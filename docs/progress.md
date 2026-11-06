@@ -6564,3 +6564,25 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: Ask AI was not clicked (no assistant on the test manager); a read and a poll that both find
   no session may both log in. The decisions made are in the plan's I142 section and decision 033,
   pending review.
+
+
+### I149 Members behind NAT, linking out — done
+
+- **The manager**: `admin.cluster.link_address` (and `link_url`) serves a WebSocket-over-TLS link
+  listener whose self-signed certificate is kept in the store; Nodes, **Add by enrollment**, makes a
+  `link` member and a one-use token (`fite1.`), and shows the `admin.cluster_member` line to paste on
+  the member (the manager's URL, its certificate's fingerprint, the token).
+- **The member** dials out on fib's WebSocket client, pins the certificate, proves the token by
+  `internal/linktoken`'s handshake for a credential of its own (`fitc1.`, a hash on the manager, kept in
+  its store or `fit.cluster-member`), and links again with backoff, pinging every 15s and closing after
+  45s of silence. A member removed on the manager is revoked and forgets its credential.
+- **Over the link** the manager reaches the member's Admin API in process (`admin.LinkAPI`): the poller,
+  tests, the member's reads and the new `Manager.Call` (I143's pass-through) go through one transport
+  for HTTP and links. The state shows `link` and the failure kind `not_linked`; rows show Linked or
+  Waiting, with New token.
+- **Tests**: enrollment; polls and calls over the link; a manager's restart; a network cut and a silent
+  drop; used, expired and replaced tokens; pins; bounds; two real fits in `cli`; under the race
+  detector; the pages checked in a browser in both languages.
+- **Gaps**: stopgaps for fib's WebSocket A52 and A53 (already requested); a member that cannot keep its
+  credential after its token was spent needs a new token. The decisions made are in the plan's I149
+  section and decision 033, pending review.

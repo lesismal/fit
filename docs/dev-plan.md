@@ -305,7 +305,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | todo |
 | I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | todo |
 | I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | todo |
-| I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | todo |
+| I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | done |
 | I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | todo |
 | **AI assistant, continued** | | | |
 | I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | done |
@@ -3241,6 +3241,37 @@ also in decision 033 as its items 20–27):
 - **Pages**: Nodes gains **Add by enrollment**: a token made with its lifetime and the config line
   to paste on the member, and the member shown as linked or waiting.
 - **Touches**: `cluster`, `config`, `admin`, `app/workbench`, `schema`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 28–42):
+
+1. **Links land on a listener of their own** (`link_address`), not on the console, whose 32
+   connections, a quarter a client address, would cap the members behind one NAT.
+2. **The manager's link certificate** is self-signed, kept in the store, never renewed, and pinned by
+   the config line, so no CA is needed.
+3. **Tokens and credentials** are `internal/linktoken` secrets of their own prefixes (`fite1.`,
+   `fitc1.`), kept as hashes and proved both ways under the label `fit cluster link v1`.
+4. **A member is added when its token is made**, shown as waiting; the token is spent before the
+   credential reaches the member. Alternative: an enrollment in two steps the member acknowledges.
+5. **The link carries the Admin API in process**, with its token's authority, without the dashboard or
+   pprof, and refused while a console password is temporary; the member needs no console.
+   Alternative: the member forwarding to its own console or Admin API over loopback.
+6. **The member keeps its credential** in its store or beside its config (`fit.cluster-member`, 0600),
+   used only for the same fingerprint; another token in its config enrolls it again.
+7. **Final refusals stop the member** (used, expired, unknown, a bad proof, revoked; the last three also
+   forget the credential) until a new token and a restart; `busy` and `replaced` retry.
+8. **`admin.cluster_member` is read at start only**, as the rest of `admin`.
+9. **Bounds**: pings every 15s, dead after 45s, backoff from 1s to a minute with jitter, a handshake of
+   10s, 16 calls a link, 2 workers and 16 queued on the member, request bodies within
+   `max_response_bytes`.
+10. **The document is version 2**, so an older manager cannot drop links by writing over it.
+11. **Tokens live 24 hours** by default, from a minute to 30 days.
+12. **One link a credential**: a newer link replaces the older, so two fits sharing one take turns.
+13. **`Manager.Call`** is the one way to call a member (HTTP or link), for I143 on.
+14. **I142's pages** changed in a few lines beside its extension points, which did not cover access
+    `link` in the columns and the edit form.
+15. **fib's WebSocket gaps** (A52, a forced close; A53, send backpressure) have stopgaps as the LLM mesh's:
+    connections found by remote address, queues bounded by calls in flight times their size.
 
 ### I150 Metrics, logs and certificates across the cluster
 
