@@ -92,7 +92,8 @@ func TestBuiltinSkillsRun(t *testing.T) {
 			}
 			want := []string{"ask_user"}
 			for _, st := range f.a.skillTools(sk, "propose", f.a.Settings()) {
-				if st.OK {
+				// The page tools only with a page that edits the config, which this chat has not.
+				if st.OK && f.a.registry.Tool(st.Name).Kind != KindPage {
 					want = append(want, st.Name)
 				}
 			}

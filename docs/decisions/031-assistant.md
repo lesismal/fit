@@ -109,6 +109,20 @@ workers.
   and discard: the user, the time, the source, the conversation, the skill, the calls (redacted and
   cut), the proposal's steps, the outcome and the version; `limits.max_audit_entries` of them, in the
   store's section `assistant.audit`.
+- **Drafts on the page (I154).** The page tools (`page_get` at `read`, `page_edit` and
+  `page_revert` at `edit`) run in the open page, not in fit: a call goes to the panel over the
+  chat's stream as the event `page_call`, and the page's answer comes back with
+  `POST /api/m/ai/chat/page` as the call's result, redacted, bounded and audited as any other; the
+  chat waits for it 30 seconds at most, and no longer than the browser stays. They are offered only
+  while the page shown declares an editor (`editable` in the page context: the members its form and
+  `.conf`/`.yaml`/`.json` tabs hold), and never over MCP. fit checks a draft before the page gets it:
+  members the page edits only, nothing in `admin`, no secret written (a `[redacted]` value copied
+  back is put back by the page as it holds it), its text parsing, at most 256 KiB. The page writes
+  it into its shared draft as a person's edit, runs its own check of a text, marks it as the
+  assistant's and unsaved, and never submits it: no page tool calls the config API's changes, and
+  the version, the ETag and `/versions` move only when the person clicks **Save and apply**, which
+  is that person's change. `page_revert` restores the page as it was before the assistant's first
+  draft, refused once the person changed it since.
 - **Skills (I127)** are Markdown with YAML front matter (`name`, `title`, `title_zh`, `description`,
   `description_zh`, `inputs`, `tools`, `model`, `examples`) and the prompt after it, at most 32 KiB;
   front matter that is not a skill's is refused with its line. The plan's fourteen built-in skills
@@ -135,7 +149,7 @@ workers.
 - The workbench's menu has the module Assistant when `admin.assistant` is set, with its Functions,
   Skills, Proposals, Audit log and Settings pages, and every page's top bar has the chat panel's button.
 - `GET /api/m/ai/settings`, `PUT /api/m/ai/settings`, `POST /api/m/ai/providers/test`,
-  `POST /api/m/ai/chat`, `POST /api/m/ai/chat/stop`, `GET /api/m/ai/tools`,
+  `POST /api/m/ai/chat`, `POST /api/m/ai/chat/stop`, `POST /api/m/ai/chat/page` (I154), `GET /api/m/ai/tools`,
   `GET /api/m/ai/conversations`, `GET`/`DELETE /api/m/ai/conversations/{id}`, and, from I126,
   `GET /api/m/ai/proposals`, `GET /api/m/ai/proposals/{conversation}`, its `POST .../apply` and
   `POST .../discard`, `GET /api/m/ai/audit`, and, from I127, `GET`/`POST /api/m/ai/skills`, `GET`/`PUT`/`DELETE

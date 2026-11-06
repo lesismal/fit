@@ -5998,3 +5998,59 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: no purge by prefix (the Admin API has none); config steps of different kinds are refused
   in one proposal; server-side error details are English only. The decisions made are in the plan's
   I126 section, pending review.
+
+
+### I127 Skills — done
+
+- **The format** (`assistant/skills.go`): Markdown with YAML front matter (name, title, title_zh,
+  description, description_zh, inputs, tools, model, examples), then the prompt; at most 32 KiB, 32
+  tools, 8 inputs and 8 examples; bad front matter is refused with its line.
+- **Built-in skills**: the plan's 14 (`explain` to `tunnel-setup`), embedded from
+  `assistant/skills/*.md` with Chinese titles, descriptions and examples; a test holds them to the
+  registry's tools.
+- **User skills** (`assistant/skillstore.go`): at most 64, kept in the store's `assistant.skills`
+  with the built-ins disabled, read without a lock; `GET`/`POST /api/m/ai/skills`,
+  `GET`/`PUT`/`DELETE /api/m/ai/skills/{name}`, `.../enable` and `.../disable`; changed by level
+  `apply`.
+- **In the chat**: `/name`, the panel's picker, the chat body's `skill` and `inputs`, or the model's
+  `skill_load` make a skill the conversation's: its prompt replaces the catalog in the system prompt,
+  the tools narrow to the skill's within the user's level plus `ask_user`, and its model is used; the
+  `start` and `skill` events and the audit log name it. Without one, the prompt carries the catalog
+  only.
+- **Workbench**: the Skills page (list, view, add, edit, enable, disable, import, export, Try), the
+  panel's skill chip and picker, and `FitAI.useSkill(name, {message, inputs})` for I128.
+- **Tests**: `make test-changed` under the race detector; `assistant` at 98.6%; each built-in runs on
+  a fixed config against the recorded model; the catalog, `skill_load` and the narrowed tools; a
+  `read` user's `/route-builder` cannot propose; in a browser, English and Chinese: bad front matter
+  refused with its line, a skill added on the page surviving a restart.
+- **Breaking** (inside the package): `Options.Catalog` is gone, the catalog comes from the skills.
+- **Gaps**: a user skill that no longer parses after an upgrade is left out and logged; no "export
+  all". The decisions made are in the plan's I127 section, pending review.
+
+
+### I154 Edits on the page, submitted by a person — done
+
+- **Page tools** (`assistant/pagetools.go`, a new tool kind `page`): `page_get` (level `read`),
+  `page_edit` and `page_revert` (level `edit`). A call goes to the panel as the stream event
+  `page_call` and comes back with `POST /api/m/ai/chat/page` as the call's result, redacted, bounded
+  and audited; the wait is at most 30s and ends when the browser leaves. They are offered only while
+  the page shown declares an editor (`editable`), and never over MCP.
+- **Checks**: fit checks a draft on the console's pool before it reaches the page (the page's members
+  only, no `admin`, no secret written, the text parses, at most 256 KiB); a refused draft is told to
+  the model, which proposes it (`config_propose`) if the user's level allows, or describes it.
+- **Workbench**: config editor pages register through `WB.editor`; a draft is written into the
+  shared draft as a person's edit would be, its fields marked, a note with Revert and an "Assistant
+  draft" badge beside "Unsaved changes", `[redacted]` values put back from the draft. No config API
+  call, version, ETag or audit change happens until the person's **Save and apply**. An untouched raw
+  tab now follows the form's changes.
+- **Skills**: route-builder, reverse-proxy, rate-limit-auth, tls-acme and cache-tuning name the page
+  tools, explain names `page_get`. Docs: "Drafts on the page" in the console docs and decision 031,
+  English and Chinese.
+- **Tests**: `make test-changed` under the race detector; `assistant` at 98.7%; in a browser against
+  a scripted model: a draft asked in Chinese lands in the Routes form, marked, with the ETag and
+  version unchanged and no config request sent; the password hash never reached the model; a revert;
+  a YAML text draft saved by the person as version 2; refusals of a member not on the page and of a
+  secret.
+- **Gaps**: two defensive branches are not covered; elements of an array without names are matched
+  by position when `[redacted]` values are put back (I126's guard does the same); a map entry's field
+  marks its container. The decisions made are in the plan's I154 section, pending review.

@@ -226,15 +226,20 @@ func TestProxyStreamedBodies(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = io.WriteString(c, "POST /whip/cam?u=cut HTTP/1.1\r\nHost: x\r\nContent-Type: application/sdp\r\nContent-Length: 200000\r\n\r\n"+offer)
-	_ = c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	_, _ = bufio.NewReader(c).ReadByte()
+	// The deep session's reservation became the session; the cut offer
+	// holds the only one while its body comes, and gives it back once the
+	// connection goes.
+	reserved := func(n int) func() bool {
+		return func() bool {
+			p := f.proxy()
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			return p.reserved == n
+		}
+	}
+	eventually(t, "the cut offer's reservation", reserved(1))
 	_ = c.Close()
-	eventually(t, "the cut offer's reservation given back", func() bool {
-		p := f.proxy()
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		return p.reserved == 1 // the deep session's
-	})
+	eventually(t, "the cut offer's reservation given back", reserved(0))
 	if got, _ := fs.posted.Load().(string); got != "" {
 		t.Fatalf("a cut offer reached the media server as %q", got)
 	}

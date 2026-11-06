@@ -4260,3 +4260,42 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   不能应用。
 - **缺口**：不能按前缀清除缓存（Admin API 没有）；同一提案中不同类的配置步骤被拒绝；服务端的错误详情只有英文。实现时所做的
   决策在计划的 I126 一节，待审查。
+
+
+### I127 技能 — 已完成
+
+- **格式**（`assistant/skills.go`）：带 YAML front matter 的 Markdown（name、title、title_zh、description、description_zh、inputs、
+  tools、model、examples），之后是 prompt；最多 32 KiB、32 个工具、8 个输入与 8 个示例；错误的 front matter 被拒绝并指出行号。
+- **内置技能**：计划中的 14 个（`explain` 到 `tunnel-setup`），从 `assistant/skills/*.md` 嵌入，带中文标题、描述与示例；有测试保证
+  它们只用注册表中的工具。
+- **用户技能**（`assistant/skillstore.go`）：最多 64 个，与被禁用的内置技能一起保存在 store 的 `assistant.skills`，读取不加锁；
+  `GET`/`POST /api/m/ai/skills`、`GET`/`PUT`/`DELETE /api/m/ai/skills/{name}`、`.../enable` 与 `.../disable`；由级别 `apply` 修改。
+- **对话中**：`/name`、面板的选择器、对话请求的 `skill` 与 `inputs`，或模型的 `skill_load` 让技能成为对话的技能：其 prompt 取代
+  系统提示中的目录，工具收窄为技能所列且用户级别允许的工具加 `ask_user`，并使用技能的模型；`start` 与 `skill` 事件以及审计日志
+  记录技能。没有技能时提示只带目录。
+- **Workbench**：Skills 页（列表、查看、添加、编辑、启用、禁用、导入、导出、试用），面板的技能标签与选择器，以及供 I128 使用的
+  `FitAI.useSkill(name, {message, inputs})`。
+- **测试**：竞态检测下的 `make test-changed`；`assistant` 覆盖率 98.6%；每个内置技能在固定配置上对录制的模型运行；目录、
+  `skill_load` 与收窄的工具；`read` 用户的 `/route-builder` 不能提议；在浏览器中以中英文验证：错误的 front matter 按行拒绝，
+  页面上添加的技能重启后仍在。
+- **不兼容变更**（包内部）：`Options.Catalog` 已删除，目录来自技能。
+- **缺口**：升级后不再能解析的用户技能被略过并记入日志；没有“全部导出”。实现时所做的决策在计划的 I127 一节，待审查。
+
+
+### I154 页面上的编辑，由人提交 — 已完成
+
+- **页面工具**（`assistant/pagetools.go`，新的工具类型 `page`）：`page_get`（`read` 级别）、`page_edit` 与 `page_revert`（`edit` 级别）。
+  调用以流事件 `page_call` 发给面板，页面经 `POST /api/m/ai/chat/page` 返回调用结果，经脱敏、受限并记入审计；最多等待 30 秒，浏览器
+  离开即结束。只在当前页面声明了编辑器（`editable`）时提供，从不经 MCP 提供。
+- **检查**：草稿到达页面前，fit 在控制台池上检查（只含页面的成员、不含 `admin`、不写密钥、文本能解析、最多 256 KiB）；被拒绝的草稿
+  告知模型，用户级别允许时由模型提议（`config_propose`），否则描述修改。
+- **Workbench**：配置编辑页通过 `WB.editor` 注册；草稿像人的编辑一样写入共享草稿，标出字段，显示带撤销按钮的提示与“未保存的修改”
+  旁的“助手草稿”标记，`[redacted]` 的值从草稿放回。直到用户点击 **Save and apply** 之前，不调用配置 API，版本、ETag 与审计都不变。
+  未改动的原始文本标签页现在会跟随表单的修改。
+- **技能**：route-builder、reverse-proxy、rate-limit-auth、tls-acme 与 cache-tuning 列出页面工具，explain 列出 `page_get`。文档：控制台
+  文档中的“页面上的草稿”与决定 031，中英文。
+- **测试**：竞态检测下的 `make test-changed`；`assistant` 覆盖率 98.7%；在浏览器中对脚本化模型：用中文提出的草稿写进 Routes 表单
+  并标出，ETag 与版本不变且没有发出配置请求；密码哈希从未到达模型；撤销；用户把 YAML 文本草稿保存为第 2 版；拒绝页面以外的成员
+  与密钥。
+- **缺口**：两个防御性分支没有覆盖；放回 `[redacted]` 值时，没有名字的数组元素按位置匹配（I126 的检查也是如此）；map 条目的字段
+  标记落在其容器上。实现时所做的决策在计划的 I154 一节，待审查。

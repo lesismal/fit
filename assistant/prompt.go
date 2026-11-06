@@ -103,6 +103,8 @@ type promptParts struct {
 	// summary stands for the early turns, and proposal is the state of
 	// the conversation's proposal.
 	summary, proposal string
+	// pageGet and pageEdit say the page tools are offered (I154).
+	pageGet, pageEdit bool
 }
 
 // skillPart is the current skill as the system prompt carries it: its
@@ -132,6 +134,7 @@ func systemPrompt(p promptParts) string {
 	if levelRank(p.level) >= levelRank(config.AssistantPropose) {
 		b.WriteString(proposePrompt)
 	}
+	writePage(&b, p)
 	if p.proposal != "" {
 		b.WriteString("\n\nThis conversation's proposal:\n<proposal>\n")
 		b.WriteString(strings.ReplaceAll(p.proposal, "</proposal", `<\/proposal`))
