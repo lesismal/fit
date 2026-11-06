@@ -639,6 +639,7 @@ func (m *Manager) changeAlerts(user string, fn func(c *alertConfig, now time.Tim
 		return errReadOnly(al.readOnly)
 	}
 	c := al.cfg.clone()
+	before, rev := alertsText(&al.cfg), al.rev
 	al.mu.Unlock()
 	entry, err := fn(&c, now)
 	if err != nil {
@@ -658,12 +659,56 @@ func (m *Manager) changeAlerts(user string, fn func(c *alertConfig, now time.Tim
 	al.mu.Unlock()
 	m.syncSenders()
 	entry.At, entry.User = now, user
+	// I148: how it went, the alerts' versions before and after, and the
+	// diff of the rules, webhooks (without their secrets) and silences.
+	entry.Outcome, entry.Before, entry.After = AuditOK, alertsTag(rev), alertsTag(rev+1)
+	entry.setDiff(before, alertsText(&c), "alerts "+entry.Before, "alerts "+entry.After)
 	if err := m.appendAudit([]AuditEntry{entry}); err != nil {
 		m.logf("cluster: the audit entry of %s was not written: %v", entry.Action, err)
 	}
 	m.logf("cluster: %q: %s %s", user, entry.Action, entry.Detail)
 	m.pokeAlerts()
 	return nil
+}
+
+// alertsText is the rules, webhooks and silences as the audit log diffs
+// them: the webhooks as the API shows them, without their secrets and their
+// URLs' paths.
+func alertsText(c *alertConfig) string {
+	views := make([]WebhookView, len(c.webhooks))
+	for i := range c.webhooks {
+		views[i] = c.webhooks[i].view()
+		views[i].Created, views[i].Updated = time.Time{}, time.Time{}
+	}
+	return pretty(struct {
+		Rules    []AlertRule   `json:"rules"`
+		Webhooks []WebhookView `json:"webhooks"`
+		Silences []Silence     `json:"silences"`
+	}{c.rules, views, c.silences})
+}
+
+// allowAlerts checks that user may change the alerts' rules and webhooks,
+// which hold secrets and decide who is told of what: a cluster-wide admin
+// (I148).
+func (m *Manager) allowAlerts(user string) error {
+	return m.Allow(user, Need{Role: RoleAdmin, Cluster: true})
+}
+
+// silenceNeed is what a silence needs of its user's roles (I148): an
+// operator of its member, of its rule's group for a rule on a group, and
+// cluster-wide otherwise.
+func silenceNeed(s *Silence, c *alertConfig) Need {
+	switch {
+	case s.Node != "":
+		return Need{Role: RoleOperator, Nodes: []string{s.Node}}
+	case s.Rule != "":
+		for _, r := range c.rules {
+			if r.Name == s.Rule && r.Group != "" {
+				return Need{Role: RoleOperator, Groups: []string{r.Group}}
+			}
+		}
+	}
+	return Need{Role: RoleOperator, Cluster: true}
 }
 
 // pruneSilences drops the silences that ended more than silenceKept ago.
@@ -716,6 +761,9 @@ func describeRule(r *AlertRule) string {
 
 // AddAlertRule adds the rule in, as user.
 func (m *Manager) AddAlertRule(user string, in *AlertRule) (AlertRule, error) {
+	if err := m.allowAlerts(user); err != nil {
+		return AlertRule{}, err
+	}
 	r := in.clone()
 	err := m.changeAlerts(user, func(c *alertConfig, now time.Time) (AuditEntry, error) {
 		if err := r.check(); err != nil {
@@ -740,6 +788,9 @@ func (m *Manager) AddAlertRule(user string, in *AlertRule) (AlertRule, error) {
 // UpdateAlertRule replaces the rule name with in, which may rename it, as
 // user.
 func (m *Manager) UpdateAlertRule(user, name string, in *AlertRule) (AlertRule, error) {
+	if err := m.allowAlerts(user); err != nil {
+		return AlertRule{}, err
+	}
 	r := in.clone()
 	if r.Name == "" {
 		r.Name = name
@@ -767,6 +818,9 @@ func (m *Manager) UpdateAlertRule(user, name string, in *AlertRule) (AlertRule, 
 
 // RemoveAlertRule removes the rule name, as user; its alerts resolve.
 func (m *Manager) RemoveAlertRule(user, name string) error {
+	if err := m.allowAlerts(user); err != nil {
+		return err
+	}
 	return m.changeAlerts(user, func(c *alertConfig, _ time.Time) (AuditEntry, error) {
 		i := c.rule(name)
 		if i < 0 {
@@ -784,6 +838,9 @@ func (e errNoAlert) Error() string { return string(e) }
 
 // AddWebhook adds the webhook in, as user.
 func (m *Manager) AddWebhook(user string, in *WebhookInput) (WebhookView, error) {
+	if err := m.allowAlerts(user); err != nil {
+		return WebhookView{}, err
+	}
 	var out WebhookView
 	err := m.changeAlerts(user, func(c *alertConfig, now time.Time) (AuditEntry, error) {
 		w, err := in.webhook(nil, now)
@@ -806,6 +863,9 @@ func (m *Manager) AddWebhook(user string, in *WebhookInput) (WebhookView, error)
 // UpdateWebhook replaces the webhook name with in, which may rename it, as
 // user; the rules that name it follow a rename.
 func (m *Manager) UpdateWebhook(user, name string, in *WebhookInput) (WebhookView, error) {
+	if err := m.allowAlerts(user); err != nil {
+		return WebhookView{}, err
+	}
 	var out WebhookView
 	err := m.changeAlerts(user, func(c *alertConfig, now time.Time) (AuditEntry, error) {
 		i := c.webhook(name)
@@ -864,6 +924,9 @@ func webhookChanges(a, b *Webhook) string {
 // RemoveWebhook removes the webhook name, as user; one a rule names is
 // refused, as the rule would then send to every webhook.
 func (m *Manager) RemoveWebhook(user, name string) error {
+	if err := m.allowAlerts(user); err != nil {
+		return err
+	}
 	return m.changeAlerts(user, func(c *alertConfig, _ time.Time) (AuditEntry, error) {
 		i := c.webhook(name)
 		if i < 0 {
@@ -889,6 +952,9 @@ func (m *Manager) AddSilence(user string, in *SilenceInput) (Silence, error) {
 	err := m.changeAlerts(user, func(c *alertConfig, now time.Time) (AuditEntry, error) {
 		s, err := in.silence(user, now)
 		if err != nil {
+			return AuditEntry{}, err
+		}
+		if err := m.Allow(user, silenceNeed(&s, c)); err != nil {
 			return AuditEntry{}, err
 		}
 		c.silences = pruneSilences(c.silences, now)
@@ -935,6 +1001,9 @@ func (m *Manager) ExpireSilence(user, id string) (Silence, error) {
 			return AuditEntry{}, errNoAlert("no silence " + strconv.Quote(id) + " is kept")
 		}
 		s := &c.silences[i]
+		if err := m.Allow(user, silenceNeed(s, c)); err != nil {
+			return AuditEntry{}, err
+		}
 		if now.Before(s.Ends) {
 			s.Ends = now
 		}

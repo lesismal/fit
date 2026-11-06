@@ -93,6 +93,9 @@ func (m *Manager) checkEnroll(in *EnrollInput) (time.Duration, error) {
 // opened, which the config line names the manager by when link_url does
 // not. It writes the store: on the console's pool.
 func (m *Manager) Enroll(user string, in *EnrollInput, host string) (Enrollment, error) {
+	if err := m.allowDraft(user, &Member{Name: strings.TrimSpace(in.Name), Labels: in.Labels}); err != nil {
+		return Enrollment{}, err
+	}
 	ttl, err := m.checkEnroll(in)
 	if err != nil {
 		return Enrollment{}, err
@@ -116,7 +119,9 @@ func (m *Manager) Enroll(user string, in *EnrollInput, host string) (Enrollment,
 			return AuditEntry{}, errConflict(fmt.Sprintf("the manager keeps %d members at most (max_nodes)", m.maxNodes))
 		}
 		d.Members = append(d.Members, mem)
-		return AuditEntry{Action: ActionEnrollToken, Node: mem.Name, Detail: "a new member; the token expires at " + mem.Link.TokenExpires.Format(time.RFC3339)}, nil
+		e := AuditEntry{Action: ActionEnrollToken, Node: mem.Name, Detail: "a new member; the token expires at " + mem.Link.TokenExpires.Format(time.RFC3339)}
+		e.setDiff("", memberText(&mem), "none", mem.Name)
+		return e, nil
 	})
 	if err != nil {
 		return Enrollment{}, err
@@ -130,6 +135,9 @@ func (m *Manager) Enroll(user string, in *EnrollInput, host string) (Enrollment,
 // it, until it enrolls with the new token, which then replaces it. For a
 // member that lost its credential, or moved to another host.
 func (m *Manager) EnrollAgain(user, name string, in *EnrollInput, host string) (Enrollment, error) {
+	if err := m.Allow(user, Need{Role: RoleAdmin, Nodes: []string{name}}); err != nil {
+		return Enrollment{}, err
+	}
 	ttl, err := m.checkEnroll(in)
 	if err != nil {
 		return Enrollment{}, err
@@ -144,12 +152,15 @@ func (m *Manager) EnrollAgain(user, name string, in *EnrollInput, host string) (
 		if d.Members[i].Access != AccessLink {
 			return AuditEntry{}, errConflict(strconv.Quote(name) + " is reached at its URL, not through a link: only a member that links out is enrolled")
 		}
+		before := memberText(&d.Members[i])
 		now := m.now().UTC()
 		l := d.Members[i].Link
 		l.TokenID, l.TokenHash, l.TokenMade, l.TokenExpires = secret.ID, secret.Hash(), now, now.Add(ttl)
 		d.Members[i].Updated = now
 		mem = d.Members[i].clone()
-		return AuditEntry{Action: ActionEnrollToken, Node: name, Detail: "the token expires at " + l.TokenExpires.Format(time.RFC3339)}, nil
+		e := AuditEntry{Action: ActionEnrollToken, Node: name, Detail: "the token expires at " + l.TokenExpires.Format(time.RFC3339)}
+		e.setDiff(before, memberText(&mem), name, name)
+		return e, nil
 	})
 	if err != nil {
 		return Enrollment{}, err
@@ -160,9 +171,9 @@ func (m *Manager) EnrollAgain(user, name string, in *EnrollInput, host string) (
 
 // linkRoutes adds the endpoints of the members that link out: where they
 // link to, and their enrollment.
-func (m *Manager) linkRoutes(api *console.API) {
+func (m *Manager) linkRoutes(api *router) {
 	api.Handle("GET", "/api/link", func(r *console.Request) { _ = r.JSON(200, m.LinkInfo(r.Request.Host)) })
-	api.Handle("POST", "/api/enroll", m.enrollNew)
+	api.Checked("POST", "/api/enroll", m.enrollNew)
 }
 
 func decodeEnroll(r *console.Request, in *EnrollInput) bool {

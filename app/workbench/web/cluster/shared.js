@@ -121,7 +121,12 @@
     // Ask AI / 问 AI
     ['ask.member', 'The cluster member {name} is {status}: {kind}. {message} Why, and what should I do?',
       '集群成员 {name} 状态为{status}：{kind}。{message} 原因是什么？我该怎么做？'],
-    ['readonly', 'The manager is read-only: {why}', '管理端为只读：{why}']
+    ['readonly', 'The manager is read-only: {why}', '管理端为只读：{why}'],
+    // Roles (I148) / 角色（I148）
+    ['role.viewer', 'viewer', '查看者'], ['role.operator', 'operator', '操作员'], ['role.admin', 'admin', '管理员'], ['role.none', 'none', '无'],
+    ['role.norole', 'You have no role in this cluster, so its pages show nothing to you. An admin of the cluster gives roles on the Users and audit page.',
+      '你在此集群中没有角色，因此其页面不向你显示任何内容。集群管理员可在“用户与审计”页面分配角色。'],
+    ['role.forbidden', 'Your role does not allow this: {why}', '你的角色不允许此操作：{why}']
   ];
 
   // KINDS are the kinds of a member's problems, as the manager names them. / 管理端对成员问题的分类。
@@ -132,6 +137,31 @@
   var ORDER = { down: 0, error: 1, unknown: 2, up: 3 };
 
   var addActions = [], rowExtras = [];
+
+  // ---- Roles (I148) / 角色（I148） ----
+  // me is the user's roles, GET /api/me, read again before each page is drawn (cluster.js): {user, open, role (cluster-
+  // wide), top (the highest anywhere), groups {name: role}, nodes {name: role}, manager_read_only}. The pages draw only
+  // the controls the roles allow; the manager refuses the rest whatever the page sends. Until it is read, or when it
+  // cannot be, everything is drawn and the manager decides.
+  // me 为用户的角色（GET /api/me），每次绘制页面前重新读取（cluster.js）：{user, open, role（集群范围）, top（任意处最高）,
+  // groups {名称: 角色}, nodes {名称: 角色}, manager_read_only}。页面只绘制角色允许的控件；无论页面发送什么，其余的都由
+  // 管理端拒绝。读到之前或无法读取时，所有控件照常绘制，由管理端决定。
+  var me = null;
+  var RANK = { viewer: 1, operator: 2, admin: 3 };
+  function rank(r) { return RANK[r] || 0; }
+  function loadMe(UI) {
+    return call(UI, 'GET', '/api/me').then(function (r) { me = r.body || null; return me; }, function () { me = null; return null; });
+  }
+  // canCluster: the role cluster-wide; canAny: anywhere; canOn: on the member node; canAll: on every member of names;
+  // canGroup: on the group g. / canCluster：集群范围；canAny：任意处；canOn：成员 node 上；canAll：names 中每个成员上；
+  // canGroup：分组 g 上。
+  function canCluster(role) { return !me || rank(me.role) >= rank(role); }
+  function canAny(role) { return !me || rank(me.top) >= rank(role); }
+  function canOn(role, node) { return !me || rank((me.nodes || {})[node] || me.role) >= rank(role); }
+  function canAll(role, names) { return (names || []).every(function (n) { return canOn(role, n); }); }
+  function canGroup(role, g) { return !me || rank((me.groups || {})[g] || me.role) >= rank(role); }
+  function noRole() { return !!me && !me.open && !me.top; }
+  function roleWord(UI, r) { return UI.t('role.' + (RANK[r] ? r : 'none')); }
 
   // ---- Requests / 请求 ----
   // call sends method path to the module, with the ETag as If-Match when given: a Promise of {status, body, etag}; a
@@ -489,6 +519,9 @@
       addActions.forEach(function (fn) { try { var b = fn(UI, ctx); if (b) out.push(b); } catch (e) { UI.fail(e); } });
       return out;
     },
-    rowExtra: function (fn) { if (typeof fn === 'function') rowExtras.push(fn); }
+    rowExtra: function (fn) { if (typeof fn === 'function') rowExtras.push(fn); },
+    // The user's roles (I148). / 用户的角色（I148）。
+    loadMe: loadMe, me: function () { return me; }, canCluster: canCluster, canAny: canAny, canOn: canOn, canAll: canAll,
+    canGroup: canGroup, noRole: noRole, roleWord: roleWord, ROLES: ['viewer', 'operator', 'admin']
   };
 })();

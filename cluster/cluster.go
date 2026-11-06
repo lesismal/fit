@@ -113,6 +113,14 @@ type Manager struct {
 	ro rolloutsState
 	// al is the alerts and the drift reads (alerts.go, I147).
 	al alertsState
+
+	// admins are admin.cluster.admins, the console users who are
+	// cluster-wide admins whatever the roles say (roles.go).
+	admins []string
+	// consoleUsers and assistantLevel are the console's users and their
+	// assistant's levels, which SetConsole sets; under mu.
+	consoleUsers   func() []string
+	assistantLevel func(user string) string
 }
 
 // New returns the manager o.Settings turns on, with the members the store
@@ -138,7 +146,7 @@ func New(o Options) (*Manager, error) {
 	m := &Manager{o: o, interval: s.Interval(), lim: limits{timeout: s.CallTimeout(), maxBytes: s.ResponseBytes()},
 		maxNodes: s.Nodes(), sem: make(chan struct{}, s.Concurrency()), tests: make(chan struct{}, MaxTests),
 		reads: make(chan struct{}, MaxReads), wake: make(chan struct{}, 1), stop: make(chan struct{}),
-		done: make(chan struct{}), nodes: map[string]*node{}}
+		done: make(chan struct{}), nodes: map[string]*node{}, admins: slices.Clone(s.Admins)}
 	doc, newer, err := readDocument(o.Store.Section(Section))
 	switch {
 	case err != nil:
@@ -368,6 +376,7 @@ func (m *Manager) change(user string, fn func(d *document) (AuditEntry, error)) 
 		d.Groups[i] = d.Groups[i].clone()
 	}
 	d.Audit = slices.Clone(d.Audit)
+	d.Access = d.Access.clone()
 	d.Rollouts = m.storedRolloutsLocked()
 	m.mu.Unlock()
 	entry, err := fn(&d)
@@ -375,6 +384,15 @@ func (m *Manager) change(user string, fn func(d *document) (AuditEntry, error)) 
 		return err
 	}
 	entry.At, entry.User = m.now().UTC(), user
+	if entry.Outcome == "" {
+		entry.Outcome = AuditOK
+	}
+	if entry.Op == "" {
+		// An operation's entry changes nothing of the document: its
+		// versions are its members'.
+		entry.Before, entry.After = revision(d.Revision), revision(d.Revision+1)
+		d.Revision++
+	}
 	d.Audit = trimAudit(append(d.Audit, entry))
 	d.Version = DocVersion
 	if err := m.o.Store.SetSection(Section, d.marshal()); err != nil {
@@ -421,12 +439,17 @@ func (m *Manager) Add(user string, in *Input) (MemberView, error) {
 		if index(d, mem.Name) >= 0 {
 			return AuditEntry{}, errConflict("a member is already named " + strconv.Quote(mem.Name))
 		}
+		if err := m.allowIn(d, user, RoleAdmin, &mem); err != nil {
+			return AuditEntry{}, err
+		}
 		if len(d.Members) >= m.maxNodes {
 			return AuditEntry{}, errConflict(fmt.Sprintf("the manager keeps %d members at most (max_nodes)", m.maxNodes))
 		}
 		d.Members = append(d.Members, mem)
 		out = mem.View()
-		return AuditEntry{Action: ActionAdd, Node: mem.Name, Detail: describe(&mem)}, nil
+		e := AuditEntry{Action: ActionAdd, Node: mem.Name, Detail: describe(&mem)}
+		e.setDiff("", memberText(&mem), "none", mem.Name)
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q added the member %q: %s", user, out.Name, describeView(&out))
@@ -443,6 +466,9 @@ func (m *Manager) Update(user, name string, in *Input) (MemberView, error) {
 		if i < 0 {
 			return AuditEntry{}, errNotFound(name)
 		}
+		if err := m.allowIn(d, user, RoleAdmin, &d.Members[i]); err != nil {
+			return AuditEntry{}, err
+		}
 		if in.Name == "" {
 			in.Name = name
 		}
@@ -453,13 +479,23 @@ func (m *Manager) Update(user, name string, in *Input) (MemberView, error) {
 		if mem.Name != name && index(d, mem.Name) >= 0 {
 			return AuditEntry{}, errConflict("a member is already named " + strconv.Quote(mem.Name))
 		}
-		changed := changes(&d.Members[i], &mem)
+		changed, before := changes(&d.Members[i], &mem), memberText(&d.Members[i])
 		d.Members[i] = mem
 		if mem.Name != name {
 			renameMember(d, name, mem.Name)
 		}
+		// The member as it will be must be the user's too: a label
+		// changed may move it out of the groups the user has roles on.
+		if err := m.allowIn(d, user, RoleAdmin, &mem); err != nil {
+			return AuditEntry{}, err
+		}
 		out = mem.View()
-		return AuditEntry{Action: ActionUpdate, Node: name, Detail: changed}, nil
+		e := AuditEntry{Action: ActionUpdate, Node: name, Detail: changed}
+		if mem.Name != name {
+			e.Nodes = []string{mem.Name}
+		}
+		e.setDiff(before, memberText(&mem), name, mem.Name)
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q changed the member %q: %s", user, name, describeView(&out))
@@ -474,9 +510,14 @@ func (m *Manager) Remove(user, name string) error {
 		if i < 0 {
 			return AuditEntry{}, errNotFound(name)
 		}
+		if err := m.allowIn(d, user, RoleAdmin, &d.Members[i]); err != nil {
+			return AuditEntry{}, err
+		}
+		e := AuditEntry{Action: ActionRemove, Node: name}
+		e.setDiff(memberText(&d.Members[i]), "", name, "none")
 		d.Members = slices.Delete(d.Members, i, i+1)
 		renameMember(d, name, "")
-		return AuditEntry{Action: ActionRemove, Node: name}, nil
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q removed the member %q", user, name)
@@ -561,20 +602,24 @@ func (m *Manager) etag() string {
 	return strconv.Quote(strconv.FormatUint(m.rev, 10))
 }
 
+// routes adds the module's endpoints, every one behind the role check
+// (roles.go): through a router, never api itself.
 func (m *Manager) routes(api *console.API) {
-	api.Handle("GET", "/api/nodes", m.list)
-	api.Handle("POST", "/api/nodes", m.add)
-	api.HandlePrefix("", "/api/nodes/", m.nodeRoute)
-	api.Handle("POST", "/api/test", m.testDraft)
-	api.Handle("GET", "/api/state", m.state)
-	api.Handle("GET", "/api/audit", func(r *console.Request) { _ = r.JSON(200, map[string]any{"entries": m.Audit()}) })
-	m.linkRoutes(api)
-	m.groupRoutes(api)
-	m.opRoutes(api)
-	m.rolloutRoutes(api)
-	m.passRoutes(api)
-	m.templateRoutes(api)
-	m.alertRoutes(api)
+	rt := &router{m: m, api: api}
+	rt.Handle("GET", "/api/nodes", m.list)
+	rt.Checked("POST", "/api/nodes", m.add)
+	rt.CheckedPrefix("", "/api/nodes/", m.nodeRoute)
+	rt.Checked("POST", "/api/test", m.testDraft)
+	rt.Handle("GET", "/api/state", m.state)
+	rt.Handle("GET", "/api/audit", m.auditRoute)
+	m.accessRoutes(rt)
+	m.linkRoutes(rt)
+	m.groupRoutes(rt)
+	m.opRoutes(rt)
+	m.rolloutRoutes(rt)
+	m.passRoutes(rt)
+	m.templateRoutes(rt)
+	m.alertRoutes(rt)
 }
 
 func (m *Manager) list(r *console.Request) {
@@ -591,6 +636,14 @@ func (m *Manager) state(r *console.Request) {
 	ro := m.readOnly
 	m.mu.Unlock()
 	_ = r.JSON(200, stateBody{IntervalMs: m.interval.Milliseconds(), TimeoutMs: m.lim.timeout.Milliseconds(), ReadOnly: ro, Nodes: m.States()})
+}
+
+// forbiddenBody is a 403 for the user's roles: the message, and what the
+// action needed.
+type forbiddenBody struct {
+	Error string `json:"error"`
+	Kind  string `json:"kind"`
+	*ErrForbidden
 }
 
 // decode decodes a member from the request's body, bounded.
@@ -619,10 +672,13 @@ func (m *Manager) answer(r *console.Request, status int, v any, err error) {
 	var nf errNotFound
 	var cf errConflict
 	var ro errReadOnly
+	var fb *ErrForbidden
 	switch {
 	case err == nil:
 		r.Header().Set("ETag", m.etag())
 		_ = r.JSON(status, v)
+	case errors.As(err, &fb):
+		_ = r.JSON(403, forbiddenBody{Error: fb.Error(), Kind: KindForbidden, ErrForbidden: fb})
 	case errors.As(err, &fe):
 		_ = r.JSON(400, fe)
 	case errors.As(err, &nf), errors.As(err, new(errNoGroup)), errors.As(err, new(errNoTemplate)), errors.As(err, new(errNoRollout)):
@@ -660,7 +716,9 @@ func (m *Manager) nodeRoute(r *console.Request) {
 	case sub == "enroll" && method == "POST":
 		m.enrollAgain(r, name)
 	case strings.HasPrefix(sub, "read/"):
-		m.read(r, name, strings.TrimPrefix(sub, "read/"))
+		if m.allow(r, Need{Role: RoleViewer, Nodes: []string{name}}) {
+			m.read(r, name, strings.TrimPrefix(sub, "read/"))
+		}
 	case sub != "":
 		_ = console.Error(r.Context, 404, "no such endpoint")
 	case method == "GET":

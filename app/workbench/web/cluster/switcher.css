@@ -25,6 +25,10 @@
 .sw-band__spacer { flex: 1; }
 .sw-ro svg { width: 12px; height: 12px; }
 
+/* The manager's own pages, read-only for a user who is not an admin of the whole cluster (I148).
+   管理端自己的页面：对非集群范围管理员的用户只读（I148）。 */
+.sw-band--manager { background: var(--warn-soft); }
+
 /* A read-only member: what saves is dimmed, and refused if clicked. / 只读成员：保存类按钮变暗，点击也会被拒绝。 */
 .shell.is-readonly .topbar .btn--primary { opacity: .4; }
 

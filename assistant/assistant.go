@@ -118,6 +118,10 @@ type Options struct {
 	// Tools are tools beside the read tools, which later iterations add:
 	// the page tools, the propose tools.
 	Tools []*Tool
+	// LevelCap, when not nil, returns the highest level a user has,
+	// whatever the settings give: a manager of other fits bounds the
+	// assistant by the user's roles there (cluster's AssistantCap).
+	LevelCap func(user string) string
 }
 
 // Assistant is the assistant of a console.
@@ -230,6 +234,19 @@ func (a *Assistant) Settings() *config.Assistant {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.settings
+}
+
+// Level returns user's level under the settings s, bounded by
+// Options.LevelCap: every check of a user's level goes through it.
+func (a *Assistant) Level(s *config.Assistant, user string) string {
+	level := s.Level(user)
+	if a.o.LevelCap == nil {
+		return level
+	}
+	if c := a.o.LevelCap(user); levelRank(c) < levelRank(level) {
+		return c
+	}
+	return level
 }
 
 // Provider returns the provider name of the settings in use, as a model

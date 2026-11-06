@@ -205,6 +205,8 @@
       only.addEventListener('change', function () { onlyDrift = only.checked; reload(); });
       var fixAll = UI.btn(t('dr.fixall', { n: fixable.length }), 'send', function () { fix(UI, fixable); }, 'primary sm');
       fixAll.disabled = !fixable.length || !!b.read_only;
+      // A fix is a sync rollout: an operator's of each member (I148). / 修复即同步发布：需要在每个成员上是操作员（I148）。
+      if (!FC.canAll('operator', fixable)) fixAll = null;
       UI.mount(body, h('div.stack', b.read_only ? h('div.callout.callout--warn', t('readonly', { why: b.read_only })) : null,
         h('div.small.muted', t('dr.intro')),
         h('div.row.row--between.cl-bar', h('label.row', only, ' ', t('dr.only')), fixAll),
@@ -233,13 +235,16 @@
   }
   function actions(UI, n, ro) {
     var h = UI.h, t = UI.t, out = [];
+    var op = FC.canOn('operator', n.node);
     if (n.fixable) {
       out.push(UI.btn(t('dr.diff'), 'layers', function () { diff(UI, n.node); }, 'ghost sm'));
+    }
+    if (n.fixable && op) {
       var f = UI.btn(t('dr.fix'), 'send', function () { fix(UI, [n.node]); }, 'primary sm');
       f.disabled = !!ro;
       out.push(f, h('a.small', { href: '#/cluster/newrollout?kind=sync&nodes=' + encodeURIComponent(n.node) }, t('dr.adjust')));
     }
-    if (n.consistency && n.consistency.count) {
+    if (n.consistency && n.consistency.count && op) {
       var rl = UI.btn(t('dr.reload'), 'refresh', function () { FC.confirmOp(UI, 'reload', [n.node]); }, 'ghost sm');
       rl.disabled = !!ro;
       out.push(rl, h('a.small', { href: UI.targetURL(n.node, '#/sys.check/check') }, t('dr.openchk')));
@@ -296,7 +301,7 @@
             return h('div.small', String(a.sends || 0), a.silenced_by ? h('div', UI.badge(t('al.silenced'), '')) : null);
           } },
           { label: '', render: function (a) {
-            return b.read_only ? null : UI.btn(t('al.silence'), 'shield', function () { silenceForm(UI, { rule: a.rule, node: a.node }, reload); }, 'ghost sm');
+            return b.read_only || !(a.node ? FC.canOn('operator', a.node) : FC.canCluster('operator')) ? null : UI.btn(t('al.silence'), 'shield', function () { silenceForm(UI, { rule: a.rule, node: a.node }, reload); }, 'ghost sm');
           } }
         ], b.active || [], { empty: t('al.none') }), null, true),
         UI.card(t('al.pending'), UI.table([{ label: '', render: function (a) { return sevBadge(UI, a.severity); } }, rule, on, what, since],
@@ -316,8 +321,11 @@
       if (!document.body.contains(el)) return;
       var b = res[0].body || {}, etag = res[0].etag, groups = ((res[1].body && res[1].body.groups) || []).map(function (g) { return g.name; });
       var ctx = { cfg: b, etag: etag, groups: groups, reload: reload };
-      var add = UI.btn(t('ru.add'), 'plus', function () { ruleForm(UI, ctx, null); }, 'primary');
-      add.disabled = !!b.read_only || (b.rules || []).length >= b.bounds.max_rules;
+      // Rules and webhooks hold secrets and decide who is told: a cluster-wide admin's (I148).
+      // 规则与 Webhook 含密钥并决定通知谁：需要集群范围的管理员（I148）。
+      var admin = FC.canCluster('admin');
+      var add = admin ? UI.btn(t('ru.add'), 'plus', function () { ruleForm(UI, ctx, null); }, 'primary') : null;
+      if (add) add.disabled = !!b.read_only || (b.rules || []).length >= b.bounds.max_rules;
       UI.mount(body, h('div.stack', b.read_only ? h('div.callout.callout--warn', t('al.readonly', { why: b.read_only })) : null,
         h('div.row.cl-bar', add),
         UI.card(null, UI.table([
@@ -329,7 +337,7 @@
           { label: t('ru.repeat'), render: function (x) { return h('span.small', x.repeat_ms ? String(mins(x.repeat_ms)) : t('ru.never')); } },
           { label: t('ru.webhooks'), render: function (x) { return h('span.small', (x.webhooks || []).length ? x.webhooks.join(', ') : t('ru.allhooks')); } },
           { label: '', render: function (x) {
-            if (b.read_only) return null;
+            if (b.read_only || !admin) return null;
             return h('span.btn-row', UI.btn(t('edit'), 'edit', function () { ruleForm(UI, ctx, x); }, 'ghost sm'),
               UI.btn(t('delete'), 'trash', function () { removeItem(UI, ctx, '/api/alerts/rules/', x.name, t('ru.rm.ask', { name: x.name }), t('ru.removed', { name: x.name })); }, 'ghost sm'));
           } }
@@ -422,8 +430,9 @@
     FC.call(UI, 'GET', '/api/alerts/config').then(function (r) {
       if (!document.body.contains(el)) return;
       var b = r.body || {}, ctx = { cfg: b, etag: r.etag, reload: reload };
-      var add = UI.btn(t('wh.add'), 'plus', function () { webhookForm(UI, ctx, null); }, 'primary');
-      add.disabled = !!b.read_only || (b.webhooks || []).length >= b.bounds.max_webhooks;
+      var admin = FC.canCluster('admin');
+      var add = admin ? UI.btn(t('wh.add'), 'plus', function () { webhookForm(UI, ctx, null); }, 'primary') : null;
+      if (add) add.disabled = !!b.read_only || (b.webhooks || []).length >= b.bounds.max_webhooks;
       UI.mount(body, h('div.stack', b.read_only ? h('div.callout.callout--warn', t('al.readonly', { why: b.read_only })) : null,
         h('div.row.cl-bar', add),
         UI.card(null, UI.table([
@@ -432,7 +441,7 @@
           { label: t('wh.url'), render: function (w) { return h('code.small', w.url_host + '/…'); } },
           { label: t('wh.status'), render: function (w) { return statusCell(UI, w.status || {}); } },
           { label: '', render: function (w) {
-            if (b.read_only) return null;
+            if (b.read_only || !admin) return null;
             var test = UI.btn(t('wh.test'), 'zap', function () {
               UI.busy(test, FC.call(UI, 'POST', '/api/alerts/webhooks/' + encodeURIComponent(w.name) + '/test').then(function (res) {
                 var x = res.body || {};
@@ -504,8 +513,9 @@
       if (!document.body.contains(el)) return;
       var b = r.body || {}, now = Date.now();
       function state(s) { return Date.parse(s.ends) <= now ? 'ended' : Date.parse(s.starts) > now ? 'later' : 'active'; }
-      var add = UI.btn(t('si.add'), 'plus', function () { silenceForm(UI, {}, reload); }, 'primary');
-      add.disabled = !!b.read_only;
+      // A silence is an operator's of what it silences (I148). / 静默需要在其所静默的对象上是操作员（I148）。
+      var add = FC.canAny('operator') ? UI.btn(t('si.add'), 'plus', function () { silenceForm(UI, {}, reload); }, 'primary') : null;
+      if (add) add.disabled = !!b.read_only;
       UI.mount(body, h('div.stack', b.read_only ? h('div.callout.callout--warn', t('al.readonly', { why: b.read_only })) : null,
         h('div.row.row--between.cl-bar', add, h('span.small.muted', t('si.hint'))),
         UI.card(null, UI.table([
@@ -516,7 +526,7 @@
           { label: t('si.ends'), render: function (s) { return h('span.small', FC.when(s.ends)); } },
           { label: t('si.comment'), render: function (s) { return h('div.small', s.comment || '', h('div.muted', t('si.by') + ' ' + s.created_by)); } },
           { label: '', render: function (s) {
-            if (b.read_only || state(s) === 'ended') return null;
+            if (b.read_only || state(s) === 'ended' || !(s.node ? FC.canOn('operator', s.node) : FC.canAny('operator'))) return null;
             return UI.btn(t('si.end'), 'x', function () {
               FC.call(UI, 'DELETE', '/api/alerts/silences/' + encodeURIComponent(s.id), undefined, r.etag).then(function () {
                 UI.toast(t('si.ended'));

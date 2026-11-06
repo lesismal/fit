@@ -60,21 +60,25 @@
     function drawTop() {
       var readOnly = list.readOnly;
       var e = st && st.error, untrusted = e && e.certificate && (e.kind === 'tls_untrusted' || e.kind === 'tls_pin_mismatch');
+      // Only what the user's role on the member allows is drawn (I148). / 只绘制用户在该成员上的角色允许的操作（I148）。
+      var admin = FC.canOn('admin', name);
+      var testBtn = FC.canOn('operator', name) ? UI.btn(t('fm.test'), 'zap', function () { FC.testSaved(UI, mem, list.etag, function () { read(true); }); }, 'ghost sm') : null;
       var tools = h('span.btn-row',
-        UI.btn(t('fm.test'), 'zap', function () { FC.testSaved(UI, mem, list.etag, function () { read(true); }); }, 'ghost sm'),
-        untrusted ? UI.btn(t('ct.trust'), 'shield', function () {
+        h('a.btn.btn--ghost.btn--sm', { href: '#/cluster/audit?node=' + encodeURIComponent(name) }, UI.icon('history'), t('au.of')),
+        testBtn,
+        untrusted && admin ? UI.btn(t('ct.trust'), 'shield', function () {
           FC.trustSaved(UI, mem, e.certificate, e.kind === 'tls_pin_mismatch', list.etag).then(function (ok) { if (ok) read(true); });
         }, 'primary sm') : null,
-        UI.btn(t('edit'), 'edit', function () {
+        !admin ? null : UI.btn(t('edit'), 'edit', function () {
           (mem.access === 'link' && FC.linkForm ? FC.linkForm : FC.memberForm)(UI, { member: mem, etag: list.etag, reload: function () { read(true); }, then: function (saved) {
             if (saved && saved.name && saved.name !== name) location.hash = '#/cluster/node/' + encodeURIComponent(saved.name);
             else read(true);
           } });
         }, 'ghost sm'),
-        UI.btn(t('delete'), 'trash', function () {
+        !admin ? null : UI.btn(t('delete'), 'trash', function () {
           FC.remove(UI, name, list.etag).then(function (ok) { if (ok) location.hash = '#/cluster/nodes'; });
         }, 'ghost sm'));
-      if (readOnly) tools.querySelectorAll('button').forEach(function (b, i) { if (i > 0) b.disabled = true; });
+      if (readOnly) tools.querySelectorAll('button').forEach(function (b) { if (b !== testBtn) b.disabled = true; });
       var s = st || {};
       var access = mem.access === 'link' && FC.linkAccess ? FC.linkAccess(UI) : mem.access === 'admin_api' ? t('nd.token') : t('nd.as', { user: mem.username || '?' });
       UI.mount(top,

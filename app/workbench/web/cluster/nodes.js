@@ -74,7 +74,11 @@
         x.title = label + ' ' + m.name; x.setAttribute('aria-label', label + ' ' + m.name);
         return x;
       }
-      var out = [b(t('fm.test'), 'zap', function () { FC.testSaved(UI, m, list.etag, saved); })];
+      // Only what the user's role on the member allows is drawn (I148): a test is an operator's, the rest an admin's.
+      // 只绘制用户在该成员上的角色允许的操作（I148）：测试需要操作员，其余需要管理员。
+      var out = [];
+      if (FC.canOn('operator', m.name)) out.push(b(t('fm.test'), 'zap', function () { FC.testSaved(UI, m, list.etag, saved); }));
+      if (!FC.canOn('admin', m.name)) return out.length ? h('span.btn-row', out) : null;
       if (untrusted) {
         var tb = b(t('ct.trust'), 'shield', function () {
           FC.trustSaved(UI, m, e.certificate, e.kind === 'tls_pin_mismatch', list.etag).then(function (ok) { if (ok) saved(); });
@@ -92,8 +96,8 @@
 
     function draw() {
       if (!list || !document.body.contains(el)) return;
-      var addBtn = UI.btn(t('fm.add'), 'plus', add, 'primary');
-      addBtn.disabled = !!readOnly || list.nodes.length >= list.maxNodes;
+      var addBtn = FC.canAny('admin') ? UI.btn(t('fm.add'), 'plus', add, 'primary') : null;
+      if (addBtn) addBtn.disabled = !!readOnly || list.nodes.length >= list.maxNodes;
       // The bar: Add a node, then what later iterations add beside it (FitCluster.addAction).
       // 工具栏：“添加节点”，以及后续迭代在其旁加入的按钮（FitCluster.addAction）。
       var more = FC.addActions(UI, { readOnly: !!readOnly, reload: read });
@@ -128,7 +132,7 @@
           return h('span', h('b', a.node || ''), ' ', h('span.muted', w === 'nd.a.' + a.action ? a.action : w));
         } },
         { label: t('nd.detail'), render: function (a) { return h('span.small.muted', a.detail || ''); } }
-      ], rows, { empty: t('nd.audit.none') }), null, true));
+      ], rows, { empty: t('nd.audit.none') }), h('a.btn.btn--ghost.btn--sm', { href: '#/cluster/audit' }, UI.icon('history'), t('nd.audit.all')), true));
     }
 
     var opened = false;
@@ -139,7 +143,7 @@
         ((r[1].body && r[1].body.nodes) || []).forEach(function (s) { states[s.name] = s; });
         draw();
         // #/cluster/nodes?add=1 opens the form once. / #/cluster/nodes?add=1 只打开一次表单。
-        if (!opened && /[?&]add=1\b/.test(location.hash) && !readOnly) { opened = true; add(); }
+        if (!opened && /[?&]add=1\b/.test(location.hash) && !readOnly && FC.canAny('admin')) { opened = true; add(); }
         FC.call(UI, 'GET', '/api/audit').then(function (a) { if (document.body.contains(el)) drawAudit(a.body && a.body.entries); }, function () { /* ignore / 忽略 */ });
       }, function (e) {
         if (!document.body.contains(el) || e.status === 401) return;

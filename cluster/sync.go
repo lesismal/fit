@@ -367,17 +367,19 @@ func (m *Manager) Desired(name string, done func(*Desired, *Problem)) error {
 
 // ---- The API ----
 
-func (m *Manager) templateRoutes(api *console.API) {
+func (m *Manager) templateRoutes(api *router) {
+	// Templates are changed by a cluster-wide admin, as Handle has it;
+	// the reads that POST check the members they read.
 	api.Handle("GET", "/api/templates", m.listTemplates)
 	api.Handle("POST", "/api/templates", m.addTemplate)
 	api.HandlePrefix("", "/api/templates/", m.templateRoute)
 	api.Handle("GET", "/api/sync", func(r *console.Request) { _ = r.JSON(200, map[string]any{"nodes": m.SyncStates()}) })
-	api.Handle("POST", "/api/sync", m.syncRoute)
-	api.HandlePrefix("GET", "/api/desired/", m.desiredRoute)
-	api.Handle("POST", "/api/compare", m.compareRoute)
-	api.Handle("POST", "/api/import", m.importRoute)
-	api.Handle("POST", "/api/text/render", m.renderText)
-	api.Handle("POST", "/api/text/parse", m.parseText)
+	api.Checked("POST", "/api/sync", m.syncRoute)
+	api.CheckedPrefix("GET", "/api/desired/", m.desiredRoute)
+	api.Checked("POST", "/api/compare", m.compareRoute)
+	api.Checked("POST", "/api/import", m.importRoute)
+	api.Checked("POST", "/api/text/render", m.renderText)
+	api.Checked("POST", "/api/text/parse", m.parseText)
 }
 
 // templatesBody is GET /api/templates's answer.
@@ -525,6 +527,9 @@ func (m *Manager) syncRoute(r *console.Request) {
 		m.answer(r, 0, nil, err)
 		return
 	}
+	if !m.allow(r, Need{Role: RoleViewer, Nodes: names}) {
+		return
+	}
 	m.tpl.mu.Lock()
 	if m.tpl.syncs >= MaxSyncs {
 		m.tpl.mu.Unlock()
@@ -618,6 +623,9 @@ type desiredBody struct {
 // desiredRoute answers GET /api/desired/<name>.
 func (m *Manager) desiredRoute(r *console.Request) {
 	name := strings.TrimPrefix(r.Path, "/api/desired/")
+	if !m.allow(r, Need{Role: RoleViewer, Nodes: []string{name}}) {
+		return
+	}
 	m.mu.Lock()
 	_, ok := m.nodes[name]
 	m.mu.Unlock()
@@ -786,6 +794,9 @@ func (m *Manager) importRoute(r *console.Request) {
 // once with the members' pages, and answers what answer makes of them; or
 // 502 with the first member's problem.
 func (m *Manager) readConfigs(r *console.Request, names []string, answer func(cfgs []*jv, etags []string) any) {
+	if !m.allow(r, Need{Role: RoleViewer, Nodes: names}) {
+		return
+	}
 	for _, n := range names {
 		m.mu.Lock()
 		_, ok := m.nodes[n]

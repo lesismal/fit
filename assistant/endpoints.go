@@ -63,7 +63,7 @@ type toolsBody struct {
 
 func (a *Assistant) toolsHandler(r *console.Request) {
 	s := a.Settings()
-	level := s.Level(r.User)
+	level := a.Level(s, r.User)
 	b := toolsBody{User: r.User, Level: level, UseTools: true, Store: a.o.Store != nil, Tools: []toolView{}}
 	b.Provider, b.Model = s.Default()
 	if p := s.Provider(b.Provider); p != nil {

@@ -76,7 +76,12 @@ func (m *Manager) alertsETag() string {
 	return strconv.Quote(alertsTag(m.al.rev))
 }
 
-func (m *Manager) alertRoutes(api *console.API) {
+// alertRoutes adds the alerts' and the drift's endpoints behind the role
+// check (I148): reads for any role; rules, webhooks and their tests, which
+// hold secrets, for a cluster-wide admin (Handle); silences for an operator
+// of what they silence, and a drift's fix, a sync rollout, for an operator of
+// its members (Checked, the Manager's methods checking).
+func (m *Manager) alertRoutes(api *router) {
 	api.Handle("GET", "/api/alerts", func(r *console.Request) { _ = r.JSON(200, m.Alerts()) })
 	api.Handle("GET", "/api/alerts/summary", func(r *console.Request) { _ = r.JSON(200, m.AlertSummary()) })
 	api.Handle("GET", "/api/alerts/config", func(r *console.Request) {
@@ -108,7 +113,7 @@ func (m *Manager) alertRoutes(api *console.API) {
 		})
 	})
 	api.HandlePrefix("", "/api/alerts/webhooks/", m.webhookRoute)
-	api.Handle("POST", "/api/alerts/silences", func(r *console.Request) {
+	api.Checked("POST", "/api/alerts/silences", func(r *console.Request) {
 		var in SilenceInput
 		if !m.alertBody(r, &in) {
 			return
@@ -119,14 +124,14 @@ func (m *Manager) alertRoutes(api *console.API) {
 			m.answerAlerts(r, 201, out, err)
 		})
 	})
-	api.HandlePrefix("", "/api/alerts/silences/", m.silenceRoute)
+	api.CheckedPrefix("", "/api/alerts/silences/", m.silenceRoute)
 	api.Handle("GET", "/api/drift", func(r *console.Request) {
 		m.mu.Lock()
 		ro := m.readOnly
 		m.mu.Unlock()
 		_ = r.JSON(200, map[string]any{"interval_ms": m.interval.Milliseconds(), "read_only": ro, "nodes": m.DriftStates()})
 	})
-	api.Handle("POST", "/api/drift/fix", func(r *console.Request) {
+	api.Checked("POST", "/api/drift/fix", func(r *console.Request) {
 		var in struct {
 			Nodes []string `json:"nodes"`
 		}

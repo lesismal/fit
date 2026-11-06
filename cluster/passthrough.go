@@ -138,7 +138,7 @@ func (e errPassBusy) Error() string { return string(e) }
 
 // passRoutes adds the pass-through to the module's routes: the console
 // serves it at PassPrefix, Module.Prefixes says.
-func (m *Manager) passRoutes(api *console.API) { api.HandlePrefix("", PassPrefix, m.passOn) }
+func (m *Manager) passRoutes(api *router) { api.CheckedPrefix("", PassPrefix, m.passOn) }
 
 // ownDigest is the manager's schema digest.
 func (m *Manager) ownDigest() string {
@@ -161,6 +161,8 @@ const (
 	// ReadOnlyManager: the manager's members cannot be written, so a
 	// write could not be recorded.
 	ReadOnlyManager = "manager"
+	// ReadOnlyRole: the user is not an admin of the member (I148).
+	ReadOnlyRole = "role"
 )
 
 // compatible returns why the pages may not write to a member whose schema
@@ -315,6 +317,15 @@ func (m *Manager) passOn(r *console.Request) {
 		return
 	}
 	write := writes(method, rt, r.Request.URL.RawQuery)
+	// A member's pages are read by a viewer of it, and changed by an
+	// admin of it.
+	need := Need{Role: RoleViewer, Nodes: []string{name}}
+	if write {
+		need.Role = RoleAdmin
+	}
+	if !m.allow(r, need) {
+		return
+	}
 	if write {
 		if ro != "" {
 			_ = console.Error(r.Context, 409, "the manager's members cannot be written ("+ro+"), so a change through it could not be recorded")
@@ -350,6 +361,10 @@ func (m *Manager) passOn(r *console.Request) {
 		return
 	}
 	user := r.User
+	var before uint64
+	if write {
+		before = m.polledVersion(name)
+	}
 	r.Context.Retain()
 	run := func(release func()) {
 		if rt.what == "workbench" {
@@ -363,7 +378,7 @@ func (m *Manager) passOn(r *console.Request) {
 				prob = n.passProblem(rep, s)
 			}
 			if write {
-				m.audited(user, n.spec.Name, method, rt.shown, rep, prob)
+				m.audited(user, n.spec.Name, method, rt.shown, body, before, rep, prob)
 			}
 			if prob != nil {
 				if prob.At.IsZero() {
@@ -485,6 +500,11 @@ func (m *Manager) passWorkbench(r *console.Request, n *node, user string, releas
 		m.mu.Lock()
 		if ro := m.readOnly; ro != "" && kind == "" {
 			kind, why = ReadOnlyManager, "the manager's members cannot be written ("+ro+"), so a change through it could not be recorded"
+		}
+		if kind == "" {
+			if err := m.allowLocked(user, Need{Role: RoleAdmin, Nodes: []string{n.spec.Name}}); err != nil {
+				kind, why = ReadOnlyRole, "your role on this member lets you read its pages, not change them: an admin of the cluster, or of a group it is in, may"
+			}
 		}
 		m.mu.Unlock()
 		mem := passMember{Name: n.spec.Name, Access: n.spec.Access, URL: n.spec.URL, ID: nd.ID, Hostname: nd.Hostname,
@@ -641,25 +661,39 @@ func (m *Manager) unholdAudit() {
 // audited records a write passed on to the member name: in the log at once,
 // and in the audit log of the store on a goroutine of its own, which writes
 // a file.
-func (m *Manager) audited(user, name, method, path string, rep *reply, prob *Problem) {
-	var outcome string
+// The body sent is not kept, as a config holds secrets: its digest is;
+// before is the member's config version as last polled, and the entry's
+// After the one its answer names.
+func (m *Manager) audited(user, name, method, path string, body []byte, before uint64, rep *reply, prob *Problem) {
+	var outcome, result string
+	after := ""
 	switch {
 	case prob != nil && rep == nil && (prob.Kind == KindAuth || prob.Kind == KindRateLimited || prob.Kind == KindPasswordChange):
 		// The console's login failed: the write was not sent.
-		outcome = "not sent (" + prob.Kind + "): " + prob.Message
+		outcome, result = "not sent ("+prob.Kind+"): "+prob.Message, AuditNotSent
 	case prob != nil && rep == nil:
-		outcome = "not answered (" + prob.Kind + "), so it may or may not have been applied: " + prob.Message
+		outcome, result = "not answered ("+prob.Kind+"), so it may or may not have been applied: "+prob.Message, AuditUnknown
 	case prob != nil:
-		outcome = strconv.Itoa(rep.status) + ", " + prob.Kind
+		outcome, result = strconv.Itoa(rep.status)+", "+prob.Kind, AuditFailed
 	default:
-		outcome = strconv.Itoa(rep.status)
+		outcome, result = strconv.Itoa(rep.status), AuditOK
+		if rep.status >= 300 {
+			result = AuditFailed
+		}
 		if v := rep.header.Get("Fit-Config-Version"); v != "" && rep.status < 300 {
 			outcome += ", config version " + v
+			after = v
 		}
 	}
 	detail := boundString(method+" "+path+": "+outcome, maxMessage)
 	m.logf("cluster: %q, through the node switcher, on the member %q: %s", user, name, detail)
-	e := AuditEntry{At: m.now().UTC(), User: user, Action: ActionAPI, Node: name, Detail: detail}
+	e := AuditEntry{At: m.now().UTC(), User: user, Action: ActionAPI, Node: name, Detail: detail, Outcome: result, After: after}
+	if before != 0 {
+		e.Before = strconv.FormatUint(before, 10)
+	}
+	if len(body) > 0 {
+		e.Digest = digestOf(body)
+	}
 	h := &m.pass
 	h.mu.Lock()
 	h.audit = append(h.audit, e)
@@ -709,10 +743,7 @@ func (m *Manager) appendAudit(entries []AuditEntry) error {
 	d := m.doc
 	d.Rollouts = m.storedRolloutsLocked()
 	m.mu.Unlock()
-	d.Audit = append(slices.Clone(d.Audit), entries...)
-	if n := len(d.Audit) - MaxAudit; n > 0 {
-		d.Audit = slices.Delete(d.Audit, 0, n)
-	}
+	d.Audit = trimAudit(append(slices.Clone(d.Audit), entries...))
 	d.Version = DocVersion
 	if err := m.o.Store.SetSection(Section, d.marshal()); err != nil {
 		return fmt.Errorf("saving the members: %w", err)

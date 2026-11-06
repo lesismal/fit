@@ -363,6 +363,9 @@ func (m *Manager) Select(selector string, names []string) (nodes, missing []stri
 func (m *Manager) AddGroup(user string, in *GroupInput) (GroupView, error) {
 	var out GroupView
 	err := m.change(user, func(d *document) (AuditEntry, error) {
+		if err := m.allowCluster(d, user); err != nil {
+			return AuditEntry{}, err
+		}
 		g, err := in.group(nil, m.now().UTC(), m.maxNodes)
 		if err != nil {
 			return AuditEntry{}, err
@@ -375,7 +378,9 @@ func (m *Manager) AddGroup(user string, in *GroupInput) (GroupView, error) {
 		}
 		d.Groups = append(d.Groups, g)
 		out = viewIn(d, &g)
-		return AuditEntry{Action: ActionGroupAdd, Group: g.Name, Detail: describeGroup(&g)}, nil
+		e := AuditEntry{Action: ActionGroupAdd, Group: g.Name, Detail: describeGroup(&g), Nodes: out.Nodes}
+		e.setDiff("", groupText(&g), "none", g.Name)
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q added the group %q", user, out.Name)
@@ -388,6 +393,9 @@ func (m *Manager) AddGroup(user string, in *GroupInput) (GroupView, error) {
 func (m *Manager) UpdateGroup(user, name string, in *GroupInput) (GroupView, error) {
 	var out GroupView
 	err := m.change(user, func(d *document) (AuditEntry, error) {
+		if err := m.allowCluster(d, user); err != nil {
+			return AuditEntry{}, err
+		}
 		i := groupIndex(d, name)
 		if i < 0 {
 			return AuditEntry{}, errNoGroup(name)
@@ -402,13 +410,16 @@ func (m *Manager) UpdateGroup(user, name string, in *GroupInput) (GroupView, err
 		if g.Name != name && groupIndex(d, g.Name) >= 0 {
 			return AuditEntry{}, errConflict("a group is already named " + strconv.Quote(g.Name))
 		}
-		changed := groupChanges(&d.Groups[i], &g)
+		changed, before := groupChanges(&d.Groups[i], &g), groupText(&d.Groups[i])
 		d.Groups[i] = g
 		if g.Name != name {
 			renameGroupInTemplates(d, name, g.Name)
+			renameGroupInAccess(d, name, g.Name)
 		}
 		out = viewIn(d, &g)
-		return AuditEntry{Action: ActionGroupUpdate, Group: name, Detail: changed}, nil
+		e := AuditEntry{Action: ActionGroupUpdate, Group: name, Detail: changed, Nodes: out.Nodes}
+		e.setDiff(before, groupText(&g), name, g.Name)
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q changed the group %q", user, name)
@@ -419,13 +430,19 @@ func (m *Manager) UpdateGroup(user, name string, in *GroupInput) (GroupView, err
 // RemoveGroup removes the group name, as user; its members stay.
 func (m *Manager) RemoveGroup(user, name string) error {
 	err := m.change(user, func(d *document) (AuditEntry, error) {
+		if err := m.allowCluster(d, user); err != nil {
+			return AuditEntry{}, err
+		}
 		i := groupIndex(d, name)
 		if i < 0 {
 			return AuditEntry{}, errNoGroup(name)
 		}
+		e := AuditEntry{Action: ActionGroupRemove, Group: name, Nodes: viewIn(d, &d.Groups[i]).Nodes}
+		e.setDiff(groupText(&d.Groups[i]), "", name, "none")
 		d.Groups = slices.Delete(d.Groups, i, i+1)
 		renameGroupInTemplates(d, name, "")
-		return AuditEntry{Action: ActionGroupRemove, Group: name}, nil
+		renameGroupInAccess(d, name, "")
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q removed the group %q", user, name)
@@ -510,11 +527,13 @@ type selectBody struct {
 	Members  []string `json:"members"`
 }
 
-func (m *Manager) groupRoutes(api *console.API) {
+func (m *Manager) groupRoutes(api *router) {
+	// Groups decide who has which role where: only a cluster-wide admin
+	// changes them, as Handle has it.
 	api.Handle("GET", "/api/groups", m.listGroups)
 	api.Handle("POST", "/api/groups", m.addGroup)
 	api.HandlePrefix("", "/api/groups/", m.groupRoute)
-	api.Handle("POST", "/api/select", m.selectMembers)
+	api.Checked("POST", "/api/select", m.selectMembers)
 }
 
 func (m *Manager) listGroups(r *console.Request) {

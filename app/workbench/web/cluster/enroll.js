@@ -151,6 +151,7 @@
 
   // The Nodes page's bar: Add by enrollment beside Add a node. / 节点页工具栏：“添加节点”旁的“通过注册添加”。
   FC.addAction(function (UI, ctx) {
+    if (!FC.canAny('admin')) return null;
     var b = UI.btn(UI.t('ce.add'), 'key', function () { form(UI, null, ctx.reload); }, 'ghost');
     b.disabled = !!ctx.readOnly;
     return b;
@@ -159,6 +160,7 @@
   FC.rowExtra(function (UI, mem, st) {
     var badge = linkBadge(UI, mem, st);
     if (!badge) return null;
+    if (!FC.canOn('admin', mem.name)) return UI.h('div.cl-link-row', badge);
     var again = UI.btn(UI.t('ce.again'), 'key', function () { form(UI, mem.name); }, 'ghost sm');
     again.title = UI.t('ce.again.title', { name: mem.name });
     return UI.h('div.cl-link-row', badge, again);

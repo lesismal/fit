@@ -510,6 +510,9 @@ func alertLine(tpl string, a *Alert) string {
 // tells done how it went, from a fib worker or the caller's goroutine. It
 // writes the audit log: off a fib worker.
 func (m *Manager) TestWebhook(user, name string, done func(WebhookResult)) error {
+	if err := m.allowAlerts(user); err != nil {
+		return err
+	}
 	m.al.mu.Lock()
 	s := m.al.senders[name]
 	m.al.mu.Unlock()

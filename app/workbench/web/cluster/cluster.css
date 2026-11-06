@@ -74,3 +74,18 @@ a.cl-chip:hover { background: var(--primary-soft); color: var(--primary); }
 .cl-pick { width: 32px; }
 .cl-ops { flex-wrap: wrap; }
 .cl-check { gap: 8px; cursor: pointer; }
+
+/* Users and audit (I148): a user's roles on groups, each a chip; an audit entry's diff, each line by its kind.
+   用户与审计（I148）：用户在分组上的角色，每个一枚标签；审计条目的差异，按行类型着色。 */
+.cl-rchips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cl-rchip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: 999px; background: var(--surface-3); font-size: 12px; }
+.cl-rchip--missing { opacity: .6; text-decoration: line-through; }
+.cl-rchip .select { width: auto; }
+.cl-rchip__x { border: 0; background: none; color: var(--text-2); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px; border-radius: 999px; }
+.cl-rchip__x:hover { background: var(--danger-soft); color: var(--danger); }
+.cl-diff { margin: 0; padding: 8px 0; max-height: 50vh; overflow: auto; font-size: 12px; line-height: 1.45; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xs); }
+.cl-diff > span { display: block; padding: 0 10px; white-space: pre; }
+.cl-diff__add { background: var(--ok-soft); }
+.cl-diff__del { background: var(--danger-soft); }
+.cl-diff__hunk { color: var(--primary); }
+.cl-diff__file { color: var(--muted); }

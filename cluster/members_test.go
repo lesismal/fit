@@ -108,8 +108,14 @@ func TestDocument(t *testing.T) {
 	if _, _, err := readDocument([]byte("[")); err == nil {
 		t.Error("not JSON")
 	}
-	if _, newer, _ := readDocument([]byte(`{"version":3}`)); !newer {
+	if _, newer, _ := readDocument([]byte(`{"version":4}`)); !newer {
 		t.Error("a newer version")
+	}
+	// Roles are I148's: a document with them is version 3, which an I149
+	// fit leaves read-only; one without them stays version 2.
+	if d, newer, err := readDocument([]byte(`{"version":3,"access":{"users":[{"user":"ada","role":"admin"}]}}`)); newer || err != nil ||
+		!strings.Contains(string(d.marshal()), `"version":3`) || d.Access.user("ada").Role != RoleAdmin {
+		t.Error("version 3", newer, err)
 	}
 	// I141's version 1 is read, and written as version 2.
 	if d, newer, err := readDocument([]byte(`{"version":1,"members":[]}`)); newer || err != nil || !strings.Contains(string(d.marshal()), `"version":2`) {

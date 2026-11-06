@@ -144,6 +144,10 @@ func (m *Manager) StartRollout(user, id string, req *StartRequest) (Rollout, err
 		m.mu.Unlock()
 		return Rollout{}, err
 	}
+	if err := m.allowRolloutLocked(user, r.Kind, r.From, r.nodes()); err != nil {
+		m.mu.Unlock()
+		return Rollout{}, err
+	}
 	m.expireLocked()
 	if r.State != RolloutPlanned {
 		m.mu.Unlock()
@@ -194,7 +198,13 @@ func (m *Manager) StartRollout(user, id string, req *StartRequest) (Rollout, err
 	rr := m.runLocked(r)
 	out := r.copy(true, false)
 	entry := AuditEntry{At: m.now().UTC(), User: user, Action: ActionRolloutStart, Rollout: r.ID, Template: r.Template, Group: r.Group,
-		Detail: clip(fmt.Sprintf("%d members in %d batches: %s", len(names), len(r.Batches), s.describe()), 512)}
+		Detail: clip(fmt.Sprintf("%d members in %d batches: %s", len(names), len(r.Batches), s.describe()), 512), Nodes: names, Outcome: AuditOK}
+	entry.setDiffText(rolloutDiff(r, names))
+	for _, x := range r.Members {
+		if slices.Contains(names, x.Node) {
+			entry.Outcomes = append(entry.Outcomes, AuditOutcome{Node: x.Node, Status: x.Status, Before: x.Version, Digest: x.Digest})
+		}
+	}
 	m.mu.Unlock()
 	m.saveRollouts(entry)
 	m.logf("cluster: %q started the rollout %s on %s: %s", user, r.ID, strings.Join(names, ", "), s.describe())
@@ -245,6 +255,9 @@ const (
 func (m *Manager) SteerRollout(user, id, what string) (Rollout, error) {
 	m.mu.Lock()
 	r, err := m.steerableLocked(id)
+	if err == nil {
+		err = m.allowRolloutLocked(user, r.Kind, r.From, r.nodes())
+	}
 	if err != nil {
 		m.mu.Unlock()
 		return Rollout{}, err
@@ -320,7 +333,8 @@ func (m *Manager) SteerRollout(user, id, what string) (Rollout, error) {
 		return Rollout{}, fieldErr("action", "%q: a rollout is paused, resumed, gone on with, aborted, rolled back or discarded", what)
 	}
 	out := r.copy(true, false)
-	entries := []AuditEntry{{At: m.now().UTC(), User: user, Action: "rollout." + what, Rollout: r.ID, Template: r.Template, Group: r.Group, Detail: detail}}
+	entries := []AuditEntry{{At: m.now().UTC(), User: user, Action: "rollout." + what, Rollout: r.ID, Template: r.Template, Group: r.Group, Detail: detail,
+		Nodes: r.nodes(), Outcome: AuditOK}}
 	if what == SteerAbort && r.State == RolloutAborted {
 		entries = append(entries, rolloutAudit(r, m.now().UTC()))
 	}
@@ -365,12 +379,15 @@ func (m *Manager) endLocked(r *Rollout, state, why string) {
 // versions. m.mu is held.
 func rolloutAudit(r *Rollout, at time.Time) AuditEntry {
 	e := AuditEntry{At: at, User: r.StartedBy, Action: ActionRolloutEnd, Rollout: r.ID, Template: r.Template, Group: r.Group,
-		Detail: clip(r.State+": "+r.Reason, 512)}
+		Detail: clip(r.State+": "+r.Reason, 512), Outcome: r.State}
 	for _, x := range r.Members {
 		if x.Status == MemberUnchanged || x.Status == MemberExcluded || x.Status == MemberError {
 			continue
 		}
-		a := AuditOutcome{Node: x.Node, Status: x.Status, Detail: memberDetail(&x)}
+		a := AuditOutcome{Node: x.Node, Status: x.Status, Detail: memberDetail(&x), Before: x.Version, After: x.Applied, Digest: x.Digest}
+		if x.RolledBack != 0 {
+			a.After = x.RolledBack
+		}
 		if x.Error != nil {
 			a.Error = clip(x.Error.Kind+": "+x.Error.Message, maxAuditError)
 		}

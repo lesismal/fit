@@ -33,7 +33,10 @@
       'sw.ro.manager': 'This manager\'s members cannot be written, so a change through it could not be recorded in its audit log: the pages are read-only.',
       'nd.a.node.api': 'changed through the node switcher',
       'sw.st.up': 'up', 'sw.st.down': 'down', 'sw.st.error': 'error', 'sw.st.unknown': 'not read yet',
-      'member.readonly': 'This member is open read-only (the band above the page says why): nothing is changed on it from here.'
+      'member.readonly': 'This member is open read-only (the band above the page says why): nothing is changed on it from here.',
+      'sw.ro.role': 'Your role on this member lets you read its pages, not change them: an admin of the cluster, or of a group it is in, may.',
+      'manager.readonly': 'Your role in this cluster lets you read this manager\'s own pages, not change them: only an admin of the whole cluster changes the manager.',
+      'sw.mgr.ro': 'Read-only: your role in this cluster is not admin of the whole cluster, so this manager\'s own config, users and services are only read here.'
     },
     'zh-CN': {
       'sw.label': '节点', 'sw.manager': '本管理端', 'sw.title': '通过本管理端打开成员自己的页面',
@@ -49,7 +52,10 @@
       'sw.ro.manager': '本管理端的成员数据不能写入，通过它所做的修改无法记入其审计日志：页面只读。',
       'nd.a.node.api': '经节点切换器修改',
       'sw.st.up': '正常', 'sw.st.down': '离线', 'sw.st.error': '错误', 'sw.st.unknown': '尚未读取',
-      'member.readonly': '此成员以只读方式打开（原因见页面上方的横条）：不能从这里修改它。'
+      'member.readonly': '此成员以只读方式打开（原因见页面上方的横条）：不能从这里修改它。',
+      'sw.ro.role': '你在此成员上的角色只允许读取其页面、不能修改：集群管理员或其所在分组的管理员才可以。',
+      'manager.readonly': '你在此集群中的角色只允许读取本管理端自己的页面、不能修改：只有集群范围的管理员才能修改管理端。',
+      'sw.mgr.ro': '只读：你在此集群中不是集群范围的管理员，因此本管理端自己的配置、用户与服务在此只能读取。'
     }
   });
 
@@ -128,7 +134,7 @@
   function why(mem) {
     function short(d) { d = d || ''; return d.length > 19 ? d.slice(0, 19) + '…' : d; }
     var k = mem.reason_kind;
-    if (k === 'not_read' || k === 'version' || k === 'manager') {
+    if (k === 'not_read' || k === 'version' || k === 'manager' || k === 'role') {
       return t('sw.ro.' + k, { member: short(mem.schema_digest), manager: short(mem.manager_schema_digest) });
     }
     return mem.reason || '';
@@ -139,6 +145,13 @@
     // Only a manager has members to switch to. / 只有管理端才有可切换的成员。
     if (!target && (wb.modules || []).indexOf('cluster') < 0) return null;
     var out = { top: switcher(target) };
+    // The manager's own pages, read-only for a user who is not an admin of the whole cluster (I148).
+    // 管理端自己的页面：对非集群范围管理员的用户只读（I148）。
+    if (!target && wb.cluster_me && wb.cluster_me.manager_read_only) {
+      out.band = h('div.sw-band.sw-band--manager', { role: 'status' }, h('span.badge.badge--warn.sw-ro', UI.icon('lock'), t('sw.readonly')),
+        h('span.sw-band__why', t('sw.mgr.ro')));
+      out.cls = 'is-readonly';
+    }
     if (target) {
       var mem = wb.member || {};
       out.title = h('span.sw-pill', { title: t('sw.member') + ' ' + target }, UI.icon('server'), target);

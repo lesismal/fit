@@ -700,6 +700,9 @@ func (m *Manager) PlanRollout(user string, req *RolloutRequest) (Rollout, error)
 		return Rollout{}, errReadOnly(m.readOnly)
 	}
 	names, err := m.rolloutTargetsLocked(req)
+	if err == nil {
+		err = m.allowRolloutLocked(user, req.Kind, req.From, names)
+	}
 	if err != nil {
 		m.mu.Unlock()
 		return Rollout{}, err
@@ -723,10 +726,33 @@ func (m *Manager) PlanRollout(user string, req *RolloutRequest) (Rollout, error)
 	out := r.copy(true, false)
 	m.mu.Unlock()
 	m.saveRollouts(AuditEntry{At: m.now().UTC(), User: user, Action: ActionRolloutPlan, Rollout: r.ID, Template: r.Template, Group: r.Group,
-		Detail: describeRollout(r, len(names))})
+		Detail: describeRollout(r, len(names)), Nodes: names, Outcome: AuditOK})
 	m.logf("cluster: %q planned the rollout %s (%s) of %s", user, r.ID, r.Kind, strings.Join(names, ", "))
 	go m.planRollout(r)
 	return out, nil
+}
+
+// allowRolloutLocked checks that user may roll out a change of kind to the
+// members names: a template's or a sync, an operator of each; a copy of
+// parts of the member from, which applies config of no template, an admin
+// of each, who reads from. m.mu is held.
+func (m *Manager) allowRolloutLocked(user, kind, from string, names []string) error {
+	if kind != RolloutCopy {
+		return m.allowLocked(user, Need{Role: RoleOperator, Nodes: names})
+	}
+	if err := m.allowLocked(user, Need{Role: RoleAdmin, Nodes: names}); err != nil {
+		return err
+	}
+	return m.allowLocked(user, Need{Role: RoleViewer, Nodes: []string{from}})
+}
+
+// nodes returns the names of r's members.
+func (r *Rollout) nodes() []string {
+	out := make([]string, len(r.Members))
+	for i := range r.Members {
+		out[i] = r.Members[i].Node
+	}
+	return out
 }
 
 // activeLocked counts the rollouts that are active. m.mu is held.

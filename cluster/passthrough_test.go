@@ -252,6 +252,11 @@ func TestPassThrough(t *testing.T) {
 			if e.User != "admin" || e.Node != name || e.Detail != want || e.At.IsZero() {
 				t.Errorf("%d: %+v", j*3+i, e)
 			}
+			// I148: the outcome, the body's digest, never the body, and the
+			// versions before and after.
+			if e.Digest == "" || e.Diff != "" || (i == 0) != (e.Outcome == AuditOK && e.After == "2") || i > 0 && e.Outcome != AuditFailed {
+				t.Errorf("%d: %+v", j*3+i, e)
+			}
 		}
 	}
 	if writes() == before {
@@ -710,7 +715,7 @@ func TestPassAuditStore(t *testing.T) {
 	if !f.m.holdAudit() {
 		t.Fatal("no audit place")
 	}
-	f.m.audited("admin", "k", "PUT", "/config", nil, &Problem{Kind: KindTimeout, Message: "slow"})
+	f.m.audited("admin", "k", "PUT", "/config", nil, 0, nil, &Problem{Kind: KindTimeout, Message: "slow"})
 	waitFor(t, "the audit writer to give up", func() bool {
 		return strings.Contains(f.log.String(), "entries of the audit log were not kept: saving the members: disk full")
 	})

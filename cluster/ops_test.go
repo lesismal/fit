@@ -142,6 +142,11 @@ func TestOpOnFiveOneDown(t *testing.T) {
 	if a := e.Outcomes[4]; a.Node != "m5" || a.Status != OutcomeFailed || !strings.HasPrefix(a.Error, "unreachable: ") {
 		t.Errorf("%+v", a)
 	}
+	// I148: how it went, and each member's versions before and after; an
+	// operation changes nothing of the document, so names no revision.
+	if a := e.Outcomes[0]; e.Outcome != AuditPartial || a.After != 8 || a.Before != 0 && a.Before != 7 || e.Before != "" || e.After != "" {
+		t.Errorf("%+v %+v", e, a)
+	}
 	// The list holds it, the latest first.
 	code, got, _ := o.s.do("GET", "/api/m/cluster/ops", "")
 	if code != 200 || !strings.Contains(got, `"id":"`+op.ID+`"`) {

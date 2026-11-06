@@ -209,15 +209,24 @@
   var target = '';
   try { target = new URLSearchParams(location.search).get('node') || ''; } catch (e) { target = ''; }
   var readOnly = false;
+  // managerRO: on a manager whose cluster has roles (I148), a user who is not a cluster-wide admin reads the manager's
+  // own pages and changes nothing of them (GET /api/m/cluster/me says), but for the Cluster menu, the switcher, the
+  // assistant and its own password, which check themselves; the manager refuses the rest as this does.
+  // managerRO：在集群设置了角色的管理端（I148），非集群范围管理员的用户只能读取管理端自己的页面、不能修改（由
+  // GET /api/m/cluster/me 告知），集群菜单、节点切换器、助手与修改自己的密码除外（它们自行检查）；管理端与此处一样拒绝其余写操作。
+  var managerRO = false;
   function targetURL(name, hash) {
     return location.pathname + (name ? '?node=' + encodeURIComponent(name) : '') + (hash == null ? location.hash : hash);
   }
   function blocked(self, method, path) {
-    if (!readOnly || !self || !self.member || method === 'GET' || method === 'HEAD') return null;
+    if (method === 'GET' || method === 'HEAD') return null;
+    var member = readOnly && self && self.member, manager = managerRO && !target;
+    if (!member && !manager) return null;
     var at = path.indexOf('?'), p = at < 0 ? path : path.slice(0, at), q = at < 0 ? '' : path.slice(at + 1);
     if (method === 'POST' && /\/m\/admin\/config\/(render|parse)$/.test(p)) return null;
     if (/(^|&)dry_run=(1|true)(&|$)/.test(q)) return null;
-    var e = new Error(t('member.readonly'));
+    if (!member && (/^\/api\/(m\/(cluster|ai)\/|n\/|login$|logout$)/.test(p) || p === '/api/m/admin/account/password')) return null;
+    var e = new Error(t(member ? 'member.readonly' : 'manager.readonly'));
     e.status = 409; e.readOnly = true;
     return e;
   }
@@ -381,7 +390,16 @@
   // read_only, reason, ...}. / 已登录用户与服务端模块 ID 列表；针对成员时为 GET /api/n/<成员>/workbench：管理端可打开的
   // 成员模块，以及 member：{name, access, fit_version, read_only, reason, ...}。
   function workbench() {
-    if (!target) return api('GET', '/api/workbench');
+    if (!target) {
+      return api('GET', '/api/workbench').then(function (wb) {
+        if (!wb || (wb.modules || []).indexOf('cluster') < 0) return wb;
+        return api('GET', '/api/m/cluster/me').then(function (me) {
+          managerRO = !!(me && me.manager_read_only);
+          wb.cluster_me = me;
+          return wb;
+        }, function () { return wb; });
+      });
+    }
     return api('GET', '/api/n/' + encodeURIComponent(target) + '/workbench').then(function (wb) {
       readOnly = !!(wb && wb.member && wb.member.read_only);
       return wb;
@@ -611,7 +629,7 @@
     api: api, raw: raw, rpc: rpc, stream: stream, rpcStream: rpcStream, setUnauthorized: function (fn) { onUnauthorized = fn; },
     setMustChange: function (fn) { onMustChange = fn; },
     session: session, login: login, logout: logout, me: me, workbench: workbench, configNote: configNote, scope: scope,
-    target: function () { return target; }, readOnly: function () { return readOnly; }, targetURL: targetURL,
+    target: function () { return target; }, readOnly: function () { return readOnly || (managerRO && !target); }, targetURL: targetURL,
     toast: toast, fail: fail, modal: modal, closeModals: closeModals, confirm: confirmBox, busy: busy, copy: copyText,
     fmtMB: fmtMB, fmtNum: fmtNum, fmtDur: fmtDur, ago: ago, fmtTime: fmtTime,
     badge: badge, onlineBadge: onlineBadge, meter: meter, stat: stat, kv: kv, empty: empty, card: card, table: table,

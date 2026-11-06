@@ -15,15 +15,15 @@ type rolloutsBody struct {
 	Rollouts  []Rollout `json:"rollouts"`
 }
 
-func (m *Manager) rolloutRoutes(api *console.API) {
+func (m *Manager) rolloutRoutes(api *router) {
 	api.Handle("GET", "/api/rollouts", func(r *console.Request) {
 		m.mu.Lock()
 		ro := m.readOnly
 		m.mu.Unlock()
 		_ = r.JSON(200, rolloutsBody{MaxActive: MaxActiveRollouts, PlanTTLMs: PlanTTL.Milliseconds(), ReadOnly: ro, Rollouts: m.Rollouts()})
 	})
-	api.Handle("POST", "/api/rollouts", m.planRoute)
-	api.HandlePrefix("", "/api/rollouts/", m.rolloutRoute)
+	api.Checked("POST", "/api/rollouts", m.planRoute)
+	api.CheckedPrefix("", "/api/rollouts/", m.rolloutRoute)
 }
 
 // bodyBounded answers 413 for a body past MaxBodyBytes.

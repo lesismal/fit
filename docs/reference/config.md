@@ -1531,6 +1531,7 @@ Also at `llm.hub.console.users[]`.
 | `max_response_bytes` | integer, 0 to 67108864 | `4194304` | The largest answer read from a member; a larger one fails its call, and is reported as too large. 4 MiB when left out or 0; 16 KiB at least. |
 | `link_address` | string |  | Where members that link out to the manager reach it, as ":7444" or "0.0.0.0:7444": a WebSocket listener over TLS, with a self-signed certificate the manager makes once and keeps in the store, which each member pins when it enrolls. Members behind NAT, or with no port open, link here with the config line Add by enrollment gives, and are managed through their link as the others are over HTTP. Off when left out: no member can enroll. |
 | `link_url` | string |  | The URL members reach link_address at, as "wss://manager.example.com:7444/cluster/link", which the config line Add by enrollment gives names; when left out, the host the page was opened at and link_address's port. Only a wss URL. |
+| `admins` | list of string |  | Console users (admin.console.users) who are the cluster's admins whatever roles the Users and audit page gives: the way back in when no admin is left. Once this or a role is set, a console user does on the cluster what its roles let it, and only a cluster-wide admin changes this manager's own config; until then, every console user is a cluster-wide admin. Changed at a restart, as all of admin is. |
 
 <a id="config-clustermember"></a>
 
