@@ -174,8 +174,14 @@ func TestTrafficCounters(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("%d %s", status, answer)
 	}
-	cs, hs, ns := statusOf(t, cp), statusOf(t, hp), statusOf(t, np)
-	pr, hr, nr := routeOf(cs, "", hubID), routeOf(hs, proxyID, nodeID), routeOf(ns, hubID, "")
+	// A route's call ends, and its in-flight count drops, once its answer
+	// has gone out, which may be after the agent has read it.
+	var pr, hr, nr model.RouteStats
+	llmtest.Eventually(t, "the call counted on every route", func() bool {
+		cs, hs, ns := statusOf(t, cp), statusOf(t, hp), statusOf(t, np)
+		pr, hr, nr = routeOf(cs, "", hubID), routeOf(hs, proxyID, nodeID), routeOf(ns, hubID, "")
+		return pr.Inflight == 0 && hr.Inflight == 0 && nr.Inflight == 0
+	})
 	for _, r := range []model.RouteStats{pr, hr, nr} {
 		if r.Calls != 1 || r.Errors != 0 || r.Inflight != 0 || r.Model != "m" || r.ReqBytes != int64(len(small)) ||
 			r.RespBytes <= int64(len(answer)) || r.RespBytes != nr.RespBytes {
@@ -188,8 +194,11 @@ func TestTrafficCounters(t *testing.T) {
 	if status, body := a.call(t, "/v1/chat/completions", big, nil); status != 200 {
 		t.Fatalf("%d %.200s", status, body)
 	}
-	cs, hs, ns = statusOf(t, cp), statusOf(t, hp), statusOf(t, np)
-	pr, hr, nr = routeOf(cs, "", hubID), routeOf(hs, proxyID, nodeID), routeOf(ns, hubID, "")
+	llmtest.Eventually(t, "the streamed call counted on every route", func() bool {
+		cs, hs, ns := statusOf(t, cp), statusOf(t, hp), statusOf(t, np)
+		pr, hr, nr = routeOf(cs, "", hubID), routeOf(hs, proxyID, nodeID), routeOf(ns, hubID, "")
+		return pr.Inflight == 0 && hr.Inflight == 0 && nr.Inflight == 0
+	})
 	want := int64(len(small) + len(big))
 	if pr.ReqBytes != want || hr.ReqBytes != want || nr.ReqBytes != want || pr.Calls != 2 {
 		t.Fatalf("a streamed body: proxy %+v hub %+v node %+v, want %d", pr, hr, nr, want)
