@@ -729,8 +729,9 @@ routes:
         # # The media_auth policy every request, playlist and segment, must satisfy, play on the
         # # stream's path: a bearer token, Basic, the token query parameter or the fit_media_token
         # # cookie. A playlist fetched with a token in its query names its playlists, segments and parts
-        # # with the token too, so that a player that sends no header (Safari, ffmpeg) plays on.
-        # # Everyone may play when left out.
+        # # with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. With
+        # # the policy's url_signing, a signed URL of the stream plays too, and its playlists hand what
+        # # they name a grant of their own. Everyone may play when left out.
         # # string.
         # auth: ""
 
@@ -787,8 +788,9 @@ routes:
 
         # # The media_auth policy a player must satisfy, play on the stream's path: a bearer token,
         # # Basic, the token query parameter (/live/cam.flv?token=T) or the fit_media_token cookie. 401
-        # # with a Bearer challenge without credentials, 403 when they do not allow it. Everyone may
-        # # play when left out, as the route's middleware allow.
+        # # with a Bearer challenge without credentials, 403 when they do not allow it. With the
+        # # policy's url_signing, a signed URL of the stream plays too. Everyone may play when left out,
+        # # as the route's middleware allow.
         # # string.
         # auth: ""
 
@@ -984,6 +986,18 @@ routes:
         # # one at a time on a pool of its own, never blocks a worker. 10s when left out.
         # # duration, as "1.5s" or "2m"; default "10s".
         # revoke_timeout: "10s"
+
+        # # What the URLs <prefix>/urls answers start with, before their paths: the scheme and host
+        # # viewers reach fit's vod, hls and httpflv routes at, as https://media.example.com. The paths
+        # # and their queries alone when left out.
+        # # string.
+        # url_base: ""
+
+        # # The path prefixes <prefix>/urls may sign URLs for: every path of a request must start with
+        # # one of them, as /vod/films/, so that a URL cannot be signed for a resource outside them. Any
+        # # path when left out.
+        # # list of string.
+        # url_prefixes: []
   # -
     # # A route whose handler is proxy, with every one of its params.
     # name: "proxy-example"
@@ -1222,7 +1236,9 @@ routes:
         # # play on the stream vod/<library>/<id>: a bearer token, Basic, the token query parameter or
         # # the fit_media_token cookie. A playlist fetched with a token in its query names its
         # # playlists, segments and subtitles with the token too, so that a player that sends no header
-        # # (Safari, ffmpeg) plays on. Everyone may play when left out.
+        # # (Safari, ffmpeg) plays on. With the policy's url_signing, a signed URL of the item plays
+        # # too, and its playlists hand what they name a grant of their own. Everyone may play when left
+        # # out.
         # # string.
         # auth: ""
 

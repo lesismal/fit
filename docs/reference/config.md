@@ -40,7 +40,7 @@ a config against it and more.
 - [LLM](#llm): [`llm`](#config-llm), [`llm.hub`](#config-llmhub), [`llm.hub.console`](#config-roleconsole), [`llm.hub.listen`](#config-llmlisten), [`llm.hub.tokens[]`](#config-linktoken), [`llm.hub.peers[]`](#config-llmpeer), [`llm.hub.limits`](#config-llmlimits), [`llm.node`](#config-llmnode), [`llm.node.models[]`](#config-llmmodel), [`llm.node.settings`](#config-llmnodesettings), [`llm.node.proxy`](#config-llmnodeproxy), [`llm.proxy`](#config-llmproxy), [`llm.proxy.api`](#config-llmproxyapi), [`llm.proxy.api_keys[]`](#config-llmproxykey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
-- [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey)
+- [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey), [`media_auth[].url_signing`](#config-urlsigning)
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
@@ -2772,6 +2772,19 @@ restart forgets, as `fit media-token` does. Revoking is per key, or all keys, bu
 the tokens a key signed cannot be listed or counted, and one subject's tokens cannot be revoked
 alone.
 
+`url_signing` turns on playback URLs that expire, for the `vod`, `hls` and `httpflv` handlers whose
+`auth` names the policy: the site's API, or `media_tokens`' `POST <prefix>/urls` for it, signs a URL
+for one viewer (`sub`), one resource (an item's path prefix, `/vod/<library>/<id>/`, or a stream's,
+`/hls/live/cam/`), an expiry (`exp`) and, if asked, the viewer's address (`ip`, or its network with
+`bind_address: subnet`) and a playback session (`sid`), with the secret or a key of the ring (`kid`).
+The handlers check it on every request, at once and without a callback; a playlist fetched with one
+hands what it names a grant of its own that lives `play_grace` (30m) past the later of the URL's
+expiry and the item's end, in their query or, with `cookie`, as the cookie `fit_media_grant` on the
+resource's path. `max_sessions` caps a subject's sessions, `on_limit` refusing a new one or ending
+the oldest; `referers` and `origins` list the pages and scripts that may play; rotating a key
+refuses the URLs it signed. Refusals are 403, and the access log shows the signature as `REDACTED`.
+See [playback URLs that expire](../media-library.md#playback-urls-that-expire).
+
 In a .conf file:
 
 ```fit
@@ -2883,6 +2896,7 @@ In JSON:
 | `keys` | list of [object](#config-mediakey) |  | A keyring of signing keys, each a name and its secret or secret_file, in place of secret or secret_file: a token is signed with one key and checked against every key, so rotating one key, as the handler media_tokens does, refuses only the tokens that key signed and the others stay good. One of the two: keys, or secret/secret_file. None when left out. |
 | `public` | list of string: `publish`, `play` |  | The actions anyone may take without credentials, as ["play"] for streams anyone may watch and only some may publish. None when left out: every request needs credentials. |
 | `token_ttl` | duration | `"12h"` | How long a token fit issues is good for, unless fit media-token's -ttl says otherwise. 12h when left out. |
+| `url_signing` | [object](#config-urlsigning) |  | Turns on playback URLs that expire: URLs signed for one viewer and one resource (an item of vod, a stream of hls or httpflv) with the policy's secret or a key of its keys, as media_tokens' /urls issues them, and checked by those handlers on every playlist, segment and subtitle, at once and without a callback. Needs secret, secret_file or keys. Off when left out. |
 
 <a id="config-mediatoken"></a>
 
@@ -2917,6 +2931,24 @@ In JSON:
 | `key` | string |  | Required. The key's name: 1 to 64 letters, digits, '_', '.', '~' and '-', which a media_tokens request names to sign with it, and a revoke to rotate it. |
 | `secret` | string |  | The key's secret, at least 16 bytes. Or secret_file, one of the two. |
 | `secret_file` | string |  | A file holding the key's secret, read each time the config is applied; the handler media_tokens rotates this file to refuse just the tokens this key signed. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. |
+
+<a id="config-urlsigning"></a>
+
+### `media_auth[].url_signing`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `ttl` | duration | `"10m"` | How long a URL media_tokens' /urls issues is good for when the request names no ttl, and at most the route's max_ttl. 10m when left out. |
+| `bind_address` | string: `ip`, `subnet` | `"ip"` | How a URL issued for a viewer's address is bound to it: ip, to that address alone, or subnet, to its /24 for IPv4 and its /64 for IPv6, for viewers whose address changes within their network. A URL issued without an address is good from anywhere. ip when left out. |
+| `play_grace` | duration | `"30m"` | How long the grant a playlist hands its segments, init segments, keys and subtitles lives past the later of the URL's expiry and the item's end, played from when the playlist is fetched: so that a film does not stop halfway, nor after a pause, while the URL itself dies soon. A live stream's grant lives this long past the URL's expiry. 30m when left out. |
+| `cookie` | boolean |  | Hands the grant on as the cookie fit_media_grant, on the resource's path and HttpOnly, rather than in the query of every URI a playlist names, for players that drop a playlist's query parameters. The URL the player starts from keeps its query. Off when left out. |
+| `max_sessions` | integer, 0 or more |  | The most playback sessions one subject may have at once, a session being a URL's sid, playing while it fetches within session_idle; past it, on_limit says what happens. No cap when left out or 0. |
+| `on_limit` | string: `refuse`, `end_oldest` | `"refuse"` | What a new session past max_sessions does: refuse, answered 403, or end_oldest, which ends the subject's session that started first, whose next request is answered 403. refuse when left out. |
+| `session_idle` | duration | `"2m"` | How long a session may go without a request and still count as playing. 2m when left out. |
+| `max_tracked_sessions` | integer, 0 or more | `100000` | The most sessions the policy keeps track of, of all its subjects; a new session past it is answered 503. 100000 when left out or 0. |
+| `referers` | list of string |  | The origins of the pages that may play the URLs, as https://www.example.com or https://*.example.com, * matching any run of characters, matched against the origin of a request's Referer: a request with another Referer is answered 403, one without any let through. Any when left out. |
+| `origins` | list of string |  | The origins whose scripts may fetch the URLs, as referers lists them, matched against a request's Origin: a request with another Origin is answered 403, one without any let through. Any when left out. |
+| `trusted_proxies` | list of string |  | The addresses ("10.0.0.1") and networks ("10.0.0.0/8") of proxies in front of fit, whose X-Forwarded-For is believed when a URL bound to an address is checked: the viewer is the last address in it that is not one of them. None when left out: the viewer is the connection's peer. |
 
 <a id="streaming"></a>
 
@@ -3705,7 +3737,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `prefix` | string |  | The part of the path before the stream's: with /hls/, /hls/live/cam/index.m3u8 is the playlist of live/cam. / when left out. |
-| `auth` | string |  | The media_auth policy every request, playlist and segment, must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and parts with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. Everyone may play when left out. |
+| `auth` | string |  | The media_auth policy every request, playlist and segment, must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and parts with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. With the policy's url_signing, a signed URL of the stream plays too, and its playlists hand what they name a grant of their own. Everyone may play when left out. |
 | `format` | string: `fmp4`, `ts` |  | The segment format of a playlist's URL without a format query parameter: fmp4, fragmented MP4 for H.264, H.265, AV1, AAC and Opus, or ts, MPEG-TS for H.264, H.265, AAC and Opus. The other is played with ?format=ts or ?format=fmp4. fmp4 when left out. |
 | `target_duration` | duration | `"2s"` | How long segments are: a stream with video is cut at the first key frame after it. Set it to the key frame interval. 2s when left out. |
 | `part_duration` | duration |  | Turns on Low-Latency HLS with parts this long, 200ms to 1s being usual: blocking playlist reloads, EXT-X-PART and preload hints. Off when left out. |
@@ -3763,7 +3795,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `prefix` | string |  | The part of the path before the stream's: with /flv/, /flv/live/cam.flv plays live/cam. / when left out: /live/cam.flv plays live/cam, the stream rtmp://host/live/cam publishes. |
-| `auth` | string |  | The media_auth policy a player must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter (/live/cam.flv?token=T) or the fit_media_token cookie. 401 with a Bearer challenge without credentials, 403 when they do not allow it. Everyone may play when left out, as the route's middleware allow. |
+| `auth` | string |  | The media_auth policy a player must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter (/live/cam.flv?token=T) or the fit_media_token cookie. 401 with a Bearer challenge without credentials, 403 when they do not allow it. With the policy's url_signing, a signed URL of the stream plays too. Everyone may play when left out, as the route's middleware allow. |
 | `wait` | duration |  | How long a player may wait for a stream with no publisher yet, or for the next one after its publisher leaves. 404 at once for a stream without a publisher when left out. |
 | `cors` | string |  | Sent as Access-Control-Allow-Origin, which a web player on another origin (flv.js, mpegts.js) needs, as "*". None when left out. |
 
@@ -3947,6 +3979,16 @@ when the writes take longer than `revoke_timeout`. The writes run on a bounded p
 at a time, and the answer is written when it completes, so no worker waits on the disk. See
 [WebRTC](../webrtc.md#issuing-tokens-from-a-route).
 
+`POST <prefix>/urls` signs playback URLs that expire, for a policy with `url_signing`, and is 404
+for one without: the body is `{"subject", "address", "session", "ttl", "key", "paths"}`, one viewer
+and the paths to sign, as `/vod/films/films/bbb/index.m3u8` or `/live/cam.flv`, at most `max_tokens`
+of them, each starting with one of `url_prefixes` when set. `address` binds the URLs to the viewer's
+address, as `bind_address` says; `session` is the playback session `max_sessions` counts, a new
+random one when left out; `ttl` is at most `max_ttl`, url_signing's `ttl` (10m) when left out; `key`
+as for tokens. It answers `{"subject", "session", "expires", "key", "urls"}`, the URLs whole,
+`url_base` before each path. See
+[playback URLs that expire](../media-library.md#playback-urls-that-expire).
+
 In a .conf file:
 
 ```fit
@@ -4025,6 +4067,8 @@ In JSON:
 | `max_tokens` | integer, 1 to 1000 | `100` | The most tokens one request may ask for; more is answered 400. 100 when left out. |
 | `max_body_bytes` | integer, 256 to 1048576 | `65536` | The largest request body the route takes; a larger one is answered 413. 64 KiB when left out. |
 | `revoke_timeout` | duration | `"10s"` | How long a revoke may wait for the secret file's write before it is answered 504; the write, one at a time on a pool of its own, never blocks a worker. 10s when left out. |
+| `url_base` | string |  | What the URLs <prefix>/urls answers start with, before their paths: the scheme and host viewers reach fit's vod, hls and httpflv routes at, as https://media.example.com. The paths and their queries alone when left out. |
+| `url_prefixes` | list of string |  | The path prefixes <prefix>/urls may sign URLs for: every path of a request must start with one of them, as /vod/films/, so that a URL cannot be signed for a resource outside them. Any path when left out. |
 
 <a id="http-handlers-proxy"></a>
 
@@ -4435,7 +4479,7 @@ In JSON:
 | --- | --- | --- | --- |
 | `library` | string |  | Required. The media_library whose items are served. |
 | `prefix` | string |  | The part of the path before an item's ID: with /vod/films/, /vod/films/films/bbb/index.m3u8 is the playlist of the item films/bbb. /vod/<library>/ when left out. |
-| `auth` | string |  | The media_auth policy every request, playlist, segment, subtitle and file, must satisfy, play on the stream vod/<library>/<id>: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and subtitles with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. Everyone may play when left out. |
+| `auth` | string |  | The media_auth policy every request, playlist, segment, subtitle and file, must satisfy, play on the stream vod/<library>/<id>: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and subtitles with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. With the policy's url_signing, a signed URL of the item plays too, and its playlists hand what they name a grant of their own. Everyone may play when left out. |
 | `container` | string: `fmp4`, `ts` | `"fmp4"` | The segments of index.m3u8: fmp4, fragmented MP4 for H.264, H.265, AV1, AAC and Opus, or ts, MPEG-TS for H.264, H.265, AAC and Opus, for older players. Either is played by its own name too, index.fmp4.m3u8 and index.ts.m3u8. fmp4 when left out. |
 | `segment_duration` | duration | `"4s"` | About how long segments are: a file with video is cut at the keyframe nearest this after a segment's start, so set it to the keyframe interval the files were made with, or a multiple of it. 1s to 60s. 4s when left out. |
 | `max_cache_bytes` | integer, 0 or more | `268435456` | The most memory the handler keeps of what it builds from the files, for the next request: how each is cut into segments, its playlists, its segments and subtitles, the least recently used dropped; and of what it is building. 256 MiB when left out or 0. |

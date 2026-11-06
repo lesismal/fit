@@ -1,5 +1,13 @@
 {
   "listeners": [{"name": "web", "address": "127.0.0.1:9401"}],
+  "access_log": {"output": "/w/out/access.log", "flush_interval": "1s"},
   "media_library": [{"name": "films", "roots": ["/w/lib"]}],
-  "routes": [{"match": {"path": ["/vod/*"]}, "handler": {"module": "vod", "params": {"library": "films", "cors": "*"}}}]
+  "media_auth": [{"name": "site", "secret_file": "/w/site-secret",
+    "url_signing": {"max_sessions": 1, "on_limit": "end_oldest", "play_grace": "2m"}}],
+  "routes": [
+    {"match": {"path": ["/vod/*"]}, "handler": {"module": "vod", "params": {"library": "films", "cors": "*", "auth": "site"}}},
+    {"match": {"path": ["/media-tokens", "/media-tokens/*"]},
+     "middleware": [{"module": "basic_auth", "params": {"users": [{"username": "site-api", "password_hash": "@HASH@"}]}}],
+     "handler": {"module": "media_tokens", "params": {"auth": "site", "url_base": "http://127.0.0.1:9401", "url_prefixes": ["/vod/films/"], "max_ttl": "1h"}}}
+  ]
 }

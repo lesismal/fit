@@ -220,8 +220,88 @@ answered 304 and ranges of a segment 206. `cache_control` is sent with each, as
 `play` on the stream `vod/<library>/<id>`, as `vod/films/films/*`: a bearer token, Basic, the
 `token` query parameter or the `fit_media_token` cookie. A playlist fetched with `?token=` names
 what it lists with the token too, so that Safari and ffmpeg, which send no header, play on.
-Expiring playback URLs and encrypted segments come later in the
+With the policy's `url_signing`, a [signed URL](#playback-urls-that-expire) of the item plays too.
+Encrypted segments come later in the
 [development plan](dev-plan.md#media-library-video-on-demand-and-channels).
+
+## Playback URLs that expire
+
+The site's API decides who watches; fit checks. A policy's `url_signing` turns on URLs signed for
+one viewer and one resource, for a while, which the `vod` handler, and the streaming role's `hls`
+and `httpflv` handlers (a channel's streams as any other), check on every request whose `auth`
+names the policy: at once, on the worker, without calling anyone back. A URL that leaks dies soon
+and opens nothing else.
+
+```json
+{
+  "media_auth": [{
+    "name": "site",
+    "keys": [{"key": "k1", "secret_file": "/etc/fit/site-k1"}, {"key": "k2", "secret_file": "/etc/fit/site-k2"}],
+    "url_signing": {"ttl": "10m", "play_grace": "30m", "max_sessions": 2, "on_limit": "end_oldest",
+                    "referers": ["https://www.example.com"]}
+  }],
+  "routes": [
+    {"match": {"path": ["/vod/films/*"]}, "handler": {"module": "vod", "params": {"library": "films", "auth": "site"}}},
+    {"match": {"path": ["/media-tokens", "/media-tokens/*"]},
+     "middleware": [{"module": "jwt", "params": {"jwks_url": "https://auth.example.com/.well-known/jwks.json"}}],
+     "handler": {"module": "media_tokens", "params": {"auth": "site", "url_base": "https://media.example.com",
+                                                      "url_prefixes": ["/vod/films/"], "max_ttl": "1h"}}}
+  ]
+}
+```
+
+**What a URL holds.** The site's API asks `media_tokens` for URLs, `POST /media-tokens/urls` with
+`{"subject": "user-42", "address": "203.0.113.7", "ttl": "10m", "paths": ["/vod/films/films/bbb/index.m3u8"]}`,
+and gets them back whole, for its page to hand hls.js or the player:
+
+```
+https://media.example.com/vod/films/films/bbb/index.m3u8?exp=1767225600&kid=k1&ip=203.0.113.7&sid=Qk9Hq3n2c8lYv1aF&sub=user-42&sig=0Wm2Yt7pV4lH8oXcQ1sZ9g
+```
+
+`exp` is the expiry, in Unix seconds; `kid` the key of the ring that signed it (none with a single
+secret); `ip` the viewer's address, or its network (`/24`, or `/64` for IPv6) with
+`bind_address: subnet`, when the request names one; `sid` the playback session, a new random one
+unless the request names one; `sub` the subject, which the access log shows as the user, so make it
+an opaque ID rather than a name or an e-mail; and `sig` the first 16 bytes of an HMAC-SHA256, in
+base64url, over the resource, the expiry and these fields, with a key derived from the ring's key
+or the policy's secret. The resource is the path up to the name: `/vod/films/films/bbb/` for an
+item, `/hls/live/cam/` for a stream's playlists, and `/live/cam/` for `/live/cam.flv`. A site may
+sign URLs itself, with the same key and the same message as `mediaauth.SignURL`; going through
+`media_tokens` keeps the keys in fit.
+
+**What is checked.** Every playlist, segment, init section, subtitle and file of the item: the key
+and the signature, against the resource the request is for, so that a URL of one item is refused for
+another and for its path changed in any byte; the expiry; the address, from the connection's peer or,
+behind `trusted_proxies`, from `X-Forwarded-For`; a `Referer` and an `Origin`, when sent, against
+`referers` and `origins`; and the session. A refused URL is answered 403, saying why: `expired`,
+`signature`, `address`, `referer`, `origin`, `session_limit` or `session_ended`. A request without a
+signature is checked as before, by a token, Basic or the cookie; one with a signature is let in by it
+alone. The check allocates nothing; the one cost is the access log's redaction.
+
+**What a playlist hands on.** A URL dies in minutes, a film runs for hours: a playlist fetched with
+the URL names its playlists, segments, init sections, keys and subtitles with a grant of its own,
+the same fields and `g=1`, which lives `play_grace` (30m) past the later of the URL's expiry and the
+item's end, played from when the playlist is fetched. So a player that started goes on to the end,
+through a pause or a seek, while the URL itself is refused once it expires. A playlist fetched with
+the grant hands the same grant on, so it is never renewed; a live stream's grant lives `play_grace`
+past the URL's expiry, after which the player needs a new URL from the site. A playlist with a grant
+is the viewer's own: it goes out with `Cache-Control: private, no-store`, whatever the route's
+`cache_control`. With `cookie`, for players that drop a playlist's query parameters, the grant is set
+as the cookie `fit_media_grant` on the resource's path instead, `HttpOnly`, `SameSite=Lax`, or
+`Secure; SameSite=None` over TLS, and the playlists name their URIs plainly, as the cache keeps them.
+
+**Sessions.** `max_sessions` caps the playback sessions of a subject: those whose requests come
+within `session_idle` (2m). Past it, `on_limit: refuse` answers a new session 403, and
+`on_limit: end_oldest` ends the subject's session that started first, whose requests, and those of
+every grant it was handed, are refused from then on until those grants would have expired. The
+sessions are kept per policy, across reloads, in memory bounded by `max_tracked_sessions` (100,000),
+a new session past it answered 503; on more than one fit, each counts the sessions it sees.
+
+**Revoking.** Rotating a key of the ring, `POST /media-tokens/revoke` with `{"key": "k1"}`, refuses
+at once the URLs and grants that key signed, and only those; rotating a single secret refuses all.
+
+**Never in a log.** A request's `token` and `sig` are replaced by `REDACTED` in the URI the access
+log writes, however it is answered, and a grant in a cookie is never logged.
 
 ## Metrics
 

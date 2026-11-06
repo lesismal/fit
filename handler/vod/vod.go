@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	stdhttp "net/http"
-	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -67,7 +66,7 @@ const (
 type VOD struct {
 	Library         string          `json:"library" fit:"required" doc:"The media_library whose items are served."`
 	Prefix          string          `json:"prefix,omitempty" doc:"The part of the path before an item's ID: with /vod/films/, /vod/films/films/bbb/index.m3u8 is the playlist of the item films/bbb. /vod/<library>/ when left out."`
-	Auth            string          `json:"auth,omitempty" doc:"The media_auth policy every request, playlist, segment, subtitle and file, must satisfy, play on the stream vod/<library>/<id>: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and subtitles with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. Everyone may play when left out."`
+	Auth            string          `json:"auth,omitempty" doc:"The media_auth policy every request, playlist, segment, subtitle and file, must satisfy, play on the stream vod/<library>/<id>: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and subtitles with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. With the policy's url_signing, a signed URL of the item plays too, and its playlists hand what they name a grant of their own. Everyone may play when left out."`
 	Container       string          `json:"container,omitempty" enum:"fmp4,ts" default:"\"fmp4\"" doc:"The segments of index.m3u8: fmp4, fragmented MP4 for H.264, H.265, AV1, AAC and Opus, or ts, MPEG-TS for H.264, H.265, AAC and Opus, for older players. Either is played by its own name too, index.fmp4.m3u8 and index.ts.m3u8. fmp4 when left out."`
 	SegmentDuration config.Duration `json:"segment_duration,omitempty" default:"\"4s\"" doc:"About how long segments are: a file with video is cut at the keyframe nearest this after a segment's start, so set it to the keyframe interval the files were made with, or a multiple of it. 1s to 60s. 4s when left out."`
 	MaxCacheBytes   int64           `json:"max_cache_bytes,omitempty" min:"0" default:"268435456" doc:"The most memory the handler keeps of what it builds from the files, for the next request: how each is cut into segments, its playlists, its segments and subtitles, the least recently used dropped; and of what it is building. 256 MiB when left out or 0."`
@@ -186,6 +185,8 @@ func (v *VOD) library() *medialib.Library {
 // ServeHTTP serves what the path names of an item.
 func (v *VOD) ServeHTTP(c *fibhttp.Context) {
 	r := c.Request
+	// Whatever the answer, the access log holds no token or signature.
+	mediaauth.Redact(r)
 	if r.Method != stdhttp.MethodGet && r.Method != stdhttp.MethodHead {
 		v.respond(c, stdhttp.StatusMethodNotAllowed, "only GET and HEAD", "Allow", "GET, HEAD")
 		return
@@ -219,40 +220,49 @@ func (v *VOD) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	if v.auth == nil {
-		v.serve(c, l, it, nm)
+		v.serve(c, l, it, nm, mediaauth.Access{})
 		return
 	}
-	v.auth.Guard(c, mediaauth.Play, "vod/"+v.Library+"/"+id, func(string) { v.serve(c, l, it, nm) })
+	// The item's resource, as a signed URL is signed for: the path up to
+	// and with the '/' after its ID.
+	resource := r.URL.Path[:len(v.prefix)+i+1]
+	v.auth.GuardResource(c, "vod/"+v.Library+"/"+id, resource, v.CORS, func(a mediaauth.Access) { v.serve(c, l, it, nm, a) })
 }
 
-// query is what every URI a playlist names carries for the request: the
-// token the playlist was fetched with in its query, so that a player that
-// sends no header carries it to what it fetches next. Expiring grants
-// (I135) are made here.
-func (v *VOD) query(c *fibhttp.Context) string {
-	if v.auth == nil || !strings.Contains(c.Request.URL.RawQuery, "token=") {
-		return ""
+// personal returns a playlist's header, h, for the viewer whose access a
+// is: with a signed URL or a grant, a playlist that names that grant, or
+// sets it as a cookie (setCookie), is the viewer's own, which no shared
+// cache may keep. h is not changed; another is returned when it differs.
+func personal(h stdhttp.Header, a *mediaauth.Access, setCookie string) stdhttp.Header {
+	if !a.URL() {
+		return h
 	}
-	if tok := c.Request.URL.Query().Get("token"); tok != "" {
-		return "token=" + url.QueryEscape(tok)
+	out := make(stdhttp.Header, len(h)+2)
+	for k, vals := range h {
+		out[k] = vals
 	}
-	return ""
+	out["Cache-Control"] = []string{"private, no-store"}
+	if setCookie != "" {
+		out["Set-Cookie"] = []string{setCookie}
+	}
+	return out
 }
 
-// serve serves nm of item it.
-func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, nm name) {
+// serve serves nm of item it to the request a let in.
+func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, nm name, a mediaauth.Access) {
 	switch nm.kind {
 	case kindMaster:
 		con := nm.c
 		if con == 0 {
 			con = v.container
 		}
-		b := renderMaster(it, con, v.query(c))
+		query, cookie := a.PassOn(it.Duration)
+		b := renderMaster(it, con, query)
 		if b == nil {
 			v.respond(c, stdhttp.StatusNotFound, "no rendition of the item is carried in "+con.String())
 			return
 		}
-		serveBlob(c, &blob{data: b, header: v.st.header(hls.PlaylistContentType, "", it.ModTime), modTime: it.ModTime})
+		serveBlob(c, &blob{data: b, header: personal(v.st.header(hls.PlaylistContentType, "", it.ModTime), &a, cookie), modTime: it.ModTime})
 	case kindMedia, kindInit, kindSegment:
 		r := v.rendition(it, nm)
 		if r == nil {
@@ -261,7 +271,8 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 		}
 		switch nm.kind {
 		case kindMedia:
-			v.serveMedia(c, l, r, nm)
+			acc := a // escapes with the playlist's callbacks, here alone
+			v.serveMedia(c, l, r, nm, &acc)
 		case kindInit:
 			v.serveInit(c, r, nm)
 		default:
@@ -273,8 +284,9 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 			return
 		}
 		if nm.kind == kindSubtitles {
-			serveBlob(c, &blob{data: renderSubtitles(nm.i, it.Duration, v.query(c)),
-				header: v.st.header(hls.PlaylistContentType, "", it.Subtitles[nm.i].ModTime), modTime: it.Subtitles[nm.i].ModTime})
+			query, cookie := a.PassOn(it.Duration)
+			serveBlob(c, &blob{data: renderSubtitles(nm.i, it.Duration, query),
+				header: personal(v.st.header(hls.PlaylistContentType, "", it.Subtitles[nm.i].ModTime), &a, cookie), modTime: it.Subtitles[nm.i].ModTime})
 			return
 		}
 		v.serveVTT(c, l, it.Subtitles[nm.i])
@@ -426,16 +438,25 @@ func (w *waiter) blob(f *medialib.File, b *blob, err error) {
 }
 
 // serveMedia serves the media playlist of r.
-func (v *VOD) serveMedia(c *fibhttp.Context, l *medialib.Library, r *medialib.Rendition, nm name) {
+func (v *VOD) serveMedia(c *fibhttp.Context, l *medialib.Library, r *medialib.Rendition, nm name, a *mediaauth.Access) {
 	if _, ok := tracksOf(r, nm.c); !ok {
 		v.respond(c, stdhttp.StatusNotFound, "the file has no track "+nm.c.String()+" carries")
 		return
 	}
-	query := v.query(c)
+	// A playlist whose URIs carry a grant or a token is rendered for its
+	// request; one that carries none is the one the cache keeps, sent with
+	// the viewer's own header when it sets a grant's cookie.
+	query, cookie := a.PassOn(r.Duration)
+	own := func(b *blob) *blob {
+		if !a.URL() {
+			return b
+		}
+		return &blob{data: b.data, header: personal(b.header, a, cookie), modTime: b.modTime}
+	}
 	lk := ckey{file: idOf(&r.File), what: whatList, c: nm.c}
 	if query == "" {
 		if b, ok := v.st.cache.peek(lk); ok {
-			serveBlob(c, b.(*blob))
+			serveBlob(c, own(b.(*blob)))
 			return
 		}
 	}
@@ -447,7 +468,7 @@ func (v *VOD) serveMedia(c *fibhttp.Context, l *medialib.Library, r *medialib.Re
 		if query == "" {
 			v.st.cache.put(lk, b, int64(len(b.data)))
 		}
-		serveBlob(c, b)
+		serveBlob(c, own(b))
 		return
 	}
 	w := v.wait(c)
@@ -460,7 +481,7 @@ func (v *VOD) serveMedia(c *fibhttp.Context, l *medialib.Library, r *medialib.Re
 		if query == "" {
 			v.st.cache.put(lk, b, int64(len(b.data)))
 		}
-		w.blob(&r.File, b, nil)
+		w.blob(&r.File, own(b), nil)
 	})
 }
 

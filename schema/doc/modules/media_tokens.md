@@ -47,6 +47,16 @@ when the writes take longer than `revoke_timeout`. The writes run on a bounded p
 at a time, and the answer is written when it completes, so no worker waits on the disk. See
 [WebRTC](../webrtc.md#issuing-tokens-from-a-route).
 
+`POST <prefix>/urls` signs playback URLs that expire, for a policy with `url_signing`, and is 404
+for one without: the body is `{"subject", "address", "session", "ttl", "key", "paths"}`, one viewer
+and the paths to sign, as `/vod/films/films/bbb/index.m3u8` or `/live/cam.flv`, at most `max_tokens`
+of them, each starting with one of `url_prefixes` when set. `address` binds the URLs to the viewer's
+address, as `bind_address` says; `session` is the playback session `max_sessions` counts, a new
+random one when left out; `ttl` is at most `max_ttl`, url_signing's `ttl` (10m) when left out; `key`
+as for tokens. It answers `{"subject", "session", "expires", "key", "urls"}`, the URLs whole,
+`url_base` before each path. See
+[playback URLs that expire](../media-library.md#playback-urls-that-expire).
+
 ```json route
 {
   "match": {"path": ["/media-tokens", "/media-tokens/*"]},

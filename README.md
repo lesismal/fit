@@ -41,7 +41,8 @@ iterations are done, 1.0's included, and 1.0's external security review is still
   those, HTTP-FLV, HLS and WHEP, on fib's media hub, each protocol behind a `media_auth` policy.
 - [Media library](docs/media-library.md): directories of film and episode files catalogued, without
   transcoding, their renditions, audio, subtitles and posters grouped, scanned off fib's workers, and
-  served as video on demand over HLS, fMP4 or MPEG-TS segments cut from the files as they are.
+  served as video on demand over HLS, fMP4 or MPEG-TS segments cut from the files as they are, to
+  the viewers a site's API signs [playback URLs that expire](docs/media-library.md#playback-urls-that-expire) for.
 - [Channels](docs/channels.md): a media library's items played as live streams, in order, shuffled
   or on a schedule, over every egress of the streaming role, and pushed on to RTMP and SRT servers.
 - [Writing modules](docs/modules.md): extending fit with Go, built in with `fit build`.

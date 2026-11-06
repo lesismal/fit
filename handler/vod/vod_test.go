@@ -314,6 +314,15 @@ func (f *fit) routeHandler() module.Handler {
 func block(t *testing.T, l *medialib.Library) func() {
 	t.Helper()
 	release := make(chan struct{})
+	// What an earlier step queued drains first, on a loaded machine too,
+	// so that the queue has room for the blocking jobs.
+	deadline := time.Now().Add(10 * time.Second)
+	for st := l.Pool().Stats(); st.Queued > 0 || st.Busy > 0; st = l.Pool().Stats() {
+		if time.Now().After(deadline) {
+			t.Fatalf("the pool is still busy: %+v", st)
+		}
+		time.Sleep(time.Millisecond)
+	}
 	n := l.Pool().Stats().Workers
 	var started sync.WaitGroup
 	started.Add(n)

@@ -19,14 +19,31 @@ if [ -x /w/vod.test ]; then
 fi
 
 sh /w/genlib.sh /w/lib "${SECONDS_FILM:-30}"
-/w/fit run -c /w/fit.json >/w/out/fit.log 2>&1 &
+# The items play only through playback URLs that expire (url_signing): the
+# collector stands for the site's API, which asks media_tokens' /urls for
+# them with its own password.
+head -c 32 /dev/urandom | base64 >/w/site-secret
+hash=$(printf 'site-api-password\n' | /w/fit hash-password -cost 4)
+sed "s|@HASH@|$hash|" /w/fit.json >/w/fit-run.json
+/w/fit run -c /w/fit-run.json >/w/out/fit.log 2>&1 &
+fit=$!
 cp /w/player.html /w/collector.py /opt/hlsjs/
-python3 /opt/hlsjs/collector.py 9400 /w/out/result.json 900 &
+SIGN_URL=http://127.0.0.1:9401/media-tokens/urls SIGN_AUTH=site-api:site-api-password \
+	python3 /opt/hlsjs/collector.py 9400 /w/out/result.json 1200 &
 collector=$!
 sleep 1
 chromium --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run \
 	--autoplay-policy=no-user-gesture-required --user-data-dir=/tmp/chrome \
-	"http://127.0.0.1:9400/player.html?base=http://127.0.0.1:9401/vod/films/&items=${ITEMS:-films/bbb,clips/hevc,clips/av1,clips/opus,clips/gop3s,music/song}" \
+	"http://127.0.0.1:9400/player.html?base=http://127.0.0.1:9401/vod/films/&signed=1&items=${ITEMS:-films/bbb,clips/hevc,clips/av1,clips/opus,clips/gop3s,music/song}" \
 	>/w/out/chromium.log 2>&1 &
 wait $collector || status=1
+# The access log, flushed every second, holds no signature.
+kill $fit
+sleep 2
+if grep -Eq 'sig=[^R&"]' /w/out/access.log; then
+	echo "FAIL the access log holds a signature"
+	status=1
+else
+	echo "ok   the access log holds $(grep -c 'sig=REDACTED' /w/out/access.log) signed requests, every signature REDACTED"
+fi
 exit $status
