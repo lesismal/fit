@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/assistant"
 	"github.com/lesismal/fit/config"
 )
@@ -262,44 +264,63 @@ func TestTimeoutAndStall(t *testing.T) {
 	eventually(t, "the slow call's cancel", func() bool { return g.cancelled.Load() == 1 && f.inflight(tok) == 0 })
 }
 
-// TestStall: a client that takes nothing of a large result has its stream
-// cut.
-func TestStall(t *testing.T) {
-	oldStall := stallTimeout
-	stallTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { stallTimeout = oldStall })
-	f := start(t, settings(`{}`, `"limits": {"max_tool_result_bytes": 16777216}`), nil, newGated().tools())
-	tok := f.token("s", "read")
-
-	// A client that sends its call and reads nothing, with a small window:
-	// the server stops waiting for it stallTimeout after its queue passed
-	// the watermark, and closes the connection, the rest of the result not
-	// sent.
+// bigCall sends big_read's call to f's /mcp with tok over a connection of
+// its own, which reads nothing, and returns once the call has ended, its
+// 2 MiB result handed to the connection. The server's socket buffer is cut
+// to 16 KiB and the client's set to 256 KiB, so that the kernel takes far
+// less than the result on every OS, and fib's queue holds the rest: on
+// Linux, loopback's send buffer starts at about 2.6 MiB (a 64 KiB MSS
+// times the initial window), and would take the whole result. The client's
+// buffer stays above the MSS, which Linux's TCP needs to keep a window
+// open without dropping what it is sent.
+func bigCall(t *testing.T, f *fixture, tok string) net.Conn {
+	t.Helper()
+	streamOpened = func(r *console.Request) {
+		if err := r.Context.Conn.SetWriteBuffer(16 << 10); err != nil {
+			t.Errorf("SetWriteBuffer: %v", err)
+		}
+	}
+	t.Cleanup(func() { streamOpened = nil })
 	conn, err := net.Dial("tcp", strings.TrimPrefix(f.url, "http://"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	_ = conn.(*net.TCPConn).SetReadBuffer(4096)
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := conn.(*net.TCPConn).SetReadBuffer(256 << 10); err != nil {
+		t.Fatal(err)
+	}
 	body, h := modernRequest("tools/call", map[string]any{"name": "big_read"})
-	req := "POST /mcp HTTP/1.1\r\nHost: " + strings.TrimPrefix(f.url, "http://") + "\r\nAuthorization: Bearer " + tok +
-		"\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: " + fmt.Sprint(len(body)) + "\r\n"
+	req := "POST /mcp HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + tok +
+		"\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: " + fmt.Sprint(len(body)) + "\r\nConnection: close\r\n"
 	for k, v := range h {
 		req += k + ": " + v + "\r\n"
 	}
 	if _, err := conn.Write([]byte(req + "\r\n" + body)); err != nil {
 		t.Fatal(err)
 	}
-	// The call ends, its result handed to the connection, before the
-	// client reads.
 	eventually(t, "the call's end", func() bool {
 		entries, _ := f.a.AuditLog(assistant.AuditFilter{Kind: assistant.AuditTool})
 		return len(entries) > 0 && entries[0].Calls[0].Tool == "big_read" && f.inflight(tok) == 0
 	})
+	return conn
+}
+
+// TestStall: a client that takes nothing of a large result has its stream
+// cut stallTimeout after the queue passed the watermark: it reads what the
+// kernels held, then the end of a connection the server closed, never the
+// whole result, and never waits for it.
+func TestStall(t *testing.T) {
+	oldStall := stallTimeout
+	stallTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { stallTimeout = oldStall })
+	f := start(t, settings(`{}`, `"limits": {"max_tool_result_bytes": 16777216}`), nil, newGated().tools())
+	tok := f.token("s", "read")
+	conn := bigCall(t, f, tok)
 	time.Sleep(stallTimeout + time.Second)
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(20 * time.Second))
 	n, err := io.Copy(io.Discard, conn)
-	if err != nil || n >= 2<<20 {
+	var ne net.Error
+	if n >= 2<<20 || errors.As(err, &ne) && ne.Timeout() {
 		t.Errorf("a client that took nothing read %d bytes, then %v", n, err)
 	}
 }

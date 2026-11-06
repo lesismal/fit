@@ -4,13 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/lesismal/fit/assistant"
 )
 
 // TestSmall covers what the protocol's tests reach only rarely: the
@@ -117,30 +114,13 @@ func TestMore(t *testing.T) {
 	}
 }
 
-// TestLateReader: a client with a small window that reads its large
-// result a while after: the stream waits for it, and it gets all of it.
+// TestLateReader: a client that reads its large result a while after the
+// call ended: the stream waits for it, within stallTimeout, and it gets all
+// of it.
 func TestLateReader(t *testing.T) {
 	f := start(t, settings(`{}`, `"limits": {"max_tool_result_bytes": 16777216}`), nil, newGated().tools())
 	tok := f.token("s", "read")
-	conn, err := net.Dial("tcp", strings.TrimPrefix(f.url, "http://"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	_ = conn.(*net.TCPConn).SetReadBuffer(4096)
-	body, h := modernRequest("tools/call", map[string]any{"name": "big_read"})
-	req := "POST /mcp HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + tok +
-		"\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: " + fmt.Sprint(len(body)) + "\r\nConnection: close\r\n"
-	for k, v := range h {
-		req += k + ": " + v + "\r\n"
-	}
-	if _, err := conn.Write([]byte(req + "\r\n" + body)); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "the call's end", func() bool {
-		entries, _ := f.a.AuditLog(assistant.AuditFilter{Kind: assistant.AuditTool})
-		return len(entries) > 0 && entries[0].Calls[0].Tool == "big_read" && f.inflight(tok) == 0
-	})
+	conn := bigCall(t, f, tok)
 	time.Sleep(200 * time.Millisecond)
 	_ = conn.SetReadDeadline(time.Now().Add(20 * time.Second))
 	n, err := io.Copy(io.Discard, conn)

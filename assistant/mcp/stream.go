@@ -20,8 +20,17 @@ type stream struct {
 	ping    *time.Timer
 }
 
+// streamOpened, when not nil, is told of every stream as it opens: the
+// tests of slow clients shrink the connection's socket buffer with it, so
+// that what a stream queues is fib's to bound, not the kernel's, on every
+// OS. nil outside tests.
+var streamOpened func(r *console.Request)
+
 // openStream starts the SSE answer of r, which the caller has retained.
 func openStream(r *console.Request, broken func()) *stream {
+	if streamOpened != nil {
+		streamOpened(r)
+	}
 	st := &stream{r: r, broken: broken}
 	ctx := r.Context
 	_ = ctx.SetWriteDeadline(time.Time{})
