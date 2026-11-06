@@ -2436,6 +2436,52 @@
       // // applies them). read when left out.
       // // one of: off, read, edit, propose, apply; default "read".
       // "default_level": "read",
+
+      // // An MCP server at /mcp on the console's address, for outside agents (Claude Code, Cursor, an
+      // // SDK's client) to call the assistant's tools, read the config, the schema and the docs, and
+      // // use the skills as prompts, with the MCP tokens users make on the workbench's MCP page. A
+      // // token has its user's level, at most propose: what it proposes is applied only in the
+      // // workbench. Off when left out.
+      // // object.
+      // "mcp": {
+        // // The addresses (as 127.0.0.1) and prefixes (as 10.0.0.0/8) MCP clients may call from; a token
+        // // may narrow them further. Loopback only when left out.
+        // // list of string.
+        // "allow": ["*.example.com", "10.1.0.0/16"],
+
+        // // The most MCP tokens a console user may hold. 10 when left out or 0.
+        // // integer, 0 or more; default 10.
+        // "max_tokens_per_user": 10,
+
+        // // The longest a token may last, in days, from when it is made. 90 when left out or 0.
+        // // integer, 0 to 3650; default 90.
+        // "max_token_days": 90,
+
+        // // The most sessions a token keeps for clients of the protocol's versions before 2026-07-28,
+        // // which open one with initialize; one more ends the one used least recently. 4 when left out
+        // // or 0.
+        // // integer, 0 or more; default 4.
+        // "max_sessions": 4,
+
+        // // How long such a session is kept without a request. 1h when left out.
+        // // duration, as "1.5s" or "2m"; default "1h".
+        // "session_idle_timeout": "1h",
+
+        // // The most bytes of a request's body, beside the console's own bound. 1 MiB when left out or
+        // // 0.
+        // // integer, 0 to 8388608; default 1048576.
+        // "max_request_bytes": 1048576,
+
+        // // The most requests of one token served at once; one more is answered 429. 4 when left out or
+        // // 0.
+        // // integer, 0 to 64; default 4.
+        // "max_concurrent_calls": 4,
+
+        // // The most requests of one token in a minute; past it they are answered 429 until the minute's
+        // // share comes back. 120 when left out or 0.
+        // // integer, 0 to 6000; default 120.
+        // "max_calls_per_minute": 120,
+      // },
     // },
   // },
 

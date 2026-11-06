@@ -112,6 +112,13 @@ type Options struct {
 	Modules func() []*Module
 	// MaxBody bounds a request's body; MaxBodyBytes when 0.
 	MaxBody int64
+	// Endpoints are paths outside /api/, as /mcp, each served by its
+	// handler for every method, before the files and without a session or
+	// a CSRF token: the handler checks the request's own credentials, and
+	// calls Request.Authenticated with what it found, so that the
+	// connection is kept as a logged-in one is, or not. A request from
+	// another web page's Origin is refused before it, as every request is.
+	Endpoints map[string]Handler
 	// PasswordRoutes are the endpoints, as "POST /api/m/admin/account/password",
 	// that a session whose password is temporary (login.Session.MustChange)
 	// may call beside GET /api/session, GET /api/workbench and the logout;
@@ -181,7 +188,8 @@ type Console struct {
 	files   map[string]file
 	routes  routeTable
 	modules func() []*Module
-	pwOnly  []string // Options.PasswordRoutes
+	pwOnly  []string           // Options.PasswordRoutes
+	ends    map[string]Handler // Options.Endpoints
 	tasks   chan func()
 	checks  chan func() // the login checks' queue, on LoginWorkers of their own
 	limit   *limitHandler
@@ -236,7 +244,7 @@ func (a *API) HandlePrefix(method, prefix string, h Handler) {
 func Start(engine *fib.Engine, o Options) (*Console, error) {
 	cfg := o.Config
 	logins := login.New(login.OptionsOf(cfg.Console()))
-	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes,
+	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes, ends: o.Endpoints,
 		idle: idleTimeout, unauthIdle: unauthIdleTimeout,
 		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), checks: make(chan func(), LoginQueue), stop: make(chan struct{})}
 	switch {
@@ -409,6 +417,18 @@ func (r *Request) Submit(fn func()) bool {
 	}
 }
 
+// Authenticated says whether the request of an endpoint (Options.Endpoints)
+// came with valid credentials of its own, as a session's would: its
+// connection is then kept for the console's idle time between requests,
+// and otherwise put back on the rule of connections without a login. Its
+// user, when valid, is who made it.
+func (r *Request) Authenticated(valid bool, user string) {
+	if valid {
+		r.User = user
+	}
+	r.c.authenticated(r.Context, valid)
+}
+
 // Decode decodes the request's JSON body into v, answering 400 or 415 and
 // returning false when it cannot.
 func (r *Request) Decode(v any) bool {
@@ -472,6 +492,11 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 		return
 	}
 	p := r.URL.Path
+	if hd := c.ends[p]; hd != nil {
+		h.Set("Cache-Control", "no-store")
+		hd(&Request{Context: ctx, Path: p, c: c})
+		return
+	}
 	if !strings.HasPrefix(p, "/api/") {
 		h.Set("Cache-Control", "no-cache")
 		c.serveFile(ctx, p)
