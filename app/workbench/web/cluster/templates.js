@@ -45,6 +45,7 @@
     ['tp.config', 'Config', '配置'],
     ['tp.config.hint', 'A part of fit\'s config, as in a config file: top-level members are owned whole; listeners, routes, services and upstreams element by element, each named. Strings may use ${node.name}, ${node.id}, ${node.hostname}, ${node.labels.<key>} and the groups\' ${<name>}; $${ writes ${. [secret] stands for a secret the manager keeps.',
       'fit 配置的一部分，写法同配置文件：顶层成员整体拥有；listeners、routes、services、upstreams 按元素拥有，每个元素须有名称。字符串可使用 ${node.name}、${node.id}、${node.hostname}、${node.labels.<key>} 与分组的 ${<name>}；$${ 表示字面的 ${。[secret] 代表管理端保存的密钥。'],
+    ['tp.ro', 'Only an admin of the whole cluster changes templates: this one is shown as it is.', '只有集群范围的管理员才能修改模板：此处按原样显示。'],
     ['tp.save', 'Save', '保存'], ['tp.saved', 'The template {name} saved.', '已保存模板 {name}。'], ['tp.added', 'The template {name} added.', '已添加模板 {name}。'],
     ['tp.rm.ask', 'Remove the template {name}? Its members keep what it gave them; the manager no longer owns it there, and tells them so.',
       '删除模板 {name}？其成员保留模板给出的配置；管理端不再拥有这些部分，并会告知成员。'],
@@ -518,7 +519,11 @@
         info.push(UI.card(t('tp.vars'), vars.length ? h('ul.tp-list', vars) : h('span.muted', '—')));
         info.push(UI.card(t('tp.warnings'), tp.warnings.length ? h('ul.tp-list', tp.warnings.map(function (w) { return h('li.small', w); })) : h('span.muted', t('tp.nowarn'))));
       }
-      UI.mount(top, h('div.stack',
+      // Read-only for anyone but a cluster-wide admin (I148): its controls hidden, its fields shown as they are.
+      // 非集群范围管理员只读（I148）：隐藏其控件，字段按原样显示。
+      var ro = !FC.canCluster('admin');
+      UI.mount(top, h('div.stack' + (ro ? '.tp-ro' : ''),
+        ro ? h('div.callout', UI.icon('lock'), ' ', t('tp.ro')) : null,
         UI.card(isNew ? t('tp.add') : t('edit') + ' ' + name, h('div.stack',
           h('div.tp-grid', field('name', t('tp.name'), nameIn, t('gr.name.hint')), field('description', t('tp.desc'), descIn),
             field('order', t('tp.order'), orderIn, t('tp.order.hint'))),

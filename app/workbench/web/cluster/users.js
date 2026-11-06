@@ -269,7 +269,7 @@
     function apply() { location.hash = '#/cluster/audit' + (qs(current()) ? '?' + qs(current()) : ''); }
     node.addEventListener('keydown', function (e) { if (e.key === 'Enter') apply(); });
     var f = { user: q.user || '', node: q.node || '', action: q.action || '', since: q.since || '', until: q.until || '' };
-    exp.href = UI.base + '/api/audit?' + qs(Object.assign({ format: 'jsonl' }, f));
+    exp.href = UI.base + '/audit?' + qs(Object.assign({ format: 'jsonl' }, f)); // UI.base is /api/m/cluster / UI.base 即 /api/m/cluster
     FC.members(UI).then(function (m) {
       UI.mount(nodeList, m.nodes.map(function (n) { return h('option', { value: n.name }); }));
     }, function () { /* ignore / 忽略 */ });

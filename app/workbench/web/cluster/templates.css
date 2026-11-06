@@ -40,3 +40,8 @@
 .mg-owned { box-shadow: inset 3px 0 0 var(--primary); }
 .mg-owned.mg-changed { box-shadow: inset 3px 0 0 var(--warn); }
 .mg-badge { margin-left: 6px; }
+
+/* A template read by someone who may not change it (I148): its fields shown, not edited; its buttons but the tabs hidden.
+   无权修改模板的用户查看时（I148）：字段只显示不编辑；除标签页外的按钮隐藏。 */
+.tp-ro .card__body input, .tp-ro .card__body select, .tp-ro .card__body textarea { pointer-events: none; }
+.tp-ro .card__body button:not(.tab) { display: none; }

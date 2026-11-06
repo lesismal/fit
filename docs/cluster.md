@@ -56,6 +56,7 @@ A manager is a fit like any other: the same config may serve routes too. Without
 | `max_nodes` | 256 | the most members kept; one more is refused |
 | `max_concurrency` | 8 | the most members read at once; tests from the pages run beside them, 4 at most, and reads of members' pages, 8 at most |
 | `max_response_bytes` | 4 MiB (16 KiB at least) | the largest answer read from a member |
+| `admins` | none | console users who are the cluster's admins whatever the roles say ([Users, roles and the audit log](#users-roles-and-the-audit-log)) |
 
 The members are kept in the store's section `cluster`, encrypted with the rest of the store and
 left out of its exports, so that no export carries a member's credentials. A section a newer fit
@@ -360,6 +361,72 @@ each member's status, versions and gate (the share of 5xx and the drift it found
 failed), with **Pause**, **Resume**, **Go on**, **Abort** and **Roll back**. A template's page has
 **Roll out**, and a member's rendered result **Sync this node**.
 
+## Users, roles and the audit log
+
+The manager's console users have **roles** on the cluster, cluster-wide and per group:
+
+| Role | May |
+| --- | --- |
+| `viewer` | read: the members, their states, groups, templates, rollouts, operations, the roles and the audit log; a member's own pages through the node switcher, read-only |
+| `operator` | also run operations (reload, roll back, check, purge, test) and rollouts of the templates there are (a template's change, a sync), and steer them; test a member as it is kept |
+| `admin` | also add, change and remove members and their credentials, make enrollment tokens, test a draft, write through the node switcher and copy parts of one member's config to others; **cluster-wide**, change groups, templates and the roles themselves |
+
+A role on a group is a role on its members: a user's role on a member is the highest of its
+cluster-wide role and its roles on the groups the member is in, and a change is allowed only when
+the user has the role on **every** member it touches, as the member is and, for a change of its
+labels or name, as it will be. Groups, templates and roles decide who has which role where, so only
+a cluster-wide admin changes them. The lists (Overview, Nodes, Groups, Templates, Rollouts, the
+audit log) are read by anyone with a role anywhere; a member's own pages, its reads, its rendered
+config, a compare or an import need a role on that member.
+
+**Where roles are kept.** The roles live in the manager's store, beside the members, and are changed
+on **Users and audit** by a cluster-wide admin; they take effect at once, for every page and request.
+`admin.cluster.admins` names console users who are cluster-wide admins whatever the roles say: the
+way back in when no admin is left, changed only by editing the config and restarting, as all of
+`admin` is. A console user the roles do not name has the **default role** (none unless set); one
+named with no role stays without one.
+
+**Before roles are set** (no roles in the store and no `admins`), every console user is a
+cluster-wide admin, as before roles existed, so a manager keeps working after an upgrade. The first
+roles saved must leave at least one cluster-wide admin (or `admins` must name one).
+
+**The manager itself.** Once roles are set, the manager's own pages, its config, its console users,
+its store and the services it runs, are changed only by a cluster-wide admin: anyone else reads
+them, and its pages say so in a band above them. A user's own password, the text conversions and
+dry runs stay everyone's. A member opened through the node switcher is read-only for a user who is
+not its admin (`reason_kind` `role`).
+
+**The assistant** (I126) never does more for a user than the user may: on a manager with roles, a
+cluster-wide admin keeps the level `admin.assistant` gives; a user who is an operator anywhere has at
+most `propose`, which a cluster-wide admin applies; anyone else at most `read`. MCP tokens are bounded
+the same way. The Users page shows each user's level and the level the roles bound it to.
+
+**The audit log** records every cluster action: members added, changed, removed, enrolled and tested;
+groups, templates and roles changed; operations; each step of a rollout; and every write through the
+node switcher. Each entry has its user, time, members, operation, outcome (`ok`, `failed`,
+`partial`, `unknown` for a write sent and not answered, `not_sent`, or the state a rollout ended in),
+the versions before and after, and the change:
+
+| Entry | Versions | Diff | Digest |
+| --- | --- | --- | --- |
+| a member, group, template or the roles | the manager's document, `r12` → `r13` | of what the API shows of it: a member's credentials only as set or not (a password changed is named in the detail), a template's secrets masked | the SHA-256 of the whole diff |
+| an operation | each member's config version before and after, in its outcome | none | none |
+| a rollout's start | each member's version, and the hash of the config it gets | each member's parts, what it has and what it gets, secrets masked | the SHA-256 of the whole diff |
+| a rollout's end | each member's version before, and after it was applied or rolled back | none | each member's config hash |
+| a write through the switcher | the member's config version as last read, and the one it answered | none: what was sent holds the member's config and secrets | the SHA-256 of the body sent |
+
+A diff is kept up to 16 KiB, cut past it with its digest of the whole. The log keeps the last 1,000
+entries and at most about 2 MiB, the oldest going first, in the store, so it holds across restarts.
+
+**The pages**, under **Users and audit**: **Users and roles**, each console user and each user the
+roles name, its cluster-wide role, its roles on groups, its assistant's level, the default role and
+**Save roles** (a cluster-wide admin's; the others read it); **Audit log**, filtered by user, member,
+operation and time (the filters are in the URL, so a member's page links to its own entries with
+**Changes of this member**), each entry opening its diff, digest, versions and outcomes, with links to
+its rollout and, for a write through the switcher, to the member's own Versions page; **Export JSON
+lines** saves the entries picked. Every Cluster page draws only the controls the user's roles allow,
+and a user with no role is told so.
+
 ## How members are reached
 
 A member is a fit the manager can reach, one of three ways:
@@ -440,7 +507,10 @@ pages above use nothing else:
 | `POST enroll` | adds a member that links out: `{"name", "labels", "ttl", "url"}`; `201` with `{"node", "token", "expires", "config", "config_line"}`, the token shown this once; `409` without `link_address` |
 | `POST nodes/<name>/enroll` | a new enrollment token for a linked member: `{"ttl", "url"}`, the same answer |
 | `GET state` | every member's state: `{"interval_ms", "timeout_ms", "read_only", "nodes"}` |
-| `GET audit` | the manager's changes: who, when, which member or group, what changed (credentials by name only); an operation with its `op` ID and each member's `outcomes` |
+| `GET audit` | the audit log, oldest first, filtered by `user`, `node` (a member it acted on), `action` (whole, `op.reload`, or its kind, `op`) and `since`/`until` (RFC 3339): `{"entries", "total", "max_entries", "max_bytes", "users", "actions"}`, each entry `{"at", "user", "action", "node", "nodes", "group", "template", "rollout", "op", "detail", "outcome", "before", "after", "diff", "clipped", "digest", "outcomes"}`, an outcome `{"node", "status", "detail", "error", "before", "after", "digest"}`; credentials never; with `format=jsonl`, the entries as JSON lines, a file to save |
+| `GET me` | the user's roles, which the pages draw by: `{"user", "open", "fixed", "role", "top", "groups", "nodes", "manager_read_only", "assistant"}`, `role` cluster-wide, `top` the highest anywhere, `nodes` and `groups` the role on each; any console user, a role or not |
+| `GET access` | the roles: `{"version", "open", "read_only", "admins", "default_role", "users", "groups", "roles", "max_users"}`, each user `{"user", "role", "groups", "console", "fixed", "assistant", "assistant_cap"}`, with an `ETag` |
+| `PUT access` | replaces the roles, a cluster-wide admin's: `{"default_role", "users": [{"user", "role", "groups": {"<group>": "<role>"}}]}`; `400` with `{"field", "error"}` for a role or group there is none of, a user named twice, or no cluster-wide admin left |
 | `GET groups` | the groups, `{"version", "max_groups", "read_only", "groups"}`, with the document's `ETag`; each group `{"name", "description", "selector", "members", "variables", "created", "updated", "nodes", "missing"}`, `nodes` the members in it now and `missing` the names no member has |
 | `POST groups` | adds a group: `{"name", "description", "selector", "members", "variables"}`; `201`; `400` with `{"field", "error"}`, `409` for a name taken or 256 groups |
 | `GET groups/<name>` | the group and its members' `states` |
@@ -473,10 +543,12 @@ Beside the module, at the console's top level, the node switcher's pass-through:
 
 | Endpoint | What it does |
 | --- | --- |
-| `GET /api/n/<member>/workbench` | the modules of the member its pages open, `{"user", "modules", "member"}`, `member` being `{"name", "access", "url", "id", "hostname", "fit_version", "schema_digest", "manager_schema_digest", "roles", "read_only", "reason_kind", "reason"}`, `reason_kind` `version`, `not_read` or `manager`; its `GET /node` is read now |
+| `GET /api/n/<member>/workbench` | the modules of the member its pages open, `{"user", "modules", "member"}`, `member` being `{"name", "access", "url", "id", "hostname", "fit_version", "schema_digest", "manager_schema_digest", "roles", "read_only", "reason_kind", "reason"}`, `reason_kind` `version`, `not_read`, `manager` or `role`; its `GET /node` is read now |
 | `GET /api/n/<member>/node` | the member's `GET /node` |
 | `<method> /api/n/<member>/m/<module>/<path>` | the member's `/api/m/<module>/<path>`, its Admin API's `/<path>` for the module `admin`, with the query; answered as the member answers, but for the headers above; `502` with `{"error", "problem"}` when the member cannot be reached, `403` for what is not passed on, `409` for a change to a read-only member |
 
+A request the user's roles do not allow is refused `403` with `{"error", "kind": "forbidden", "user",
+"role", "nodes", "groups", "cluster"}`: the role it needed, and the members or groups it lacks it on.
 A change sent with `If-Match` and an ETag that is no longer the document's (its members, groups
 and templates) is refused `412`. At most
 4 tests and 8 reads run at once; one more is `429`. The reads pass on those four GETs of a member

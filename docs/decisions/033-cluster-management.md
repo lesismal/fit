@@ -195,6 +195,18 @@ What I146 adds, rollouts ([rollouts](../cluster.md#rollouts-a-change-applied-in-
   started by the class of their status, never going back (`status.requests`), when the config sets
   `metrics`.
 
+What I148 adds, users' roles and the audit log ([users, roles and the audit
+log](../cluster.md#users-roles-and-the-audit-log)):
+
+- **Roles** in the document's `access` (document version 3 once set): `viewer`, `operator` and
+  `admin`, cluster-wide and per group, a default for console users not named;
+  `admin.cluster.admins` for admins whatever the roles say. One check, `Manager.Allow(user, Need)`,
+  behind every endpoint of the module (its router), every switcher call, the console's gate on the
+  manager's own pages and the assistant's levels. `GET me`, `GET` and `PUT access`.
+- **The audit log**'s entries gain their members, outcome, diff and digest and the versions before
+  and after; `GET audit` filters by user, member, operation and time and exports JSON lines; tests
+  of members are audited.
+
 ## Pending review
 
 Decided while building I140 (2026-11-06); each stands until the user rules on it.
@@ -533,6 +545,73 @@ Decided while building I146 (2026-11-06):
      from its query), `rollout/<id>`; **Roll out** on a template's page and **Sync this node** on a
      rendered result; a dry run's errors linked to the member's page, its own pages and its rendered
      result. The API's times are milliseconds (`pause_ms`, `wait_ms`, `window_ms`).
+
+Decided while building I148 (2026-11-06):
+
+103. **Roles live in the manager's document**, `access` in the store's section `cluster`, changed on
+     the Users page by a cluster-wide admin and in effect at once; `admin.cluster.admins` (config,
+     at a restart) names admins whatever the roles say, the way back in. Alternatives: roles in the
+     config, which changes only at a restart and which any console user may edit; roles on
+     `admin.console.users`.
+104. **Before roles are set every console user is a cluster-wide admin**, as before: no roles in
+     the document and no `admins`. The first roles saved must leave a cluster-wide admin. There is
+     no way back to that open state but giving every user `admin`. Alternative: everyone a viewer
+     after an upgrade, which would lock a manager's people out of what they did the day before.
+105. **A role on a member is the highest** of the user's cluster-wide role and its roles on the
+     groups the member is in; a change needs the role on every member it touches, a member's change
+     also as the member will be (a label moved out of the user's groups is refused). Group roles
+     follow a rename and go with a removal, so a group made later under the name gives no one a
+     role.
+106. **What each role does**: viewer reads; operator runs operations, tests a member as kept, and
+     plans, starts and steers rollouts of templates and syncs; admin also changes members and their
+     credentials, enrolls, tests drafts, writes through the switcher and plans copies (config of no
+     template, so an admin's, who must read the member copied from); groups, templates and the roles
+     are a cluster-wide admin's, as they decide who has which role where.
+107. **Lists are not filtered by role**: anyone with a role anywhere reads every member's state,
+     every group, template, rollout and the whole audit log (no credential is in any of them); a
+     member's own reads (its pages through the switcher, `read/`, `desired`, `sync`, `compare`,
+     `import`) need a role on it. Alternative: every list filtered to the user's members.
+108. **A default role** for console users the roles do not name, none unless set; a user named
+     with no role is none, whatever the default, so one user can be left out.
+109. **One check, `Manager.Allow(user, Need)`**, which the module's router puts in front of every
+     endpoint: an endpoint added with `Handle` lets in reads of any role and writes of a
+     cluster-wide admin only (so one added without thought fails closed); one added with `Checked`
+     says what it needs itself. The Manager's methods (`Add`, `Update`, `Remove`, `Enroll`,
+     groups, templates, `StartOp`, `PlanRollout`, `StartRollout`, `SteerRollout`, `SetAccess`)
+     check too, so the assistant's tools (I153) calling them are bound alike.
+110. **The manager itself is a cluster-wide admin's** once roles are set: the console asks the
+     manager about every request (`Options.Gate`), and writes to the manager's own modules (its
+     config, console users, store, role modules) are refused to anyone else; reads, the module
+     `cluster`, the switcher, the assistant, a user's own password, the text conversions and dry
+     runs pass. Its pages say so in a band and refuse such writes before sending them. Alternative:
+     the manager's own pages every console user's, through which a viewer could raise itself at the
+     next restart.
+111. **The assistant never exceeds the user's role**: once roles are set, a cluster-wide admin keeps
+     its `admin.assistant` level, an operator anywhere at most `propose` (applied by a cluster-wide
+     admin), anyone else at most `read`; MCP tokens alike. For I153's cluster tools both apply, the
+     narrower winning.
+112. **Version 3 only with roles**: a document without them is still written as version 2, which
+     an I146 or I149 fit reads and writes; one with roles as 3, which such a fit leaves read-only
+     rather than drop the roles and let everyone do everything.
+113. **An entry's change**: a member's, a group's, a template's and the roles' as a unified diff of
+     what the API shows (credentials only as set, a password changed named in the detail, secrets
+     masked); a rollout's start with each member's parts; at most 16 KiB kept, its digest the SHA-256
+     of the whole. A write through the switcher keeps only the body's digest: the body is the
+     member's config, secrets and all. Its versions: the manager's own changes by a new revision of
+     the document (`r12`, kept, unlike the ETag, which starts over at a restart); an operation's and a
+     rollout's per member, in their outcomes; a switcher write's the member's version as last read
+     and the one it answered.
+114. **Tests are audited** (`node.test`, with the outcome), so that every action of I141–I147 is,
+     reversing I141's ninth; polls, reads and members told what the manager owns are not.
+115. **Every write of the log keeps both bounds** (1,000 entries and about 2 MiB): the switcher's
+     and the rollouts' writes kept only the count before.
+116. **The audit log's reads**: `GET audit` filters by `user`, `node` (any member an entry acted
+     on), `action` (whole or its kind before the dot) and `since`/`until` (RFC 3339); `format=jsonl`
+     answers JSON lines as a file.
+117. **The pages**: Users and audit after Rollouts, `#/cluster/users` and `#/cluster/audit` (its
+     filters in the URL); every Cluster page drawn after `GET me`, with only the controls the roles
+     allow (a template's editor read-only, operations' boxes off for members the user may not
+     operate); a member through the switcher read-only for its non-admins (`reason_kind` `role`).
 
 Open questions of the plan, answered as proposed until reviewed:
 
