@@ -1661,3 +1661,28 @@ pipeline 请求照常先处理完）。HTTP/2 和 HTTP/3 上它属于整条连�
 
 **fit 的使用方式。** 控制台以 5s 的 `IdleTimeout` 提供服务（`console.UnauthIdleTimeout`，与 Admin API 对未认证连接一样），
 带有效会话的请求或成功的登录用 `SetIdleTimeout` 把所在连接改为控制台通常的 2 分钟（`console.IdleTimeout`）；登出后改回 5s。
+
+## A68：新轨道沿用同一时钟
+
+**状态。** 2026-11-06 由 I134（频道）提出。fib 尚未实现；fit 的频道在此之前照常工作，见下文。
+
+**问题。** 发布者在流中途更换轨道而时钟继续（`hub.Publisher.SetTracks`，例如频道切到以不同方式编码的条目，或编码改变）时，
+各出口会把之后的包挪后，仿佛时钟重新开始了。它们把 `OnTracks` 之后第一个不晚于*任一*轨道最后一个包的包当作新时钟，把之后
+的内容移到那个包之后至少 20ms。有 B 帧时，下一个条目最初的画面在上一个条目的音频结束之前解码（早出 B 帧延迟，两个 B 帧为
+80ms），于是频道的视频在并未重启的地方跳变约 100ms。
+
+**依据。** `media/flv` 的 `Timeline.Stamp` 在 `Restart` 之后拿包与 `t.last`（两条轨道中最大的时间戳）比较（RTMP 播放与
+HTTP-FLV）；`media/srt` 的 `sendPacket` 在 `restart` 之后与 `s.lastDTS`（所有包中最大的）比较；`media/hls` 的 muxer 让下一个
+writer 从上一个的 `End()`（最大者）开始；`media/rtsp` 的播放器在 `restart` 时重新定基。在 fit 的 `TestChannelInterop` 中，
+由两个 SPS 不同的条目（先 320x240，后 480x270，两个 B 帧）组成的频道，经 RTMP、HTTP-FLV、SRT、RTSP 与 HLS 时视频解码时间
+出现 120 到 135ms 的跳变；而轨道相同的条目（不调用 `SetTracks`）没有任何跳变。
+
+**建议的 API。** 二者择一：
+
+1. 出口按轨道检查重启：`OnTracks` 之后的包，只有不晚于其自身轨道的最后时间戳（`lastVideo`、`lastAudio`），或超过上限时，
+   才算新时钟。时钟重新开始的重新发布仍能被识别（其视频早于最后的视频），同一时钟上的更换则继续沿用。
+2. 或由 hub 区分二者：可选接口 `hub.TracksChanger`（`OnTracksChanged(tracks)`），正在发布的发布者调用 `Publisher.SetTracks`
+   时代替 `OnTracks` 调用它，各出口实现它而不 `Restart`；新发布者的 `OnTracks` 保持现有处理。
+
+**fit 的使用方式。** fit 无需改动：`streaming/channels` 在条目的轨道与上一个不同时调用 `SetTracks`，其时间戳本已按轨道连续，
+各出口届时原样转发即可。`TestChannelInterop` 与 `TestChannelEgresses` 中对这类条目 0.2s 的容差可收紧到一帧。

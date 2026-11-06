@@ -6,7 +6,8 @@ A media library is directories of film and episode files that fit catalogues, fo
 that serve them as video on demand and the channels that play them as live streams
 ([decision 032](decisions/032-media-library.md)). This page covers the catalog: what a library
 holds, how files are grouped into items, how scans run and what bounds them, and the Admin API that
-reads it. Serving the items comes with the `vod` handler and the streaming role's channels.
+reads it. Serving the items comes with the `vod` handler and the streaming role's
+[channels](channels.md), which play them as live streams.
 
 Off by default: without `media_library`, no files are scanned or served.
 

@@ -2196,3 +2196,39 @@ load where the idle deadline is chosen, and no allocation.
 Admin API keeps an unauthenticated connection), and a request that carries a valid session, or a
 login that succeeds, gives its connection the console's usual 2 minutes (`console.IdleTimeout`)
 with `SetIdleTimeout`; a logout gives it the 5s back.
+
+## A68: New tracks on the same clock
+
+**Status.** Requested on 2026-11-06, from I134 (channels). Not yet in fib; fit's channels go on
+without it, as below.
+
+**Problem.** A publisher that changes its tracks mid-stream, its clock running on
+(`hub.Publisher.SetTracks`, as a channel moving to an item encoded otherwise does, or a codec change),
+has its packets moved on by the egresses, as though the clock had started again. Each takes the
+first packet after `OnTracks` that comes at or before the last packet of *any* track for a new
+clock, and moves what follows past that packet by at least 20ms. With B-frames the next item's first
+pictures are decoded before the last item's audio ends (by the B-frames' delay, 80ms with two), so a
+channel's video jumps by about 100ms where nothing restarted.
+
+**Evidence.** `media/flv`'s `Timeline.Stamp` after `Restart` compares the packet with `t.last`, the
+largest timestamp of either track (RTMP play and HTTP-FLV); `media/srt`'s `sendPacket` after
+`restart` compares with `s.lastDTS`, the largest of all; `media/hls`'s muxer starts the next writer
+at the last one's `End()`, its largest; `media/rtsp`'s player rebases from `restart`. In fit's
+`TestChannelInterop` a channel of two items whose SPS differ (320x240, then 480x270, two B-frames)
+shows a step of 120 to 135ms in the video's decode times over RTMP, HTTP-FLV, SRT, RTSP and HLS, where
+items whose tracks are the same (no `SetTracks`) show none.
+
+**Suggested API.** Either of:
+
+1. The egresses' restart checks per track: a packet after `OnTracks` starts a new clock only when it
+   comes at or before its own track's last timestamp (`lastVideo`, `lastAudio`), or more than the
+   bound past it. A republish whose clock starts again is still found (its video comes before the
+   last video), and a change on the same clock carries on.
+2. Or the hub tells the two apart: an optional `hub.TracksChanger` (`OnTracksChanged(tracks)`) that
+   `Publisher.SetTracks` of the publisher that runs calls in place of `OnTracks`, which the
+   egresses implement without `Restart`, while a new publisher's `OnTracks` keeps today's handling.
+
+**How fit uses it.** Nothing in fit changes: `streaming/channels` calls `SetTracks` when an item's
+tracks differ from the last one's, its timestamps already continuous per track, and the egresses then
+pass them on as they are. The tolerance of 0.2s for such items in `TestChannelInterop` and
+`TestChannelEgresses` comes down to a frame.

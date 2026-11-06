@@ -85,6 +85,7 @@ fit.json:12:40: routes[0].middleware[0].params.max_size: deprecated: renamed "ma
 | `GET /cache`、`POST /cache/purge` | 缓存的 zone，以及按 URL、标签或 zone 清除 |
 | `GET /tokens`，`/tokens/{role}` 上的 `GET`、`POST`，`/tokens/{role}/{id}` 上的 `PATCH`、`DELETE` | 隧道 hub 与 LLM 各角色的监听签发的连接令牌：列出、签发、修改过期时间、吊销 |
 | `GET /media/library`、`GET /media/library/{name}`、`GET /media/library/{name}/items/{id}`、`POST /media/library/{name}/rescan` | 媒体库：其扫描、一个媒体库的一页条目、一个条目，以及重新扫描 |
+| `GET /streaming/channels`，`/streaming/channels/{name}` 上的 `GET`、`POST`，`GET /streaming/push`，`POST /streaming/push/{name}` | 流媒体角色的频道与推流目标：各自在播放或做什么，以及启动、停止、跳过或重启 |
 | `GET /dashboard/` | 给人看的仪表盘（不覆盖） |
 
 配置中的路径是 JSON pointer 的各段。修改的响应在 body（`version`）和 `Fit-Config-Version` 中给出应用的版本号，并给出配置的
