@@ -711,7 +711,9 @@ func TestPassAuditStore(t *testing.T) {
 		t.Fatal("no audit place")
 	}
 	f.m.audited("admin", "k", "PUT", "/config", nil, &Problem{Kind: KindTimeout, Message: "slow"})
-	waitFor(t, "the audit writer to give up", func() bool { return strings.Contains(f.log.String(), "entries of the audit log were not kept: saving the members: disk full") })
+	waitFor(t, "the audit writer to give up", func() bool {
+		return strings.Contains(f.log.String(), "entries of the audit log were not kept: saving the members: disk full")
+	})
 	waitFor(t, "the audit place to be given back", func() bool {
 		f.m.pass.mu.Lock()
 		defer f.m.pass.mu.Unlock()
