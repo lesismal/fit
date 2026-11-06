@@ -34,7 +34,7 @@ func TestRolloutEdges(t *testing.T) {
 		// with the member unread after, not known, then found never applied.
 		k := newRoFixtureWith(t, 2, slowPolls)
 		k.ms["m1"].set(func(f *roMember) { f.putClose = true })
-		k.ms["m2"].set(func(f *roMember) { f.putClose, f.nodeFailOnce = true, true })
+		k.ms["m2"].set(func(f *roMember) { f.putClose, f.nodeFailAfterPut = true, true })
 		r := k.waitRollout(k.oneMember(fast(Strategy{Mode: StrategyAll}), "m1", "m2").ID, "failed", ended)
 		if x := memberOf(t, r, "m1"); x.Status != MemberFailed || x.Unsure || x.Error.Kind != KindUnreachable {
 			t.Errorf("%+v", x)
