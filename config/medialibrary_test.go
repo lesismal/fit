@@ -22,6 +22,9 @@ func TestMediaLibrary(t *testing.T) {
 		m.Workers() != max(16, 4*goruntime.GOMAXPROCS(0)) || m.Queue() != DefaultMediaFileQueue || m.Timeout() != DefaultMediaFileTimeout {
 		t.Fatalf("%+v", m)
 	}
+	if m.Encryptable() || !(&MediaLibrary{SecretFile: "/s"}).Encryptable() || !(&MediaLibrary{Secret: "s"}).Encryptable() {
+		t.Error("Encryptable")
+	}
 	if (&MediaLibrary{}).Interval() != DefaultMediaScanInterval || (&MediaLibrary{FileWorkers: 3}).Workers() != 3 {
 		t.Error("defaults")
 	}
@@ -41,6 +44,8 @@ func TestMediaLibrary(t *testing.T) {
 		{`[{"name": "a", "roots": ["/a"], "exclude": [""]}]`, "is not a pattern"},
 		{`[{"name": "a", "roots": ["/a"], "scan_interval": "1s"}]`, "at least 10s"},
 		{`[{"name": "a", "roots": ["/a"], "max_sidecar_bytes": 2000000}]`, "greater than the maximum"},
+		{`[{"name": "a", "roots": ["/a"], "secret": "0123456789abcdef", "secret_file": "/s"}]`, "one of the two"},
+		{`[{"name": "a", "roots": ["/a"], "secret": "short"}]`, "use at least 16"},
 	} {
 		_, err := Load([]byte(head + bad.doc + `}`))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {
