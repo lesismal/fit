@@ -620,6 +620,7 @@ func (m *Manager) routes(api *console.API) {
 	m.passRoutes(rt)
 	m.templateRoutes(rt)
 	m.alertRoutes(rt)
+	m.insightRoutes(rt)
 }
 
 func (m *Manager) list(r *console.Request) {
