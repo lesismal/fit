@@ -8,11 +8,14 @@
 // TunnelKit.bytes, dur, ms, rtt, rttText, rttSum, stateBadge, protoBadge, linkProtos, endpointList, pageURL, openPage,
 // graph(cols) are plain helpers; TunnelKit.with(UI) adds, on a module's scoped UI: call(path, body, ok) → Promise of
 // whether it worked, services(list, extra) → editor, hubEditor(hub|null, onSaved), flow({all, one}) → {open, refresh},
-// configNote(role).
+// configNote(role). The diagrams' head has an Ask AI button (I128) that closes them and asks the skill diagnose about
+// the box or line selected, or the diagram shown: the diagram as drawn goes as the page's selection.
 //
 // TunnelKit.bytes、dur、ms、rtt、rttText、rttSum、stateBadge、protoBadge、linkProtos、endpointList、pageURL、openPage、
 // graph(cols) 为普通辅助函数；TunnelKit.with(UI) 基于模块的 scoped UI 增加：call(path, body, ok) → 是否成功的 Promise、
 // services(list, extra) → 编辑器、hubEditor(hub|null, onSaved)、flow({all, one}) → {open, refresh}、configNote(role)。
+// 隧道图头部有“问 AI”按钮（I128）：关闭隧道图，并以技能 diagnose 诊断选中的方框或连线，未选中时诊断所显示的图；
+// 所绘制的图作为页面的选中项。
 (function () {
   'use strict';
   var h = UI.h, t = UI.t, NS = 'http://www.w3.org/2000/svg';
@@ -59,6 +62,10 @@
     ['tk.ca_file', 'Checked against the CAs in {file}, set in the config.', '按配置中设置的 {file} 内的 CA 校验。'],
     ['tk.keep', '•••••••• leave blank to keep', '•••••••• 留空则保持不变'], ['tk.name_opt', 'name (optional)', '名称（可选）'],
     ['tk.optional', 'optional', '可选'], ['tk.move_up', 'Up', '上移'], ['tk.move_down', 'Down', '下移'], ['tk.no_services', 'No services', '没有服务'],
+    ['tk.ask.map', 'Diagnose the tunnel map: which links or tunnels fail or run slow, and why?', '诊断隧道全景：哪些连接或隧道失败或变慢？原因是什么？'],
+    ['tk.ask.path', 'Diagnose the tunnel {name} along its path: does it fail or run slow, and why?', '沿链路诊断隧道 {name}：它是否失败或变慢？原因是什么？'],
+    ['tk.ask.link', 'Diagnose the link {from} → {to} on the tunnel map: does it fail or run slow, and why?', '诊断隧道图上的连接 {from} → {to}：它是否失败或变慢？原因是什么？'],
+    ['tk.ask.node', 'Diagnose {label} on the tunnel map: is it healthy, and do its links fail or run slow?', '诊断隧道图上的 {label}：它是否正常？它的连接是否失败或变慢？'],
     ['tk.map', 'Tunnel map', '隧道全景'], ['tk.path', 'Tunnel path', '隧道链路'], ['tk.all_tunnels', 'All tunnels', '全部隧道'],
     ['tk.control', 'Control link', '控制连接'], ['tk.traffic', 'Traffic', '流量热度'], ['tk.low_high', 'low → high', '低 → 高'],
     ['tk.tunnel_id', 'Tunnel ID', '隧道 ID'], ['tk.local_app', 'Local app', '本地应用'], ['tk.this_page', 'this page', '本页'],
@@ -466,6 +473,34 @@
     // 页面每次加载后调用 refresh()，使打开的图保持最新。
     function flow(o) {
       var cur = null; // {id, sel, el: {...}, close}
+      // askSpec asks diagnose about the selection of g, the diagram shown, or the diagram itself. / 让 diagnose 诊断所选或所示的图。
+      function plain(v) { return v == null ? v : typeof v === 'object' ? (v.textContent != null ? v.textContent : String(v)) : v; }
+      function askSpec(g, one, sel) {
+        if (!g) return null;
+        function label(id) { return (g.byId[id] || {}).label || id; }
+        var x = sel && sel.node && g.byId[sel.node], l = null, msg;
+        if (sel && sel.link) g.links.forEach(function (v) { if (v.key === sel.link) l = v; });
+        if (l) msg = t('tk.ask.link', { from: label(l.from), to: label(l.to) });
+        else if (x) msg = t('tk.ask.node', { label: x.label });
+        else if (one) msg = t('tk.ask.path', { name: (g.tunnels[one] || {}).name || one });
+        else msg = t('tk.ask.map');
+        var map = {
+          columns: g.cols,
+          boxes: g.nodes.map(function (n) {
+            var f = {};
+            (n.facts || []).forEach(function (p) { if (p && p[1] !== undefined && p[1] !== null && p[1] !== '') f[plain(p[0])] = plain(p[1]); });
+            return { id: n.id, kind: n.kind, label: n.label, sub: n.sub || undefined, state: n.state || undefined, note: n.note || undefined, facts: f };
+          }),
+          lines: g.links.map(function (v) {
+            return { from: label(v.from), to: label(v.to), kind: v.dashed ? 'control' : 'tunnel', protocol: v.label || undefined,
+              rtt: v.rtt ? rttText(v.rtt) : undefined, up_bytes: v.dashed ? undefined : v.up, down_bytes: v.dashed ? undefined : v.down,
+              tunnels: keys(v.tunnels).length || undefined };
+          }),
+          tunnels: keys(g.tunnels).map(function (k) { var tn = g.tunnels[k]; return { id: tn.id, name: tn.name, up_bytes: tn.up, down_bytes: tn.down, age: dur(tn.created) }; })
+        };
+        return { skill: 'diagnose', message: msg,
+          selection: { link_map: 'tunnel', view: one ? 'path' : 'map', selected: l ? { line: label(l.from) + ' → ' + label(l.to) } : x ? { box: x.label, kind: x.kind } : null, map: map } };
+      }
       function open(id) {
         if (cur) { cur.view = id; cur.sel = null; draw(); return; }
         var head = h('div.row.row--between'), chips = h('div.row', { style: { gap: '6px' } }), canvas = h('div.lm-canvas'), side = h('aside.lm-side');
@@ -488,9 +523,15 @@
       function refresh() { if (cur && document.body.contains(cur.canvas)) draw(); }
       function draw() {
         var one = cur.view !== undefined && cur.view !== null, g = one ? o.one(cur.view) : o.all();
+        var me = cur, ask = g && window.FitAI && FitAI.askButton ? FitAI.askButton(function () {
+          var spec = askSpec(g, one ? me.view : null, me.sel);
+          // The diagram is closed so that the panel beside the page is seen. / 关闭隧道图，以便看到页面旁的面板。
+          if (spec && FitAI.available() && me.close) me.close();
+          return spec;
+        }) : null;
         UI.mount(cur.head, h('div', h('h3', one ? t('tk.path') : t('tk.map')),
           h('div.small.muted', g ? (one ? (g.tunnels[cur.view] || {}).name : g.cols.join(' → ')) : '')),
-          one ? UI.btn(t('tk.all_tunnels'), 'fold', function () { cur.view = null; cur.sel = cur.mapSel || null; draw(); }, 'sm') : null);
+          h('div.row', ask, one ? UI.btn(t('tk.all_tunnels'), 'fold', function () { cur.view = null; cur.sel = cur.mapSel || null; draw(); }, 'sm') : null));
         if (!g) {
           UI.mount(cur.chips); UI.mount(cur.side);
           UI.mount(cur.canvas, UI.empty(t('tk.closed'), 'tunnel'));

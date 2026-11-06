@@ -12,6 +12,11 @@
 // LinkMap.graph(cols) → g; g.node(id, col, {kind, label, sub, state: 'ok'|'bad'|'wait', self, facts: [[k, v]]});
 // g.link(from, to, {fwd, back (bytes, the request's way and the answer's; left out: not known), rtt, calls, errors, inflight});
 // LinkMap.mount(el, {load() → Promise of g, interval}) → {refresh}
+//
+// The map's card has an Ask AI button (I128) that asks the skill diagnose about the box or line selected, or the whole
+// map: the map as it was last drawn (boxes, lines, latency, calls, errors, rates) goes as the page's selection.
+// 链路图卡片有“问 AI”按钮（I128），以技能 diagnose 诊断选中的方框或连线，未选中时诊断整张图：最后一次绘制的图（方框、连线、
+// 延迟、调用、错误、速率）作为页面的选中项。
 (function () {
   'use strict';
   var h = UI.h, t = UI.t, NS = 'http://www.w3.org/2000/svg';
@@ -24,7 +29,10 @@
       'lm.calls_v': '{c} calls, {e} failed, {i} running', 'lm.select': 'Click a box or a line for its details.',
       'lm.kind': 'Kind', 'lm.total': 'Total', 'lm.now': 'Now', 'lm.stale': 'Refresh failed, showing the last state: {m}',
       'lm.k.proxy': 'Proxy', 'lm.k.hub': 'Hub', 'lm.k.node': 'Node', 'lm.k.model': 'Model', 'lm.k.upstream': 'Upstream',
-      'lm.k.agents': 'Agents', 'lm.this': 'this page'
+      'lm.k.agents': 'Agents', 'lm.this': 'this page',
+      'lm.ask.map': 'Diagnose the LLM link map: which links fail or run slow, and why?',
+      'lm.ask.link': 'Diagnose the link {from} → {to} on the LLM link map: does it fail or run slow, and why?',
+      'lm.ask.node': 'Diagnose {label} ({kind}) on the LLM link map: is it healthy, and do its links fail or run slow?'
     },
     'zh-CN': {
       'lm.map': '链路图', 'lm.links': '连接与流量', 'lm.from': '来源', 'lm.to': '去向', 'lm.rtt': '延迟',
@@ -33,7 +41,10 @@
       'lm.calls_v': '{c} 次调用，{e} 次失败，{i} 次进行中', 'lm.select': '点击方框或连线查看详情。',
       'lm.kind': '类型', 'lm.total': '累计', 'lm.now': '当前', 'lm.stale': '刷新失败，显示的是上次的状态：{m}',
       'lm.k.proxy': '代理', 'lm.k.hub': 'Hub', 'lm.k.node': '节点', 'lm.k.model': '模型', 'lm.k.upstream': '上游',
-      'lm.k.agents': 'Agent', 'lm.this': '本页面'
+      'lm.k.agents': 'Agent', 'lm.this': '本页面',
+      'lm.ask.map': '诊断 LLM 链路图：哪些连接失败或变慢？原因是什么？',
+      'lm.ask.link': '诊断 LLM 链路图上的连接 {from} → {to}：它是否失败或变慢？原因是什么？',
+      'lm.ask.node': '诊断 LLM 链路图上的 {label}（{kind}）：它是否正常？它的连接是否失败或变慢？'
     }
   });
 
@@ -230,14 +241,44 @@
     ], g.links, { empty: t('lm.none') });
   }
 
+  // ---- Ask AI (I128) / 问 AI ----
+  // plain is a fact's value as text: a node drawn for the page goes as its text. / 事实的值转为文本（页面上的节点取其文字）。
+  function plain(v) { return v == null ? v : typeof v === 'object' ? (v.textContent != null ? v.textContent : String(v)) : v; }
+  function facts(fs) { var o = {}; (fs || []).forEach(function (f) { if (f) o[plain(f[0])] = plain(f[1]); }); return o; }
+  function rttMs(r) { return r && r.samples ? +(r.avg || r.last).toFixed(2) : undefined; }
+  // mapFacts is what the assistant is told of a graph. / 告诉助手的图信息。
+  function mapFacts(g) {
+    function label(id) { return (g.byId[id] || {}).label || id; }
+    return {
+      columns: g.cols,
+      boxes: g.nodes.map(function (x) { return { id: x.id, kind: x.kind, label: x.label, sub: x.sub || undefined, state: x.state || undefined, self: x.self || undefined, facts: facts(x.facts) }; }),
+      lines: g.links.map(function (l) {
+        return { from: label(l.from), to: label(l.to), rtt_ms: rttMs(l.rtt), latency: rttGrade(l.rtt) || undefined, calls: l.calls, errors: l.errors,
+          in_flight: l.inflight, request_bytes: l.fwd, answer_bytes: l.back, request_rate: l.rateF, answer_rate: l.rateB, facts: l.facts ? facts(l.facts) : undefined };
+      })
+    };
+  }
+  // askSpec asks diagnose about the selected box or line of g, or the whole map. / 让 diagnose 诊断选中的方框、连线或整张图。
+  function askSpec(g, sel) {
+    if (!g) return null;
+    var x = g.byId[sel], l = null, msg;
+    g.links.forEach(function (v) { if (v.key === sel) l = v; });
+    if (l) msg = t('lm.ask.link', { from: (g.byId[l.from] || {}).label || l.from, to: (g.byId[l.to] || {}).label || l.to });
+    else if (x) msg = t('lm.ask.node', { label: x.label, kind: t('lm.k.' + x.kind) });
+    else msg = t('lm.ask.map');
+    var sx = l ? { line: (g.byId[l.from] || {}).label + ' → ' + (g.byId[l.to] || {}).label } : x ? { box: x.label, kind: x.kind } : null;
+    return { skill: 'diagnose', message: msg, selection: { link_map: 'llm', selected: sx, map: mapFacts(g) } };
+  }
+
   // mount polls o.load() every o.interval (3s) and draws its graph; the rates of a line come from its bytes now and
   // at the poll before. / mount 每隔 o.interval（3 秒）调用 o.load() 并绘制其图；连线的速率由其本次与上次的字节数算出。
   function mount(el, o) {
     var prev = {}, sel = null, last = null;
     var note = h('div'), canvas = h('div.lm-canvas'), sideEl = h('aside.lm-side'), tbl = h('div');
     var legend = h('div.lm-legend.small.muted', t('lm.legend'), h('span.rtt-good', t('lm.good')), ' / ', h('span.rtt-fair', t('lm.fair')), ' / ', h('span.rtt-poor', t('lm.poor')));
+    var ask = window.FitAI && FitAI.askButton ? FitAI.askButton(function () { return askSpec(last, sel); }) : null;
     UI.mount(el, h('div.stack', note,
-      UI.card(t('lm.map'), h('div.stack', legend, h('div.lm-body', canvas, sideEl)), UI.btn(t('refresh'), 'refresh', function () { load(); }, 'sm')),
+      UI.card(t('lm.map'), h('div.stack', legend, h('div.lm-body', canvas, sideEl)), h('div.row', ask, UI.btn(t('refresh'), 'refresh', function () { load(); }, 'sm'))),
       UI.card(t('lm.links'), tbl, null, true)));
     function draw(g) {
       last = g;

@@ -18,7 +18,8 @@
 //           and kids are text already (the module words them itself). A nav item may instead be an external link
 //           ({label, href, icon?}) to a page of another module, or a collapsible node ({id, label, tag?, kids:
 //           [{label, href?, icon?, count?, title?}]}) whose children are third-level links (a kid without href is a
-//           muted row). A module with one page, or one external link, is a leaf.
+//           muted row). A module with one page, or one external link, is a leaf. A node or a kid may carry ask, an Ask
+//           AI spec (ai/ask.js, I128): its row then has the assistant's button, shown while the assistant may be asked.
 //   setup(UI, sh) → {routes: {'route/:param': fn(params)}, fallback} or a Promise of it. Called once, on the
 //           module's first visit. UI is the library scoped to the module; sh.page(navId, title, crumb) marks the
 //           menu item, sets the title and returns the emptied content element, and sh.tools is the top bar's tools.
@@ -37,7 +38,7 @@
 // 页面，右侧为所选页面。控制台提供某服务端模块时（GET /api/workbench 列出）才显示该模块：admin.console 提供配置本身的
 // 模块与同进程运行的每个角色的模块，角色自己的控制台只提供该角色的。模块用 WB.module(def) 注册，字段见上。
 // nav 也可为函数（菜单重建时再次调用，其标签为模块自己取好的文字）；条目可为指向其他模块页面的外链，或带 kids 的可折叠节点，
-// 其子项为第三级链接。boot 在外框构建完成后调用一次。topbar 在每次构建外框时调用，返回的元素放在顶栏中（每个页面都有），
+// 其子项为第三级链接；节点或子项可带 ask（“问 AI”的 spec，见 ai/ask.js，I128），其行上即有助手按钮。boot 在外框构建完成后调用一次。topbar 在每次构建外框时调用，返回的元素放在顶栏中（每个页面都有），
 // shell 为外框根元素，供页面旁的面板（助手）使用。WB.page() 返回当前页面（面板作为上下文发送），WB.select(value) 记录页面的
 // 选中项，切换页面时清除。编辑配置的页面用 WB.editor({describe, call}) 登记其编辑器（切换页面时清除），WB.page() 的 editable
 // 即其声明；WB.pageTool(name, args) 把助手页面工具的调用（page_get、page_edit、page_revert）交给它：只在页面上起草，从不提交或保存。
@@ -255,6 +256,12 @@
     return h('a.nav__item.tree__leaf.tree__d2.tree__link', { href: n.href, title: navLabel(m, n.title || n.label), 'data-href': n.href },
       n.icon ? UI.icon(n.icon) : null, h('span.ellipsis', label));
   }
+  // askOf is the Ask AI button of a menu item's ask (I128), or null without one or without the assistant.
+  // askOf 返回菜单项 ask 的“问 AI”按钮（I128）；没有 ask 或没有助手时为 null。
+  function askOf(spec) {
+    var b = spec && window.FitAI && FitAI.askButton ? FitAI.askButton(spec, { label: false, cls: 'tree__ask' }) : null;
+    return b || null;
+  }
   // portNode is a collapsible node (one listener port): its head toggles it, its kids are the third level; a port is
   // collapsed until it is opened. / portNode 是可折叠节点（一个监听端口）：头部切换展开，子项为第三级；端口默认收起。
   function portNode(m, n) {
@@ -266,6 +273,8 @@
         href: '#', title: navLabel(m, n.title || n.label), 'aria-expanded': isOpen ? 'true' : 'false',
         onclick: function (e) { e.preventDefault(); toggle(node, pkey); }
       }, UI.icon(n.icon || 'listen'), text(m, navLabel(m, n.label), navLabel(m, n.tag)), h('span.tree__chev', UI.icon('chev'))), kids);
+    var ask = askOf(n.ask);
+    if (ask) node.appendChild(ask);
     ports[pkey] = node;
     return node;
   }
@@ -276,7 +285,10 @@
     var count = k.count != null && k.count !== '' ? h('span.tree__count', String(k.count)) : null;
     var ico = k.icon ? UI.icon(k.icon) : null;
     if (!k.href) return h('span.nav__item.tree__leaf.tree__d3.tree__kid--muted', { title: title }, ico, h('span.ellipsis', label), count);
-    return h('a.nav__item.tree__leaf.tree__d3.tree__link', { href: k.href, title: title, 'data-href': k.href }, ico, h('span.ellipsis', label), count);
+    var a = h('a.nav__item.tree__leaf.tree__d3.tree__link', { href: k.href, title: title, 'data-href': k.href }, ico, h('span.ellipsis', label), count);
+    // A kid with an Ask AI button is a row of the link and the button. / 带“问 AI”按钮的子项是链接与按钮组成的一行。
+    var ask = askOf(k.ask);
+    return ask ? h('div.tree__row', a, ask) : a;
   }
 
   // rebuildTree draws the sidebar again from the modules' nav, keeping the open state and the filter, and marks the

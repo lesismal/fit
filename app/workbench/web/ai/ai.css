@@ -91,3 +91,22 @@
 .ai-skill__list { margin: 0; padding-left: 18px; }
 .ai-skill__prompt { padding: 8px 10px; max-height: 50vh; overflow: auto; }
 .ai-skill__src { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; min-height: 360px; }
+
+/* Ask AI (I128): hidden until the panel says the assistant may be asked (fit-ai-on on <html>); a form field's and a
+   sidebar row's button shows fully on hover or focus. / “问 AI”：面板告知可以询问助手（<html> 上的 fit-ai-on）之前隐藏；
+   表单字段与侧栏条目上的按钮在悬停或聚焦时完全显示。 */
+.ai-askbtn { display: none; flex: none; color: var(--primary); }
+html.fit-ai-on .ai-askbtn { display: inline-flex; }
+.ai-askbtn.btn--icon { padding: 3px; height: auto; min-height: 0; }
+.ai-askbtn svg { width: 14px; height: 14px; }
+.ai-askrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.cf-askfield { opacity: .45; margin-left: 4px; }
+.cf-field:hover .cf-askfield, .cf-node > summary:hover .cf-askfield, .cf-askfield:focus-visible { opacity: 1; }
+.tree__port, .tree__row { position: relative; }
+.tree__row { display: flex; flex-direction: column; }
+.tree__ask { position: absolute; right: 30px; top: 7px; color: var(--sidebar-strong); background: var(--sidebar-2); opacity: 0; }
+.tree__row > .tree__ask { right: 4px; top: 50%; transform: translateY(-50%); }
+.tree__port > .tree__head:hover ~ .tree__ask, .tree__row:hover > .tree__ask, .tree__ask:hover, .tree__ask:focus-visible { opacity: 1; }
+.shell.is-mini .tree__ask { display: none !important; }
+.ck-row__head .ck-ask { margin-left: auto; align-self: center; }
+.ov-spikes .callout { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }

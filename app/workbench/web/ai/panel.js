@@ -11,7 +11,8 @@
 // by typing /name at the start of the message, which shows the enabled skills that match: the chip above the composer
 // says which the conversation runs, its × stops it, and the message goes with "skill" when the chip changed it. A skill
 // the assistant loads itself (skill_load) comes as the event skill and sets the chip. FitAI.useSkill(name, {message,
-// inputs}) opens the panel on a new conversation with a skill picked, for the pages' Ask AI buttons (I128). The page's
+// inputs, send}) opens the panel on a new conversation with a skill picked, and with send sends the message at once,
+// for the pages' Ask AI buttons (I128, ai/ask.js), which the panel shows or hides with the user's level. The page's
 // editor, when it has one (WB.editor), goes with the page as editable; a page tool's call (I154) comes as the event
 // page_call, is run on the page shown (WB.pageTool), which drafts into its editor and forms and never saves, and its
 // answer goes back with POST /api/chat/page as the call's result.
@@ -24,8 +25,8 @@
 // 以 DOM 节点构建，从不作为 HTML 插入，模型写的任何内容都不会在页面上执行。对话的待处理提案（提案工具的各步骤，I126）显示在
 // 输入框上方，带“应用”（会再弹出含完整差异的对话框确认）与“丢弃”（ai/proposals.js）。技能（I127）可用“技能”按钮选择，或在
 // 消息开头输入 /name，面板会列出匹配的已启用技能：输入框上方的标签显示对话运行的技能，点 × 停止使用；标签有变化时消息带上 "skill"。
-// 助手自行加载的技能（skill_load）以 skill 事件到达并更新标签。FitAI.useSkill(name, {message, inputs}) 以选好的技能打开面板并新建
-// 对话，供各页面的“问 AI”按钮使用（I128）。页面有编辑器时（WB.editor），其声明作为 editable 随页面发送；页面工具的调用
+// 助手自行加载的技能（skill_load）以 skill 事件到达并更新标签。FitAI.useSkill(name, {message, inputs, send}) 以选好的技能打开面板并
+// 新建对话，带 send 时立即发送消息，供各页面的“问 AI”按钮使用（I128，ai/ask.js），面板按用户级别显示或隐藏这些按钮。页面有编辑器时（WB.editor），其声明作为 editable 随页面发送；页面工具的调用
 // （I154）以 page_call 事件到达，在当前页面上执行（WB.pageTool）：只起草到页面的编辑器与表单、从不保存，其应答经
 // POST /api/chat/page 作为该调用的结果返回。
 (function () {
@@ -50,7 +51,8 @@
       'p.skills': 'Skills', 'p.skillsHint': 'Pick a skill, or type /name at the start of a message', 'p.noSkill': 'No skill: the assistant picks one when it fits',
       'p.clearSkill': 'Stop using this skill', 'p.skillLoaded': 'The assistant loaded the skill {skill}.', 'p.noMatch': 'No enabled skill matches.',
       'p.onPage': 'on the page…', 'p.drafted': 'Drafted on the page, not saved: review it there, then Save and apply — or revert it.',
-      'p.reverted': 'The assistant\'s draft was taken off the page.'
+      'p.reverted': 'The assistant\'s draft was taken off the page.',
+      'p.skillOff': 'The skill {skill} is not enabled: the assistant answers without it.'
     },
     'zh-CN': {
       'p.open': '助手', 'p.close': '关闭助手', 'p.new': '新对话', 'p.delete': '删除此对话',
@@ -70,7 +72,8 @@
       'p.skills': '技能', 'p.skillsHint': '选择一个技能，或在消息开头输入 /name', 'p.noSkill': '未选技能：合适时助手会自行选择',
       'p.clearSkill': '停止使用此技能', 'p.skillLoaded': '助手加载了技能 {skill}。', 'p.noMatch': '没有匹配的已启用技能。',
       'p.onPage': '在页面上执行…', 'p.drafted': '已起草到页面上，尚未保存：请在页面上检查，然后“保存并应用”，或撤回。',
-      'p.reverted': '已从页面上撤回助手的草稿。'
+      'p.reverted': '已从页面上撤回助手的草稿。',
+      'p.skillOff': '技能 {skill} 未启用：助手将不使用它来回答。'
     }
   }, 'ai');
 
@@ -229,10 +232,13 @@
     var button = h('button.btn.btn--ghost.btn--icon.ai-toggle', { type: 'button', title: t('p.open'), 'aria-label': t('p.open'), onclick: toggle }, UI.icon('chat'));
     setBusy(false);
 
-    // The button is hidden for a user whose level is off. / 级别为 off 的用户看不到按钮。
+    // The button is hidden for a user whose level is off, and so are the pages' Ask AI buttons (ai/ask.js).
+    // 级别为 off 的用户看不到按钮，各页面的“问 AI”按钮也一样（ai/ask.js）。
+    if (window.FitAI.setAvailable) FitAI.setAvailable(null, shell);
     UI.api('GET', '/api/tools').then(function (info) {
       st.info = info;
       button.hidden = info.level === 'off';
+      if (window.FitAI.setAvailable) FitAI.setAvailable(info.level !== 'off', shell);
       showInfo();
     }, function () { /* the panel says so when opened / 打开面板时再提示 */ });
 
@@ -325,8 +331,10 @@
       }
       return false;
     }
-    // useSkill opens the panel on a new conversation with skill name picked, its inputs and a message filled in.
-    // useSkill 以选好的技能 name 打开面板并新建对话，预填其输入与消息。
+    // useSkill opens the panel on a new conversation with skill name picked, its inputs and a message filled in; with
+    // o.send (an Ask AI button's, I128) the message goes at once, with the page as context, once the enabled skills are
+    // read: a skill not enabled is left out, and said so. / useSkill 以选好的技能 name 打开面板并新建对话，预填其输入与
+    // 消息；带 o.send 时（“问 AI”按钮，I128）在读取已启用的技能后立即连同页面上下文发送：未启用的技能不使用，并加以说明。
     function useSkill(name, o) {
       o = o || {};
       if (st.streaming) return false;
@@ -335,6 +343,16 @@
       setSkill(name, o.inputs);
       if (o.message != null) input.value = o.message;
       setTimeout(function () { input.focus(); }, 30);
+      if (o.send && input.value.trim()) {
+        st.sendPage = pageBox.checked = true;
+        (st.skills ? Promise.resolve() : loadSkills()).then(function () {
+          if (st.streaming || st.skill !== name) return;
+          var off = !skillOf(name);
+          if (off) setSkill('');
+          submit();
+          if (off) log.insertBefore(h('div.callout.callout--warn.small', t('p.skillOff', { skill: '/' + name })), log.firstChild);
+        });
+      }
       return true;
     }
     window.FitAI.useSkill = useSkill;

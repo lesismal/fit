@@ -1,10 +1,14 @@
 // The gateway's overview: what fit runs now, read only, from the Admin API's GET endpoints (/status,
 // /config/effective, /versions): the running config's version, reloads, connections, the listeners, the upstreams'
 // backends and their health, the routes and services and where each came from, the certificates. Needs ui.js,
-// workbench.js and config.js (for the certificate table).
+// workbench.js and config.js (for the certificate table). Ask AI (I128): an upstream with backends down, and a spike
+// of the error counters between two refreshes (requests failed on an upstream, connections refused, reloads failed),
+// have a button that asks the skill diagnose about it; a spike stays listed for a minute.
 //
 // 网关概览：当前运行状态，只读，来自 Admin API 的 GET 接口（/status、/config/effective、/versions）：运行配置的版本、
 // 重载、连接、监听、上游后端及其健康状态、路由与四层服务及其来源、证书。依赖 ui.js、workbench.js 与 config.js（证书表）。
+// “问 AI”（I128）：有后端不可用的上游，以及两次刷新之间错误计数的突增（上游的失败请求、被拒绝的连接、失败的重载）都有按钮，
+// 以技能 diagnose 诊断它；突增在列表中保留一分钟。
 (function () {
   'use strict';
 
@@ -35,7 +39,14 @@
     ['certs', 'Certificates', '证书'], ['filter', 'Filter', '筛选'],
     ['versions', 'Recent versions', '最近版本'], ['all.versions', 'All versions', '全部版本'], ['running', 'running', '运行中'],
     ['applied', 'Applied', '应用时间'], ['version', 'Version', '版本'], ['updated', 'Updated {time}', '更新于 {time}'],
-    ['auto', 'Auto refresh', '自动刷新'], ['edit', 'Edit', '编辑']
+    ['auto', 'Auto refresh', '自动刷新'], ['edit', 'Edit', '编辑'],
+    // Ask AI (I128): spikes, and what is asked of the assistant / “问 AI”：突增，以及向助手提的问题
+    ['sp.failed', '{n} more requests failed on the upstream {name} in {s}s', '{s} 秒内上游 {name} 又有 {n} 个请求失败'],
+    ['sp.refused', '{n} more connections were refused in {s}s', '{s} 秒内又有 {n} 个连接被拒绝'],
+    ['sp.reloads', '{n} more config reloads failed in {s}s', '{s} 秒内又有 {n} 次配置重载失败'],
+    ['ask.up', 'The upstream {name} has {down} of {all} backends down. Why, and what should I fix?',
+      '上游 {name} 的 {all} 个后端中有 {down} 个不可用。原因是什么？应该修复什么？'],
+    ['ask.spike', 'Diagnose this spike: {what}. What caused it, and what should I fix?', '诊断这次突增：{what}。原因是什么？应该修复什么？']
   ];
 
   WB.module({
@@ -44,6 +55,58 @@
     setup: function (UI, sh) {
       var h = UI.h, t = UI.t;
       var auto = true;
+
+      // ---- Ask AI (I128) / 问 AI ----
+      function askOf(spec) { return window.FitAI && FitAI.askButton ? FitAI.askButton(spec, { label: false }) : null; }
+      // routesTo is the names of the routes proxying to upstream name. / 代理到上游 name 的路由名称。
+      function routesTo(cfg, name) {
+        return (cfg.routes || []).filter(function (r) {
+          var p = r && r.handler && r.handler.params;
+          return p && p.upstream === name;
+        }).map(function (r) { return r.name; }).filter(Boolean);
+      }
+      function backends(u) {
+        return u.backends.map(function (b) { return { address: b.address, up: b.up, probed_down: b.probed_down, in_flight: b.in_flight, succeeded: b.succeeded, failed: b.failed }; });
+      }
+      function upAsk(u, n, cfg) {
+        return function () {
+          var names = routesTo(cfg, u.name);
+          return { skill: 'diagnose', message: t('ask.up', { name: u.name, down: u.backends.length - n, all: u.backends.length }),
+            inputs: { route: names.join(', ') },
+            selection: { upstream: { name: u.name, in_flight: u.in_flight, backends: backends(u) }, routes: names } };
+        };
+      }
+      // A spike is an error counter that rose between two refreshes: {key, text, at, ask}, kept SPIKE_MS.
+      // 突增是两次刷新之间增加的错误计数：{key, text, at, ask}，保留 SPIKE_MS。
+      var SPIKE_MS = 60000, prev = null, spikes = {};
+      function counters(st) {
+        var c = { refused: (st.connections || {}).refused || 0, reloads: (st.reloads || {}).failed || 0, failed: {}, at: Date.now() };
+        (st.upstreams || []).forEach(function (u) { c.failed[u.name] = u.backends.reduce(function (a, b) { return a + (b.failed || 0); }, 0); });
+        return c;
+      }
+      // spot compares st with the refresh before and records the counters that rose. / 与上次刷新比较，记录增加的计数。
+      function spot(st, cfg) {
+        var now = counters(st), secs = prev ? Math.max(1, Math.round((now.at - prev.at) / 1000)) : 0;
+        function add(key, what, sel) {
+          var spec = function () {
+            return { skill: 'diagnose', message: t('ask.spike', { what: what }), inputs: sel.route ? { route: sel.route } : null,
+              selection: { spike: sel, what: what, at: new Date(now.at).toISOString() } };
+          };
+          spikes[key] = { text: what, at: now.at, ask: spec };
+        }
+        if (prev) {
+          if (now.refused > prev.refused) add('refused', t('sp.refused', { n: now.refused - prev.refused, s: secs }), { counter: 'connections.refused', delta: now.refused - prev.refused, seconds: secs, total: now.refused });
+          if (now.reloads > prev.reloads) add('reloads', t('sp.reloads', { n: now.reloads - prev.reloads, s: secs }), { counter: 'reloads.failed', delta: now.reloads - prev.reloads, seconds: secs, total: now.reloads });
+          (st.upstreams || []).forEach(function (u) {
+            var a = now.failed[u.name], b = prev.failed[u.name];
+            if (b == null || a <= b) return;
+            add('u:' + u.name, t('sp.failed', { n: a - b, name: u.name, s: secs }), { counter: 'upstream.failed', upstream: u.name, delta: a - b, seconds: secs,
+              total: a, backends: backends(u), route: routesTo(cfg, u.name).join(', ') });
+          });
+        }
+        prev = now;
+        Object.keys(spikes).forEach(function (k) { if (now.at - spikes[k].at > SPIKE_MS) delete spikes[k]; });
+      }
 
       function list(values) { return values && values.length ? values.map(function (v) { return UI.badge(v); }) : h('span.muted.small', t('all')); }
       function sec(unix) { return Date.parse(unix) / 1000; }
@@ -76,19 +139,21 @@
       }
 
       function page() {
+        // A visit compares its own refreshes only. / 每次访问只比较本次访问中的刷新。
+        prev = null;
         var el = sh.page('overview', t('mod.label'));
         var stamp = h('span.muted.small');
         var autoBox = h('input', { type: 'checkbox', checked: auto, onchange: function () { auto = autoBox.checked; } });
         UI.mount(sh.tools, stamp, h('label.check.small', autoBox, h('span', t('auto'))),
           UI.btn(t('refresh'), 'refresh', function () { load(); }, 'ghost sm'));
-        var tiles = h('div.grid.grid--3');
+        var tiles = h('div.grid.grid--3'), spBox = h('div.ov-spikes.stack');
         var lsBox = h('div'), srcBox = h('div'), shBox = h('div'), upBox = h('div.stack'), rtBox = h('div'), svBox = h('div'), certBox = h('div'), verBox = h('div');
         var rq = '', uq = '';
         var rtTools = h('div.row', filterInput(function (q) { rq = q; applyFilter(rtBox, 'tbody tr', rq); }),
           h('a.btn.btn--ghost.btn--sm', { href: '#/gw.reverse/routes' }, UI.icon('edit'), t('edit')));
         var upTools = h('div.row', filterInput(function (q) { uq = q; applyFilter(upBox, '.ov-upstream', uq); }),
           h('a.btn.btn--ghost.btn--sm', { href: '#/gw.reverse/upstreams' }, UI.icon('edit'), t('edit')));
-        UI.mount(el, tiles,
+        UI.mount(el, spBox, tiles,
           h('div.grid.grid--2', UI.card(t('listeners'), lsBox, h('a.btn.btn--ghost.btn--sm', { href: '#/gw.listeners/listeners' }, UI.icon('edit'), t('edit')), true),
             UI.card(t('sources'), srcBox, null, true)),
           shBox,
@@ -108,6 +173,12 @@
             ups.forEach(function (u) { all += u.backends.length; up += u.backends.filter(function (b) { return b.up; }).length; });
             var soon = certs.filter(function (c) { return Date.parse(c.not_after) - Date.now() < 14 * 86400e3; }).length;
             var rl = st.reloads || {}, cn = st.connections || {};
+            spot(st, cfg);
+            var ks = Object.keys(spikes).sort(function (a, b) { return spikes[b].at - spikes[a].at; });
+            UI.mount(spBox, ks.map(function (k) {
+              var x = spikes[k];
+              return h('div.callout.callout--warn', h('span', UI.icon('activity'), ' ', x.text, ' ', h('span.muted.small', UI.ago(x.at / 1000))), askOf(x.ask));
+            }));
             UI.mount(tiles,
               UI.stat('layers', t('t.version'), st.version, t('t.version.sub', { source: st.source, ago: UI.ago(sec(st.applied)) }), 'info'),
               UI.stat('refresh', t('t.reloads'), rl.succeeded, t('t.reloads.sub', { n: rl.failed || 0 }), rl.failed ? 'warn' : 'ok'),
@@ -153,7 +224,7 @@
               return h('div.ov-upstream.stack',
                 h('div.row', h('b', u.name), UI.badge(t('u.up', { up: n, all: u.backends.length }), kind, true),
                   h('span.muted.small', t('u.inflight', { n: u.in_flight })), c.u && c.u.load_balancing ? UI.badge(c.u.load_balancing) : null,
-                  c.source ? UI.badge(c.source, 'primary') : null),
+                  c.source ? UI.badge(c.source, 'primary') : null, n < u.backends.length ? askOf(upAsk(u, n, cfg)) : null),
                 UI.table([
                   { label: t('backend'), render: function (b) { return h('code', b.address); } },
                   { label: t('state'), render: function (b) { return b.up ? UI.badge(t('up'), 'ok', true) : UI.badge(b.probed_down ? t('down.probe') : t('down.fail'), 'danger', true); } },

@@ -681,6 +681,34 @@ message (a name, or `""` to stop the conversation's) and `"inputs"` (the skill's
 `"skill": "name"`. Its `start` event carries the `skill` the chat runs, and an event `skill` says
 that `skill_load` set one.
 
+### Ask AI on the pages
+
+Where the work is, a page has an **Ask AI** button. A click opens the panel on a new conversation
+with a skill picked, its inputs filled in, the thing asked about given to the page as its selection
+(sent with the page as context, as `WB.select` does), and a question in the user's language, which is
+sent at once: the first answer is about that thing. The question shows in the conversation as the
+user's message, as if typed.
+
+| Where | Skill | Inputs | What goes as the selection |
+| --- | --- | --- | --- |
+| A save's problems, a failed save, a `.conf`/`.yaml`/`.json` tab whose text does not parse | `explain` | `error`: the error and each problem with its path, line and column; `path`: the member, when the problems name one | the problems; the text they are about, the lines around each problem's line, numbered, or, for a save of the forms, the draft's values at the problems' paths |
+| Each field of a form (the button beside its name) | `explain` | `path`: its schema path (`routes.handler`, indexes and keys left out) | the field's path in the draft (`routes[0].handler`), its type and its value |
+| Each difference on the **Consistency** page | `drift-explain` | `difference`: its ID | its name, kind, category, detail and the fixes offered (not its values: the skill reads them) |
+| Each port of the **Engine** menu, and each of its entries that lists routes | `diagnose` | `route`: the names of the port's or the entry's routes | the port (name, address, the address bound, protocols, tags), its entries, and its routes' match, handler, upstream and middleware |
+| Each route of **Reverse proxy → Routes** | `diagnose` | `route`: its name | its match, handler, upstream, listeners and middleware |
+| An upstream with backends down, on the **Overview** and **Reverse proxy → Upstreams** | `diagnose` | `route`: the routes that proxy to it | its backends: address, up, probed down, in flight, succeeded, failed |
+| A spike on the **Overview**: an error counter that rose between two refreshes (requests failed on an upstream, connections refused, reloads failed), listed for a minute | `diagnose` | `route`, for an upstream's | the counter, by how much it rose and in how many seconds, its total, and the upstream's backends |
+| The LLM roles' link map, and the tunnel's map and paths | `diagnose` | — | the box or line selected, and the map as drawn: boxes with their facts, lines with latency, calls, errors and rates (the tunnel's diagram is closed, so the panel shows) |
+
+The buttons show only where the panel does: the console serves the module `ai` and the user's level
+is not `off`. Without the module no button is made, nor for a user whose level is `off`, and until
+the panel has read the level they are kept hidden. A skill that is disabled is left out — the
+question goes without it, and the conversation
+says so; while an answer runs, a click is refused with a note. Secrets stay out: a field whose path
+names a secret goes without its value, the text's lines that set a secret go with `[redacted]`, and
+the selection is bounded (strings cut at 1,500 characters, lists at 40 items, the whole at 8 KiB)
+before the server redacts it and cuts it to 16 KiB as all page context. An input is at most 2 KiB.
+
 ### Migration and security review
 
 Two of the built-in skills do whole tasks, and fit checks them on fixed sets of configs.
@@ -825,4 +853,8 @@ served from memory, with nothing fetched from elsewhere. `core/` holds the libra
 with `WB.module`, naming the server module whose API it calls, its place in the menu and its pages.
 A module shows when the console serving the page serves its server module. A module may also put a tool in
 every page's top bar (`topbar`, as the assistant's button), and a page may say what it has selected
-with `WB.select`, which `WB.page` hands the assistant's panel with the page shown.
+with `WB.select`, which `WB.page` hands the assistant's panel with the page shown. A page makes an
+Ask AI button with `FitAI.askButton(spec)` (`ai/ask.js`), where `spec`, or a function returning it
+at the click, is `{skill, message, inputs, selection}`; the button is `null` while the assistant is
+off for the user, so a page checks for `window.FitAI` and places what it gets. A menu node or entry
+of a dynamic `nav` may carry `ask`, the same spec, for a button on its row.
