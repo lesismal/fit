@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	stdhttp "net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,34 +22,18 @@ import (
 // HTTP-01 challenge on a listener in the clear: the dispatcher answers it
 // from memory, and the TLS listener then serves the certificate.
 func TestACMEHTTPChallenge(t *testing.T) {
-	port := pebbletest.FreePort(t)
-	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port})
-	c, err := config.Load(fmt.Appendf(nil, `{
-  "acme": {"directory": %q, "ca_file": %q, "storage": %q, "timeout": "20s", "challenges": ["http-01"]},
-  "listeners": [
-    {"name": "http", "address": "127.0.0.1:%d"},
-    {"name": "https", "address": "127.0.0.1:0", "tls": {"acme": ["www.fit.test"]}}
-  ],
-  "routes": [{"handler": {"module": "respond", "params": {"body": "hello"}}}]
-}`, p.Directory, p.CAFile, t.TempDir(), port))
-	if err != nil {
-		t.Fatal(err)
-	}
-	acme, err := tlsmgr.NewACME(c.ACME, nil, logs.Func(t.Logf))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer acme.Close()
-	g, err := runtime.Compile(c, runtime.Env{ACME: acme})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rt := new(runtime.Runtime)
-	rt.Swap(g)
-	defer rt.Close()
-	s, err := Start(rt)
-	if err != nil {
-		t.Fatal(err)
+	// The port is found free, then let go of, before the listener binds it:
+	// another test may take it between, so a bind that finds it in use
+	// tries again on another.
+	var s *Server
+	var p *pebbletest.Pebble
+	for attempt := 0; ; attempt++ {
+		var err error
+		if s, p, err = startACMEHTTP(t); err == nil {
+			break
+		} else if !strings.Contains(err.Error(), "address already in use") || attempt == 4 {
+			t.Fatal(err)
+		}
 	}
 	defer s.Close()
 	var addr string
@@ -81,4 +66,45 @@ func TestACMEHTTPChallenge(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// startACMEHTTP starts Pebble, checking HTTP-01 on a port found free, and
+// fit with a listener on that port in the clear and one with TLS from ACME.
+func startACMEHTTP(t *testing.T) (*Server, *pebbletest.Pebble, error) {
+	t.Helper()
+	port := pebbletest.FreePort(t)
+	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port})
+	c, err := config.Load(fmt.Appendf(nil, `{
+  "acme": {"directory": %q, "ca_file": %q, "storage": %q, "timeout": "20s", "challenges": ["http-01"]},
+  "listeners": [
+    {"name": "http", "address": "127.0.0.1:%d"},
+    {"name": "https", "address": "127.0.0.1:0", "tls": {"acme": ["www.fit.test"]}}
+  ],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "hello"}}}]
+}`, p.Directory, p.CAFile, t.TempDir(), port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acme, err := tlsmgr.NewACME(c.ACME, nil, logs.Func(t.Logf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := runtime.Compile(c, runtime.Env{ACME: acme})
+	if err != nil {
+		acme.Close()
+		t.Fatal(err)
+	}
+	rt := new(runtime.Runtime)
+	rt.Swap(g)
+	s, err := Start(rt)
+	if err != nil {
+		rt.Close()
+		acme.Close()
+		return nil, nil, err
+	}
+	t.Cleanup(func() {
+		rt.Close()
+		acme.Close()
+	})
+	return s, p, nil
 }
