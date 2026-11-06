@@ -84,6 +84,11 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   名称与英文描述（不超过窗口的十分之一），`skill_load` 把某个技能的完整提示词交给模型；`/name`、面板的选择器或 `skill_load`
   使它成为对话的技能，此后系统提示带上其提示词（标明为 fit 自己的指令，不能推翻规则）而不再带目录。技能可用的工具为它所列、
   且用户级别与设置允许的那些，外加 `ask_user`；技能的 `model` 从启动它的那条消息起使用。
+- **迁移与审查（I129）**：`migrate` 先用 `fit adapt` 的转换器，剩下的由模型完成（Traefik 完全由模型转换），合并进运行中的
+  配置，成为一个提案，其 `config_propose` 步骤在 `unconverted` 中列出没有带过来的项；`security-review` 每行写一条发现
+  （严重程度、成员与修复），并为可以修复的提出步骤。两者都在固定的配置集（`assistant/testdata/eval`）上评估：CI 中用记录的
+  回答，`make assistant-eval` 用环境中设定的模型，从不在 CI 中运行。`config_get` 请求了配置未设置的成员时返回 null；
+  rate_limit 的 `key`（`ip`、`route`、`header:Name`）是选择器，按原样读写。
 
 ## 影响
 

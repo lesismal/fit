@@ -1,0 +1,352 @@
+{
+  "model": "hand-written for the eval, in the shape a model answers",
+  "turns": [
+    {
+      "text": "",
+      "calls": [
+        {
+          "name": "adapt_convert",
+          "args": {
+            "from": "nginx",
+            "text": "{{source}}"
+          }
+        },
+        {
+          "name": "config_get",
+          "args": {
+            "members": [
+              "listeners",
+              "routes",
+              "upstreams"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_validate",
+          "args": {
+            "patch": {
+              "upstreams": [
+                {
+                  "name": "proxy_127_0_0_1_7700",
+                  "addresses": [
+                    "127.0.0.1:7700"
+                  ]
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "docs.example.org-assets",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/assets/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "static",
+                    "params": {
+                      "root": "/srv/docs"
+                    }
+                  },
+                  "middleware": [
+                    {
+                      "module": "headers",
+                      "params": {
+                        "response": {
+                          "set": {
+                            "Cache-Control": "public, max-age=2592000"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "docs.example.org-search",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/search*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "proxy_127_0_0_1_7700"
+                    }
+                  }
+                },
+                {
+                  "name": "docs.example.org-private",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/private/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 401
+                    }
+                  }
+                },
+                {
+                  "name": "docs.example.org-counter",
+                  "listeners": [
+                    "web"
+                  ],
+                  "priority": 30000,
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/counter"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 501,
+                      "body": "not converted\n"
+                    }
+                  }
+                },
+                {
+                  "name": "docs.example.org",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "static",
+                    "params": {
+                      "root": "/srv/docs",
+                      "try_files": [
+                        "{path}",
+                        "{path}/",
+                        "/index.html"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Move the nginx config over",
+            "members": {
+              "upstreams": [
+                {
+                  "name": "proxy_127_0_0_1_7700",
+                  "addresses": [
+                    "127.0.0.1:7700"
+                  ]
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "docs.example.org-assets",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/assets/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "static",
+                    "params": {
+                      "root": "/srv/docs"
+                    }
+                  },
+                  "middleware": [
+                    {
+                      "module": "headers",
+                      "params": {
+                        "response": {
+                          "set": {
+                            "Cache-Control": "public, max-age=2592000"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "docs.example.org-search",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/search*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "proxy_127_0_0_1_7700"
+                    }
+                  }
+                },
+                {
+                  "name": "docs.example.org-private",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/private/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 401
+                    }
+                  }
+                },
+                {
+                  "name": "docs.example.org-counter",
+                  "listeners": [
+                    "web"
+                  ],
+                  "priority": 30000,
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/counter"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 501,
+                      "body": "not converted\n"
+                    }
+                  }
+                },
+                {
+                  "name": "docs.example.org",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "host": [
+                      "docs.example.org"
+                    ],
+                    "path": [
+                      "/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "static",
+                    "params": {
+                      "root": "/srv/docs",
+                      "try_files": [
+                        "{path}",
+                        "{path}/",
+                        "/index.html"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "unconverted": [
+              "line 11: stub_status: fit counts requests in its metrics, at the Admin API's /metrics; the location is left out",
+              "lines 23-24: auth_basic with auth_basic_user_file /etc/nginx/htpasswd: fit's basic_auth holds bcrypt hashes in the config, which I may not write; /private/ answers 401 until you add its users on the page",
+              "line 28: content_by_lua_block: OpenResty's Lua is not converted; /counter answers 501, and a wasm middleware is the closest fit has"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "The server listens on :8080, where your listener web is, so its routes go on web. The converter took the files, try_files and the search proxy; by hand, expires 30d (line 15) is a Cache-Control of 30 days on /assets/. Not converted: stub_status (line 11), the htpasswd users (lines 23-24; /private/ stays closed) and the Lua (line 28)."
+    }
+  ]
+}

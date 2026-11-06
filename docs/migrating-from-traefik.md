@@ -5,7 +5,9 @@
 fit takes from Traefik its providers, which turn Docker labels, a Consul catalog, KV stores and
 Kubernetes resources into routes, and its middleware; it adds a static file server, a cache, and a
 smaller footprint per connection. There is no converter; this guide maps Traefik's parts to fit's,
-and the [config reference](reference/config.md) has every field.
+and the [config reference](reference/config.md) has every field. The workbench's assistant converts
+Traefik's YAML or Docker labels itself with its skill `migrate`, by this mapping, as one proposal
+that lists what could not be carried over ([the console](console.md#migration-and-security-review)).
 
 ## How the parts map
 

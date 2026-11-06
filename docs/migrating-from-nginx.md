@@ -24,7 +24,13 @@ locations (exact, prefix, `^~` and regular expressions, nested), and in them `pr
 `upstream` blocks, `root`, `alias`, `index`, `try_files`, `return`, `rewrite`, `limit_req` with
 `limit_req_zone`, `client_max_body_size`, `add_header`, `proxy_set_header` with literal values,
 and `gzip`, and `error_log` and `access_log`. Read what it reports, and finish the config by hand
-with the tables below.
+with the tables below. What `auth_basic` guards answers 401 until a `basic_auth` middleware with its
+users takes its place, so that nothing a password kept is served to anyone; OpenResty's
+`*_by_lua_block` blocks are skipped, and reported at their lines.
+
+The workbench's assistant does the rest with its skill `migrate`: the converter first, then what
+it left, merged into the running config as one proposal that lists what could not be carried over
+(see [the console](console.md#migration-and-security-review)).
 
 ## How the parts map
 

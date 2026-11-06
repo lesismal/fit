@@ -135,6 +135,14 @@ workers.
   fenced as fit's own instructions that never override the rules, in place of the catalog. A
   skill's tools are those it names that the user's level and the settings allow, and `ask_user`;
   a skill's `model` is used from the message that starts it.
+- **Migration and review (I129)**: `migrate` converts with `fit adapt`'s converter first and the
+  model for what it left (Traefik by the model alone), merged into the running config as one
+  proposal whose `config_propose` step lists, in `unconverted`, what was not carried over;
+  `security-review` writes findings one a line, severity, member and fix, and proposes the fixes it
+  may. Both are evaluated on fixed sets of configs (`assistant/testdata/eval`): in CI against
+  recorded answers, and against a model in the environment with `make assistant-eval`, never in
+  CI. A member `config_get` is asked for and the config does not set comes back null, and
+  rate_limit's `key` (`ip`, `route`, `header:Name`) is a selector, read and written as it is.
 
 ## Consequences
 

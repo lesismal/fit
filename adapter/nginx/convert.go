@@ -157,6 +157,10 @@ type settings struct {
 	limitReqs    []map[string]any
 	proxyHeaders [][2]string
 	hostHeader   string
+	// authBasic is the line of the auth_basic this context is under, 0
+	// for none: its requests answer 401, since its users are not
+	// converted.
+	authBasic int
 	// set records which of the not-inherited-if-set lists this context set.
 	setAddHeaders, setLimitReqs, setProxyHeaders bool
 }
@@ -290,6 +294,19 @@ func (c *converter) setting(s *settings, d *directive, where string) {
 			s.gzip = d.args[0] == "on"
 			return
 		}
+	case "auth_basic":
+		if len(d.args) == 1 {
+			if d.args[0] == "off" {
+				s.authBasic = 0
+				return
+			}
+			s.authBasic = d.line
+			c.warn(d.line, "auth_basic: not converted: what it guards answers 401 until a basic_auth middleware takes its place, with its users' bcrypt hashes (fit hash-password makes one)")
+			return
+		}
+	case "auth_basic_user_file":
+		c.skip(d, "fit does not read htpasswd files: basic_auth's users hold the bcrypt hashes, written in the config")
+		return
 	case "add_header":
 		if len(d.args) >= 2 && len(d.args) <= 3 {
 			if strings.Contains(d.args[1], "$") {
@@ -338,6 +355,10 @@ func (c *converter) setting(s *settings, d *directive, where string) {
 		"proxy_buffer_size", "proxy_busy_buffers_size", "proxy_send_timeout", "send_timeout",
 		"client_body_timeout", "client_header_timeout", "resolver", "resolver_timeout":
 		c.skip(d, "not converted: fit's defaults stand in for it")
+		return
+	}
+	if strings.Contains(d.name, "_by_lua") {
+		c.skip(d, "OpenResty's Lua is not converted: fit's plugins are WebAssembly, run by the wasm middleware")
 		return
 	}
 	c.skip(d, "not converted")
@@ -669,6 +690,9 @@ func (c *converter) location(d *directive, parent *settings, info *serverInfo, o
 		}
 		r.Handler = h
 	}
+	if ret == nil {
+		guarded(r, s)
+	}
 	r.Middleware = append(r.Middleware, c.response(s)...)
 	c.out.Routes = append(c.out.Routes, r)
 	for _, n := range nested {
@@ -685,10 +709,20 @@ func (c *converter) addRoute(d *directive, s *settings, info *serverInfo, m *out
 	if m != nil && len(m.Host) == 0 && len(m.Path) == 0 {
 		m = nil
 	}
-	c.out.Routes = append(c.out.Routes, &outRoute{
+	r := &outRoute{
 		Name: name, Listeners: info.listeners, Priority: priority, Match: m,
 		Middleware: append(append(slices.Clone(info.rewrites), c.limits(s)...), c.response(s)...), Handler: h, line: d.line,
-	})
+	}
+	guarded(r, s)
+	c.out.Routes = append(c.out.Routes, r)
+}
+
+// guarded makes r, a route under an auth_basic not converted, answer 401
+// rather than serve what the password guarded to anyone.
+func guarded(r *outRoute, s *settings) {
+	if s.authBasic > 0 {
+		r.Handler = outRef{Module: "respond", Params: map[string]any{"status": 401}}
+	}
 }
 
 // limits returns the middleware of a context's limits, which nginx applies

@@ -1,0 +1,181 @@
+{
+  "listeners": [
+    {
+      "name": "http",
+      "address": ":80",
+      "protocols": [
+        "http/1.1"
+      ]
+    },
+    {
+      "name": "https",
+      "address": ":443",
+      "protocols": [
+        "http/1.1",
+        "h2"
+      ],
+      "tls": {
+        "certificates": [
+          {
+            "cert_file": "/etc/fit/api.crt",
+            "key_file": "/etc/fit/api.key"
+          }
+        ]
+      }
+    },
+    {
+      "name": "partners",
+      "address": ":8443",
+      "protocols": [
+        "http/1.1"
+      ],
+      "tls": {
+        "certificates": [
+          {
+            "cert_file": "/etc/fit/partners.crt",
+            "key_file": "/etc/fit/partners.key"
+          }
+        ],
+        "client_auth": {
+          "ca_files": [
+            "/etc/fit/partners-ca.pem"
+          ],
+          "mode": "verify_if_given"
+        }
+      }
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "api",
+      "addresses": [
+        "10.0.6.10:8080",
+        "10.0.6.11:8080"
+      ],
+      "health_check": {
+        "path": "/healthz"
+      }
+    },
+    {
+      "name": "reports",
+      "addresses": [
+        "10.0.6.30:8080"
+      ],
+      "response_header_timeout": "30m",
+      "response_timeout": "24h"
+    },
+    {
+      "name": "partner-api",
+      "addresses": [
+        "10.0.6.40:8080"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "name": "to-https",
+      "listeners": [
+        "http"
+      ],
+      "middleware": [
+        {
+          "module": "redirect",
+          "params": {
+            "status": 308,
+            "to": "https://{host}{uri}"
+          }
+        }
+      ],
+      "handler": {
+        "module": "respond"
+      }
+    },
+    {
+      "name": "api",
+      "listeners": [
+        "https"
+      ],
+      "match": {
+        "host": [
+          "api.example.com"
+        ],
+        "path": [
+          "/v1/*"
+        ]
+      },
+      "middleware": [
+        {
+          "module": "rate_limit",
+          "params": {
+            "rate": 20,
+            "burst": 40,
+            "trusted_proxies": [
+              "0.0.0.0/0"
+            ]
+          }
+        }
+      ],
+      "handler": {
+        "module": "proxy",
+        "params": {
+          "upstream": "api"
+        }
+      }
+    },
+    {
+      "name": "reports",
+      "listeners": [
+        "https"
+      ],
+      "match": {
+        "host": [
+          "api.example.com"
+        ],
+        "path": [
+          "/reports/*"
+        ]
+      },
+      "handler": {
+        "module": "proxy",
+        "params": {
+          "upstream": "reports"
+        }
+      }
+    },
+    {
+      "name": "files",
+      "listeners": [
+        "https"
+      ],
+      "match": {
+        "host": [
+          "api.example.com"
+        ],
+        "path": [
+          "/files/*"
+        ]
+      },
+      "handler": {
+        "module": "static",
+        "params": {
+          "root": "/srv/files",
+          "strip_prefix": "/files",
+          "browse": true,
+          "dotfiles": "allow"
+        }
+      }
+    },
+    {
+      "name": "partners",
+      "listeners": [
+        "partners"
+      ],
+      "handler": {
+        "module": "proxy",
+        "params": {
+          "upstream": "partner-api"
+        }
+      }
+    }
+  ]
+}

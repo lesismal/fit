@@ -1,0 +1,59 @@
+{
+  "from": "caddyfile",
+  "source": "source.caddyfile",
+  "routes": [
+    {
+      "port": 443,
+      "host": "blog.example.net",
+      "path": "/api/comments",
+      "want": {
+        "upstream": [
+          "10.0.2.5:4000",
+          "10.0.2.6:4000"
+        ],
+        "contains": [
+          "strip_prefix"
+        ]
+      }
+    },
+    {
+      "port": 443,
+      "host": "blog.example.net",
+      "path": "/posts/hello.html",
+      "want": {
+        "module": "static",
+        "contains": [
+          "/var/www/blog"
+        ]
+      }
+    },
+    {
+      "port": 443,
+      "host": "www.blog.example.net",
+      "path": "/about",
+      "want": {
+        "redirect": "https://blog.example.net"
+      }
+    },
+    {
+      "port": 80,
+      "host": "blog.example.net",
+      "path": "/posts/",
+      "want": {
+        "redirect": "https://"
+      }
+    },
+    {
+      "port": 8080,
+      "host": "localhost",
+      "path": "/healthz",
+      "want": {
+        "module": "respond"
+      }
+    }
+  ],
+  "unconverted": [
+    "templates",
+    "header_regexp|@bots"
+  ]
+}

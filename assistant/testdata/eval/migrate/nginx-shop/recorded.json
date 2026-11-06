@@ -1,0 +1,497 @@
+{
+  "model": "hand-written for the eval, in the shape a model answers",
+  "turns": [
+    {
+      "text": "",
+      "calls": [
+        {
+          "name": "adapt_convert",
+          "args": {
+            "from": "nginx",
+            "text": "{{source}}"
+          }
+        },
+        {
+          "name": "config_get",
+          "args": {
+            "members": [
+              "listeners",
+              "routes",
+              "upstreams"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "schema_describe",
+          "args": {
+            "path": "routes.match.remote_ip"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_validate",
+          "args": {
+            "patch": {
+              "listeners": [
+                {
+                  "name": "web",
+                  "address": ":8080",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "http_80",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "https_443",
+                  "address": ":443",
+                  "protocols": [
+                    "http/1.1"
+                  ],
+                  "tls": {
+                    "certificates": [
+                      {
+                        "cert_file": "/etc/nginx/tls/shop.crt",
+                        "key_file": "/etc/nginx/tls/shop.key"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "upstreams": [
+                {
+                  "name": "shop_api",
+                  "addresses": [
+                    "10.0.1.10:8080",
+                    "10.0.1.11:8080"
+                  ],
+                  "load_balancing": "least_conn",
+                  "connect_timeout": "3s"
+                },
+                {
+                  "name": "proxy_10_0_1_20_9000",
+                  "addresses": [
+                    "10.0.1.20:9000"
+                  ]
+                },
+                {
+                  "name": "proxy_10_0_1_30_3000",
+                  "addresses": [
+                    "10.0.1.30:3000"
+                  ]
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com",
+                  "listeners": [
+                    "http_80"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 301,
+                        "to": "https://{host}{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 404
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com-api",
+                  "listeners": [
+                    "https_443"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/api/*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "rate_limit",
+                      "params": {
+                        "burst": 20,
+                        "key": "ip",
+                        "rate": 10
+                      }
+                    },
+                    {
+                      "module": "body_limit",
+                      "params": {
+                        "max_bytes": 20971520
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "shop_api"
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com-admin",
+                  "listeners": [
+                    "https_443"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/admin/*"
+                    ],
+                    "remote_ip": [
+                      "192.168.10.0/24"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "body_limit",
+                      "params": {
+                        "max_bytes": 20971520
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "proxy_10_0_1_20_9000"
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com-admin-others",
+                  "listeners": [
+                    "https_443"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/admin/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 403
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com-2",
+                  "listeners": [
+                    "https_443"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "body_limit",
+                      "params": {
+                        "max_bytes": 20971520
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "proxy_10_0_1_30_3000"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Move the nginx config over",
+            "members": {
+              "listeners": [
+                {
+                  "name": "web",
+                  "address": ":8080",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "http_80",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "https_443",
+                  "address": ":443",
+                  "protocols": [
+                    "http/1.1"
+                  ],
+                  "tls": {
+                    "certificates": [
+                      {
+                        "cert_file": "/etc/nginx/tls/shop.crt",
+                        "key_file": "/etc/nginx/tls/shop.key"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "upstreams": [
+                {
+                  "name": "shop_api",
+                  "addresses": [
+                    "10.0.1.10:8080",
+                    "10.0.1.11:8080"
+                  ],
+                  "load_balancing": "least_conn",
+                  "connect_timeout": "3s"
+                },
+                {
+                  "name": "proxy_10_0_1_20_9000",
+                  "addresses": [
+                    "10.0.1.20:9000"
+                  ]
+                },
+                {
+                  "name": "proxy_10_0_1_30_3000",
+                  "addresses": [
+                    "10.0.1.30:3000"
+                  ]
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com",
+                  "listeners": [
+                    "http_80"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 301,
+                        "to": "https://{host}{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 404
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com-api",
+                  "listeners": [
+                    "https_443"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/api/*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "rate_limit",
+                      "params": {
+                        "burst": 20,
+                        "key": "ip",
+                        "rate": 10
+                      }
+                    },
+                    {
+                      "module": "body_limit",
+                      "params": {
+                        "max_bytes": 20971520
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "shop_api"
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com-admin",
+                  "listeners": [
+                    "https_443"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/admin/*"
+                    ],
+                    "remote_ip": [
+                      "192.168.10.0/24"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "body_limit",
+                      "params": {
+                        "max_bytes": 20971520
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "proxy_10_0_1_20_9000"
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com-admin-others",
+                  "listeners": [
+                    "https_443"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/admin/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 403
+                    }
+                  }
+                },
+                {
+                  "name": "shop.example.com-2",
+                  "listeners": [
+                    "https_443"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "body_limit",
+                      "params": {
+                        "max_bytes": 20971520
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "proxy_10_0_1_30_3000"
+                    }
+                  }
+                }
+              ]
+            },
+            "unconverted": [
+              "line 24: error_page 502 503 /maintenance.html: fit has no custom error pages; the upstream's own error answers pass through",
+              "line 40: sub_filter (with sub_filter_once, line 41): fit does not rewrite response bodies; the closest is a wasm middleware of your own"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "The converter took the listeners, the shop_api pool, the redirect to HTTPS, the rate limit and the body limit. By hand: allow and deny (lines 33-34) are a remote_ip match on /admin/ for 192.168.10.0/24, and a route beside it answering 403. Not converted: error_page (line 24) and sub_filter (line 40), listed on the proposal. Your health route and listener web stay. The proposal waits for you to apply it."
+    }
+  ]
+}

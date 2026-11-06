@@ -128,6 +128,80 @@ func (p *parser) next() (token, bool, error) {
 	return token{}, false, nil
 }
 
+// skipLua passes over the Lua code of d, an OpenResty *_by_lua_block
+// directive, to the "}" that ends it: braces in Lua's strings, long
+// brackets and comments do not count.
+func (p *parser) skipLua(d *directive) error {
+	depth := 1
+	for p.pos < len(p.src) {
+		c := p.src[p.pos]
+		switch {
+		case c == '\n':
+			p.line++
+			p.pos++
+		case c == '{':
+			depth++
+			p.pos++
+		case c == '}':
+			p.pos++
+			if depth--; depth == 0 {
+				return nil
+			}
+		case c == '-' && strings.HasPrefix(p.src[p.pos:], "--"):
+			p.pos += 2
+			if p.longBracket() {
+				continue
+			}
+			for p.pos < len(p.src) && p.src[p.pos] != '\n' {
+				p.pos++
+			}
+		case c == '[' && p.longBracket():
+		case c == '"' || c == '\'':
+			p.pos++
+			// A string ends at its quote, or, unended, at the line's end.
+			for p.pos < len(p.src) && p.src[p.pos] != c && p.src[p.pos] != '\n' {
+				if p.src[p.pos] == '\\' && p.pos+1 < len(p.src) && p.src[p.pos+1] != '\n' {
+					p.pos++
+				}
+				p.pos++
+			}
+			if p.pos < len(p.src) && p.src[p.pos] == c {
+				p.pos++
+			}
+		default:
+			p.pos++
+		}
+	}
+	return p.errorf(d.line, "%s: a block of Lua that does not end", d.name)
+}
+
+// longBracket passes over a Lua long bracket, [[...]] or [==[...]==], at
+// the parser's place, and reports whether there was one.
+func (p *parser) longBracket() bool {
+	s := p.src[p.pos:]
+	if !strings.HasPrefix(s, "[") {
+		return false
+	}
+	level := 1
+	for level < len(s) && s[level] == '=' {
+		level++
+	}
+	if level >= len(s) || s[level] != '[' {
+		return false
+	}
+	end := "]" + strings.Repeat("=", level-1) + "]"
+	i := strings.Index(s[level+1:], end)
+	if i < 0 {
+		p.line += strings.Count(s, "\n")
+		p.pos = len(p.src)
+		return true
+	}
+	body := s[:level+1+i+len(end)]
+	p.line += strings.Count(body, "\n")
+	p.pos += len(body)
+	return true
+}
+
 // block reads directives until the "}" that ends the block, or the end of
 // the config at depth 0.
 func (p *parser) block(depth int) ([]*directive, error) {
@@ -173,6 +247,13 @@ func (p *parser) block(depth int) ([]*directive, error) {
 			}
 			if !a.quoted && a.text == "{" {
 				d.isBlock = true
+				if strings.HasSuffix(d.name, "_by_lua_block") {
+					// OpenResty's Lua: code, not directives, kept out.
+					if err := p.skipLua(d); err != nil {
+						return nil, err
+					}
+					break
+				}
 				if d.block, err = p.block(depth + 1); err != nil {
 					return nil, err
 				}

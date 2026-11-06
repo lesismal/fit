@@ -46,6 +46,10 @@ const (
 	maxSummaryBytes = 300
 	// maxPurgeItems bounds a purge's URLs, and its tags.
 	maxPurgeItems = 100
+	// maxUnconverted bounds a step's unconverted items, and
+	// maxUnconvertedBytes each one.
+	maxUnconverted      = 100
+	maxUnconvertedBytes = 500
 	// maxDiffBytes bounds each format's diff.
 	maxDiffBytes = 256 << 10
 )
@@ -106,6 +110,10 @@ type stepArgs struct {
 	// config_propose
 	Members json.RawMessage `json:"members"`
 	Ops     []patchOp       `json:"ops"`
+	// Unconverted lists what of a config moved from another server the
+	// change does not carry over (the skill migrate): each item with the
+	// source's line, what it was and why, or the closest fit has.
+	Unconverted []string `json:"unconverted"`
 	// reconcile_propose
 	Fixes []FixRef `json:"fixes"`
 	// rollback_propose
@@ -147,7 +155,7 @@ func proposeTools() []*Tool {
 	return []*Tool{
 		{Name: ToolConfigPropose, Group: GroupChange, Level: config.AssistantPropose,
 			Description: "Propose a change to fit's config: top-level members set whole (members), or operations at JSON pointers (ops: add, replace or remove; /routes/- appends). Read the config first and change only what was asked; prefer ops for a part of a large member. Values shown as [redacted] may be written back where they were, never elsewhere; secrets and admin cannot be proposed." + note,
-			Parameters:  json.RawMessage(`{"type":"object","properties":{` + summarySchema + `,"members":{"type":"object","description":"top-level members set to these values; null removes one"},"ops":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string","enum":["add","replace","remove"]},"path":{"type":"string","description":"a JSON pointer, as /routes/0/handle or /upstreams/-"},"value":{"description":"the value of an add or a replace"}},"required":["op","path"]}}},"required":["summary"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{` + summarySchema + `,"members":{"type":"object","description":"top-level members set to these values; null removes one"},"unconverted":{"type":"array","items":{"type":"string"},"maxItems":100,"description":"when the change moves a config from another server: each item of it not carried over, as 'line 12: sub_filter: fit does not rewrite response bodies', shown to the person with the diff"},"ops":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string","enum":["add","replace","remove"]},"path":{"type":"string","description":"a JSON pointer, as /routes/0/handle or /upstreams/-"},"value":{"description":"the value of an add or a replace"}},"required":["op","path"]}}},"required":["summary"]}`),
 			Run:         toolPropose(ToolConfigPropose)},
 		{Name: ToolReconcilePropose, Group: GroupChange, Level: config.AssistantPropose,
 			Description: "Propose fixes of the Consistency check's differences, by each difference's id and the action of one of its fixes, as consistency_check lists them. Reconcile steps are applied together, and not with config_propose or rollback_propose steps: propose those in a proposal of their own." + note,
@@ -301,6 +309,9 @@ func (b *built) step(a *Assistant, ctx context.Context, i int, st ProposalStep) 
 		if err := b.setKind(KindPatch); err != nil {
 			return err
 		}
+		if err := checkUnconverted(args.Unconverted); err != nil {
+			return err
+		}
 		return b.patch(args)
 	case ToolReconcilePropose:
 		if err := b.setKind(KindReconcile); err != nil {
@@ -316,6 +327,38 @@ func (b *built) step(a *Assistant, ctx context.Context, i int, st ProposalStep) 
 		return b.purge(a, ctx, args)
 	}
 	return fmt.Errorf("%s is not a propose tool", st.Tool)
+}
+
+// checkUnconverted checks config_propose's unconverted items.
+func checkUnconverted(items []string) error {
+	if len(items) > maxUnconverted {
+		return fmt.Errorf("unconverted holds at most %d items", maxUnconverted)
+	}
+	for _, it := range items {
+		if s := strings.TrimSpace(it); s == "" || len(s) > maxUnconvertedBytes {
+			return fmt.Errorf("each of unconverted is 1 to %d bytes saying what was not carried over", maxUnconvertedBytes)
+		}
+	}
+	return nil
+}
+
+// unconverted returns the unconverted items of steps, in order, each once.
+func unconverted(steps []ProposalStep) []string {
+	var out []string
+	for _, st := range steps {
+		var args struct {
+			Unconverted []string `json:"unconverted"`
+		}
+		if st.Tool != ToolConfigPropose || json.Unmarshal(st.Args, &args) != nil {
+			continue
+		}
+		for _, it := range args.Unconverted {
+			if it = strings.TrimSpace(it); it != "" && !slices.Contains(out, it) {
+				out = append(out, it)
+			}
+		}
+	}
+	return out
 }
 
 // patch applies config_propose's members and ops to b.after, all or none.
@@ -443,7 +486,7 @@ func (b *built) guardAt(tokens []string, v, baseV any, secret bool) (any, error)
 			}
 			return nil, fmt.Errorf("%s is %q, a redacted value the config does not have there: leave that member as it is, and change what is around it with ops", pointerOf(tokens), t)
 		}
-		if secret && t != "" && t != bs {
+		if secret && t != "" && t != bs && !selectorValue(tokens[len(tokens)-1], t) {
 			return nil, fmt.Errorf("%s holds a secret, which the assistant never writes: leave it out, or as it is, and the person sets it on the page", pointerOf(tokens))
 		}
 	}
