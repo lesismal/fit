@@ -5897,3 +5897,42 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   certificate with its open links kept.
 - **Gaps**: the llm proxy's `api.cert_file` and the roles' console `cert_file` are not watched. The
   decisions made are in the plan's I160 section, pending review.
+
+
+## AI assistant in the workbench
+
+### I124 The assistant's settings and model client — done
+
+- **Decision 031** (English and Chinese). **Config**: `admin.assistant` (`config/assistant.go`):
+  providers of eight kinds, `default_model`, `params`, `limits` (every limit of the plan's table),
+  `data`, `users` with their levels and `default_level`; it needs `admin.console`.
+- **Store**: named sections beside the config (`Store.Section`, `Store.SetSection`); the settings and
+  keys are kept in section `assistant`; a store is written as version 3 only while it holds a
+  section, versions 1 and 2 are still read, and sections are never exported.
+- **`assistant/model`**: one client for anthropic, openai, openai_responses, gemini, azure_openai,
+  ollama, openai_compatible and llm_proxy, on fib's asynchronous HTTP client: each kind's request
+  from the system prompt, messages and tools, its streamed answer (SSE, or NDJSON for Ollama) parsed
+  into text, thinking, tool calls and usage; a line 1 MiB, an answer 8 MiB by default, 64 tool calls,
+  8 KiB of an error body; connect, first-byte, silence and whole-call timeouts; retries only before
+  an answer; a cancel closes the call's connection. Keys print as `***`, are replaced in every error,
+  and go only over https or to loopback.
+- **Console module `ai`** (served only with `admin.assistant`): `GET`/`PUT /api/m/ai/settings` (409
+  without a store, 412 to a stale page), `POST /api/m/ai/providers/test` (4 at once, cancelled when
+  the browser leaves). Disk and certificate work runs on the console's pool; model calls answer
+  later, so no fib worker waits.
+- **Workbench** (`ai/settings.js`): the Settings page in English and Chinese: providers with their
+  key's state, edited in a dialog with a write-only key; a test (model list, then a short call, each
+  timed); "Read the provider's list"; the default model, limits, data and each user's level.
+- **Tests**: `make test-changed` under the race detector (77 packages); `assistant` 100%,
+  `assistant/model` 99.4%, `config/assistant.go` 100% covered; every kind round-trips a tool call
+  against a recorded fake (`assistant/internal/fakeapi`); slow, cut, oversized and too-many-tool-call
+  streams fail within their bounds; keys stay out of answers and logs. `test/docker/assistant`
+  against Ollama 0.12.6 with `qwen2.5:1.5b`, run on the benchmark host (Docker Hub did not answer
+  from the dev machine): a tool call round-trips as kind `ollama` and as `openai_compatible`, the
+  model lists and a cancelled call pass. The page was checked in a browser against `mockllm`, in
+  English and Chinese, the key never in the page or the log.
+- **Breaking**: a store that holds the assistant's settings is version 3, which older fits cannot
+  open; stores without sections are unchanged.
+- **Gaps**: reasoning is not carried between turns for OpenAI Responses' encrypted reasoning items or
+  Anthropic's redacted thinking; no way back to the config file's settings once the store holds
+  them. The decisions made are in the plan's I124 section, pending review.

@@ -4191,3 +4191,30 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **测试**：竞态检测覆盖其涉及的 79 个包；本机与 Windows 的 vet；上述攻击、重启后指纹不变的 hub、保留已有链路并接受轮换证书的
   LLM 监听方。
 - **缺口**：llm proxy 的 `api.cert_file` 与角色控制台的 `cert_file` 没有被监视。实现时所做的决策在计划的 I160 一节，待审查。
+
+
+## workbench 中的 AI 助手
+
+### I124 助手的设置与模型客户端 — 已完成
+
+- **决定 031**（中英文）。**配置**：`admin.assistant`（`config/assistant.go`）：八种 provider、`default_model`、`params`、
+  `limits`（计划表中的全部限制）、`data`、带级别的 `users` 与 `default_level`；它需要 `admin.console`。
+- **Store**：配置旁的具名小节（`Store.Section`、`Store.SetSection`）；设置与密钥保存在 `assistant` 小节；只有含小节时才写
+  第 3 版，第 1、2 版仍可读，小节从不导出。
+- **`assistant/model`**：一个客户端支持 anthropic、openai、openai_responses、gemini、azure_openai、ollama、openai_compatible 与
+  llm_proxy，基于 fib 的异步 HTTP 客户端：按类型由系统提示、消息与工具构造请求，流式应答（SSE，Ollama 为 NDJSON）解析为文本、
+  思考、工具调用与用量；单行 1 MiB，应答默认 8 MiB，64 个工具调用，错误正文 8 KiB；连接、首字节、静默与整次调用超时；只在得到
+  应答前重试；取消会关闭调用的连接。密钥打印为 `***`，在所有错误中被替换，只经 https 或发往 loopback。
+- **控制台模块 `ai`**（只在设置 `admin.assistant` 时提供）：`GET`/`PUT /api/m/ai/settings`（没有 store 答 409，页面过期答 412），
+  `POST /api/m/ai/providers/test`（最多同时 4 个，浏览器离开时取消）。磁盘与证书工作在控制台的池上运行；模型调用稍后应答，
+  不让 fib worker 等待。
+- **Workbench**（`ai/settings.js`）：中英文的设置页：列出 provider 及其密钥状态，在对话框中编辑，密钥只写；测试（先模型列表，
+  再一次短调用，各自计时）；“读取 provider 的列表”；默认模型、限制、数据与每个用户的级别。
+- **测试**：竞态检测下的 `make test-changed`（77 个包）；覆盖率 `assistant` 100%、`assistant/model` 99.4%、
+  `config/assistant.go` 100%；每种类型都对录制的假 API（`assistant/internal/fakeapi`）完成一次工具调用往返；慢、断、过大与工具
+  调用过多的流都在限制内失败；密钥不进应答与日志。`test/docker/assistant` 用 Ollama 0.12.6 与 `qwen2.5:1.5b` 在基准机上运行（开发
+  机连不上 Docker Hub）：以 `ollama` 与 `openai_compatible` 两种类型完成工具调用往返，模型列表与取消调用通过。页面在浏览器中对
+  `mockllm` 以中英文检查过，密钥从未出现在页面或日志中。
+- **不兼容变更**：保存了助手设置的 store 为第 3 版，旧版 fit 无法打开；没有小节的 store 不变。
+- **缺口**：OpenAI Responses 的加密推理项与 Anthropic 的 redacted thinking 不在轮次之间传递；store 保存设置后无法回到配置文件的
+  设置。实现时所做的决策在计划的 I124 一节，待审查。

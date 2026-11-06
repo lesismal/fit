@@ -268,7 +268,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I122 | workbench 的功能标签与监听端口：流媒体、媒体认证、WebRTC、隧道与 LLM 配置各自成页，每个监听端口列出它所提供的功能并链接到各自的页面 | I121 | done |
 | I123 | workbench 的引擎菜单：一个一级条目，每个监听端口是其功能的子菜单，按用户要求的顺序（处理器、反向/正向代理、缓存与中间件、流媒体、WebRTC、四层/SOCKS/TLS/ACME/默认 HTTPS），端口行带该端口的功能标签 | I122 | done |
 | **AI 助手** | | | |
-| I124 | 决定 031；`admin.assistant` 及其设置页面；各 API 的模型客户端，流式、带工具调用，基于 fib 的异步 HTTP 客户端；密钥保存在 store 中 | I120 | todo |
+| I124 | 决定 031；`admin.assistant` 及其设置页面；各 API 的模型客户端，流式、带工具调用，基于 fib 的异步 HTTP 客户端；密钥保存在 store 中 | I120 | done |
 | I125 | workbench 的对话面板与只读工具：工具注册表、SSE 对话、页面上下文、脱敏、fit 日志环 | I124 | todo |
 | I126 | 提议：修改类工具、diff 与应用流程、按用户的级别与审计日志 | I125 | todo |
 | I127 | Skill：格式、内置集合、Skills 页面、导入导出、`/name` | I126 | todo |
@@ -1658,6 +1658,29 @@ skill 嵌入在 bundle 中；用户可在 Skills 页面添加自己的（保存�
 - **完成条件**：每种 kind 都针对其 API 的录制假服务调用通过，并在 `test/docker` 中针对 Ollama 与一个 OpenAI 兼容服务器调用通过，
   工具调用往返成功；密钥从不出现在响应、页面或日志中；慢速、中断或超大的流被限制并失败；在 race 检测下通过。
 - **涉及**：`assistant`（新）、`admin`、`admin/store`、`config`、`schema`、`app/workbench`、`docs`。
+
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **设置存放在哪里。** `admin.assistant` 给出初始设置；设置页保存后改用 store 的 `assistant` 一节，与 store 中的配置一样。`admin`
+   整体只在重启时变化且不进 store，页面无法保存到其中。备选：单独的覆盖层；页面不允许编辑。
+2. **没有 store 就不保存**：`PUT` 答 409；页面仍可读取与测试，密钥来自 `api_key_env`，页面输入的密钥绝不落到明文文件。
+3. **只有存在小节时才写第 3 版**：没有小节的 store 仍写第 2 版，旧版 fit 可以打开。备选：总写第 3 版。
+4. **导出不含密钥**：导出只带配置与用户。备选：因导出已加密而包含密钥。
+5. **掩码显示密钥最后四个字符**，仅限 16 个字符以上的密钥。备选：只显示“已设置”。
+6. **非 loopback 不通过明文 http 发送密钥**，与控制台和 Admin API 一致。备选：允许局域网地址（如局域网中的 vLLM）。
+7. **`llm_proxy` 是一种 provider 类型**，而不是计划表中单独的成员：经 loopback 用 proxy 的某个 API key 访问，证书固定（pin），
+   不按 CA 校验。
+8. **重试**：在得到任何应答之前，对传输错误与可重试状态（408、429、500、502–504、529，Retry-After 最多 10 秒）重试；
+   首字节超时从不重试。
+9. **各 API 的细节**：Gemini 用 `parametersJsonSchema`；Chat Completions 用 `stream_options.include_usage`；openai 与 azure 用
+   `max_completion_tokens` 与 `reasoning_effort`，其他用 `max_tokens`；Anthropic 的思考预算 2048/8192/24576 加到 `max_tokens`
+   上，开启思考时不带 temperature；Responses 用 `store: false`。
+10. **计划表中的所有限制现在都在 schema 里**，带默认值；I124 只执行 `max_stream_bytes`，其余由使用它们的迭代执行。
+11. **`users` 是列表**，元素为 `{username, level}`，每个都须是控制台用户。
+12. **防止更新丢失**：本进程内的保存计数器对过期页面答 412。备选：基于哈希的 ETag。
+13. **provider 测试**：最多同时 4 个，模型列表 15 秒、调用 30 秒，最多 32 个 token，不重试；`models_only` 只读列表。
+14. **模型连接**：在监听器的引擎上，最多 16 个 fib 客户端（每种连接超时与固定证书一个）；需要第 17 个时淘汰最旧的，等其调用
+    结束后关闭。
 
 ### I125 对话面板与只读工具
 

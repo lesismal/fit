@@ -278,7 +278,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I122 | The workbench's feature tabs and listener ports: streaming, media auth, WebRTC, tunnel and LLM config on pages of their own, and each listener port listing the features it serves with links to their pages | I121 | done |
 | I123 | The workbench's Engine menu: one first-level entry, each listener port a submenu of its features in the order asked (handlers, reverse/forward proxy, cache and middleware, streaming, WebRTC, layer 4/SOCKS/TLS/ACME/HTTPS by default), with the port's feature tags on its line | I122 | done |
 | **AI assistant** | | | |
-| I124 | Decision 031; `admin.assistant` and its settings page; the model client for each API, streamed, with tool calls, on fib's asynchronous HTTP client; keys in the store | I120 | todo |
+| I124 | Decision 031; `admin.assistant` and its settings page; the model client for each API, streamed, with tool calls, on fib's asynchronous HTTP client; keys in the store | I120 | done |
 | I125 | The workbench's chat panel and the read tools: tool registry, SSE chat, page context, redaction, fit's log ring | I124 | todo |
 | I126 | Proposals: the change tools, the diff and apply flow, per-user levels and the audit log | I125 | todo |
 | I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | todo |
@@ -1957,6 +1957,40 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   Ollama and an OpenAI-compatible server, a tool call round-tripping; a key never appears in a response,
   the page or a log; a slow, cut or oversized stream is bounded and failed; under the race detector.
 - **Touches**: `assistant` (new), `admin`, `admin/store`, `config`, `schema`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Where the settings live.** `admin.assistant` gives the first settings; once the Settings page
+   saves, the store's section `assistant` is used, as the store's config is. All of `admin` changes
+   only at a restart and stays out of the store, so the page cannot save into it. Alternatives: an
+   override layer of its own; no editing in the page.
+2. **Without a store nothing is saved**: `PUT` answers 409; the page still reads and tests, and keys
+   come from `api_key_env`, so a key typed in the page never lands in a plain file.
+3. **Version 3 only with a section**: a store without one is still written as version 2, so older
+   fits open it. Alternative: always version 3.
+4. **Keys are not exported**: an export carries the config and the users only. Alternative: include
+   them, as exports are encrypted.
+5. **A masked key shows its last four characters**, only for keys of 16 or more. Alternative: "set".
+6. **No key over plain http off loopback**, as for the console and the Admin API. Alternative: allow
+   LAN addresses (a vLLM on the LAN).
+7. **`llm_proxy` is a provider kind** rather than a member of its own as the plan's table has it:
+   reached on loopback with one of the proxy's API keys, its certificate pinned, not checked
+   against CAs.
+8. **Retries** on transport errors and retryable statuses (408, 429, 500, 502–504, 529, with
+   Retry-After up to 10s) before any answer; a first-byte timeout is never retried.
+9. **Each API's details**: Gemini `parametersJsonSchema`; Chat Completions
+   `stream_options.include_usage`; `max_completion_tokens` and `reasoning_effort` for openai and
+   azure, `max_tokens` for the rest; Anthropic thinking budgets 2048/8192/24576 added to
+   `max_tokens`, no temperature with thinking; Responses with `store: false`.
+10. **Every limit of the plan's table is in the schema now**, with defaults; only `max_stream_bytes`
+    is enforced in I124, the rest by the iterations that use them.
+11. **`users` is a list** of `{username, level}`, each a console user.
+12. **Lost updates**: a counter of saves in this process answers 412 to a stale page. Alternative: an
+    ETag from a hash.
+13. **Provider tests**: at most 4 at once, 15s for the model list and 30s for the call, at most 32
+    tokens, no retries; `models_only` reads the list alone.
+14. **Model connections**: on the listeners' engine, at most 16 fib clients (one per connect timeout
+    and pinned certificate); a 17th retires the oldest, closed once its calls end.
 
 ### I125 The chat panel and the read tools
 
