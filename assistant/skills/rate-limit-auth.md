@@ -4,7 +4,7 @@ title: Rate limits and auth
 title_zh: 限流与认证
 description: Rate limits, IP allow and deny lists, and basic, JWT or forward auth on routes.
 description_zh: 为路由配置限流、IP 允许与拒绝列表，以及 basic、JWT 或转发认证。
-tools: [config_get, schema_describe, config_validate, config_propose]
+tools: [config_get, schema_describe, config_validate, config_propose, page_get, page_edit, page_revert]
 inputs:
   - name: route
     description: The route to protect, by name.
@@ -32,3 +32,8 @@ You protect routes: limits on how often and how much, and who may pass.
    without credentials gets back.
 
 Without the propose tools, show the config text instead.
+
+When the page the person is on edits every member the change touches (page_context's `editable.members`)
+and `page_edit` is offered, draft the change there instead: `page_get` first, then `page_edit` with the same
+operations, and say it waits on the page for the person's Save and apply. A change that touches a member the
+page does not edit is proposed, or shown as text, as above.

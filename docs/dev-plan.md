@@ -281,7 +281,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I124 | Decision 031; `admin.assistant` and its settings page; the model client for each API, streamed, with tool calls, on fib's asynchronous HTTP client; keys in the store | I120 | done |
 | I125 | The workbench's chat panel and the read tools: tool registry, SSE chat, page context, redaction, fit's log ring | I124 | done |
 | I126 | Proposals: the change tools, the diff and apply flow, per-user levels and the audit log | I125 | done |
-| I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | todo |
+| I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | done |
 | I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | todo |
 | I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | todo |
 | I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | todo |
@@ -2107,6 +2107,38 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   loaded with `skill_load`, and the prompt sent without it carries only the catalog; a skill naming a
   tool above the user's level cannot call it; bad front matter is refused with its line; English and Chinese; under the race detector.
 - **Touches**: `assistant`, `admin/store`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Who changes skills**: level `apply`; everyone else reads and runs them, as skills change the
+   assistant for every user. Alternatives: `propose`; skills private to each user.
+2. **One set for the console**, shared by all users, as team skills and I130's MCP prompts want.
+   Alternative: a section a user.
+3. **Bounds are constants**: 64 user skills of 32 KiB each, as I125's conversation sizes.
+   Alternative: `limits.max_skills`.
+4. **A built-in's name is refused** to a user skill; to change a built-in, export it, rename it, add
+   it and disable the original. Alternative: a user skill overrides a built-in.
+5. **`skill_load` makes the skill the conversation's**: the tools narrow and `skill_load` leaves
+   them; later turns keep the skill until it is cleared. Alternative: load the prompt only.
+6. **The prompt is sent once**: while a skill is the conversation's, its prompt is in the system
+   prompt, marked as fit's own instructions that never override the rules, and earlier `skill_load`
+   results are replaced in the request by a short note (stored and shown whole).
+7. **The catalog** goes only when `skill_load` is offered and no skill is the conversation's, at most a
+   tenth of the window, names only past it.
+8. **The catalog lists every enabled skill** whatever the user's level; the tools narrow when it
+   runs. Alternative: hide skills whose tools are all above the level.
+9. **`ask_user`** is always a skill's, whatever it names.
+10. **A tool a skill names that this fit lacks** is accepted and shown as such, so skills written for
+    later tools load; built-ins are tested to name only registered ones.
+11. **A skill's model**: `provider/model` when the provider exists, else a model of the default
+    provider; it applies from the message that starts the chat.
+12. **`/name`** is a skill only when it names an enabled one (`/etc/hosts …` goes as written); the API
+    refuses `/name` alone (400), the panel just sets the chip.
+13. **Inputs** go into the system prompt as redacted `<skill_inputs>` data, never into the user's
+    words, 2 KiB each, kept with the conversation; missing ones are listed for the model.
+14. **A skill disabled or deleted** leaves its conversation at the next message.
+15. **The panel's Markdown** joins wrapped list items and nests indented ones, as the skills' prompts
+    need.
 
 ### I128 Ask AI where the work is
 

@@ -4,7 +4,7 @@ title: Explain
 title_zh: 讲解
 description: Explains the current page, a member of the config or a value, what it does here and why, with links to the docs.
 description_zh: 讲解当前页面、配置中的某个成员或某个值：它在这里做什么、为什么，并附文档链接。
-tools: [config_get, schema_describe, config_validate, versions_diff, status_get]
+tools: [config_get, schema_describe, config_validate, versions_diff, status_get, page_get]
 inputs:
   - name: path
     description: The member of the config to explain, as routes.handler or admin.console.

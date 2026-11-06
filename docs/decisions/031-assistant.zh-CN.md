@@ -69,6 +69,14 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   提案被拒绝并在新版本上重新提供。每次工具调用与每次应用都按当时的设置检查用户级别。
 - **审计日志（I126）** 记录每次调用了工具的回答，以及每次应用、拒绝、重新提供与丢弃：用户、时间、来源、对话、技能、调用（已
   脱敏并截断）、提案的步骤、结果与版本；最多 `limits.max_audit_entries` 条，保存在 store 的 `assistant.audit` 段中。
+- **页面上的草稿（I154）。** 页面工具（`read` 级的 `page_get`，`edit` 级的 `page_edit` 与 `page_revert`）在打开的页面中
+  执行，而不在 fit 中：调用以 `page_call` 事件经对话的流发给面板，页面的应答经 `POST /api/m/ai/chat/page` 作为该调用的结果返回，
+  与其他结果一样脱敏、受限并记入审计；对话最多等待 30 秒，浏览器离开即停止。只有当前页面声明了编辑器（页面上下文中的
+  `editable`：其表单与 `.conf`/`.yaml`/`.json` 标签页所含的成员）时才提供，且从不经 MCP 提供。草稿交给页面前由 fit 检查：只含
+  页面所编辑的成员，不触及 `admin`，不写入密钥（抄回的 `[redacted]` 值由页面按其原值放回），文本可解析，最多 256 KiB。页面像
+  人工修改一样把它写入共享草稿，对文本运行自己的检查，标为助手所写且未保存，从不提交：页面工具不调用任何修改配置的接口，版本、
+  ETag 与 `/versions` 只在人点击 **保存并应用** 时才变化，记为此人的修改。`page_revert` 把页面恢复到助手首次起草之前，人在此
+  之后改过页面时拒绝。
 - **技能（I127）** 是带 YAML front matter（`name`、`title`、`title_zh`、`description`、`description_zh`、`inputs`、`tools`、
   `model`、`examples`）的 Markdown，其后为提示词，最多 32 KiB；不符合技能格式的 front matter 会被拒绝并给出行号。计划中的 14 个
   内置技能嵌入在二进制中；用户添加的技能由控制台的所有用户共享，最多 64 个，与停用的内置技能一起保存在 store 的
@@ -81,7 +89,7 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
 
 - 设置了 `admin.assistant` 时，workbench 的菜单中有“助手”模块及其功能页与设置页，每个页面的顶栏都有对话面板的按钮。
 - `GET /api/m/ai/settings`、`PUT /api/m/ai/settings`、`POST /api/m/ai/providers/test`、`POST /api/m/ai/chat`、
-  `POST /api/m/ai/chat/stop`、`GET /api/m/ai/tools`、`GET /api/m/ai/conversations` 与 `GET`/`DELETE /api/m/ai/conversations/{id}`
+  `POST /api/m/ai/chat/stop`、`POST /api/m/ai/chat/page`（I154）、`GET /api/m/ai/tools`、`GET /api/m/ai/conversations` 与 `GET`/`DELETE /api/m/ai/conversations/{id}`
   属于控制台，与其他模块的 API 一样需要登录与 CSRF 令牌；I126 加入 `GET /api/m/ai/proposals`、
   `GET /api/m/ai/proposals/{conversation}`、其 `POST .../apply` 与 `POST .../discard`，以及 `GET /api/m/ai/audit`，菜单中加入
   提案页与审计日志页；I127 加入 `GET`/`POST /api/m/ai/skills`、`GET`/`PUT`/`DELETE /api/m/ai/skills/{name}` 及其

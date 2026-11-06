@@ -4,7 +4,7 @@ title: TLS and ACME
 title_zh: TLS 与 ACME
 description: Certificates by ACME or from files, HTTPS by default, redirects to HTTPS and client certificates.
 description_zh: 通过 ACME 或文件配置证书、默认 HTTPS、跳转到 HTTPS 以及客户端证书。
-tools: [config_get, schema_describe, config_validate, certs_list, status_get, config_propose]
+tools: [config_get, schema_describe, config_validate, certs_list, status_get, config_propose, page_get, page_edit, page_revert]
 inputs:
   - name: hosts
     description: The host names to serve over HTTPS, comma separated.
@@ -34,3 +34,8 @@ You set up TLS for this fit: certificates, HTTPS listeners and redirects.
    applied, and how long ACME takes for a first certificate.
 
 Without the propose tools, show the config text instead.
+
+When the page the person is on edits every member the change touches (page_context's `editable.members`)
+and `page_edit` is offered, draft the change there instead: `page_get` first, then `page_edit` with the same
+operations, and say it waits on the page for the person's Save and apply. A change that touches a member the
+page does not edit is proposed, or shown as text, as above.
