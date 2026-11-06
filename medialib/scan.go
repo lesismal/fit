@@ -103,9 +103,11 @@ func (sc *scanner) truncate(format string, args ...any) {
 // its reads of files on the library's pool.
 func (l *Library) scan() {
 	sc := &scanner{l: l, s: l.set.Load()}
+	l.sweepUploads(sc.s.up)
 	started := time.Now()
 	l.mu.Lock()
 	l.status = Status{Scanning: true, Scans: l.status.Scans, Started: started}
+	edits := l.edits
 	l.mu.Unlock()
 	cat := sc.run(l.cat.Load())
 	ended := time.Now()
@@ -119,7 +121,23 @@ func (l *Library) scan() {
 		return
 	}
 	cat.Scanned = ended
+	l.mu.Lock()
+	// What the library's own changes took out while the scan ran stays out:
+	// the scan may have listed it before, and the next scan lists it as it
+	// is now.
+	var gone []string
+	for id, at := range l.forgotten {
+		if at > edits {
+			gone = append(gone, id)
+		} else {
+			delete(l.forgotten, id)
+		}
+	}
+	if len(gone) > 0 {
+		cat = cat.without(gone)
+	}
 	l.cat.Store(cat)
+	l.mu.Unlock()
 	l.tables.keep(cat)
 	l.scans.Add(1)
 	errs := 0
@@ -313,7 +331,7 @@ func (l *Library) sleep(d time.Duration) bool {
 // readSidecars reads and parses the sidecars found, on the pool, their
 // bytes bounded by max_sidecar_bytes each and by max_catalog_bytes all
 // together; a sidecar that does not parse is a problem.
-func (sc *scanner) readSidecars() map[*entry]*sidecar {
+func (sc *scanner) readSidecars() map[*entry]*Sidecar {
 	var list []*entry
 	var total int64
 	for _, e := range sc.entries {
@@ -330,12 +348,12 @@ func (sc *scanner) readSidecars() map[*entry]*sidecar {
 			list = append(list, e)
 		}
 	}
-	parsed := make([]*sidecar, len(list))
+	parsed := make([]*Sidecar, len(list))
 	errs := make([]error, len(list))
 	sc.onPool(len(list), func(i int) {
 		parsed[i], errs[i] = readSidecar(list[i], sc.s.follow)
 	}, func(i int) { errs[i] = ErrBusy })
-	out := make(map[*entry]*sidecar, len(list))
+	out := make(map[*entry]*Sidecar, len(list))
 	for i, e := range list {
 		if errs[i] != nil {
 			sc.problem(e.root, e.rel, "the sidecar: %v", errs[i])
@@ -382,7 +400,7 @@ type group struct {
 	root  *root
 	dir   string // with no '/' at the end; "" at the root
 	base  string
-	side  *sidecar
+	side  *Sidecar
 	sidef *entry
 	media []*member
 	subs  []*member
@@ -394,7 +412,7 @@ func (g *group) path() string { return path.Join(g.dir, g.base) }
 // group gathers the files found into items: what sidecars name, then media
 // files by their names' base and rendition label, then subtitles and
 // posters named after an item's base.
-func (sc *scanner) group(sides map[*entry]*sidecar) []*group {
+func (sc *scanner) group(sides map[*entry]*Sidecar) []*group {
 	byRel := map[*root]map[string]*entry{}
 	for _, e := range sc.entries {
 		if byRel[e.root] == nil {
@@ -445,7 +463,7 @@ func (sc *scanner) group(sides map[*entry]*sidecar) []*group {
 			}
 			return f
 		}
-		for i, list := range [][]sidecarMedia{sd.Renditions, sd.Audio} {
+		for i, list := range [][]SidecarFile{sd.Renditions, sd.Audio} {
 			for _, m := range list {
 				if f := ref("file", m.File, kindMedia); f != nil {
 					g.media = append(g.media, &member{e: f, name: m.Name, language: m.Language, def: m.Default, audio: i == 1})
@@ -759,7 +777,7 @@ func (sc *scanner) build(groups []*group) *Catalog {
 func (sc *scanner) item(g *group) *Item {
 	it := &Item{Root: g.root.conf, Path: g.path(), Title: g.base}
 	if sd := g.side; sd != nil {
-		it.ID, it.Title = sd.ID, cmp.Or(sd.Title, it.Title)
+		it.ID, it.Title, it.named = sd.ID, cmp.Or(sd.Title, it.Title), sd.ID != ""
 		f := g.sidef.file()
 		it.Sidecar = &f
 	}

@@ -100,6 +100,16 @@ What each iteration decides:
   `vendor/` path. The console's Content-Security-Policy opens `connect-src`, `img-src` and
   `media-src` (with `blob:`) to the listeners serving `vod` and `hls` routes alone, and no
   `worker-src`, so the player runs without a worker.
+- **I139, files managed from the workbench**: uploads are resumable as tus makes them (`POST` to
+  begin, `PATCH` at `Upload-Offset`, `HEAD` to resume), into the library's `upload_dir`, bounded by
+  `max_upload_bytes`, `max_uploads` and `min_free_bytes`; the console streams a `PATCH`'s body to the
+  file pool as it arrives (fib's `StreamRequestBodyAtHeader`, `OnBody`, `HoldBody` and `LimitBody`),
+  into a temporary file kept across restarts and renamed into place once whole. Rename, move, delete
+  and sidecar edits act on an item and all its files, on the pool, one at a time, never writing out of
+  a root; a change to an item a channel names or plays, or a viewer plays, is refused unless forced,
+  so that the workbench warns first; each is written to the assistant's audit log. A full tus server
+  (its `Upload-Metadata`, `Tus-Resumable` and extensions) was not taken: the workbench and scripts need
+  the three calls alone.
 
 ## Rejected
 

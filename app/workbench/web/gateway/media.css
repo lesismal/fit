@@ -70,3 +70,12 @@
 .md-reason.is-hot { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: var(--danger-soft); }
 .md-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .md-metric { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+
+/* Uploads, an item's files and its sidecar (I139). / 上传、条目的文件与 sidecar（I139）。 */
+.md-uploads:empty { display: none; }
+.md-upload { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.md-upload[data-state="failed"] { border-color: var(--danger); }
+.md-sidecar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-xs); }
+.md-sidecar-row .select { min-width: 200px; flex: 1 1 200px; }
+.md-sidecar-row .input { width: auto; flex: 1 1 140px; }
+.md-sidecar-row .md-lang { flex: 0 0 80px; }

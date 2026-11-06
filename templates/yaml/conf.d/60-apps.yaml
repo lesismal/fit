@@ -2604,3 +2604,34 @@
     # # of the two. None when left out.
     # # string.
     # secret_file: ""
+
+    # # A directory inside one of the roots, or a root itself, that files uploaded from the
+    # # workbench, or the Admin API's /media/library/<name>/uploads, are written into: in pieces,
+    # # resumable after a cut connection, to a temporary file named .fit-upload-*, renamed into
+    # # place once whole and probed by the scan that follows. Made when missing. None when left out:
+    # # no uploads; the files of the library are still renamed, moved and deleted from the
+    # # workbench.
+    # # string.
+    # upload_dir: ""
+
+    # # The largest file uploaded; a larger one is refused 413 before any of it is written. 32 GiB
+    # # when left out or 0.
+    # # integer, 0 or more; default 34359738368.
+    # max_upload_bytes: 34359738368
+
+    # # The most uploads under way at once, begun and not yet whole; one more is refused 429 until
+    # # one ends, or is cancelled, or expires. 4 when left out or 0.
+    # # integer, 0 to 1024; default 4.
+    # max_uploads: 4
+
+    # # The disk space left free beside the uploads under way: an upload whose bytes, with those of
+    # # the others still to come, would leave less free on upload_dir's disk is refused 507 before
+    # # any of it is written. 1 GiB when left out or 0.
+    # # integer, 0 or more; default 1073741824.
+    # min_free_bytes: 1073741824
+
+    # # How long an upload not written to is kept before it is given up and its temporary file
+    # # removed, at the next scan; at least 1m. An upload is kept across restarts until then. 24h
+    # # when left out.
+    # # duration, as "1.5s" or "2m"; default "24h".
+    # upload_expiry: "24h"

@@ -2,10 +2,14 @@
 // on demand and channels track (I132-I136). Its pages read the Admin API and edit the config's shared draft:
 //
 //   library            each library's items, searched, filtered (codec, resolution, problems) and paged from
-//                      GET /media/library/<name>; a rescan with its progress
+//                      GET /media/library/<name>; a rescan with its progress; uploads into its upload_dir (I139), sent
+//                      in 8 MiB PATCHes at the upload's offset, resumed after a cut connection, and those under way
+//                      resumed by picking their file again
 //   item/:lib/:id      an item: its renditions, tracks, codecs, audio, subtitles, poster and sidecar, its probe error, and
 //                      a preview player (hls.js, vendor/hls.min.js, loaded when first needed) on a URL that
-//                      POST /media/preview signs for the logged-in user, good for two minutes
+//                      POST /media/preview signs for the logged-in user, good for two minutes; its files renamed, moved
+//                      and deleted after a confirm that says what plays it (GET usage), and its sidecar edited in a
+//                      form (I139)
 //   channels           each channel of streaming.channels as a timeline: its list, dragged in from the library, and its
 //                      schedule on a day in its time zone, loop and shuffle — edits of the shared draft, applied by Save
 //                      and apply from the next item on; what plays now and next, start, stop, skip, a preview; and every
@@ -167,7 +171,47 @@
     ['cf.us.note', 'Each media_auth policy\'s url_signing. The raw tabs hold the whole media_auth member, its secrets left as the draft holds them.',
       '各 media_auth 策略的 url_signing。原始文本标签页为整个 media_auth 成员。'],
     ['cf.us.none', 'No media_auth policy: add one on the media auth page.', '没有 media_auth 策略：请在“媒体认证”页添加。'],
-    ['cf.us.policy', 'Policy {name}', '策略 {name}'], ['cf.mediaauth', 'Media auth', '媒体认证']
+    ['cf.us.policy', 'Policy {name}', '策略 {name}'], ['cf.mediaauth', 'Media auth', '媒体认证'],
+    // uploads (I139) / 上传（I139）
+    ['up.title', 'Upload', '上传'], ['up.files', 'Files', '文件'], ['up.dir', 'Into the folder', '上传到文件夹'],
+    ['up.dir.ph', 'the upload folder itself', '上传文件夹本身'], ['up.start', 'Upload', '上传'],
+    ['up.note', 'Into {dir} of {root}: at most {max} a file, {n} under way at once. A cut connection picks up where it stopped; the scan that follows probes each file once whole.',
+      '上传到 {root} 的 {dir}：每个文件最大 {max}，同时进行最多 {n} 个。连接中断后从停止处继续；文件完整后由随后的扫描探测。'],
+    ['up.off', 'This library takes no uploads: set its upload_dir on the library config page.', '此媒体库不接受上传：请在“媒体库配置”页设置 upload_dir。'],
+    ['up.pause', 'Pause', '暂停'], ['up.resume', 'Resume', '继续'], ['up.cancel', 'Cancel', '取消'],
+    ['up.cancel.q', 'Give up the upload of {path}? What was sent is removed.', '放弃上传 {path}？已发送的部分将被删除。'],
+    ['up.done', '{path} is uploaded; the library is scanned to probe it.', '{path} 已上传；正在扫描媒体库以探测它。'],
+    ['up.retry', 'The connection was lost: trying again from {at} in {s}s…', '连接中断：{s} 秒后从 {at} 处重试…'],
+    ['up.under', 'Uploads under way', '进行中的上传'], ['up.none', 'No upload under way.', '没有进行中的上传。'],
+    ['up.pick', 'Pick {name} again to resume it', '重新选择 {name} 以继续上传'],
+    ['up.mismatch', '{name} is not the file being uploaded: it is {got}, the upload {want}.', '{name} 不是正在上传的文件：它为 {got}，上传为 {want}。'],
+    ['up.path', 'File', '文件'], ['up.progress', 'Sent', '已发送'], ['up.user', 'By', '上传者'], ['up.updated', 'Last written', '最近写入'],
+    ['up.s.queued', 'waiting', '等待中'], ['up.s.sending', 'sending', '发送中'], ['up.s.paused', 'paused', '已暂停'],
+    ['up.s.done', 'done', '已完成'], ['up.s.failed', 'failed', '失败'], ['up.s.cancelled', 'cancelled', '已取消'], ['up.s.retrying', 'retrying', '重试中'],
+    // an item's files (I139) / 条目的文件（I139）
+    ['mg.title', 'Manage files', '管理文件'], ['mg.rename', 'Rename', '改名'], ['mg.newname', 'New name', '新名称'],
+    ['mg.move', 'Move', '移动'], ['mg.dir', 'To the folder', '移动到文件夹'], ['mg.dir.root', '(the root)', '（根目录）'], ['mg.delete', 'Delete', '删除'],
+    ['mg.note', 'Each of its {n} files goes with it. A change that touches what plays is warned about first.', '其 {n} 个文件随之变动。影响正在播放内容的修改会先给出警告。'],
+    ['mg.rename.q', 'Rename {id} to {name}? Its files named after it are renamed, and {idnote}.', '把 {id} 改名为 {name}？以其命名的文件随之改名，并且{idnote}。'],
+    ['mg.move.q', 'Move {id} and its {n} files to {dir}? {idnote}.', '把 {id} 及其 {n} 个文件移动到 {dir}？{idnote}。'],
+    ['mg.delete.q', 'Delete {id} and its {n} files from the disk? This cannot be undone.', '从磁盘删除 {id} 及其 {n} 个文件？此操作无法撤销。'],
+    ['mg.idkeep', 'its ID stays {id}, as its sidecar names it', '其 ID 保持为 {id}（由 sidecar 指定）'],
+    ['mg.idnew', 'its ID becomes {id}: channels and URLs naming the old one lose it', '其 ID 变为 {id}：引用旧 ID 的频道与 URL 将找不到它'],
+    ['mg.inuse', 'It is in use: {what}. Going on may stop what plays it.', '它正在使用中：{what}。继续操作可能中断正在播放的内容。'],
+    ['mg.chan', 'the channels {list} name it', '频道 {list} 引用了它'], ['mg.playing', 'the channels {list} play it now', '频道 {list} 正在播放它'],
+    ['mg.sess', '{n} viewers play it', '{n} 位观众正在播放它'], ['mg.anyway', 'Go on all the same', '仍然继续'],
+    ['mg.done', 'Done: the library is scanned again.', '已完成：正在重新扫描媒体库。'], ['mg.wait', 'Waiting for the scan to list {id}…', '等待扫描列出 {id}…'],
+    // the sidecar (I139) / sidecar（I139）
+    ['sc.title', 'Sidecar', 'Sidecar'], ['sc.edit', 'Edit the sidecar', '编辑 sidecar'], ['sc.new', 'Write a sidecar', '写入 sidecar'],
+    ['sc.note', 'The sidecar {path} names the item\'s ID, title, poster and files; without one, they come from the files\' names.',
+      'sidecar {path} 指定条目的 ID、标题、海报与文件；没有它时，这些来自文件名。'],
+    ['sc.id', 'ID', 'ID'], ['sc.id.ph', 'from its path', '取自路径'], ['sc.ttl', 'Title', '标题'], ['sc.poster', 'Poster', '海报'],
+    ['sc.renditions', 'Renditions', '视频码流'], ['sc.audio', 'Audio files', '音频文件'], ['sc.subs', 'Subtitles', '字幕'],
+    ['sc.file', 'File', '文件'], ['sc.name', 'Name', '名称'], ['sc.lang', 'Language', '语言'], ['sc.default', 'Default', '默认'],
+    ['sc.forced', 'Forced', '强制'], ['sc.add', 'Add', '添加'], ['sc.remove', 'Remove', '移除'], ['sc.nofile', '(none)', '（无）'],
+    ['sc.save', 'Save the sidecar', '保存 sidecar'], ['sc.saved', 'The sidecar is written; the library is scanned again.', 'sidecar 已写入；正在重新扫描媒体库。'],
+    ['sc.idchange.q', 'Change the ID from {from} to {to}? Channels and URLs naming {from} no longer find it.', '把 ID 从 {from} 改为 {to}？引用 {from} 的频道与 URL 将找不到它。'],
+    ['sc.inuse.q', '{error} Write the sidecar all the same?', '{error} 仍然写入 sidecar？']
   ];
 
   var ID = 'gw.medialib';
@@ -396,8 +440,8 @@
           if (!libs.some(function (l) { return l.name === lib.name; })) lib.name = libs[0].name;
           var tabs = libs.length > 1 ? UI.tabs(libs.map(function (l) { return [l.name, l.name + ' · ' + l.items]; }), lib.name, function (k) { lib.name = k; libraryPage(); }) : null;
           var cur = libs.filter(function (l) { return l.name === lib.name; })[0];
-          var head = h('div'), items = h('div.stack');
-          UI.mount(el, tabs, head, items);
+          var head = h('div'), items = h('div.stack.md-items');
+          UI.mount(el, tabs, head, uploadCard(cur), items);
           drawLibrary(head, cur);
           drawItems(items, cur.name);
           // The rescan's progress, while a scan runs or waits. / 扫描进行或等待期间的进度。
@@ -423,7 +467,7 @@
               UI.toast(t(r && r.queued ? 'l.rescan.queued' : 'l.rescan.waiting', { name: l.name }));
               l.status = (r && r.status) || st;
               drawLibrary(head, l);
-              follow(head, l.name, head.nextSibling);
+              follow(head, l.name, head.parentNode.querySelector('.md-items'));
             }).catch(UI.fail);
           });
         }, 'sm');
@@ -492,6 +536,306 @@
       }
       function itemHash(name, id) { return '#/' + ID + '/item/' + enc(name) + '/' + enc(id); }
 
+      // ---- uploads (I139) / 上传（I139） ----
+      // A file is sent in pieces of CHUNK bytes, each a PATCH at the upload's offset, which the console streams to the
+      // library's file pool; a piece that fails for the connection is sent again from the offset the server has
+      // (HEAD), after a pause that grows. One file at a time. / 文件按 CHUNK 字节分块发送，每块为一次带偏移量的 PATCH，控制台
+      // 将其流式写入媒体库的文件池；因连接失败的块，在逐渐加长的等待后从服务端记录的偏移量（HEAD）处重发。一次上传一个文件。
+      var CHUNK = 8 << 20, RETRIES = 30;
+      var uploads = { tasks: [], running: false };
+      function kindOf(name) {
+        return /\.(mp4|m4v|m4a|mov)$/i.test(name) ? 'media' : /\.(vtt|srt)$/i.test(name) ? 'sub' : /\.(jpe?g|png|webp)$/i.test(name) ? 'image' : '';
+      }
+      function joinPath(dir, name) { dir = (dir || '').replace(/^\/+|\/+$/g, ''); return dir ? dir + '/' + name : name; }
+      function upPath(lib, id) { return '/api/media/library/' + enc(lib) + '/uploads' + (id ? '/' + enc(id) : ''); }
+      function uploadCard(l) {
+        if (!l.upload) return UI.card(t('up.title'), h('div.muted.small', t('up.off'), ' ', h('a', { href: '#/' + ID + '/config' }, t('l.config'))));
+        var u = l.upload;
+        var files = h('input.input.input--sm', { type: 'file', multiple: true, accept: '.mp4,.m4v,.m4a,.mov,.vtt,.srt,.jpg,.jpeg,.png,.webp,.json', 'aria-label': t('up.files') });
+        var dir = h('input.input.input--sm', { placeholder: t('up.dir.ph'), 'aria-label': t('up.dir') });
+        var list = h('div.stack.md-uploads'), under = h('div');
+        var go = UI.btn(t('up.start'), 'upload', function () {
+          Array.prototype.forEach.call(files.files || [], function (f) {
+            uploads.tasks.push({ lib: l.name, file: f, path: joinPath(dir.value, f.name), size: f.size, offset: 0, state: 'queued' });
+          });
+          files.value = '';
+          draw();
+          run();
+        }, 'primary sm');
+        function draw() {
+          var mine = uploads.tasks.filter(function (k) { return k.lib === l.name; });
+          UI.mount(list, mine.map(taskRow));
+        }
+        uploads.redraw = draw;
+        function taskRow(k) {
+          var acts = h('div.btn-row');
+          if (k.state === 'sending' || k.state === 'queued' || k.state === 'retrying') acts.appendChild(UI.btn(t('up.pause'), 'stop', function () { k.state = 'paused'; draw(); }, 'sm'));
+          if (k.state === 'paused' || k.state === 'failed') acts.appendChild(UI.btn(t('up.resume'), 'play', function () { k.state = 'queued'; k.error = ''; draw(); run(); }, 'sm'));
+          if (k.state !== 'done' && k.state !== 'cancelled') acts.appendChild(UI.btn(t('up.cancel'), 'x', function () { cancel(k); }, 'sm'));
+          return h('div.md-upload', { 'data-state': k.state },
+            h('div.row.row--between', h('code.small', k.path), h('span', UI.badge(t('up.s.' + k.state), k.state === 'done' ? 'ok' : k.state === 'failed' ? 'danger' : ''), acts)),
+            UI.meter(t('up.progress'), k.offset, k.size || 1, fmtBytes(k.offset) + ' / ' + fmtBytes(k.size)),
+            k.note ? h('div.small.muted', k.note) : null, k.error ? h('div.callout.callout--danger.small', UI.icon('alert'), ' ', k.error) : null);
+        }
+        function cancel(k) {
+          UI.confirm(t('up.cancel.q', { path: k.path }), t('up.cancel'), true).then(function (ok) {
+            if (!ok) return;
+            var was = k.state;
+            k.state = 'cancelled';
+            draw();
+            if (k.id && was !== 'done') api('DELETE', '/media/library/' + enc(k.lib) + '/uploads/' + enc(k.id)).then(loadUnder, UI.fail);
+          });
+        }
+        // The uploads under way, from this page or another, or from before a restart: one is resumed by picking its file
+        // again. / 进行中的上传（来自本页、其他页面或重启之前）：重新选择其文件即可继续。
+        function loadUnder() {
+          return api('GET', '/media/library/' + enc(l.name) + '/uploads').then(function (r) {
+            var rows = ((r && r.uploads) || []).filter(function (x) { return !uploads.tasks.some(function (k) { return k.id === x.id && k.state !== 'cancelled'; }); });
+            UI.mount(under, rows.length ? h('details.md-problems', { open: true }, h('summary', t('up.under') + ' · ' + rows.length), UI.table([
+              { label: t('up.path'), render: function (x) { return h('code.small', x.path); } },
+              { label: t('up.progress'), render: function (x) { return fmtBytes(x.offset) + ' / ' + fmtBytes(x.size); } },
+              { label: t('up.user'), render: function (x) { return x.user || '—'; } },
+              { label: t('up.updated'), render: function (x) { return UI.ago(unix(x.updated)); } },
+              { label: '', render: function (x) {
+                var pick = h('input', { type: 'file', style: { display: 'none' } });
+                var name = x.path.split('/').pop();
+                pick.addEventListener('change', function () {
+                  var f = pick.files && pick.files[0];
+                  if (!f) return;
+                  if (f.size !== x.size) { UI.toast(t('up.mismatch', { name: f.name, got: fmtBytes(f.size), want: fmtBytes(x.size) }), 'error'); return; }
+                  uploads.tasks.push({ lib: l.name, file: f, path: x.path, size: x.size, id: x.id, offset: x.offset, state: 'queued' });
+                  draw(); loadUnder(); run();
+                });
+                return h('div.btn-row', pick, h('span', { title: t('up.pick', { name: name }) }, UI.btn(t('up.resume'), 'play', function () { pick.click(); }, 'sm')),
+                  UI.btn(t('up.cancel'), 'x', function () { cancel({ lib: l.name, id: x.id, path: x.path, state: 'paused' }); }, 'sm'));
+              } }
+            ], rows)) : null);
+          }).catch(function () { UI.mount(under); });
+        }
+        draw();
+        loadUnder();
+        return UI.card(t('up.title'), h('div.stack',
+          h('div.small.muted', t('up.note', { dir: u.dir || '/', root: u.root, max: fmtBytes(u.max_bytes), n: u.max_uploads })),
+          h('div.row.md-filters', UI.field(t('up.files'), files), UI.field(t('up.dir'), dir), go), list, under));
+      }
+      // run sends the queued uploads, one at a time. / 依次发送排队的上传。
+      function run() {
+        if (uploads.running) return;
+        var k = uploads.tasks.filter(function (x) { return x.state === 'queued'; })[0];
+        if (!k) return;
+        uploads.running = true;
+        k.state = 'sending';
+        redraw();
+        var begin = k.id ? Promise.resolve() : api('POST', '/media/library/' + enc(k.lib) + '/uploads', { path: k.path, size: k.size }).then(function (r) {
+          k.id = r.id; k.offset = r.offset || 0; k.path = r.path;
+        });
+        begin.then(function () { return send(k, 0); }).then(function (r) {
+          if (r && r.complete) {
+            k.state = 'done';
+            UI.toast(t('up.done', { path: k.path }));
+          }
+        }, function (e) {
+          if (k.state === 'sending' || k.state === 'retrying') { k.state = 'failed'; k.error = (e && e.message) || String(e); }
+        }).then(function () { uploads.running = false; redraw(); run(); });
+      }
+      function redraw() { if (uploads.redraw) uploads.redraw(); }
+      function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+      // send sends k's pieces from k.offset; tries counts the failures in a row. / 从 k.offset 起发送各块；tries 为连续失败次数。
+      function send(k, tries) {
+        if (k.state !== 'sending' && k.state !== 'retrying') return Promise.resolve(null);
+        var end = Math.min(k.offset + CHUNK, k.size);
+        return ui.raw('PATCH', upPath(k.lib, k.id), k.file.slice(k.offset, end), { 'Upload-Offset': String(k.offset), 'Content-Type': 'application/offset+octet-stream' }).then(function (r) {
+          return r.text().then(function (txt) {
+            var j = null;
+            try { j = txt ? JSON.parse(txt) : null; } catch (e) { /* not json / 非 JSON */ }
+            var at = r.headers.get('Upload-Offset');
+            if (r.ok && j) {
+              k.offset = j.offset; k.note = ''; k.state = k.state === 'retrying' ? 'sending' : k.state;
+              redraw();
+              return j.complete ? j : send(k, 0);
+            }
+            if ((r.status === 409 || r.status === 503) && tries < RETRIES) {
+              // Another write still ends, or the pool is busy: from where the server is. / 另一写入尚未结束或文件池繁忙：从服务端位置继续。
+              if (at != null) k.offset = +at;
+              return wait(1000).then(function () { return send(k, tries + 1); });
+            }
+            throw new Error((j && j.error) || (r.status + ' ' + r.statusText));
+          });
+        }, function () {
+          // The connection: ask where the upload is, after a pause. / 连接问题：稍候查询上传进度。
+          if (tries >= RETRIES) throw new Error(t('stream.broken'));
+          var s = Math.min(15, 1 + tries);
+          k.state = k.state === 'sending' ? 'retrying' : k.state;
+          k.note = t('up.retry', { at: fmtBytes(k.offset), s: s });
+          redraw();
+          return wait(s * 1000).then(function () {
+            return ui.raw('HEAD', upPath(k.lib, k.id)).then(function (r) {
+              if (r.status === 404) throw new Error(t('it.missing', { id: k.path, lib: k.lib }));
+              var at = r.headers.get('Upload-Offset');
+              if (r.ok && at != null) k.offset = +at;
+            }, function () { /* still down / 仍未恢复 */ });
+          }).then(function () { return send(k, tries + 1); });
+        });
+      }
+
+      // ---- an item's files (I139) / 条目的文件（I139） ----
+      function fileCount(it) {
+        return (it.renditions || []).length + (it.audio || []).length + (it.subtitles || []).length + (it.poster ? 1 : 0) + (it.sidecar ? 1 : 0);
+      }
+      function baseOf(it) { return String(it.path).split('/').pop(); }
+      function dirOf(it) { var p = String(it.path); var i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
+      // inUseText says what uses an item, from GET usage. / 根据 GET usage 说明条目被何者使用。
+      function inUseText(u) {
+        var what = [];
+        if ((u.channels || []).length) what.push(t('mg.chan', { list: u.channels.join(', ') }));
+        if ((u.playing || []).length) what.push(t('mg.playing', { list: u.playing.join(', ') }));
+        if (u.sessions) what.push(t('mg.sess', { n: u.sessions }));
+        return t('mg.inuse', { what: what.join('; ') });
+      }
+      // change asks GET usage, confirms with what uses the item, then makes the change with force if it is in use, and goes
+      // to the item once the scan lists it. / 先查询 GET usage，在确认框中说明使用情况，再执行修改（使用中时带 force），扫描列出后跳转到条目。
+      function change(p, it, op, body, question, label, danger) {
+        return api('GET', '/media/library/' + enc(p.lib) + '/usage?item=' + enc(it.id)).then(function (u) {
+          var msg = question + (u.in_use ? ' ' + inUseText(u) : '');
+          return UI.confirm(msg, u.in_use ? t('mg.anyway') : label, danger || u.in_use).then(function (ok) {
+            if (!ok) return null;
+            body.item = it.id;
+            if (u.in_use) body.force = true;
+            return api('POST', '/media/library/' + enc(p.lib) + '/' + op, body).then(function (c) {
+              UI.toast(t('mg.done'));
+              if (op === 'delete') { location.hash = '#/' + ID + '/library'; return c; }
+              return arrive(p.lib, c.id).then(function () { goItem(p.lib, c.id); return c; });
+            });
+          });
+        });
+      }
+      // goItem shows the item id, drawn again when it is the one shown. / 显示条目 id；已在显示时重新绘制。
+      function goItem(lib, id) {
+        if (location.hash === itemHash(lib, id)) itemPage({ lib: lib, id: id });
+        else location.hash = itemHash(lib, id);
+      }
+      // arrive waits, a while at most, until the library lists id. / 等待（有上限）媒体库列出 id。
+      function arrive(lib, id) {
+        var n = 0;
+        function look() {
+          return api('GET', '/media/library/' + enc(lib) + '/items/' + idPath(id)).catch(function (e) {
+            if (++n > 40 || !e || e.status !== 404) return null;
+            return wait(250).then(look);
+          });
+        }
+        return look();
+      }
+      function manageCard(p, it) {
+        var n = fileCount(it);
+        var name = h('input.input.input--sm', { value: baseOf(it), 'aria-label': t('mg.newname') });
+        var dirs = h('datalist', { id: 'md-dirs' });
+        var dir = h('input.input.input--sm', { value: dirOf(it), list: 'md-dirs', placeholder: t('mg.dir.root'), 'aria-label': t('mg.dir') });
+        api('GET', '/media/library/' + enc(p.lib) + '/dirs?root=' + enc(it.root)).then(function (r) {
+          UI.mount(dirs, ((r && r.dirs) || []).map(function (d) { return h('option', { value: d }); }));
+        }, function () { /* typed instead / 改为手动输入 */ });
+        function idNote(newPath) {
+          return it.sidecar && it.id !== newPath && it.id !== dirOf(it) + '/' + baseOf(it) ? t('mg.idkeep', { id: it.id }) : t('mg.idnew', { id: newPath });
+        }
+        var rename = UI.btn(t('mg.rename'), 'edit', function () {
+          var v = name.value.trim();
+          if (!v || v === baseOf(it)) return;
+          UI.busy(rename, change(p, it, 'rename', { name: v }, t('mg.rename.q', { id: it.id, name: v, idnote: idNote(dirOf(it) ? dirOf(it) + '/' + v : v) }), t('mg.rename'))).catch(UI.fail);
+        }, 'sm');
+        var move = UI.btn(t('mg.move'), 'forward', function () {
+          var v = dir.value.trim().replace(/^\/+|\/+$/g, '');
+          if (v === dirOf(it)) return;
+          var q = t('mg.move.q', { id: it.id, n: n, dir: v || t('mg.dir.root'), idnote: idNote(v ? v + '/' + baseOf(it) : baseOf(it)) });
+          UI.busy(move, change(p, it, 'move', { dir: v }, q, t('mg.move'))).catch(UI.fail);
+        }, 'sm');
+        var del = UI.btn(t('mg.delete'), 'trash', function () {
+          UI.busy(del, change(p, it, 'delete', {}, t('mg.delete.q', { id: it.id, n: n }), t('mg.delete'), true)).catch(UI.fail);
+        }, 'danger sm');
+        return UI.card(t('mg.title'), h('div.stack', h('div.small.muted', t('mg.note', { n: n })),
+          h('div.row.md-filters', UI.field(t('mg.newname'), name), rename), h('div.row.md-filters', UI.field(t('mg.dir'), dir), dirs, move),
+          h('div.btn-row', del)));
+      }
+
+      // ---- the sidecar's form (I139) / sidecar 表单（I139） ----
+      function sidecarCard(p, it) {
+        var open = UI.btn(it.sidecar ? t('sc.edit') : t('sc.new'), 'edit', function () {
+          UI.busy(open, api('GET', '/media/library/' + enc(p.lib) + '/sidecar?item=' + enc(it.id))).then(function (v) { sidecarForm(p, it, v); }).catch(UI.fail);
+        }, 'sm');
+        return UI.card(t('sc.title'), h('div.small.muted', t('sc.note', { path: it.sidecar ? it.sidecar.path : dirOf(it) + (dirOf(it) ? '/' : '') + baseOf(it) + '.json' })), open);
+      }
+      function sidecarForm(p, it, v) {
+        var sd = JSON.parse(JSON.stringify(v.sidecar || {}));
+        var files = v.files || [];
+        function pick(kind, value) {
+          var opts = files.filter(function (f) { return kindOf(f) === kind; });
+          if (value && opts.indexOf(value) < 0) opts.unshift(value);
+          return h('select.select.select--sm', { 'aria-label': t('sc.file') }, [h('option', { value: '' }, t('sc.nofile'))].concat(opts.map(function (f) {
+            return h('option', { value: f, selected: f === value }, f);
+          })));
+        }
+        var id = h('input.input.input--sm', { value: sd.id || '', placeholder: t('sc.id.ph'), 'aria-label': t('sc.id') });
+        var title = h('input.input.input--sm', { value: sd.title || '', 'aria-label': t('sc.ttl') });
+        var poster = pick('image', sd.poster || '');
+        function rows(list, kind, subs) {
+          var box = h('div.md-rows');
+          function row(m) {
+            var f = pick(kind, m.file || ''), nm = h('input.input.input--sm', { value: m.name || '', placeholder: t('sc.name'), 'aria-label': t('sc.name') });
+            var lg = h('input.input.input--sm.md-lang', { value: m.language || '', placeholder: 'en', 'aria-label': t('sc.lang') });
+            var df = h('input', { type: 'checkbox', checked: !!m.default }), fc = subs ? h('input', { type: 'checkbox', checked: !!m.forced }) : null;
+            var el = h('div.md-sidecar-row', f, nm, lg, h('label.md-check', df, t('sc.default')), fc ? h('label.md-check', fc, t('sc.forced')) : null,
+              UI.btn('', 'x', function () { el.remove(); }, 'ghost icon sm'));
+            el.read = function () {
+              var o = { file: f.value };
+              if (nm.value.trim()) o.name = nm.value.trim();
+              if (lg.value.trim()) o.language = lg.value.trim();
+              if (df.checked) o.default = true;
+              if (fc && fc.checked) o.forced = true;
+              return o;
+            };
+            box.appendChild(el);
+          }
+          (list || []).forEach(row);
+          box.read = function () {
+            return Array.prototype.map.call(box.children, function (c) { return c.read(); }).filter(function (o) { return o.file; });
+          };
+          var add = UI.btn(t('sc.add'), 'plus', function () { row({}); }, 'sm');
+          return { el: h('div.stack', box, h('div.btn-row', add)), read: box.read };
+        }
+        var rend = rows(sd.renditions, 'media'), aud = rows(sd.audio, 'media'), subs = rows(sd.subtitles, 'sub', true);
+        var body = h('div.stack',
+          h('div.small.muted', t('sc.note', { path: v.path })),
+          h('div.md-settings', UI.field(t('sc.id'), id), UI.field(t('sc.ttl'), title), UI.field(t('sc.poster'), poster)),
+          h('b', t('sc.renditions')), rend.el, h('b', t('sc.audio')), aud.el, h('b', t('sc.subs')), subs.el);
+        function save(force) {
+          var out = {};
+          if (id.value.trim()) out.id = id.value.trim();
+          if (title.value.trim()) out.title = title.value.trim();
+          if (poster.value) out.poster = poster.value;
+          var r = rend.read(), a = aud.read(), s = subs.read();
+          if (r.length) out.renditions = r;
+          if (a.length) out.audio = a;
+          if (s.length) out.subtitles = s;
+          var req = { item: it.id, sidecar: out };
+          if (v.exists) req.modified = v.modified;
+          if (force) req.force = true;
+          return api('PUT', '/media/library/' + enc(p.lib) + '/sidecar', req).then(function (c) {
+            UI.toast(t('sc.saved'));
+            return arrive(p.lib, c.id).then(function () { goItem(p.lib, c.id); return true; });
+          }, function (e) {
+            if (e && e.status === 409 && !force && /in use/.test(e.message || '')) {
+              return UI.confirm(t('sc.inuse.q', { error: e.message }), t('mg.anyway'), true).then(function (ok) { return ok ? save(true) : false; });
+            }
+            throw e;
+          });
+        }
+        UI.modal({ title: t('sc.title') + ' · ' + it.id, wide: true, body: body, actions: [{ label: t('cancel') }, { label: t('sc.save'), kind: 'primary', onclick: function () {
+          var nid = id.value.trim() || '';
+          var was = (v.sidecar && v.sidecar.id) || '';
+          var go = nid !== was && (nid || was) ? UI.confirm(t('sc.idchange.q', { from: it.id, to: nid || dirOf(it) + '/' + baseOf(it) }), t('sc.save'), true) : Promise.resolve(true);
+          return go.then(function (ok) { return ok ? save(false) : false; });
+        } }] });
+      }
+
+
       // ---- an item / 条目 ----
       function itemPage(p) {
         var el = sh.page('library', p.id, t('n.library') + ' / ' + p.lib + ' / ' + p.id);
@@ -517,6 +861,7 @@
             [t('it.sidecar'), it.sidecar ? h('span', h('code.small', it.sidecar.path), ' · ', fmtBytes(it.sidecar.size), ' · ', UI.fmtTime(unix(it.sidecar.modified))) : t('it.nofile')]
           ])));
           if (!it.error) parts.push(previewCard(ui, { library: p.lib, item: it.id }));
+          parts.push(manageCard(p, it), sidecarCard(p, it));
           parts.push(UI.card(t('it.renditions'), renditions(it.renditions || [])));
           if ((it.audio || []).length) parts.push(UI.card(t('it.audio'), renditions(it.audio)));
           parts.push(UI.card(t('it.subtitles'), UI.table([

@@ -55,8 +55,18 @@ type Library struct {
 	stop    chan struct{}
 	done    chan struct{} // closed when the scanner ends
 
-	mu     sync.Mutex // guards status
+	mu     sync.Mutex // guards status, edits and forgotten
 	status Status
+	// edits counts the library's own changes of its files; forgotten is
+	// the items they took out of the catalog, by the edit that did, until
+	// a scan that started after it ends.
+	edits     uint64
+	forgotten map[string]uint64
+
+	// fileMu is held while the library changes its files, one change at
+	// a time; uploads are the uploads under way.
+	fileMu  sync.Mutex
+	uploads uploads
 
 	scans, probed, probeErrors atomic.Uint64
 }
@@ -85,7 +95,8 @@ type Status struct {
 
 func newLibrary(name string, s *settings, log *logs.Logger) *Library {
 	l := &Library{name: name, log: log, kick: make(chan struct{}, 1), retime: make(chan struct{}, 1),
-		stop: make(chan struct{}), done: make(chan struct{})}
+		stop: make(chan struct{}), done: make(chan struct{}), forgotten: map[string]uint64{}}
+	l.uploads.m = map[string]*upload{}
 	l.set.Store(s)
 	l.cat.Store(&Catalog{byID: map[string]*Item{}})
 	l.pool.Store(NewPool(s.workers, s.queue, s.timeout))
@@ -201,6 +212,7 @@ func (l *Library) remove() {
 	close(l.stop)
 	l.pool.Load().Close()
 	l.tables.clear()
+	l.closeUploads()
 }
 
 // stopped reports whether the library was removed, for a scan to stop.

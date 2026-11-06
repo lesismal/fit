@@ -28,6 +28,20 @@ type settings struct {
 	timeout          time.Duration
 	// keys are those of encrypted HLS, nil without a secret.
 	keys *Keys
+	// up is where uploads go, nil without upload_dir.
+	up *uploadDir
+}
+
+// uploadDir is a library's upload_dir: the root it lies in, its path under
+// that root, and the bounds of uploads.
+type uploadDir struct {
+	root     *root
+	rel      string // its slash path under the root; "" for the root itself
+	abs      string
+	maxBytes int64
+	max      int
+	minFree  int64
+	expiry   time.Duration
 }
 
 // root is a root of a library: as the config writes it, and absolute.
@@ -53,6 +67,26 @@ func compile(c *config.MediaLibrary) (*settings, error) {
 			return nil, fmt.Errorf("root %q: not a path", r)
 		}
 		s.roots = append(s.roots, root{conf: r, abs: abs})
+	}
+	if c.UploadDir != "" {
+		abs, err := filepath.Abs(c.UploadDir)
+		if err != nil {
+			return nil, fmt.Errorf("upload_dir %q: not a path", c.UploadDir)
+		}
+		for i := range s.roots {
+			r := &s.roots[i]
+			if rel, err := filepath.Rel(r.abs, abs); err == nil && inside(r.abs, abs) {
+				if rel == "." {
+					rel = ""
+				}
+				s.up = &uploadDir{root: r, rel: filepath.ToSlash(rel), abs: abs, maxBytes: c.UploadBytes(),
+					max: c.Uploads(), minFree: c.FreeBytes(), expiry: c.Expiry()}
+				break
+			}
+		}
+		if s.up == nil {
+			return nil, fmt.Errorf("upload_dir %q is not inside a root", c.UploadDir)
+		}
 	}
 	for _, f := range []struct {
 		list []string

@@ -698,3 +698,26 @@ func TestProvision(t *testing.T) {
 		t.Errorf("prefix %q", h.prefix)
 	}
 }
+
+// TestDeletedItem: an item the library deletes (I139) is answered 404 at
+// once, and what the cache keeps of it is dropped with the next request.
+func TestDeletedItem(t *testing.T) {
+	root := copyLib(t)
+	f := startVOD(t, root, "", `{"library": "films", "segment_duration": "2s"}`, "")
+	h := f.handler(t)
+	f.mustGet(t, "/vod/films/films/movie/v1.fmp4.m3u8", 200)
+	f.mustGet(t, "/vod/films/films/movie/v1.0.m4s", 200)
+	before := h.Cache().Entries
+	done := make(chan error, 1)
+	f.lib.DeleteItem("films/movie", func(_ *medialib.Change, err error) { done <- err })
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	f.mustGet(t, "/vod/films/films/movie/v1.0.m4s", 404)
+	f.mustGet(t, "/vod/films/clips/av1/v0.0.m4s", 200)
+	for deadline := time.Now().Add(20 * time.Second); h.Cache().Entries >= before; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the cache keeps %d entries, %d before the delete", h.Cache().Entries, before)
+		}
+	}
+}

@@ -12,7 +12,8 @@
 // Requests are served on fib's workers, and nothing here blocks one: a
 // login's password is checked on a small bounded pool of its own, and an
 // API handler's blocking work done on the console's bounded pool, with the request retained until it answers
-// (rules 1 and 4). Bodies are JSON, held whole up to MaxBodyBytes (rule 7).
+// (rules 1 and 4). Bodies are JSON, held whole up to MaxBodyBytes (rule 7),
+// but for those Options.StreamBody picks, which stream (rule 5).
 package console
 
 import (
@@ -21,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"mime"
 	"net"
 	stdhttp "net/http"
@@ -132,7 +134,20 @@ type Options struct {
 	// for every response, on a fib worker: it must not block, and what it
 	// returns must be origins alone, which the policy holds as they are.
 	Sources func(r *stdhttp.Request) []string
+	// StreamBody, when not nil, picks the requests whose bodies stream to
+	// their handler as they arrive, rather than being held whole up to
+	// MaxBody: it is called on a fib worker with the request as its header
+	// made it, and must not block. Such a handler takes the body with
+	// Context.OnBody, bounds it with Context.LimitBody, and may lift the
+	// console's read timeout for it with Context.SetReadDeadline. A request
+	// that is not let in is answered at once, and its connection closed
+	// rather than its body read.
+	StreamBody func(r *stdhttp.Request) bool
 }
+
+// MaxStreamedBody bounds a body StreamBody picks, whatever its handler's
+// LimitBody: 1 TiB.
+const MaxStreamedBody = 1 << 40
 
 // Module is an API a console serves under /api/m/<ID>/: a role's, made once
 // for the role and kept, since its routes are added on its first request.
@@ -288,6 +303,12 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		// gives its connection c.idle (see authenticated).
 		IdleTimeout:  c.unauthIdle,
 		WriteTimeout: 30 * time.Second,
+		// Only the bodies StreamBody picks stream; the others are held
+		// whole, up to maxBody, as before.
+		StreamRequestBody:          o.StreamBody != nil,
+		StreamRequestBodyThreshold: math.MaxInt64,
+		StreamRequestBodyAtHeader:  o.StreamBody,
+		MaxStreamedBodyBytes:       MaxStreamedBody,
 	}, fibhttp.HandlerFunc(c.serve))
 	if cfg.CertFile != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)

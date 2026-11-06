@@ -66,6 +66,8 @@ type Console struct {
 	// reading is set.
 	origins atomic.Pointer[mediaOrigins]
 	reading atomic.Bool
+	// inner is the Admin API's server the console calls in process.
+	inner *Server
 }
 
 // StartConsole serves the console c describes on engine, for configs, whose
@@ -88,6 +90,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 	// at once.
 	var logins atomic.Pointer[login.Logins]
 	inner := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceConsole}
+	cs.inner = inner
 	cs.api = inner.routes()
 	if a.Assistant != nil {
 		o := assistant.Options{Engine: engine, Settings: a.Assistant, Console: c, Config: configs.CurrentConfig, Logf: logf,
@@ -103,6 +106,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		// Settings is set, and the tools are the assistant's own: New
 		// cannot fail.
 		cs.ai, _ = assistant.New(o)
+		inner.audit = cs.auditFile
 		mo := mcp.Options{Assistant: cs.ai, HasUser: func(user string) bool { l := logins.Load(); return l != nil && l.HasUser(user) },
 			Docs: schema.Reference, URL: cs.URL, Logf: logf}
 		if o.Store != nil {
@@ -140,6 +144,8 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		PasswordRoutes: []string{"GET /api/m/" + AdminModule + "/users", "POST /api/m/" + AdminModule + "/account/password"},
 		// The media routes' listeners, which a preview plays from.
 		Sources: cs.sources,
+		// An upload's pieces stream to the library's file pool.
+		StreamBody: uploadPatch,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("console: %w", err)
@@ -179,6 +185,7 @@ func (cs *Console) routes(api *console.API) {
 	api.Handle("GET", "/api/users", cs.users)
 	api.Handle("POST", "/api/account/password", cs.accountPassword)
 	api.Handle("POST", "/api/users/password", cs.userPassword)
+	api.HandlePrefix("PATCH", "/api/media/library/", cs.uploadChunk)
 	api.HandlePrefix("", "/api/", cs.proxy)
 }
 
