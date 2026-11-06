@@ -128,6 +128,10 @@ func (n *node) observe(now time.Time, p *poller) {
 	in := &n.ins
 	in.mu.Lock()
 	defer in.mu.Unlock()
+	if in.samples == nil {
+		// Its whole ring at once, so that appending never grows it past.
+		in.samples = make([]sample, 0, SeriesPoints)
+	}
 	if len(in.samples) < SeriesPoints {
 		in.samples = append(in.samples, s)
 	} else {

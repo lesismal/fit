@@ -2,7 +2,7 @@
 
 [English](033-cluster-management.md) | [简体中文](033-cluster-management.zh-CN.md)
 
-Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I143, I144, I145, I146, I147 and I149 built; the choices marked *pending review*
+Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I143, I144, I145, I146, I147, I148, I149 and I150 built; the choices marked *pending review*
 stand until the user rules on them. The track is I140–I151 of the
 [development plan](../dev-plan.md#cluster-management).
 
@@ -222,6 +222,19 @@ log](../cluster.md#users-roles-and-the-audit-log)):
 - **The audit log**'s entries gain their members, outcome, diff and digest and the versions before
   and after; `GET audit` filters by user, member, operation and time and exports JSON lines; tests
   of members are audited.
+
+What I150 adds, metrics, logs and certificates across the cluster ([metrics, logs and
+certificates](../cluster.md#metrics-logs-and-certificates)):
+
+- **Series** of each member's counters from every poll, 360 polls a member, in the manager's memory
+  on the member's node; rates and gauges per member and summed per group. `GET metrics`.
+- **The certificate inventory**: every member's certificates as its last poll read them, the
+  soonest to expire first. `GET certificates`.
+- **Logs tailed** from up to 16 members at once, merged by time, followed with a cursor. `GET logs`.
+- **`fit cluster`** in the CLI, through the manager's Admin API (`/cluster/...`), acting as the
+  cluster-wide admin `Admin API`.
+- **On members**: `GET /logs/recent` in the Admin API (capability `logs.recent`), the log's ring
+  read after a sequence number; each ring message numbered (`seq`).
 
 ## Pending review
 
@@ -715,6 +728,50 @@ Decided while building I148 (2026-11-06):
      endpoints do. Their audit entries gain the outcome, the alerts' versions (`a3` → `a4`) and the
      diff of the rules, webhooks (as the API shows them) and silences. Alternative: silences an
      admin's, as rules are.
+
+Decided while building I150 (2026-11-07):
+
+134. **The CLI reaches the manager through its Admin API**, with the token in `admin.token_file`
+     and `-c` as `fit check` and `fit token` do, not through the console with a login: no password
+     on a command line or in a script, and the manager's Admin API is already where its owner
+     drives it. The manager serves a subset there, `/cluster/...` (members, states, groups, drift,
+     a sync's diff, metrics, certificates, logs, rollouts), as net/http handlers calling the
+     Manager's methods; the console module stays as it is. Alternative: the console with a login,
+     whose endpoints would have served the CLI unchanged, at the cost of a password to keep.
+135. **The Admin API acts as a cluster-wide admin**, the user `Admin API`, whatever the roles say:
+     its token's holder can rewrite the manager's config, `admin.cluster.admins` included. A console
+     user of that name has no role and changes nothing of the manager, so that no one logs in as
+     it. Alternative: a role for the token in the config.
+136. **The bytes of the series are the bytes queued for clients** (`/status`'s `pending_bytes`, a
+     gauge), not bytes sent a second: fit counts no bytes per request today, and a counter on the
+     request path is a hot-path change with its own benchmark. Alternative: bytes in and out
+     counted per route beside the requests (a follow-up, measured on the benchmark host).
+137. **Series live in the manager's memory**, on the member's node, 360 polls a member (an hour at
+     10s; about 30 KiB a member), and start afresh at a restart; nothing is written to the store.
+     Alternative: kept in the store, which would write it at every poll.
+138. **Rates are computed when read**, from the counters of two polls, `null` across a restart of
+     the member (its start changed or a counter went back), a gap of more than three intervals, or
+     a member that counts no requests. A group sums its members' points a poll interval at a time,
+     with the count of members summed.
+139. **The series and the inventory are any role's**, as the states they come from (item 122); a
+     member's logs need a role on it, as its own reads do.
+140. **The tail reads the members' rings** (I125's, now numbered) through a new member endpoint,
+     `GET /logs/recent?after=`, not the log files: what the assistant's `log_tail` reads, bounded,
+     the same on every OS. A cursor holds each member's last number; a member restarted is read
+     from its start (an `after` past its last). At most 16 members a tail and 1,000 messages a
+     member, one of the 8 reads of members while it runs; the page keeps 2,000 lines.
+141. **The inventory is what the poller reads** (`/status`'s certificates, now with issuer, serial
+     and dates), 256 a member, not a read of each member when the page opens.
+142. **The Overview's sparklines are a `rowExtra`** (I142's extension point), one read of the series
+     a poll interval at most for every card, so that `overview.js` was not edited.
+143. **`fit cluster rollout start`** plans, prints the plan, asks unless `-yes`, starts, and with
+     `-wait` follows until the rollout ends or a canary waits; exit codes: 0 done or waiting, 1
+     failed, aborted, rolled back or expired; `state`, `diff` and `certs -within` exit 1 for a
+     member not up, out of sync, or a certificate expiring.
+144. **`diff` tells members nothing** of what the manager owns there, as drift reads do (item 105),
+     unlike the Templates page's reads.
+145. **Charts are inline SVG of the workbench's own**, a categorical palette by member name, colours
+     set through the CSSOM (the console's CSP refuses inline style attributes); no chart library.
 
 Open questions of the plan, answered as proposed until reviewed:
 
