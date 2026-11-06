@@ -1,0 +1,10 @@
+{
+  "id": "sintel",
+  "title": "Sintel",
+  "poster": "art/sintel.png",
+  "renditions": [
+    {"file": "sintel-hd.mp4", "name": "hd"},
+    {"file": "sintel-sd.mp4", "name": "sd"}
+  ],
+  "subtitles": [{"file": "subs/sintel.zh.srt", "name": "中文", "language": "zh", "default": true}]
+}

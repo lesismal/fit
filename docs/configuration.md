@@ -110,6 +110,7 @@ More: the [JSON reference](reference/json.md).
 | `tunnel` | The tunnel's hub, node and proxy, which reach services behind NAT | [Tunnel](reference/config.md#tunnel), [the tunnel](tunnel.md) |
 | `webrtc` | A TURN server (`turn`), the media port of `whip` and `whep` (`media`), and the relay of `webrtc_proxy` (`proxy`) | [WebRTC](reference/config.md#webrtc), [WebRTC](webrtc.md) |
 | `streaming` | The streaming role: a media hub with RTMP, RTSP and SRT listeners and the WebRTC port of `stream_whip` and `stream_whep` | [Streaming](reference/config.md#streaming), [streaming](streaming.md) |
+| `media_library` | Media libraries: directories of media files catalogued into items, their renditions, audio, subtitles and posters | [Media library](reference/config.md#media-library), [media library](media-library.md) |
 | `providers` | Docker, Consul, etcd and Kubernetes | [Providers](reference/config.md#providers) |
 | `schema_version` | The version of the config, 1; optional | [Compatibility](compatibility.md#the-schemas-version) |
 

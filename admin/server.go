@@ -90,6 +90,10 @@ const VersionHeader = "Fit-Config-Version"
 //	                            one role's; POST issues one, PATCH
 //	                            /tokens/{role}/{id} changes its expiry,
 //	                            DELETE revokes it (see tokens.go)
+//	GET    /media/library       the media libraries and their scans;
+//	                            /media/library/{name} one library, with a
+//	                            page of its items; .../items/{id} one item;
+//	                            POST .../rescan scans it again (medialib.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //
@@ -237,6 +241,10 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /tokens/{role}", s.issueToken)
 	mux.HandleFunc("PATCH /tokens/{role}/{id}", s.tokenExpiry)
 	mux.HandleFunc("DELETE /tokens/{role}/{id}", s.revokeToken)
+	mux.HandleFunc("GET /media/library", s.libraries)
+	mux.HandleFunc("GET /media/library/{name}", s.libraryPage)
+	mux.HandleFunc("GET /media/library/{name}/items/{id...}", s.libraryItem)
+	mux.HandleFunc("POST /media/library/{name}/rescan", s.rescan)
 	return mux
 }
 

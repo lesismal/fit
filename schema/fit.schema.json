@@ -2208,6 +2208,111 @@
       ],
       "type": "object"
     },
+    "config.MediaLibrary": {
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "description": "Files and directories left out, by pattern, as files writes them, as trailers or **/extras/**; a directory left out is not walked. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "file_queue": {
+          "default": 4096,
+          "description": "The most jobs that wait for the file pool; one more is refused, as a request answered 503. 4096 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "file_timeout": {
+          "default": "10s",
+          "description": "How long a job may wait for the file pool before it is given up, as a request answered 503. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "file_workers": {
+          "description": "The goroutines of the library's file pool, which probe, read sample tables and read the files' bytes, so that no fib worker waits on the disk: all the disk is asked to do at once. 4 a CPU, and at least 16, when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "files": {
+          "description": "The files looked at, by pattern: a pattern without '/' matches a file's name, as *.mp4, and one with '/' its path under the root, as films/**/*.mp4, where * matches within a name and ** any run of directories. Every file when left out; names starting with '.' are never looked at.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "follow_symlinks": {
+          "description": "Follow symbolic links that lead out of the library's roots. A link that stays within its root is followed either way; one that leads out is refused, and reported, when left out or false.",
+          "type": "boolean"
+        },
+        "max_catalog_bytes": {
+          "default": 67108864,
+          "description": "The most memory the catalog takes, as reckoned from its items' paths, titles, tracks and codec configurations; past it the rest of the items are left out, and the scan says so. 64 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_files": {
+          "default": 200000,
+          "description": "The most files and directories a scan looks at, across the roots; past it the scan stops there, and says so. 200000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_items": {
+          "default": 20000,
+          "description": "The most items the catalog holds; past it the rest are left out, and the scan says so. 20000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_probes": {
+          "default": 4,
+          "description": "The most files probed at once on the library's file pool, so that a scan leaves the pool's other workers to the files being served. 4 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_sidecar_bytes": {
+          "default": 65536,
+          "description": "The largest sidecar, <name>.json, read; a larger one is reported and left out. At most 1 MiB. 64 KiB when left out or 0.",
+          "maximum": 1048576,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_subtitle_bytes": {
+          "default": 2097152,
+          "description": "The largest subtitle file served, .vtt or .srt turned into WebVTT; a larger one is listed with its error and not served. 2 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_table_bytes": {
+          "default": 134217728,
+          "description": "The most memory the sample tables read from the files take, kept for the files being served; past it the least recently used are dropped, and a table larger than all of it is refused. 128 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The library's name, which handlers and the Admin API's /media/library/<name> refer to it by. Letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        },
+        "roots": {
+          "description": "The directories whose files the library holds, scanned with their subdirectories; an item's id is its path under its root. A root may not lie inside another. A root missing when scanned is reported, and the others are scanned.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scan_interval": {
+          "default": "10m",
+          "description": "How often the roots are scanned again, at least 10s; a scan also runs when the library is made, when the config changes its roots, patterns or bounds, and on the Admin API's POST /media/library/<name>/rescan. A file whose size and time are unchanged is not probed again. 10m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "roots"
+      ],
+      "type": "object"
+    },
     "config.MediaToken": {
       "additionalProperties": false,
       "properties": {
@@ -6019,6 +6124,13 @@
       "description": "Named policies of who may publish and play which streams, with tokens, users and keys for tokens fit signs: the handlers and roles that take media (whip, whep, webrtc_proxy) refer to one with their auth param. A handler without auth lets everyone in, as the route's middleware allow.",
       "items": {
         "$ref": "#/$defs/config.MediaAuth"
+      },
+      "type": "array"
+    },
+    "media_library": {
+      "description": "Named libraries of media files: directories scanned into a catalog of items, each a title with its renditions, audio, subtitles and poster, probed off fib's workers on a bounded file pool of the library's own, and read by the Admin API's /media/library. None when left out: no files are scanned or served.",
+      "items": {
+        "$ref": "#/$defs/config.MediaLibrary"
       },
       "type": "array"
     },
