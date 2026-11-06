@@ -4123,8 +4123,10 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   fastcgi 在 Linux 上也对反斜杠答 400；在 Windows 与 macOS 上 `static` 拒绝大小写变体与脚本扩展名。
 - **测试**：竞态检测下的 `make test-changed`（77 个包）；linux、darwin 与 windows 的 vet。Windows 的名字查找只编译与 vet，
   未运行：CI 没有它的 Windows 测试。
-- **基准**：基准机上 `BenchmarkServeCached` 交替 10 轮：687.5 ns 到 692.2 ns（p=0.53），分配不变。`bench/ab.sh` 的 static
-  运行没能开始：用户的 `qwen27b.service` 占着基准框架的 h2c 端口 :8081。
+- **基准**：基准机上 `BenchmarkServeCached` 交替 10 轮：687.5 ns 到 692.2 ns（p=0.53），分配不变。fit `61b5a6c4` 对 `f294f290`
+  （含 I158 的 fib 与 I159 的 I161；5 轮，由于用户的 `qwen27b.service` 占着 8081，运行时把基准框架的 h2c 端口临时改为 8091）的
+  `bench/ab.sh`：h2c 的 `static` +6.7%、`fixed` +5.2%，5 轮全快（来自 I158 的 fib）；HTTP/1.1 上的 `static`、`fixed` 与 `proxy`
+  以及 h2c 上的 `proxy` 在噪声内。
 - **缺口**：全速重连的 loopback 客户端仍可能在新的 loopback 管理员连接认证前抢走它的位（已认证的不受影响）；按客户端限制
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 

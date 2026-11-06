@@ -5798,8 +5798,11 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Tests**: `make test-changed` under the race detector (77 packages); vet for linux, darwin and
   windows. Windows' name lookup is compiled and vetted, not run: CI has no Windows test of it.
 - **Benchmark**: `BenchmarkServeCached` on the benchmark host, 10 alternating runs: 687.5 ns to
-  692.2 ns (p=0.53), allocations unchanged. The `bench/ab.sh` static run did not start: the user's
-  `qwen27b.service` holds :8081, the harness's h2c port.
+  692.2 ns (p=0.53), allocations unchanged. `bench/ab.sh` of fit `61b5a6c4`
+  against `f294f290` (I161 with I158's fib and I159; 5 rounds, the harness's h2c port moved to 8091
+  for the run, since the user's `qwen27b.service` holds 8081): `static` h2c +6.7% and `fixed` h2c
+  +5.2%, faster 5 of 5 (I158's fib); `static`, `fixed` and `proxy` over HTTP/1.1 and `proxy` over h2c
+  within noise.
 - **Gaps**: a loopback client reconnecting at full speed can still race a brand-new loopback admin
   connection before it authenticates (an already authenticated one is never affected); a per-client
   accept rate would close it. The decisions made while building it are in the plan's I161 section,
