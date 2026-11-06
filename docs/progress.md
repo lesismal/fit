@@ -6654,3 +6654,27 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the template form edits handlers and maps as JSON; a member down when told hears at its next
   read; a member without a store has `admin` in its desired config, for I146 to check. The decisions
   made are in the plan's I145 section and decision 033, pending review.
+
+
+### I146 Rollouts — done
+
+- **Plans**: a template's change, a sync, or parts copied from a member: each member's desired config,
+  diff and own dry run (`If-Match` on the ETag read); members not ready said why.
+- **Strategies**: all at once, rolling (by size or percentage, with a pause), or a canary waiting for a
+  go; each member applied by its `PUT /config` with `If-Match` (changed since the plan, skipped and never
+  overwritten); a health gate after each batch (reachable, running the config applied, no new drift,
+  and a 5xx share over a window from the new `GET /status` `requests`, `status.requests`); a failed gate
+  stops and rolls back the batch, or all, by `/rollback/{n}` with `If-Match`.
+- **Control**: pause, resume, go, abort, roll back, discard; one rollout or operation a member; kept in
+  the store (the last 50) with each member's outcome and versions; a restart shows a running rollout
+  paused where it stopped, an apply in flight settled by ETag on resume.
+- **Pages**: Cluster, Rollouts (history, a new rollout, its plan with diffs and dry-run errors, the
+  strategy form, a confirm dialog, progress batch by batch with gates and controls), **Roll out** on
+  templates, **Sync this node** on rendered results; English and Chinese.
+- **Tests**: Docker with five members on the benchmark host (`test/docker/cluster` `TestRollouts`): a
+  rolling rollout in batches, a member failing its 5xx gate rolled back with its batch, a canary
+  waiting for its go, a member edited after the plan skipped, a manager restarted between batches and
+  resumed; `cluster` at 99.0%; the race suite.
+- **Gaps**: with no traffic the 5xx gate passes with a note; server reasons are English on the Chinese
+  pages; a rollout's history keeps the paths changed, not the values. The decisions made are in the
+  plan's I146 section and decision 033, pending review.
