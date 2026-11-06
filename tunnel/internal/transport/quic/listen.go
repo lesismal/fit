@@ -24,9 +24,14 @@ func init() { transport.Register(Scheme, relay{}) }
 type relay struct{}
 
 // ParseURL returns the host:port of a "quic://host:port" URL, or of a bare
-// "host:port".
+// "host:port", whose host may be empty, to listen on. An address with a
+// user, a query or a fragment is refused: none says how a certificate is
+// checked.
 func ParseURL(raw string) (string, error) {
-	base, _, _ := strings.Cut(raw, "?")
+	base := raw
+	if strings.ContainsAny(raw, "?#@") {
+		return "", errors.New("quic: address " + strconv.Quote(raw) + " has a query, a fragment or a user, which an address does not")
+	}
 	if !strings.Contains(base, "://") {
 		if _, _, err := net.SplitHostPort(base); err != nil {
 			return "", errors.New("quic: bad address " + strconv.Quote(raw) + ": " + err.Error())

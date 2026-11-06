@@ -24,9 +24,40 @@ func TestEndpointAddress(t *testing.T) {
 		{EndpointReq{Protocol: config.TunnelWSS, Address: "h:1/tun"}, "wss://h:1/tun"},
 		{EndpointReq{Protocol: "tcp", Address: " h:1 "}, "h:1"},
 	} {
-		if got := c.e.address(); got != c.want {
-			t.Errorf("%+v: %q", c.e, got)
+		if got, err := c.e.address(); err != nil || got != c.want {
+			t.Errorf("%+v: %q, %v", c.e, got, err)
 		}
+	}
+	// The review's attacks: a fragment or a query that would have changed
+	// how the hub's certificate is checked, and a user; and an address the
+	// config refuses otherwise.
+	for _, e := range []EndpointReq{
+		{Protocol: config.TunnelTLS, Address: "tls://hub:7000#?pin=" + strings.Repeat("0", 64) + "&"},
+		{Protocol: config.TunnelTLS, Address: "hub:443#?x="},
+		{Protocol: config.TunnelQUIC, Address: "hub:7000#?insecure=1&"},
+		{Protocol: config.TunnelWSS, Address: "hub:443/tunnel#?ca=/tmp/evil.pem&"},
+		{Protocol: config.TunnelWSS, Address: "wss://hub:443/tunnel?pin=" + strings.Repeat("0", 64)},
+		{Protocol: config.TunnelTLS, Address: "user@hub:7000"},
+		{Protocol: "tcp", Address: "hub:7000#x"},
+		{Protocol: "tcp", Address: "hub"},
+	} {
+		if got, err := e.address(); !errors.Is(err, ErrBadRequest) || !strings.Contains(err.Error(), "is not") && !strings.Contains(err.Error(), "pin or ca_file") {
+			t.Errorf("%+v: %q, %v", e, got, err)
+		}
+	}
+}
+
+// The pages cannot write an endpoint whose fragment would have overridden
+// the hub's pin.
+func TestEditHubRefusesFragment(t *testing.T) {
+	m := Member{}
+	ep := []EndpointReq{{Protocol: config.TunnelTLS, Address: "hub:7000#?pin=" + strings.Repeat("0", 64) + "&", Enabled: true}}
+	err := EditHub(m, "", HubReq{Endpoints: ep, Password: "pw", Pin: strings.Repeat("1", 64)}, false)
+	if !errors.Is(err, ErrBadRequest) || !strings.Contains(err.Error(), "fragment") {
+		t.Fatalf("%v", err)
+	}
+	if _, ok := m["hubs"]; ok {
+		t.Fatalf("written: %v", m)
 	}
 }
 

@@ -117,9 +117,9 @@ there, and shows the token itself once, for the node's or proxy's `token` (see
 | `tokens` | none | the tokens the hub issued, each `{id, name, hash, created_at, expires_at, note, members}`, which nodes and proxies register with (see [Tokens](#tokens)); made by the pages, the Admin API and `fit token`, not by hand |
 | `password` | none: only tokens register | deprecated: a password every node and proxy may register with, proven with an HMAC, never sent. Taken in this release, with a warning on the pages while a member uses it; refused in the next |
 | `body_password` | none | AES-256-GCM on every frame's body, which authenticates every frame; nodes and proxies need the same. A link that registers with a token keys it from the token and this by HKDF |
-| `listeners` | none: the pages add them | `{protocol: tls\|wss\|quic\|tcp\|ws, address, path, cert_file, key_file}`; a ws or wss listener's path is `/tunnel` by default, and only those have one. A `tcp` or `ws` listener on an address that is not a loopback one (`127.0.0.0/8`, `::1`, `localhost`; an empty host is every address) is refused unless `body_password` is set (see [What protects a link](#what-protects-a-link)). A tls, wss or quic listener presents the certificate of its `cert_file` and `key_file`, read each time the member is applied, or the hub's own (below) |
+| `listeners` | none: the pages add them | `{protocol: tls\|wss\|quic\|tcp\|ws, address, path, cert_file, key_file}`; a ws or wss listener's path is `/tunnel` by default, and only those have one. A `tcp` or `ws` listener on an address that is not a loopback one (`127.0.0.0/8`, `::1`, `localhost`; an empty host is every address) is refused unless `body_password` is set (see [What protects a link](#what-protects-a-link)). A tls, wss or quic listener presents the certificate of its `cert_file` and `key_file`, read each time the member is applied and again when they change on disk (`fit run -watch-certs`, on by default), or the hub's own (below) |
 | `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for proxies' `web_proxies`, answering on any path; it needs `console`, its password is the hub's when left out, and `max_conns` is 32. A WebSocket that has not proven the password within 10s is closed, and one IP address may have a quarter of `max_conns` open that have not |
-| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; past half of `max_handshakes`, a client proves its address with a QUIC Retry before its handshake starts. `cert` and `key` are the hub's own certificate, which its tls, wss and quic listeners without `cert_file` present; the hub makes a self-signed one and writes it here when such a listener needs one; they go together |
+| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; past half of `max_handshakes`, a client proves its address with a QUIC Retry before its handshake starts. `cert` and `key` are the hub's own certificate, which its tls, wss and quic listeners without `cert_file` present; they go together. When such a listener needs one and none is set, the hub makes a self-signed one and keeps it: here, with `admin.store`; or else in a file beside the config, mode 0600, named after it (`fit.tunnel.hub.pem` beside `fit.json`, or in a directory of configs) |
 | `register_timeout` | 10s | how long a link may take to register |
 | `call_timeout` | 15s | how long a node may take to answer: to open a tunnel, list or set its services |
 | `max_links`, `max_links_per_peer`, `max_peers`, `max_tunnels` | 1024, 128, 1024, 16384 | the bounds of what the hub keeps |
@@ -158,13 +158,13 @@ there, and shows the token itself once, for the node's or proxy's `token` (see
 | Field | Default | What it is |
 |-------|---------|------------|
 | `name` | the first endpoint's address | what forwards and the pages name it by |
-| `endpoints` | required | `{address, disabled}`, tried in order: `tls://host:port`, `wss://host:port/path` (443 without a port), `quic://host:port`; and `host:port` or `tcp://` for TCP and `ws://host:port/path`, in the clear, which are refused to a host that is not a loopback one unless `body_password` is set |
+| `endpoints` | required | `{address, disabled}`, tried in order: `tls://host:port`, `wss://host:port/path` (443 without a port), `quic://host:port`; and `host:port` or `tcp://` for TCP and `ws://host:port/path`, in the clear, which are refused to a host that is not a loopback one unless `body_password` is set. An address is only where to dial: one with a query, a fragment or a user (`?`, `#`, `@`) is refused, by the config and by the pages, since `pin`, `ca_file` and `quic_insecure` alone say how the hub's certificate is checked |
 | `token` | | the token the hub issued for this node or proxy, `fitt1.<id>.<secret>`; `token` or `password` is required, not both |
 | `password` | | deprecated: the hub's shared password, until the hub issues a token |
 | `body_password` | none | the hub's, when it has one |
 | `pin` | | the SHA-256 of the hub's certificate, as the hub's page shows it, which tls, wss and quic endpoints check the certificate against in place of the chain and the name: for the hub's self-signed certificate. Its old name, `quic_pin`, is still read, with a warning |
 | `ca_file` | | a PEM file of the CAs that sign the hub's certificate, checked with its name, in place of the system's roots; read at each dial; not with `pin` |
-| `quic_insecure` | false | a quic endpoint takes any certificate: anyone on the path can then read and change the links. For tests only; tls and wss have no such switch |
+| `quic_insecure` | false | a quic endpoint takes any certificate: anyone on the path can then read and change the links. For tests only; tls and wss have no such switch. Refused for a `quic://` endpoint whose host is not a loopback one unless `body_password` is set, as `tcp://` is; `pin` and `ca_file` override it |
 | `pool_size` | 10, at most 100 | how many links to the hub carry tunnels |
 | `dial_timeout` | 5s | a link's dial |
 | `call_timeout` | 10s | the hub's answer to a registration or a call |
@@ -191,13 +191,22 @@ a peer that needs more opens a larger pool.
 - **QUIC** links run on a UDP binding of the same engine, with fib's QUIC, TLS 1.3 and the ALPN
   `fit-tunnel`.
 - **The hub's certificate.** A hub makes a self-signed certificate when a tls, wss or quic listener
-  needs one and keeps it in its member (`quic.cert`, `quic.key`), so its fingerprint, which nodes and
-  proxies pin, outlives a restart; its console shows the fingerprint, and each listener's. A listener
-  with `cert_file` and `key_file` presents that certificate instead, for nodes and proxies that check
-  it with `ca_file` or the system's roots. A node or proxy checks the certificate by `pin`, by
-  `ca_file`, or by the system's roots, the name included unless pinned. It keeps no TLS session
-  tickets, so each handshake checks the certificate in full; the pin is checked again in the
-  handshake's last check, which a resumed session runs too.
+  needs one and keeps it, so its fingerprint, which nodes and proxies pin, outlives a restart: with
+  `admin.store`, in its member (`quic.cert`, `quic.key`), which the store keeps; without one, in a
+  file beside the config, mode 0600, named after it (`/etc/fit/fit.tunnel.hub.pem` beside
+  `/etc/fit/fit.json`; `fit.tunnel.hub.pem` in a directory of configs), which the hub reads at each
+  start and its log names. Back that file up with the config; delete it for a new certificate, which
+  every node and proxy must pin again. Where it cannot be written, as beside a read-only config, the
+  hub logs that its certificate will change at the next start. Its console shows the fingerprint,
+  and each listener's. A listener with `cert_file` and `key_file` presents that certificate instead,
+  for nodes and proxies that check it with `ca_file` or the system's roots; the files are read again
+  when they change on disk (`fit run -watch-certs`), and the listener opens anew with the new
+  certificate. A node or proxy checks the certificate by `pin`, by `ca_file`, or by the system's
+  roots, the name included unless pinned. These are given to the dial beside the address, never
+  read from it: an endpoint with a query, a fragment or a user is refused, so no address, one
+  pasted from elsewhere included, can change how the certificate is checked. It keeps no TLS
+  session tickets, so each handshake checks the certificate in full; the pin is checked again in
+  the handshake's last check, which a resumed session runs too.
 - **Registration with a token** is mutual and bound to the link. Each link of a node or proxy first
   calls `challenge` with its token's ID and a fresh 32-byte nonce of its own, and the hub answers with
   a fresh nonce of its own; the link then registers with a proof of the token over a transcript of
@@ -294,7 +303,7 @@ while any does. To move:
 | `tls://`, `wss://`, `quic://` with `pin` or `ca_file` | its certificate (TLS 1.3), and the registration's proof | authenticated and encrypted by TLS | cut the link, see its timing and sizes |
 | `tls://`, `wss://`, `quic://` with neither | its certificate, by the system's roots: a hub with a public CA's certificate | as above | as above, as long as no CA the system trusts signs another certificate for the hub's name |
 | `tcp://`, `ws://` with `body_password` | the registration's proof, and each frame sealed under the password | each authenticated and its body encrypted (AES-256-GCM); forged, replayed, reordered and crossed frames close the link | as above, and see the frames' kinds and headers |
-| `quic://` with `quic_insecure` | the registration's proof, once | not authenticated | read every frame and send its own, through a relay: for tests only |
+| `quic://` with `quic_insecure` | the registration's proof, once | not authenticated | read every frame and send its own, through a relay: for tests only, and refused unless the hub's address is a loopback one or `body_password` is set |
 | `tcp://`, `ws://` without `body_password` | the registration's proof, once | not authenticated, in the clear | read every frame, and through a relay send its own: refused unless the hub's address is a loopback one |
 
 A relay that does not have the hub's key cannot complete TLS with a node that pins the hub's
@@ -316,6 +325,15 @@ This release refuses links that only the registration authenticates:
   tls or wss listener, move the nodes and proxies, then remove the old listener.
 - `quic_pin` is now `pin`, and checks tls and wss endpoints as well as quic ones. The old name
   still loads, with a warning; the pages write `pin`.
+- An endpoint whose address has a query, a fragment or a user (`?`, `#`, `@`) no longer loads,
+  nor can the pages write one: set `pin` or `ca_file` instead of anything in the address.
+- `quic_insecure` with a `quic://` endpoint whose host is not a loopback one no longer loads
+  unless `body_password` is set (or `pin` or `ca_file`, which override it): pin the hub's
+  certificate instead.
+- A hub without `admin.store` keeps the self-signed certificate it makes in a file beside the
+  config (see [Links](#links)), and so presents the same one after a restart; before, it made a new
+  one at each start, and its nodes and proxies had to pin it again. The first start of this release
+  makes one more new certificate: pin it once more.
 - With `body_password`, the link protocol is version 3, whose keys name the direction: a hub,
   node or proxy of an earlier release and one of this release refuse each other's sealed links,
   each logging both versions. Upgrade them together.

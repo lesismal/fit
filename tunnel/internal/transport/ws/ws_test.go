@@ -105,7 +105,7 @@ func TestEcho(t *testing.T) {
 		t.Fatalf("URL %q", l.URL())
 	}
 	var r *recorder
-	c, err := transport.Dial(tunneltest.Engine(t), l.URL(), 5*time.Second, func(c transport.Conn) transport.Handler {
+	c, err := transport.Dial(tunneltest.Engine(t), l.URL(), 5*time.Second, transport.ClientOptions{}, func(c transport.Conn) transport.Handler {
 		r = newRecorder(c, false)
 		return r
 	})
@@ -137,7 +137,7 @@ func TestBadURLs(t *testing.T) {
 	e := tunneltest.Engine(t)
 	open := func(c transport.Conn) transport.Handler { return newRecorder(c, false) }
 	for _, addr := range []string{"wss://127.0.0.1:1/", "ws://%zz"} {
-		if _, err := transport.Dial(e, addr, time.Second, open); err == nil {
+		if _, err := transport.Dial(e, addr, time.Second, transport.ClientOptions{}, open); err == nil {
 			t.Errorf("dialed %q", addr)
 		}
 		if _, err := transport.Listen(e, addr, transport.ListenOptions{}, open); err == nil {
@@ -348,7 +348,7 @@ func switched(key string) string {
 func dialRaw(t *testing.T, url string, timeout time.Duration) (transport.Conn, *recorder, error) {
 	t.Helper()
 	var r *recorder
-	c, err := transport.Dial(tunneltest.Engine(t), url, timeout, func(c transport.Conn) transport.Handler {
+	c, err := transport.Dial(tunneltest.Engine(t), url, timeout, transport.ClientOptions{}, func(c transport.Conn) transport.Handler {
 		r = newRecorder(c, false)
 		return r
 	})
@@ -446,6 +446,15 @@ func TestClientControlFrames(t *testing.T) {
 // A ws:// URL without a port takes port 80.
 func TestDialerDefaultPort(t *testing.T) {
 	if _, err := Dialer(tunneltest.Engine(t), "ws://127.0.0.1/x", time.Second, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Dialer is for ws:// only, and a web proxy's URL may have a query.
+	for _, bad := range []string{"wss://127.0.0.1/x", "ws://%zz/x"} {
+		if _, err := Dialer(tunneltest.Engine(t), bad, time.Second, nil); err == nil {
+			t.Errorf("Dialer(%q)", bad)
+		}
+	}
+	if _, err := Dialer(tunneltest.Engine(t), "ws://127.0.0.1/x?a=b", time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
 }

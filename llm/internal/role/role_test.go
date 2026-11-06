@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
+	goruntime "runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -183,6 +186,85 @@ func TestApplyWritesID(t *testing.T) {
 	waitEdit(t, ed2)
 	if b2.Self().ID == "" {
 		t.Fatal("no ID made")
+	}
+}
+
+// Without admin.store, a self_signed listener's certificate is kept in a
+// file beside the config, 0600, not written into the member: a restart
+// presents the same one. A file that does not hold one leaves the listener
+// without TLS, and the file as it is.
+func TestSelfSignedKeptBesideConfig(t *testing.T) {
+	dir := t.TempDir()
+	listen := &config.LLMListen{Address: freeAddr(t), Password: "pw", SelfSigned: true}
+	start := func() (*Base, *editor) {
+		ed := &editor{done: make(chan struct{}, 16)}
+		mgr := app.NewManager(testEngine(), nil, nil, ed.edit)
+		mgr.KeepBeside(filepath.Join(dir, "fit.yaml"))
+		if err := mgr.Apply(&config.Config{LLM: &config.LLM{Hub: &config.LLMHub{}}}); err != nil {
+			t.Fatal(err)
+		}
+		hostMu.Lock()
+		h := lastHost
+		hostMu.Unlock()
+		b := New(h, Spec{Role: model.RoleHub})
+		t.Cleanup(func() {
+			b.Stop(context.Background())
+			mgr.Stop(context.Background())
+		})
+		if err := b.Apply(Common{ID: "hub-1", Listen: listen}); err != nil {
+			t.Fatal(err)
+		}
+		return b, ed
+	}
+	b, ed := start()
+	fp := b.Mesh.Listen().Fingerprint
+	kept := filepath.Join(dir, "fit.llm.hub.pem")
+	fi, err := os.Stat(kept)
+	if err != nil || len(fp) != 64 {
+		t.Fatalf("kept %v, fingerprint %q", err, fp)
+	}
+	if goruntime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", fi.Mode())
+	}
+	select {
+	case <-ed.done:
+		t.Fatalf("the member was edited: %s", ed.cur)
+	case <-time.After(100 * time.Millisecond):
+	}
+	b.Stop(context.Background())
+	if b2, _ := start(); b2.Mesh.Listen().Fingerprint != fp {
+		t.Fatalf("restarted with %s, was %s", b2.Mesh.Listen().Fingerprint, fp)
+	}
+
+	if err := os.WriteFile(kept, []byte("nothing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if b3, _ := start(); b3.Mesh.Listen().Fingerprint != "" || b3.Mesh.Listen().Error == "" {
+		t.Fatalf("a bad file: %+v", b3.Mesh.Listen())
+	}
+	if data, _ := os.ReadFile(kept); string(data) != "nothing" {
+		t.Fatal("the bad file was overwritten")
+	}
+
+	// Where nothing can be written, the certificate goes into the member,
+	// as with a store, and the listener runs.
+	dir = filepath.Join(dir, "none")
+	b4, ed4 := start()
+	if b4.Mesh.Listen().Fingerprint == "" {
+		t.Fatalf("unwritable: %+v", b4.Mesh.Listen())
+	}
+	waitEdit(t, ed4)
+}
+
+func TestListenCertFiles(t *testing.T) {
+	if f := ListenCertFiles(nil); f != nil {
+		t.Fatal(f)
+	}
+	if f := ListenCertFiles(&config.LLMListen{SelfSigned: true}); f != nil {
+		t.Fatal(f)
+	}
+	if f := ListenCertFiles(&config.LLMListen{CertFile: "c", KeyFile: "k"}); len(f) != 2 || f[0] != "c" || f[1] != "k" {
+		t.Fatal(f)
 	}
 }
 

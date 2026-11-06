@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -312,6 +314,40 @@ func TestManagerHostWithoutLog(t *testing.T) {
 	defer m.Stop(context.Background())
 	if h := m.host("llm.hub"); h.Log != nil || h.ID != "llm.hub" || h.m != m {
 		t.Fatalf("host = %+v", h)
+	}
+}
+
+// A role keeps its files beside the config file, named after it, or in the
+// directory of configs; none for standard input, or before KeepBeside.
+func TestKeptFile(t *testing.T) {
+	m := NewManager(nil, nil, nil, nil)
+	defer m.Stop(context.Background())
+	h := m.host("tunnel.hub")
+	if f := h.KeptFile("pem"); f != "" {
+		t.Fatalf("before KeepBeside: %q", f)
+	}
+	if f := (&Host{ID: "tunnel.hub"}).KeptFile("pem"); f != "" {
+		t.Fatalf("without a Manager: %q", f)
+	}
+	dir := t.TempDir()
+	m.KeepBeside(filepath.Join(dir, "fit.yaml"))
+	if f := h.KeptFile("pem"); f != filepath.Join(dir, "fit.tunnel.hub.pem") {
+		t.Fatalf("beside a file: %q", f)
+	}
+	m.KeepBeside(dir)
+	if f := h.KeptFile("pem"); f != filepath.Join(dir, "fit.tunnel.hub.pem") {
+		t.Fatalf("in a directory: %q", f)
+	}
+	wd, _ := os.Getwd()
+	m.KeepBeside("conf.json")
+	if f := h.KeptFile("pem"); f != filepath.Join(wd, "conf.tunnel.hub.pem") {
+		t.Fatalf("a relative file: %q", f)
+	}
+	for _, p := range []string{"-", ""} {
+		m.KeepBeside(p)
+		if f := h.KeptFile("pem"); f != "" {
+			t.Fatalf("%q: %q", p, f)
+		}
 	}
 }
 

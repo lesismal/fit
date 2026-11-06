@@ -228,7 +228,7 @@ func TestServerIdleConn(t *testing.T) {
 // timeout takes the default.
 func TestClientRefusesStream(t *testing.T) {
 	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{}, false)
-	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", "", true), 0, func(c transport.Conn) transport.Handler { return newSink(c, false) })
+	c, err := transport.Dial(tunneltest.Engine(t), "quic://"+s.hostport(t), 0, insecureOpts, func(c transport.Conn) transport.Handler { return newSink(c, false) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestClientCloseAfterSend(t *testing.T) {
 // A dial whose open turns the link away fails.
 func TestDialOpenRefused(t *testing.T) {
 	f := newFixture(t, false)
-	_, err := transport.Dial(tunneltest.Engine(t), f.url(), 5*time.Second, func(transport.Conn) transport.Handler { return nil })
+	_, err := transport.Dial(tunneltest.Engine(t), f.url(), 5*time.Second, f.opts(), func(transport.Conn) transport.Handler { return nil })
 	if !errors.Is(err, transport.ErrClosedOpening) {
 		t.Errorf("err %v", err)
 	}
@@ -289,12 +289,12 @@ func TestMaxConns(t *testing.T) {
 	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{MaxConns: 1}, false)
 	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
 	e := tunneltest.Engine(t)
-	c, err := transport.Dial(e, DialURL(s.hostport(t), "", "", true), 5*time.Second, open)
+	c, err := transport.Dial(e, "quic://"+s.hostport(t), 5*time.Second, insecureOpts, open)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if _, err := transport.Dial(e, DialURL(s.hostport(t), "", "", true), 300*time.Millisecond, open); err == nil {
+	if _, err := transport.Dial(e, "quic://"+s.hostport(t), 300*time.Millisecond, insecureOpts, open); err == nil {
 		t.Error("a connection past MaxConns was let in")
 	}
 }
@@ -302,14 +302,19 @@ func TestMaxConns(t *testing.T) {
 func TestDialErrors(t *testing.T) {
 	e := tunneltest.Engine(t)
 	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
-	for _, addr := range []string{
-		"quic://127.0.0.1:1/path",
-		"quic://127.0.0.1:1?%zz",
-		"quic://127.0.0.1:1?pin=zz",
-		"quic://host.invalid:1?insecure=1",
-		"quic://127.0.0.1:99999?insecure=1",
+	for addr, opts := range map[string]transport.ClientOptions{
+		"quic://127.0.0.1:1/path":  insecureOpts,
+		"quic://127.0.0.1:1?%zz":   insecureOpts,
+		"quic://127.0.0.1:1":       {PinSHA256: "zz"},
+		"quic://host.invalid:1":    insecureOpts,
+		"quic://127.0.0.1:99999":   insecureOpts,
+		"quic://127.0.0.1":         insecureOpts,
+		"quic://127.0.0.1:1#frag":  insecureOpts,
+		"quic://127.0.0.1:1?a=b":   insecureOpts,
+		"quic://user@127.0.0.1:1":  insecureOpts,
+		"quic://127.0.0.1:1/x?y#z": insecureOpts,
 	} {
-		if _, err := transport.Dial(e, addr, time.Second, open); err == nil {
+		if _, err := transport.Dial(e, addr, time.Second, opts, open); err == nil {
 			t.Errorf("dialed %q", addr)
 		}
 	}
@@ -497,7 +502,7 @@ func TestListenerRetry(t *testing.T) {
 		t.Fatalf("%d of 8 Initials answered with a Retry", retries)
 	}
 	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
-	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", "", true), 3*time.Second, open)
+	c, err := transport.Dial(tunneltest.Engine(t), "quic://"+s.hostport(t), 3*time.Second, insecureOpts, open)
 	if err != nil {
 		t.Fatalf("a real client: %v", err)
 	}
@@ -510,7 +515,7 @@ func TestListenerRetry(t *testing.T) {
 func TestListenerAddressClosed(t *testing.T) {
 	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{}, false)
 	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
-	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", "", true), 3*time.Second, open)
+	c, err := transport.Dial(tunneltest.Engine(t), "quic://"+s.hostport(t), 3*time.Second, insecureOpts, open)
 	if err != nil {
 		t.Fatal(err)
 	}

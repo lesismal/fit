@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,46 +14,21 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/transport"
 )
 
-// DialURL is the quic:// address of hostport with how to check its
-// certificate: pinned to the fingerprint pin, or by the CAs of caFile, or,
-// if insecure, not checked.
-func DialURL(hostport, pin, caFile string, insecure bool) string {
-	u := Scheme + "://" + hostport
-	if q := transport.ClientQuery(pin, caFile, insecure); q != "" {
-		u += "?" + q
-	}
-	return u
-}
-
-// splitQuery parses a quic:// address with its query into the host and port
-// and the client options it names.
-func splitQuery(addr string) (string, ClientOptions, error) {
-	hostport, err := ParseURL(addr)
-	if err != nil {
-		return "", ClientOptions{}, err
-	}
-	_, query, _ := strings.Cut(addr, "?")
-	opts, err := transport.ParseClientQuery(query)
-	if err != nil {
-		return "", ClientOptions{}, err
-	}
-	return hostport, opts, nil
-}
-
 // ErrDialTimeout is the error of a dial whose handshake took too long.
 var ErrDialTimeout = errors.New("quic: dial timed out")
 
-// Dial opens a QUIC connection to addr on a UDP connection engine dials,
-// and a stream on it once the handshake is over, which carries the link
-// open makes. It waits for that, for at most timeout: not on a fib worker.
-func (relay) Dial(engine *fib.Engine, addr string, timeout time.Duration, open transport.OpenFunc) (transport.Conn, error) {
-	hostport, opts, err := splitQuery(addr)
+// Dial opens a QUIC connection to addr, a quic:// URL of a host and port,
+// on a UDP connection engine dials, checking the server's certificate as
+// opts says, and a stream on it once the handshake is over, which carries
+// the link open makes. It waits for that, for at most timeout: not on a fib
+// worker.
+func (relay) Dial(engine *fib.Engine, addr string, timeout time.Duration, opts transport.ClientOptions, open transport.OpenFunc) (transport.Conn, error) {
+	u, err := transport.HostURL(addr, Scheme)
 	if err != nil {
 		return nil, err
 	}
-	host, _, _ := net.SplitHostPort(hostport)
-	opts.ServerName = host
-	tc, err := ClientTLSConfig(opts)
+	hostport := u.Host
+	tc, err := transport.TLSClientConfig(u, opts, ALPN, true)
 	if err != nil {
 		return nil, err
 	}

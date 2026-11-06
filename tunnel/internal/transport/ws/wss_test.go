@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"crypto/tls"
 	"net"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,7 +52,7 @@ func TestWSSEcho(t *testing.T) {
 		t.Fatalf("URL %q", l.URL())
 	}
 	var r *recorder
-	c, err := transport.Dial(tunneltest.Engine(t), l.URL()+"?"+transport.ClientQuery(fp, "", false), 5*time.Second, func(c transport.Conn) transport.Handler {
+	c, err := transport.Dial(tunneltest.Engine(t), l.URL(), 5*time.Second, transport.CheckBy(fp, "", false), func(c transport.Conn) transport.Handler {
 		r = newRecorder(c, false)
 		return r
 	})
@@ -84,18 +86,18 @@ func TestWSSRefused(t *testing.T) {
 	l := listenWSS(t, "/link", cert)
 	e := tunneltest.Engine(t)
 	open := func(c transport.Conn) transport.Handler { return newRecorder(c, false) }
-	if _, err := transport.Dial(e, l.URL()+"?pin="+other, 5*time.Second, open); err == nil || !strings.Contains(err.Error(), "does not match the pin") {
+	if _, err := transport.Dial(e, l.URL(), 5*time.Second, transport.ClientOptions{PinSHA256: other}, open); err == nil || !strings.Contains(err.Error(), "does not match the pin") {
 		t.Fatalf("another pin: %v", err)
 	}
-	if _, err := transport.Dial(e, l.URL()+"?insecure=1", 5*time.Second, open); err == nil || !strings.Contains(err.Error(), "takes no insecure") {
+	if _, err := transport.Dial(e, l.URL(), 5*time.Second, transport.ClientOptions{InsecureSkipVerify: true}, open); err == nil || !strings.Contains(err.Error(), "takes no insecure") {
 		t.Fatalf("insecure: %v", err)
 	}
-	if _, err := transport.Dial(e, l.URL(), 5*time.Second, open); err == nil {
+	if _, err := transport.Dial(e, l.URL(), 5*time.Second, transport.ClientOptions{}, open); err == nil {
 		t.Fatal("the system's roots took a self-signed certificate")
 	}
 	// The path is still the listener's.
-	pin := transport.Fingerprint(cert)
-	if _, err := transport.Dial(e, strings.TrimSuffix(l.URL(), "/link")+"/other?pin="+pin, 5*time.Second, open); err == nil || !strings.Contains(err.Error(), "404") {
+	pin := transport.ClientOptions{PinSHA256: transport.Fingerprint(cert)}
+	if _, err := transport.Dial(e, strings.TrimSuffix(l.URL(), "/link")+"/other", 5*time.Second, pin, open); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("another path: %v", err)
 	}
 	// A tls:// listener speaks another application protocol.
@@ -104,20 +106,55 @@ func TestWSSRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tl.Close()
-	if _, err := transport.Dial(e, "wss://"+strings.TrimPrefix(tl.URL(), "tls://")+"/link?pin="+pin, 5*time.Second, open); err == nil {
+	if _, err := transport.Dial(e, "wss://"+strings.TrimPrefix(tl.URL(), "tls://")+"/link", 5*time.Second, pin, open); err == nil {
 		t.Fatal("a wss dial to a tls listener worked")
 	}
 	if _, err := transport.Listen(e, "wss://127.0.0.1:0/x", transport.ListenOptions{}, open); err == nil {
 		t.Fatal("a wss listener without a certificate")
 	}
-	if _, err := transport.Dial(e, "wss://%zz/x", time.Second, open); err == nil {
+	if _, err := transport.Dial(e, "wss://%zz/x", time.Second, transport.ClientOptions{}, open); err == nil {
 		t.Fatal("dialed a bad URL")
 	}
 }
 
-// What says how the hub's certificate is checked does not reach the hub:
-// the request asks for the path alone. A wss URL without a port is 443.
-func TestWSSQueryNotSent(t *testing.T) {
+// The review's attacks on wss://: an address whose fragment or query would
+// have overridden the pin, swapped the CAs, or dropped the pin for the
+// system's roots. Dial refuses each before it connects; with the address
+// alone, the pin the options give refuses a certificate that is not the
+// hub's.
+func TestWSSAddressCannotChangeTheCheck(t *testing.T) {
+	evil, evilFP := wssCert(t)
+	_, realFP := wssCert(t)
+	l := listenWSS(t, "/tunnel", evil)
+	e := tunneltest.Engine(t)
+	var opened atomic.Int32
+	open := func(c transport.Conn) transport.Handler { opened.Add(1); return newRecorder(c, false) }
+	real := transport.ClientOptions{PinSHA256: realFP}
+	for _, attack := range []string{
+		l.URL() + "#?pin=" + evilFP + "&",
+		l.URL() + "#?pin=" + evilFP + "&?pin=" + realFP,
+		l.URL() + "#?ca=/etc/ssl/cert.pem&",
+		l.URL() + "#?x=",
+		l.URL() + "?pin=" + evilFP,
+		"wss://u:p@" + strings.TrimPrefix(l.URL(), "wss://"),
+		"ws://" + strings.TrimPrefix(l.URL(), "wss://") + "#?insecure=1",
+	} {
+		_, err := transport.Dial(e, attack, 5*time.Second, real, open)
+		if err == nil || !strings.Contains(err.Error(), "which an address does not") {
+			t.Errorf("%q: %v", attack, err)
+		}
+	}
+	if _, err := transport.Dial(e, l.URL(), 5*time.Second, real, open); err == nil || !strings.Contains(err.Error(), "does not match the pin") {
+		t.Fatalf("the real pin took another certificate: %v", err)
+	}
+	if opened.Load() != 0 {
+		t.Fatal("a link opened")
+	}
+}
+
+// The request asks for the path alone; how the hub's certificate is
+// checked is not in it. A wss URL without a port is 443.
+func TestWSSRequestLine(t *testing.T) {
 	cert, fp := wssCert(t)
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{ALPN}})
 	if err != nil {
@@ -135,7 +172,7 @@ func TestWSSQueryNotSent(t *testing.T) {
 		line <- s
 	}()
 	go func() {
-		_, _ = transport.Dial(tunneltest.Engine(t), "wss://"+ln.Addr().String()+"/tunnel?pin="+fp, 2*time.Second, func(c transport.Conn) transport.Handler { return newRecorder(c, false) })
+		_, _ = transport.Dial(tunneltest.Engine(t), "wss://"+ln.Addr().String()+"/tunnel", 2*time.Second, transport.ClientOptions{PinSHA256: fp}, func(c transport.Conn) transport.Handler { return newRecorder(c, false) })
 	}()
 	select {
 	case s := <-line:
@@ -145,9 +182,10 @@ func TestWSSQueryNotSent(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("no request")
 	}
-	dial, err := dialer(tunneltest.Engine(t), "wss://example.invalid/x?pin="+fp, time.Second, nil)
-	if err != nil || dial == nil {
-		t.Fatalf("a wss URL without a port: %v", err)
+	u, _ := url.Parse("wss://example.invalid/x")
+	dial, err := dialer(tunneltest.Engine(t), u, time.Second, transport.ClientOptions{PinSHA256: fp}, nil)
+	if err != nil || dial == nil || u.Host != "example.invalid:443" {
+		t.Fatalf("a wss URL without a port: %v %v", u, err)
 	}
 }
 
@@ -168,7 +206,7 @@ func TestWSSCut(t *testing.T) {
 		}
 	}()
 	_, fp := wssCert(t)
-	if _, err := transport.Dial(tunneltest.Engine(t), "wss://"+ln.Addr().String()+"/x?pin="+fp, 5*time.Second, func(c transport.Conn) transport.Handler { return newRecorder(c, false) }); err == nil {
+	if _, err := transport.Dial(tunneltest.Engine(t), "wss://"+ln.Addr().String()+"/x", 5*time.Second, transport.ClientOptions{PinSHA256: fp}, func(c transport.Conn) transport.Handler { return newRecorder(c, false) }); err == nil {
 		t.Fatal("a dial to a server that closed worked")
 	}
 }

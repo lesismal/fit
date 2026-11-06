@@ -53,9 +53,9 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | `node_password` | string | `password` | 已弃用：node 以 node 身份连接时证明的密码，用于 hub 或 proxy 的监听。 |
 | `proxy_password` | string | `password` | 已弃用：proxy 以 proxy 身份连接时证明的密码，用于 hub 或 node 的监听。 |
 | `hub_password` | string | `password` | 已弃用：hub 以 hub 身份连接时证明的密码，用于 node 或 proxy 的监听。 |
-| `cert_file`、`key_file` | string | 无 | PEM 文件，包含监听出示的证书、其后的任何中间证书，以及私钥。两者都设置时以 TLS（`wss://`）接受连接，对端用其 `ca_file` 或 `pin` 校验证书。在监听启动时读取。 |
-| `self_signed` | bool | false | 以角色自己生成的自签名证书走 TLS 接受连接，用于没有 `cert_file` 的监听。角色把它写入 `cert` 与 `key`，重启后保持不变，并在连接页与日志中显示其 SHA-256 指纹：对端把它设为 `pin`。 |
-| `cert`、`key` | string | 无 | `self_signed` 生成的 PEM 证书与私钥，由角色写入。删除两者会生成新证书，所有对端都须重新固定其指纹。 |
+| `cert_file`、`key_file` | string | 无 | PEM 文件，包含监听出示的证书、其后的任何中间证书，以及私钥。两者都设置时以 TLS（`wss://`）接受连接，对端用其 `ca_file` 或 `pin` 校验证书。在监听启动时读取，磁盘上的文件变化时再次读取（`fit run -watch-certs`，默认开启）：此后建立的连接使用新证书，已建立的连接保持不变；文件加载失败时（例如只写了一个、另一个还没写），证书保持不变，文件下次变化时再读取。 |
+| `self_signed` | bool | false | 以角色自己生成的自签名证书走 TLS 接受连接，用于没有 `cert_file` 的监听。角色会保存它，使其重启后保持不变：有 `admin.store` 时写入 `cert` 与 `key`；没有时写入配置旁、按配置和角色命名的文件，权限 0600（`fit.json` 旁的 `fit.llm.hub.pem`），每次启动时读取。角色在连接页与日志中显示其 SHA-256 指纹：对端把它设为 `pin`。 |
+| `cert`、`key` | string | 无 | `self_signed` 生成的 PEM 证书与私钥，配置有 `admin.store` 时由角色写入。删除两者，或删除配置旁的文件，会生成新证书，所有对端都须重新固定其指纹。 |
 
 监听方接受角色的[令牌](#令牌)，令牌可连接它所互联的任何角色的对端；在下一版本之前，它也接受自己的各个密码。拨号方
 证明的密码决定它可以以哪个角色 hello（见[hello 与角色](#hello-与角色)）；既没有自己的密码、也没有 `password` 的角色只能

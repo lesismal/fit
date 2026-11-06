@@ -223,6 +223,10 @@ type Mesh struct {
 	lst     *wire.Listener
 	laddr   string
 	lfp     string // the fingerprint of the listener's certificate, "" without TLS
+	// lcert is the certificate of a listener with cert_file, which a new
+	// handshake takes, swapped when the files change.
+	// lcert 是带 cert_file 的监听的证书，新握手取用它，文件变化时替换。
+	lcert atomic.Pointer[tls.Certificate]
 
 	nextConn atomic.Int64
 	round    atomic.Uint64 // round robin over the connections of a peer / 在对端的连接之间轮询

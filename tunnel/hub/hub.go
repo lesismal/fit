@@ -35,6 +35,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/certpin"
 	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/tunnel/internal/bodycrypt"
@@ -62,8 +63,22 @@ func init() {
 			}
 			return c.Tunnel.Hub
 		},
-		New: func(h *app.Host) (app.Role, error) { return New(h), nil },
+		New:       func(h *app.Host) (app.Role, error) { return New(h), nil },
+		CertFiles: func(c *config.Config) []string { return certFiles(c.Tunnel.Hub) },
 	})
+}
+
+// certFiles is the certificate and key files of cfg's listeners, which each
+// Apply reads, and fit run's -watch-certs has applied again when they
+// change.
+func certFiles(cfg *config.TunnelHub) []string {
+	var out []string
+	for _, l := range cfg.Listeners {
+		if l.CertFile != "" && config.TunnelTakesTLS(l.Protocol) {
+			out = append(out, l.CertFile, l.KeyFile)
+		}
+	}
+	return out
 }
 
 // unregisteredFrame bounds the frames of a link that has not registered:
@@ -210,8 +225,11 @@ type Hub struct {
 	console   *common.Console
 	socket    *socket
 	// generated is a certificate made for the tls, wss and quic
-	// listeners, until the config has it.
+	// listeners, until the config has it, or the one kept in the file
+	// keptIn, made there if madeKept.
 	generated [2]string
+	keptIn    string
+	madeKept  bool
 
 	// lmu guards what Status reads of what amu guards.
 	lmu        sync.Mutex
@@ -383,23 +401,41 @@ func needsHubCert(l config.TunnelListener) bool {
 
 // applyCert sets the hub's certificate, which the tls, wss and quic
 // listeners without cert_file present: the config's, or, when such a
-// listener needs one and the config has none, one made here, which it
-// returns as PEM to be written into the config.
+// listener needs one and the config has none, a self-signed one. Without
+// admin.store, that is kept in a file beside the config (app.Host.KeptFile),
+// made there the first time; with one, it is made here and returned as PEM,
+// to be written into the config, which the store keeps. Either way it
+// outlives a restart, and the pins of the nodes and proxies stay good.
 func (s *Hub) applyCert(cfg *config.TunnelHub) (persist []string, err error) {
 	certPEM, keyPEM := "", ""
 	if cfg.QUIC != nil {
 		certPEM, keyPEM = cfg.QUIC.Cert, cfg.QUIC.Key
 	}
+	kept := ""
 	if certPEM == "" && slices.ContainsFunc(cfg.Listeners, needsHubCert) {
 		if s.generated[0] == "" {
-			c, k, err := transport.NewSelfSigned("localhost", cfg.HubName())
-			if err != nil {
+			var c, k []byte
+			var made bool
+			if kept = s.h.KeptFile("pem"); kept != "" {
+				c, k, made, err = certpin.Keep(kept, "fit tunnel", "localhost", cfg.HubName())
+				switch {
+				case err != nil && c == nil:
+					return nil, fmt.Errorf("the hub's certificate: %w", err)
+				case err != nil:
+					// Not written: kept in the config, as with a store, which
+					// keeps it only as long as fit runs.
+					s.log.Warnf("the hub's certificate cannot be kept in %s, so it changes when fit restarts, and the nodes' and proxies' pins of it fail: %v", kept, err)
+					kept = ""
+				}
+			} else if c, k, err = transport.NewSelfSigned("localhost", cfg.HubName()); err != nil {
 				return nil, err
 			}
-			s.generated = [2]string{string(c), string(k)}
+			s.generated, s.keptIn, s.madeKept = [2]string{string(c), string(k)}, kept, made
 		}
 		certPEM, keyPEM = s.generated[0], s.generated[1]
-		persist = s.generated[:]
+		if s.keptIn == "" {
+			persist = s.generated[:]
+		}
 	}
 	if certPEM == s.certPEM {
 		return persist, nil
@@ -417,6 +453,12 @@ func (s *Hub) applyCert(cfg *config.TunnelHub) (persist []string, err error) {
 	s.lmu.Lock()
 	s.cert, s.certPEM, s.fp = &cert, certPEM, transport.Fingerprint(cert)
 	s.lmu.Unlock()
+	switch {
+	case kept != "" && s.madeKept:
+		s.log.Infof("made the hub's certificate, kept in %s: fingerprint %s", kept, s.fp)
+	case kept != "":
+		s.log.Infof("the hub's certificate, kept in %s: fingerprint %s", kept, s.fp)
+	}
 	return persist, nil
 }
 

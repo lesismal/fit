@@ -32,7 +32,7 @@ func (w *wsProxy) OnClose(error) { close(w.done) }
 func (v *env) dialSocket(addr string) *wsProxy {
 	v.t.Helper()
 	w := &wsProxy{t: v.t, msgs: make(chan []byte, 256), done: make(chan struct{})}
-	c, err := transport.Dial(v.e, "ws://"+addr+"/", 5*time.Second, func(transport.Conn) transport.Handler { return w })
+	c, err := transport.Dial(v.e, "ws://"+addr+"/", 5*time.Second, transport.ClientOptions{}, func(transport.Conn) transport.Handler { return w })
 	if err != nil {
 		v.t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestConsoleSocket(t *testing.T) {
 	// Past max_conns, a WebSocket closes at once, maybe before its dial
 	// has returned.
 	refused := &wsProxy{t: t, msgs: make(chan []byte, 1), done: make(chan struct{})}
-	if c, err := transport.Dial(v.e, "ws://"+sock+"/", 5*time.Second, func(transport.Conn) transport.Handler { return refused }); err == nil {
+	if c, err := transport.Dial(v.e, "ws://"+sock+"/", 5*time.Second, transport.ClientOptions{}, func(transport.Conn) transport.Handler { return refused }); err == nil {
 		refused.waitClosed()
 		_ = c.Close()
 	}
@@ -194,7 +194,7 @@ func TestSocketUnauthenticated(t *testing.T) {
 	_ = hello.c.Send(wscrypt.Hello())
 	waitFor(t, "two WebSockets", func() bool { return count() == 2 })
 	third := &wsProxy{t: t, msgs: make(chan []byte, 1), done: make(chan struct{})}
-	if c, err := transport.Dial(v.e, "ws://"+sock+"/", 5*time.Second, func(transport.Conn) transport.Handler { return third }); err == nil {
+	if c, err := transport.Dial(v.e, "ws://"+sock+"/", 5*time.Second, transport.ClientOptions{}, func(transport.Conn) transport.Handler { return third }); err == nil {
 		third.waitClosed()
 		_ = c.Close()
 	}

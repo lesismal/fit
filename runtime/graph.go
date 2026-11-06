@@ -232,6 +232,15 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			g.watchFiles(certs.Files())
 		}
 	}
+	// The roles' certificate files, as the tunnel hub's listeners' and the
+	// LLM mesh's: the roles read them when they apply, so a change to them
+	// has the config applied again. One that cannot be read now is not
+	// watched; the role says why when it applies.
+	for _, p := range app.CertFiles(c) {
+		if data, err := os.ReadFile(p); err == nil {
+			g.watchFiles(map[string][sha256.Size]byte{p: sha256.Sum256(data)})
+		}
+	}
 	for i := range c.Upstreams {
 		u := &c.Upstreams[i]
 		key, files, keyed := upstreamKey(u)

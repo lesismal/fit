@@ -5,8 +5,8 @@
 // ws://host:port/path, and wss, the same over TLS (fib's, package fib/tls),
 // both to dial and to listen on. A wss listener presents the certificate
 // transport.ListenOptions gives it, and a wss dial checks the hub's as the
-// query of its address says (see package transport): wss://host:port/path?pin=...
-// The query is not sent to the hub.
+// transport.ClientOptions given to Dial say, never as its address does: a
+// dial's address has no query and no fragment (see transport.ParseURL).
 //
 // It is a fib.Layer below the link rather than a WebSocket handler beside
 // it: once the opening handshake is done, every send of the connection goes
@@ -55,8 +55,15 @@ const ALPN = "http/1.1"
 // wsTransport dials and listens on ws:// and wss:// URLs.
 type wsTransport struct{}
 
-func (wsTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, open transport.OpenFunc) (transport.Conn, error) {
-	dial, err := dialer(engine, addr, timeout, func(out fib.Layer) fib.Handler {
+// Dial opens a link to addr, a ws:// or wss:// URL without a user, a query
+// or a fragment (see transport.ParseURL); a wss dial checks the hub's
+// certificate as opts says, and a ws dial ignores opts.
+func (wsTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, opts transport.ClientOptions, open transport.OpenFunc) (transport.Conn, error) {
+	u, err := transport.ParseURL(addr)
+	if err != nil {
+		return nil, err
+	}
+	dial, err := dialer(engine, u, timeout, opts, func(out fib.Layer) fib.Handler {
 		if out == nil {
 			return transport.FibHandler(open)
 		}
@@ -385,21 +392,22 @@ func (s *Server) OnClose(c *fib.Connection, err error) {
 // and hands the connection to handler once the server has switched
 // protocols; done is told the connection then, or why there is none.
 func Dialer(engine *fib.Engine, rawURL string, timeout time.Duration, handler fib.Handler) (func(done func(*fib.Connection, error)) error, error) {
-	if u, err := url.Parse(rawURL); err == nil && u.Scheme != "ws" {
-		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// is", u.Scheme)
-	}
-	return dialer(engine, rawURL, timeout, func(fib.Layer) fib.Handler { return handler })
-}
-
-// dialer is a dial that opens a WebSocket to rawURL, a ws:// or wss:// URL,
-// on engine, and hands the connection to the handler handler makes once the
-// server has switched protocols. Over TLS, handler is given the layer to
-// send through; otherwise nil, and the frames are the connection's layer.
-func dialer(engine *fib.Engine, rawURL string, timeout time.Duration, handler func(out fib.Layer) fib.Handler) (func(done func(*fib.Connection, error)) error, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
+	if u.Scheme != "ws" {
+		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// is", u.Scheme)
+	}
+	return dialer(engine, u, timeout, transport.ClientOptions{}, func(fib.Layer) fib.Handler { return handler })
+}
+
+// dialer is a dial that opens a WebSocket to u, a ws:// or wss:// URL, on
+// engine, and hands the connection to the handler handler makes once the
+// server has switched protocols. A wss dial checks the server's certificate
+// as opts says. Over TLS, handler is given the layer to send through;
+// otherwise nil, and the frames are the connection's layer.
+func dialer(engine *fib.Engine, u *url.URL, timeout time.Duration, opts transport.ClientOptions, handler func(out fib.Layer) fib.Handler) (func(done func(*fib.Connection, error)) error, error) {
 	var conf *tls.Config
 	switch u.Scheme {
 	case "ws":
@@ -407,14 +415,10 @@ func dialer(engine *fib.Engine, rawURL string, timeout time.Duration, handler fu
 		if u.Port() == "" {
 			u.Host = net.JoinHostPort(u.Hostname(), "443")
 		}
-		// The query says how the hub's certificate is checked, and is
-		// not the hub's to see.
-		hostURL := *u
-		hostURL.Path, hostURL.RawPath = "", ""
-		if _, conf, err = transport.TLSClientConfig(hostURL.String(), ALPN, false); err != nil {
+		var err error
+		if conf, err = transport.TLSClientConfig(u, opts, ALPN, false); err != nil {
 			return nil, err
 		}
-		u.RawQuery = ""
 	default:
 		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// and wss:// are", u.Scheme)
 	}
