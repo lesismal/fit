@@ -9,10 +9,12 @@ import (
 )
 
 // HubReq is a hub a node or proxy links to, as its pages send it to
-// add or change one. A password left empty stays as it was.
+// add or change one. A token or password left empty stays as it was; one
+// given replaces the other.
 type HubReq struct {
 	Name         string        `json:"name"`
 	Endpoints    []EndpointReq `json:"endpoints"`
+	Token        string        `json:"token"`
 	Password     string        `json:"password"`
 	BodyPassword string        `json:"body_password"`
 	PoolSize     int           `json:"pool_size"`
@@ -106,10 +108,18 @@ func EditHub(m Member, name string, req HubReq, clearBody bool) error {
 	if err := set("endpoints", eps); err != nil {
 		return err
 	}
-	if req.Password != "" {
+	// A token replaces the password, and the password a token.
+	switch {
+	case req.Token != "":
+		if err := set("token", strings.TrimSpace(req.Token)); err != nil {
+			return err
+		}
+		delete(u, "password")
+	case req.Password != "":
 		if err := set("password", req.Password); err != nil {
 			return err
 		}
+		delete(u, "token")
 	}
 	switch {
 	case req.BodyPassword != "":
@@ -134,8 +144,9 @@ func EditHub(m Member, name string, req HubReq, clearBody bool) error {
 	if err := set("quic_insecure", req.QUICInsecure); err != nil {
 		return err
 	}
-	if _, ok := u["password"]; !ok {
-		return BadRequest("a hub needs a password")
+	_, pw := u["password"]
+	if _, tok := u["token"]; !tok && !pw {
+		return BadRequest("a hub needs the token it issued for this member, or its password")
 	}
 	data, err := json.Marshal(u)
 	if err != nil {

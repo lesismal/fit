@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/llm/internal/model"
 )
 
@@ -58,24 +59,38 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 		if _, err := clientTLS(*req, host); err != nil {
 			return nil, err
 		}
+		if req.Token != "" {
+			if _, err := linktoken.Parse(req.Token); err != nil {
+				return nil, BadRequest("%v", err)
+			}
+		}
 		err = edit(ctx, func(s *Settings) error {
 			for i, p := range s.Peers {
 				if p.Addr == addr {
-					if req.Password != "" {
-						s.Peers[i].Password = req.Password
+					// A token replaces the password, and the password a token; neither keeps both.
+					// 令牌替换密码，密码替换令牌；都不给则两者保留。
+					switch {
+					case req.Token != "":
+						s.Peers[i].Token, s.Peers[i].Password = req.Token, ""
+					case req.Password != "":
+						s.Peers[i].Token, s.Peers[i].Password = "", req.Password
 					}
 					s.Peers[i].Role = req.Role
 					s.Peers[i].Pin, s.Peers[i].CAFile, s.Peers[i].ServerName = req.Pin, req.CAFile, req.ServerName
 					return nil
 				}
 			}
-			if req.Password == "" {
-				return BadRequest("password required")
+			if req.Password == "" && req.Token == "" {
+				return BadRequest("token or password required")
 			}
 			if len(s.Peers) >= MaxTargets {
 				return BadRequest("at most %d dial targets", MaxTargets)
 			}
-			s.Peers = append(s.Peers, model.DialReq{Addr: addr, Password: req.Password, Role: req.Role,
+			pw := req.Password
+			if req.Token != "" {
+				pw = ""
+			}
+			s.Peers = append(s.Peers, model.DialReq{Addr: addr, Password: pw, Token: req.Token, Role: req.Role,
 				Pin: req.Pin, CAFile: req.CAFile, ServerName: req.ServerName})
 			return nil
 		})
@@ -118,8 +133,12 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 				s.Listen = nil
 				return nil
 			}
-			// An empty password keeps the current one, each role's apart.
-			if l := s.Listen; l != nil {
+			// An empty password keeps the current one, each role's apart, unless the request clears them all,
+			// once every peer links with a token.
+			// 空密码保留当前密码（各角色分别处理），除非请求清除全部密码（在所有对端都改用令牌之后）。
+			clear := cfg.ClearPasswords
+			cfg.ClearPasswords = false
+			if l := s.Listen; l != nil && !clear {
 				keep := func(v *string, cur string) {
 					if *v == "" {
 						*v = cur
@@ -130,8 +149,8 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 				keep(&cfg.ProxyPassword, l.ProxyPassword)
 				keep(&cfg.HubPassword, l.HubPassword)
 			}
-			if len(m.credentials(cfg)) == 0 {
-				return BadRequest("a listener needs a password for a role it links with")
+			if clear {
+				cfg.Password, cfg.NodePassword, cfg.ProxyPassword, cfg.HubPassword = "", "", "", ""
 			}
 			// The request says whether and how the listener takes TLS; a
 			// self-signed certificate already made is kept while it stays

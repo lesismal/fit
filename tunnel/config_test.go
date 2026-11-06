@@ -65,7 +65,7 @@ func TestConfig(t *testing.T) {
 		{"a bad certificate", `{"tunnel": {"hub": {"quic": {"cert": "x", "key": "y"}}}}`, "do not load"},
 		{"two services of a name", `{"tunnel": {"node": {"services": [{"name": "a", "address": "h:1"}, {"name": "a", "address": "h:2"}]}}}`, "already named"},
 		{"a service without a port", `{"tunnel": {"node": {"services": [{"name": "a", "address": "nowhere"}]}}}`, "services[0].address"},
-		{"a hub without a password", `{"tunnel": {"node": {"hubs": [{"endpoints": [{"address": "h:1"}]}]}}}`, "missing required field"},
+		{"a hub without a token or password", `{"tunnel": {"node": {"hubs": [{"endpoints": [{"address": "h:1"}]}]}}}`, "set the token the hub issued"},
 		{"a bad endpoint", `{"tunnel": {"node": {"hubs": [{"endpoints": [{"address": "http://h:1"}], "password": "x"}]}}}`, "the scheme http"},
 		{"every endpoint off", `{"tunnel": {"node": {"hubs": [{"endpoints": [{"address": "h:1", "disabled": true}], "password": "x"}]}}}`, "every endpoint is disabled"},
 		{"two hubs of a name", `{"tunnel": {"node": {"hubs": [` + up + `, ` + up + `]}}}`, "already named"},

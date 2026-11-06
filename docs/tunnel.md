@@ -38,7 +38,10 @@ A role runs while its member is set. A config with roles and no routes needs no 
   "tunnel": {
     "hub": {
       "name": "hub",
-      "password": "a-registration-password",
+      "tokens": [
+        {"id": "fdd44d906b8e6ce2", "name": "lab", "hash": "1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4"},
+        {"id": "5a3716dd56e5e458", "name": "alice", "hash": "4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df"}
+      ],
       "body_password": "a-body-password",
       "listeners": [
         {"protocol": "tls", "address": ":7000"},
@@ -66,7 +69,7 @@ A role runs while its member is set. A config with roles and no routes needs no 
           {"address": "wss://hub.example.com:7001/tunnel"},
           {"address": "tls://hub.example.com:7000"}
         ],
-        "password": "a-registration-password",
+        "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
         "body_password": "a-body-password",
         "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"
       }],
@@ -86,7 +89,7 @@ A role runs while its member is set. A config with roles and no routes needs no 
       "hubs": [{
         "name": "hub",
         "endpoints": [{"address": "tls://hub.example.com:7000"}],
-        "password": "a-registration-password",
+        "token": "fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4",
         "body_password": "a-body-password",
         "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"
       }],
@@ -99,7 +102,10 @@ A role runs while its member is set. A config with roles and no routes needs no 
 ```
 
 `pin` is the SHA-256 fingerprint of the hub's certificate, which the hub's console shows and its
-log prints when it makes the certificate. Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22.
+log prints when it makes the certificate. The hub's `tokens` are not written by hand: its Tokens
+page, its Admin API or `fit token create -role tunnel.hub -name lab` issues each, keeps its hash
+there, and shows the token itself once, for the node's or proxy's `token` (see
+[Tokens](#tokens)). Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22.
 `fit validate` checks the members; the
 [config reference](reference/config.md) lists every field, its default and its bounds.
 
@@ -108,8 +114,9 @@ log prints when it makes the certificate. Then `ssh -p 2222 127.0.0.1` reaches 1
 | Field | Default | What it is |
 |-------|---------|------------|
 | `name` | the host's name | the name nodes and proxies are told |
-| `password` | none: no registration is taken | what nodes and proxies register with, proven with an HMAC, never sent |
-| `body_password` | none | AES-256-GCM on every frame's body, which authenticates every frame; nodes and proxies need the same |
+| `tokens` | none | the tokens the hub issued, each `{id, name, hash, created_at, expires_at, note, members}`, which nodes and proxies register with (see [Tokens](#tokens)); made by the pages, the Admin API and `fit token`, not by hand |
+| `password` | none: only tokens register | deprecated: a password every node and proxy may register with, proven with an HMAC, never sent. Taken in this release, with a warning on the pages while a member uses it; refused in the next |
+| `body_password` | none | AES-256-GCM on every frame's body, which authenticates every frame; nodes and proxies need the same. A link that registers with a token keys it from the token and this by HKDF |
 | `listeners` | none: the pages add them | `{protocol: tls\|wss\|quic\|tcp\|ws, address, path, cert_file, key_file}`; a ws or wss listener's path is `/tunnel` by default, and only those have one. A `tcp` or `ws` listener on an address that is not a loopback one (`127.0.0.0/8`, `::1`, `localhost`; an empty host is every address) is refused unless `body_password` is set (see [What protects a link](#what-protects-a-link)). A tls, wss or quic listener presents the certificate of its `cert_file` and `key_file`, read each time the member is applied, or the hub's own (below) |
 | `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for proxies' `web_proxies`, answering on any path; it needs `console`, its password is the hub's when left out, and `max_conns` is 32. A WebSocket that has not proven the password within 10s is closed, and one IP address may have a quarter of `max_conns` open that have not |
 | `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; past half of `max_handshakes`, a client proves its address with a QUIC Retry before its handshake starts. `cert` and `key` are the hub's own certificate, which its tls, wss and quic listeners without `cert_file` present; the hub makes a self-signed one and writes it here when such a listener needs one; they go together |
@@ -152,7 +159,8 @@ log prints when it makes the certificate. Then `ssh -p 2222 127.0.0.1` reaches 1
 |-------|---------|------------|
 | `name` | the first endpoint's address | what forwards and the pages name it by |
 | `endpoints` | required | `{address, disabled}`, tried in order: `tls://host:port`, `wss://host:port/path` (443 without a port), `quic://host:port`; and `host:port` or `tcp://` for TCP and `ws://host:port/path`, in the clear, which are refused to a host that is not a loopback one unless `body_password` is set |
-| `password` | required | the hub's |
+| `token` | | the token the hub issued for this node or proxy, `fitt1.<id>.<secret>`; `token` or `password` is required, not both |
+| `password` | | deprecated: the hub's shared password, until the hub issues a token |
 | `body_password` | none | the hub's, when it has one |
 | `pin` | | the SHA-256 of the hub's certificate, as the hub's page shows it, which tls, wss and quic endpoints check the certificate against in place of the chain and the name: for the hub's self-signed certificate. Its old name, `quic_pin`, is still read, with a warning |
 | `ca_file` | | a PEM file of the CAs that sign the hub's certificate, checked with its name, in place of the system's roots; read at each dial; not with `pin` |
@@ -190,7 +198,16 @@ a peer that needs more opens a larger pool.
   `ca_file`, or by the system's roots, the name included unless pinned. It keeps no TLS session
   tickets, so each handshake checks the certificate in full; the pin is checked again in the
   handshake's last check, which a resumed session runs too.
-- **Registration** is mutual. Each link of a node or proxy registers with an HMAC-SHA256 of the
+- **Registration with a token** is mutual and bound to the link. Each link of a node or proxy first
+  calls `challenge` with its token's ID and a fresh 32-byte nonce of its own, and the hub answers with
+  a fresh nonce of its own; the link then registers with a proof of the token over a transcript of
+  the token's ID, both nonces and the peer's type and name, and the hub's answer carries the hub's
+  proof of the token over the same transcript and the answer, under another key and a label of the
+  other direction ([decision 035](decisions/035-link-tokens.md) has the keys). A proof replayed on
+  another link, answered to another nonce, or sent back to its sender does not check; the hub keeps
+  only a hash of the token, which cannot be used to register. A hub of an earlier release, which
+  takes no token, is named in the node's or proxy's status and log as one to upgrade.
+- **Registration with the shared password** (deprecated) is mutual too. Each link of a node or proxy registers with an HMAC-SHA256 of the
   password over the peer's type, name, a time and a fresh random nonce; the time must be within
   5 minutes of the hub's clock, and a nonce is taken once. The hub's answer proves the hub knows
   the password in turn: an HMAC-SHA256 of the password over that registration, its nonce
@@ -220,7 +237,55 @@ a peer that needs more opens a larger pool.
   gave the same random bytes the other way round. The attacker can still see the frames' lengths
   and timing, and cut the link. This is the link protocol's version 3: a hub, node or proxy with
   `body_password` closes a link to a peer of version 2 or 1, logging the peer's version and its
-  own, so upgrade them together.
+  own, so upgrade them together. A link that registers with a token sends a hello of version 4,
+  which names the token's ID after its random bytes; the hub keys the link from that token and the
+  body password, by HKDF, with no PBKDF2 and no shared salt, and refuses a registration with another
+  token than the hello's. A hub of an earlier release refuses such a hello.
+
+### Tokens
+
+A hub issues a token for each node or proxy that registers with it, in place of a password every
+member shares ([decision 035](decisions/035-link-tokens.md)):
+
+- **Each token its own credential.** A token is `fitt1.<id>.<secret>`, a 16-hex-digit ID and 256
+  random bits. The hub keeps, in its member's `tokens`, the ID, a name, when it was made, an
+  optional expiry, an optional note and a hash, never the token: it is shown once, when it is made.
+- **Of no role.** Any node or proxy may register with a valid token; what it may do follows from
+  its type and the hub's rules (`allow_proxy_services`) and the node's (`allow_hub_services`).
+- **Bound to its members.** The first time a node or proxy registers with a token, the hub binds
+  its `node/<name>` or `proxy/<name>` to that token and writes it into the token's `members`, so
+  that no other token registers under that name, across restarts. Revoking the token frees it: to
+  move a member to a new token, issue the new one, revoke the old, and give the member the new one.
+- **Expiry.** A token may expire at a set time or after a duration (`30d`, `720h`); an expired
+  token is refused, and the hub closes its links at its expiry (at most a minute late, should the
+  wall clock jump). Revoking a token closes its links at once.
+- **Managed three ways**, each change a config edit of `tunnel.hub`, applied and kept as any page's
+  edit is, and logged to the `admin` logger: the hub's **Tokens** page; the Admin API,
+  `GET /tokens/tunnel.hub`, `POST /tokens/tunnel.hub` `{name, note, ttl | expires_at}`,
+  `PATCH /tokens/tunnel.hub/{id}` `{ttl | expires_at}` (neither: never) and
+  `DELETE /tokens/tunnel.hub/{id}`; and the CLI:
+
+  ```sh
+  fit token create -c fit.json -role tunnel.hub -name lab -ttl 90d   # prints the token, once
+  fit token list   -c fit.json -role tunnel.hub                      # expiry, last use, members, links
+  fit token expiry -c fit.json -role tunnel.hub -id fdd44d906b8e6ce2 -never
+  fit token revoke -c fit.json -role tunnel.hub -id fdd44d906b8e6ce2
+  ```
+
+  The list gives each token's last use and the address it came from since fit started, its
+  members and the links that use it now.
+
+### Upgrading: tokens in place of the password
+
+The shared `password` still registers in this release, beside tokens, and is refused in the next.
+The hub's status lists the peers that registered with it (`password_peers`), and its pages warn
+while any does. To move:
+
+1. Upgrade the hub first: a node or proxy with a token refuses a hub of an earlier release.
+2. Issue a token for each node and proxy, and set it as that member's `token` in place of its
+   `password` (its hub editor does both).
+3. Once the warning is gone, remove the hub's password (its Settings page, **Remove the shared
+   password**), so that only tokens register.
 
 ### What protects a link
 
@@ -268,7 +333,7 @@ Every dial, registration and call has its timeout; a link's TCP connection is pr
 quiet, and closed when its peer stops answering; a QUIC connection pings every `keep_alive` and
 closes after `idle_timeout`; a tunnel idle past `idle_timeout` closes. The hub bounds its links,
 peers and tunnels, a peer's links, the QUIC handshakes under way, and the frames of a link that has
-not registered, to 64 KiB.
+not registered, to 64 KiB; its tokens, to 1,024, and a token's members, to 256.
 
 ## Consoles
 
@@ -282,11 +347,14 @@ session cookie and a CSRF token, and a loopback address unless `cert_file` and `
 
 - **hub**: the nodes, with their services and latency, and the proxies; the tunnels, with their
   bytes each way and their paths' latency. Query a node, set its services, kick a peer, close a
-  tunnel. Add, change and remove listeners; set the passwords and the console socket; copy the
-  fingerprint of the hub's certificate, which nodes and proxies pin, and see each listener's.
-  Services set here are written into the node's own member, when
-  the node's `allow_hub_services` lets them.
-- **node**: its hubs, with the protocols each link took, and add, edit and remove them; its
+  tunnel. Add, change and remove listeners; set the passwords and the console socket, or remove the
+  shared password; copy the fingerprint of the hub's certificate, which nodes and proxies pin, and
+  see each listener's. **Tokens**: issue one (shown once, to copy), list them with their expiry,
+  last use, members and links, change a token's expiry, revoke one; the overview and the Tokens
+  page warn while a peer registers with the shared password. Services set here are written into
+  the node's own member, when the node's `allow_hub_services` lets them.
+- **node**: its hubs, with the protocols each link took, and add, edit and remove them, each with
+  the token the hub issued (which replaces a password) or, until the next release, the password; its
   services, and save them, every hub told; its tunnels, and close one.
 - **proxy**: its hubs, edited as a node's, their nodes and services, with each hub's share of
   a node's tunnels; query a node, and set its services through a hub whose `allow_proxy_services`
@@ -328,7 +396,10 @@ password; the console's own login still applies.
 `go test -race ./tunnel/...` runs the roles through fit's config, as `fit run` does, on a real
 engine: tunnels over TCP, TLS, WebSocket, WebSocket over TLS and QUIC, with and without body
 encryption, large transfers, slow services and proxies, cut connections, the pages' changes written
-back into the config, and a restart that reads them back from a store. A relay at the hub's address
+back into the config, and a restart that reads them back from a store. Tokens are tested over TLS,
+WebSocket over TLS, QUIC and sealed TCP: a token of any role registers, another token cannot take
+a member over, an unknown, forged or replayed proof is refused, an expired token's links close, and
+a revoked token's at once. A relay at the hub's address
 is tested too: one that passes the bytes on cannot inject a frame over tls or wss, and one with a
 certificate of its own does not complete the handshake with a node that pins the hub's. `test/docker/tunnel/fit-tunnel-docker.sh test` runs
 hubs, nodes and proxies in containers of their own, with devices on networks only their node

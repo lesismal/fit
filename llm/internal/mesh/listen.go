@@ -31,9 +31,6 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 			return err
 		}
 		cfg.Addr = addr
-		if len(m.credentials(cfg)) == 0 {
-			return BadRequest("a listener needs a password for a role it links with")
-		}
 		if host, _, _ := net.SplitHostPort(addr); !Loopback(host) && !cfg.TLS() {
 			return BadRequest("%s is not a loopback address: set cert_file and key_file, or self_signed, so that links are taken over TLS and peers can check whose listener they reach", addr)
 		}
@@ -81,6 +78,10 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 			"addr", m.laddr, "path", WSPath, "fingerprint", fp)
 	} else {
 		m.log(slog.LevelInfo, "mesh listening", "addr", m.laddr, "path", WSPath)
+	}
+	if len(creds) == 0 && m.tokens.Len() == 0 {
+		m.log(slog.LevelWarn, "mesh: the listener has no password and no token yet: it takes no link until its pages, its Admin API module or fit token issue one",
+			"addr", m.laddr)
 	}
 	for _, c := range creds {
 		if len(c.Roles) > 1 {

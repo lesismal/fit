@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/llm/internal/model"
 	"github.com/lesismal/fit/llm/internal/wire"
 )
@@ -34,24 +35,37 @@ func (m *Mesh) Dial(req model.DialReq) error {
 	if m.stopped() {
 		return wire.ErrClosed
 	}
+	var sec *linktoken.Secret
+	if req.Token != "" {
+		s, err := linktoken.Parse(req.Token)
+		if err != nil {
+			return BadRequest("%v", err)
+		}
+		sec = &s
+	}
 	m.mu.Lock()
 	old := m.targets[addr]
-	password := req.Password
-	if password == "" && old != nil {
-		password = old.password
+	// A token or a password given replaces both; neither keeps the old ones.
+	// 给出令牌或密码即替换两者；都不给则保留原有的。
+	password, token := req.Password, req.Token
+	if token != "" {
+		password = ""
 	}
-	if password == "" {
+	if password == "" && token == "" && old != nil {
+		password, token, sec = old.password, old.token, old.sec
+	}
+	if password == "" && token == "" {
 		m.mu.Unlock()
-		return BadRequest("password required")
+		return BadRequest("token or password required")
 	}
 	if old != nil {
-		if old.password == password && old.role == req.Role && sameTLS(old.req, req) {
+		if old.password == password && old.token == token && old.role == req.Role && sameTLS(old.req, req) {
 			m.mu.Unlock()
 			return nil
 		}
 		delete(m.targets, addr)
 	}
-	t := &target{addr: addr, password: password, role: req.Role, req: req, tls: tc, stopCh: make(chan struct{})}
+	t := &target{addr: addr, password: password, token: token, sec: sec, role: req.Role, req: req, tls: tc, stopCh: make(chan struct{})}
 	m.targets[addr] = t
 	m.wg.Add(1)
 	m.mu.Unlock()
@@ -240,6 +254,9 @@ func (m *Mesh) Targets() []model.DialTarget {
 		t.mu.Lock()
 		dt := model.DialTarget{Addr: t.addr, Role: t.role, Error: t.err, TLS: t.tls != nil, Pin: t.req.Pin, CAFile: t.req.CAFile,
 			ServerName: t.req.ServerName}
+		if t.sec != nil {
+			dt.TokenID = t.sec.ID
+		}
 		if c := t.conn; c != nil {
 			c.mu.Lock()
 			if c.registered && c.live() {
@@ -263,7 +280,7 @@ func (m *Mesh) DialReqs() []model.DialReq {
 	m.mu.RLock()
 	out := make([]model.DialReq, 0, len(m.targets))
 	for _, t := range m.targets {
-		out = append(out, model.DialReq{Addr: t.addr, Password: t.password, Role: t.role, Pin: t.req.Pin, CAFile: t.req.CAFile,
+		out = append(out, model.DialReq{Addr: t.addr, Password: t.password, Token: t.token, Role: t.role, Pin: t.req.Pin, CAFile: t.req.CAFile,
 			ServerName: t.req.ServerName})
 	}
 	m.mu.RUnlock()

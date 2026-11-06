@@ -163,7 +163,10 @@ they are written; `fit schema -template fit` prints the .conf template. `fit has
 password twice, masked, from a terminal (or reads it from standard input) and prints its bcrypt hash, for `basic_auth`'s users, the
 console's and `media_auth`'s. `fit media-token -c fit.conf -policy live -publish 'live/*' -play '*' -ttl 1h -subject obs`
 prints a token signed with a [`media_auth`](reference/config.md#media-auth) policy's `secret`, for a WHIP or WHEP client to send as its
-bearer token; a running fit with the same secret takes it until it expires.
+bearer token; a running fit with the same secret takes it until it expires. `fit token create -c fit.conf
+-role tunnel.hub -name lab -ttl 90d` asks a running fit, through its Admin API, for a link token its
+[tunnel hub](tunnel.md#tokens) or [LLM role](llm.md#tokens) issues, and prints it, once; `fit token
+list`, `expiry` and `revoke` list the tokens with their last use, change one's expiry and revoke one.
 
 ## Changing a running config
 

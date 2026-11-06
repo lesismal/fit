@@ -67,8 +67,9 @@ var (
 // TunnelHub is the tunnel's hub role.
 type TunnelHub struct {
 	Name                 string               `json:"name,omitempty" doc:"The name the hub tells the nodes and proxies that register. The host's name when left out."`
-	Password             string               `json:"password,omitempty" doc:"The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out."`
-	BodyPassword         string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. It applies to the links that open after it changes."`
+	Password             string               `json:"password,omitempty" doc:"The password every node and proxy may register with, which they prove they know without sending it: deprecated for tokens, which give each member a credential of its own. Still taken in this release, with a warning on the pages while a member uses it; refused in the next. Without it, only tokens register."`
+	Tokens               []LinkToken          `json:"tokens,omitempty" doc:"The tokens the hub issued, which nodes and proxies register with in place of the password: each its own credential, kept as a hash, with an optional expiry. The hub's pages, its Admin API module and fit token make, list, change and revoke them; not written by hand."`
+	BodyPassword         string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. A link registered with a token derives its keys from the token and this, by HKDF; one with the password, from the password's PBKDF2. It applies to the links that open after it changes."`
 	Listeners            []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. A tcp or ws listener on an address that is not a loopback one needs body_password: use tls, wss or quic there. None when left out: the console's pages add them."`
 	ConsoleSocket        *TunnelConsoleSocket `json:"console_socket,omitempty" doc:"An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."`
 	QUIC                 *TunnelHubQUIC       `json:"quic,omitempty" doc:"The hub's certificate, which its tls, wss and quic listeners present unless they have cert_file, and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a listener needs one and none is set."`
@@ -185,7 +186,8 @@ type TunnelWebProxy struct {
 type TunnelUplink struct {
 	Name          string           `json:"name,omitempty" doc:"The hub's name here, which forwards and the pages name it by. The first endpoint's address when left out."`
 	Endpoints     []TunnelEndpoint `json:"endpoints" fit:"required" doc:"The hub's addresses, in the order each link tries them: it dials the first one not disabled, and the next when that fails."`
-	Password      string           `json:"password" fit:"required" doc:"The hub's password."`
+	Token         string           `json:"token,omitempty" doc:"The token the hub issued for this node or proxy, as fitt1.<id>.<secret>, which its pages, its Admin API module or fit token show once when they make it. Set token or password, not both."`
+	Password      string           `json:"password,omitempty" doc:"The hub's shared password: deprecated for token, taken by hubs of this release with a warning, and refused by the next."`
 	BodyPassword  string           `json:"body_password,omitempty" doc:"The hub's body_password, when it has one. A tcp:// or ws:// endpoint whose host is not a loopback one needs it."`
 	Pin           string           `json:"pin,omitempty" renamed:"quic_pin" doc:"The SHA-256 fingerprint of the hub's certificate, as its pages show it, which tls://, wss:// and quic:// endpoints check the certificate against, in place of the chain and name checks: for a hub with a self-signed certificate. Without it or ca_file, the certificate is checked against the system's roots."`
 	CAFile        string           `json:"ca_file,omitempty" doc:"A PEM file of the CAs that sign the hub's certificate, which tls://, wss:// and quic:// endpoints check it against, its name too, in place of the system's roots. Read at each dial. Not with pin."`
@@ -510,6 +512,7 @@ func checkTunnelHub(s *TunnelHub, add func(Value, string, ...any)) {
 	if msg := checkTunnelName(s.Name); msg != "" {
 		add(s.At.Field("name"), "%s", msg)
 	}
+	checkLinkTokens(s.Tokens, s.At.Field("tokens"), add)
 	seen := map[string]int{}
 	for i, l := range s.Listeners {
 		at := s.At.Field("listeners").Index(i)
@@ -600,8 +603,15 @@ func checkTunnelUplinks(ups []TunnelUplink, at Value, add func(Value, string, ..
 		if len(u.Endpoints) > 0 && on == 0 {
 			add(uat.Field("endpoints"), "every endpoint is disabled")
 		}
-		if u.Password == "" {
-			add(uat.Field("password"), "the password is empty")
+		switch {
+		case u.Token != "" && u.Password != "":
+			add(uat.Field("password"), "set token or password, not both: the token replaces the password")
+		case u.Token != "":
+			if msg := CheckLinkTokenString(u.Token); msg != "" {
+				add(uat.Field("token"), "%s", msg)
+			}
+		case u.Password == "":
+			add(uat.Field("token"), "set the token the hub issued for this member (or, until the next release, its password)")
 		}
 		for j, e := range u.Endpoints {
 			if checkTunnelEndpoint(e.Address) == "" && u.Bare(e.Address) {

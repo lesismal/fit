@@ -52,6 +52,7 @@ examples are JSON; the same fields work in a .conf or YAML config. The
 | `name` | string | the host's name | The name the role shows its peers: up to 64 characters, no control characters, no spaces around it. |
 | `console` | object | none | The role's web pages. See [The pages](#the-pages). |
 | `listen` | object | none | Where the role takes links from its peers. |
+| `tokens` | array | none | The tokens the role's listener issued, which its peers link with: `{id, name, hash, created_at, expires_at, note, members}`, at most 1,024. Made by the pages, the Admin API and `fit token`, not by hand. See [Tokens](#tokens). |
 | `peers` | array | none | The peers the role dials and keeps linked to; at most 64. |
 | `limits` | object | the defaults | Bounds on the role's links. |
 
@@ -60,18 +61,20 @@ examples are JSON; the same fields work in a .conf or YAML config. The
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `address` | string | required | The host and port the role takes links on, as a binding of its own on the listeners' engine. The WebSocket path is `/ws`. An empty host listens on every address. |
-| `password` | string | none | The password of every role the listener links with that has no password of its own. Peers prove they know it; it never crosses the network. Whoever holds it may link as any of those roles, so give each role its own instead. |
-| `node_password` | string | `password` | The password nodes prove to link as a node, on a hub's or a proxy's listener. |
-| `proxy_password` | string | `password` | The password proxies prove to link as a proxy, on a hub's or a node's listener. |
-| `hub_password` | string | `password` | The password hubs prove to link as a hub, on a node's or a proxy's listener. |
+| `password` | string | none | Deprecated for [tokens](#tokens): the password of every role the listener links with that has no password of its own. Peers prove they know it; it never crosses the network. Whoever holds it may link as any of those roles. Taken in this release, with a warning on the links page while a peer uses it; refused in the next. |
+| `node_password` | string | `password` | Deprecated: the password nodes prove to link as a node, on a hub's or a proxy's listener. |
+| `proxy_password` | string | `password` | Deprecated: the password proxies prove to link as a proxy, on a hub's or a node's listener. |
+| `hub_password` | string | `password` | Deprecated: the password hubs prove to link as a hub, on a node's or a proxy's listener. |
 | `cert_file`, `key_file` | string | none | PEM files with the certificate the listener presents, any intermediates after it, and its key. With both, links are taken over TLS (`wss://`), and peers check the certificate with their `ca_file` or `pin`. Read when the listener starts. |
 | `self_signed` | bool | false | Take links over TLS with a self-signed certificate the role makes, for a listener without `cert_file`. The role writes it into `cert` and `key`, so that it outlives a restart, and shows its SHA-256 fingerprint on its links page and in its log: peers set that as their `pin`. |
 | `cert`, `key` | string | none | The PEM certificate and key `self_signed` made, written by the role. Delete both for a new certificate, which every peer must pin again. |
 
-The password a dialer proves decides the role it may say hello as (see
-[Hello and roles](#hello-and-roles)). A listener needs `password`, or the password of at least one
-role it links with; a role with neither is not taken. A role's own password on a listener of a role
-that does not link with it (`hub_password` on a hub's) is an error. A listener that takes one
+A listener takes the role's [tokens](#tokens), which link a peer of any role it links with, and,
+until the next release, its passwords. The password a dialer proves decides the role it may say
+hello as (see [Hello and roles](#hello-and-roles)); a role with no password of its own and no
+`password` is taken with tokens alone. A listener with no password takes tokens alone, and none
+until one is issued, which its log says when it starts. A role's own password on a listener of a
+role that does not link with it (`hub_password` on a hub's) is an error. A listener that takes one
 password from more than one role, as `password` alone does, logs a warning when it starts.
 
 A listener on an address other than a loopback one (`127.0.0.0/8`, `::1`, `localhost`), an empty
@@ -84,7 +87,8 @@ for why.
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `address` | string | required | The peer's host and port, as its `listen.address` says. The host is required and the port is a number. Each address appears once. |
-| `password` | string | required | The password of the dialing role on the peer's listener: a node dials with the peer's `listen.node_password`, a proxy with its `listen.proxy_password`, a hub with its `listen.hub_password`, or with its `listen.password` when it has none for the role. |
+| `token` | string | | The token the peer's role issued for this one, `fitt1.<id>.<secret>`, as its pages, its Admin API or `fit token create` show it once. `token` or `password` is required, not both. |
+| `password` | string | | Deprecated: the password of the dialing role on the peer's listener: a node dials with the peer's `listen.node_password`, a proxy with its `listen.proxy_password`, a hub with its `listen.hub_password`, or with its `listen.password` when it has none for the role. |
 | `role` | string | required | The role the peer must announce: `hub`, `node` or `proxy`, never the dialing role's own. A hub dials nodes and proxies, a node dials hubs and proxies, a proxy dials hubs and nodes. |
 | `pin` | string | none | The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits, colons and case ignored, as its links page and its log show it. The link goes over TLS (`wss://`), and only to a listener with exactly that certificate; its name and dates are not checked. |
 | `ca_file` | string | none | Or a PEM file with the certificates of the authorities the peer's certificate must chain to: the link goes over TLS, and the certificate must name `server_name`, or the address's host. One of `pin` and `ca_file`. Read when the peer is set. |
@@ -202,8 +206,13 @@ The fields every role has, and:
         "address": "127.0.0.1:9200",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret",
-                 "self_signed": true},
+      "listen": {"address": ":9210", "self_signed": true},
+      "tokens": [
+        {"id": "fdd44d906b8e6ce2", "name": "gpu-1", "hash": "1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4",
+         "created_at": 1793900000, "members": ["node-8c1f6e2a90b34d57"]},
+        {"id": "5a3716dd56e5e458", "name": "laptop", "hash": "4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df",
+         "created_at": 1793900000, "expires_at": 1825436000}
+      ],
       "limits": {"max_conns": 1024, "max_inflight": 1024, "ping_interval": "15s", "slow_timeout": "30s",
                  "retry_interval": "5s", "stream_idle": "2m"},
       "max_nodes": 1024
@@ -224,8 +233,8 @@ The fields every role has, and:
         "address": "127.0.0.1:9100",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
-                 "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+      "peers": [{"address": "hub.example.net:9210", "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
+                 "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
       "models": [
         {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B",
          "max_inflight": 4},
@@ -253,8 +262,8 @@ The fields every role has, and:
         "address": "127.0.0.1:9300",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub",
-                 "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+      "peers": [{"address": "hub.example.net:9210", "token": "fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4",
+                 "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
       "api": {"address": "127.0.0.1:9301", "max_body_bytes": 33554432, "max_conns": 256, "max_inflight": 256,
               "first_byte_timeout": "5m", "timeout": "30m"},
       "api_keys": [
@@ -267,8 +276,11 @@ The fields every role has, and:
 ```
 
 The `password_hash` is made with `fit hash-password`; the one above is an example only. API keys
-are made on the proxy's pages, not written by hand. The `pin` is the hub's fingerprint, as the hub's
-links page and its log show it once it has made its certificate; the one above is an example only.
+are made on the proxy's pages, not written by hand, and so are the hub's `tokens`: its links page,
+its Admin API or `fit token create -role llm.hub -name gpu-1` issues each, keeps its hash and shows
+the token once, for the node's or proxy's peer `token`; the hub writes `members` itself. The `pin`
+is the hub's fingerprint, as the hub's links page and its log show it once it has made its
+certificate; the one above is an example only.
 
 ### Three places
 
@@ -276,21 +288,26 @@ A hub on a public server at hub.example.net, a node on a GPU machine in a lab, a
 machine of an office LAN, at 192.168.1.10. The node and the proxy dial the hub; neither needs a
 listener of its own, so neither needs a public address. The proxy serves the agents of every
 machine of the LAN, over TLS, with its API keys. The hub takes links over TLS with a certificate
-it makes itself; the node and the proxy pin it by the fingerprint its links page shows.
+it makes itself; the node and the proxy pin it by the fingerprint its links page shows, and link
+with a token each that the hub issued.
 
-The server:
+The server, which takes tokens alone:
 
 ```json
-{"llm": {"hub": {"listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret",
-                            "self_signed": true}}}}
+{"llm": {"hub": {"listen": {"address": ":9210", "self_signed": true}}}}
+```
+
+```sh
+fit token create -c fit.json -role llm.hub -name gpu-1    # the GPU machine's token, shown once
+fit token create -c fit.json -role llm.hub -name office   # the LAN machine's
 ```
 
 The GPU machine:
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
-             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+  "peers": [{"address": "hub.example.net:9210", "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
+             "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
 ```
@@ -299,8 +316,8 @@ The LAN machine:
 
 ```json
 {"llm": {"proxy": {
-  "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub",
-             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+  "peers": [{"address": "hub.example.net:9210", "token": "fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4",
+             "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
@@ -388,8 +405,8 @@ A node serving one model of each:
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
-             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+  "peers": [{"address": "hub.example.net:9210", "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
+             "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "models": [
     {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
     {"name": "whisper", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "openai/whisper-large-v3"},
@@ -427,9 +444,10 @@ member without dropping links that did not change.
 Kicking a link from the pages is the one change that is not written: it closes the link, and the
 dialer links again.
 
-The members hold secrets: mesh passwords and model API keys, in the clear. A plain config file is
-as safe as the file; `admin.store` keeps them encrypted. A proxy's API keys are kept as their
-SHA-256 only, so neither the config nor the store holds a key that can be used.
+The members hold secrets: a peer's token, mesh passwords and model API keys, in the clear. A plain
+config file is as safe as the file; `admin.store` keeps them encrypted. A proxy's API keys are kept
+as their SHA-256 only, and a listener's tokens as a hash that cannot be used to link, so neither the
+config nor the store holds a key or a token another can use with them.
 
 ## The mesh
 
@@ -446,10 +464,10 @@ Off loopback, links go over TLS 1.3, served by fib's TLS, whose handshake takes 
 waits. The dialer checks the listener's certificate: by its `pin`, the SHA-256 of the certificate,
 compared in constant time, in place of the chain and name checks; or by `ca_file`, the chain to one
 of its authorities and the name. No TLS session is resumed, on either side, so every link checks
-the certificate in a full handshake. The password handshake below still runs inside TLS, so a link
-needs both: the certificate the dialer expects, and the password of its role.
+the certificate in a full handshake. The token's (or password's) handshake below still runs inside
+TLS, so a link needs both: the certificate the dialer expects, and a token the listener issued.
 
-TLS is what keeps a link to the two ends that made it. The password handshake is checked once, when
+TLS is what keeps a link to the two ends that made it. The handshake is checked once, when
 the link opens, and the frames after it carry no proof of their own. Over plain `ws://`, one who
 took over a listener's address, knowing no password, could pass a dialer's handshake through to
 the real listener, then send requests on the link as the listener, which the dialer serves: a node
@@ -457,7 +475,21 @@ with `allow_hub_manage` would run them as its hub's. Over TLS, the relay cannot 
 pinned certificate, and the records it passes through are sealed with keys it does not have: what
 it injects ends the link.
 
-After the upgrade, before any frame:
+After the upgrade, before any frame, with a token:
+
+1. The listener sends a 32-byte random challenge.
+2. The dialer answers with its token's ID, a 32-byte random nonce of its own, and its proof of the
+   token over a transcript of the token's ID, its nonce and the challenge
+   ([decision 035](decisions/035-link-tokens.md) has the keys).
+3. The listener looks the token up, refuses one it did not issue, or one expired, closing with code
+   4001 and the reason, and checks the proof. Its acknowledgement carries its own proof of the token
+   over the same transcript, under another key and the label of the other direction. The token links
+   a peer of any role the listener takes.
+4. The dialer checks the listener's proof, and gives up the dial when it is missing or wrong.
+
+A proof replayed on another link, answered to another nonce, or sent back to its sender does not
+check, and the listener keeps only a hash of the token, which cannot be used to link. With a
+password (deprecated):
 
 1. The listener sends a 32-byte random challenge.
 2. The dialer answers with the HMAC-SHA256 of the challenge, keyed with its password (the one the
@@ -497,6 +529,44 @@ each role with such a listener:
 A listener and its dialers move together: a dialer with a pin gets nowhere with a plain listener,
 and a plain dialer nowhere with a TLS one. Roles on one machine, linked over loopback, need no
 change.
+
+### Tokens
+
+A role's listener issues a token for each peer that dials it, in place of a password a role's
+peers share ([decision 035](decisions/035-link-tokens.md)):
+
+- **Each token its own credential.** A token is `fitt1.<id>.<secret>`, a 16-hex-digit ID and 256
+  random bits. The role keeps, in its member's `tokens`, the ID, a name, when it was made, an
+  optional expiry, an optional note and a hash, never the token: it is shown once, when it is made.
+- **Of no role.** A valid token links a peer of any role the listener takes; what the peer may call
+  follows from the role it says hello as, as [Hello and roles](#hello-and-roles) says.
+- **Bound to its members.** The first ID that says hello with a token is bound to it and written into
+  the token's `members`, so that no other token says hello as that ID, across restarts. Revoking the
+  token frees it: to move a peer to a new token, issue the new one, revoke the old, and give the peer
+  the new one.
+- **Expiry.** A token may expire at a set time or after a duration (`30d`, `720h`); an expired token
+  is refused, and its links are closed at its expiry (at most a minute late, should the wall clock
+  jump). Revoking a token closes its links at once.
+- **Managed three ways**, each change a config edit of the role's member, applied and kept as any
+  page's edit is, and logged to the `admin` logger: the links page's **Link tokens** card (the
+  methods `/mesh/tokens/list`, `/mesh/tokens/create`, `/mesh/tokens/expiry`, `/mesh/tokens/revoke`);
+  the Admin API, `GET /tokens/llm.hub`, `POST /tokens/llm.hub` `{name, note, ttl | expires_at}`,
+  `PATCH /tokens/llm.hub/{id}` `{ttl | expires_at}` (neither: never) and `DELETE /tokens/llm.hub/{id}`,
+  and the same for `llm.node` and `llm.proxy`; and `fit token list|create|expiry|revoke -role llm.hub`.
+  The list gives each token's last use and the address it came from since fit started, its members
+  and the links that use it now.
+
+### Moving to tokens
+
+The listener's passwords still link in this release, beside tokens, and are refused in the next.
+The links page shows which inbound links proved a shared password, and warns while any does. To
+move a role:
+
+1. Upgrade the listener's fit first: a dialer with a token gets nowhere with an earlier listener.
+2. Issue a token for each peer that dials it, and set it as that peer's `token` in place of its
+   `password` (the links page's **Connect to…** form does both).
+3. Once the warning is gone, edit the listener and tick **Remove every password**, so that only
+   tokens link.
 
 ### Frames, sessions and streams
 
@@ -561,14 +631,17 @@ closed. A peer is refused when:
 - its role is the role's own (hubs never link to hubs, nodes to nodes, proxies to proxies);
 - its role is not one the role links with: a hub links nodes and proxies, a node links hubs and
   proxies, a proxy links hubs and nodes;
-- on a link it dialed in, its role is not one whose password the link proved;
+- on a link it dialed in with a password, its role is not one whose password the link proved;
+- on a link it dialed in with a token, its ID is bound to another token (see [Tokens](#tokens));
 - on a dialed link, its role is not the one `peers[].role` names;
 - its ID is the role's own;
 - its ID is linked already under another role.
 
 A refused dialer waits at least 30 seconds, or `retry_interval` when longer, before trying again.
-What a peer may call depends on its role, as hello said, and the role is bound to the password the
-peer proved: a proxy that holds a hub's `proxy_password` cannot join it as a node, nor say hello to
+What a peer may call depends on its role, as hello said. A token is of no role: its holder says
+hello as any role the listener takes, and its ID is bound to the token, so that another token's
+holder cannot say hello as that ID and take its calls. With a password, the role is bound to the
+password the peer proved: a proxy that holds a hub's `proxy_password` cannot join it as a node, nor say hello to
 a node as a hub when it holds the node's `proxy_password`, so it cannot manage a node that has
 `allow_hub_manage` on. A refused hello leaves the link without a role: nothing it calls runs, and it
 is closed a second later. `listen.password` alone, or a role's password set the same as
@@ -927,7 +1000,11 @@ What each role's pages show, in English or Chinese:
 
 The links page sets the listener and the peers, and kicks a link. It shows whether the listener
 takes TLS and the fingerprint of its certificate, which its dialers pin, and how each peer's
-listener is checked: by a pin, a CA file, or not at all on loopback.
+listener is checked: by a pin, a CA file, or not at all on loopback. Its **Link tokens** card issues
+a token (shown once, to copy), lists the tokens with their expiry, last use, members and links,
+changes a token's expiry and revokes one; each inbound link shows the token it proved, or a warning
+that it proved a shared password, and the listener's edit can remove every password. A peer is
+added with the token its listener issued, which replaces a password.
 
 The traffic page draws the role's links as a map of columns, as the tunnel's pages do: a proxy's
 agents, the proxy, its hubs, their nodes and their models; a hub's proxies, the hub, its nodes and
@@ -954,7 +1031,8 @@ The API under `/api/`:
 
 The pages call the same methods peers call, as a local caller allowed everything, and the methods
 only the pages may call: the mesh's (`/mesh/peers`, `/mesh/status`, `/mesh/dial`, `/mesh/undial`,
-`/mesh/kick`, `/mesh/listen`, `/mesh/limits/get`, `/mesh/limits/set`); a hub's node table
+`/mesh/kick`, `/mesh/listen`, `/mesh/limits/get`, `/mesh/limits/set`, and the tokens',
+`/mesh/tokens/list`, `/mesh/tokens/create`, `/mesh/tokens/expiry`, `/mesh/tokens/revoke`); a hub's node table
 (`/hub/nodes`), managed calls (`/hub/node/call`, `/hub/node/stream`), name (`/hub/profile/set`) and
 settings (`/hub/settings/get`, `/hub/settings/set`); a node's settings (`/node/settings/get`,
 `/node/settings/set`) and upstream bounds (`/node/upstream/get`, `/node/upstream/set`); a proxy's
@@ -987,6 +1065,7 @@ Every bound has a default; a config that sets none is bounded.
 | Links not authenticated yet | 256, 16 per IP address | fixed |
 | Method timeout | 10s; 30s for a node's or proxy's config change, 20s for a model check, 30s for GPU status and settings, 90s for a hub's managed call | fixed |
 | Peers, models, API keys | 64, 256, 256 | fixed |
+| Link tokens, members of a token | 1,024, 256 | fixed |
 | Nodes in a hub's table | 1024 | `max_nodes` |
 | A hub's node list | `max_nodes` nodes, 64 models and 16 GPUs each, 4 MiB; pushed after 200ms, a second apart, its traffic every 5s | fixed |
 | Routes counted | 1024 per role, the rest as `other` | fixed |

@@ -219,7 +219,7 @@ func TestRegisterRefused(t *testing.T) {
 
 	// Without a password, nothing registers.
 	w := newHub(t, `{"listeners": [{"protocol": "tcp", "address": "127.0.0.1:0"}]}`)
-	if err := w.dial(w.listen()).register(proto.TypeNode, "lab", "pw"); err == nil || !strings.Contains(err.Error(), "password") {
+	if err := w.dial(w.listen()).register(proto.TypeNode, "lab", "pw"); err == nil || !strings.Contains(err.Error(), "takes tokens only") {
 		t.Fatalf("registered without a password: %v", err)
 	}
 }

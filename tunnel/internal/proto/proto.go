@@ -86,6 +86,11 @@ const (
 	// MethodKick tells a peer the hub is closing its connection, with the
 	// reason as the body.
 	MethodKick Method = 6
+	// MethodChallenge starts a registration with a token: ChallengeReq,
+	// the token's ID and the peer's nonce, answered with ChallengeRsp, the
+	// hub's nonce, which the MethodRegister that follows on the link proves
+	// the token over. Once per link, before it registers.
+	MethodChallenge Method = 7
 
 	// MethodNodeInfo asks a node for its Info: an empty request answered
 	// with Info.
@@ -113,7 +118,7 @@ const (
 
 var methodNames = map[Method]string{
 	MethodRegister: "register", MethodUpdate: "update", MethodNodes: "nodes", MethodSetNodeServices: "node/services",
-	MethodPing: "ping", MethodKick: "kick", MethodNodeInfo: "node/info", MethodNodeSetServices: "node/set-services",
+	MethodPing: "ping", MethodKick: "kick", MethodChallenge: "challenge", MethodNodeInfo: "node/info", MethodNodeSetServices: "node/set-services",
 	MethodTunnelOpen: "tunnel/open", MethodTunnelData: "tunnel/data", MethodTunnelAck: "tunnel/ack", MethodTunnelClose: "tunnel/close",
 }
 
@@ -191,13 +196,29 @@ func (info *Info) FindService(name string) (Service, bool) {
 }
 
 // RegisterReq authenticates and registers a connection of a peer's pool.
-// MAC is the HMAC-SHA256, keyed with the hub's password, of the peer's
-// type and name, Time and Nonce; see Sign.
+// With a token, Token is its ID and Proof the token's proof over the
+// challenge's nonces and the peer's type and name (see ProveToken); with the
+// shared password, MAC is the HMAC-SHA256, keyed with the hub's password, of
+// the peer's type and name, Time and Nonce (see Sign).
 type RegisterReq struct {
 	Info  Info   `json:"info"`
-	Time  int64  `json:"time"`
+	Time  int64  `json:"time,omitempty"`
+	Nonce string `json:"nonce,omitempty"`
+	MAC   string `json:"mac,omitempty"`
+	Token string `json:"token,omitempty"`
+	Proof string `json:"proof,omitempty"`
+}
+
+// ChallengeReq starts a registration with token Token: Nonce is the peer's,
+// NonceSize random bytes in hex.
+type ChallengeReq struct {
+	Token string `json:"token"`
 	Nonce string `json:"nonce"`
-	MAC   string `json:"mac"`
+}
+
+// ChallengeRsp answers a ChallengeReq with the hub's nonce, in hex.
+type ChallengeRsp struct {
+	Nonce string `json:"nonce"`
 }
 
 // RegisterRsp answers a registration.
@@ -396,6 +417,17 @@ func CheckProof(req *RegisterReq, rsp *RegisterRsp, password string) error {
 	return nil
 }
 
+// CheckPeer checks the type and name a registration tells.
+func CheckPeer(info *Info) error {
+	if info.Name == "" {
+		return errors.New("tunnel: a peer needs a name")
+	}
+	if info.Type != TypeNode && info.Type != TypeProxy {
+		return fmt.Errorf("tunnel: unknown peer type %q", info.Type)
+	}
+	return nil
+}
+
 // Verifier checks registrations against a password, and refuses a nonce it
 // has seen within MaxClockSkew, so a registration overheard cannot be
 // replayed.
@@ -409,11 +441,8 @@ type Verifier struct {
 
 // Verify checks req.
 func (v *Verifier) Verify(req *RegisterReq) error {
-	if req.Info.Name == "" {
-		return errors.New("tunnel: a peer needs a name")
-	}
-	if req.Info.Type != TypeNode && req.Info.Type != TypeProxy {
-		return fmt.Errorf("tunnel: unknown peer type %q", req.Info.Type)
+	if err := CheckPeer(&req.Info); err != nil {
+		return err
 	}
 	now := time.Now()
 	if d := now.Sub(time.Unix(req.Time, 0)); d > MaxClockSkew || d < -MaxClockSkew {

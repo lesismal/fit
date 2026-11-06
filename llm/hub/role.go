@@ -68,7 +68,7 @@ func (r *Role) Apply(member any) error {
 		return errors.New("llm.hub: no member")
 	}
 	r.hub.setMaxNodes(m.Nodes())
-	return r.Base.Apply(role.Common{ID: m.ID, Name: m.Name, Console: m.Console, Listen: m.Listen, Peers: m.Peers, Limits: m.Limits})
+	return r.Base.Apply(role.Common{ID: m.ID, Name: m.Name, Console: m.Console, Listen: m.Listen, Tokens: m.Tokens, Peers: m.Peers, Limits: m.Limits})
 }
 
 // Stop ends the hub: its links drain until ctx ends, for 10s at most.

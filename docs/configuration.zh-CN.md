@@ -145,7 +145,9 @@ fit validate -c fit.yaml -c conf.d
 .conf 模板。`fit hash-password` 在终端中提示输入两次密码（输入显示为 `*`，非终端时从标准输入读取）并打印其 bcrypt 哈希，用于 `basic_auth` 的用户、控制台的用户和 `media_auth` 的用户。
 `fit media-token -c fit.conf -policy live -publish 'live/*' -play '*' -ttl 1h -subject obs` 打印一个用
 [`media_auth`](reference/config.md#media-auth) 策略的 `secret` 签名的 token，供 WHIP 或 WHEP 客户端作为 bearer token 发送；
-使用同一 secret 的运行中的 fit 在其过期前都接受它。
+使用同一 secret 的运行中的 fit 在其过期前都接受它。`fit token create -c fit.conf -role tunnel.hub -name lab -ttl 90d`
+经 Admin API 向运行中的 fit 申请一个由其[隧道 hub](tunnel.zh-CN.md#令牌)或 [LLM 角色](llm.zh-CN.md#令牌)签发的连接
+令牌，并打印它，只此一次；`fit token list`、`expiry` 和 `revoke` 列出令牌及其最近使用、修改某个令牌的过期时间、吊销某个令牌。
 
 ## 修改运行中的配置
 

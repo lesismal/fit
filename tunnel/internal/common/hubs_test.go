@@ -91,6 +91,19 @@ func TestEditHub(t *testing.T) {
 	if got = hubs(t, m); got[0]["name"] != "b" || got[0]["body_password"] != nil {
 		t.Fatalf("renamed %v", got[0])
 	}
+	// A token replaces the password, and the password the token.
+	if err := EditHub(m, "b", HubReq{Name: "b", Endpoints: ep[:1], Token: " tok "}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got = hubs(t, m); got[0]["token"] != "tok" || got[0]["password"] != nil {
+		t.Fatalf("token %v", got[0])
+	}
+	if err := EditHub(m, "b", HubReq{Name: "b", Endpoints: ep[:1], Password: "pw2"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got = hubs(t, m); got[0]["token"] != nil || got[0]["password"] != "pw2" {
+		t.Fatalf("password %v", got[0])
+	}
 
 	for _, c := range []struct {
 		name string
@@ -99,7 +112,7 @@ func TestEditHub(t *testing.T) {
 	}{
 		{"nope", HubReq{Endpoints: ep, Password: "pw"}, "no hub named nope"},
 		{"", HubReq{Endpoints: []EndpointReq{{Address: " "}}, Password: "pw"}, "needs an address"},
-		{"", HubReq{Endpoints: ep}, "needs a password"},
+		{"", HubReq{Endpoints: ep}, "needs the token it issued for this member, or its password"},
 		{"", HubReq{Name: "b", Endpoints: ep, Password: "pw"}, "a hub named b exists"},
 		{"b", HubReq{Endpoints: []EndpointReq{{Address: "h:9"}}}, "a hub named h:9 exists"},
 	} {

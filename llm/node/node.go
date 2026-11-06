@@ -172,7 +172,7 @@ func (n *Node) Apply(member any) error {
 	if was != now {
 		n.log.Infof("hub management is now %v", now)
 	}
-	err := n.Base.Apply(role.Common{ID: m.ID, Name: m.Name, Console: m.Console, Listen: m.Listen, Peers: m.Peers, Limits: m.Limits})
+	err := n.Base.Apply(role.Common{ID: m.ID, Name: m.Name, Console: m.Console, Listen: m.Listen, Tokens: m.Tokens, Peers: m.Peers, Limits: m.Limits})
 	n.start.Do(func() {
 		n.wg.Add(3)
 		go n.hwLoop()

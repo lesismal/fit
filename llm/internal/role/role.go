@@ -23,6 +23,7 @@ import (
 	"github.com/lesismal/fit/app/workbench"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/certpin"
+	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/llm/internal/mesh"
 	"github.com/lesismal/fit/llm/internal/model"
 	"github.com/lesismal/fit/llm/internal/pool"
@@ -53,6 +54,7 @@ type Common struct {
 	Name    string
 	Console *config.RoleConsole
 	Listen  *config.LLMListen
+	Tokens  []config.LinkToken
 	Peers   []config.LLMPeer
 	Limits  *config.LLMLimits
 }
@@ -72,6 +74,8 @@ type Base struct {
 	hostname string
 
 	module *console.Module
+	// tokens issues and revokes the listener's link tokens.
+	tokens *linktoken.Manager
 
 	mu         sync.Mutex
 	id, name   string
@@ -104,6 +108,7 @@ func New(h *app.Host, spec Spec) *Base {
 	b.Mesh = mesh.New(mesh.Options{Self: b.Self, AcceptRoles: config.LLMPeerRoles(spec.Role), Engine: h.Engine, Log: h.Log}, b.Router)
 	mesh.RegisterAdmin(b.Router, b.Mesh, b.EditMesh)
 	b.registerSettings()
+	b.setupTokens()
 	b.module = &console.Module{ID: "llm." + spec.Role, Routes: b.routes}
 	return b
 }
@@ -212,6 +217,9 @@ func (b *Base) Apply(c Common) error {
 	for _, p := range c.Peers {
 		peers = append(peers, dialReq(p))
 	}
+	// The tokens before the listener, so that a listener with tokens alone
+	// says so only when it has none.
+	b.Mesh.Tokens().Set(c.Tokens)
 	if err := b.Mesh.Configure(listen, peers); err != nil {
 		b.Log.Warnf("%v", err)
 	}
@@ -297,6 +305,7 @@ func (b *Base) Stop(ctx context.Context) {
 		c.Stop(ctx)
 	}
 	b.Mesh.Shutdown(ctx)
+	b.Mesh.Tokens().Stop()
 	b.Pool.Stop(ctx)
 }
 
@@ -394,7 +403,7 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 		}
 		peers := make([]config.LLMPeer, 0, len(s.Peers))
 		for _, p := range s.Peers {
-			peers = append(peers, config.LLMPeer{Address: p.Addr, Password: p.Password, Role: p.Role, Pin: p.Pin,
+			peers = append(peers, config.LLMPeer{Address: p.Addr, Password: p.Password, Token: p.Token, Role: p.Role, Pin: p.Pin,
 				CAFile: p.CAFile, ServerName: p.ServerName})
 		}
 		return Set(m, "peers", peers)
@@ -410,7 +419,7 @@ func listenConfig(l *config.LLMListen) model.ListenConfig {
 
 // dialReq is the mesh's dial target of p.
 func dialReq(p config.LLMPeer) model.DialReq {
-	return model.DialReq{Addr: p.Address, Password: p.Password, Role: p.Role, Pin: p.Pin, CAFile: p.CAFile,
+	return model.DialReq{Addr: p.Address, Password: p.Password, Token: p.Token, Role: p.Role, Pin: p.Pin, CAFile: p.CAFile,
 		ServerName: p.ServerName}
 }
 

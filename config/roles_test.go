@@ -31,13 +31,16 @@ func TestLLMChecks(t *testing.T) {
 	}
 	for _, bad := range []struct{ doc, want string }{
 		{`{"llm": {"hub": {"id": "a b"}}}`, "the ID is up to 128 characters"},
-		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": ""}}}}`, "a listener needs a password"},
-		{`{"llm": {"hub": {"listen": {"address": ":9200"}}}}`, "node_password or proxy_password"},
 		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": "p", "hub_password": "h"}}}}`, "a hub takes no links from hubs"},
 		{`{"llm": {"node": {"listen": {"address": ":9200", "node_password": "n"}}}}`, "a node takes no links from nodes"},
-		{`{"llm": {"proxy": {"listen": {"address": ":9200", "proxy_password": "x"}}}}`, "a listener needs a password"},
+		{`{"llm": {"proxy": {"listen": {"address": ":9200", "proxy_password": "x"}}}}`, "a proxy takes no links from proxys"},
 		{`{"llm": {"node": {"peers": [` + strings.Join(peers, ",") + `]}}}`, "at most 64 peers"},
-		{`{"llm": {"hub": {"peers": [{"address": "h:1", "password": "", "role": "node"}]}}}`, "a peer needs its password"},
+		{`{"llm": {"hub": {"peers": [{"address": "h:1", "password": "", "role": "node"}]}}}`, "a peer needs the token"},
+		{`{"llm": {"hub": {"peers": [{"address": "h:1", "token": "nope", "role": "node"}]}}}`, "not a link token"},
+		{`{"llm": {"hub": {"peers": [{"address": "h:1", "token": "` + tok + `", "password": "p", "role": "node"}]}}}`, "not both"},
+		{`{"llm": {"hub": {"tokens": [{"id": "x", "name": "", "hash": "y"}]}}}`, "the ID is 16 lowercase hex digits"},
+		{`{"llm": {"node": {"tokens": [{"id": "0123456789abcdef", "name": "", "hash": "y"}]}}}`, "the name is 1 to 64"},
+		{`{"llm": {"proxy": {"tokens": [{"id": "0123456789abcdef", "name": "a", "hash": "y"}]}}}`, "the hash is 64 hex digits"},
 		{`{"llm": {"hub": {"limits": {"ping_interval": "10ms"}}}}`, "ping_interval"},
 		{`{"llm": {"hub": {"limits": {"slow_timeout": "-1s"}}}}`, "slow_timeout"},
 		{`{"llm": {"hub": {"limits": {"stream_idle": "10ms"}}}}`, "stream_idle"},
@@ -122,6 +125,7 @@ func TestLLMDefaults(t *testing.T) {
 // TestTunnelChecks checks what the tunnel's roles refuse beyond decoding.
 func TestTunnelChecks(t *testing.T) {
 	up := func(u string) string { return `{"tunnel": {"node": {"hubs": [` + u + `]}}}` }
+	hash := strings.Repeat("ab", 32)
 	for _, bad := range []struct{ doc, want string }{
 		{`{"tunnel": {"hub": {"name": " s"}}}`, "is not a name"},
 		{`{"tunnel": {"hub": {"listeners": [{"protocol": "tcp", "address": "nope"}]}}}`, "nope"},
@@ -135,7 +139,15 @@ func TestTunnelChecks(t *testing.T) {
 		{up(`{"name": " s", "endpoints": [{"address": "h:1"}], "password": "p"}`), "is not a name"},
 		{up(`{"name": "s", "endpoints": [], "password": "p"}`), "list at least one endpoint"},
 		{up(`{"endpoints": [{"address": "h:1"}, {"address": "h:1"}], "password": "p"}`), "listed twice"},
-		{up(`{"endpoints": [{"address": "h:1"}], "password": ""}`), "the password is empty"},
+		{up(`{"endpoints": [{"address": "h:1"}], "password": ""}`), "set the token the hub issued"},
+		{up(`{"endpoints": [{"address": "h:1"}], "token": "fitt1.x"}`), "not a link token"},
+		{up(`{"endpoints": [{"address": "h:1"}], "token": "` + tok + `", "password": "p"}`), "not both"},
+		{`{"tunnel": {"hub": {"tokens": [{"id": "0123456789abcdef", "name": "a", "hash": "` + hash + `", "note": "` + strings.Repeat("n", 1025) + `"}]}}}`, "the note is up to 1024"},
+		{`{"tunnel": {"hub": {"tokens": [{"id": "0123456789abcdef", "name": "a", "hash": "` + hash + `"},
+			{"id": "0123456789abcdef", "name": "b", "hash": "` + hash + `"}]}}}`, "another token has the ID"},
+		{`{"tunnel": {"hub": {"tokens": [{"id": "0123456789abcdef", "name": "a", "hash": "` + hash + `", "members": ["node/a"]},
+			{"id": "0123456789abcde0", "name": "b", "hash": "` + hash + `", "members": ["node/a", ""]}]}}}`, "bound to token 0123456789abcdef"},
+		{`{"tunnel": {"hub": {"tokens": [{"id": "0123456789abcdef", "name": "a", "hash": "` + hash + `", "members": ["\u0001"]}]}}}`, "a member is 1 to 256 bytes"},
 		{up(`{"endpoints": [{"address": "h:0"}], "password": "p"}`), "not a host and port to dial"},
 		{up(`{"endpoints": [{"address": "ws://:1/x"}], "password": "p"}`), "not a ws:// URL"},
 		{up(`{"endpoints": [{"address": "quic://h"}], "password": "p"}`), "not a quic:// URL"},

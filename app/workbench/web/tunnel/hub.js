@@ -10,7 +10,7 @@
   var WORDS = [
     ['mod.label', 'Hub', 'Hub'],
     ['nav.overview', 'Overview', '概览'], ['nav.nodes', 'Nodes', '节点'], ['nav.proxies', 'Proxies', 'proxy'], ['nav.tunnels', 'Tunnels', '隧道'],
-    ['nav.listeners', 'Listeners', '监听'], ['nav.settings', 'Settings', '设置'],
+    ['nav.listeners', 'Listeners', '监听'], ['nav.tokens', 'Tokens', '令牌'], ['nav.settings', 'Settings', '设置'],
     ['ov.nodes_sub', '{n} services', '{n} 个服务'], ['ov.proxies_sub', '{n} forwarding', '{n} 个有隧道'],
     ['ov.tunnels_sub', '↑ {up} · ↓ {down}', '↑ {up} · ↓ {down}'], ['ov.listeners_sub', '{n} failing', '{n} 个失败'],
     ['ov.listeners_ok', 'all open', '全部已打开'], ['ov.hub', 'This hub', '本 hub'], ['ov.links', 'Registered links', '已注册链路'],
@@ -27,7 +27,8 @@
     ['listeners_tls', 'TLS, WSS and QUIC listeners authenticate the hub to nodes and proxies that pin its certificate. TCP and WS carry the links in the clear: off a loopback address they need the body password.',
       'TLS、WSS 与 QUIC 监听向固定了本 hub 证书指纹的节点和 proxy 证明 hub 的身份。TCP 与 WS 明文传输链路：用于非回环地址时须设置消息体密码。'],
     ['own_cert', 'its own certificate', '自有证书'],
-    ['set.title', 'Passwords and console socket', '密码与控制台 WebSocket'], ['set.password', 'Registration password', '注册密码'],
+    ['set.title', 'Passwords and console socket', '密码与控制台 WebSocket'], ['set.password', 'Shared registration password (deprecated: use tokens)', '共享注册密码（已弃用：请改用令牌）'],
+    ['set.clear_password', 'Remove the shared password: only tokens register', '移除共享密码：只接受令牌注册'],
     ['set.body', 'Body AES password', '消息体 AES 密码'], ['set.clear_body', 'Remove the body password', '移除消息体密码'],
     ['set.socket_pw', 'Console socket password', '控制台 WebSocket 密码'], ['set.clear_socket', 'Remove it, using the registration password', '移除它，改用注册密码'],
     ['set.socket_addr', 'Console over an encrypted WebSocket, address', '经加密 WebSocket 的控制台地址'],
@@ -49,10 +50,11 @@
     nav: [
       { id: 'overview', icon: 'dashboard', label: 'nav.overview' }, { id: 'nodes', icon: 'pod', label: 'nav.nodes' },
       { id: 'proxies', icon: 'proxy', label: 'nav.proxies' }, { id: 'tunnels', icon: 'tunnel', label: 'nav.tunnels' },
-      { id: 'listeners', icon: 'listen', label: 'nav.listeners' }, { id: 'settings', icon: 'settings', label: 'nav.settings' }
+      { id: 'listeners', icon: 'listen', label: 'nav.listeners' }, { id: 'tokens', icon: 'key', label: 'nav.tokens' },
+      { id: 'settings', icon: 'settings', label: 'nav.settings' }
     ],
     setup: function (UI, sh) {
-      var h = UI.h, t = UI.t, K = TunnelKit.with(UI);
+      var h = UI.h, t = UI.t, K = TunnelKit.with(UI), TP = TokensPanel.with(UI);
       var state = { peers: [], tunnels: [], listeners: [] };
 
       // ---- State / 状态 ----
@@ -164,8 +166,8 @@
       function overview(el) {
         var flow = newFlow();
         UI.mount(sh.tools, mapButton(flow));
-        var stats = h('div.grid.grid--4'), info = h('div'), lsBox = h('div'), tunnels = h('div');
-        UI.mount(el, h('div.stack', stats, h('div.grid.grid--2', UI.card(t('ov.hub'), info), UI.card(t('nav.listeners'), lsBox, null, true)),
+        var stats = h('div.grid.grid--4'), info = h('div'), lsBox = h('div'), tunnels = h('div'), warn = h('div');
+        UI.mount(el, h('div.stack', warn, stats, h('div.grid.grid--2', UI.card(t('ov.hub'), info), UI.card(t('nav.listeners'), lsBox, null, true)),
           UI.card(t('nav.tunnels'), tunnels, null, true)));
         poll(function () {
           var st = state, ns = nodes(), ps = proxies(), ls = st.listeners;
@@ -173,6 +175,8 @@
           var busy = ps.filter(function (p) { return p.tunnels > 0; }).length;
           var up = st.tunnels.reduce(function (a, x) { return a + x.up; }, 0), down = st.tunnels.reduce(function (a, x) { return a + x.down; }, 0);
           var bad = ls.filter(function (l) { return l.error; }).length;
+          var pw = TP.passwordWarning(st.password_peers);
+          UI.mount(warn, pw ? h('div.callout.callout--warn', UI.icon('alert'), ' ', pw, ' ', h('a', { href: '#/tunnel.hub/tokens' }, t('nav.tokens'))) : null);
           UI.mount(stats,
             UI.stat('pod', t('nav.nodes'), ns.length, t('ov.nodes_sub', { n: svc }), ns.length ? 'ok' : ''),
             UI.stat('proxy', t('nav.proxies'), ps.length, t('ov.proxies_sub', { n: busy }), 'info'),
@@ -322,6 +326,22 @@
         });
       }
 
+      // ---- Tokens / 令牌 ----
+      // The tokens the hub issued, and a warning while a member still registers with the shared password.
+      // 本 hub 签发的令牌；仍有成员用共享密码注册时给出警告。
+      function tokensPage(el) {
+        var panel;
+        function id(v) { return { id: v }; }
+        panel = TP.mount(el, {
+          list: function () { return UI.api('GET', '/api/tokens'); },
+          create: function (req) { return UI.api('POST', '/api/tokens', req); },
+          expiry: function (v, req) { return UI.api('POST', '/api/tokens/expiry', Object.assign(id(v), req)); },
+          revoke: function (v) { return UI.api('POST', '/api/tokens/revoke', id(v)); },
+          warning: function () { return TP.passwordWarning(state.password_peers); }
+        });
+        poll(function () { if (!document.querySelector('.modal')) panel.refresh(); });
+      }
+
       // ---- Settings / 设置 ----
       function settingsPage(el) {
         var form = h('div'), quic = h('div');
@@ -335,6 +355,7 @@
             password: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: set.has_password ? t('tk.keep') : t('set.pw_unset') }),
             body: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: set.has_body_password ? t('tk.keep') : t('tk.optional') }),
             clearBody: h('input', { type: 'checkbox' }),
+            clearPassword: h('input', { type: 'checkbox' }),
             socket: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: set.has_socket_password ? t('tk.keep') : t('set.socket_default') }),
             clearSocket: h('input', { type: 'checkbox' }),
             socketAddr: h('input.input.mono', { value: set.socket_address || '', placeholder: t('set.socket_ph') })
@@ -343,12 +364,14 @@
           UI.mount(form, h('form.form', {
             onsubmit: function (e) {
               e.preventDefault();
-              UI.busy(save, K.call('/api/settings', { password: f.password.value, body_password: f.body.value, clear_body_password: f.clearBody.checked,
+              UI.busy(save, K.call('/api/settings', { password: f.password.value, clear_password: f.clearPassword.checked,
+                body_password: f.body.value, clear_body_password: f.clearBody.checked,
                 socket_password: f.socket.value, clear_socket_password: f.clearSocket.checked, socket_address: f.socketAddr.value.trim() }, t('set.saved')))
                 .then(function (ok) { if (ok) setTimeout(load, 300); });
             }
           },
           UI.field(t('set.password'), f.password),
+          set.has_password ? h('label.check', f.clearPassword, ' ', t('set.clear_password')) : null,
           UI.field(t('set.body'), f.body),
           set.has_body_password ? h('label.check', f.clearBody, ' ', t('set.clear_body')) : null,
           UI.field(t('set.socket_pw'), f.socket),
@@ -375,6 +398,7 @@
           'proxies': function () { proxiesPage(sh.page('proxies', t('nav.proxies'))); },
           'tunnels': function () { tunnelsPage(sh.page('tunnels', t('nav.tunnels'))); },
           'listeners': function () { listenersPage(sh.page('listeners', t('nav.listeners'))); },
+          'tokens': function () { tokensPage(sh.page('tokens', t('nav.tokens'))); },
           'settings': function () { settingsPage(sh.page('settings', t('nav.settings'))); }
         }
       };

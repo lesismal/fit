@@ -150,13 +150,6 @@ func TestRegisterAdmin(t *testing.T) {
 			t.Fatalf("dial %+v: code %d", req, code)
 		}
 	}
-	if _, code := invoke(local, model.MethodListen, model.ListenReq{Addr: "127.0.0.1:9"}); code != model.CodeBadRequest {
-		t.Fatalf("listen without password: code %d", code)
-	}
-	// A node takes no nodes: a node's password alone is none. / 节点不接受节点：只有节点的密码等于没有密码。
-	if _, code := invoke(local, model.MethodListen, model.ListenReq{Addr: "127.0.0.1:9", NodePassword: "x"}); code != model.CodeBadRequest {
-		t.Fatalf("listen with a node's password alone: code %d", code)
-	}
 	if _, code := invoke(local, model.MethodUndial, model.UndialReq{Addr: "127.0.0.1:9"}); code != model.CodeNotFound {
 		t.Fatalf("undial unknown: code %d", code)
 	}

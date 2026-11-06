@@ -20,6 +20,7 @@ package hub
 import (
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/tunnel/internal/bodycrypt"
 	"github.com/lesismal/fit/tunnel/internal/common"
@@ -91,6 +93,15 @@ type Conn struct {
 	// on it, since the peer serves nothing before the answer proves the
 	// hub.
 	ready bool
+	// use is the token the link registered with, nil for the password.
+	use *linktoken.Use
+}
+
+// challenge is the value of a link that asked for a challenge and has not
+// registered yet: the token it named and the two nonces.
+type challenge struct {
+	token     string
+	peer, hub []byte
 }
 
 // Peer is a registered node or proxy.
@@ -181,6 +192,10 @@ type Hub struct {
 	h      *app.Host
 	log    *logs.Logger
 	router *link.Router
+	// tokens are the tokens the hub issued, and the links using them;
+	// manage changes them.
+	tokens *linktoken.Registry
+	manage *linktoken.Manager
 
 	set atomic.Pointer[settings]
 
@@ -230,7 +245,56 @@ func New(h *app.Host) *Hub {
 		byID: map[uint32]*Peer{}, routes: map[uint64]*Route{}, since: time.Now(), epoch: rand.Uint64() | 1}
 	s.router = s.newRouter()
 	s.console = common.NewConsole(h.Engine, "tunnel.hub", h.Log, s.api)
+	s.tokens = &linktoken.Registry{OnBind: s.bind}
+	s.manage = &linktoken.Manager{Role: ID, Reg: s.tokens, Edit: s.editTokens, Log: h.Admin}
 	return s
+}
+
+// LinkTokens is the hub's tokens, for its pages, the Admin API and fit
+// token.
+func (s *Hub) LinkTokens() *linktoken.Manager { return s.manage }
+
+// editTokens changes the hub's tokens in its member, and waits until the
+// config has been applied.
+func (s *Hub) editTokens(ctx context.Context, change func([]config.LinkToken) ([]config.LinkToken, error)) error {
+	done := make(chan error, 1)
+	s.h.Edit(func(cur []byte) ([]byte, error) {
+		return common.EditJSON(cur, func(m common.Member) error {
+			var ts []config.LinkToken
+			if err := m.Get("tokens", &ts); err != nil {
+				return err
+			}
+			ts, err := change(ts)
+			if err != nil {
+				return err
+			}
+			return m.Set("tokens", ts)
+		})
+	}, func(_ []string, err error) { done <- err })
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// bind writes into the config that member registered with token first, so
+// that no other token takes the member over after a restart.
+func (s *Hub) bind(token, member string) {
+	s.h.Edit(func(cur []byte) ([]byte, error) {
+		return common.EditJSON(cur, func(m common.Member) error {
+			var ts []config.LinkToken
+			if err := m.Get("tokens", &ts); err != nil {
+				return err
+			}
+			return m.Set("tokens", linktoken.Bind(ts, token, member))
+		})
+	}, func(_ []string, err error) {
+		if err != nil {
+			s.log.Warnf("keeping in the config that %s registers with token %s: %v", member, token, err)
+		}
+	})
 }
 
 func (s *Hub) settings() *settings { return s.set.Load() }
@@ -255,8 +319,19 @@ func (s *Hub) Apply(member any) error {
 	first := !s.started
 	next := &settings{cfg: cfg, name: cfg.HubName()}
 	if cfg.BodyPassword != "" {
-		next.coder, _ = bodycrypt.New(cfg.BodyPassword) // fails only for an empty password
+		cd, _ := bodycrypt.New(cfg.BodyPassword) // fails only for an empty password
+		// A link that registers with a token seals with the token's keys,
+		// which its hello names.
+		body := cfg.BodyPassword
+		next.coder = cd.WithTokens(func(id string) (*bodycrypt.Coder, error) {
+			stored, err := s.tokens.Lookup(id)
+			if err != nil {
+				return nil, err
+			}
+			return bodycrypt.NewToken(id, linktoken.BodyKey(stored), body), nil
+		})
 	}
+	s.tokens.Set(cfg.Tokens)
 	if cfg.Password != "" {
 		if old := s.settings(); old != nil && old.verifier != nil && old.verifier.Password == cfg.Password {
 			next.verifier = old.verifier
@@ -484,6 +559,7 @@ func (s *Hub) Stop(ctx context.Context) {
 	}
 	s.stopped = true
 	s.stopAll()
+	s.tokens.Stop()
 	s.console.Stop(ctx)
 }
 
@@ -592,15 +668,17 @@ func (s *Hub) accept(c transport.Conn) transport.Handler {
 func (s *Hub) newRouter() *link.Router {
 	r := link.NewRouter()
 	r.Log = s.log
-	// Only registration is served before a link has registered.
+	// Only registration, and its challenge, are served before a link has
+	// registered.
 	r.Guard = func(l *link.Link, m proto.Method) error {
-		if m != proto.MethodRegister && peerOf(l) == nil {
+		if m != proto.MethodRegister && m != proto.MethodChallenge && peerOf(l) == nil {
 			return errNotRegistered
 		}
 		return nil
 	}
 	r.OnClose = func(l *link.Link, _ error) { s.disconnected(l) }
 
+	r.HandleCall(proto.MethodChallenge, s.challenge, true)
 	r.HandleCall(proto.MethodRegister, s.register, false)
 	r.HandleCall(proto.MethodUpdate, s.update, false)
 	r.HandleCall(proto.MethodPing, s.ping, true)
@@ -635,6 +713,65 @@ func (s *Hub) newRouter() *link.Router {
 // register registers a link of a peer's pool: with the peer of the same
 // type and name, or as a new peer, in the lowest place none of the peer's
 // links holds.
+// challenge answers a link's MethodChallenge, the start of a registration
+// with a token: it keeps the token named and both nonces with the link, for
+// the registration that follows.
+func (s *Hub) challenge(c *link.Link, body []byte) (any, error) {
+	var req proto.ChallengeReq
+	if err := link.Decode(body, &req); err != nil {
+		return nil, err
+	}
+	peer, err := proto.DecodeNonce(req.Nonce)
+	if err != nil {
+		return nil, err
+	}
+	if c.Value() != nil {
+		return nil, errors.New("tunnel: a link asks for one challenge, before it registers")
+	}
+	ch := &challenge{token: req.Token, peer: peer, hub: linktoken.Nonce()}
+	c.SetValue(ch)
+	return &proto.ChallengeRsp{Nonce: hex.EncodeToString(ch.hub)}, nil
+}
+
+// authenticate checks req, a registration on c, with the token it names
+// and the link's challenge, or with the shared password; it returns the
+// answer's proof maker and, for a token, the link's use of it.
+func (s *Hub) authenticate(c *link.Link, set *settings, req *proto.RegisterReq) (func(*proto.RegisterRsp), *linktoken.Use, error) {
+	if req.Token == "" {
+		if c.HelloToken() != "" {
+			return nil, nil, errors.New("tunnel: the link's hello named a token, and its registration none")
+		}
+		if set.verifier == nil {
+			return nil, nil, errors.New("tunnel: the hub takes tokens only: register with a token it issued")
+		}
+		if err := set.verifier.Verify(req); err != nil {
+			return nil, nil, err
+		}
+		pw := set.verifier.Password
+		return func(rsp *proto.RegisterRsp) { proto.Prove(req, rsp, pw) }, nil, nil
+	}
+	ch, _ := c.Value().(*challenge)
+	switch {
+	case ch == nil || ch.token != req.Token:
+		return nil, nil, errors.New("tunnel: a registration with a token follows its challenge")
+	case c.HelloToken() != "" && c.HelloToken() != req.Token:
+		return nil, nil, errors.New("tunnel: the link's hello named another token")
+	}
+	c.SetValue(nil) // a challenge proves one registration
+	stored, err := s.tokens.Lookup(req.Token)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := proto.VerifyToken(req, stored, ch.peer, ch.hub); err != nil {
+		return nil, nil, err
+	}
+	use, err := s.tokens.Admit(req.Token, req.Info.Type+"/"+req.Info.Name, c.RemoteAddr(), func() { _ = c.Close() })
+	if err != nil {
+		return nil, nil, err
+	}
+	return func(rsp *proto.RegisterRsp) { proto.ProveTokenHub(req, rsp, stored, ch.peer, ch.hub) }, use, nil
+}
+
 func (s *Hub) register(c *link.Link, body []byte) (any, error) {
 	var req proto.RegisterReq
 	if err := link.Decode(body, &req); err != nil {
@@ -644,13 +781,25 @@ func (s *Hub) register(c *link.Link, body []byte) (any, error) {
 		return nil, errors.New("tunnel: already registered")
 	}
 	set := s.settings()
-	if set.verifier == nil {
-		return nil, errors.New("tunnel: the hub has no registration password set yet")
+	if err := proto.CheckPeer(&req.Info); err != nil {
+		return nil, err
 	}
-	if err := set.verifier.Verify(&req); err != nil {
+	prove, use, err := s.authenticate(c, set, &req)
+	if err != nil {
 		s.log.Warnf("refused the registration of %s %q from %s: %v", req.Info.Type, req.Info.Name, c.RemoteAddr(), err)
 		return nil, err
 	}
+	rsp, err := s.admit(c, set, &req, use)
+	if err != nil {
+		use.Release()
+		return nil, err
+	}
+	prove(rsp.Rsp.(*proto.RegisterRsp))
+	return rsp, nil
+}
+
+// admit registers c, authenticated as req says, with its peer.
+func (s *Hub) admit(c *link.Link, set *settings, req *proto.RegisterReq, use *linktoken.Use) (*link.Then, error) {
 	key := req.Info.Type + "/" + req.Info.Name
 	s.mu.Lock()
 	peer := s.byName[key]
@@ -681,7 +830,7 @@ func (s *Hub) register(c *link.Link, body []byte) (any, error) {
 		s.byName[key] = peer
 		s.byID[peer.ID] = peer
 	}
-	conn := &Conn{Peer: peer}
+	conn := &Conn{Peer: peer, use: use}
 	for peer.links[conn.Index] != nil {
 		conn.Index++
 	}
@@ -697,10 +846,13 @@ func (s *Hub) register(c *link.Link, body []byte) (any, error) {
 	s.mu.Unlock()
 	c.SetMaxFrame(link.MaxFrame)
 	if created {
-		s.log.Infof("%s %q registered from %s as peer %d", req.Info.Type, req.Info.Name, c.RemoteAddr(), peer.ID)
+		how := "the shared password"
+		if use != nil {
+			how = "token " + req.Token
+		}
+		s.log.Infof("%s %q registered from %s as peer %d, with %s", req.Info.Type, req.Info.Name, c.RemoteAddr(), peer.ID, how)
 	}
 	rsp := &proto.RegisterRsp{Peer: peer.ID, Conn: conn.ID, Index: conn.Index, Hub: set.name}
-	proto.Prove(&req, rsp, set.verifier.Password)
 	// The link carries the hub's calls, tunnels and node lists only once
 	// the answer has gone before them.
 	return &link.Then{Rsp: rsp, After: func() {
@@ -755,6 +907,9 @@ func (s *Hub) ping(c *link.Link, body []byte) (any, error) {
 // disconnected closes the tunnels a link that closed carried, and forgets
 // its peer once that has no link left.
 func (s *Hub) disconnected(c *link.Link) {
+	if conn := connOf(c); conn != nil {
+		conn.use.Release()
+	}
 	s.mu.Lock()
 	delete(s.links, c)
 	s.registeredLocked(c)

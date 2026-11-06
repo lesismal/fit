@@ -33,7 +33,9 @@ Commands:
 	media-token
 	           print a token a media_auth policy's secret signs, for whip, whep
 	           and the other media handlers and roles
-	store      export or import the config kept encrypted in admin.store
+	token      issue, list, change and revoke the link tokens a running fit's
+	           tunnel hub and LLM listeners take, through its Admin API
+	store     export or import the config kept encrypted in admin.store
 	help       print this help
 `
 
@@ -68,6 +70,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runHashPassword(args[1:], stdout, stderr)
 	case "media-token":
 		return runMediaToken(args[1:], stdout, stderr)
+	case "token":
+		return runToken(args[1:], stdout, stderr)
 	case "store":
 		return runStore(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":

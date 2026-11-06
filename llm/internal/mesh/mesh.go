@@ -27,6 +27,7 @@ import (
 
 	"github.com/lesismal/fib"
 
+	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/logs"
 
 	"github.com/lesismal/fit/llm/internal/model"
@@ -157,6 +158,11 @@ type conn struct {
 	// roles are the roles an inbound connection may say hello as: those of the password its dialer proved.
 	// roles 是入站连接可以 hello 的角色：其拨号方所证明密码的角色。
 	roles []string
+	// token is the link token an inbound connection proved, "" for a password, and use its record in the
+	// registry once the hello bound the peer's ID to it.
+	// token 是入站连接所证明的连接令牌，密码则为 ""；use 是 hello 把对端 ID 绑定到令牌后在登记表中的记录。
+	token string
+	use   *linktoken.Use
 	ready chan struct{} // closed once the hello completed / hello 完成后关闭
 
 	mu         sync.Mutex
@@ -174,7 +180,11 @@ func (c *conn) usable() bool { return c.live() && !c.wc.Draining() }
 type target struct {
 	addr     string
 	password string
-	role     string // the role the peer must have / 对端必须具有的角色
+	// token is the link token the target is dialed with, in place of password, and sec it parsed.
+	// token 是拨号该目标所用的连接令牌（代替 password），sec 为其解析结果。
+	token string
+	sec   *linktoken.Secret
+	role  string // the role the peer must have / 对端必须具有的角色
 	// req is what the target was set with, its TLS settings among it, and tls the configuration it is dialed with
 	// (nil: plain ws://).
 	// req 是设置该目标时的请求（含其 TLS 设置），tls 为拨号所用的配置（nil 表示普通 ws://）。
@@ -231,6 +241,9 @@ type Mesh struct {
 	wg       sync.WaitGroup
 
 	routes *Routes
+	// tokens are the link tokens the listener issued, and the links that use them.
+	// tokens 是监听方签发的连接令牌，以及使用它们的连接。
+	tokens *linktoken.Registry
 
 	// helloWait is helloTimeout; a test may shorten it before the mesh listens.
 	// helloWait 即 helloTimeout；测试可在互联监听之前缩短它。
@@ -251,9 +264,27 @@ func New(opts Options, router *Router) *Mesh {
 		pushes:  map[string]pushRoute{},
 		stopCh:  make(chan struct{}),
 		routes:  newRoutes(),
+		tokens:  &linktoken.Registry{},
 
 		helloWait: helloTimeout,
 	}
+}
+
+// Tokens returns the listener's link tokens: the role sets them from its config, and its OnBind.
+// Tokens 返回监听方的连接令牌：由角色根据其配置设置，并设置其 OnBind。
+func (m *Mesh) Tokens() *linktoken.Registry { return m.tokens }
+
+// tokenRoles are the roles a link that proved a token may say hello as: every role the mesh accepts, since a token is
+// of no role.
+// tokenRoles 是证明了令牌的连接可以 hello 的角色：mesh 接受的所有角色，因为令牌不绑定角色。
+func (m *Mesh) tokenRoles() []string {
+	var out []string
+	for _, r := range m.opts.AcceptRoles {
+		if r != model.RoleLocal {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Routes returns the counts of the model calls the role relays, per route.
@@ -333,13 +364,18 @@ func (m *Mesh) connConfig(t *target, creds []wire.Credential) wire.ConnConfig {
 			return nil
 		}
 		cfg.Credentials = creds
+		cfg.Tokens, cfg.TokenRoles = m.tokens, m.tokenRoles()
 		cfg.OnAuthFailed = func(r *http.Request) {
-			m.log(slog.LevelWarn, "mesh: authentication failed (wrong password)", "remote", r.RemoteAddr)
+			m.log(slog.LevelWarn, "mesh: authentication failed (wrong password or token)", "remote", r.RemoteAddr)
 		}
 		cfg.Handlers = func(wc *wire.Conn) wire.Handlers { return m.handlers(m.connected(wc, nil)) }
 		cfg.OnOpen = m.awaitHello
 	} else {
-		cfg.Auth = wire.Password(t.password)
+		if t.sec != nil {
+			cfg.Token = t.sec
+		} else {
+			cfg.Auth = wire.Password(t.password)
+		}
 		cfg.Handlers = func(wc *wire.Conn) wire.Handlers { return m.handlers(m.connected(wc, t)) }
 	}
 	return cfg
@@ -483,7 +519,7 @@ func (m *Mesh) stopped() bool {
 // connected 记录一条新的已认证连接（由 wire 在处理该连接的任何帧之前调用）。
 func (m *Mesh) connected(wc *wire.Conn, t *target) *conn {
 	c := &conn{wc: wc, id: m.nextConn.Add(1), dir: "in", remote: wc.RemoteAddr(), target: t, roles: wc.Roles,
-		ready: make(chan struct{})}
+		token: wc.Token, ready: make(chan struct{})}
 	if t != nil {
 		c.dir, c.remote = "out", t.addr
 	}
@@ -527,9 +563,10 @@ func (m *Mesh) disconnected(wc *wire.Conn, err error) {
 	}
 	delete(m.conns, wc)
 	c.mu.Lock()
-	was, peer := c.registered, c.peer
-	c.registered, c.closed = false, true
+	was, peer, use := c.registered, c.peer, c.use
+	c.registered, c.closed, c.use = false, true, nil
 	c.mu.Unlock()
+	use.Release()
 	if was {
 		m.unindexLocked(c, peer.ID)
 	}
@@ -580,6 +617,8 @@ func (m *Mesh) register(c *conn, id model.Identity) error {
 	peer := model.PeerConn{Identity: id, ConnID: c.id, Direction: c.dir, Remote: c.remote, ConnectedAt: time.Now().Unix()}
 	if c.target != nil {
 		peer.Target = c.target.addr
+	} else {
+		peer.TokenID, peer.SharedPassword = c.token, c.token == ""
 	}
 	m.mu.Lock()
 	// An ID is one process's: one that another connection holds under
@@ -648,6 +687,11 @@ func (m *Mesh) handleHello(c *conn, payload []byte) ([]byte, error) {
 		// 拨号方证明的密码不是该角色的：持有节点密码的代理不能以节点身份 hello。
 		err = fmt.Errorf("role %s: the password this link proved is not the %s password of this listener", id.Role, id.Role)
 	}
+	if err == nil && c.token != "" {
+		// A token binds the first ID that says hello with it: another token cannot take the ID over.
+		// 令牌绑定第一个用它 hello 的 ID：其他令牌无法接管该 ID。
+		err = m.admitToken(c, id.ID)
+	}
 	if err == nil {
 		err = m.register(c, id)
 	}
@@ -659,6 +703,29 @@ func (m *Mesh) handleHello(c *conn, payload []byte) ([]byte, error) {
 		return nil, Errorf(model.CodeForbidden, "%s", err.Error())
 	}
 	return json.Marshal(m.Self())
+}
+
+// admitToken records c, which proved its token, as the link of peer id: the token must still be good, and id not
+// bound to another token. A connection closed meanwhile releases it.
+// admitToken 把证明了令牌的 c 记为对端 id 的连接：令牌须仍然有效，且 id 未绑定到其他令牌。期间已关闭的连接会释放它。
+func (m *Mesh) admitToken(c *conn, id string) error {
+	use, err := m.tokens.Admit(c.token, id, c.remote, c.wc.Close)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	old := c.use
+	closed := c.closed
+	if !closed {
+		c.use = use
+	}
+	c.mu.Unlock()
+	old.Release()
+	if closed {
+		use.Release()
+		return wire.ErrClosed
+	}
+	return nil
 }
 
 // hello says hello on an outbound connection, retrying until it succeeds or the connection is gone.

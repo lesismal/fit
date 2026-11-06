@@ -149,7 +149,7 @@ func (c *Proxy) Apply(member any) error {
 	if err := c.applyAPI(m.API); err != nil {
 		return err
 	}
-	return c.Base.Apply(role.Common{ID: m.ID, Name: m.Name, Console: m.Console, Listen: m.Listen, Peers: m.Peers, Limits: m.Limits})
+	return c.Base.Apply(role.Common{ID: m.ID, Name: m.Name, Console: m.Console, Listen: m.Listen, Tokens: m.Tokens, Peers: m.Peers, Limits: m.Limits})
 }
 
 // applyAPI starts, changes or stops the agent API.

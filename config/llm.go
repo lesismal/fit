@@ -81,7 +81,8 @@ func (l *LLMListen) TLS() bool { return l.CertFile != "" || l.Cert != "" || l.Se
 // backoff whenever the link is lost.
 type LLMPeer struct {
 	Address    string `json:"address" fit:"required" doc:"The peer's host and port, as its listen.address says."`
-	Password   string `json:"password" fit:"required" doc:"The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role."`
+	Token      string `json:"token,omitempty" doc:"The token the peer's listener issued for this role, as fitt1.<id>.<secret>, which the peer's pages, its Admin API module or fit token show once when they make it. Set token or password, not both."`
+	Password   string `json:"password,omitempty" doc:"The shared password of the dialing role on the peer's listener, deprecated for token: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role. Taken in this release, with a warning on the peer's pages; refused in the next."`
 	Role       string `json:"role" fit:"required" enum:"hub,node,proxy" doc:"The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own."`
 	Pin        string `json:"pin,omitempty" doc:"The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits (colons allowed), as its pages and its log show it: the link is made over TLS (wss://) and only to a listener with exactly that certificate. A peer at an address other than a loopback one needs pin or ca_file."`
 	CAFile     string `json:"ca_file,omitempty" doc:"A PEM file with the certificates of the authorities the peer listener's certificate must chain to: the link is made over TLS (wss://), and the certificate must name server_name, or the address's host. Or pin, one of the two."`
@@ -149,6 +150,7 @@ type LLMHub struct {
 	Name     string       `json:"name,omitempty" doc:"The name the hub shows its peers; the host's name when left out. Its pages change it."`
 	Console  *RoleConsole `json:"console,omitempty" doc:"The hub's web pages; none when left out."`
 	Listen   *LLMListen   `json:"listen,omitempty" doc:"Where the hub takes links from nodes and proxies; none when left out. Its pages change it."`
+	Tokens   []LinkToken  `json:"tokens,omitempty" doc:"The tokens the hub's listener issued, which nodes and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand."`
 	Peers    []LLMPeer    `json:"peers,omitempty" doc:"The nodes and proxies the hub dials. Its pages change them."`
 	Limits   *LLMLimits   `json:"limits,omitempty" doc:"Bounds on the hub's links; the defaults when left out."`
 	MaxNodes int          `json:"max_nodes,omitempty" min:"0" default:"1024" doc:"The most nodes the hub keeps in its table, offline ones included; past it the offline node seen longest ago is forgotten; online nodes are bounded by limits.max_conns and the hub's peers. 1024 when left out or 0."`
@@ -173,6 +175,7 @@ type LLMNode struct {
 	Description string           `json:"description,omitempty" doc:"A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it."`
 	Console     *RoleConsole     `json:"console,omitempty" doc:"The node's web pages; none when left out."`
 	Listen      *LLMListen       `json:"listen,omitempty" doc:"Where the node takes links from hubs and proxies; none when left out. Its pages change it."`
+	Tokens      []LinkToken      `json:"tokens,omitempty" doc:"The tokens the node's listener issued, which hubs and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand."`
 	Peers       []LLMPeer        `json:"peers,omitempty" doc:"The hubs and proxies the node dials. Its pages change them."`
 	Limits      *LLMLimits       `json:"limits,omitempty" doc:"Bounds on the node's links; the defaults when left out."`
 	Models      []LLMModel       `json:"models,omitempty" doc:"The models the node serves: each an upstream API endpoint. Its pages, and a hub that settings.allow_hub_manage lets, change them."`
@@ -280,6 +283,7 @@ type LLMProxy struct {
 	Name    string        `json:"name,omitempty" doc:"The name the proxy shows its peers; the host's name when left out. Its pages change it."`
 	Console *RoleConsole  `json:"console,omitempty" doc:"The proxy's web pages; none when left out."`
 	Listen  *LLMListen    `json:"listen,omitempty" doc:"Where the proxy takes links from hubs and nodes; none when left out. Its pages change it."`
+	Tokens  []LinkToken   `json:"tokens,omitempty" doc:"The tokens the proxy's listener issued, which hubs and nodes link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand."`
 	Peers   []LLMPeer     `json:"peers,omitempty" doc:"The hubs and nodes the proxy dials. Its pages change them."`
 	Limits  *LLMLimits    `json:"limits,omitempty" doc:"Bounds on the proxy's links; the defaults when left out."`
 	API     *LLMProxyAPI  `json:"api,omitempty" doc:"The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."`
@@ -353,15 +357,18 @@ func (c *Config) checkLLM(add func(Value, string, ...any)) {
 	if h := r.Hub; h != nil {
 		checkRoleConsole(h.Console, add)
 		checkLLMMesh("hub", h.At, h.ID, h.Name, h.Listen, h.Peers, h.Limits, add)
+		checkLinkTokens(h.Tokens, h.At.Field("tokens"), add)
 	}
 	if n := r.Node; n != nil {
 		checkRoleConsole(n.Console, add)
 		checkLLMMesh("node", n.At, n.ID, n.Name, n.Listen, n.Peers, n.Limits, add)
+		checkLinkTokens(n.Tokens, n.At.Field("tokens"), add)
 		checkLLMNode(n, add)
 	}
 	if cl := r.Proxy; cl != nil {
 		checkRoleConsole(cl.Console, add)
 		checkLLMMesh("proxy", cl.At, cl.ID, cl.Name, cl.Listen, cl.Peers, cl.Limits, add)
+		checkLinkTokens(cl.Tokens, cl.At.Field("tokens"), add)
 		checkLLMProxy(cl, add)
 	}
 }
@@ -399,18 +406,12 @@ func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, pee
 		checkLLMListenTLS(l, add)
 		// A role's own password is only for a role the listener links with.
 		accept := LLMPeerRoles(role)
-		var fields []string
-		own := false
+		// A listener with no password takes links with the role's tokens
+		// alone, none until one is issued.
 		for _, f := range []struct{ role, v string }{{"node", l.NodePassword}, {"proxy", l.ProxyPassword}, {"hub", l.HubPassword}} {
-			if slices.Contains(accept, f.role) {
-				fields = append(fields, f.role+"_password")
-				own = own || f.v != ""
-			} else if f.v != "" {
+			if !slices.Contains(accept, f.role) && f.v != "" {
 				add(l.At.Field(f.role+"_password"), "a %s takes no links from %ss", role, f.role)
 			}
-		}
-		if l.Password == "" && !own {
-			add(l.At.Field("password"), "a listener needs a password: password, or a role's own, %s", strings.Join(fields, " or "))
 		}
 	}
 	if len(peers) > MaxLLMPeers {
@@ -425,8 +426,15 @@ func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, pee
 		} else if slices.IndexFunc(peers, func(o LLMPeer) bool { return o.Address == p.Address }) < i {
 			add(pat.Field("address"), "%q is listed twice", p.Address)
 		}
-		if p.Password == "" {
-			add(pat.Field("password"), "a peer needs its password")
+		switch {
+		case p.Token != "" && p.Password != "":
+			add(pat.Field("password"), "set token or password, not both: the token replaces the password")
+		case p.Token != "":
+			if msg := CheckLinkTokenString(p.Token); msg != "" {
+				add(pat.Field("token"), "%s", msg)
+			}
+		case p.Password == "":
+			add(pat.Field("token"), "a peer needs the token its listener issued for this role (or, until the next release, its password)")
 		}
 		if !slices.Contains(accept, p.Role) {
 			add(pat.Field("role"), "a %s links with %s, not %q", role, strings.Join(accept, " and "), p.Role)
