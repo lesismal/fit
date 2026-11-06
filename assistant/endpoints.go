@@ -95,7 +95,7 @@ func (a *Assistant) conversationsHandler(r *console.Request) {
 		list := make([]convSummary, 0, len(u.convs))
 		for i := len(u.convs) - 1; i >= 0; i-- {
 			c := u.convs[i]
-			list = append(list, convSummary{ID: c.ID, Title: c.Title, Created: c.Created, Updated: c.Updated, Messages: len(c.Messages), Busy: c.busy != nil})
+			list = append(list, convSummary{ID: c.ID, Title: c.Title, Created: c.Created, Updated: c.Updated, Messages: len(c.Messages), Busy: c.busy != nil, Skill: c.Skill})
 		}
 		used := u.usedToday()
 		a.chats.mu.Unlock()

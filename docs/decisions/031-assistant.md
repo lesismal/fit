@@ -78,7 +78,7 @@ workers.
   `POST /api/m/ai/chat`, answered as SSE, during which fit calls the model, runs the tools it asks
   for and calls it again, until an answer, a question to the user or a limit. The context is
   assembled for every call: the system prompt (role, concepts, rules, the answer's language), the
-  page the browser is on, the skill catalog (empty until I127), and the history within the model's
+  page the browser is on, the skill catalog (I127), and the history within the model's
   window: the tools' early results cut first, then the early turns summarized by the model, the
   summary kept with the conversation. The user's words are sent as written.
 - **The tool registry** (`assistant.Registry`): each tool has a name, a group, a JSON Schema, the
@@ -109,16 +109,29 @@ workers.
   and discard: the user, the time, the source, the conversation, the skill, the calls (redacted and
   cut), the proposal's steps, the outcome and the version; `limits.max_audit_entries` of them, in the
   store's section `assistant.audit`.
+- **Skills (I127)** are Markdown with YAML front matter (`name`, `title`, `title_zh`, `description`,
+  `description_zh`, `inputs`, `tools`, `model`, `examples`) and the prompt after it, at most 32 KiB;
+  front matter that is not a skill's is refused with its line. The plan's fourteen built-in skills
+  are embedded in the binary; skills users add are shared by the console's users, at most 64, in
+  the store's section `assistant.skills` with the built-ins disabled, and only a user whose level
+  is `apply` adds, edits, enables or disables them. Skills load on demand: without one, the system
+  prompt lists the enabled skills by name and English description (within a tenth of the window),
+  and `skill_load` hands the model a skill's whole prompt; `/name`, the panel's picker or
+  `skill_load` make it the conversation's skill, whose prompt the system prompt then carries,
+  fenced as fit's own instructions that never override the rules, in place of the catalog. A
+  skill's tools are those it names that the user's level and the settings allow, and `ask_user`;
+  a skill's `model` is used from the message that starts it.
 
 ## Consequences
 
 - The workbench's menu has the module Assistant when `admin.assistant` is set, with its Functions,
-  Proposals, Audit log and Settings pages, and every page's top bar has the chat panel's button.
+  Skills, Proposals, Audit log and Settings pages, and every page's top bar has the chat panel's button.
 - `GET /api/m/ai/settings`, `PUT /api/m/ai/settings`, `POST /api/m/ai/providers/test`,
   `POST /api/m/ai/chat`, `POST /api/m/ai/chat/stop`, `GET /api/m/ai/tools`,
   `GET /api/m/ai/conversations`, `GET`/`DELETE /api/m/ai/conversations/{id}`, and, from I126,
   `GET /api/m/ai/proposals`, `GET /api/m/ai/proposals/{conversation}`, its `POST .../apply` and
-  `POST .../discard`, and `GET /api/m/ai/audit` are the console's, behind its login and CSRF token,
+  `POST .../discard`, `GET /api/m/ai/audit`, and, from I127, `GET`/`POST /api/m/ai/skills`, `GET`/`PUT`/`DELETE
+  /api/m/ai/skills/{name}` and its `POST .../enable` and `.../disable` are the console's, behind its login and CSRF token,
   as every module's API is.
 - A chat holds one of the console's connections for as long as it streams, and the tools take the
   console pool's workers for as long as they run; `max_concurrent_chats` (4) keeps both few.

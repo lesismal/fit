@@ -296,7 +296,7 @@ func TestChatSummarizes(t *testing.T) {
 		}
 		return fakeapi.Turn{Text: long[:400]}
 	}, func(o *Options) {
-		o.Settings.Providers[0].Models[0].Context = 3000
+		o.Settings.Providers[0].Models[0].Context = 3600
 	})
 	id := ""
 	for i := range 8 {
@@ -317,7 +317,7 @@ func TestChatSummarizes(t *testing.T) {
 		t.Errorf("the last call: %d bytes, %s", len(last.Raw), fakeapi.System(last)[len(fakeapi.System(last))-200:])
 	}
 	for _, r := range reqs {
-		if fakeapi.System(r) != summaryPrompt && tokens(string(r.Raw)) > 3000 {
+		if fakeapi.System(r) != summaryPrompt && tokens(string(r.Raw)) > 3600 {
 			t.Errorf("a call of %d bytes outgrew the window", len(r.Raw))
 		}
 	}
@@ -516,7 +516,7 @@ func TestToolsEndpoint(t *testing.T) {
 	if status != 200 || json.Unmarshal([]byte(body), &b) != nil {
 		t.Fatalf("%d %s", status, body)
 	}
-	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools()) || b.Tools[0].Group != GroupConfig {
+	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools())+1 || b.Tools[0].Group != GroupConfig {
 		t.Fatalf("%+v", b)
 	}
 	byName := map[string]toolView{}
@@ -635,15 +635,12 @@ func TestChatWithoutStore(t *testing.T) {
 	}
 }
 
-// TestChatCatalogAndExtraTools: the catalog a later iteration fills is in
-// the system prompt, and tools it adds are offered by level.
+// TestChatCatalogAndExtraTools: the skills' catalog is in the system
+// prompt, and tools a later iteration adds are offered by level.
 func TestChatCatalogAndExtraTools(t *testing.T) {
 	sc := &script{turns: []fakeapi.Turn{{Calls: []fakeapi.Call{{ID: "p", Name: "extra_tool", Args: `{}`}}}, {Text: "ok"}}}
 	var emitted []Event
 	f := startChat(t, `"default_level": "propose"`, sc.next, func(o *Options) {
-		o.Catalog = func(user, level string) []CatalogEntry {
-			return []CatalogEntry{{Name: "diagnose", Description: "why a route fails, for " + user + " at " + level}}
-		}
 		o.Tools = []*Tool{{Name: "extra_tool", Group: GroupChange, Level: config.AssistantPropose, Parameters: json.RawMessage(`{"type":"object"}`),
 			Run: func(c *Call) (string, error) {
 				c.Emit(Event{Type: "proposal", Text: c.Conversation})
@@ -656,7 +653,7 @@ func TestChatCatalogAndExtraTools(t *testing.T) {
 		t.Fatal(s.err)
 	}
 	sys := fakeapi.System(f.model.Requests()[0])
-	if !strings.Contains(sys, "- diagnose: why a route fails, for ada at propose") || !strings.Contains(sys, "level is propose") {
+	if !strings.Contains(sys, "- diagnose: Finds why a route answers 502 or 504") || !strings.Contains(sys, "level is propose") {
 		t.Errorf("%s", sys)
 	}
 	if len(emitted) != 1 || emitted[0].Text != "ada/propose" || len(s.of("proposal")) != 1 || !strings.Contains(s.of(EventToolResult)[0].Content, "boom") {

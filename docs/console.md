@@ -569,6 +569,73 @@ offered again; `422` when it does not check or the Admin API refused it), `POST
 (`?user=`, `?conversation=`, `?kind=` `chat`, `apply` or `discard`, `?before=` an entry's `seq`,
 `?limit=` up to 500; the latest first).
 
+### Skills
+
+A skill is a named task: when to use it, a prompt that says how, the tools it may call, the inputs it
+takes and, if it wants one, its model. It is written as Markdown, YAML front matter between two lines
+`---`, then the prompt:
+
+```markdown
+---
+name: ops-check
+title: Ops check
+title_zh: 运维检查
+description: Checks what the ops team checks every morning.
+description_zh: 检查运维团队每天早上检查的内容。
+tools: [status_get, upstream_health, config_propose]
+inputs:
+  - name: upstream
+    description: The pool to look at.
+    required: false
+model: anthropic/claude-sonnet-4-5
+examples:
+  - Is everything up this morning?
+---
+Read the status and each upstream's health, and say what is down and why.
+```
+
+`name` (lower case letters, digits and `-`, at most 40), `title` and `description` are needed;
+`title_zh` and `description_zh` are what the workbench shows in Chinese; `tools` names the tools it
+may call, and is narrowed again by the user's level and the settings (`ask_user` is always there);
+`model` is `provider/model` of a provider the settings have, or a model of the default provider;
+`inputs` (at most 8) and `examples` (at most 8) are shown on the Skills page and in the panel. A
+skill is at most 32 KiB. Front matter that is not this — a key not listed, a value of the wrong
+kind, a name taken, YAML that does not parse — is refused with the line it is about.
+
+fit has fourteen built-in skills, embedded in the binary: `explain`, `route-builder`,
+`reverse-proxy`, `tls-acme`, `rate-limit-auth`, `cache-tuning`, `diagnose`, `drift-explain`,
+`log-analysis`, `security-review`, `migrate`, `media-setup`, `llm-mesh-setup` and `tunnel-setup`.
+The **Skills** page lists them with those users added: each one's title and what it is for, the
+tools it names (those the user may not call struck through), and whether it is enabled; a skill is
+viewed whole, exported as its `.md`, and run from one of its examples with **Try**. A user whose
+level is `apply` adds skills (from a template, or by importing `.md` files), edits and deletes those
+added, and enables or disables any; a built-in skill is not changed or deleted, but exported,
+renamed and added as one's own, and the built-in one disabled. Skills added are shared by every
+console user, at most 64, kept in the store's section `assistant.skills` with which built-in ones
+are disabled; without a store they last until fit restarts.
+
+In the panel, **Skills** picks one, and typing `/` at the start of a message lists the enabled
+skills that match; `/name the rest` runs the skill on the rest. The chip above the composer says
+which skill the conversation runs, and its × stops it. Without a skill, each call's system prompt
+lists the enabled skills, each by name and its one-line English description, and the model loads
+one with `skill_load` when the person's request fits it: the tool's result is the skill's whole
+prompt, and from then on the conversation runs that skill. While a skill runs, the system prompt
+carries its prompt and no catalog, and the model is offered the tools the skill names that the
+user's level and the settings allow, and `ask_user`; a tool it names above the level is not
+offered, and the prompt says so. The catalog takes at most a tenth of the model's window: past
+that, the skills are listed by name only. The audit log names the skill each answer ran.
+
+The endpoints are `GET /api/m/ai/skills` (every skill, without its prompt, each with `builtin`,
+`enabled` and `tool_state`, and whether this user may change them), `POST /api/m/ai/skills`
+(`{"source"}`: added; `400` with `{"error", "line"}`, `409` for a name taken or past 64),
+`GET /api/m/ai/skills/{name}` (whole, with `prompt` and `source`), `PUT` (an added skill replaced,
+its name may change), `DELETE`, and `POST /api/m/ai/skills/{name}/enable` and `.../disable`; a
+change needs the level `apply` (`403` below it). `POST /api/m/ai/chat` takes `"skill"` with a
+message (a name, or `""` to stop the conversation's) and `"inputs"` (the skill's inputs, at most
+2 KiB each, sent to the model as data); a message `/name ...` of an enabled skill is the same as
+`"skill": "name"`. Its `start` event carries the `skill` the chat runs, and an event `skill` says
+that `skill_load` set one.
+
 ## Roles' pages
 
 The [LLM feature](llm.md)'s and the [tunnel](tunnel.md)'s roles can also have pages of their own,

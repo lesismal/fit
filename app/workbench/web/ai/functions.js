@@ -35,6 +35,8 @@
     ['t.access_log_sample', 'Recent lines of the access log\'s file matching a route, status, client or text.', '访问日志文件中与路由、状态码、客户端或文字匹配的最近行。'],
     ['t.adapt_convert', 'Converts nginx or Caddyfile text to fit\'s config, as fit adapt does, with what it could not convert.', '像 fit adapt 一样把 nginx 或 Caddyfile 文本转换为 fit 配置，并列出无法转换的部分。'],
     ['t.ask_user', 'Asks you a question with options, shown as buttons in the panel; your choice is the result.', '向你提出带选项的问题（在面板中显示为按钮），你的选择即为结果。'],
+    ['t.skill_load', 'Loads an enabled skill the assistant picked from the catalog: its whole prompt, and from then on only the tools it names that your level allows.',
+      '加载助手从目录中选出的已启用技能：其完整提示词；此后只使用它所列且你的级别允许的工具。'],
     ['why.needs the level propose', 'needs the level propose', '需要 propose 级别'],
     ['t.config_propose', 'Adds a config change to the conversation\'s proposal: top-level members, or operations at JSON pointers; checked as a whole, never applied by the assistant.',
       '向对话的提案加入一项配置变更：顶层成员，或按 JSON 指针的操作；整体检查，助手从不自行应用。'],

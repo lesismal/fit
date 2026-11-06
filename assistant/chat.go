@@ -21,7 +21,7 @@ import (
 // an Event; the last is the SSE event "end", an Event of type done, or, when
 // the chat failed, the SSE event "error" with {"message"}.
 const (
-	EventStart      = "start"       // the conversation and model: Conversation, Title, Model
+	EventStart      = "start"       // the conversation and model: Conversation, Title, Model, and the Skill it runs
 	EventText       = "text"        // a piece of the answer: Text
 	EventThinking   = "thinking"    // a piece of the model's thinking: Text
 	EventToolCall   = "tool_call"   // a tool called: ID, Name, Arguments
@@ -30,6 +30,7 @@ const (
 	EventUsage      = "usage"       // a model call's tokens: Usage, and Today, the user's today
 	EventSummary    = "summary"     // the early turns were summarized, up to Folded
 	EventProposal   = "proposal"    // a step joined the conversation's proposal: ID, Revision, Name (the tool), Text (its summary)
+	EventSkill      = "skill"       // skill_load made Skill the conversation's skill
 	EventDone       = "done"        // the end: Reason
 )
 
@@ -62,6 +63,7 @@ type Event struct {
 	Model        string          `json:"model,omitempty"`
 	Folded       int             `json:"folded,omitempty"`
 	Revision     int             `json:"revision,omitempty"`
+	Skill        string          `json:"skill,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
 }
 
@@ -82,14 +84,18 @@ var errStopped = errors.New("the chat was stopped")
 
 // chatBody is POST /api/chat's: one of a message, a retry of the last
 // answer, or the choice of an ask_user question; and the page the person is
-// on, and the workbench's language.
+// on, and the workbench's language. With a message, Skill sets the
+// conversation's skill ("" none) and Inputs its inputs; a message that
+// starts with /name, an enabled skill's, sets it too.
 type chatBody struct {
-	Conversation string       `json:"conversation"`
-	Message      *string      `json:"message"`
-	Retry        bool         `json:"retry"`
-	Answer       *askAnswer   `json:"answer"`
-	Page         *PageContext `json:"page"`
-	Lang         string       `json:"lang"`
+	Conversation string            `json:"conversation"`
+	Message      *string           `json:"message"`
+	Retry        bool              `json:"retry"`
+	Answer       *askAnswer        `json:"answer"`
+	Page         *PageContext      `json:"page"`
+	Lang         string            `json:"lang"`
+	Skill        *string           `json:"skill"`
+	Inputs       map[string]string `json:"inputs"`
 }
 
 type askAnswer struct {
@@ -159,6 +165,10 @@ func (a *Assistant) chatHandler(r *console.Request) {
 		_ = console.Error(r.Context, 400, "a retry or an answer names its conversation")
 		return
 	}
+	if status, msg := a.skillOfBody(&body); status != 0 {
+		_ = console.Error(r.Context, status, msg)
+		return
+	}
 	prov, mod := s.Default()
 	if prov == "" || mod == "" {
 		_ = console.Error(r.Context, 409, "no model is set: add a provider with a model on the Settings page")
@@ -176,9 +186,72 @@ func (a *Assistant) chatHandler(r *console.Request) {
 	})
 }
 
+// skillOfBody reads the skill a message names, by Skill or as /name, and
+// checks its inputs; the status, not 0, refuses the body. The skills are
+// read without a lock: it runs on a fib worker.
+func (a *Assistant) skillOfBody(body *chatBody) (int, string) {
+	if body.Message != nil && body.Skill == nil && strings.HasPrefix(*body.Message, "/") {
+		word := (*body.Message)[1:]
+		name, rest := word, ""
+		if i := strings.IndexAny(word, " \n\t"); i >= 0 {
+			name, rest = word[:i], word[i:]
+		}
+		if a.EnabledSkill(name) != nil {
+			rest = strings.TrimSpace(rest)
+			if rest == "" {
+				return 400, "after /" + name + ", say what the skill is to do"
+			}
+			body.Skill, body.Message = &name, &rest
+		}
+	}
+	switch {
+	case body.Skill != nil && body.Message == nil:
+		return 400, "a skill is set with a message"
+	case len(body.Inputs) > 0 && (body.Skill == nil || *body.Skill == ""):
+		return 400, "inputs go with the skill they are for"
+	case body.Skill == nil || *body.Skill == "":
+		return 0, ""
+	}
+	sk := a.EnabledSkill(*body.Skill)
+	if sk == nil {
+		return 404, "no enabled skill is named " + *body.Skill
+	}
+	if len(body.Inputs) > maxSkillInputs {
+		return 400, fmt.Sprintf("a skill takes at most %d inputs", maxSkillInputs)
+	}
+	for k, v := range body.Inputs {
+		switch {
+		case sk.input(k) == nil:
+			return 400, "the skill " + sk.Name + " takes no input " + k
+		case len(v) > maxInputValue || !utf8.ValidString(v):
+			return 400, fmt.Sprintf("the input %s is at most %d bytes of text", k, maxInputValue)
+		}
+	}
+	return 0, ""
+}
+
+// convSkill returns the skill user's conversation id runs, or "".
+func (a *Assistant) convSkill(user, id string) string {
+	a.chats.mu.Lock()
+	defer a.chats.mu.Unlock()
+	if conv := a.userLocked(user).conversation(id); conv != nil {
+		return conv.Skill
+	}
+	return ""
+}
+
 // begin readies the conversation and starts the chat's stream, on the
 // pool; it reports whether it did, answering the request otherwise.
 func (a *Assistant) begin(r *console.Request, body chatBody, s *config.Assistant, level, prov, mod string) bool {
+	// The skill the chat runs: the one the body sets, or the
+	// conversation's while it is enabled; and its model, when it names one.
+	var sk *Skill
+	if body.Skill != nil {
+		sk = a.EnabledSkill(*body.Skill)
+	} else if name := a.convSkill(r.User, body.Conversation); name != "" {
+		sk = a.EnabledSkill(name)
+	}
+	prov, mod = skillModel(s, sk, prov, mod)
 	p, err := a.Provider(prov)
 	if err != nil {
 		_ = console.Error(r.Context, 409, err.Error())
@@ -199,12 +272,14 @@ func (a *Assistant) begin(r *console.Request, body chatBody, s *config.Assistant
 		}
 	}
 	if useTools {
-		c.tools = a.registry.For(level, s)
+		c.base = a.registry.For(level, s)
+	}
+	c.tools = c.base
+	if sk != nil {
+		c.skill, c.tools = sk, narrow(c.base, sk)
 	}
 	c.page = c.red.pageJSON(body.Page)
-	if a.o.Catalog != nil {
-		c.catalog = a.o.Catalog(r.User, level)
-	}
+	c.catalog = a.Catalog()
 
 	status, msg := a.prepare(c, body)
 	if status != 0 {
@@ -268,6 +343,17 @@ func (a *Assistant) prepare(c *chat, body chatBody) (int, string) {
 		conv.Messages = append(conv.Messages, Msg{Message: model.Message{Role: model.RoleTool, Content: body.Answer.Choice,
 			ToolCallID: tc.ID, ToolName: tc.Name}, At: now})
 	}
+	switch {
+	case body.Skill != nil:
+		conv.Skill, conv.SkillInputs = *body.Skill, body.Inputs
+		if conv.Skill == "" || len(body.Inputs) == 0 {
+			conv.SkillInputs = nil
+		}
+	case c.skill == nil && conv.Skill != "":
+		// The conversation's skill was disabled or deleted since.
+		conv.Skill, conv.SkillInputs = "", nil
+	}
+	c.inputs = conv.SkillInputs
 	conv.Updated = now
 	conv.busy = c
 	c.conv = conv
@@ -344,7 +430,7 @@ type chat struct {
 	p       *model.Provider
 	model   string
 	window  int
-	tools   []*Tool
+	base    []*Tool // the tools the user's level and the model allow
 	catalog []CatalogEntry
 	red     *redactor
 	page    []byte
@@ -361,9 +447,12 @@ type chat struct {
 	calls      atomic.Int32
 	limited    atomic.Bool
 
-	skill string // the skill the chat runs (I127)
-
-	mu      sync.Mutex
+	mu sync.Mutex
+	// skill is the skill the chat runs, and tools the tools it offers:
+	// base, narrowed to the skill's. skill_load changes both.
+	skill   *Skill
+	tools   []*Tool
+	inputs  map[string]string // the skill's inputs the person gave
 	ended   bool
 	call    *model.Call
 	waiting bool
@@ -384,7 +473,7 @@ func (c *chat) open() {
 	h.Set("X-Accel-Buffering", "no")
 	ctx.WriteHeader(200)
 	c.mu.Lock()
-	c.writeLocked(sseData(Event{Type: EventStart, Conversation: c.conv.ID, Title: c.conv.Title, Model: c.model}))
+	c.writeLocked(sseData(Event{Type: EventStart, Conversation: c.conv.ID, Title: c.conv.Title, Model: c.model, Skill: c.skillNameLocked()}))
 	ctx.Flush()
 	c.ping = time.AfterFunc(pingInterval, c.pingNow)
 	c.mu.Unlock()
@@ -500,7 +589,7 @@ func (c *chat) finish(reason, errMsg string) {
 	}
 	partial := c.partial.String()
 	c.partial.Reset()
-	calls, prop := c.audit, c.proposal
+	calls, prop, skill := c.audit, c.proposal, c.skillNameLocked()
 	c.mu.Unlock()
 	c.cancel()
 	if len(calls) > 0 {
@@ -508,7 +597,7 @@ func (c *chat) finish(reason, errMsg string) {
 		if errMsg != "" {
 			outcome = ReasonError
 		}
-		c.a.Audit(AuditEntry{User: c.user, Kind: AuditChat, Conversation: c.conv.ID, Skill: c.skill, Calls: calls, Proposal: prop,
+		c.a.Audit(AuditEntry{User: c.user, Kind: AuditChat, Conversation: c.conv.ID, Skill: skill, Calls: calls, Proposal: prop,
 			Outcome: outcome, Detail: errMsg})
 	}
 
@@ -568,19 +657,39 @@ func (c *chat) request() (req *model.Request, fold int) {
 	from, summary := c.conv.Folded, c.conv.Summary
 	state := proposalState(c.conv.Proposal, c.conv.ProposalNote)
 	c.a.chats.mu.Unlock()
-	req = &model.Request{Model: c.model, System: systemPrompt(c.level, c.lang, c.page, c.catalog, summary, c.red.text(state)),
-		MaxTokens: c.s.Params.MaxOutput(), Thinking: c.s.Params.ThinkingLevel()}
+	c.mu.Lock()
+	sk, tools, inputs := c.skill, c.tools, c.inputs
+	c.mu.Unlock()
+	parts := promptParts{level: c.level, lang: c.lang, page: c.page, summary: summary, proposal: c.red.text(state)}
+	switch {
+	case sk != nil:
+		parts.skill = &skillPart{skill: sk, inputs: c.red.inputsJSON(inputs), tools: toolNames(tools), not: c.notOffered(sk, tools)}
+	case slices.ContainsFunc(tools, func(t *Tool) bool { return t.Name == "skill_load" }):
+		// The catalog, while the model may load a skill of it, within a
+		// tenth of the window.
+		parts.catalog, parts.catalogBytes = c.catalog, c.window/10*3
+	}
+	req = &model.Request{Model: c.model, System: systemPrompt(parts), MaxTokens: c.s.Params.MaxOutput(), Thinking: c.s.Params.ThinkingLevel()}
 	if c.s.Params != nil {
 		req.Temperature = c.s.Params.Temperature
 	}
-	if len(c.tools) > 0 {
-		req.Tools = modelTools(c.tools)
+	if len(tools) > 0 {
+		req.Tools = modelTools(tools)
 	}
 	toolsJSON, _ := json.Marshal(req.Tools)
 	// The answer's share is its max_output_tokens, at most a quarter of the
 	// window, so that a small window still holds the conversation.
 	b := budget{window: c.window, output: min(req.MaxTokens, c.window/4), fixed: tokens(req.System) + tokens(string(toolsJSON))}
 	req.Messages = history(msgs[from:])
+	if sk != nil {
+		// The skill's prompt is in the system prompt: the results that
+		// loaded one are not sent again.
+		for i := range req.Messages {
+			if m := &req.Messages[i]; m.Role == model.RoleTool && m.ToolName == "skill_load" && !m.IsError {
+				m.Content = fence(m.ToolName, "(a skill was loaded here; the current skill's prompt is in the system prompt)")
+			}
+		}
+	}
 	if fitHistory(req.Messages, b.room()) || c.summarized.Load() {
 		return req, 0
 	}
@@ -682,6 +791,8 @@ func (c *chat) onDone(res *model.Result, err error) {
 
 // tool returns the tool name the chat offers, or nil.
 func (c *chat) tool(name string) *Tool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, t := range c.tools {
 		if t.Name == name {
 			return t
@@ -770,7 +881,8 @@ func (c *chat) setProposal(p *Proposal, changed []string) {
 func (c *chat) runPool(t *Tool, tc model.ToolCall, next func()) {
 	var done atomic.Bool
 	call := &Call{Context: c.ctx, Args: tc.Arguments, User: c.user, Level: c.level, Settings: c.s, Conversation: c.conv.ID,
-		Emit: c.emit, Skill: c.skill, a: c.a, expired: &done, proposed: c.setProposal}
+		Emit: c.emit, Skill: c.skillName(), a: c.a, expired: &done, proposed: c.setProposal}
+	call.loadSkill = func(sk *Skill) ([]string, []string) { return c.loadSkill(sk, &done) }
 	var timer atomic.Pointer[time.Timer]
 	deliver := func(out string, err error) {
 		if !done.CompareAndSwap(false, true) {

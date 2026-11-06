@@ -50,7 +50,7 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
 
 - **代理循环（I125）** 在 fit 中运行，而不在浏览器中：一次对话是一个请求 `POST /api/m/ai/chat`，以 SSE 应答；期间 fit
   调用模型、运行它要求的工具、再调用模型，直到得到回答、向用户提问或达到上限。每次调用都重新组装上下文：系统提示（角色、
-  概念、规则、回答的语言）、浏览器所在的页面、技能目录（I127 之前为空），以及模型窗口内的历史：先截断早期的工具结果，再由
+  概念、规则、回答的语言）、浏览器所在的页面、技能目录（I127），以及模型窗口内的历史：先截断早期的工具结果，再由
   模型把早期轮次总结为摘要，摘要随对话保存。用户的话按原样发送。
 - **工具注册表**（`assistant.Registry`）：每个工具有名称、分组、JSON Schema、所需的最低级别、可选的低于
   `max_tool_result_bytes` 的上限，以及运行的位置。读取类工具在控制台的线程池（控制台自己的四个工作线程）上运行，以进程内调用
@@ -69,6 +69,13 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   提案被拒绝并在新版本上重新提供。每次工具调用与每次应用都按当时的设置检查用户级别。
 - **审计日志（I126）** 记录每次调用了工具的回答，以及每次应用、拒绝、重新提供与丢弃：用户、时间、来源、对话、技能、调用（已
   脱敏并截断）、提案的步骤、结果与版本；最多 `limits.max_audit_entries` 条，保存在 store 的 `assistant.audit` 段中。
+- **技能（I127）** 是带 YAML front matter（`name`、`title`、`title_zh`、`description`、`description_zh`、`inputs`、`tools`、
+  `model`、`examples`）的 Markdown，其后为提示词，最多 32 KiB；不符合技能格式的 front matter 会被拒绝并给出行号。计划中的 14 个
+  内置技能嵌入在二进制中；用户添加的技能由控制台的所有用户共享，最多 64 个，与停用的内置技能一起保存在 store 的
+  `assistant.skills` 段中，只有级别为 `apply` 的用户能添加、编辑、启用或停用。技能按需加载：没有技能时，系统提示列出已启用技能的
+  名称与英文描述（不超过窗口的十分之一），`skill_load` 把某个技能的完整提示词交给模型；`/name`、面板的选择器或 `skill_load`
+  使它成为对话的技能，此后系统提示带上其提示词（标明为 fit 自己的指令，不能推翻规则）而不再带目录。技能可用的工具为它所列、
+  且用户级别与设置允许的那些，外加 `ask_user`；技能的 `model` 从启动它的那条消息起使用。
 
 ## 影响
 
@@ -77,7 +84,8 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   `POST /api/m/ai/chat/stop`、`GET /api/m/ai/tools`、`GET /api/m/ai/conversations` 与 `GET`/`DELETE /api/m/ai/conversations/{id}`
   属于控制台，与其他模块的 API 一样需要登录与 CSRF 令牌；I126 加入 `GET /api/m/ai/proposals`、
   `GET /api/m/ai/proposals/{conversation}`、其 `POST .../apply` 与 `POST .../discard`，以及 `GET /api/m/ai/audit`，菜单中加入
-  提案页与审计日志页。
+  提案页与审计日志页；I127 加入 `GET`/`POST /api/m/ai/skills`、`GET`/`PUT`/`DELETE /api/m/ai/skills/{name}` 及其
+  `POST .../enable` 与 `.../disable`，菜单中加入技能页。
 - 一次对话在流式输出期间占用控制台的一个连接，工具在运行期间占用控制台线程池的工作线程；`max_concurrent_chats`（4）使两者
   都保持很少。
 - 保存了助手设置的 fit 写出的 store 为版本 3，旧版 fit 无法打开。这是把密钥与配置一同加密保存的代价。

@@ -61,6 +61,10 @@ type Conversation struct {
 	// the model's next call.
 	Proposal     *Proposal `json:"proposal,omitempty"`
 	ProposalNote string    `json:"proposal_note,omitempty"`
+	// Skill is the skill the conversation runs, set by /name, the panel's
+	// picker or skill_load, and SkillInputs the inputs the person gave it.
+	Skill       string            `json:"skill,omitempty"`
+	SkillInputs map[string]string `json:"skill_inputs,omitempty"`
 
 	busy *chat // the chat under way, nil when none
 }
@@ -73,6 +77,7 @@ type convSummary struct {
 	Updated  int64  `json:"updated"`
 	Messages int    `json:"messages"`
 	Busy     bool   `json:"busy"`
+	Skill    string `json:"skill,omitempty"`
 }
 
 // userChats are a user's conversations and the tokens they spent today.
@@ -196,7 +201,10 @@ func (u *userChats) boundLocked(max int) {
 // for each message's JSON around it. It is counted, not encoded, since it
 // runs under a.chats.mu, on the goroutines that end chats.
 func convBytes(c *Conversation) int {
-	n := 128 + len(c.ID) + len(c.Title) + len(c.Summary) + len(c.ProposalNote)
+	n := 128 + len(c.ID) + len(c.Title) + len(c.Summary) + len(c.ProposalNote) + len(c.Skill)
+	for k, v := range c.SkillInputs {
+		n += 8 + len(k) + len(v)
+	}
 	if c.Proposal != nil {
 		n += c.Proposal.bytes() + len(c.Proposal.Error)
 	}
