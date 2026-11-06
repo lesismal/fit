@@ -79,6 +79,7 @@ type Manager struct {
 	module   *console.Module
 	sem      chan struct{} // the polls under way
 	tests    chan struct{} // the tests under way
+	reads    chan struct{} // the reads of members under way
 	wake     chan struct{}
 	stop     chan struct{}
 	done     chan struct{}
@@ -117,7 +118,8 @@ func New(o Options) (*Manager, error) {
 	s := o.Settings
 	m := &Manager{o: o, interval: s.Interval(), lim: limits{timeout: s.CallTimeout(), maxBytes: s.ResponseBytes()},
 		maxNodes: s.Nodes(), sem: make(chan struct{}, s.Concurrency()), tests: make(chan struct{}, MaxTests),
-		wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), nodes: map[string]*node{}}
+		reads: make(chan struct{}, MaxReads), wake: make(chan struct{}, 1), stop: make(chan struct{}),
+		done: make(chan struct{}), nodes: map[string]*node{}}
 	doc, newer, err := readDocument(o.Store.Section(Section))
 	switch {
 	case err != nil:
@@ -577,7 +579,8 @@ func (m *Manager) add(r *console.Request) {
 	})
 }
 
-// nodeRoute answers /api/nodes/<name> and /api/nodes/<name>/test.
+// nodeRoute answers /api/nodes/<name>, /api/nodes/<name>/test and
+// /api/nodes/<name>/read/<what>.
 func (m *Manager) nodeRoute(r *console.Request) {
 	rest := strings.TrimPrefix(r.Path, "/api/nodes/")
 	name, sub, _ := strings.Cut(rest, "/")
@@ -585,6 +588,8 @@ func (m *Manager) nodeRoute(r *console.Request) {
 	switch {
 	case sub == "test" && method == "POST":
 		m.testSaved(r, name)
+	case strings.HasPrefix(sub, "read/"):
+		m.read(r, name, strings.TrimPrefix(sub, "read/"))
 	case sub != "":
 		_ = console.Error(r.Context, 404, "no such endpoint")
 	case method == "GET":

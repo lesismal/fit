@@ -119,7 +119,7 @@ func (f *fakeMember) serve(w http.ResponseWriter, r *http.Request) {
 	caps, nodeStatus, loginStatus, noCSRF, expired, reject, logoutDelay, noRoles := f.caps, f.nodeStatus, f.loginStatus, f.noCSRF, f.expired, f.reject, f.logoutDelay, f.noRoles
 	f.mu.Unlock()
 	if caps == nil {
-		caps = []string{"config.check", "console", "node", "status"}
+		caps = []string{"config.check", "config.versions", "console", "node", "status"}
 	}
 	var roles any = []string{}
 	if noRoles {
@@ -231,6 +231,7 @@ func (f *fakeMember) serve(w http.ResponseWriter, r *http.Request) {
 			"capabilities": caps})
 	case "/status":
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": 7, "reloads": map[string]any{"succeeded": 3, "failed": 1},
+			"listeners":   []any{map[string]any{"name": "web", "address": "[::]:443", "protocols": []string{"h1", "h2"}}},
 			"connections": map[string]any{"open": 5, "refused": 2},
 			"upstreams":   []any{map[string]any{"name": "u", "backends": []any{map[string]any{"up": true}, map[string]any{"up": false}}}},
 			"certificates": []any{
@@ -238,6 +239,11 @@ func (f *fakeMember) serve(w http.ResponseWriter, r *http.Request) {
 				map[string]any{"listener": "web", "names": []string{"soon.example"}, "not_after": "2027-01-01T00:00:00Z"},
 			},
 			"pad": strings.Repeat("x", pad)})
+	case "/versions":
+		_ = json.NewEncoder(w).Encode(map[string]any{"current": 7, "versions": []any{
+			map[string]any{"version": 6, "applied": "2026-11-05T00:00:00Z", "source": "file", "bytes": 10, "etag": `"a"`},
+			map[string]any{"version": 7, "applied": "2026-11-06T00:00:01Z", "source": "console", "bytes": 12, "etag": `"abc"`},
+		}})
 	case "/config/check":
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": 7, "checked_at": "2026-11-06T00:00:02Z", "summary": map[string]any{"drift": 2, "info": 1}})
 	default:
