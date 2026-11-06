@@ -2259,6 +2259,156 @@
     # # integer, 0 to 65536; default 32768.
     # max_offer_bytes: 32768
 
+  # # Channels: items of a media_library played into the hub as live streams, in order, shuffled,
+  # # looped or on a schedule, paced by their timestamps, which run on from one item to the next;
+  # # every egress plays them under its auth. A reload changes a channel in place, from its next
+  # # item. At most 256. None when left out.
+  # # list of object.
+  # channels:
+    # -
+      # # The stream the channel publishes into the hub, as tv/films: every egress of the streaming
+      # # role plays it by that path, under its auth, as rtmp://host/tv/films or
+      # # /hls/tv/films/index.m3u8. Parts of letters, digits, '.', '_', '~' and '-', split at '/'. A
+      # # channel renamed is another channel: the old one ends.
+      # # string; required.
+      # name: ""
+
+      # # The media_library the channel's items are of.
+      # # string; required.
+      # library: ""
+
+      # # The IDs of the library's items the channel plays, in this order unless order is shuffle, and
+      # # again from the first when loop is on; between the schedule's slots too. An item the library
+      # # does not hold, or cannot serve, is skipped. At most 10000.
+      # # list of string.
+      # items: []
+
+      # # The order items are played in: sequence, as listed, or shuffle, every item once in a random
+      # # order each time round. sequence when left out.
+      # # one of: sequence, shuffle; default "sequence".
+      # order: "sequence"
+
+      # # Play items again from the first once the last has played. With loop off, the channel goes
+      # # quiet after the last, staying published, until its next slot, or until the Admin API stops
+      # # and starts it, which plays the list again from the first. On when left out.
+      # # boolean; default true.
+      # loop: true
+
+      # # Items started at set times, in time_zone, cutting what plays: daily, on days of the week, or
+      # # once. A slot whose time has passed while its item would still be playing, when the channel
+      # # starts, is joined where it would be. Between slots the channel plays items, or goes quiet
+      # # without them. At most 1000.
+      # # list of object.
+      # schedule:
+        # -
+          # # When the slot starts, in the channel's time_zone: HH:MM or HH:MM:SS every day; days of the
+          # # week before it, as mon,wed,fri 20:00 or sat-sun 09:30; or a date, as 2026-12-31 23:00, once.
+          # # string; required.
+          # at: ""
+
+          # # The ID of the library's item the slot plays, from its start.
+          # # string; required.
+          # item: ""
+
+      # # The IANA time zone the schedule's times are in, as Asia/Shanghai or Local for the host's.
+      # # UTC when left out.
+      # # string; default "UTC".
+      # time_zone: "UTC"
+
+      # # The rendition played of each item, by its name, as 720p; one an item lacks plays its best
+      # # instead. The rendition with the most pixels, the highest bit rate among equals, when left
+      # # out.
+      # # string.
+      # rendition: ""
+
+      # # How much of the items is read ahead of what is sent, on the library's file pool, so that a
+      # # slow disk does not stall the channel and the next item follows the last without a gap. 500ms
+      # # to 1m. 3s when left out.
+      # # duration, as "1.5s" or "2m"; default "3s".
+      # read_ahead: "3s"
+
+      # # The most bytes read ahead and not yet sent, whatever read_ahead says, at least 1 MiB; a
+      # # sample larger than it ends its item. 16 MiB when left out or 0.
+      # # integer, 0 or more; default 16777216.
+      # max_buffer_bytes: 16777216
+
+      # # Outside servers the channel is relayed to, as streaming's push names them, their stream
+      # # being the channel's.
+      # # list of object.
+      # push:
+        # -
+          # # The target's name in the Admin API and the metrics, unique among the push targets. The
+          # # stream's name and the target's place among the stream's when left out, as tv/films#1.
+          # # string.
+          # name: ""
+
+          # # The stream of the hub relayed, as live/cam or a channel's name. Required in streaming's
+          # # push; a channel's push targets relay the channel.
+          # # string.
+          # stream: ""
+
+          # # Where the stream is sent: rtmp://host[:port]/app/stream, or rtmps://, publishing to an RTMP
+          # # server as a CDN's ingest takes it; or
+          # # srt://host:port?streamid=...&passphrase=...&latency=ms, calling an SRT listener with
+          # # MPEG-TS. The URL is a secret, its stream key with it: the Admin API and the logs show its
+          # # scheme, host and app alone.
+          # # string; required.
+          # url: ""
+
+          # # How long the first retry waits, after a target refuses, drops or cannot be reached, or the
+          # # stream is not published; each retry waits twice the last, up to retry_max, and a push that
+          # # has stayed up retry_max starts again from retry_min. 1s when left out.
+          # # duration, as "1.5s" or "2m"; default "1s".
+          # retry_min: "1s"
+
+          # # The longest a retry waits. 30s when left out.
+          # # duration, as "1.5s" or "2m"; default "30s".
+          # retry_max: "30s"
+
+          # # How long connecting may take, the RTMP handshake and publish or the SRT handshake. 10s when
+          # # left out.
+          # # duration, as "1.5s" or "2m"; default "10s".
+          # connect_timeout: "10s"
+
+  # # Outside RTMP or SRT servers, as a CDN's ingest, that streams of the hub are relayed to, each
+  # # reconnected with backoff when it drops; a channel's own push lists its own. A reload keeps a
+  # # target whose stream and url are unchanged connected. At most 256 in all. None when left out.
+  # # list of object.
+  # push:
+    # -
+      # # The target's name in the Admin API and the metrics, unique among the push targets. The
+      # # stream's name and the target's place among the stream's when left out, as tv/films#1.
+      # # string.
+      # name: ""
+
+      # # The stream of the hub relayed, as live/cam or a channel's name. Required in streaming's
+      # # push; a channel's push targets relay the channel.
+      # # string.
+      # stream: ""
+
+      # # Where the stream is sent: rtmp://host[:port]/app/stream, or rtmps://, publishing to an RTMP
+      # # server as a CDN's ingest takes it; or
+      # # srt://host:port?streamid=...&passphrase=...&latency=ms, calling an SRT listener with
+      # # MPEG-TS. The URL is a secret, its stream key with it: the Admin API and the logs show its
+      # # scheme, host and app alone.
+      # # string; required.
+      # url: ""
+
+      # # How long the first retry waits, after a target refuses, drops or cannot be reached, or the
+      # # stream is not published; each retry waits twice the last, up to retry_max, and a push that
+      # # has stayed up retry_max starts again from retry_min. 1s when left out.
+      # # duration, as "1.5s" or "2m"; default "1s".
+      # retry_min: "1s"
+
+      # # The longest a retry waits. 30s when left out.
+      # # duration, as "1.5s" or "2m"; default "30s".
+      # retry_max: "30s"
+
+      # # How long connecting may take, the RTMP handshake and publish or the SRT handshake. 10s when
+      # # left out.
+      # # duration, as "1.5s" or "2m"; default "10s".
+      # connect_timeout: "10s"
+
 # Named libraries of media files: directories scanned into a catalog of items, each a title
 # with its renditions, audio, subtitles and poster, probed off fib's workers on a bounded file
 # pool of the library's own, and read by the Admin API's /media/library. None when left out:

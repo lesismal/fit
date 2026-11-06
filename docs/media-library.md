@@ -7,7 +7,7 @@ that serve them as video on demand and the channels that play them as live strea
 ([decision 032](decisions/032-media-library.md)). This page covers the catalog: what a library
 holds, how files are grouped into items, how scans run and what bounds them, and the Admin API that
 reads it, and [video on demand](#video-on-demand), the `vod` handler that serves the items over
-HLS. Playing them as live streams comes with the streaming role's channels.
+HLS. Playing them as live streams comes with the streaming role's [channels](channels.md).
 
 Off by default: without `media_library`, no files are scanned or served.
 

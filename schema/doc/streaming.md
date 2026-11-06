@@ -23,6 +23,14 @@ place; a change of another field of a listener starts that listener again, closi
 connections, and a change of the hub's limits ends every stream. See
 [Streaming](../streaming.md) and [decision 030](../decisions/030-media-auth-and-pages.md).
 
+`channels` play the items of a [`media_library`](#media-library) into the hub as live streams, each
+under its name: in order, shuffled, looped, or on a `schedule` of start times in a `time_zone`, paced
+by the samples' timestamps, which run on from one item to the next; every egress plays them under
+its `auth`. `push` relays a channel, or any stream, to outside RTMP or SRT servers, reconnecting with
+backoff between `retry_min` and `retry_max`; a push URL holds a stream key, and is never shown whole.
+A reload changes channels in place, from their next item. See [Channels](../channels.md) and
+[decision 032](../decisions/032-media-library.md).
+
 ```json
 {
   "listeners": [{"name": "web", "address": ":8080"}],

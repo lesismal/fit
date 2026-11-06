@@ -119,6 +119,14 @@ RTMP stream of H.264 and AAC plays as video alone; nor is Opus turned into AAC f
 the role's own, not `webrtc.media`'s, whose SFU serves the `whip` and `whep` handlers apart from the
 hub.
 
+## Channels and push targets
+
+`channels` play the items of a [media library](media-library.md) into the hub as live streams, in
+order, shuffled, looped or on a schedule, each by its name, which every egress plays under its
+`auth`; `push` relays a channel, or any stream, to outside RTMP or SRT servers, reconnecting with
+backoff. A streaming role with channels needs no listener to take streams in. See
+[Channels and push targets](channels.md).
+
 ## Limits and timeouts
 
 | Field | Default | |
@@ -142,7 +150,9 @@ stream that has no publisher yet; without them such a play is refused at once.
 A reload changes a listener's `auth` in place: the clients connected stay, and the next publish and
 play are checked against the policy as it is now. A change of any other field of a listener starts
 that listener again, closing its connections. A change of `max_streams`, `max_players` or
-`gop_cache_bytes` starts the hub again, ending every stream and connection. `hls` keeps its
+`gop_cache_bytes` starts the hub again, ending every stream and connection. Channels and push
+targets change in place: a channel's new list or schedule from its next item, a push target whose
+stream and URL are the same staying connected ([Reloads](channels.md#reloads)). `hls` keeps its
 segments across a reload that keeps its params. Leaving `streaming` out stops the role, and its
 handlers answer `503`.
 
@@ -155,6 +165,7 @@ handlers answer `503`.
 | `fit_streaming_published_total` | counter | streams published |
 | `fit_streaming_auth_refused_total{protocol,reason}` | counter | RTMP, RTSP and SRT clients refused: `unauthorized`, `forbidden`, `unavailable` (the policy not loaded, or a password being checked) |
 | `fit_streaming_restarts_total` | counter | the hub started again for a change of its limits |
+| `fit_streaming_channels{state}` and the rest | | channels and push targets: [Metrics](channels.md#metrics) |
 
 The role logs on the `webrtc` logger, prefixed `streaming:`: each listener's address as it starts,
 and each stream published and unpublished.

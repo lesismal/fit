@@ -96,6 +96,7 @@ These were renamed for 1.0, so that every size in bytes ends in `_bytes` and eve
 | `GET /cache`, `POST /cache/purge` | The cache's zones, and purges by URL, tag or zone |
 | `GET /tokens`, `GET`, `POST /tokens/{role}`, `PATCH`, `DELETE /tokens/{role}/{id}` | The link tokens the tunnel hub's and the LLM roles' listeners issue: list, issue, change the expiry of, revoke |
 | `GET /media/library`, `GET /media/library/{name}`, `GET /media/library/{name}/items/{id}`, `POST /media/library/{name}/rescan` | The media libraries: their scans, a page of a library's items, an item, and a rescan |
+| `GET /streaming/channels`, `GET`, `POST /streaming/channels/{name}`, `GET /streaming/push`, `POST /streaming/push/{name}` | The streaming role's channels and push targets: what each plays or does, and start, stop, skip or restart |
 | `GET /dashboard/` | The dashboard, for people (not covered) |
 
 A path in the config is a JSON pointer's tokens. A change answers with the version applied, in the

@@ -40,7 +40,7 @@ a config against it and more.
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey)
-- [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc)
+- [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
@@ -2872,6 +2872,14 @@ place; a change of another field of a listener starts that listener again, closi
 connections, and a change of the hub's limits ends every stream. See
 [Streaming](../streaming.md) and [decision 030](../decisions/030-media-auth-and-pages.md).
 
+`channels` play the items of a [`media_library`](#media-library) into the hub as live streams, each
+under its name: in order, shuffled, looped, or on a `schedule` of start times in a `time_zone`, paced
+by the samples' timestamps, which run on from one item to the next; every egress plays them under
+its `auth`. `push` relays a channel, or any stream, to outside RTMP or SRT servers, reconnecting with
+backoff between `retry_min` and `retry_max`; a push URL holds a stream key, and is never shown whole.
+A reload changes channels in place, from their next item. See [Channels](../channels.md) and
+[decision 032](../decisions/032-media-library.md).
+
 In a .conf file:
 
 ```fit
@@ -3013,6 +3021,8 @@ In JSON:
 | `rtsp` | [object](#config-streamrtsp) |  | Take and play streams over RTSP 1.0 with interleaved RTP (RTP/AVP/TCP), as rtsp://host/app/stream. None when left out. |
 | `srt` | [object](#config-streamsrt) |  | Take and play streams over SRT, MPEG-TS on UDP, the stream named by the caller's stream ID. None when left out. |
 | `webrtc` | [object](#config-streamwebrtc) |  | The UDP port the PeerConnections of the stream_whip and stream_whep handlers share, which publish into the hub with WHIP and play from it with WHEP. Routes with those handlers answer 503 without it. None when left out. |
+| `channels` | list of [object](#config-streamchannel) |  | Channels: items of a media_library played into the hub as live streams, in order, shuffled, looped or on a schedule, paced by their timestamps, which run on from one item to the next; every egress plays them under its auth. A reload changes a channel in place, from its next item. At most 256. None when left out. |
+| `push` | list of [object](#config-streampush) |  | Outside RTMP or SRT servers, as a CDN's ingest, that streams of the hub are relayed to, each reconnected with backoff when it drops; a channel's own push lists its own. A reload keeps a target whose stream and url are unchanged connected. At most 256 in all. None when left out. |
 
 <a id="config-streamrtmp"></a>
 
@@ -3072,6 +3082,48 @@ In JSON:
 | `connect_timeout` | duration | `"15s"` | How long a session may take from its answer to a connected PeerConnection before it is ended; once connected, ICE consent bounds it. 15s when left out. |
 | `play_wait` | duration |  | How long a WHEP offer may wait for a stream with no publisher yet, its request held, before it is answered 404. Answered 404 at once when left out. |
 | `max_offer_bytes` | integer, 0 to 65536 | `32768` | The largest offer taken; a larger one is answered 400. At most 64 KiB. 32 KiB when left out or 0. |
+
+<a id="config-streamchannel"></a>
+
+### `streaming.channels[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The stream the channel publishes into the hub, as tv/films: every egress of the streaming role plays it by that path, under its auth, as rtmp://host/tv/films or /hls/tv/films/index.m3u8. Parts of letters, digits, '.', '_', '~' and '-', split at '/'. A channel renamed is another channel: the old one ends. |
+| `library` | string |  | Required. The media_library the channel's items are of. |
+| `items` | list of string |  | The IDs of the library's items the channel plays, in this order unless order is shuffle, and again from the first when loop is on; between the schedule's slots too. An item the library does not hold, or cannot serve, is skipped. At most 10000. |
+| `order` | string: `sequence`, `shuffle` | `"sequence"` | The order items are played in: sequence, as listed, or shuffle, every item once in a random order each time round. sequence when left out. |
+| `loop` | boolean | `true` | Play items again from the first once the last has played. With loop off, the channel goes quiet after the last, staying published, until its next slot, or until the Admin API stops and starts it, which plays the list again from the first. On when left out. |
+| `schedule` | list of [object](#config-channelslot) |  | Items started at set times, in time_zone, cutting what plays: daily, on days of the week, or once. A slot whose time has passed while its item would still be playing, when the channel starts, is joined where it would be. Between slots the channel plays items, or goes quiet without them. At most 1000. |
+| `time_zone` | string | `"UTC"` | The IANA time zone the schedule's times are in, as Asia/Shanghai or Local for the host's. UTC when left out. |
+| `rendition` | string |  | The rendition played of each item, by its name, as 720p; one an item lacks plays its best instead. The rendition with the most pixels, the highest bit rate among equals, when left out. |
+| `read_ahead` | duration | `"3s"` | How much of the items is read ahead of what is sent, on the library's file pool, so that a slow disk does not stall the channel and the next item follows the last without a gap. 500ms to 1m. 3s when left out. |
+| `max_buffer_bytes` | integer, 0 or more | `16777216` | The most bytes read ahead and not yet sent, whatever read_ahead says, at least 1 MiB; a sample larger than it ends its item. 16 MiB when left out or 0. |
+| `push` | list of [object](#config-streampush) |  | Outside servers the channel is relayed to, as streaming's push names them, their stream being the channel's. |
+
+<a id="config-channelslot"></a>
+
+### `streaming.channels[].schedule[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `at` | string |  | Required. When the slot starts, in the channel's time_zone: HH:MM or HH:MM:SS every day; days of the week before it, as mon,wed,fri 20:00 or sat-sun 09:30; or a date, as 2026-12-31 23:00, once. |
+| `item` | string |  | Required. The ID of the library's item the slot plays, from its start. |
+
+<a id="config-streampush"></a>
+
+### `streaming.channels[].push[]`
+
+Also at `streaming.push[]`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | The target's name in the Admin API and the metrics, unique among the push targets. The stream's name and the target's place among the stream's when left out, as tv/films#1. |
+| `stream` | string |  | The stream of the hub relayed, as live/cam or a channel's name. Required in streaming's push; a channel's push targets relay the channel. |
+| `url` | string |  | Required. Where the stream is sent: rtmp://host[:port]/app/stream, or rtmps://, publishing to an RTMP server as a CDN's ingest takes it; or srt://host:port?streamid=...&passphrase=...&latency=ms, calling an SRT listener with MPEG-TS. The URL is a secret, its stream key with it: the Admin API and the logs show its scheme, host and app alone. |
+| `retry_min` | duration | `"1s"` | How long the first retry waits, after a target refuses, drops or cannot be reached, or the stream is not published; each retry waits twice the last, up to retry_max, and a push that has stayed up retry_max starts again from retry_min. 1s when left out. |
+| `retry_max` | duration | `"30s"` | The longest a retry waits. 30s when left out. |
+| `connect_timeout` | duration | `"10s"` | How long connecting may take, the RTMP handshake and publish or the SRT handshake. 10s when left out. |
 
 <a id="media-library"></a>
 

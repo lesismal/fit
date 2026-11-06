@@ -100,7 +100,7 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `llm` | llm 的 hub、node 和 proxy，在多台机器间共享 AI 模型并提供给 agent 调用 | [LLM](reference/config.md#llm)、[llm](llm.zh-CN.md) |
 | `tunnel` | tunnel 的 hub、node 和 proxy，用于访问 NAT 后的服务 | [Tunnel](reference/config.md#tunnel)、[tunnel](tunnel.zh-CN.md) |
 | `webrtc` | TURN 服务器（`turn`）、`whip` 和 `whep` 的媒体端口（`media`）、`webrtc_proxy` 的转发（`proxy`） | [WebRTC](reference/config.md#webrtc)、[WebRTC](webrtc.zh-CN.md) |
-| `streaming` | 流媒体角色：带 RTMP、RTSP、SRT 监听器以及 `stream_whip` 和 `stream_whep` 的 WebRTC 端口的媒体 hub | [Streaming](reference/config.md#streaming)、[流媒体](streaming.zh-CN.md) |
+| `streaming` | 流媒体角色：带 RTMP、RTSP、SRT 监听器以及 `stream_whip` 和 `stream_whep` 的 WebRTC 端口的媒体 hub；由媒体库条目组成的频道，以及推流目标 | [Streaming](reference/config.md#streaming)、[流媒体](streaming.zh-CN.md)、[频道](channels.zh-CN.md) |
 | `media_library` | 媒体库：把媒体文件所在的目录编目成条目，及其版本、音轨、字幕和海报 | [Media library](reference/config.md#media-library)、[媒体库](media-library.zh-CN.md) |
 | `providers` | Docker、Consul、etcd 和 Kubernetes | [Providers](reference/config.md#providers) |
 | `schema_version` | 配置的版本，1；可不写 | [兼容性](compatibility.zh-CN.md#schema-的版本) |

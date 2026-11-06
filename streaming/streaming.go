@@ -22,10 +22,14 @@
 // plaintext passwords are checked at once. The HTTP handlers wait for the
 // check, the request retained.
 //
-// A reload changes in place what it can: each listener's auth. A change of
-// any other field of a listener starts that listener again, closing its
-// connections; a change of the hub's limits starts everything again,
-// ending every stream.
+// Its channels (package channels) play the items of a media library into
+// the hub as live streams, and its push targets relay streams of the hub to
+// outside RTMP and SRT servers.
+//
+// A reload changes in place what it can: each listener's auth, and the
+// channels and push targets. A change of any other field of a listener
+// starts that listener again, closing its connections; a change of the
+// hub's limits starts everything again, ending every stream.
 package streaming
 
 import (
@@ -45,6 +49,7 @@ import (
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/mediaauth"
 	"github.com/lesismal/fit/observe"
+	"github.com/lesismal/fit/streaming/channels"
 )
 
 // ID is the role's, and its member's path in the config.
@@ -121,6 +126,7 @@ type Server struct {
 	rtsp    *tcpListener
 	srt     *srtListener
 	webrtc  *rtcListener
+	chans   *channels.Manager
 
 	m meters
 }
@@ -224,6 +230,13 @@ func (s *Server) Apply(member any) error {
 	if err := s.applyWebRTC(cfg.WebRTC); err != nil {
 		errs = append(errs, fmt.Errorf("webrtc: %w", err))
 	}
+	if s.chans == nil {
+		s.chans = channels.New(channels.Options{Hub: s.hub, Libraries: s.key, Dial: s.key, Log: s.log})
+		channels.Register(s.key, s.chans)
+	}
+	if err := s.chans.Apply(cfg.Channels, cfg.PushTargets()); err != nil {
+		errs = append(errs, fmt.Errorf("channels: %w", err))
+	}
 	cur := &current{hub: s.hub}
 	if s.webrtc != nil {
 		cur.rtc = s.webrtc.srv
@@ -275,8 +288,14 @@ func (s *Server) Stop(context.Context) {
 	s.cur.Store(nil)
 }
 
-// stopAll closes every listener and the hub.
+// stopAll closes every listener, the channels and push targets, and the
+// hub.
 func (s *Server) stopAll() {
+	if s.chans != nil {
+		channels.Unregister(s.key, s.chans)
+		s.chans.Stop()
+		s.chans = nil
+	}
 	if s.rtmp != nil {
 		s.rtmp.close(s.engine)
 		s.rtmp = nil
@@ -407,4 +426,5 @@ func (s *Server) WriteMetrics(w observe.MetricWriter) {
 	}
 	w.Family("fit_streaming_restarts_total", "counter", "Times a change of the hub's limits started the role again, ending every stream.")
 	w.Sample("fit_streaming_restarts_total", float64(s.m.restarts.Load()))
+	channels.Lookup(s.key).WriteMetrics(w)
 }

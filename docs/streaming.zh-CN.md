@@ -103,6 +103,12 @@ DELETE 该 URL 结束会话，无需凭据，因为 ID 本身就是凭证。H.26
 不会经 WHEP 发送，因此 H.264 加 AAC 的 RTMP 流只播放视频；Opus 也不会转成 AAC 给 RTMP。该端口是本角色自己的，不是
 `webrtc.media` 的；后者的 SFU 独立于 hub，服务 `whip` 和 `whep` 处理器。
 
+## 频道与推流目标
+
+`channels` 把[媒体库](media-library.zh-CN.md)的条目作为直播流播放进 hub，按顺序、随机、循环或按排期，各以其名称为流名，
+每种出口都在其 `auth` 之下播放；`push` 把频道或任意流转推到外部 RTMP 或 SRT 服务器，断开后以退避方式重连。有频道的流媒体
+角色无需接收推流的监听器。见[频道与推流目标](channels.zh-CN.md)。
+
 ## 上限与超时
 
 | 字段 | 默认值 | |
@@ -123,7 +129,8 @@ DELETE 该 URL 结束会话，无需凭据，因为 ID 本身就是凭证。H.26
 ## 重载
 
 重载原地修改监听器的 `auth`：已连接的客户端保留，之后的推流和播放按当前策略检查。修改监听器的其他字段会重启该监听器并关闭
-其连接。修改 `max_streams`、`max_players` 或 `gop_cache_bytes` 会重启 hub，结束所有流和连接。参数不变时，`hls` 在重载后
+其连接。修改 `max_streams`、`max_players` 或 `gop_cache_bytes` 会重启 hub，结束所有流和连接。频道与推流目标原地修改：频道新的
+列表或排期从其下一个条目起生效，流与 URL 不变的推流目标保持连接（[重新加载](channels.zh-CN.md#重新加载)）。参数不变时，`hls` 在重载后
 保留其分片。去掉 `streaming` 会停止该角色，其处理器返回 `503`。
 
 ## 指标与日志
@@ -135,6 +142,7 @@ DELETE 该 URL 结束会话，无需凭据，因为 ID 本身就是凭证。H.26
 | `fit_streaming_published_total` | counter | 推送过的流 |
 | `fit_streaming_auth_refused_total{protocol,reason}` | counter | 被拒绝的 RTMP、RTSP 和 SRT 客户端：`unauthorized`、`forbidden`、`unavailable`（策略未加载，或密码正在检查） |
 | `fit_streaming_restarts_total` | counter | 因 hub 上限改变而重启 hub 的次数 |
+| `fit_streaming_channels{state}` 等 | | 频道与推流目标：见[指标](channels.zh-CN.md#指标) |
 
 该角色记录在 `webrtc` logger 上，前缀为 `streaming:`：每个监听器启动时的地址，以及每路流的推送和结束。
 

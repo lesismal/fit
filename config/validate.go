@@ -266,6 +266,7 @@ func (c *Config) Validate() Errors {
 	c.checkWebRTC(add)
 	c.checkMediaAuth(add)
 	c.checkStreaming(add)
+	c.checkChannels(add)
 	c.checkMediaLibrary(add)
 
 	if a := c.ACME; a != nil {

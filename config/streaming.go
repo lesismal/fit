@@ -52,6 +52,9 @@ type Streaming struct {
 	SRT    *StreamSRT    `json:"srt,omitempty" doc:"Take and play streams over SRT, MPEG-TS on UDP, the stream named by the caller's stream ID. None when left out."`
 	WebRTC *StreamWebRTC `json:"webrtc,omitempty" doc:"The UDP port the PeerConnections of the stream_whip and stream_whep handlers share, which publish into the hub with WHIP and play from it with WHEP. Routes with those handlers answer 503 without it. None when left out."`
 
+	Channels []StreamChannel `json:"channels,omitempty" doc:"Channels: items of a media_library played into the hub as live streams, in order, shuffled, looped or on a schedule, paced by their timestamps, which run on from one item to the next; every egress plays them under its auth. A reload changes a channel in place, from its next item. At most 256. None when left out."`
+	Push     []StreamPush    `json:"push,omitempty" doc:"Outside RTMP or SRT servers, as a CDN's ingest, that streams of the hub are relayed to, each reconnected with backoff when it drops; a channel's own push lists its own. A reload keeps a target whose stream and url are unchanged connected. At most 256 in all. None when left out."`
+
 	At Value `json:"-" fit:"self"`
 }
 
@@ -200,8 +203,8 @@ func (c *Config) checkStreaming(add func(Value, string, ...any)) {
 	if s == nil {
 		return
 	}
-	if s.RTMP == nil && s.RTSP == nil && s.SRT == nil && s.WebRTC == nil {
-		add(s.At, "nothing takes streams in: set rtmp, rtsp, srt or webrtc")
+	if s.RTMP == nil && s.RTSP == nil && s.SRT == nil && s.WebRTC == nil && len(s.Channels) == 0 {
+		add(s.At, "nothing takes streams in: set rtmp, rtsp, srt, webrtc or channels")
 	}
 	policy := func(at Value, name string) {
 		if name != "" && c.MediaAuthPolicy(name) == nil {
