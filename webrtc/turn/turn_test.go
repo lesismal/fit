@@ -854,6 +854,10 @@ func TestCutClient(t *testing.T) {
 	p, q := newPeer(t), newPeer(t)
 	allow(t, s, p, q)
 	exchange(t, u, p, relayed, "hello")
+	// The other client's socket is opened while the cut one's is: opened
+	// after, it could be given the same port, and so the 5-tuple of the
+	// allocation that is still there (437 Allocation Mismatch).
+	other := newClient(t, addr, "alice", "pw", true)
 	u.cut()
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
@@ -868,7 +872,6 @@ func TestCutClient(t *testing.T) {
 			}
 		}
 	})
-	other := newClient(t, addr, "alice", "pw", true)
 	exchange(t, other, q, other.mustAllocate(t), "meanwhile")
 	eventually(t, "the cut client's allocation to expire", func() bool { return s.Allocations() == 1 })
 	close(stop)
