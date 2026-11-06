@@ -341,10 +341,18 @@ func TestSealedBothWays(t *testing.T) {
 			g.mu.Unlock()
 			g.n.Add(1)
 		}, true)
+		r.HandleCall(proto.MethodPing, func(*Link, []byte) (any, error) { return nil, nil }, true)
 		return r
 	}
 	ga, gb := &got{next: map[uint64]uint32{}}, &got{next: map[uint64]uint32{}}
 	a, b := pair(t, serve(ga), serve(gb), coder(t, "pw"), coder(t, "pw"))
+	// What waits for the peer's hello is bounded by maxBeforeHello, a
+	// registration and not the longest frame, and the roles send tunnel
+	// frames only once the registration is answered: so do the senders
+	// here, once a call is answered, when each side has the other's hello.
+	if err := a.Call(proto.MethodPing, nil, nil, 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
 	const senders, each = 4, 20
 	longest := MaxFrame - HeaderSize - 8 - bodycrypt.Overhead
 	var wg sync.WaitGroup
