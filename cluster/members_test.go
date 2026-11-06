@@ -108,8 +108,12 @@ func TestDocument(t *testing.T) {
 	if _, _, err := readDocument([]byte("[")); err == nil {
 		t.Error("not JSON")
 	}
-	if _, newer, _ := readDocument([]byte(`{"version":2}`)); !newer {
+	if _, newer, _ := readDocument([]byte(`{"version":3}`)); !newer {
 		t.Error("a newer version")
+	}
+	// I141's version 1 is read, and written as version 2.
+	if d, newer, err := readDocument([]byte(`{"version":1,"members":[]}`)); newer || err != nil || !strings.Contains(string(d.marshal()), `"version":2`) {
+		t.Error("version 1", newer, err)
 	}
 	// What a later iteration keeps is kept as it is.
 	d, _, _ = readDocument([]byte(`{"version":1,"groups":[{"name":"g"}],"templates":[1],"rollouts":[true]}`))

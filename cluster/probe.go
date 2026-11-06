@@ -102,7 +102,7 @@ func (m *Manager) test(r *console.Request, mem *Member, after func(*TestResult))
 	p := &poller{n: n, start: m.now()}
 	res := &TestResult{}
 	report := func(prob *Problem) {
-		if seen := n.t.seen.Load(); seen != nil {
+		if seen := n.t.certificate(); seen != nil {
 			c := *seen
 			c.err = nil
 			res.Certificate = &c
@@ -123,20 +123,7 @@ func (m *Manager) test(r *console.Request, mem *Member, after func(*TestResult))
 		res.OK, res.Node, res.LatencyMs = true, &info, p.latency.Milliseconds()
 		end(res)
 	}
-	read := func() {
-		p.get(n.p.node, &p.answer, func() { report(nil) })
-	}
 	// A failed poll step ends the test with its problem.
 	p.finishFn = report
-	if mem.Access == AccessConsole {
-		n.login(func(prob *Problem) {
-			if prob != nil {
-				report(prob)
-				return
-			}
-			read()
-		})
-		return
-	}
-	read()
+	p.get(n.p.node, &p.answer, func() { report(nil) })
 }

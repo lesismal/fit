@@ -250,6 +250,7 @@ func (c *Config) Validate() Errors {
 		checkConsole(a.Console, add)
 		checkAssistant(a.Assistant, a.Console, add)
 		checkCluster(a, add)
+		checkClusterMember(a.ClusterMember, add)
 	}
 	c.checkLLM(add)
 	c.checkTunnel(add)

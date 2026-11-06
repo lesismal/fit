@@ -184,6 +184,8 @@ type State struct {
 	// TLS is the certificate the member presented at its latest
 	// handshake.
 	TLS *CertInfo `json:"tls,omitempty"`
+	// Link is the link of a member that links out to the manager.
+	Link *LinkState `json:"link,omitempty"`
 }
 
 // node is a member as the poller reaches it: its transport, its console
@@ -191,7 +193,7 @@ type State struct {
 type node struct {
 	m    *Manager
 	spec Member // the member as the node was made for it, never changed
-	t    *transport
+	t    caller
 	p    paths
 	// busy is a poll under way; next is when the next is due, in Unix
 	// nanoseconds; closed is a member removed or changed.
@@ -217,7 +219,13 @@ type session struct {
 }
 
 func newNode(m *Manager, spec Member) *node {
-	n := &node{m: m, spec: spec, t: newTransport(m.o.Engine, &spec, m.lim), p: adminPaths}
+	n := &node{m: m, spec: spec, p: adminPaths}
+	switch spec.Access {
+	case AccessLink:
+		n.t = newLinkTransport(m, spec.credentialID())
+	default:
+		n.t = newTransport(m.o.Engine, &spec, m.lim)
+	}
 	if spec.Access == AccessConsole {
 		n.p = consolePaths
 	}
@@ -264,32 +272,19 @@ func (n *node) poll(done func()) {
 // poller is one poll of a member: a chain of calls, each started from the
 // callback of the one before, on fib's workers.
 type poller struct {
-	n        *node
-	done     func()
-	start    time.Time
-	relogged bool
-	answer   nodeAnswer
-	latency  time.Duration
-	status   *statusAnswer
-	check    *checkAnswer
+	n       *node
+	done    func()
+	start   time.Time
+	answer  nodeAnswer
+	latency time.Duration
+	status  *statusAnswer
+	check   *checkAnswer
 	// finishFn, when set, is told how the poll ended in place of the
 	// node's state: a test's.
 	finishFn func(*Problem)
 }
 
-func (p *poller) begin() {
-	if p.n.spec.Access == AccessConsole && p.n.currentSession() == nil {
-		p.n.login(func(prob *Problem) {
-			if prob != nil {
-				p.finish(prob)
-				return
-			}
-			p.readNode()
-		})
-		return
-	}
-	p.readNode()
-}
+func (p *poller) begin() { p.readNode() }
 
 func (n *node) currentSession() *session {
 	n.mu.Lock()
@@ -298,32 +293,12 @@ func (n *node) currentSession() *session {
 }
 
 // get reads path into v and calls next, or finishes the poll with what went
-// wrong: a console session that ended is logged in again, once a poll.
+// wrong.
 func (p *poller) get(path string, v any, next func()) {
 	n := p.n
-	if n.closed.Load() {
-		p.finish(&Problem{Kind: KindUnreachable, Message: errClosed.Error()})
-		return
-	}
-	s := n.currentSession()
-	start := n.m.now()
-	n.t.do("GET", path, n.header(s, false), nil, func(r *reply, err error) {
-		if err != nil {
-			p.finish(n.t.failure(err, start))
-			return
-		}
-		if r.status == stdhttp.StatusUnauthorized && n.spec.Access == AccessConsole && !p.relogged {
-			// The session ended: the member restarted, or it lasted its
-			// lifetime. Log in again and read it once more.
-			p.relogged = true
-			n.dropSession(s)
-			n.login(func(prob *Problem) {
-				if prob != nil {
-					p.finish(prob)
-					return
-				}
-				p.get(path, v, next)
-			})
+	n.call("GET", path, nil, nil, func(r *reply, s *session, prob *Problem) {
+		if prob != nil {
+			p.finish(prob)
 			return
 		}
 		if prob := n.answerProblem(r, path, s); prob != nil {
@@ -335,9 +310,70 @@ func (p *poller) get(path string, v any, next func()) {
 			return
 		}
 		if path == n.p.node {
-			p.latency = n.m.now().Sub(start)
+			p.latency = r.took
 		}
 		next()
+	})
+}
+
+// call sends method path, with header and body, to the member with its
+// credentials, and calls done once with the answer, whatever its status,
+// and the console session it was sent with; or with why there is none. A
+// member reached by its console is logged in first when the node has no
+// session, and again when a call answers 401, as after the member
+// restarted or the session's lifetime ended, once a call. header's
+// credentials, Host and Content-Length are not sent: the member's own are.
+func (n *node) call(method, path string, header stdhttp.Header, body []byte, done func(*reply, *session, *Problem)) {
+	if n.spec.Access == AccessConsole && n.currentSession() == nil {
+		n.login(func(prob *Problem) {
+			if prob != nil {
+				done(nil, nil, prob)
+				return
+			}
+			n.send(method, path, header, body, true, done)
+		})
+		return
+	}
+	n.send(method, path, header, body, false, done)
+}
+
+// dropHeaders are what a caller's header never sends to a member.
+var dropHeaders = []string{"Authorization", "Cookie", "X-Fit-Csrf", "Host", "Content-Length", "Connection", "Transfer-Encoding", "Upgrade"}
+
+// send is one try of call; relogged is a call that logged in already.
+func (n *node) send(method, path string, header stdhttp.Header, body []byte, relogged bool, done func(*reply, *session, *Problem)) {
+	if n.closed.Load() {
+		done(nil, nil, &Problem{Kind: KindUnreachable, Message: errClosed.Error()})
+		return
+	}
+	s := n.currentSession()
+	h := n.header(s, method != stdhttp.MethodGet && method != stdhttp.MethodHead)
+	for k, v := range header {
+		k = stdhttp.CanonicalHeaderKey(k)
+		if !slices.Contains(dropHeaders, k) {
+			h[k] = slices.Clone(v)
+		}
+	}
+	start := n.m.now()
+	n.t.do(method, path, h, body, func(r *reply, err error) {
+		if err != nil {
+			done(nil, s, n.t.failure(err, start))
+			return
+		}
+		r.took = n.m.now().Sub(start)
+		if r.status == stdhttp.StatusUnauthorized && n.spec.Access == AccessConsole && !relogged {
+			// The session ended: log in again and send it once more.
+			n.dropSession(s)
+			n.login(func(prob *Problem) {
+				if prob != nil {
+					done(nil, nil, prob)
+					return
+				}
+				n.send(method, path, header, body, true, done)
+			})
+			return
+		}
+		done(r, s, nil)
 	})
 }
 
@@ -421,7 +457,7 @@ func (p *poller) finish(prob *Problem) {
 	st := &n.state
 	old := st.Status
 	st.Polled = now
-	if seen := n.t.seen.Load(); seen != nil {
+	if seen := n.t.certificate(); seen != nil {
 		c := *seen
 		c.err = nil
 		st.TLS = &c
@@ -432,7 +468,7 @@ func (p *poller) finish(prob *Problem) {
 		}
 		prob.Message = n.redact(prob.Message)
 		st.Error, st.Failures = prob, st.Failures+1
-		st.Reachable = prob.Kind != KindUnreachable && prob.Kind != KindTimeout
+		st.Reachable = prob.Kind != KindUnreachable && prob.Kind != KindTimeout && prob.Kind != KindNotLinked
 		st.Status = StatusError
 		if !st.Reachable {
 			st.Status = StatusDown

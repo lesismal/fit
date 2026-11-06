@@ -93,6 +93,10 @@ type Manager struct {
 	rev      uint64
 	nodes    map[string]*node
 	closed   bool
+
+	// link is the members that link out to the manager: the listener
+	// they link to, and their links.
+	link linkHub
 }
 
 // New returns the manager o.Settings turns on, with the members the store
@@ -136,6 +140,12 @@ func New(o Options) (*Manager, error) {
 		m.nodes[mem.Name] = newNode(m, mem.clone())
 	}
 	m.module = &console.Module{ID: ModuleID, Routes: m.routes}
+	if err := m.startLinks(); err != nil {
+		for _, n := range m.nodes {
+			n.t.close()
+		}
+		return nil, err
+	}
 	go m.run()
 	return m, nil
 }
@@ -158,6 +168,7 @@ func (m *Manager) Close() {
 		nodes := slices.Collect(maps.Values(m.nodes))
 		m.nodes = map[string]*node{}
 		m.mu.Unlock()
+		m.stopLinks()
 		var wg sync.WaitGroup
 		for _, n := range nodes {
 			wg.Add(1)
@@ -257,6 +268,7 @@ func (m *Manager) sync() {
 		n.shutdown(func() {})
 	}
 	m.nodes = keep
+	m.syncLinks()
 	m.poke()
 }
 
@@ -287,7 +299,11 @@ func (m *Manager) States() []State {
 // stateLocked returns mem's state; m.mu is held.
 func (m *Manager) stateLocked(mem *Member) State {
 	if n := m.nodes[mem.Name]; n != nil {
-		return n.snapshot(mem)
+		st := n.snapshot(mem)
+		if mem.Access == AccessLink {
+			st.Link = m.linkStateOf(mem)
+		}
+		return st
 	}
 	// A member kept in the store that does not check is never polled.
 	v := mem.View()
@@ -440,6 +456,9 @@ func describe(m *Member) string {
 }
 
 func describeView(v *MemberView) string {
+	if v.Access == AccessLink {
+		return "linking out to the manager, by enrollment"
+	}
 	s := v.URL + " by " + v.Access + ", certificate by " + v.TLS.Verified()
 	if v.Access == AccessConsole {
 		s += ", as " + strconv.Quote(v.Username)
@@ -465,6 +484,7 @@ func changes(a, b *Member) string {
 	add(a.Token != b.Token, "token")
 	add(a.TLS.CA != b.TLS.CA, "tls.ca")
 	add(a.TLS.Fingerprint != b.TLS.Fingerprint, "tls.fingerprint")
+	add(a.credentialID() != b.credentialID(), "link.credential")
 	if len(out) == 0 {
 		return "nothing"
 	}
@@ -506,6 +526,7 @@ func (m *Manager) routes(api *console.API) {
 	api.Handle("POST", "/api/test", m.testDraft)
 	api.Handle("GET", "/api/state", m.state)
 	api.Handle("GET", "/api/audit", func(r *console.Request) { _ = r.JSON(200, map[string]any{"entries": m.Audit()}) })
+	m.linkRoutes(api)
 }
 
 func (m *Manager) list(r *console.Request) {
@@ -585,6 +606,8 @@ func (m *Manager) nodeRoute(r *console.Request) {
 	switch {
 	case sub == "test" && method == "POST":
 		m.testSaved(r, name)
+	case sub == "enroll" && method == "POST":
+		m.enrollAgain(r, name)
 	case sub != "":
 		_ = console.Error(r.Context, 404, "no such endpoint")
 	case method == "GET":
