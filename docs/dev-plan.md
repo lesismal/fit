@@ -302,7 +302,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | done |
 | I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | done |
 | I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | done |
-| I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | todo |
+| I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | done |
 | I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | todo |
 | I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | todo |
 | I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | done |
@@ -3293,6 +3293,47 @@ also in decision 033 as its items 68–84):
   member's page), the strategy form, the confirm dialog with the diff; a running rollout's progress
   batch by batch with each member's gate, and pause, resume, abort and roll back; the history.
 - **Touches**: `cluster`, `app/workbench`, `docs`, `test/docker`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 85–102):
+
+1. **Rollouts live typed in the document's `rollouts`** (still version 2); a ready member's desired
+   config is kept byte for byte (encrypted with the store) until the rollout ends, then only its hash
+   and the paths changed; the last 50 kept. The exact bytes keep the dry run's `new_etag` valid, after a
+   restart too. Alternatives: a section of their own; the desired config made again at apply.
+2. **A plan is frozen**: members get what was planned; plans expire after an hour; 4 rollouts planned or
+   under way at once. Alternative: templates rendered again at each batch.
+3. **Members not ready are left out with the reason**, the start going on with the ready ones; a person
+   may leave out more. Alternative: no start with any member not ready.
+4. **A conflict is applied over** when its member is in the plan; the diff shows each part's sync state
+   and reason. Alternative: conflicting parts or members left out by themselves.
+5. **Batches follow members' names**: the canary is the first ones, then batches by size, by percentage
+   rounded up, or the rest at once. Alternatives: a canary chosen by hand or label.
+6. **Gate defaults**: a wait of 5s; with a 5xx threshold, a window of 30s judged from 20 requests, fewer
+   passing with a note; a member that counts no requests fails its batch before anything is applied.
+7. **The 5xx share is a member-side change**: `/status`'s `requests`, totals that never go back
+   (`status.requests`, counted when the member's config sets `metrics`), read twice by the manager.
+   Alternative: a windowed endpoint on the member.
+8. **An apply refused fails its batch's gate**, which is rolled back; a member skipped with 412 does not.
+9. **Rollback goes to the version the member ran at plan time**, never forced; a member changed since,
+   or no longer keeping that version, is `rollback_failed`; a failed gate rolls back its batch, or with
+   `on_failure: all` everything applied.
+10. **An apply whose answer was lost is settled by ETag** (the member's `config_etag` against the dry
+    run's `new_etag`), or marked `unsure`.
+11. **Pause** takes effect between batches; **abort** stops after the members being applied, cuts a
+    gate's wait short and keeps what was applied (rolling back is asked apart).
+12. **After a manager's restart** a running rollout is paused, a plan being made expires, a rollback under
+    way fails so it can be asked again; only a person resumes.
+13. **A started rollout holds its members** through paused and waiting until it ends; plans hold nothing.
+14. **Checkpoints are written without changing the members' ETag** (`appendAudit`); a failed write is
+    logged and the rollout goes on.
+15. **A goroutine a rollout**, `max_concurrency` members of a batch at once; tests use millisecond
+    timings, not an injected clock.
+16. **API times are milliseconds** (`pause_ms`, `wait_ms`, `window_ms`).
+17. **The pages**: Rollouts after Templates; New rollout filled from its URL's query; dry-run errors link
+    to the member's page, its own pages and its rendered result.
+18. **`admin` on a member without a store** is accepted back unchanged by `PUT /config`; templates and
+    copies never own `admin`, so a rollout never changes it.
 
 ### I147 Drift and alerts
 
