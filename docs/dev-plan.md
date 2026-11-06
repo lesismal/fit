@@ -310,7 +310,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | **AI assistant, continued** | | | |
 | I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | todo |
 | I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | todo |
-| I154 | The assistant's page edits: the `edit` level, and the page tools that draft a change into the open page's editor and forms as an unsaved draft, reverted on request, never submitted — **Save and apply** stays the person's | I125, I126, I120 | todo |
+| I154 | The assistant's page edits: the `edit` level, and the page tools that draft a change into the open page's editor and forms as an unsaved draft, reverted on request, never submitted — **Save and apply** stays the person's | I125, I126, I120 | done |
 | **Logging** | | | |
 | I155 | Decision 034; the file sink: a bounded queue and a writer of its own, the log's `time_zone` (local by default, UTC or an IANA zone), rotation by size and by time, retention by age, number and total size, compression, and `log`'s file outputs and their `rotate` | I21, I82, I83 | done |
 | I156 | The access log's file through the same sink: `access_log.rotate` and `time_zone`, one sink per path, shared with `log`'s, a rotation only after the buffers are written, and the config's refusal of two settings for one path | I155 | done |
@@ -2236,6 +2236,33 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   field or a forbidden member is refused; a draft over its bound is refused and says so; English and
   Chinese; a browser check passes; under the race detector.
 - **Touches**: `assistant`, `app/workbench`, `admin`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **How the page answers**: `POST /api/m/ai/chat/page` while the SSE stream stays open, so the
+   answer comes back as the call's result and ends when the browser leaves. Alternative: end the
+   stream and resume with a new request, as `ask_user` does.
+2. **When page tools are offered**: only while the page context declares `editable.members`, so
+   unticking "send this page as context" removes them too. Alternative: always, the page refusing.
+3. **`page_get` is level `read`**, as the plan's table says; a read user is told it cannot draft.
+4. **The draft's format** is `config_propose`'s (`members`, JSON-pointer `ops`), or `text` with its
+   `format`, so the model learns one. Alternative: dotted schema paths.
+5. **Checked twice**: by fit (members, no `admin`, no secret, parses, 256 KiB) and by the page
+   against its draft and its `/config/parse`; a text that fails fit's parse never reaches the editor.
+6. **Secrets**: under a secret-named member only a copied-back `[redacted]`, which the page restores;
+   dropping a secret field from an object that remains is refused; any `[redacted]` is put back as
+   the draft holds it, or refused. Alternative: allow empty values or removal, as I126 allows empty.
+7. **`add` creates missing parents** on the page, unlike `config_propose`'s ops, since drafts often add
+   into a member the page lacks.
+8. **Revert** restores a snapshot from before the assistant's first draft, raw texts included; after
+   a person's edit the assistant's `page_revert` is refused and the page's Revert asks first.
+9. **Text drafts** stay in their tab as written, unless they held `[redacted]`, when the tab is
+   rendered again from the draft so the saved text carries the real secret.
+10. **One draft for all pages**: the note, badge and Revert show on every editor page while an
+    assistant draft exists, as the config pages share one draft.
+11. **Skills**: five change skills name the page tools, `explain` names `page_get`; `migrate` and
+    `security-review` are I129's.
+12. **The page's wait** is 30s, a constant as `toolTimeout`. Alternative: a `limits` setting.
 
 ### Decisions from review (2026-11-04)
 
