@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/lesismal/fit/assistant/model"
 	"github.com/lesismal/fit/config"
@@ -79,8 +80,16 @@ type Call struct {
 	// Emit sends an event of the chat's stream to the panel, as a proposal
 	// would that a tool adds to.
 	Emit func(Event)
+	// Skill is the skill the chat runs, when one (I127).
+	Skill string
 
 	a *Assistant
+	// expired is set once the call's result was given up on, past its
+	// timeout: a propose tool then adds no step.
+	expired *atomic.Bool
+	// proposed hears of the proposal a propose tool changed, and the
+	// members it changes, for the chat's audit entry.
+	proposed func(p *Proposal, changed []string)
 }
 
 // Decode decodes the call's arguments into v, a struct, and says what is

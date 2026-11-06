@@ -5,14 +5,17 @@
 // folded row with its arguments and its result, an ask_user question is a row of buttons whose choice goes back as the
 // call's result. Stop ends the answer (POST /api/chat/stop), retry answers the last message again, and the user's
 // conversations (GET /api/conversations, GET and DELETE /api/conversations/{id}) are picked, started anew or deleted in
-// the panel's head. Markdown is built as DOM nodes, never as HTML, so nothing a model writes runs on the page.
+// the panel's head. Markdown is built as DOM nodes, never as HTML, so nothing a model writes runs on the page. A
+// conversation's pending proposal (the propose tools' steps, I126) is shown above the composer, with Apply, which asks
+// again in a dialog with the whole diff, and Discard (ai/proposals.js).
 //
 // 助手的对话面板：控制台提供 ai 模块且用户级别不是 off 时，每个页面的顶栏都有一个按钮，点开后面板显示在页面旁。消息连同当前
 // 页面（WB.page）与页面上选中的文字作为上下文发往 POST /api/chat，回答以 SSE 事件流回（text、thinking、tool_call、
 // tool_result、ask、usage、summary，最后为 end 或 error）：文字按 Markdown 随到随画，每次工具调用为一行可展开的记录（参数与
 // 结果），ask_user 的问题显示为一排按钮，所选即该调用的结果。停止会结束回答（POST /api/chat/stop），重试会重新回答最后一条
 // 消息；用户的对话（GET /api/conversations、GET 与 DELETE /api/conversations/{id}）在面板头部选择、新建或删除。Markdown
-// 以 DOM 节点构建，从不作为 HTML 插入，模型写的任何内容都不会在页面上执行。
+// 以 DOM 节点构建，从不作为 HTML 插入，模型写的任何内容都不会在页面上执行。对话的待处理提案（提案工具的各步骤，I126）显示在
+// 输入框上方，带“应用”（会再弹出含完整差异的对话框确认）与“丢弃”（ai/proposals.js）。
 (function () {
   'use strict';
 
@@ -30,7 +33,8 @@
       'p.cut': 'cut to its bound', 'p.stopped': 'Stopped.', 'p.summary': 'The earlier turns are summarized for the model from here on.',
       'p.summarized': 'The turns above are summarized for the model.', 'p.chose': 'Chose: {choice}', 'p.limit.max_tool_calls': 'The answer reached its limit of tool calls.',
       'p.limit.max_tokens_per_day': 'Today\'s tokens are spent.', 'p.kept': 'Conversations are kept in the store, encrypted.',
-      'p.notKept': 'Without admin.store, conversations last until fit restarts.', 'p.copy': 'Copy', 'p.you': 'You'
+      'p.notKept': 'Without admin.store, conversations last until fit restarts.', 'p.copy': 'Copy', 'p.you': 'You',
+      'p.step': 'Added to the proposal — {tool}: {summary}'
     },
     'zh-CN': {
       'p.open': '助手', 'p.close': '关闭助手', 'p.new': '新对话', 'p.delete': '删除此对话',
@@ -45,7 +49,8 @@
       'p.cut': '已截断至上限', 'p.stopped': '已停止。', 'p.summary': '从这里起，之前的轮次以摘要提供给模型。',
       'p.summarized': '以上轮次以摘要提供给模型。', 'p.chose': '已选择：{choice}', 'p.limit.max_tool_calls': '本次回答已达到工具调用次数上限。',
       'p.limit.max_tokens_per_day': '今日的 token 已用完。', 'p.kept': '对话加密保存在 store 中。',
-      'p.notKept': '未配置 admin.store：对话只保留到 fit 重启。', 'p.copy': '复制', 'p.you': '你'
+      'p.notKept': '未配置 admin.store：对话只保留到 fit 重启。', 'p.copy': '复制', 'p.you': '你',
+      'p.step': '已加入提案 — {tool}：{summary}'
     }
   }, 'ai');
 
@@ -155,6 +160,8 @@
       del, h('button.btn.btn--ghost.btn--icon.btn--sm', { type: 'button', title: t('p.close'), 'aria-label': t('p.close'), onclick: toggle }, UI.icon('x')));
     var note = h('div.callout.callout--warn.ai-note', { hidden: true });
     var log = h('div.ai-log', { role: 'log', 'aria-live': 'polite' });
+    // The conversation's pending proposal, above the composer (ai/proposals.js draws it). / 对话的待处理提案，显示在输入框上方。
+    var propBox = h('div.ai-propbox', { hidden: true });
     var pageBox = h('input', { type: 'checkbox', checked: true, onchange: function () { st.sendPage = pageBox.checked; } });
     var pageLabel = h('span.ellipsis');
     var input = h('textarea.textarea.ai-input', {
@@ -164,7 +171,7 @@
     var sendBtn = h('button.btn.btn--primary.ai-send', { type: 'button', onclick: function () { if (st.streaming) stop(); else submit(); } });
     var foot = h('div.ai-foot.small.muted');
     var box = h('aside.ai-panel', { hidden: true, 'aria-label': t('p.open'), onkeydown: function (e) { if (e.key === 'Escape') toggle(); } },
-      head, note, log, h('label.check.ai-ctx.small', pageBox, pageLabel), h('div.ai-compose', input, sendBtn), foot);
+      head, note, log, propBox, h('label.check.ai-ctx.small', pageBox, pageLabel), h('div.ai-compose', input, sendBtn), foot);
     shell.appendChild(box);
     var button = h('button.btn.btn--ghost.btn--icon.ai-toggle', { type: 'button', title: t('p.open'), 'aria-label': t('p.open'), onclick: toggle }, UI.icon('chat'));
     setBusy(false);
@@ -226,8 +233,9 @@
       save(CONV_KEY, st.conv);
       drawPick();
       UI.clear(log);
+      drawProposal(null);
       if (!st.conv) { log.appendChild(UI.empty(t('p.empty'), 'chat')); return; }
-      UI.api('GET', '/api/conversations/' + encodeURIComponent(st.conv)).then(drawConversation, function (e) {
+      UI.api('GET', '/api/conversations/' + encodeURIComponent(st.conv)).then(function (c) { drawConversation(c); if (c.proposal) refreshProposal(); }, function (e) {
         if (e && e.status === 404) { open(''); return; }
         UI.fail(e);
       });
@@ -239,6 +247,31 @@
         if (!ok) return;
         UI.api('DELETE', '/api/conversations/' + encodeURIComponent(c.id)).then(function () { open(''); return list(); }, UI.fail);
       });
+    }
+
+    // ---- The proposal / 提案 ----
+    // refreshProposal reads the conversation's pending proposal, checked on the running config, and draws it.
+    // refreshProposal 读取对话的待处理提案（已在运行中的配置上检查）并绘制。
+    function refreshProposal() {
+      var conv = st.conv;
+      if (!conv || !window.FitAI.proposal) { drawProposal(null); return; }
+      UI.api('GET', '/api/proposals/' + encodeURIComponent(conv)).then(function (b) {
+        if (conv === st.conv) drawProposal(b && b.proposal);
+      }, function () { /* the card stays as it was / 卡片保持原样 */ });
+    }
+    function drawProposal(v) {
+      if (!v) { UI.clear(propBox); propBox.hidden = true; return; }
+      UI.mount(propBox, FitAI.proposal.card(UI, v, {
+        busy: function () { return st.streaming; },
+        done: function (view, msg, kind) {
+          if (msg) {
+            log.appendChild(h('div.callout.small' + (kind === 'ok' ? '.callout--ok' : kind ? '.callout--' + kind : ''), msg));
+            scrollDown(true);
+          }
+          drawProposal(view);
+        }
+      }));
+      propBox.hidden = false;
     }
 
     // ---- Drawing a conversation / 绘制对话 ----
@@ -344,6 +377,8 @@
       st.streaming = on;
       UI.mount(sendBtn, UI.icon(on ? 'stop' : 'send'), on ? t('p.stop') : t('p.send'));
       sendBtn.classList.toggle('btn--danger', on);
+      // The proposal waits while the answer may still change it. / 回答进行中提案可能还会变，暂不可操作。
+      propBox.classList.toggle('is-busy', on);
       pick.disabled = on;
       input.disabled = false;
     }
@@ -402,6 +437,7 @@
           case 'ask': T.ask(ev, true); break;
           case 'usage': footer(ev.today); break;
           case 'summary': T.note(t('p.summary')); break;
+          case 'proposal': T.note(t('p.step', { tool: t('tool.' + ev.name), summary: ev.text || '' })); break;
         }
       }, { signal: st.ctrl ? st.ctrl.signal : undefined }).then(function (end) {
         T.flush();
@@ -418,6 +454,7 @@
         setBusy(false);
         st.ctrl = null;
         list();
+        refreshProposal();
         scrollDown();
       });
     }

@@ -49,8 +49,9 @@ func (w *apiRecorder) Write(p []byte) (int, error) {
 var errNoAPI = errors.New("the Admin API is not reachable from the assistant here")
 
 // api calls the Admin API in process, as the console's own pages do: on
-// the console's pool, which the tools run on.
-func (a *Assistant) api(ctx context.Context, method, path, ctype string, body []byte) (*apiAnswer, error) {
+// the console's pool, which the tools run on; ifMatch, when not "", is the
+// ETag of the config a change is for.
+func (a *Assistant) api(ctx context.Context, method, path, ctype, ifMatch string, body []byte) (*apiAnswer, error) {
 	if a.o.API == nil {
 		return nil, errNoAPI
 	}
@@ -60,6 +61,9 @@ func (a *Assistant) api(ctx context.Context, method, path, ctype string, body []
 	}
 	if ctype != "" {
 		req.Header.Set("Content-Type", ctype)
+	}
+	if ifMatch != "" {
+		req.Header.Set("If-Match", ifMatch)
 	}
 	w := &apiRecorder{header: http.Header{}}
 	a.o.API.ServeHTTP(w, req)
@@ -75,19 +79,50 @@ func (a *Assistant) api(ctx context.Context, method, path, ctype string, body []
 // apiJSON calls the Admin API and returns the body of a 2xx answer, or the
 // error the API gave.
 func (a *Assistant) apiJSON(ctx context.Context, method, path, ctype string, body []byte) ([]byte, error) {
-	ans, err := a.api(ctx, method, path, ctype, body)
+	return a.apiDo(ctx, method, path, ctype, "", body)
+}
+
+// apiDo is apiJSON with If-Match ifMatch, when not "".
+func (a *Assistant) apiDo(ctx context.Context, method, path, ctype, ifMatch string, body []byte) ([]byte, error) {
+	ans, err := a.api(ctx, method, path, ctype, ifMatch, body)
 	if err != nil {
 		return nil, err
 	}
 	if ans.status/100 != 2 {
-		var e struct {
-			Error string `json:"error"`
-		}
-		_ = json.Unmarshal(ans.body, &e)
-		if e.Error == "" {
-			e.Error = string(clip(string(ans.body), 512))
-		}
-		return nil, fmt.Errorf("the Admin API answered %d: %s", ans.status, e.Error)
+		return nil, ans.err()
 	}
 	return ans.body, nil
+}
+
+// apiError is an answer of the Admin API that is not a 2xx: its status,
+// its message and the config's errors it lists.
+type apiError struct {
+	Status int
+	Msg    string
+	Errors []apiProblem
+}
+
+// apiProblem is a config error as the Admin API reports it.
+type apiProblem struct {
+	Path    string `json:"path,omitempty"`
+	Line    int    `json:"line,omitempty"`
+	Column  int    `json:"column,omitempty"`
+	Message string `json:"message"`
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("the Admin API answered %d: %s", e.Status, e.Msg)
+}
+
+// err returns the answer as an *apiError.
+func (ans *apiAnswer) err() error {
+	var e struct {
+		Error  string       `json:"error"`
+		Errors []apiProblem `json:"errors"`
+	}
+	_ = json.Unmarshal(ans.body, &e)
+	if e.Error == "" {
+		e.Error = clip(string(ans.body), 512)
+	}
+	return &apiError{Status: ans.status, Msg: e.Error, Errors: e.Errors}
 }

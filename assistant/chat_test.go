@@ -516,7 +516,7 @@ func TestToolsEndpoint(t *testing.T) {
 	if status != 200 || json.Unmarshal([]byte(body), &b) != nil {
 		t.Fatalf("%d %s", status, body)
 	}
-	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools()) || b.Tools[0].Group != GroupConfig {
+	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools()) || b.Tools[0].Group != GroupConfig {
 		t.Fatalf("%+v", b)
 	}
 	byName := map[string]toolView{}
@@ -524,7 +524,7 @@ func TestToolsEndpoint(t *testing.T) {
 		byName[tv.Name] = tv
 	}
 	if !byName["log_tail"].Enabled || byName["access_log_sample"].Enabled || byName["access_log_sample"].Why != "data.send_access_log is off" ||
-		byName["ask_user"].Kind != KindAsk || !json.Valid(byName["config_get"].Parameters) {
+		byName["ask_user"].Kind != KindAsk || !json.Valid(byName["config_get"].Parameters) || byName["config_propose"].Enabled || byName["config_propose"].Why != "needs the level propose" {
 		t.Errorf("%+v", byName)
 	}
 }

@@ -56,6 +56,11 @@ type Conversation struct {
 	// outgrew its model's window.
 	Summary string `json:"summary,omitempty"`
 	Folded  int    `json:"folded,omitempty"`
+	// Proposal is the change the propose tools made, pending until it is
+	// applied or discarded; ProposalNote what became of the last one, for
+	// the model's next call.
+	Proposal     *Proposal `json:"proposal,omitempty"`
+	ProposalNote string    `json:"proposal_note,omitempty"`
 
 	busy *chat // the chat under way, nil when none
 }
@@ -191,7 +196,10 @@ func (u *userChats) boundLocked(max int) {
 // for each message's JSON around it. It is counted, not encoded, since it
 // runs under a.chats.mu, on the goroutines that end chats.
 func convBytes(c *Conversation) int {
-	n := 128 + len(c.ID) + len(c.Title) + len(c.Summary)
+	n := 128 + len(c.ID) + len(c.Title) + len(c.Summary) + len(c.ProposalNote)
+	if c.Proposal != nil {
+		n += c.Proposal.bytes() + len(c.Proposal.Error)
+	}
 	for i := range c.Messages {
 		m := &c.Messages[i]
 		n += 64 + len(m.Content) + len(m.Thinking) + len(m.ThinkingSignature) + len(m.ToolCallID) + len(m.ToolName) + len(m.Error)
@@ -276,6 +284,7 @@ func (a *Assistant) saver() {
 }
 
 func (a *Assistant) saveDirty() {
+	a.saveAudit()
 	for {
 		a.chats.mu.Lock()
 		var user string

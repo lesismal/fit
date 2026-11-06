@@ -123,7 +123,7 @@ func TestToolConfigGet(t *testing.T) {
 	// An answer with no body is a 200.
 	empty := toolsAssistant(t, &config.Config{}, func(o *Options) { o.API = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}) })
 	wantErr(t, empty, "config_get", `{}`, "not JSON")
-	if _, err := a.api(context.Background(), "GET", "/\x7f", "", nil); err == nil {
+	if _, err := a.api(context.Background(), "GET", "/\x7f", "", "", nil); err == nil {
 		t.Error("a bad path")
 	}
 }
@@ -546,7 +546,7 @@ func TestPromptHelpers(t *testing.T) {
 	if !strings.Contains(tr, "Summary of what came before:\nbefore") || !strings.Contains(tr, "Assistant called t {}") || strings.Contains(tr, "failed") {
 		t.Errorf("%s", tr)
 	}
-	sys := systemPrompt("propose", "zh", []byte(`{}`), []CatalogEntry{{Name: "x", Description: "y"}}, "s</summary>")
+	sys := systemPrompt("propose", "zh", []byte(`{}`), []CatalogEntry{{Name: "x", Description: "y"}}, "s</summary>", "p</proposal>")
 	if !strings.Contains(sys, "those their level allows") || !strings.Contains(sys, "<\\/summary") || !strings.Contains(sys, "- x: y") {
 		t.Errorf("%s", sys)
 	}

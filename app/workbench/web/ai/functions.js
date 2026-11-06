@@ -12,8 +12,8 @@
     ['fn.title', 'Functions', '功能'], ['fn.level', 'Your level: {level}', '你的级别：{level}'],
     ['fn.model', 'Model: {model}', '模型：{model}'], ['fn.noModel', 'No model is set yet.', '尚未设置模型。'],
     ['fn.useTools', 'calls tools', '调用工具'], ['fn.noTools', 'calls no tools', '不调用工具'],
-    ['fn.note', 'The tools the assistant may call. Each reads what this fit runs, on the console\'s pool, through the Admin API in process; secrets are redacted from every result, and each result is bounded. None writes the config, a version or the store.',
-      '助手可以调用的工具。每个工具都在控制台的线程池上、经进程内的 Admin API 读取本 fit 的运行情况；每个结果都会脱敏并受大小限制。没有任何工具会写入配置、版本或 store。'],
+    ['fn.note', 'The tools the assistant may call. Each reads what this fit runs, on the console\'s pool, through the Admin API in process; secrets are redacted from every result, and each result is bounded. None writes the config, a version or the store: the propose tools only add steps to a proposal, which a person whose level is apply applies after a second confirm.',
+      '助手可以调用的工具。每个工具都在控制台的线程池上、经进程内的 Admin API 读取本 fit 的运行情况；每个结果都会脱敏并受大小限制。没有任何工具会写入配置、版本或 store：提案工具只向提案加入步骤，由级别为 apply 的人再次确认后应用。'],
     ['fn.name', 'Tool', '工具'], ['fn.needs', 'Level', '级别'], ['fn.state', 'State', '状态'], ['fn.what', 'What it does', '作用'],
     ['fn.on', 'enabled', '已启用'], ['fn.off', 'disabled', '未启用'], ['fn.schema', 'Arguments', '参数'],
     ['g.config', 'Config', '配置'], ['g.runtime', 'Runtime', '运行时'], ['g.roles', 'Roles', '角色'], ['g.logs', 'Logs', '日志'],
@@ -34,7 +34,13 @@
     ['t.log_tail', 'The latest lines of fit\'s own log, from a bounded ring in memory, by logger, level and text.', 'fit 自身日志的最新行（来自内存中的有界环形缓冲），可按记录器、级别与文字筛选。'],
     ['t.access_log_sample', 'Recent lines of the access log\'s file matching a route, status, client or text.', '访问日志文件中与路由、状态码、客户端或文字匹配的最近行。'],
     ['t.adapt_convert', 'Converts nginx or Caddyfile text to fit\'s config, as fit adapt does, with what it could not convert.', '像 fit adapt 一样把 nginx 或 Caddyfile 文本转换为 fit 配置，并列出无法转换的部分。'],
-    ['t.ask_user', 'Asks you a question with options, shown as buttons in the panel; your choice is the result.', '向你提出带选项的问题（在面板中显示为按钮），你的选择即为结果。']
+    ['t.ask_user', 'Asks you a question with options, shown as buttons in the panel; your choice is the result.', '向你提出带选项的问题（在面板中显示为按钮），你的选择即为结果。'],
+    ['why.needs the level propose', 'needs the level propose', '需要 propose 级别'],
+    ['t.config_propose', 'Adds a config change to the conversation\'s proposal: top-level members, or operations at JSON pointers; checked as a whole, never applied by the assistant.',
+      '向对话的提案加入一项配置变更：顶层成员，或按 JSON 指针的操作；整体检查，助手从不自行应用。'],
+    ['t.reconcile_propose', 'Adds Consistency fixes to the proposal, by difference and action; applied together through the reconcile endpoint.', '向提案加入一致性修复（按差异与操作）；经 reconcile 接口一起应用。'],
+    ['t.rollback_propose', 'Proposes applying a kept version again, as a new version.', '提议将保存的某个版本重新应用为新版本。'],
+    ['t.cache_purge_propose', 'Adds a cache purge, by zone, URL, tag or all, run after the proposal\'s config change.', '加入一次缓存清除（按缓存区、URL、标签或全部），在提案的配置变更之后执行。']
   ];
   var en = {}, zh = {};
   WORDS.forEach(function (w) { en[w[0]] = w[1]; zh[w[0]] = w[2]; });

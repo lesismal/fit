@@ -15,6 +15,7 @@
   // [key, en, zh] / [键, 英文, 中文]
   var WORDS = [
     ['m.ai', 'Assistant', '助手'], ['n.settings', 'Settings', '设置'], ['n.functions', 'Functions', '功能'],
+    ['n.proposals', 'Proposals', '提案'], ['n.audit', 'Audit log', '审计日志'],
     ['src.store', 'These settings are kept in the store, with the providers\' keys.', '这些设置与各提供方的密钥一起保存在 store 中。'],
     ['src.config', 'These settings are admin.assistant\'s from the config file. Saving keeps them in the store from then on, keys included; the file\'s are then only the first ones.',
       '这些设置来自配置文件中的 admin.assistant。保存后改由 store 保存（包括密钥）；此后文件中的设置只是最初的设置。'],
@@ -73,7 +74,8 @@
 
   WB.module({
     id: 'ai', icon: 'chat', label: 'm.ai', words: WORDS,
-    nav: [{ id: 'functions', icon: 'code', label: 'n.functions' }, { id: 'settings', icon: 'settings', label: 'n.settings' }],
+    nav: [{ id: 'functions', icon: 'code', label: 'n.functions' }, { id: 'proposals', icon: 'layers', label: 'n.proposals' },
+      { id: 'audit', icon: 'history', label: 'n.audit' }, { id: 'settings', icon: 'settings', label: 'n.settings' }],
     // The chat panel, opened from the top bar of every page (ai/panel.js). / 对话面板，从每个页面的顶栏打开（ai/panel.js）。
     topbar: function (UI, shell) { return window.FitAI && FitAI.panel ? FitAI.panel(UI, shell) : null; },
     setup: function (UI, sh) {
@@ -420,8 +422,10 @@
         load();
       }
 
-      // The Functions page is ai/functions.js's. / 功能页由 ai/functions.js 提供。
-      return { routes: { settings: settingsPage, functions: function () { FitAI.functionsPage(UI, sh); } } };
+      // The Functions, Proposals and Audit log pages are ai/functions.js's, ai/proposals.js's and ai/audit.js's.
+      // 功能页、提案页与审计日志页分别由 ai/functions.js、ai/proposals.js 与 ai/audit.js 提供。
+      return { routes: { settings: settingsPage, functions: function () { FitAI.functionsPage(UI, sh); },
+        proposals: function () { FitAI.proposal.page(UI, sh); }, audit: function () { FitAI.auditPage(UI, sh); } } };
     }
   });
 })();

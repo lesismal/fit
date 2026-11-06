@@ -46,3 +46,27 @@
 .ai-send { flex: none; }
 .ai-foot { padding: 0 14px 10px; }
 @media (max-width: 700px) { .ai-panel { width: 100vw; } }
+
+/* Proposals: the panel's card, the dialog's diff, the Proposals and Audit log pages. / 提案：面板卡片、对话框差异、提案页与审计日志页。 */
+.ai-propbox { padding: 0 14px; max-height: 42vh; overflow-y: auto; }
+.ai-propbox.is-busy { opacity: .6; pointer-events: none; }
+.ai-prop { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+  border-radius: var(--radius-sm); background: var(--surface-2); margin: 8px 0 0; }
+.ai-prop__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ai-prop__head > svg { color: var(--primary); }
+.ai-prop__body { gap: 6px; }
+.ai-prop__steps { margin: 0; padding-left: 20px; }
+.ai-prop__steps li { margin: 2px 0; word-break: break-word; }
+.ai-err { color: var(--danger); }
+.ai-diff { margin: 0; padding: 8px 0; max-height: 50vh; overflow: auto; font-size: 12px; line-height: 1.45; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xs); }
+.ai-diff > span { display: block; padding: 0 10px; white-space: pre; }
+.ai-diff__add { background: var(--ok-soft); }
+.ai-diff__del { background: var(--danger-soft); }
+.ai-diff__hunk { color: var(--info, var(--primary)); }
+.ai-diff__file { color: var(--muted); }
+.ai-difftabs { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+.callout--ok { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+.ai-audit__filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ai-audit__filters > select, .ai-audit__filters > input { width: auto; min-width: 140px; max-width: 240px; flex: none; }
+.ai-audit__calls { margin: 0; padding-left: 16px; }
+.ai-audit__detail { max-width: 320px; word-break: break-word; }

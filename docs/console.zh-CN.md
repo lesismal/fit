@@ -396,12 +396,49 @@ token（超出时 `429`，或正在进行的回答结束），`max_tool_result_b
 每个对话最多 512 KiB，每个用户合计最多 8 MiB；没有 store 时只保留到 fit 重启。用户只能看到自己的对话。
 
 端点为 `POST /api/m/ai/chat`（`{"conversation", "message" | "retry": true | "answer": {"id", "choice"}, "page", "lang"}`；
-以 SSE 应答：类型为 `start`、`text`、`thinking`、`tool_call`、`tool_result`、`ask`、`usage` 与 `summary` 的 `data:` 事件，
+以 SSE 应答：类型为 `start`、`text`、`thinking`、`tool_call`、`tool_result`、`ask`、`usage`、`summary` 与 `proposal` 的 `data:` 事件，
 最后是带 `{"type": "done", "reason"}`（`answer`、`ask`、`max_tool_calls`、`max_tokens_per_day`、`stopped`）的 `event: end`，
 或带 `{"message"}` 的 `event: error`；级别为 `off` 的用户 `403`，对话不存在 `404`，没有模型、对话正在回答或已达轮数时 `409`，
 超出同时回答数或当天 token 时 `429`）、`POST /api/m/ai/chat/stop`（`{"conversation"}`）、`GET /api/m/ai/conversations`、
 `GET` 与 `DELETE /api/m/ai/conversations/{id}`，以及 `GET /api/m/ai/tools`（用户的级别、模型，以及每个工具的级别、分组、
 schema 及本用户能否调用）。
+
+### 提案、级别与审计日志
+
+**级别。** `admin.assistant.users` 为每个控制台用户设定级别，`default_level` 为其余用户的级别：`off`（没有面板）、`read`
+（只读工具）、`edit`（另可起草打开页面上的草稿，I154）、`propose`（另可使用提案工具）与 `apply`（另可应用提案），每一级都包含
+之前的各级。只有用户级别达到工具所需级别时，该工具才提供给模型；每次调用在运行时还会按当时使用的设置再检查一次，因此在设置页
+降低某用户的级别后，正在进行的对话的下一次调用就会被拒绝。
+
+**提案。** 即使级别为 `propose` 或 `apply`，助手自己也不修改任何东西：它的提案工具只向对话唯一的待处理提案加入步骤。
+`config_propose` 整体替换成员（`members`，`null` 表示删除）或按 JSON 指针操作（`ops`：`add`、`replace`、`remove`）；
+`reconcile_propose` 按差异与操作选择一致性修复；`rollback_propose` 重新应用某个保存的版本；`cache_purge_propose` 按 URL、标签
+或全部清除某个缓存区。每个步骤都会与其他步骤一起在运行中的配置上检查（与 `fit validate` 相同），提案记录检查时的 ETag 与版本；
+本身有误的步骤会被拒绝、不加入提案，而使整体无效的步骤会连同错误保留，等待下一个步骤修正。一个提案的配置步骤只能是一种：
+补丁，合并后以一次 `PUT /config/text?members=` 应用其改动的顶层成员；一致性修复，以一次 `POST /config/reconcile` 一起应用；
+或一次回滚，`POST /rollback/{n}`。缓存清除可与任何一种同在，在配置之后执行。任何步骤都不能触及 `admin`（其成员不在任何工具
+的范围内，且只在 fit 重启时生效），也不能写入密钥：模型看到的 `[redacted]` 值只能写回配置中原有的位置，届时恢复为配置原值。
+最多 32 个步骤、256 KiB 参数。
+
+面板在输入框上方显示待处理的提案：各步骤、改动的成员、是否通过检查、`.conf`、`.yaml` 与 `.json` 三种格式的差异（已脱敏），
+以及 **审阅并应用…** 与 **丢弃**。“应用”会打开含完整差异的对话框，只有其中的 **应用** 才会以该用户的身份应用，带上所见的 ETag
+作为 `If-Match` 以及所确认的修订号：生成一个新版本（来源为 console），保存到 store 并列入 **版本**，然后执行缓存清除。取消对话框
+不会发送任何请求。若提案检查后配置已变，应用会被拒绝，提案移到新版本上重新提供，需要重新审阅与确认；Admin API 拒绝的变更不会
+应用任何内容，提案连同原因保留，模型也会得知。只有级别为 `apply` 的用户能应用；`propose` 用户的提案等待这样的用户，他们在
+**提案** 页可看到所有用户的待处理提案。
+
+**审计日志** 记录助手做过的事：每次调用了工具的回答（其调用，已脱敏并截断；留下的提案；结果），以及每次应用、拒绝、重新提供
+与丢弃，含用户、时间、对话、技能、提案的步骤与生成的版本。最多保留 `limits.max_audit_entries`（1000）条，保存在 store 的
+`assistant.audit` 段中，重启后仍在，在 **审计日志** 页查看。
+
+端点为 `GET /api/m/ai/proposals`（待处理的提案：用户自己的；级别为 `apply` 时为所有用户的）、
+`GET /api/m/ai/proposals/{conversation}`（`?user=` 读取他人的：在运行中的配置上检查后的提案，含 `revision`、`etag`、`stale`、
+`steps` 及各步骤的错误、`changed`、按格式的 `diff`、`valid`、`errors`、`can_apply`）、
+`POST /api/m/ai/proposals/{conversation}/apply`（`{"id", "revision", "etag", "user"}`；`200` 带 `outcome` 为 `applied` 或
+`partial`、`version` 与清除结果；级别低于 `apply` 时 `403`；修订号不符或对话正在回答时 `409`；过期时 `412` 并重新提供提案；
+检查未通过或 Admin API 拒绝时 `422`）、`POST /api/m/ai/proposals/{conversation}/discard`（`{"id", "user"}`）以及
+`GET /api/m/ai/audit`（`?user=`、`?conversation=`、`?kind=` 为 `chat`、`apply` 或 `discard`、`?before=` 某条记录的 `seq`、
+`?limit=` 最多 500；最新的在前）。
 
 ## 角色的页面
 
