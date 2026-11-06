@@ -5936,3 +5936,33 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: reasoning is not carried between turns for OpenAI Responses' encrypted reasoning items or
   Anthropic's redacted thinking; no way back to the config file's settings once the store holds
   them. The decisions made are in the plan's I124 section, pending review.
+
+
+### I125 The chat panel and the read tools — done
+
+- **The loop**: `POST /api/m/ai/chat` streams a chat as SSE (start, text, thinking, tool call, tool
+  result, ask, usage, summary, done): fit calls the model, runs the tools it asks for and calls it
+  again, until an answer, an `ask_user` question or a limit. Every `limits` setting is enforced (tool
+  calls, turns, concurrent chats, tokens a day, tool result and answer bytes, conversations). Each
+  call carries the rules, the language, the open page and its selection, the skill catalog (empty
+  until I127) and the history; past the model's window, early tool results are cut, then early turns
+  summarized by the model and the summary kept. The user's words go as typed.
+- **Read tools** (`assistant.Registry`): `config_get`, `schema_describe`, `config_validate`,
+  `versions_diff`, `status_get`, `metrics_query`, `upstream_health`, `consistency_check`,
+  `certs_list`, `cache_zones`, `log_tail`, `access_log_sample`, `adapt_convert` and `ask_user`, on
+  the console's pool against the Admin API in process, 30s each; every result redacted, cut to its
+  bound with a note, and fenced as data. fit's own log keeps its last 1,000 messages for `log_tail`
+  (`logs.Root.Recent`).
+- **Conversations**: per user in the encrypted store, a section each (`assistant.chats.<hash>`),
+  written by one saver; `GET /api/m/ai/conversations`, `GET`/`DELETE /api/m/ai/conversations/{id}`,
+  `POST /api/m/ai/chat/stop`, `GET /api/m/ai/tools`.
+- **Workbench**: a chat button in every page's top bar (hidden for level `off`); the panel renders
+  Markdown as DOM nodes as it streams, folds tool calls, shows `ask_user` as buttons, and has Stop,
+  Retry and pick, new and delete conversation; the Functions page; English and Chinese.
+- **Tests**: `make test-changed` (83 packages) under the race detector; `assistant` at 98.0%; a
+  scripted fake model and the real Admin API and log ring; in a browser: questions answered from
+  tools in English and Chinese, the `ask_user` choice reaching the model, Stop, Retry, conversations
+  across a restart, and no conversation text in the store file in the clear.
+- **Gaps**: `llm_nodes` and `tunnel_nodes` are not built, as those roles have no Go API for their
+  node lists; `metrics_query` reads current counters only, as fit keeps no metric history. The
+  decisions made are in the plan's I125 section, pending review.

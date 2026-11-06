@@ -4218,3 +4218,23 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **不兼容变更**：保存了助手设置的 store 为第 3 版，旧版 fit 无法打开；没有小节的 store 不变。
 - **缺口**：OpenAI Responses 的加密推理项与 Anthropic 的 redacted thinking 不在轮次之间传递；store 保存设置后无法回到配置文件的
   设置。实现时所做的决策在计划的 I124 一节，待审查。
+
+
+### I125 对话面板与只读工具 — 已完成
+
+- **循环**：`POST /api/m/ai/chat` 以 SSE 流式输出一次对话（start、text、thinking、tool call、tool result、ask、usage、summary、
+  done）：fit 调用模型、运行它要求的工具、再调用模型，直到得到回答、`ask_user` 问题或到达限制。`limits` 的每项设置都已执行
+  （工具调用、轮次、并发对话、每日 token、工具结果与回答字节数、对话数）。每次调用带上规则、语言、打开的页面及其选中内容、
+  技能目录（I127 之前为空）与历史；超出模型窗口时先截断早期工具结果，再由模型摘要早期轮次并保存摘要。用户的话原样发送。
+- **只读工具**（`assistant.Registry`）：`config_get`、`schema_describe`、`config_validate`、`versions_diff`、`status_get`、
+  `metrics_query`、`upstream_health`、`consistency_check`、`certs_list`、`cache_zones`、`log_tail`、`access_log_sample`、
+  `adapt_convert` 与 `ask_user`，在控制台池上进程内调用 Admin API，每个 30 秒；每个结果都脱敏、按上限截断并注明、作为数据隔开。
+  fit 自己的日志保留最近 1,000 条供 `log_tail` 使用（`logs.Root.Recent`）。
+- **对话**：按用户保存在加密 store 中，每人一个小节（`assistant.chats.<hash>`），由一个保存者写入；
+  `GET /api/m/ai/conversations`、`GET`/`DELETE /api/m/ai/conversations/{id}`、`POST /api/m/ai/chat/stop`、`GET /api/m/ai/tools`。
+- **Workbench**：每页顶栏的对话按钮（级别 `off` 时隐藏）；面板在流式输出时把 Markdown 渲染为 DOM 节点，折叠工具调用，以按钮显示
+  `ask_user`，提供停止、重试与选择、新建、删除对话；Functions 页；中英文。
+- **测试**：竞态检测下的 `make test-changed`（83 个包）；`assistant` 覆盖率 98.0%；脚本化的假模型与真实的 Admin API 和日志环；
+  在浏览器中：中英文问题由工具回答，`ask_user` 的选择到达模型，停止、重试、重启后对话仍在，store 文件中没有明文对话。
+- **缺口**：`llm_nodes` 与 `tunnel_nodes` 未实现，这些角色没有节点列表的 Go API；`metrics_query` 只读当前计数，fit 不保存指标历史。
+  实现时所做的决策在计划的 I125 一节，待审查。

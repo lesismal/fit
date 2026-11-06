@@ -279,7 +279,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I123 | The workbench's Engine menu: one first-level entry, each listener port a submenu of its features in the order asked (handlers, reverse/forward proxy, cache and middleware, streaming, WebRTC, layer 4/SOCKS/TLS/ACME/HTTPS by default), with the port's feature tags on its line | I122 | done |
 | **AI assistant** | | | |
 | I124 | Decision 031; `admin.assistant` and its settings page; the model client for each API, streamed, with tool calls, on fib's asynchronous HTTP client; keys in the store | I120 | done |
-| I125 | The workbench's chat panel and the read tools: tool registry, SSE chat, page context, redaction, fit's log ring | I124 | todo |
+| I125 | The workbench's chat panel and the read tools: tool registry, SSE chat, page context, redaction, fit's log ring | I124 | done |
 | I126 | Proposals: the change tools, the diff and apply flow, per-user levels and the audit log | I125 | todo |
 | I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | todo |
 | I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | todo |
@@ -2010,6 +2010,38 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   restart within their bounds; under the race
   detector, and the panel works in a browser.
 - **Touches**: `assistant`, `admin`, `admin/store`, `observe`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Where tools run.** The console pool's request helper answers 504 and would break a stream, so
+   `console.Request.Submit` runs work on the pool without holding the request, 30s a tool.
+   Alternative: a pool of the assistant's own.
+2. **Redaction** happens once, on every result in the loop, plus by structure inside the JSON tools:
+   members named like secrets (password, secret, token, key, hash; not `*_file`, `*_env`, `max_*`)
+   and secrets in text by pattern. `admin.assistant`, `admin.console.users`, `admin.store`,
+   `admin.address` and `admin.token_file` are left out entirely. Alternative: listed paths only.
+3. **`access_log_sample`** reads the last 512 KiB of the access log's file, not a ring, which would
+   add a copy on the request path.
+4. **At `max_turns`** a new message is refused (409, start a new conversation), not folded silently.
+5. **At `max_tool_calls`** further calls get error results and the answer ends with reason
+   `max_tool_calls`; no closing call without tools, which Anthropic refuses after tool calls.
+6. **Tokens a day** are counted per user in their conversations' section, reset at UTC midnight.
+7. **A conversation's size**: constants, 512 KiB a conversation and 8 MiB a user; past them,
+   summarized messages go first, then the earliest turns. Alternative: settings of their own.
+8. **Without a store** conversations are kept in memory until a restart, and the panel says so.
+9. **The context budget**: about 3 bytes a token; 32,768 tokens when a model's `context` is unset; the
+   answer's share is `max_output_tokens`, at most a quarter; the summary is tried once a chat, and if
+   it fails the history is cut harder.
+10. **The page context** goes in the system prompt, redacted and at most 16 KiB, so the user's words
+    reach the model unchanged.
+11. **The last event** is written after the conversation and the chat's slot are freed, so a message
+    sent at once is not refused.
+12. **A slow browser**: events are written without waiting, within the limits; one that takes nothing
+    for 60s has its stream cut, which stops the chat. Alternative: pause the model's stream.
+13. **Stop**: the browser aborts its fetch and calls `POST /api/m/ai/chat/stop`; the partial answer is
+    kept, marked stopped, and calls left without results get error results.
+14. **Languages**: the model gets English tool descriptions; the Functions page shows them in the
+    workbench's language.
 
 ### I126 Proposals, levels and the audit log
 
