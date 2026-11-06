@@ -3207,6 +3207,8 @@ In JSON:
 | `read_ahead` | duration | `"3s"` | How much of the items is read ahead of what is sent, on the library's file pool, so that a slow disk does not stall the channel and the next item follows the last without a gap. 500ms to 1m. 3s when left out. |
 | `max_buffer_bytes` | integer, 0 or more | `16777216` | The most bytes read ahead and not yet sent, whatever read_ahead says, at least 1 MiB; a sample larger than it ends its item. 16 MiB when left out or 0. |
 | `push` | list of [object](#config-streampush) |  | Outside servers the channel is relayed to, as streaming's push names them, their stream being the channel's. |
+| `encrypt` | boolean |  | Encrypts the channel's HLS segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, under a key derived from the library's secret, which the hls handler serves only to a request its auth lets play the channel; so that segments copied, as a CDN keeps them, do not play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are not served for it. The other egresses play the channel as before, under their auth. Off when left out. |
+| `key_rotation` | integer, 0 to 100000 | `10` | With encrypt, how many segments one key encrypts before the next takes over, so that a key handed out opens a few segments only. 10 when left out or 0. |
 
 <a id="config-channelslot"></a>
 
@@ -3361,6 +3363,8 @@ In JSON:
 | `file_workers` | integer, 0 or more |  | The goroutines of the library's file pool, which probe, read sample tables and read the files' bytes, so that no fib worker waits on the disk: all the disk is asked to do at once. 4 a CPU, and at least 16, when left out or 0. |
 | `file_queue` | integer, 0 or more | `4096` | The most jobs that wait for the file pool; one more is refused, as a request answered 503. 4096 when left out or 0. |
 | `file_timeout` | duration | `"10s"` | How long a job may wait for the file pool before it is given up, as a request answered 503. 10s when left out. |
+| `secret` | string |  | The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation segments. Changing it changes every key, so that segments encrypted before, kept by a CDN, no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of the library can be encrypted. |
+| `secret_file` | string |  | A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. None when left out. |
 
 <a id="providers"></a>
 
@@ -4487,6 +4491,7 @@ In JSON:
 | `cache_control` | string |  | Sent as Cache-Control with every playlist, segment, subtitle and file, so that a CDN keeps them, as "public, max-age=86400": they change only when their file does, which their ETag and Last-Modified say. None when left out. |
 | `cors` | string |  | Sent as Access-Control-Allow-Origin, as "*", for players on other origins. None when left out. |
 | `timeout` | duration | `"30s"` | How long a request may wait for what it needs to be read and built on the library's file pool; past it the answer is 503. 30s when left out. |
+| `encrypt` | boolean |  | Encrypts the segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, each item under a key of its own derived from the library's secret, which the media playlists name as aes.key in the item's directory and the handler serves only to a request auth lets play that item: segments copied, as a CDN keeps them, do not play without it. The files themselves are then not served; initialization sections, subtitles and posters stay clear. Needs auth and the library's secret or secret_file. Off when left out. |
 
 <a id="http-handlers-webrtc_proxy"></a>
 

@@ -1281,6 +1281,15 @@ routes:
         # # pool; past it the answer is 503. 30s when left out.
         # # duration, as "1.5s" or "2m"; default "30s".
         # timeout: "30s"
+
+        # # Encrypts the segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, each item under
+        # # a key of its own derived from the library's secret, which the media playlists name as
+        # # aes.key in the item's directory and the handler serves only to a request auth lets play that
+        # # item: segments copied, as a CDN keeps them, do not play without it. The files themselves are
+        # # then not served; initialization sections, subtitles and posters stay clear. Needs auth and
+        # # the library's secret or secret_file. Off when left out.
+        # # boolean.
+        # encrypt: true
   # -
     # # A route whose handler is webrtc_proxy, with every one of its params.
     # name: "webrtc_proxy-example"
