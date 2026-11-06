@@ -32,7 +32,7 @@ a config against it and more.
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
 - [Engine](#engine): [`engine`](#config-engine)
-- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser)
+- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser), [`admin.assistant.mcp`](#config-assistantmcp)
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
@@ -1256,7 +1256,8 @@ made from the schema and a JSON editor; off a loopback address it needs `cert_fi
 [decision 027](../decisions/027-console-and-store.md). `admin.assistant`, off when left out, adds
 the workbench's assistant: the model APIs it calls (Anthropic, OpenAI, Gemini, Azure OpenAI, Ollama,
 any Chat Completions server, or this fit's `llm.proxy`), its limits and each console user's level;
-the Settings page keeps them, with the keys, in the store. See
+the Settings page keeps them, with the keys, in the store; its `mcp` serves the assistant to
+outside agents over MCP at `/mcp` on the console's address, with tokens users make on the MCP page. See
 [the assistant](../console.md#the-assistant) and [decision 031](../decisions/031-assistant.md).
 
 In a .conf file:
@@ -1390,6 +1391,7 @@ Also at `llm.hub.console.users[]`.
 | `data` | [object](#config-assistantdata) |  | What of fit's logs may be sent to a model, and more of what is redacted before anything is. |
 | `users` | list of [object](#config-assistantuser) |  | What each console user may have the assistant do, by user name; a user not listed has default_level. |
 | `default_level` | string: `off`, `read`, `edit`, `propose`, `apply` | `"read"` | The level of a console user that users does not list: off, read (the read tools only), edit (also drafts on the open page, never submitted), propose (also proposals) or apply (also applies them). read when left out. |
+| `mcp` | [object](#config-assistantmcp) |  | An MCP server at /mcp on the console's address, for outside agents (Claude Code, Cursor, an SDK's client) to call the assistant's tools, read the config, the schema and the docs, and use the skills as prompts, with the MCP tokens users make on the workbench's MCP page. A token has its user's level, at most propose: what it proposes is applied only in the workbench. Off when left out. |
 
 <a id="config-assistantprovider"></a>
 
@@ -1472,6 +1474,21 @@ Also at `llm.hub.console.users[]`.
 | --- | --- | --- | --- |
 | `username` | string |  | Required. A console user's name. |
 | `level` | string: `off`, `read`, `edit`, `propose`, `apply` |  | Required. What the user may have the assistant do: off, read, edit, propose or apply, each including the ones before it. |
+
+<a id="config-assistantmcp"></a>
+
+### `admin.assistant.mcp`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `allow` | list of string |  | The addresses (as 127.0.0.1) and prefixes (as 10.0.0.0/8) MCP clients may call from; a token may narrow them further. Loopback only when left out. |
+| `max_tokens_per_user` | integer, 0 or more | `10` | The most MCP tokens a console user may hold. 10 when left out or 0. |
+| `max_token_days` | integer, 0 to 3650 | `90` | The longest a token may last, in days, from when it is made. 90 when left out or 0. |
+| `max_sessions` | integer, 0 or more | `4` | The most sessions a token keeps for clients of the protocol's versions before 2026-07-28, which open one with initialize; one more ends the one used least recently. 4 when left out or 0. |
+| `session_idle_timeout` | duration | `"1h"` | How long such a session is kept without a request. 1h when left out. |
+| `max_request_bytes` | integer, 0 to 8388608 | `1048576` | The most bytes of a request's body, beside the console's own bound. 1 MiB when left out or 0. |
+| `max_concurrent_calls` | integer, 0 to 64 | `4` | The most requests of one token served at once; one more is answered 429. 4 when left out or 0. |
+| `max_calls_per_minute` | integer, 0 to 6000 | `120` | The most requests of one token in a minute; past it they are answered 429 until the minute's share comes back. 120 when left out or 0. |
 
 <a id="https-by-default"></a>
 

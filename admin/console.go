@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fib"
@@ -17,6 +18,7 @@ import (
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/app/workbench"
 	"github.com/lesismal/fit/assistant"
+	"github.com/lesismal/fit/assistant/mcp"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/login"
 	"github.com/lesismal/fit/runtime"
@@ -56,6 +58,9 @@ type Console struct {
 	// ai is the assistant, served as the module ai, when admin.assistant
 	// is set; nil otherwise.
 	ai *assistant.Assistant
+	// mcp is the assistant's MCP server, at /mcp, which answers only while
+	// the assistant's settings have mcp; nil without the assistant.
+	mcp *mcp.Server
 }
 
 // StartConsole serves the console c describes on engine, for configs, whose
@@ -73,6 +78,9 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	cs := &Console{schema: sch, logf: logf, configs: configs}
+	// The logins exist once the console is started, which may serve /mcp
+	// at once.
+	var logins atomic.Pointer[login.Logins]
 	inner := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceConsole}
 	cs.api = inner.routes()
 	if a.Assistant != nil {
@@ -89,12 +97,23 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		// Settings is set, and the tools are the assistant's own: New
 		// cannot fail.
 		cs.ai, _ = assistant.New(o)
+		mo := mcp.Options{Assistant: cs.ai, HasUser: func(user string) bool { l := logins.Load(); return l != nil && l.HasUser(user) },
+			Docs: schema.Reference, URL: cs.URL, Logf: logf}
+		if o.Store != nil {
+			mo.Store = o.Store
+		}
+		cs.mcp = mcp.New(mo)
+		cs.ai.Extend(cs.mcp.Routes)
 	}
 	cs.module = &console.Module{ID: AdminModule, Routes: cs.routes}
+	var endpoints map[string]console.Handler
+	if cs.mcp != nil {
+		endpoints = map[string]console.Handler{mcp.Path: cs.mcp.Serve}
+	}
 	rc := &config.RoleConsole{Address: c.Addr(), MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
 		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
 	cs.c, err = console.Start(engine, console.Options{
-		Config: rc, Cookie: sessionCookie, Pages: workbench.Pages(), Logf: logf,
+		Config: rc, Cookie: sessionCookie, Pages: workbench.Pages(), Logf: logf, Endpoints: endpoints,
 		// The routes of the console's own pages, the workbench's, beside
 		// the modules': /api/m/admin/schema and the like.
 		Modules: func() []*console.Module {
@@ -118,6 +137,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	cs.logins = cs.c.Logins()
+	logins.Store(cs.logins)
 	if user, until := configs.TemporaryPassword(); user != "" {
 		cs.logins.SetTemporary(user, until)
 	}

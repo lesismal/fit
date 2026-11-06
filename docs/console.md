@@ -432,11 +432,11 @@ It needs `admin.console`, and like all of `admin` it is read when fit starts.
 ```json
 "assistant": {
   "providers": [
-    {"name": "claude", "kind": "anthropic", "models": [{"name": "claude-sonnet-4-5", "context": 200000}]},
+    {"name": "claude", "kind": "anthropic", "models": [{"name": "claude-sonnet-5-5", "context": 200000}]},
     {"name": "local", "kind": "ollama", "base_url": "http://127.0.0.1:11434", "models": [{"name": "qwen3:8b"}]},
     {"name": "mesh", "kind": "llm_proxy"}
   ],
-  "default_model": {"provider": "claude", "model": "claude-sonnet-4-5"},
+  "default_model": {"provider": "claude", "model": "claude-sonnet-5-5"},
   "users": [{"username": "ops", "level": "propose"}]
 }
 ```
@@ -632,7 +632,7 @@ inputs:
   - name: upstream
     description: The pool to look at.
     required: false
-model: anthropic/claude-sonnet-4-5
+model: anthropic/claude-sonnet-5-5
 examples:
   - Is everything up this morning?
 ---
@@ -716,7 +716,7 @@ converted; and two fit configs with planted problems, each with the findings the
 by member. `make assistant-eval` runs them against a model:
 
 ```bash
-FIT_EVAL_KIND=anthropic FIT_EVAL_MODEL=claude-sonnet-4-5 FIT_EVAL_API_KEY=... make assistant-eval
+FIT_EVAL_KIND=anthropic FIT_EVAL_MODEL=claude-sonnet-5-5 FIT_EVAL_API_KEY=... make assistant-eval
 ```
 
 It reports, case by case, whether the proposal checks (as `fit validate` checks a config: loaded
@@ -728,6 +728,82 @@ provider as `admin.assistant` would, `FIT_EVAL_CASES` picks cases by a regular e
 back as each case's `recorded.json`. Files a config names that are not on this machine
 (certificates, a static root) stand for those on the machine it came from. CI calls no model:
 `go test ./assistant` runs the same sets against the recorded answers, and every case must pass.
+
+### The MCP server
+
+`admin.assistant.mcp`, off when left out, serves the assistant over the
+[Model Context Protocol](https://modelcontextprotocol.io) at `/mcp` on the console's address, so that
+outside agents — Claude Code, Cursor, a client of an MCP SDK — use what the panel uses:
+
+| MCP | What fit serves |
+| --- | --- |
+| tools | the registry's tools the token's level allows under the settings, with their schemas, results redacted and cut as for the model; not `ask_user` nor the page tools, which need the person and the open page |
+| prompts | the enabled skills, each skill's inputs its arguments; a prompt is the skill's prompt with the tools it uses |
+| resources | `fit://config/base`, `fit://config/effective`, `fit://status`, `fit://versions`, `fit://schema`, `fit://docs/reference` and each of its chapters; templates `fit://schema/{path}`, `fit://versions/{n}` and `fit://docs/reference/{chapter}`; redacted as for the model, at most 1 MiB each |
+
+```json
+{
+  "admin": {
+    "console": {"users": [{"username": "ada", "password_hash": "$2a$10$..."}]},
+    "assistant": {
+      "users": [{"username": "ada", "level": "apply"}],
+      "mcp": {"allow": ["127.0.0.1", "::1"], "max_calls_per_minute": 120}
+    }
+  }
+}
+```
+
+An agent authenticates with an **MCP token**, made on the workbench's **Assistant → MCP** page: a
+name, a level (`read`, or `propose` for a user whose level is `propose` or `apply`), a number of
+days (at most `max_token_days`, 90) and, if wanted, the addresses it is used from. The token is
+shown once — fit keeps only a SHA-256 of its secret, in the store's section `assistant.mcp`, or in
+memory until fit restarts without a store — and is revoked on the same page. A token's calls have
+its level within its user's level in the settings in use at each request, so a user lowered to
+`read` or `off` takes their tokens with them; a token's user no longer a console user is refused.
+A user sees their own tokens; one whose level is `apply` sees and revokes everyone's.
+
+A token whose level is `propose` is offered the propose tools: each adds a step to the token's one
+pending proposal, kept in a conversation of its user's named `MCP: <token name>`, and answers with
+the proposal's ID and a link to the **Proposals** page. There is no apply tool: the proposal is
+applied only there, by a user whose level is `apply`, with the Apply click and the dialog's confirm,
+as every proposal is. A token's propose calls run one after another, so that its proposal takes one
+step at a time.
+
+The transport is Streamable HTTP, for both of the protocol's eras: revision `2026-07-28`, stateless,
+whose every request carries its version in `_meta` and the headers `Mcp-Protocol-Version`,
+`Mcp-Method` and `Mcp-Name`, which fit checks against the body (`server/discover` answers what fit
+serves); and `2025-11-25`, `2025-06-18` and `2025-03-26`, which open a session with `initialize`
+(`Mcp-Session-Id`, ended with `DELETE`). A request is a `POST` of one JSON-RPC message; `tools/call`
+is answered as an SSE stream (pings while the tool runs, then the result) to a client that accepts
+one, the rest as JSON; a stream the client cuts cancels the call, and `GET` answers `405`, as fit
+sends nothing unasked.
+
+Each request is checked, in this order: the caller's address against `allow` (loopback when left
+out; `403`), the token in `Authorization: Bearer` (`401` when missing, wrong, revoked or expired),
+the token's own addresses (`403`), the user's level (`403` when `off`), and the token's bounds:
+`max_calls_per_minute` (120) and `max_concurrent_calls` (4) answer `429` with `Retry-After`,
+`max_request_bytes` (1 MiB) `413`, and `max_sessions` (4) ends the session used least recently,
+`session_idle_timeout` (1h) an idle one. A tool call runs on the console's pool within 30 seconds;
+a client that takes nothing of its stream is cut a minute after its queue passed the watermark.
+Every tool call, resource read and prompt is in the audit log with the source `mcp` and the token's
+name. The console's `Origin` check refuses browsers of other sites, as for every request.
+
+To add fit to Claude Code, with the token in place of `<token>`:
+
+```sh
+claude mcp add --transport http fit http://127.0.0.1:2020/mcp --header "Authorization: Bearer <token>"
+```
+
+A client configured by JSON (Cursor, a project's `.mcp.json`) takes
+`{"mcpServers": {"fit": {"type": "http", "url": "http://127.0.0.1:2020/mcp", "headers": {"Authorization": "Bearer <token>"}}}}`.
+The MCP page shows both with the console's own address. fit's assistant calls no outside MCP
+server.
+
+The endpoints of the page are `GET /api/m/ai/mcp` (the server on or off, its settings with their
+defaults, the endpoint, and the tokens, never their hashes), `POST /api/m/ai/mcp/tokens`
+(`{"name", "level", "days", "allow"}`: `{"token", "view"}`, the token shown this once; `409` for a
+name taken or past `max_tokens_per_user`) and `DELETE /api/m/ai/mcp/tokens/{id}`. The settings are
+saved with the assistant's through `PUT /api/m/ai/settings`.
 
 ## Roles' pages
 
