@@ -257,6 +257,9 @@ func (c *Config) Validate() Errors {
 
 	if a := c.Admin; a != nil {
 		checkAdminAddress(a, add)
+		if a.NodeID != "" && !nodeIDPattern.MatchString(a.NodeID) {
+			add(a.At.Field("node_id"), "%q is not a node ID: 1 to 64 letters, digits, '.', '_' and '-', starting with a letter or digit", a.NodeID)
+		}
 		checkStore(a.Store, add)
 		checkConsole(a.Console, add)
 		checkAssistant(a.Assistant, a.Console, add)
@@ -628,6 +631,9 @@ func checkStore(st *Store, add func(Value, string, ...any)) {
 // loopback address, the API needs a token and TLS, so that the token, which
 // is all it takes to change what fit serves, never crosses a network in the
 // clear.
+// nodeIDPattern is what admin.node_id may be.
+var nodeIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
 func checkAdminAddress(a *Admin, add func(Value, string, ...any)) {
 	if network, address := a.Network(); network == "unix" {
 		if address == "" {

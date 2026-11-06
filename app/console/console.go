@@ -709,25 +709,30 @@ func (c *Console) login(ctx *fibhttp.Context) {
 		return
 	}
 	// The attempt is admitted, one from an address at a time, before it is
-	// queued, so that every failure counts before the next guess is checked.
+	// queued, so that every failure counts before the next guess is checked;
+	// and not while the user's checks are slowed.
 	addr := clientAddr(ctx.Request)
-	t, wait, busy := c.logins.Admit(addr)
+	t, wait, busy, slowed := c.logins.AdmitUser(addr, body.Username)
 	if t == nil {
-		refuseLogin(ctx, wait, busy)
+		refuseLogin(ctx, wait, busy, slowed)
 		return
 	}
 	// bcrypt takes its time on the login pool, not on the worker, nor on
 	// the workers of logged-in users' tasks.
 	(&Request{Context: ctx, c: c}).goOn(c.checks, func() {
 		if wait := t.LockedOut(); wait > 0 {
-			refuseLogin(ctx, wait, false)
+			refuseLogin(ctx, wait, false, false)
 			return
 		}
 		ok, err := c.logins.Check(ctx.Context(), body.Username, body.Password)
 		if err != nil {
 			return // the client left
 		}
-		t.Done(!ok)
+		if ok {
+			t.Passed()
+		} else {
+			t.Done(true)
+		}
 		if !ok {
 			c.warnf("console: a failed login as %q from %s", body.Username, addr)
 			_ = Error(ctx, stdhttp.StatusUnauthorized, "the user name or password is wrong")
@@ -747,15 +752,33 @@ func (c *Console) login(ctx *fibhttp.Context) {
 }
 
 // refuseLogin answers 429 for a login that may not be checked for wait,
-// since its address is locked out or, when busy, another login from it is
-// being checked.
-func refuseLogin(ctx *fibhttp.Context, wait time.Duration, busy bool) {
-	ctx.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+// since its address is locked out, or, when busy, another login from it is
+// being checked, or, when slowed, its user has failed too often in a row.
+func refuseLogin(ctx *fibhttp.Context, wait time.Duration, busy, slowed bool) {
 	msg := "too many failed logins from this address; try again later"
-	if busy {
+	switch {
+	case busy:
 		msg = "another login from this address is being checked; try again"
+	case slowed:
+		msg = "too many failed logins as this user; try again later"
 	}
-	_ = Error(ctx, stdhttp.StatusTooManyRequests, msg)
+	Refuse(ctx, wait, msg)
+}
+
+// RetryBody is a 429's answer: why, and the seconds to wait before trying
+// again, as Retry-After says too.
+type RetryBody struct {
+	Error      string `json:"error"`
+	RetryAfter int    `json:"retry_after"`
+}
+
+// Refuse answers 429 with msg, telling the client to try again after wait,
+// in Retry-After and in the body's retry_after: its whole seconds and one
+// more, so that a client that waits that long finds the wait over.
+func Refuse(ctx *fibhttp.Context, wait time.Duration, msg string) {
+	secs := int(wait.Seconds()) + 1
+	ctx.Header().Set("Retry-After", strconv.Itoa(secs))
+	_ = WriteJSON(ctx, stdhttp.StatusTooManyRequests, RetryBody{Error: msg, RetryAfter: secs})
 }
 
 func (c *Console) logout(ctx *fibhttp.Context) {

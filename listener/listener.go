@@ -418,6 +418,72 @@ func http3Config(l *runtime.Listener, tlsConfig *tls.Config) http3.Config {
 	return c
 }
 
+// Plan says what Reload would do with g without doing it: the listeners it
+// would bind and those it would remove. A new listener's address is tried
+// as bind tries it, a plain bind closed at once, so that an address another
+// socket holds gives the error Reload would give; nothing is bound, and g
+// stays the caller's. The address of a listener to be bound is the one
+// written, its port 0 unresolved.
+func (s *Server) Plan(g *runtime.Graph) (added, removed []Addr, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var kept []*binding
+	fresh := make([]*runtime.Listener, 0, len(g.Listeners))
+	for _, l := range g.Listeners {
+		i := slices.IndexFunc(s.bound, func(b *binding) bool { return b.same(l) && !slices.Contains(kept, b) })
+		if i < 0 {
+			fresh = append(fresh, l)
+			continue
+		}
+		kept = append(kept, s.bound[i])
+	}
+	var gone []*binding
+	for _, b := range s.bound {
+		if !slices.Contains(kept, b) {
+			gone = append(gone, b)
+		}
+	}
+	for _, l := range fresh {
+		if !slices.ContainsFunc(gone, func(b *binding) bool { return b.address == l.Address }) {
+			if err := tryBind(l); err != nil {
+				return nil, nil, fmt.Errorf("listener %q: %w", l.Name, err)
+			}
+		}
+		network := "tcp"
+		if slices.Equal(l.Protocols, []string{config.ProtocolUDP}) {
+			network = "udp"
+		}
+		added = append(added, Addr{Name: l.Name, Addr: plannedAddr{network, l.Address}, Protocols: l.Protocols})
+	}
+	return added, addrsOf(gone), nil
+}
+
+// tryBind tries l's address as bindOnce does before it binds, for TCP, UDP
+// or both, and binds nothing.
+func tryBind(l *runtime.Listener) error {
+	switch {
+	case slices.Equal(l.Protocols, []string{config.ProtocolTCP}):
+		return checkFree(l.Address)
+	case slices.Equal(l.Protocols, []string{config.ProtocolUDP}):
+		return checkFreeUDP(l.Address)
+	}
+	if slices.ContainsFunc(l.Protocols, func(p string) bool { return p != config.ProtocolH3 }) {
+		if err := checkFree(l.Address); err != nil {
+			return err
+		}
+	}
+	if slices.Contains(l.Protocols, config.ProtocolH3) {
+		return checkUDP(l.Address)
+	}
+	return nil
+}
+
+// plannedAddr is the address of a listener Plan would bind, as written.
+type plannedAddr struct{ network, address string }
+
+func (a plannedAddr) Network() string { return a.network }
+func (a plannedAddr) String() string  { return a.address }
+
 // Reload makes g the runtime's current graph, taking over the caller's
 // reference to it, and moves the listeners to g's: those g has unchanged are
 // kept, the new and changed ones bound first, and those g has no more drained
