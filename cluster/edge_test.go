@@ -206,11 +206,10 @@ func TestTestAbandoned(t *testing.T) {
 	waitFor(t, "the test's slot", func() bool { return len(f.m.tests) == 0 })
 
 	// A saved member that does not check is not tested.
-	f.store.sections[Section] = []byte(`{"members":[{"name":"bad","url":"ftp://x","access":"admin_api","token":"t"}]}`)
-	f.m.Close()
-	f.start()
-	s.c.Timeout = 10 * time.Second
-	if code, body, _ := s.do("POST", "/api/m/cluster/nodes/bad/test", ""); code != 400 {
+	g := &fixture{t: t, engine: f.engine, store: newMemStore(), log: &logBuf{}, set: config.Cluster{PollInterval: config.Duration(time.Hour)}}
+	g.store.sections[Section] = []byte(`{"members":[{"name":"bad","url":"ftp://x","access":"admin_api","token":"t"}]}`)
+	g.start()
+	if code, body, _ := g.serve().do("POST", "/api/m/cluster/nodes/bad/test", ""); code != 400 {
 		t.Errorf("%d %s", code, body)
 	}
 }

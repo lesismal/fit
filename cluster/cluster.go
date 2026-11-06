@@ -510,11 +510,11 @@ func (m *Manager) routes(api *console.API) {
 
 func (m *Manager) list(r *console.Request) {
 	m.mu.Lock()
-	ro, max := m.readOnly, m.maxNodes
+	ro, maxNodes := m.readOnly, m.maxNodes
 	m.mu.Unlock()
 	tag := m.etag()
 	r.Header().Set("ETag", tag)
-	_ = r.JSON(200, membersBody{Version: strings.Trim(tag, `"`), MaxNodes: max, ReadOnly: ro, Nodes: m.Members()})
+	_ = r.JSON(200, membersBody{Version: strings.Trim(tag, `"`), MaxNodes: maxNodes, ReadOnly: ro, Nodes: m.Members()})
 }
 
 func (m *Manager) state(r *console.Request) {
