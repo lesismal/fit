@@ -68,6 +68,9 @@ type Options struct {
 	Logf func(format string, args ...any)
 	// Now is the clock; time.Now when nil.
 	Now func() time.Time
+	// NodeID is the manager's own node ID, which the members it tells what
+	// it owns there are told (I145).
+	NodeID string
 }
 
 // Manager is the manager of a fit's members.
@@ -104,6 +107,8 @@ type Manager struct {
 	link linkHub
 	// pass is the calls the node switcher passes on to members.
 	pass passHub
+	// tpl is the members' sync states against the templates (sync.go).
+	tpl tplState
 }
 
 // New returns the manager o.Settings turns on, with the members the store
@@ -183,8 +188,10 @@ func (m *Manager) Close() {
 			wg.Add(1)
 			n.shutdown(wg.Done)
 		}
-		// The operations under way hear their calls abandoned, and end.
+		// The operations under way hear their calls abandoned, and end;
+		// so do the reads of members' sync states.
 		m.waitOps(closeWait)
+		m.waitSyncs(closeWait)
 		ended := make(chan struct{})
 		go func() { wg.Wait(); close(ended) }()
 		select {
@@ -369,6 +376,10 @@ func (m *Manager) change(user string, fn func(d *document) (AuditEntry, error)) 
 	if !m.closed {
 		m.sync()
 	}
+	if !strings.HasPrefix(entry.Action, "op.") {
+		// What the members own may have changed: they are told.
+		defer m.kickManaged()
+	}
 	return nil
 }
 
@@ -548,6 +559,7 @@ func (m *Manager) routes(api *console.API) {
 	m.groupRoutes(api)
 	m.opRoutes(api)
 	m.passRoutes(api)
+	m.templateRoutes(api)
 }
 
 func (m *Manager) list(r *console.Request) {
@@ -598,7 +610,7 @@ func (m *Manager) answer(r *console.Request, status int, v any, err error) {
 		_ = r.JSON(status, v)
 	case errors.As(err, &fe):
 		_ = r.JSON(400, fe)
-	case errors.As(err, &nf), errors.As(err, new(errNoGroup)):
+	case errors.As(err, &nf), errors.As(err, new(errNoGroup)), errors.As(err, new(errNoTemplate)):
 		_ = console.Error(r.Context, 404, err.Error())
 	case errors.As(err, new(errBusy)):
 		_ = console.Error(r.Context, 429, err.Error())

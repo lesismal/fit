@@ -10,6 +10,7 @@
 - [集群页面](#集群页面)
 - [分组与操作](#分组与操作)
 - [成员自己的页面：节点切换器](#成员自己的页面节点切换器)
+- [模板：分组共享的配置](#模板分组共享的配置)
 - [如何访问成员](#如何访问成员)
 - [管理端读取什么，以及可能出现的问题](#管理端读取什么以及可能出现的问题)
 - [API](#api)
@@ -147,6 +148,66 @@ schema 绘制其配置：经控制台为 `/api/m/admin/schema`，经令牌或连
 64 个。不转发：成员的控制台用户与密码（在成员上修改）、其 pprof 与仪表盘、其自己的集群管理与助手、LLM 角色的页面，以及流（`501`）；
 隧道角色的页面需要经成员的控制台访问。
 
+## 模板：分组共享的配置
+
+**模板**是管理端在其关联分组的成员上拥有的配置。它的写法与 fit 配置文件中的一部分相同，拥有它所写的内容：整个顶层成员
+（`log`、`media_auth`、`access_log` 等），以及 `listeners`、`routes`、`services`、`upstreams` 中按名称逐个拥有的元素；模板中
+这些列表的元素必须有名称，且名称不能使用变量，因为模板靠它在每个成员上找到该元素。`admin` 与 `schema_version` 属于成员自己。
+成员的**期望配置**是其自身配置，再用其模板拥有的部分替换：顶层成员整体设置；元素在成员已有处替换，否则追加到列表末尾；其他
+部分保持成员原样。
+
+```json
+{"upstreams": [{"name": "api", "addresses": ["${backend}"]}],
+ "routes": [{"name": "api", "match": {"path": ["/api/*"]},
+             "handler": {"module": "proxy", "params": {"upstream": "api"}},
+             "middleware": [{"module": "headers", "params": {"response": {"set": {"X-Served-By": "${node.name} in ${node.labels.region}"}}}}]}]}
+```
+
+字符串中的**变量**按成员渲染：`${node.name}`（成员在管理端的名称）、`${node.id}` 与 `${node.hostname}`（按其 `GET /node`）、
+`${node.labels.<key>}`，以及 `${<name>}`——模板所关联且包含该成员的分组的变量，模板分组列表中靠后的分组优先；`$${` 表示字面的
+`${`。成员缺少某个变量时，其同步状态为错误并指出该变量，而不是渲染为空字符串。变量都是字符串：数字或布尔值在模板中直接书写。
+
+**顺序。** 一个模板可关联任意多个分组，并有 `order`（-1000 到 1000）。成员的模板按 order、再按名称依次应用；两个模板拥有成员
+的同一部分时，后者胜出，该部分会注明它覆盖了哪个模板。
+
+**密钥**（名称为密码、secret、令牌、密钥等的成员，以及推流 URL）随模板保存在管理端的 store 中，应答时显示为 `[secret]`；以
+`[secret]` 原样发回时，保留该位置（按成员名、元素名称或下标）已保存的密钥，其他值则替换它。从成员配置创建的模板保留其密钥，
+且密钥不会到达浏览器。**文件路径**（`cert_file`、`token_file`、`..._dir`）会给出警告：每个成员从自己的磁盘读取它们。
+
+**同步状态。** 读取成员时，逐部分比较其配置（`GET /config`）与其模板渲染的结果，并借助成员保存的管理端记录（见下文）判断
+是谁修改了什么：
+
+| 状态 | 原因 | 含义 |
+| --- | --- | --- |
+| `in_sync` | | 成员上的该部分与渲染结果相同 |
+| `out_of_sync` | `missing` | 成员上还没有该部分 |
+| `out_of_sync` | `template_changed` | 成员上的值仍是管理端上次看到同步时的值，而模板现在渲染出不同的值 |
+| `conflict` | `changed_here` | 成员上的值既不是管理端上次看到同步时的值，也不是渲染结果：有人在成员上修改了它 |
+| `conflict` | `removed_here` | 管理端曾看到同步的部分已不在成员上 |
+| `conflict` | `own_value` | 成员上有自己的值，早于模板拥有该部分 |
+
+成员的状态取其各部分中最差的；无法读取或模板无法为其渲染时为 `error`，没有关联模板时为 `unmanaged`。这里不会向成员应用任何
+配置：期望配置由发布（I146）应用，由漂移（I147）持续检查。
+
+**告知成员。** 管理端读取成员时，以及模板、分组或成员变化后不久，会通过成员自己的 `PUT /node/managed`（带 `If-Match`）告知
+每个成员管理端在其上拥有什么：管理端的节点 ID 与主机，以及每个部分的模板和管理端上次看到其同步时的值的哈希。成员把它保存在
+自己的 store 中（没有 store 时保存在内存中，直到管理端再次告知），并在 `GET /node/managed` 应答，每个部分附带此后是否在成员上
+被修改（能力 `node.managed`）。成员自己的配置页面会标出这些部分（左侧色条与徽标，在成员上修改过的为琥珀色），修改前先询问：
+聚焦其字段、点击其按钮、编辑原始文本标签页，或“保存并应用”提交未询问过的修改。不会拒绝修改：成员仍归自己，冲突由管理端报告。
+`DELETE /node/managed` 让成员忘记管理端。
+
+**页面**（**模板**之下）：
+
+- **列表**：各模板的分组（不存在的分组为琥珀色）、顺序、拥有的部分，以及按同步状态计数的成员；**立即读取**读取全部成员；
+  **添加模板**、**从节点导入**与**对比两个节点**。
+- **模板页**：名称、说明、顺序与分组（附成员数）；配置的表单（由 schema 生成：每个顶层成员一张卡片，每个元素一个框，字段从
+  列表中添加、点叉号移除；没有普通控件的值，如处理器，以 JSON 编辑），以及 `.conf`、`.yaml`、`.json` 文本（输入时即时转换）；
+  其拥有的部分、变量及其来源、警告；以及其成员，每个成员的同步状态，每个部分成员上的值与渲染结果并排显示。
+- **渲染结果**（`#/cluster/rendered/<member>`）：成员的同步状态，以及其配置与期望配置逐行并排。
+- **对比**（`#/cluster/compare`）：两个成员的配置逐部分对比（相同、不同或只在一方），各自并排，以及整个配置。
+- **从节点导入**：逐部分读取成员的配置（列表中未命名的元素、`admin` 与 `schema_version` 不能选择），把选中的部分创建为模板，
+  并关联到选中的分组。关联到其来源成员时，该成员即为已同步。
+
 ## 如何访问成员
 
 成员是管理端能访问到的 fit，访问方式有三种：
@@ -220,6 +281,18 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 | `POST ops` | 开始一次操作：`{"op", "group", "members", "purge"}`，`op` 为 `reload`、`rollback`、`check`、`purge` 或 `test` 之一；作用于分组的成员、`members`，或分组中的 `members`；`purge` 为 `{"zone", "keys", "prefixes", "tags", "all"}`；返回 `202` 与该操作；成员已在另一操作中返回 `409`，已有 4 次操作在运行返回 `429` |
 | `GET ops` | 保存的操作，最新的在前 |
 | `GET ops/<id>` | 一次操作：`{"id", "op", "group", "user", "purge", "started", "ended", "finished", "counts", "outcomes"}`，每个结果为 `{"node", "status", "detail", "error", "result", "started", "ended", "took_ms"}`，`status` 为 `pending`、`running`、`done` 或 `failed`，`error` 与状态中的问题相同 |
+| `GET templates` | 模板列表 `{"version", "max_templates", "read_only", "templates"}`，带文档的 `ETag`；每个模板为 `{"name", "description", "groups", "order", "config", "created", "updated", "parts", "variables", "warnings", "nodes", "missing_groups"}`，`config` 中的密钥显示为 `[secret]`，`parts` 每项为 `{"path", "member", "name"}`，`nodes` 为其分组当前的成员 |
+| `POST templates` | 添加模板：`{"name", "description", "groups", "order", "config"}`，或以 `"from": {"node", "paths"}` 代替 `config`，即成员配置中当前的若干部分（`"log"`、`"routes[api]"`）；返回 `201`；`400` 附 `{"field", "error"}`；名称已被占用或已有 128 个模板时 `409`；无法读取成员时 `502` |
+| `GET templates/<name>` | 该模板 |
+| `PUT templates/<name>` | 替换该模板，新的 `name` 即重命名；`[secret]` 保留该位置已保存的密钥 |
+| `DELETE templates/<name>` | 删除该模板；其成员保留模板给出的配置，并被告知管理端不再拥有这些部分 |
+| `POST sync` | 立即读取成员：`{"nodes"}`、`{"template"}`（其成员）或 `{}`（全部成员），并告知每个成员管理端拥有什么：`{"nodes", "pending"}`，每项为 `{"node", "state", "error", "errors", "checked", "config_etag", "templates", "parts", "counts", "released", "managed", "managed_error", "note"}`，每个部分为 `{"path", "member", "name", "template", "overrides", "state", "reason", "have", "want"}`，密钥已隐藏；30 秒内未读完的成员列为 `pending`；同时最多 4 个，再多返回 `429` |
+| `GET sync` | 每个成员最近的同步状态，不含各部分的值 |
+| `GET desired/<member>` | 立即读取的成员：其同步状态、`config` 与 `desired`，密钥已隐藏 |
+| `POST compare` | `{"a", "b"}`：两个成员的配置，`{"a", "b", "parts"}`，每一方为 `{"node", "config_etag", "config"}`，每个部分为 `{"path", "state", "a", "b"}`，`state` 为 `same`、`differs`、`only_a` 或 `only_b` |
+| `POST import` | `{"node"}`：成员配置的各部分，`{"node", "config_etag", "parts"}`，每项为 `{"path", "member", "name", "ownable", "why", "secret", "value"}` |
+| `POST text/render?format=` | 把模板配置（JSON）写成 `conf`、`yaml` 或 `json` 文本 |
+| `POST text/parse?format=` | 把这种文本读成 JSON，出错时 `400` 附错误 |
 
 在模块之外、控制台的顶层，是节点切换器的转发：
 
@@ -229,7 +302,7 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 | `GET /api/n/<成员>/node` | 成员的 `GET /node` |
 | `<方法> /api/n/<成员>/m/<模块>/<路径>` | 成员的 `/api/m/<模块>/<路径>`（模块 `admin` 为其 Admin API 的 `/<路径>`），带查询参数；按成员的应答返回，应答头如上所述；无法访问成员时返回 `502` 与 `{"error", "problem"}`，不转发的接口返回 `403`，对只读成员的修改返回 `409` |
 
-带 `If-Match` 且其 ETag 已不是文档（成员与分组）当前 ETag 的修改返回 `412`。同时最多进行 4 个测试和 8 个读取，再多返回 `429`。读取只转发
+带 `If-Match` 且其 ETag 已不是文档（成员、分组与模板）当前 ETag 的修改返回 `412`。同时最多进行 4 个测试和 8 个读取，再多返回 `429`。读取只转发
 成员的这四个 GET，不转发其他接口，从不写入；成员的能力列表中没有某个读取所需的能力（`status`、`config.versions`、
 `config.check`）时不会向它请求。任何应答、页面或日志都不含密码、令牌或成员的会话 cookie。
 

@@ -330,7 +330,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		adminLog := root.Logger(config.LoggerAdmin)
 		// The settings, the store and the engine are there: New fails only
 		// for link_address, which it listens on.
-		manager, err = cluster.New(cluster.Options{Engine: s.Engine(), Settings: c.Admin.Cluster, Store: boot.st, Logf: adminLog.Infof})
+		manager, err = cluster.New(cluster.Options{Engine: s.Engine(), Settings: c.Admin.Cluster, Store: boot.st, Logf: adminLog.Infof, NodeID: nodeID})
 		if err != nil {
 			fmt.Fprintf(stderr, "fit run: %v\n", err)
 			_ = as.Shutdown(context.Background())

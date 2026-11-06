@@ -3,8 +3,9 @@
 // added, tested, trusted, edited and removed; and a member's page, #/cluster/node/<name>, opened from both. The pages
 // are overview.js, nodes.js and member.js, on shared.js; docs/cluster.md describes them and the API they call.
 // Groups (I144, groups.js): resource groups, a group's page with its members and the operations on them
-// (#/cluster/group/<name>), and the same over every member (#/cluster/ops). Templates, rollouts, drift and alerts,
-// users and audit (I145–I148) come as more pages of this menu.
+// (#/cluster/group/<name>), and the same over every member (#/cluster/ops). Templates (I145, templates.js): templates,
+// their members' sync states, Compare and Import from a node. Rollouts, drift and alerts,
+// users and audit (I146–I148) come as more pages of this menu.
 //
 // 集群菜单（I142）：工作台的一级入口，在控制台提供模块 cluster 时显示（设置了 admin.cluster 的 fit，即其他 fit 的管理端）：
 // 概览，各成员的状态；节点，添加、测试、信任、编辑与删除成员；以及成员页 #/cluster/node/<name>，两者都可打开。页面在
@@ -17,7 +18,7 @@
   WB.module({
     id: 'cluster', server: 'cluster', icon: 'hub', label: 'm.cluster', words: FC.WORDS,
     nav: [{ id: 'overview', icon: 'dashboard', label: 'n.overview' }, { id: 'nodes', icon: 'server', label: 'n.nodes' },
-      { id: 'groups', icon: 'cube', label: 'n.groups' }],
+      { id: 'groups', icon: 'cube', label: 'n.groups' }, { id: 'templates', icon: 'layers', label: 'n.templates' }],
     setup: function (UI, sh) {
       return {
         routes: {
@@ -26,7 +27,13 @@
           'node/:name': function (p) { FC.pages.member(UI, sh, p); },
           groups: function () { FC.pages.groups(UI, sh); },
           'group/:name': function (p) { FC.pages.group(UI, sh, p); },
-          ops: function () { FC.pages.ops(UI, sh); }
+          ops: function () { FC.pages.ops(UI, sh); },
+          // Templates (I145, templates.js). / 模板（I145，templates.js）。
+          templates: function () { FC.pages.templates(UI, sh); },
+          newtemplate: function () { FC.pages.template(UI, sh, null); },
+          'template/:name': function (p) { FC.pages.template(UI, sh, p); },
+          'rendered/:name': function (p) { FC.pages.rendered(UI, sh, p); },
+          compare: function () { FC.pages.compare(UI, sh); }
         },
         fallback: 'overview'
       };

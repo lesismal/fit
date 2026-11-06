@@ -2,7 +2,7 @@
 
 [English](033-cluster-management.md) | [简体中文](033-cluster-management.zh-CN.md)
 
-Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I143, I144 and I149 built; the choices marked *pending review*
+Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I143, I144, I145 and I149 built; the choices marked *pending review*
 stand until the user rules on them. The track is I140–I151 of the
 [development plan](../dev-plan.md#cluster-management).
 
@@ -164,6 +164,24 @@ What I143 adds, a member's own pages opened from the manager ([the node switcher
   against that member, marked in its colour, read-only for another version; **Open** on every
   member's card, row and page.
 - **On every fit, for it**: `GET /schema` in the Admin API (`schema`).
+
+What I145 adds, templates ([templates](../cluster.md#templates-config-shared-by-a-group)):
+
+- **Templates** in the document's `templates`: a fragment of fit's config, whose top-level members
+  it owns whole and whose elements of `listeners`, `routes`, `services` and `upstreams` it owns by
+  name; attached to groups, with an `order`; strings rendered per member with `${node.name}`,
+  `${node.id}`, `${node.hostname}`, `${node.labels.<key>}` and the groups' `${<name>}`; secrets kept
+  in the store and answered as `[secret]`. `GET/POST/PUT/DELETE /api/m/cluster/templates[/<name>]`,
+  a template made from a member's parts with `from`.
+- **Sync state** per member and part (`in_sync`, `out_of_sync`, `conflict`, with a reason), read
+  by `POST sync` and kept without values for `GET sync`; a member's desired config
+  (`GET desired/<member>`, and `Manager.Desired` for I146); two members compared (`POST compare`);
+  a member's config listed for import (`POST import`); the editor's text tabs (`POST text/render`,
+  `text/parse`).
+- **On every fit, for it**: `GET`, `PUT` and `DELETE /node/managed` (`node.managed`), what a manager
+  owns there, kept in the store's section `managed` (in memory without a store), each part with
+  whether it changed there since the manager saw it in sync; the config pages mark those parts and
+  ask before a change to one.
 
 ## Pending review
 
@@ -383,6 +401,63 @@ Decided while building I143 (2026-11-06):
 67. **Two fixes on the way**: an HTTP member's call now takes an escaped path with its query (the
     query was escaped into the path before, which no caller had needed); a refused login's problem
     is copied for each caller, which changed it unlocked (a data race the tests found).
+
+Decided while building I145 (2026-11-06):
+
+68. **A template is a fragment of the config, and owns what it writes**: its parts are read from
+    the fragment, with no list of paths beside it; `listeners`, `routes`, `services` and `upstreams`
+    by element name, every other top-level member whole (`media_auth` whole, as the plan says);
+    `admin` and `schema_version` never. The plan's `tls` has no top-level member in fit's config (a
+    listener's TLS is the listener's), so it is owned with its listener. Alternatives: JSON
+    pointers listed beside the config; `media_auth` by policy name.
+69. **An element's name takes no variables**: it is how the template finds the element on every
+    member.
+70. **Overlaps are settled by `order`** (-1000 to 1000) on the template, then by name, the later
+    winning; each part says which templates it overrides. Alternatives: an order of templates per
+    group; the order of the templates' list.
+71. **Variables**: `node.name`, `node.id`, `node.hostname`, `node.labels.<key>`, and the variables
+    of the template's groups that the member is in, a later group in the template's list winning;
+    strings only; `$${` writes `${`. A variable a member lacks makes that member's state `error`,
+    never an empty string. No defaults on the template. Alternatives: typed values; defaults.
+72. **Who changed a part is told by a three-way comparison**: the member's value, the rendered one,
+    and the hash of the value the manager last saw there in sync, which the member keeps in its
+    record (`/node/managed`), bounded by its own parts. A part the member had before the template
+    owned it is a conflict (`own_value`), since applying would overwrite it. Alternative: the
+    hashes in the manager's document, members times parts.
+73. **The record is told by `PUT /node/managed` with `If-Match`**, read again and put once more on
+    `412`; when a page reads a member, and half a second after a change of templates, groups or
+    members (to the members a template is attached to and those told before), coalesced. It is
+    logged, not audited. A member without a store keeps it in memory until it is told again; one
+    whose fit lacks `node.managed` is read, not told. A member removed from the manager keeps its
+    record until `DELETE /node/managed`. Alternatives: an explicit button; on every poll (I147).
+74. **A value's hash is the SHA-256 of its canonical JSON** (members sorted, numbers as written), so
+    `1.0` and `1` differ, as the config does not compare them otherwise.
+75. **Secrets are recognised by name** (the assistant's rule, `rate_limit`'s `key` aside, and push
+    URLs), masked as `[secret]` in every answer (templates, sync, desired, compare, import), and a
+    mask sent back keeps the secret kept at its place (by member, element name, or index); a mask
+    with nothing kept there is refused.
+76. **Paths to files** are members ending `_file`, `_files` or `_dir`, warned about, not refused.
+77. **A desired config** sets a top-level member whole, replaces an element in place, or adds it at
+    the end of its list. A template cannot remove a part from members; a part no longer owned is
+    left as it is, and listed as released. Alternatives: a position for new elements; owned
+    removals.
+78. **The document stays version 2**: templates are typed now, and an I144 or I149 fit keeps them
+    as it finds them. Templates follow a group's rename; a group removed leaves their groups.
+79. **Reading sync states answers at once, bounded**: 4 reads at once (`429` past), each reading
+    `max_concurrency` members at once and answering after 30s with the rest `pending`; desired,
+    import and compare share the member pages' 8 reads. Only summaries are kept, without values.
+80. **The text tabs are converted by the module's own endpoints** (`text/render`, `text/parse`,
+    fit's adapters), so a fragment converts without the config's checks.
+81. **The template's form is the Templates page's own**, drawn from the schema, not the config
+    pages' editor, whose one shared draft is the running config; what has no plain control (a
+    module, a map, a list of objects below the top) is edited as JSON.
+82. **The member's pages ask, never refuse**: a field focused, a button clicked, a raw tab edited,
+    or Save and apply with a change to an owned part not asked about, each asked once per part
+    until the config is read again. No button forgets the manager on the member's pages; the API's
+    `DELETE /node/managed` does.
+83. **A member of another schema** is read with a note (I143's `compatible`), not refused.
+84. **The pages**: Templates after Groups; `#/cluster/newtemplate`, `template/<name>`,
+    `rendered/<member>` and `compare`.
 
 Open questions of the plan, answered as proposed until reviewed:
 
