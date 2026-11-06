@@ -1469,6 +1469,7 @@ Also at `llm.hub.console.users[]`.
 | --- | --- | --- | --- |
 | `send_logs` | boolean |  | Let the tools hand lines of fit's own log to the model, redacted. Off by default. |
 | `send_access_log` | boolean |  | Let the tools hand lines of the access log to the model, redacted. Off by default. |
+| `send_subjects` | boolean |  | Let the media tools hand playback sessions' subjects to the model as they are. Off by default: each subject is replaced by a hash of it, the same for one subject while fit runs, which the propose tools take back. |
 | `redact` | list of string |  | Regular expressions (Go's syntax) whose matches are replaced in everything the tools hand a model, beside the keys, hashes, tokens and private keys that always are. |
 
 <a id="config-assistantuser"></a>

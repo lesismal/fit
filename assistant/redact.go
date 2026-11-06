@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -37,7 +38,16 @@ var secretPatterns = []struct {
 	{regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}`), Redacted},
 	{regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{30,}`), Redacted},
 	{regexp.MustCompile(`(?i)\b((?:[a-z]+[_-])?(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|authorization))(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;&"']+)`), "${1}${2}" + Redacted},
+	// A playback URL signed by media_auth (I135), or a grant a playlist
+	// hands on: the whole URL, its path and subject with its signature,
+	// since one that has not expired plays; then a signature or a grant's
+	// cookie left alone. JSON writes '&' as \u0026.
+	{regexp.MustCompile(`(?:\b[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>\\?]*|/[^\s"'<>\\?]*|\b[A-Za-z0-9._~%-]+)\?(?:[^\s"'<>\\]|\\u0026)*?(?:\b|\\u0026)sig=(?:[^\s"'<>\\]|\\u0026)*`), RedactedURL},
+	{regexp.MustCompile(`(\b|\\u0026)(sig|fit_media_grant)=[^\s"'<>\\&;,]+`), "${1}${2}=" + Redacted},
 }
+
+// RedactedURL is what a signed playback URL is replaced with.
+const RedactedURL = "[redacted playback URL]"
 
 // redactor replaces the secrets of what a tool hands the model: the
 // providers' keys it knows, the patterns above and the settings' own.
@@ -97,6 +107,36 @@ func secretName(name string) bool {
 	for _, suffix := range []string{"_token", "_tokens", "_key", "_keys", "_hash", "_sha256", "_signature"} {
 		if strings.HasSuffix(n, suffix) {
 			return true
+		}
+	}
+	return false
+}
+
+// pushURL reports whether the member key of the object at path, dotted
+// without indexes, is a push target's url, as streaming.push or a channel's
+// push has it: the URL carries the stream key or the SRT passphrase, and is
+// a secret whole.
+func pushURL(path, key string) bool {
+	return key == "url" && (path == "push" || strings.HasSuffix(path, ".push"))
+}
+
+// secretPath reports whether the member at tokens, a JSON pointer's with
+// its indexes, holds a secret by its name, or by its place: a push
+// target's url.
+func secretPath(tokens []string) bool {
+	if len(tokens) == 0 {
+		return false
+	}
+	k := tokens[len(tokens)-1]
+	if secretName(k) {
+		return true
+	}
+	if k != "url" {
+		return false
+	}
+	for i := len(tokens) - 2; i >= 0; i-- {
+		if _, err := strconv.Atoi(tokens[i]); err != nil {
+			return tokens[i] == "push"
 		}
 	}
 	return false
@@ -181,7 +221,7 @@ func (w *jsonRewriter) value(path string, secret bool) error {
 				kb, _ := json.Marshal(key)
 				w.b.Write(kb)
 				w.b.WriteByte(':')
-				if err := w.value(sub, secret || secretName(key)); err != nil {
+				if err := w.value(sub, secret || secretName(key) || pushURL(path, key)); err != nil {
 					return err
 				}
 			}

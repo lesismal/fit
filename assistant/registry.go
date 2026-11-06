@@ -29,6 +29,7 @@ const (
 	GroupConfig  = "config"
 	GroupRuntime = "runtime"
 	GroupRoles   = "roles"
+	GroupMedia   = "media"
 	GroupLogs    = "logs"
 	GroupPage    = "page"
 	GroupChange  = "change"
@@ -177,7 +178,7 @@ func (r *Registry) Tools() []*Tool {
 	return out
 }
 
-var groupOrder = []string{GroupConfig, GroupRuntime, GroupRoles, GroupLogs, GroupPage, GroupChange, GroupConvert, GroupAgent}
+var groupOrder = []string{GroupConfig, GroupRuntime, GroupRoles, GroupMedia, GroupLogs, GroupPage, GroupChange, GroupConvert, GroupAgent}
 
 func groupRank(g string) int {
 	if i := slices.Index(groupOrder, g); i >= 0 {

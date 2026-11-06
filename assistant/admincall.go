@@ -52,6 +52,17 @@ var errNoAPI = errors.New("the Admin API is not reachable from the assistant her
 // the console's pool, which the tools run on; ifMatch, when not "", is the
 // ETag of the config a change is for.
 func (a *Assistant) api(ctx context.Context, method, path, ctype, ifMatch string, body []byte) (*apiAnswer, error) {
+	return a.apiAs(ctx, "", method, path, ctype, ifMatch, body)
+}
+
+// ConsoleUserHeader is the header field the console sets on the Admin API's
+// requests it passes on: the user logged in, whom a change of a media
+// library's files is audited as (admin.ConsoleUserHeader).
+const ConsoleUserHeader = "Fit-Console-User"
+
+// apiAs is api as the console's user, when not "": a proposal's media
+// steps are applied as the person who applies it.
+func (a *Assistant) apiAs(ctx context.Context, user, method, path, ctype, ifMatch string, body []byte) (*apiAnswer, error) {
 	if a.o.API == nil {
 		return nil, errNoAPI
 	}
@@ -64,6 +75,9 @@ func (a *Assistant) api(ctx context.Context, method, path, ctype, ifMatch string
 	}
 	if ifMatch != "" {
 		req.Header.Set("If-Match", ifMatch)
+	}
+	if user != "" {
+		req.Header.Set(ConsoleUserHeader, user)
 	}
 	w := &apiRecorder{header: http.Header{}}
 	a.o.API.ServeHTTP(w, req)

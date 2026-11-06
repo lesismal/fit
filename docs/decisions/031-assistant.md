@@ -125,7 +125,7 @@ workers.
   draft, refused once the person changed it since.
 - **Skills (I127)** are Markdown with YAML front matter (`name`, `title`, `title_zh`, `description`,
   `description_zh`, `inputs`, `tools`, `model`, `examples`) and the prompt after it, at most 32 KiB;
-  front matter that is not a skill's is refused with its line. The plan's fourteen built-in skills
+  front matter that is not a skill's is refused with its line. The plan's eighteen built-in skills
   are embedded in the binary; skills users add are shared by the console's users, at most 64, in
   the store's section `assistant.skills` with the built-ins disabled, and only a user whose level
   is `apply` adds, edits, enables or disables them. Skills load on demand: without one, the system
@@ -159,6 +159,22 @@ workers.
   own addresses; every call, read and prompt is in the audit log with the source `mcp` and the
   token's name. fit's assistant calls no outside MCP server. The official Go MCP SDK is used only
   by a test, in a module of its own (`test/mcpsdk`), so that fit's own dependencies do not grow.
+- **The media library's tools (I152)** read the libraries, channels and playback of decision 032
+  through the Admin API in process (`media_library_search`, `media_item_get`, `channels_status`,
+  `playback_sessions`), and propose a rescan, sessions ended, a key rotated from its file, or an
+  item's files renamed, moved, deleted or given a sidecar. Their steps are actions, not config: they
+  join a config change of any kind, as purges do, and run after it in order, through the Admin
+  API's media endpoints as the person who applies, so that a change of files is audited as that
+  person's `media` entry and not again by the assistant. A file step carries what uses the item
+  (channels naming or playing it, viewers), shown with the proposal and in the confirm; the apply
+  sends back a digest of what it was shown (`media_tag`), and a mismatch offers the proposal again;
+  `force` goes only for what the person saw in use, and a step that fails leaves the rest applied
+  (`partial`). Nothing of a key, a signature or a playback URL reaches a model: a push target's
+  `url` is a secret whole, and any URL or path with `sig=` is redacted wherever it appears; subjects
+  go as an HMAC under a key made at each start unless `data.send_subjects` allows them. The media
+  tools are served over MCP within a token's level, as the others are. The skills `vod-setup`,
+  `channel-scheduler`, `library-health` and `playback-troubleshoot` use them, and the media pages'
+  Ask AI buttons run the last three.
 
 ## Consequences
 

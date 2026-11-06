@@ -398,11 +398,11 @@ Markdown 随到随画，每次工具调用为一行可展开的记录（参数�
 **停止** 结束回答并保留已生成的部分；**重试** 重新回答最后一条消息；面板头部可选择对话、新建或删除对话。
 
 助手只读取，自己从不修改任何东西：它调用的工具（**功能** 页列出它们、各自所需级别以及是否启用）读取配置、schema、版本、
-状态、指标、上游健康、一致性检查、证书、缓存、fit 自身日志与访问日志，像 `fit validate` 一样检查配置，转换 nginx 或
+状态、指标、上游健康、一致性检查、证书、缓存、媒体库、频道与播放会话、fit 自身日志与访问日志，像 `fit validate` 一样检查配置，转换 nginx 或
 Caddyfile 文本，并向用户提问。它们在控制台的线程池上、经进程内的 Admin API 运行，每次最多 30 秒。每个结果在交给模型前都会
 脱敏（密钥、密码哈希、令牌、私钥、各提供方的密钥、`data.redact` 的模式，以及任何工具都不读取的成员：`admin.assistant`、
 `admin.console.users`、`admin.store`、`admin.address` 与 `admin.token_file`），截断到 `limits.max_tool_result_bytes` 并注明，
-且作为数据加以标示，系统提示要求模型绝不把它当作指令。`log_tail` 需要 `data.send_logs`，读取 fit 日志在内存中保留的最近
+且作为数据加以标示，系统提示要求模型绝不把它当作指令（签名的播放 URL 与主体按[媒体库](#媒体库)一节处理）。`log_tail` 需要 `data.send_logs`，读取 fit 日志在内存中保留的最近
 1000 条消息；`access_log_sample` 需要 `data.send_access_log`，读取访问日志文件的末尾。用户的话按原样发给模型。
 
 **上限。** `max_tool_calls` 限制一条消息的回答可调用的工具数（超出时调用失败、回答结束），`max_turns` 限制一个对话的消息数
@@ -454,7 +454,7 @@ schema 及本用户能否调用）。
 端点为 `GET /api/m/ai/proposals`（待处理的提案：用户自己的；级别为 `apply` 时为所有用户的）、
 `GET /api/m/ai/proposals/{conversation}`（`?user=` 读取他人的：在运行中的配置上检查后的提案，含 `revision`、`etag`、`stale`、
 `steps` 及各步骤的错误、`changed`、按格式的 `diff`、`valid`、`errors`、`unconverted`、`can_apply`）、
-`POST /api/m/ai/proposals/{conversation}/apply`（`{"id", "revision", "etag", "user"}`；`200` 带 `outcome` 为 `applied` 或
+`POST /api/m/ai/proposals/{conversation}/apply`（`{"id", "revision", "etag", "media_tag", "user"}`；`200` 带 `outcome` 为 `applied` 或
 `partial`、`version` 与清除结果；级别低于 `apply` 时 `403`；修订号不符或对话正在回答时 `409`；过期时 `412` 并重新提供提案；
 检查未通过或 Admin API 拒绝时 `422`）、`POST /api/m/ai/proposals/{conversation}/discard`（`{"id", "user"}`）以及
 `GET /api/m/ai/audit`（`?user=`、`?conversation=`、`?kind=` 为 `chat`、`apply` 或 `discard`、`?before=` 某条记录的 `seq`、
@@ -518,9 +518,10 @@ Read the status and each upstream's health, and say what is down and why.
 最多 32 KiB。不符合上述格式的 front matter（未列出的键、类型不对的值、已被占用的名称、无法解析的 YAML）会被拒绝，并给出出错
 的行号。
 
-fit 内置 14 个技能，嵌入在二进制中：`explain`、`route-builder`、`reverse-proxy`、`tls-acme`、`rate-limit-auth`、
+fit 内置 18 个技能，嵌入在二进制中：`explain`、`route-builder`、`reverse-proxy`、`tls-acme`、`rate-limit-auth`、
 `cache-tuning`、`diagnose`、`drift-explain`、`log-analysis`、`security-review`、`migrate`、`media-setup`、
-`llm-mesh-setup` 与 `tunnel-setup`。**技能** 页把它们与用户添加的技能一起列出：每个技能的标题与用途、所列的工具（本用户不可
+`llm-mesh-setup`、`tunnel-setup`，以及媒体库的 `vod-setup`、`channel-scheduler`、`library-health` 与
+`playback-troubleshoot`（见[下文](#媒体库)）。**技能** 页把它们与用户添加的技能一起列出：每个技能的标题与用途、所列的工具（本用户不可
 调用的以删除线显示）以及是否启用；可查看全文、导出为 `.md`，并用 **试用** 以其示例运行。级别为 `apply` 的用户可以添加技能
 （从模板或导入 `.md` 文件）、编辑与删除已添加的技能，并启用或停用任意技能；内置技能不能修改或删除，但可以导出、改名后作为自己的
 技能添加，再停用内置的那个。添加的技能由所有控制台用户共享，最多 64 个，与停用了哪些内置技能一起保存在 store 的
@@ -555,15 +556,57 @@ fit 内置 14 个技能，嵌入在二进制中：`explain`、`route-builder`、
 | **反向代理 → 路由** 中的每条路由 | `diagnose` | `route`：其名称 | 其匹配、处理器、上游、监听与中间件 |
 | **概览** 与 **反向代理 → 上游** 中有后端不可用的上游 | `diagnose` | `route`：代理到它的路由 | 其各后端：地址、是否可用、是否被健康检查判为不可用、在途、成功、失败 |
 | **概览** 中的突增：两次刷新之间增加的错误计数（上游的失败请求、被拒绝的连接、失败的重载），保留列出一分钟 | `diagnose` | `route`（上游的突增） | 该计数、增加了多少、用了几秒、累计值，以及该上游的各后端 |
-| **媒体库**条目页上的探测错误 | `explain` | `error`：该错误 | 媒体库、条目与文件 |
-| **频道**页上出错的推流目标 | `diagnose` | — | 该目标：名称、流、频道、协议、服务器（从不含推流密钥）、状态、错误、连接与失败次数 |
-| **播放 URL** 与**指标**页上被拒绝（403）的策略 URL | `diagnose` | `status`：`403` | 该策略及其按原因统计的拒绝 |
+| **媒体库**条目页上的探测错误 | `library-health` | `library`、`item` | 媒体库、条目、文件及其错误 |
+| **频道**页上出错的推流目标 | `channel-scheduler` | `channel`：目标属于频道时为该频道 | 该目标：名称、流、频道、协议、服务器（从不含推流密钥）、状态、错误、连接与失败次数 |
+| **播放 URL** 与**指标**页上被拒绝（403）的策略 URL | `playback-troubleshoot` | `policy`、`status`：`403` | 该策略及其按原因统计的拒绝 |
 | LLM 角色的链路图，隧道的全景图与链路 | `diagnose` | — | 选中的方框或连线，以及所绘制的图：方框及其信息，连线的延迟、调用、错误与速率（隧道图会先关闭，以便看到面板） |
 
 只有面板出现的地方才有这些按钮：控制台提供 `ai` 模块，且用户级别不是 `off`。没有该模块时不创建按钮，级别为 `off` 的用户
 也没有；面板读到用户级别之前按钮保持隐藏。已停用的技能不使用——问题照常发送，对话中会说明；回答进行中点击会被拒绝并提示。密钥不外泄：路径含密钥的字段
 不带其值，文本中设置密钥的行以 `[redacted]` 代替，选中项先在页面上限定大小（字符串截断为 1,500 字符，列表截断为 40 项，整体
 8 KiB），再像所有页面上下文一样由服务端脱敏并截断为 16 KiB。每个输入至多 2 KiB。
+
+### 媒体库
+
+媒体库的工具（I152）经进程内的 Admin API 读取[媒体库](media-library.zh-CN.md)中的各媒体库、`vod` 路由、频道与 `media_auth`
+策略，与 **媒体库** 页面一样；它们与其他工具一样按级别提供：
+
+| 工具 | 级别 | 作用 |
+| --- | --- | --- |
+| `media_library_search` | `read` | 各媒体库及其扫描、错误与文件池；或某个库的目录问题与一页条目（默认 25，最多 100），可搜索（`q`）与过滤（`codec`、`errors`、`min_height`、`max_height`） |
+| `media_item_get` | `read` | 条目全貌（文件、轨道、编码、码率版本、音频、字幕、海报、sidecar、探测错误）、当前使用情况（`GET /media/library/{name}/usage`），以及（带 `sidecar` 时）其 sidecar 或依文件名生成的草稿 |
+| `channels_status` | `read` | 各频道的状态、错误、正在与即将播放的条目及进度、计数与推流目标（状态、字节、码率、最近错误；目标 URL 只含协议、主机与 app），以及 streaming 自身的推流目标 |
+| `playback_sessions` | `read` | 各策略的 `url_signing` 设置、按名称列出的密钥（及哪些可轮换）、正在播放的会话与按原因统计的被拒 URL、播放最多的资源、`vod` 缓存与各库的文件池；指定策略时（未指定时为唯一签发 URL 的策略）按主体与开始时间分页列出会话（默认 50，最多 200），可按 `resource` 或 `subject` 缩小，并给出各主体正在播放的会话数与 `max_sessions` 的对比 |
+| `media_scan_propose` | `propose` | 重新扫描某个媒体库 |
+| `media_session_end_propose` | `propose` | 结束某策略的播放会话，每个按所显示的主体与其 ID 指定（最多 100 个） |
+| `media_key_rotate_propose` | `propose` | 轮换策略的密钥（按名称指定密钥环中的一个、全部，或单一密钥）：仅限保存在 `secret_file` 中的密钥 |
+| `media_file_propose` | `propose` | 重命名、移动或删除条目的文件，或写入其 sidecar，每个条目一步 |
+
+**交给模型的内容。** 任何工具都不会把密钥、签名或播放 URL 交给模型：Admin API 的媒体接口本身不返回这些；配置中推流目标的
+`url` 整体脱敏（其中含推流密钥）；无论出现在何处（错误、日志行、页面上下文），查询串带 `sig=` 的 URL 或路径都会被替换为
+`[redacted playback URL]`，单独出现的 `sig=` 或 `fit_media_grant=` 的值替换为 `[redacted]`。测试 URL 只由 **播放 URL** 页签发，
+任何工具都不会签发。会话的主体以 `subject-` 加上其 HMAC 的 16 位十六进制发送，HMAC 的密钥由 fit 每次启动时生成，fit 运行期间
+同一主体的哈希不变；除非设置了 `admin.assistant.data.send_subjects`（设置页的 **原样发送播放会话的主体**）。提案工具接受两种形式的
+主体。地址与会话 ID 原样发送。
+
+**媒体步骤。** 提案工具与配置的提案工具一样，向对话唯一的待处理提案加入步骤。它们是操作而不是配置：与任何一种配置变更同在
+一个提案中（与缓存清除一样），在配置之后按提出的顺序执行，然后才是缓存清除；每一步都以应用提案的人的身份（`Fit-Console-User`）
+经 Admin API 的媒体接口执行，因此文件的修改以该用户的 `media` 条目写入审计日志，与应用本身的条目并列。每一步都在当前运行状态上
+检查：媒体库、条目、策略、密钥与会话存在，只轮换保存在文件中的密钥，sidecar 必须是媒体库能读取的，每个条目只有一个文件步骤，
+已不再播放的会话会被略去并注明。文件步骤会读取条目的使用情况（`GET /media/library/{name}/usage`）：播放列表或节目表包含它的
+频道、正在或即将播放它的频道，以及正在播放它的观众；步骤的结果会告诉模型，提案卡片与确认对话框也会显示，并说明此修改对它们的
+影响（删除某个频道正在播放的文件会写出该频道的名称）。提案视图带有 `media`（每一步及其使用情况、警告、会话与 sidecar 的差异）与
+`media_tag`（所示各条目使用情况的摘要：是否在用、引用或播放它的频道、是否有观众在播放）；应用时回传它，若与当前使用情况不符则返回 `412`，并以新的警告重新提供提案。随后，对用户确认过
+的正在使用的条目带 `force` 发送；期间才开始被使用的条目会被媒体库拒绝，记为该步骤的错误。某一步失败时其余步骤仍会完成，结果为
+`partial`，并给出每一步的结果（应答中的 `media`）。
+
+**MCP。** 媒体工具与其他工具一样在 `/mcp` 上提供：读取类工具提供给级别为 `read` 的令牌，提案工具提供给级别为 `propose` 的令牌；
+其提案只能在 workbench 中应用。
+
+**技能。** `vod-setup` 根据网站描述配置媒体库、其 `vod` 路由与 `url_signing`；`channel-scheduler` 用文字描述的条目生成频道的
+播放列表或节目表及其推流目标，并排查推流目标失败的原因；`library-health` 找出探测错误、缺失的码率版本或字幕以及播放器无法播放的
+编码，并给出用 ffmpeg 处理文件的步骤；`playback-troubleshoot` 根据按原因统计的 403、会话上限、授权、缓存与文件池找出观众被拒或
+卡顿的原因，并可提议结束会话。媒体页面上的 **问 AI** 按钮会运行它们（见上表）。
 
 ### 迁移与安全审查
 

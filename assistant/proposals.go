@@ -118,11 +118,21 @@ type stepArgs struct {
 	Fixes []FixRef `json:"fixes"`
 	// rollback_propose
 	Version uint64 `json:"version"`
-	// cache_purge_propose
+	// cache_purge_propose; All also media_key_rotate_propose's
 	Zone string   `json:"zone"`
 	URLs []string `json:"urls"`
 	Tags []string `json:"tags"`
 	All  bool     `json:"all"`
+	// the media propose tools (proposals_media.go)
+	Library  string          `json:"library"`
+	Item     string          `json:"item"`
+	Op       string          `json:"op"`
+	Name     string          `json:"name"`
+	Dir      string          `json:"dir"`
+	Sidecar  json.RawMessage `json:"sidecar"`
+	Policy   string          `json:"policy"`
+	Sessions []SessionRef    `json:"sessions"`
+	Key      string          `json:"key"`
 }
 
 // patchOp is an operation of config_propose: add, replace or remove at a
@@ -201,16 +211,20 @@ type built struct {
 	fixes    []FixRef
 	rollback uint64
 	purges   []PurgeStep
+	media    []MediaAction
+	mediaTag string
 	stepErrs []string
 	changed  []string
 	valid    bool
 	errors   []validationError
 
-	red    *redactor
-	check  []checkDiff     // GET /config/check's, read once
-	zones  map[string]bool // GET /cache's, read once
-	fixAt  []int           // the step each fix is from
-	reread error
+	red   *redactor
+	check []checkDiff     // GET /config/check's, read once
+	zones map[string]bool // GET /cache's, read once
+	// policies are GET /media/auth's, read once.
+	policies []authPolicyView
+	fixAt    []int // the step each fix is from
+	reread   error
 }
 
 // checkDiff is a difference of GET /config/check, as far as a fix needs.
@@ -250,6 +264,7 @@ func (a *Assistant) build(ctx context.Context, red *redactor, steps []ProposalSt
 	if b.kind == KindReconcile {
 		b.applyFixes()
 	}
+	b.mediaTag = mediaTag(b.media)
 	for _, k := range b.after.keys {
 		if v, ok := b.base.get(k); !ok || !equalTree(v, b.after.vals[k]) {
 			b.changed = append(b.changed, k)
@@ -262,7 +277,7 @@ func (a *Assistant) build(ctx context.Context, red *redactor, steps []ProposalSt
 	}
 	b.valid = !slices.ContainsFunc(b.stepErrs, func(e string) bool { return e != "" })
 	switch {
-	case b.kind == KindPatch && len(b.changed) == 0 && len(b.purges) == 0:
+	case b.kind == KindPatch && len(b.changed) == 0 && len(b.purges) == 0 && len(b.media) == 0:
 		b.valid = false
 		b.errors = append(b.errors, validationError{Msg: "the proposal changes nothing"})
 	case b.kind != "" && b.valid && len(b.changed) > 0:
@@ -325,6 +340,9 @@ func (b *built) step(a *Assistant, ctx context.Context, i int, st ProposalStep) 
 		return b.rollbackTo(a, ctx, args.Version)
 	case ToolPurgePropose:
 		return b.purge(a, ctx, args)
+	}
+	if isMediaTool(st.Tool) {
+		return b.mediaStep(a, ctx, i, st.Tool, args)
 	}
 	return fmt.Errorf("%s is not a propose tool", st.Tool)
 }
@@ -441,7 +459,7 @@ func isRedacted(s string) bool { return strings.Contains(s, "[redacted") }
 // redacted with no such secret there, and a secret the config does not
 // already have there: the assistant never writes a secret.
 func (b *built) guard(tokens []string, v any) (any, error) {
-	secret := slices.ContainsFunc(tokens, secretName)
+	secret := slices.ContainsFunc(tokens, secretName) || secretPath(tokens)
 	baseV, _ := lookupTree(b.base, tokens)
 	return b.guardAt(tokens, v, baseV, secret)
 }
@@ -456,7 +474,8 @@ func (b *built) guardAt(tokens []string, v, baseV any, secret bool) (any, error)
 			if bo != nil {
 				bv = bo.vals[k]
 			}
-			x, err := b.guardAt(append(tokens, k), t.vals[k], bv, secret || secretName(k))
+			sub := append(tokens[:len(tokens):len(tokens)], k)
+			x, err := b.guardAt(sub, t.vals[k], bv, secret || secretPath(sub))
 			if err != nil {
 				return nil, err
 			}

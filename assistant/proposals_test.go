@@ -48,10 +48,12 @@ type fakeConfigs struct {
 	broken   map[string]bool // these requests, "METHOD /path", answer 500
 	// failPurge fails a purge of a zone, as when it went since the check.
 	failPurge bool
+	// media is the media endpoints, over a fixed library.
+	media *fakeMedia
 }
 
 func newFakeConfigs(data string) *fakeConfigs {
-	return &fakeConfigs{versions: [][]byte{[]byte(data)}, check: `{"differences":[]}`, zones: []string{"main"}}
+	return &fakeConfigs{versions: [][]byte{[]byte(data)}, check: `{"differences":[]}`, zones: []string{"main"}, media: newFakeMedia()}
 }
 
 func etagOf(data []byte) string {
@@ -85,6 +87,7 @@ func (f *fakeConfigs) handler() http.Handler {
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(v)
 	}
+	f.media.mount(mux)
 	mux.HandleFunc("GET /config", func(w http.ResponseWriter, r *http.Request) {
 		n, data := f.current()
 		w.Header().Set("ETag", etagOf(data))

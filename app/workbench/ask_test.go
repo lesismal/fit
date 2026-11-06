@@ -14,7 +14,8 @@ import (
 func TestAskSkills(t *testing.T) {
 	skills := builtinSkills(t)
 	specs := 0
-	want := map[string]bool{"explain": false, "drift-explain": false, "diagnose": false}
+	want := map[string]bool{"explain": false, "drift-explain": false, "diagnose": false,
+		"library-health": false, "channel-scheduler": false, "playback-troubleshoot": false}
 	spec := regexp.MustCompile(`skill: '([a-z][a-z0-9-]*)'`)
 	if err := fs.WalkDir(Pages(), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".js") {

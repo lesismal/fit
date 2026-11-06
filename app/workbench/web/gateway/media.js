@@ -25,9 +25,9 @@
 //                      problems at those members link back here
 //
 // No page keeps a URL, a token or a signature: a preview's URL lives in its player only, the test URL in its form until
-// the page changes; secrets never reach the browser. Ask AI (I128): an item's probe error (explain), a push target in
-// error and the 403s by reason (diagnose). Needs ui.js, workbench.js and config.js; loaded before features.js, so that
-// its places of a save's problems come first.
+// the page changes; secrets never reach the browser. Ask AI (I128, I152): an item's probe error (library-health), a push
+// target in error (channel-scheduler) and the 403s by reason (playback-troubleshoot). Needs ui.js, workbench.js and
+// config.js; loaded before features.js, so that its places of a save's problems come first.
 //
 // 媒体库页面（I138）：扁平菜单中的一个模块，位于流媒体与媒体认证旁，涵盖点播与频道的整条线（I132-I136）。各页读取 Admin API，
 // 并编辑配置的共享草稿：library 为各媒体库的条目（搜索、按编码/分辨率/问题过滤、分页）与重新扫描进度；item 为单个条目的
@@ -38,7 +38,8 @@
 // （从不保存），按名称与时长显示密钥（从不显示密钥本身）、确认后轮换单个或全部，分页列出播放会话（可逐个结束）及各主体相对
 // max_sessions 的数量；metrics 为各媒体库、vod 处理器、策略与频道的观看数、每秒请求与字节、缓存命中率与字节、文件池队列与拒绝、
 // 按原因统计的 403；另有 media_library、vod 路由、streaming.channels（含 push）与各策略 url_signing 的配置页，带 UI/.conf/
-// .yaml/.json 标签页（I120），保存问题链接回这里。页面不保存任何 URL、令牌或签名，密钥从不到达浏览器。
+// .yaml/.json 标签页（I120），保存问题链接回这里。页面不保存任何 URL、令牌或签名，密钥从不到达浏览器。“问 AI”（I128、I152）：
+// 条目的探测错误（library-health）、出错的推流目标（channel-scheduler）、按原因统计的 403（playback-troubleshoot）。
 (function () {
   'use strict';
 
@@ -850,7 +851,7 @@
           (it.renditions || []).concat(it.audio || [], it.subtitles || []).forEach(function (f) { if (f.error) errs.push({ path: f.path, error: f.error }); });
           errs.forEach(function (e) {
             parts.push(h('div.callout.callout--danger', h('div.ai-askrow', h('b', t('it.error')),
-              askOf({ skill: 'explain', message: t('it.ask', { path: e.path, lib: p.lib, error: e.error }), inputs: { error: e.error },
+              askOf({ skill: 'library-health', message: t('it.ask', { path: e.path, lib: p.lib, error: e.error }), inputs: { library: p.lib, item: it.id },
                 selection: { library: p.lib, item: it.id, file: e.path, error: e.error } })),
               h('div', h('code.small', e.path), ': ', e.error)));
           });
@@ -1209,8 +1210,8 @@
             } },
             { label: t('ps.error'), render: function (p) {
               if (!p.error) return '—';
-              return h('div.ai-askrow', h('span.small', p.error), askOf({ skill: 'diagnose',
-                message: t('ps.ask', { name: p.name, stream: p.stream, state: p.state, error: p.error }), inputs: {},
+              return h('div.ai-askrow', h('span.small', p.error), askOf({ skill: 'channel-scheduler',
+                message: t('ps.ask', { name: p.name, stream: p.stream, state: p.state, error: p.error }), inputs: { channel: p.channel || '' },
                 selection: { push: { name: p.name, stream: p.stream, channel: p.channel, protocol: p.protocol, server: p.url, state: p.state, error: p.error,
                   connects: p.connects, failures: p.failures } } }, { label: false }));
             } },
@@ -1408,7 +1409,7 @@
       function forbiddenAsk(name, r) {
         return function () {
           var list = Object.keys(r || {}).filter(function (k) { return r[k]; }).map(function (k) { return k + ' ' + r[k]; }).join(', ');
-          return { skill: 'diagnose', message: t('x.ask', { name: name, list: list }), inputs: { status: '403' },
+          return { skill: 'playback-troubleshoot', message: t('x.ask', { name: name, list: list }), inputs: { policy: name, status: '403' },
             selection: { policy: name, refusals: r } };
         };
       }

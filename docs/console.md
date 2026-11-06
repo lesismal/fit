@@ -518,13 +518,14 @@ the last message again; the head picks a conversation, starts a new one or delet
 The assistant reads, and never changes anything itself: the tools it calls (the **Functions** page
 lists them, with the level each needs and whether it is enabled) read the config, the schema, the
 versions, the status, the metrics, the upstreams' health, the Consistency check, the certificates,
-the cache, fit's own log and the access log, check a config as `fit validate` does, convert nginx or
-Caddyfile text, and ask the user. They run on the console's pool, through the Admin API in process,
-each within 30 seconds. Every result is redacted before the model sees it (keys, password hashes,
+the cache, the media libraries, channels and playback sessions, fit's own log and the access log,
+check a config as `fit validate` does, convert nginx or Caddyfile text, and ask the user. They run on
+the console's pool, through the Admin API in process, each within 30 seconds. Every result is redacted before the model sees it (keys, password hashes,
 tokens, private keys, the providers' keys, `data.redact`'s patterns, and the members no tool reads:
 `admin.assistant`, `admin.console.users`, `admin.store`, `admin.address` and `admin.token_file`), cut
 to `limits.max_tool_result_bytes` with a note saying so, and fenced as data, which the system prompt
-tells the model never to take as instructions. `log_tail` needs `data.send_logs` and reads the last
+tells the model never to take as instructions (signed playback URLs and subjects as [the media
+library](#the-media-library) says). `log_tail` needs `data.send_logs` and reads the last
 1000 messages fit's log keeps in memory; `access_log_sample` needs `data.send_access_log` and reads
 the end of the access log's file. The user's words go to the model as written.
 
@@ -600,7 +601,7 @@ The endpoints are `GET /api/m/ai/proposals` (the pending proposals: the user's, 
 one whose level is `apply`), `GET /api/m/ai/proposals/{conversation}` (`?user=` for another's: the
 proposal checked on the running config, with `revision`, `etag`, `stale`, `steps` and each step's
 error, `changed`, `diff` by format, `valid`, `errors`, `unconverted`, `can_apply`), `POST
-/api/m/ai/proposals/{conversation}/apply` (`{"id", "revision", "etag", "user"}`; `200` with
+/api/m/ai/proposals/{conversation}/apply` (`{"id", "revision", "etag", "media_tag", "user"}`; `200` with
 `outcome` `applied` or `partial`, the `version` and the purges; `403` below `apply`; `409` for a
 revision not the proposal's or a conversation answering; `412` when stale, with the proposal
 offered again; `422` when it does not check or the Admin API refused it), `POST
@@ -684,9 +685,11 @@ may call, and is narrowed again by the user's level and the settings (`ask_user`
 skill is at most 32 KiB. Front matter that is not this — a key not listed, a value of the wrong
 kind, a name taken, YAML that does not parse — is refused with the line it is about.
 
-fit has fourteen built-in skills, embedded in the binary: `explain`, `route-builder`,
+fit has eighteen built-in skills, embedded in the binary: `explain`, `route-builder`,
 `reverse-proxy`, `tls-acme`, `rate-limit-auth`, `cache-tuning`, `diagnose`, `drift-explain`,
-`log-analysis`, `security-review`, `migrate`, `media-setup`, `llm-mesh-setup` and `tunnel-setup`.
+`log-analysis`, `security-review`, `migrate`, `media-setup`, `llm-mesh-setup`, `tunnel-setup`, and
+the media library's `vod-setup`, `channel-scheduler`, `library-health` and `playback-troubleshoot`
+([below](#the-media-library)).
 The **Skills** page lists them with those users added: each one's title and what it is for, the
 tools it names (those the user may not call struck through), and whether it is enabled; a skill is
 viewed whole, exported as its `.md`, and run from one of its examples with **Try**. A user whose
@@ -735,9 +738,9 @@ user's message, as if typed.
 | Each route of **Reverse proxy → Routes** | `diagnose` | `route`: its name | its match, handler, upstream, listeners and middleware |
 | An upstream with backends down, on the **Overview** and **Reverse proxy → Upstreams** | `diagnose` | `route`: the routes that proxy to it | its backends: address, up, probed down, in flight, succeeded, failed |
 | A spike on the **Overview**: an error counter that rose between two refreshes (requests failed on an upstream, connections refused, reloads failed), listed for a minute | `diagnose` | `route`, for an upstream's | the counter, by how much it rose and in how many seconds, its total, and the upstream's backends |
-| An item's probe error on its **Media library** page | `explain` | `error`: the error | the library, the item and the file |
-| A push target in error on the **Channels** page | `diagnose` | — | the target: name, stream, channel, protocol, server (never its stream key), state, error, connects and failures |
-| A policy's URLs refused 403, on **Playback URLs** and **Metrics** | `diagnose` | `status`: `403` | the policy and its refusals by reason |
+| An item's probe error on its **Media library** page | `library-health` | `library`, `item` | the library, the item, the file and its error |
+| A push target in error on the **Channels** page | `channel-scheduler` | `channel`: the target's channel, when it is a channel's | the target: name, stream, channel, protocol, server (never its stream key), state, error, connects and failures |
+| A policy's URLs refused 403, on **Playback URLs** and **Metrics** | `playback-troubleshoot` | `policy`, `status`: `403` | the policy and its refusals by reason |
 | The LLM roles' link map, and the tunnel's map and paths | `diagnose` | — | the box or line selected, and the map as drawn: boxes with their facts, lines with latency, calls, errors and rates (the tunnel's diagram is closed, so the panel shows) |
 
 The buttons show only where the panel does: the console serves the module `ai` and the user's level
@@ -748,6 +751,64 @@ says so; while an answer runs, a click is refused with a note. Secrets stay out:
 names a secret goes without its value, the text's lines that set a secret go with `[redacted]`, and
 the selection is bounded (strings cut at 1,500 characters, lists at 40 items, the whole at 8 KiB)
 before the server redacts it and cuts it to 16 KiB as all page context. An input is at most 2 KiB.
+
+### The media library
+
+The media library's tools (I152) read the libraries, the `vod` routes, the channels and the
+`media_auth` policies of the [media library](media-library.md) through the Admin API in process, as
+the **Media library** pages do, and are offered as the other tools are, by level:
+
+| Tool | Level | What it does |
+| --- | --- | --- |
+| `media_library_search` | `read` | the libraries with their scans, errors and file pools; or a library's catalog problems and a page of its items (25, at most 100), searched (`q`) and filtered (`codec`, `errors`, `min_height`, `max_height`) |
+| `media_item_get` | `read` | an item whole (files, tracks, codecs, renditions, audio, subtitles, poster, sidecar, probe errors), what uses it now (`GET /media/library/{name}/usage`), and, with `sidecar`, its sidecar or a draft of one |
+| `channels_status` | `read` | each channel's state, error, now and next with the position, counters and push targets (state, bytes, bitrate, last error; a target's URL as scheme, host and app only), and streaming's own push targets |
+| `playback_sessions` | `read` | each policy's `url_signing` settings, keys by name (and which rotate), sessions playing and URLs refused by reason, the resources played most, the `vod` caches and the libraries' pools; for a policy (the only one that signs when none is named), a page of its sessions (50, at most 200) by subject and start, narrowed by `resource` or `subject`, and each subject's sessions playing set against `max_sessions` |
+| `media_scan_propose` | `propose` | a rescan of a library |
+| `media_session_end_propose` | `propose` | playback sessions of a policy ended, each by its subject as shown and its ID (at most 100) |
+| `media_key_rotate_propose` | `propose` | a policy's key rotated (one of the keyring by name, all, or the single secret): only a key kept in a `secret_file` |
+| `media_file_propose` | `propose` | an item's files renamed, moved or deleted, or its sidecar written, one step per item |
+
+**What reaches the model.** No tool hands it a key, a signature or a playback URL: the Admin API's
+media answers carry none, a push target's `url` in the config is redacted whole (it holds the stream
+key), and the redaction replaces any URL or path whose query carries `sig=` with `[redacted playback
+URL]`, and a `sig=` or `fit_media_grant=` left alone with `[redacted]`, wherever it appears (an
+error, a log line, the page's context). A test URL is issued only by the **Playback URLs** page,
+never by a tool. A session's subject goes as `subject-` and 16 hex digits of an HMAC of it under a
+key fit makes each time it starts, the same for one subject while fit runs, unless `admin.assistant.data.send_subjects`
+is set (the Settings page's **Send playback sessions' subjects as they are**); the propose tools take
+a subject back in either form. Addresses and session IDs are sent as they are.
+
+**Media steps.** The propose tools add steps to the conversation's one pending proposal, as the
+config's do. They are actions, not config: they go with a config change of any kind, as cache
+purges do, and are applied after it, in the order proposed, then the purges; each through the Admin
+API's media endpoint, as the person who applies the proposal (`Fit-Console-User`), so that a change
+of files is written to the audit log as a `media` entry of theirs, beside the apply's. Each step is
+checked on what runs now: the library, item, policy, key and sessions exist, a key rotates only from
+a file, a sidecar is one the library reads, one file step per item, and sessions that no longer play
+are left out with a note. A file step reads what uses the item (`GET /media/library/{name}/usage`):
+the channels whose list or schedule names it, those playing it now or next, and the viewers playing
+it; the step's result tells the model, and the proposal's card and the confirm dialog show it, with
+what the change does to them (a delete of a file a channel plays names that channel). The view
+carries `media` (each step with its usage, warning, sessions and a sidecar's diff) and `media_tag`,
+a digest of what it shows of each item (in use or not, the channels that name or play it, whether
+viewers play it); the apply sends it back, and one that does not match what uses the items now is
+refused `412` and the proposal offered again with the new warnings. The steps a person
+confirmed are then sent with `force` for an item in use, which the person saw; one that came into
+use meanwhile is refused by the library and is that step's error. A step that fails leaves the
+others applied, and the outcome `partial`, with each step's result (`media` in the answer).
+
+**MCP.** The media tools are served on `/mcp` as the others are: the read ones to a token whose
+level is `read`, and the propose ones to a token whose level is `propose`; their proposals are
+applied in the workbench only.
+
+**Skills.** `vod-setup` sets up a library, its `vod` routes and `url_signing` from a description of
+the site; `channel-scheduler` writes a channel's list or schedule from items described in words, and
+its push targets, and finds why a push target fails; `library-health` finds probe errors, missing
+renditions or subtitles and codecs players cannot play, and gives the ffmpeg steps that prepare the
+files; `playback-troubleshoot` finds why viewers are refused or stall from the 403s by reason, the
+session caps, the grants, the caches and the file pool, and may propose ending sessions. The media
+pages' **Ask AI** buttons run them (the table above).
 
 ### Migration and security review
 

@@ -237,6 +237,11 @@ when the console runs the assistant.
 On the console, an upload's `PATCH` streams; on the Admin API's own server, its body must arrive
 within the server's read timeout, a minute, so send pieces that do.
 
+The workbench's assistant reads the libraries, channels and playback sessions with its media tools,
+and may propose a rescan, a rename, move, delete or sidecar of an item, sessions ended or a key
+rotated, each saying what uses the item; a person applies the proposal, through these endpoints, as
+themselves ([the assistant's media library](console.md#the-media-library)).
+
 ## Video on demand
 
 The `vod` handler serves a library's items over HLS (RFC 8216), cut from the files as they are

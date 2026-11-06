@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lesismal/fit/assistant"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/handler/mediatokens"
 	"github.com/lesismal/fit/handler/vod"
@@ -58,7 +59,7 @@ const PreviewTTL = 2 * time.Minute
 // for a preview's subject and the host of its URL. A caller with the
 // Admin API's token may set them itself.
 const (
-	ConsoleUserHeader = "Fit-Console-User"
+	ConsoleUserHeader = assistant.ConsoleUserHeader
 	ConsoleHostHeader = "Fit-Console-Host"
 )
 
