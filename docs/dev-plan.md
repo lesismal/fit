@@ -316,9 +316,9 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I156 | The access log's file through the same sink: `access_log.rotate` and `time_zone`, one sink per path, shared with `log`'s, a rotation only after the buffers are written, and the config's refusal of two settings for one path | I155 | done |
 | I157 | The workbench's Logs page: each output, its loggers and format, the files on disk with sizes and ages, the rotation and retention form, rotate now and clean up now with a preview and a confirmation, and warnings | I155, I156, I120 | done |
 | **Performance** | | | |
-| I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | todo |
+| I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | done |
 | **Agent and tunnel, continued** | | | |
-| I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | todo |
+| I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | done |
 | I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | todo |
 | I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | done |
 
@@ -2768,6 +2768,33 @@ Principles, in the order they bind:
   the upgrade; under the race detector.
 - **Touches**: `tunnel/...`, `llm/...`, `config`, `admin`, `app`, `cli`, `schema`, `docs`.
 
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The proof.** SCRAM-like: the listener stores SHA-256(HMAC(secret)), so a copy of the config
+   cannot link; the listener's proof key and the body key come from that hash by HKDF, so whoever
+   holds the hash can pose as the listener or read sealed tcp links. Alternatives: a plain HMAC under
+   the stored key (the config becomes a credential); a key pair a member.
+2. **A member's binding is kept** in the token's `members`, by a config edit on first use, so it
+   survives restarts; moving a member to another token means revoking the old one first. Alternatives:
+   in memory only; an explicit rebind.
+3. **A member's identity** is `node/<name>` or `proxy/<name>` in the tunnel and the role's ID in the
+   LLM mesh, as each already keys its peers.
+4. **The tunnel's `challenge` round trip** before registration, so the hub adds a nonce whether or
+   not bodies are sealed. Alternative: reuse the sealed hello's random bytes, which exist only with
+   `body_password`.
+5. **Sealing.** `body_password` still turns it on; keys are HKDF of the token's body key and
+   `body_password`, and the hello names the token's ID in clear. Alternative: a token alone turns it on.
+6. **Where tokens sit.** At the role (`tunnel.hub.tokens`, `llm.<role>.tokens`), not under `listen`,
+   so editing the listener from the pages keeps them.
+7. **A listener with no password** is allowed and takes only tokens, with a warning while it has
+   none, so a role can be set up before its first token.
+8. **Expiry** is checked by a timer at the next expiry, at least once a minute; the docs give that
+   minute as the bound.
+9. **Last use and live links** are kept at run time only, not written to the config on each handshake.
+10. **Bounds**: 1,024 tokens a listener, 256 members a token; lifetimes as Go durations or `Nd`.
+11. **Removing the password**: `clear_password` (tunnel hub settings) and `clear_passwords` (an LLM
+    listener's edit) in the pages' APIs.
+
 ### I160 The tunnel's and the LLM mesh's TLS, after review
 
 - **Why**: an independent review of the TLS added on 2026-11-06 (fit `3622aee1`, `6bd2c39c`,
@@ -2875,3 +2902,18 @@ Work on throughput and latency that no feature track owns.
   `5c0e5b9`; fib's security tests for these checks still pass; fib's CI passes, and fit is on that
   commit.
 - **Touches**: fib `http` (`h2_server.go`, `h2_pseudo.go`), fit `go.mod`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The `:authority` remembered.** After the first two commits `BenchmarkH2ServerGET` was still
+   +0.7%, so a connection keeps the last valid `:authority` and checks it again only when it changes
+   (`cb9bbbe`): clients send the same string each time, and a decoded string is a copy that cannot
+   change. Alternative: stop at `089a5b0`, GET at +0.7%, simpler code.
+2. **The response side too.** `089a5b0` checks a known key of a response with the same one lookup,
+   though the plan named request checks only; it helps `static` and can be dropped on its own.
+3. **Hop-by-hop fields by comparison.** The map is a comparison everywhere, the HTTP/2 client
+   included; behaviour is the same.
+4. **What the A/B built.** fit's main calls `Context.SetIdleTimeout`, which `5c0e5b9` lacks, so both
+   sides were built from fit `35270ef4` (the v1.7.1 pin, as in the A/B that found the cost) with a
+   `replace` in a scratch modfile. The harness's h2c port was moved to 8091 for the run, uncommitted,
+   since the user's `qwen27b.service` holds 8081.
