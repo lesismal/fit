@@ -1,0 +1,21 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_02","object":"response","status":"in_progress","model":"gpt-test","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"msg_02","type":"message","status":"in_progress","content":[],"role":"assistant"}}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","sequence_number":2,"item_id":"msg_02","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"text":""}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":3,"item_id":"msg_02","output_index":0,"content_index":0,"delta":"The listener "}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_02","output_index":0,"content_index":0,"delta":"web is up."}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","sequence_number":5,"item_id":"msg_02","output_index":0,"content_index":0,"text":"The listener web is up."}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":6,"response":{"id":"resp_02","object":"response","status":"completed","model":"gpt-test","usage":{"input_tokens":90,"output_tokens":9,"total_tokens":99}}}
+

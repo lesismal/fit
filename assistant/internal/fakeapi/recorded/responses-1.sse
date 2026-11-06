@@ -1,0 +1,33 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_01","object":"response","created_at":1762387200,"status":"in_progress","model":"gpt-test","output":[],"usage":null}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_01","object":"response","status":"in_progress","model":"gpt-test"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_01","type":"reasoning","summary":[]}}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","sequence_number":3,"item_id":"rs_01","output_index":0,"summary_index":0,"delta":"Checking the listener."}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":4,"output_index":0,"item":{"id":"rs_01","type":"reasoning","summary":[{"type":"summary_text","text":"Checking the listener."}]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":5,"output_index":1,"item":{"id":"fc_01","type":"function_call","status":"in_progress","arguments":"","call_id":"call_r1","name":"get_status"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":6,"item_id":"fc_01","output_index":1,"delta":"{\"listener\":"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":7,"item_id":"fc_01","output_index":1,"delta":"\"web\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","sequence_number":8,"item_id":"fc_01","output_index":1,"arguments":"{\"listener\":\"web\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":9,"output_index":1,"item":{"id":"fc_01","type":"function_call","status":"completed","arguments":"{\"listener\":\"web\"}","call_id":"call_r1","name":"get_status"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":10,"response":{"id":"resp_01","object":"response","status":"completed","model":"gpt-test","usage":{"input_tokens":50,"input_tokens_details":{"cached_tokens":10},"output_tokens":20,"output_tokens_details":{"reasoning_tokens":5},"total_tokens":70}}}
+

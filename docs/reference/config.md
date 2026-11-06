@@ -32,7 +32,7 @@ a config against it and more.
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
 - [Engine](#engine): [`engine`](#config-engine)
-- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser)
+- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser)
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
@@ -1333,6 +1333,7 @@ In JSON:
 | `disable_dashboard` | boolean |  | Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false. |
 | `store` | [object](#config-store) |  | Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file. |
 | `console` | [object](#config-console) |  | Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out. |
+| `assistant` | [object](#config-assistant) |  | The workbench's assistant, a chat beside the console's pages that reads what fit does and drafts changes for a person to submit, calling the model APIs set here; off when left out, and then nothing is sent anywhere. Needs console. With a store, these settings are the first ones only: once the Settings page saves, the store's are used, keys included. |
 
 <a id="config-store"></a>
 
@@ -1371,6 +1372,102 @@ Also at `llm.hub.console.users[]`.
 | --- | --- | --- | --- |
 | `username` | string |  | Required. The user's name. |
 | `password_hash` | string |  | Required. The bcrypt hash of the user's password, as fit hash-password makes it. |
+
+<a id="config-assistant"></a>
+
+### `admin.assistant`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `providers` | list of [object](#config-assistantprovider) |  | The model APIs the assistant may call, each by name. Their keys are not written here: the Settings page keeps them in admin.store, or api_key_env names a variable that holds one. |
+| `default_model` | [object](#config-assistantmodelref) |  | The provider and model the chat uses; the first model of the first provider when left out. |
+| `params` | [object](#config-assistantparams) |  | What a model call asks for: its output, temperature and thinking. |
+| `limits` | [object](#config-assistantlimits) |  | Bounds on the assistant's conversations, tool calls and model answers; the defaults when left out. |
+| `data` | [object](#config-assistantdata) |  | What of fit's logs may be sent to a model, and more of what is redacted before anything is. |
+| `users` | list of [object](#config-assistantuser) |  | What each console user may have the assistant do, by user name; a user not listed has default_level. |
+| `default_level` | string: `off`, `read`, `edit`, `propose`, `apply` | `"read"` | The level of a console user that users does not list: off, read (the read tools only), edit (also drafts on the open page, never submitted), propose (also proposals) or apply (also applies them). read when left out. |
+
+<a id="config-assistantprovider"></a>
+
+### `admin.assistant.providers[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The provider's name, which default_model and the Settings page name it by: letters, digits, '_', '.' and '-'. |
+| `kind` | string: `anthropic`, `openai`, `openai_responses`, `gemini`, `azure_openai`, `ollama`, `openai_compatible`, `llm_proxy` |  | Required. The API it speaks: anthropic (Messages), openai (Chat Completions), openai_responses (Responses), gemini (generateContent), azure_openai (Chat Completions of a deployment), ollama (/api/chat), openai_compatible (Chat Completions at any base_url, as vLLM, llama.cpp, DeepSeek or a gateway), or llm_proxy, this fit's own llm.proxy, reached on its api address, so that the assistant uses the mesh's models. |
+| `base_url` | string |  | The API's base URL, as https://api.openai.com/v1; the vendor's when left out, and needed for openai_compatible and azure_openai. Not for llm_proxy. A key is sent only over https, or to a loopback host. |
+| `api_version` | string |  | The api-version of an azure_openai provider's calls, as 2024-10-21; needed for it, and for no other kind. |
+| `api_key_env` | string |  | An environment variable holding the API key, read when a call is made; a key the Settings page keeps in the store comes first. |
+| `headers` | object of string |  | Headers sent with every call, as an organization or a gateway's own; not the key's headers, Host or the body's framing. |
+| `models` | list of [object](#config-assistantmodel) |  | The models offered from this provider; the Settings page reads the provider's own list to add them. |
+| `connect_timeout` | duration | `"10s"` | How long a connect, TLS included, may take. 10s when left out. |
+| `first_byte_timeout` | duration | `"2m"` | How long a call may wait for its answer to begin. 2m when left out. |
+| `idle_timeout` | duration | `"1m"` | How long a streamed answer may go silent. 1m when left out. |
+| `timeout` | duration | `"10m"` | The most one call may take, to the end of its answer. 10m when left out. |
+| `retries` | integer, 0 to 5 | `2` | How often a call is tried again when it failed before any of its answer was taken: the connect failed, or the API answered 408, 429, 500, 502, 503, 504 or 529. 2 when left out; 0 tries once. |
+
+<a id="config-assistantmodel"></a>
+
+### `admin.assistant.providers[].models[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The model's ID, as the provider names it. |
+| `context` | integer, 0 or more |  | The model's context window, in tokens; 0 or left out when not known. |
+| `tools` | boolean | `true` | Whether the model calls tools. On when left out. |
+
+<a id="config-assistantmodelref"></a>
+
+### `admin.assistant.default_model`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `provider` | string |  | Required. A provider's name. |
+| `model` | string |  | Required. The model's ID. |
+
+<a id="config-assistantparams"></a>
+
+### `admin.assistant.params`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_output_tokens` | integer, 0 or more | `4096` | The most tokens a model's answer may have. 4096 when left out or 0. |
+| `temperature` | number, 0 to 2 |  | The sampling temperature; the model's own when left out. |
+| `thinking` | string: `off`, `low`, `medium`, `high` | `"off"` | How much a model that thinks before it answers may: off, low, medium or high, as its API takes it (an effort, or a budget of tokens). off when left out. |
+
+<a id="config-assistantlimits"></a>
+
+### `admin.assistant.limits`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_turns` | integer, 0 or more | `40` | The most turns a conversation keeps, a user's message and the answer to it each. 40 when left out or 0. |
+| `max_tool_calls` | integer, 0 or more | `16` | The most tools an answer may call before the assistant stops it. 16 when left out or 0. |
+| `max_tool_result_bytes` | integer, 0 or more | `32768` | The most bytes of a tool's result handed to the model; a longer one is cut, and says so. 32 KiB when left out or 0. |
+| `max_conversations` | integer, 0 or more | `50` | The most conversations kept for each user; one more removes the oldest. 50 when left out or 0. |
+| `max_concurrent_chats` | integer, 0 or more | `4` | The most answers being made at once, across users; one more is refused until one ends. 4 when left out or 0. |
+| `max_tokens_per_day` | integer, 0 or more | `1000000` | The most tokens, in and out, one user's calls may take in a day, as the APIs count them. 1000000 when left out or 0. |
+| `max_stream_bytes` | integer, 0 or more | `8388608` | The most bytes of one model answer as it streams in; a larger one is cut and fails. 8 MiB when left out or 0. |
+| `max_audit_entries` | integer, 0 or more | `1000` | The most entries the assistant's audit log keeps; one more removes the oldest. 1000 when left out or 0. |
+
+<a id="config-assistantdata"></a>
+
+### `admin.assistant.data`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `send_logs` | boolean |  | Let the tools hand lines of fit's own log to the model, redacted. Off by default. |
+| `send_access_log` | boolean |  | Let the tools hand lines of the access log to the model, redacted. Off by default. |
+| `redact` | list of string |  | Regular expressions (Go's syntax) whose matches are replaced in everything the tools hand a model, beside the keys, hashes, tokens and private keys that always are. |
+
+<a id="config-assistantuser"></a>
+
+### `admin.assistant.users[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `username` | string |  | Required. A console user's name. |
+| `level` | string: `off`, `read`, `edit`, `propose`, `apply` |  | Required. What the user may have the assistant do: off, read, edit, propose or apply, each including the ones before it. |
 
 <a id="https-by-default"></a>
 

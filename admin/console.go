@@ -16,6 +16,7 @@ import (
 
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/app/workbench"
+	"github.com/lesismal/fit/assistant"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/login"
 	"github.com/lesismal/fit/schema"
@@ -51,6 +52,9 @@ type Console struct {
 	module  *console.Module
 	logins  *login.Logins
 	configs *Configs // whose store keeps the console users
+	// ai is the assistant, served as the module ai, when admin.assistant
+	// is set; nil otherwise.
+	ai *assistant.Assistant
 }
 
 // StartConsole serves the console c describes on engine, for configs, whose
@@ -68,6 +72,14 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	cs := &Console{schema: sch, logf: logf, configs: configs}
+	if a.Assistant != nil {
+		o := assistant.Options{Engine: engine, Settings: a.Assistant, Console: c, Config: configs.CurrentConfig, Logf: logf}
+		if st := configs.Sealer(); st != nil {
+			o.Store = st
+		}
+		// Settings is set: New cannot fail.
+		cs.ai, _ = assistant.New(o)
+	}
 	inner := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceConsole}
 	cs.api = inner.routes()
 	cs.module = &console.Module{ID: AdminModule, Routes: cs.routes}
@@ -79,6 +91,9 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		// the modules': /api/m/admin/schema and the like.
 		Modules: func() []*console.Module {
 			out := []*console.Module{cs.module}
+			if cs.ai != nil {
+				out = append(out, cs.ai.Module())
+			}
 			if modules != nil {
 				out = append(out, modules()...)
 			}
@@ -125,6 +140,9 @@ func (cs *Console) URL() string { return cs.c.URL() }
 // requests under way, until ctx ends at most.
 func (cs *Console) Shutdown(ctx context.Context) error {
 	cs.c.Stop(ctx)
+	if cs.ai != nil {
+		cs.ai.Close()
+	}
 	return ctx.Err()
 }
 

@@ -2,8 +2,10 @@
 // fitstore: a header that says how the key is derived from a password, then
 // the config sealed with XChaCha20-Poly1305, the header its additional data.
 // Beside the config, the store keeps the console users whose passwords
-// changed since fit started, so that a changed password survives a restart.
-// See docs/decisions/027-console-and-store.md.
+// changed since fit started, so that a changed password survives a restart,
+// and named sections other parts of fit keep there, as the assistant's
+// settings and model API keys. See docs/decisions/027-console-and-store.md
+// and docs/decisions/031-assistant.md.
 //
 // Opening and writing a store read and write files, and deriving its key
 // takes 64 MiB and a fair share of a second: both are for the control plane,
@@ -19,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,8 +34,14 @@ import (
 // The header's layout.
 const (
 	magic = "FITSTORE"
-	// version is the format this fit writes: the sealed payload is an
-	// envelope of the base config and the console users kept beside it.
+	// versionSections is the format of a store that keeps sections: the
+	// sealed payload is version's envelope with the sections in it. A store
+	// without sections is written as version, so that a fit that predates
+	// sections still opens it.
+	versionSections = 3
+	// version is the format of a store without sections, and of the files
+	// exported: the sealed payload is an envelope of the base config and the
+	// console users kept beside it.
 	version = 2
 	// versionConfig is the first format, whose sealed payload is the base
 	// config alone; it is still read.
@@ -51,11 +60,13 @@ type User struct {
 	PasswordHash string `json:"password_hash"`
 }
 
-// payload is the plaintext of a version 2 store: the base config, and the
-// users whose password hashes replace those of the config's admin.
+// payload is the plaintext of a version 2 or 3 store: the base config, the
+// users whose password hashes replace those of the config's admin, and, in
+// version 3, the sections, each a JSON value its owner reads and writes.
 type payload struct {
-	Config json.RawMessage `json:"config"`
-	Users  []User          `json:"users,omitempty"`
+	Config   json.RawMessage            `json:"config"`
+	Users    []User                     `json:"users,omitempty"`
+	Sections map[string]json.RawMessage `json:"sections,omitempty"`
 }
 
 // Params are Argon2id's settings.
@@ -106,11 +117,12 @@ type Store struct {
 		Seal(dst, nonce, plaintext, additionalData []byte) []byte
 		Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error)
 	}
-	// data is the base config last read or written, and users the console
-	// users kept beside it; SetUsers seals data again with new users, and
-	// Write keeps the old ones.
-	data  []byte
-	users []User
+	// data is the base config last read or written, users the console users
+	// kept beside it, and sections the sections; SetUsers and SetSection seal
+	// data again with what they change, and Write keeps the others.
+	data     []byte
+	users    []User
+	sections map[string]json.RawMessage
 }
 
 // Open opens the store at path with password and returns the base config it
@@ -179,34 +191,38 @@ func (s *Store) open(file []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrOpen, s.path)
 	}
-	data, users, err := s.decode(h.version, plaintext)
+	p, err := s.decode(h.version, plaintext)
 	if err != nil {
 		return nil, err
 	}
-	s.data, s.users = data, users
-	return data, nil
+	s.data, s.users, s.sections = p.Config, p.Users, p.Sections
+	return p.Config, nil
 }
 
-// decode returns the base config and the users a store of version ver
-// holds, plaintext being what its key seals.
-func (s *Store) decode(ver byte, plaintext []byte) ([]byte, []User, error) {
+// decode returns what a store of version ver holds, plaintext being what
+// its key seals.
+func (s *Store) decode(ver byte, plaintext []byte) (payload, error) {
 	if ver == versionConfig {
-		return plaintext, nil, nil
+		return payload{Config: plaintext}, nil
 	}
 	var p payload
 	if err := json.Unmarshal(plaintext, &p); err != nil || len(p.Config) == 0 {
-		return nil, nil, fmt.Errorf("store: %s holds no config", s.path)
+		return payload{}, fmt.Errorf("store: %s holds no config", s.path)
 	}
-	return p.Config, p.Users, nil
+	if ver != versionSections {
+		p.Sections = nil
+	}
+	return p, nil
 }
 
-// encode returns the payload of a version 2 store: the config as it was
-// written, its layout kept, and the users beside it. The config is JSON,
-// since the payload is: one that is not is refused before anything is
-// written, rather than making a store nothing can open.
-func encode(data []byte, users []User) ([]byte, error) {
+// encode returns the payload of a store and its version: the config as it
+// was written, its layout kept, the users beside it, and the sections, which
+// make it version 3. The config is JSON, since the payload is: one that is
+// not is refused before anything is written, rather than making a store
+// nothing can open.
+func encode(data []byte, users []User, sections map[string]json.RawMessage) ([]byte, byte, error) {
 	if !json.Valid(data) {
-		return nil, errors.New("store: the config is not JSON")
+		return nil, 0, errors.New("store: the config is not JSON")
 	}
 	var b bytes.Buffer
 	b.Grow(len(data) + 32 + len(users)*128)
@@ -217,8 +233,17 @@ func encode(data []byte, users []User) ([]byte, error) {
 		b.WriteString(`,"users":`)
 		b.Write(u)
 	}
+	ver := byte(version)
+	if len(sections) > 0 {
+		// Each section is valid JSON, as SetSection or the store's own
+		// payload gave it: the map cannot fail to marshal.
+		sec, _ := json.Marshal(sections)
+		b.WriteString(`,"sections":`)
+		b.Write(sec)
+		ver = versionSections
+	}
 	b.WriteByte('}')
-	return b.Bytes(), nil
+	return b.Bytes(), ver, nil
 }
 
 func readFile(path string) ([]byte, error) {
@@ -249,8 +274,8 @@ func parseHeader(path string, file []byte) (h header, err error) {
 		return h, fmt.Errorf("%w: %s", ErrNotStore, path)
 	}
 	b := file[len(magic):]
-	if b[0] != version && b[0] != versionConfig {
-		return h, fmt.Errorf("store: %s is fitstore version %d; this fit reads versions %d and %d", path, b[0], versionConfig, version)
+	if b[0] != versionSections && b[0] != version && b[0] != versionConfig {
+		return h, fmt.Errorf("store: %s is fitstore version %d; this fit reads versions %d to %d", path, b[0], versionConfig, versionSections)
 	}
 	if b[1] != kdfArgon2 {
 		return h, fmt.Errorf("store: %s derives its key by method %d, which this fit does not know", path, b[1])
@@ -275,20 +300,23 @@ func (s *Store) Path() string { return s.path }
 
 // Seal returns a fitstore file holding data, a base config as JSON, and
 // users, sealed with the store's own key, as an export of it that opens with
-// the store's password; the store's file is not touched.
+// the store's password; the store's file is not touched. The store's
+// sections are not in it: they hold secrets, as model API keys, that stay
+// with the store.
 func (s *Store) Seal(data []byte, users []User) ([]byte, error) {
-	plaintext, err := encode(data, users)
+	plaintext, ver, err := encode(data, users, nil)
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.seal(version, plaintext), nil
+	return s.seal(ver, plaintext), nil
 }
 
 // Unseal opens file, a whole fitstore file such as an export, with the
-// store's password, and returns the base config and the users it holds; the
-// store's file and what the store remembers are not touched.
+// store's password, and returns the base config and the users it holds, not
+// its sections; the store's file and what the store remembers are not
+// touched.
 func (s *Store) Unseal(file []byte) ([]byte, []User, error) {
 	return Unseal(file, s.password)
 }
@@ -347,7 +375,45 @@ func (s *Store) SetUsers(users []User) error {
 	if s.data == nil {
 		return errors.New("store: the store holds no config yet, so it can keep no users")
 	}
-	return s.write(s.data, slices.Clone(users))
+	return s.write(s.data, slices.Clone(users), s.sections)
+}
+
+// MaxSectionName bounds a section's name.
+const MaxSectionName = 64
+
+// Section returns a copy of the section kept under name, a JSON value, or
+// nil when there is none.
+func (s *Store) Section(name string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return bytes.Clone(s.sections[name])
+}
+
+// SetSection keeps data, a JSON value, as the section name beside the
+// config, or removes the section when data is empty, and writes the store.
+// A store whose config has not been read or written yet keeps no sections,
+// and gives an error; so does data that is not JSON, and a write that fails,
+// which changes nothing.
+func (s *Store) SetSection(name string, data []byte) error {
+	if name == "" || len(name) > MaxSectionName {
+		return fmt.Errorf("store: a section's name is 1 to %d bytes", MaxSectionName)
+	}
+	if len(data) > 0 && !json.Valid(data) {
+		return fmt.Errorf("store: the section %q is not JSON", name)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data == nil {
+		return errors.New("store: the store holds no config yet, so it can keep no sections")
+	}
+	sections := make(map[string]json.RawMessage, len(s.sections)+1)
+	maps.Copy(sections, s.sections)
+	if len(data) == 0 {
+		delete(sections, name)
+	} else {
+		sections[name] = bytes.Clone(data)
+	}
+	return s.write(s.data, s.users, sections)
 }
 
 // Write seals data with a new nonce and replaces the store's file with it,
@@ -358,23 +424,23 @@ func (s *Store) SetUsers(users []User) error {
 func (s *Store) Write(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.write(data, s.users)
+	return s.write(data, s.users, s.sections)
 }
 
-// write seals data and users, the store's payload, and replaces the store's
-// file with it. s.mu must be held.
-func (s *Store) write(data []byte, users []User) error {
+// write seals data, users and sections, the store's payload, and replaces
+// the store's file with it. s.mu must be held.
+func (s *Store) write(data []byte, users []User, sections map[string]json.RawMessage) error {
 	if len(data) > MaxBytes {
 		return fmt.Errorf("store: the config is larger than %d bytes", MaxBytes)
 	}
-	plaintext, err := encode(data, users)
+	plaintext, ver, err := encode(data, users, sections)
 	if err != nil {
 		return err
 	}
 	if len(plaintext) > MaxBytes {
-		return fmt.Errorf("store: the config and its users are larger than %d bytes", MaxBytes)
+		return fmt.Errorf("store: the config, its users and its sections are larger than %d bytes", MaxBytes)
 	}
-	out := s.seal(version, plaintext)
+	out := s.seal(ver, plaintext)
 	dir := filepath.Dir(s.path)
 	f, err := os.CreateTemp(dir, "."+filepath.Base(s.path)+".*")
 	if err != nil {
@@ -405,7 +471,7 @@ func (s *Store) write(data []byte, users []User) error {
 	}
 	ok = true
 	syncDir(dir)
-	s.data, s.users = data, users
+	s.data, s.users, s.sections = data, users, sections
 	return nil
 }
 

@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"parts": [{"text": "The listener "}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 70,"candidatesTokenCount": 3,"totalTokenCount": 73},"modelVersion": "gemini-test","responseId": "r2"}
+
+data: {"candidates": [{"content": {"parts": [{"text": "web is up."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 70,"candidatesTokenCount": 9,"totalTokenCount": 79,"cachedContentTokenCount": 32},"modelVersion": "gemini-test","responseId": "r2"}
+

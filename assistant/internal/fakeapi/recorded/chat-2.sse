@@ -1,0 +1,14 @@
+: keep-alive
+
+data: {"id":"chatcmpl-2","object":"chat.completion.chunk","created":1762387201,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"The tool says it is up."},"logprobs":null,"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-2","object":"chat.completion.chunk","created":1762387201,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"The listener "},"logprobs":null,"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-2","object":"chat.completion.chunk","created":1762387201,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"web is up."},"logprobs":null,"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-2","object":"chat.completion.chunk","created":1762387201,"model":"gpt-test","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}],"usage":null}
+
+data: {"id":"chatcmpl-2","object":"chat.completion.chunk","created":1762387201,"model":"gpt-test","choices":[],"usage":{"prompt_tokens":80,"completion_tokens":9,"total_tokens":89,"prompt_tokens_details":{"cached_tokens":64},"completion_tokens_details":{"reasoning_tokens":3}}}
+
+data: [DONE]
+

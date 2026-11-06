@@ -97,7 +97,7 @@ func TestUsersPastTheBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	full := []byte(`"` + strings.Repeat("a", MaxBytes-2) + `"`)
-	if err := s.Write(full); err == nil || !strings.Contains(err.Error(), "the config and its users are larger than") {
+	if err := s.Write(full); err == nil || !strings.Contains(err.Error(), "the config, its users and its sections are larger than") {
 		t.Errorf("a full config with users: %v", err)
 	}
 	if data, err := s.Read(); err != nil || string(data) != `{}` {

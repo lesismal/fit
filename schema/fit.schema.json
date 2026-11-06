@@ -173,6 +173,10 @@
           "description": "Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". A host that is not a loopback address or localhost needs token_file, cert_file and key_file, so that only holders of the token reach the API and the token never crosses a network in the clear. 127.0.0.1:2019 when left out.",
           "type": "string"
         },
+        "assistant": {
+          "$ref": "#/$defs/config.Assistant",
+          "description": "The workbench's assistant, a chat beside the console's pages that reads what fit does and drafts changes for a person to submit, calling the model APIs set here; off when left out, and then nothing is sent anywhere. Needs console. With a store, these settings are the first ones only: once the Settings page saves, the store's are used, keys included."
+        },
         "cert_file": {
           "description": "A PEM file with the Admin API's certificate, followed by any intermediates; with key_file, the API is served over TLS, 1.2 or later. The files are read again when they change, so that a renewed certificate is served without a restart. Not for a Unix socket.",
           "type": "string"
@@ -224,6 +228,309 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "config.Assistant": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/config.AssistantData",
+          "description": "What of fit's logs may be sent to a model, and more of what is redacted before anything is."
+        },
+        "default_level": {
+          "default": "read",
+          "description": "The level of a console user that users does not list: off, read (the read tools only), edit (also drafts on the open page, never submitted), propose (also proposals) or apply (also applies them). read when left out.",
+          "enum": [
+            "off",
+            "read",
+            "edit",
+            "propose",
+            "apply"
+          ],
+          "type": "string"
+        },
+        "default_model": {
+          "$ref": "#/$defs/config.AssistantModelRef",
+          "description": "The provider and model the chat uses; the first model of the first provider when left out."
+        },
+        "limits": {
+          "$ref": "#/$defs/config.AssistantLimits",
+          "description": "Bounds on the assistant's conversations, tool calls and model answers; the defaults when left out."
+        },
+        "params": {
+          "$ref": "#/$defs/config.AssistantParams",
+          "description": "What a model call asks for: its output, temperature and thinking."
+        },
+        "providers": {
+          "description": "The model APIs the assistant may call, each by name. Their keys are not written here: the Settings page keeps them in admin.store, or api_key_env names a variable that holds one.",
+          "items": {
+            "$ref": "#/$defs/config.AssistantProvider"
+          },
+          "type": "array"
+        },
+        "users": {
+          "description": "What each console user may have the assistant do, by user name; a user not listed has default_level.",
+          "items": {
+            "$ref": "#/$defs/config.AssistantUser"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "config.AssistantData": {
+      "additionalProperties": false,
+      "properties": {
+        "redact": {
+          "description": "Regular expressions (Go's syntax) whose matches are replaced in everything the tools hand a model, beside the keys, hashes, tokens and private keys that always are.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "send_access_log": {
+          "description": "Let the tools hand lines of the access log to the model, redacted. Off by default.",
+          "type": "boolean"
+        },
+        "send_logs": {
+          "description": "Let the tools hand lines of fit's own log to the model, redacted. Off by default.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "config.AssistantLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_audit_entries": {
+          "default": 1000,
+          "description": "The most entries the assistant's audit log keeps; one more removes the oldest. 1000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_concurrent_chats": {
+          "default": 4,
+          "description": "The most answers being made at once, across users; one more is refused until one ends. 4 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_conversations": {
+          "default": 50,
+          "description": "The most conversations kept for each user; one more removes the oldest. 50 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_stream_bytes": {
+          "default": 8388608,
+          "description": "The most bytes of one model answer as it streams in; a larger one is cut and fails. 8 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tokens_per_day": {
+          "default": 1000000,
+          "description": "The most tokens, in and out, one user's calls may take in a day, as the APIs count them. 1000000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tool_calls": {
+          "default": 16,
+          "description": "The most tools an answer may call before the assistant stops it. 16 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tool_result_bytes": {
+          "default": 32768,
+          "description": "The most bytes of a tool's result handed to the model; a longer one is cut, and says so. 32 KiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_turns": {
+          "default": 40,
+          "description": "The most turns a conversation keeps, a user's message and the answer to it each. 40 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "config.AssistantModel": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "description": "The model's context window, in tokens; 0 or left out when not known.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The model's ID, as the provider names it.",
+          "type": "string"
+        },
+        "tools": {
+          "default": true,
+          "description": "Whether the model calls tools. On when left out.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "config.AssistantModelRef": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "description": "The model's ID.",
+          "type": "string"
+        },
+        "provider": {
+          "description": "A provider's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "type": "object"
+    },
+    "config.AssistantParams": {
+      "additionalProperties": false,
+      "properties": {
+        "max_output_tokens": {
+          "default": 4096,
+          "description": "The most tokens a model's answer may have. 4096 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "temperature": {
+          "description": "The sampling temperature; the model's own when left out.",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "number"
+        },
+        "thinking": {
+          "default": "off",
+          "description": "How much a model that thinks before it answers may: off, low, medium or high, as its API takes it (an effort, or a budget of tokens). off when left out.",
+          "enum": [
+            "off",
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.AssistantProvider": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "description": "An environment variable holding the API key, read when a call is made; a key the Settings page keeps in the store comes first.",
+          "type": "string"
+        },
+        "api_version": {
+          "description": "The api-version of an azure_openai provider's calls, as 2024-10-21; needed for it, and for no other kind.",
+          "type": "string"
+        },
+        "base_url": {
+          "description": "The API's base URL, as https://api.openai.com/v1; the vendor's when left out, and needed for openai_compatible and azure_openai. Not for llm_proxy. A key is sent only over https, or to a loopback host.",
+          "type": "string"
+        },
+        "connect_timeout": {
+          "default": "10s",
+          "description": "How long a connect, TLS included, may take. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "first_byte_timeout": {
+          "default": "2m",
+          "description": "How long a call may wait for its answer to begin. 2m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Headers sent with every call, as an organization or a gateway's own; not the key's headers, Host or the body's framing.",
+          "type": "object"
+        },
+        "idle_timeout": {
+          "default": "1m",
+          "description": "How long a streamed answer may go silent. 1m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "kind": {
+          "description": "The API it speaks: anthropic (Messages), openai (Chat Completions), openai_responses (Responses), gemini (generateContent), azure_openai (Chat Completions of a deployment), ollama (/api/chat), openai_compatible (Chat Completions at any base_url, as vLLM, llama.cpp, DeepSeek or a gateway), or llm_proxy, this fit's own llm.proxy, reached on its api address, so that the assistant uses the mesh's models.",
+          "enum": [
+            "anthropic",
+            "openai",
+            "openai_responses",
+            "gemini",
+            "azure_openai",
+            "ollama",
+            "openai_compatible",
+            "llm_proxy"
+          ],
+          "type": "string"
+        },
+        "models": {
+          "description": "The models offered from this provider; the Settings page reads the provider's own list to add them.",
+          "items": {
+            "$ref": "#/$defs/config.AssistantModel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "The provider's name, which default_model and the Settings page name it by: letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        },
+        "retries": {
+          "default": 2,
+          "description": "How often a call is tried again when it failed before any of its answer was taken: the connect failed, or the API answered 408, 429, 500, 502, 503, 504 or 529. 2 when left out; 0 tries once.",
+          "maximum": 5,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": "10m",
+          "description": "The most one call may take, to the end of its answer. 10m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "config.AssistantUser": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "description": "What the user may have the assistant do: off, read, edit, propose or apply, each including the ones before it.",
+          "enum": [
+            "off",
+            "read",
+            "edit",
+            "propose",
+            "apply"
+          ],
+          "type": "string"
+        },
+        "username": {
+          "description": "A console user's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "level"
+      ],
       "type": "object"
     },
     "config.AutoHTTPS": {

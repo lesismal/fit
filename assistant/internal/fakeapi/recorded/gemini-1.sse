@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"parts": [{"text": "The user wants the listener checked.","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 40,"totalTokenCount": 40},"modelVersion": "gemini-test","responseId": "r1"}
+
+data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "get_status","args": {"listener": "web"}},"thoughtSignature": "CiQBVKhc7"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 40,"candidatesTokenCount": 8,"totalTokenCount": 53,"thoughtsTokenCount": 5},"modelVersion": "gemini-test","responseId": "r1"}
+

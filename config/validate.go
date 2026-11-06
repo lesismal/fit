@@ -259,6 +259,7 @@ func (c *Config) Validate() Errors {
 		checkAdminAddress(a, add)
 		checkStore(a.Store, add)
 		checkConsole(a.Console, add)
+		checkAssistant(a.Assistant, a.Console, add)
 	}
 	c.checkLLM(add)
 	c.checkTunnel(add)
