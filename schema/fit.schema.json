@@ -189,6 +189,10 @@
           "$ref": "#/$defs/config.Cluster",
           "description": "Manage other fits from this one, the manager: their addresses and credentials, added on the workbench's Cluster pages, are kept in the store, and each one's state is read every poll_interval. Off when left out, and then nothing is called. Needs store and console. See decision 033."
         },
+        "cluster_member": {
+          "$ref": "#/$defs/config.ClusterMember",
+          "description": "Link this fit out to a manager of many fits, which then manages it through the link as it manages others over HTTP: for a fit behind NAT, or with no port open to the manager. The manager's Add by enrollment gives the line to paste here. Off when left out, and then nothing is dialed. Read when fit starts. See decision 033."
+        },
         "console": {
           "$ref": "#/$defs/config.Console",
           "description": "Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out."
@@ -700,6 +704,14 @@
     "config.Cluster": {
       "additionalProperties": false,
       "properties": {
+        "link_address": {
+          "description": "Where members that link out to the manager reach it, as \":7444\" or \"0.0.0.0:7444\": a WebSocket listener over TLS, with a self-signed certificate the manager makes once and keeps in the store, which each member pins when it enrolls. Members behind NAT, or with no port open, link here with the config line Add by enrollment gives, and are managed through their link as the others are over HTTP. Off when left out: no member can enroll.",
+          "type": "string"
+        },
+        "link_url": {
+          "description": "The URL members reach link_address at, as \"wss://manager.example.com:7444/cluster/link\", which the config line Add by enrollment gives names; when left out, the host the page was opened at and link_address's port. Only a wss URL.",
+          "type": "string"
+        },
         "max_concurrency": {
           "default": 8,
           "description": "The most members polled at once; the others wait for their turn. Tests from the pages run beside them, 4 at most. 8 when left out or 0.",
@@ -734,6 +746,32 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "config.ClusterMember": {
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "description": "The SHA-256 of the manager's link certificate, 64 hex digits, with or without colons, as the page gives it: the only certificate this fit links to.",
+          "type": "string"
+        },
+        "manager": {
+          "description": "The manager's link URL, as its Add by enrollment page gives it: wss://host:port/cluster/link.",
+          "type": "string"
+        },
+        "token": {
+          "description": "The enrollment token the manager made for this fit, fite1.<ID>.<secret>, used once: this fit proves it to the manager, which answers a credential of this fit's own, kept in the store, or without one in a file beside the config (fit.cluster-member beside fit.json); the token is not used again. Left out once this fit has a credential; a new token enrolls this fit again.",
+          "type": "string"
+        },
+        "token_file": {
+          "description": "A file holding the enrollment token, in place of token.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "manager",
+        "fingerprint"
+      ],
       "type": "object"
     },
     "config.Console": {

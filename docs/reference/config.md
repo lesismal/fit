@@ -32,7 +32,7 @@ a config against it and more.
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
 - [Engine](#engine): [`engine`](#config-engine)
-- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser), [`admin.assistant.mcp`](#config-assistantmcp), [`admin.cluster`](#config-cluster)
+- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser), [`admin.assistant.mcp`](#config-assistantmcp), [`admin.cluster`](#config-cluster), [`admin.cluster_member`](#config-clustermember)
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
 - [Profiling](#pprof): [`pprof`](#config-pprof)
@@ -1278,8 +1278,11 @@ outside agents over MCP at `/mcp` on the console's address, with tokens users ma
 credentials are kept in the store, each one's `GET /node`, `/status` and `/config/check` read every
 `poll_interval` through its console or its Admin API, and their states served in the console as the
 module `cluster`, whose Cluster pages add, test and trust them; it needs `console`, and a store:
-`store`, or the one `fit run -admin` keeps beside the config. See
-[cluster management](../cluster.md) and [decision 033](../decisions/033-cluster-management.md).
+`store`, or the one `fit run -admin` keeps beside the config. Its `link_address` takes the links of
+members behind NAT, which `admin.cluster_member` links out with: the line Add by enrollment gives,
+the manager's URL, its certificate's fingerprint and an enrollment token used once. See
+[cluster management](../cluster.md), [members behind NAT](../cluster.md#members-behind-nat) and
+[decision 033](../decisions/033-cluster-management.md).
 
 In a .conf file:
 
@@ -1362,6 +1365,7 @@ In JSON:
 | `console` | [object](#config-console) |  | Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out. |
 | `assistant` | [object](#config-assistant) |  | The workbench's assistant, a chat beside the console's pages that reads what fit does and drafts changes for a person to submit, calling the model APIs set here; off when left out, and then nothing is sent anywhere. Needs console. With a store, these settings are the first ones only: once the Settings page saves, the store's are used, keys included. |
 | `cluster` | [object](#config-cluster) |  | Manage other fits from this one, the manager: their addresses and credentials, added on the workbench's Cluster pages, are kept in the store, and each one's state is read every poll_interval. Off when left out, and then nothing is called. Needs store and console. See decision 033. |
+| `cluster_member` | [object](#config-clustermember) |  | Link this fit out to a manager of many fits, which then manages it through the link as it manages others over HTTP: for a fit behind NAT, or with no port open to the manager. The manager's Add by enrollment gives the line to paste here. Off when left out, and then nothing is dialed. Read when fit starts. See decision 033. |
 
 <a id="config-store"></a>
 
@@ -1525,6 +1529,19 @@ Also at `llm.hub.console.users[]`.
 | `max_nodes` | integer, 0 to 10000 | `256` | The most members the manager keeps; one more is refused. 256 when left out or 0. |
 | `max_concurrency` | integer, 0 to 256 | `8` | The most members polled at once; the others wait for their turn. Tests from the pages run beside them, 4 at most. 8 when left out or 0. |
 | `max_response_bytes` | integer, 0 to 67108864 | `4194304` | The largest answer read from a member; a larger one fails its call, and is reported as too large. 4 MiB when left out or 0; 16 KiB at least. |
+| `link_address` | string |  | Where members that link out to the manager reach it, as ":7444" or "0.0.0.0:7444": a WebSocket listener over TLS, with a self-signed certificate the manager makes once and keeps in the store, which each member pins when it enrolls. Members behind NAT, or with no port open, link here with the config line Add by enrollment gives, and are managed through their link as the others are over HTTP. Off when left out: no member can enroll. |
+| `link_url` | string |  | The URL members reach link_address at, as "wss://manager.example.com:7444/cluster/link", which the config line Add by enrollment gives names; when left out, the host the page was opened at and link_address's port. Only a wss URL. |
+
+<a id="config-clustermember"></a>
+
+### `admin.cluster_member`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `manager` | string |  | Required. The manager's link URL, as its Add by enrollment page gives it: wss://host:port/cluster/link. |
+| `fingerprint` | string |  | Required. The SHA-256 of the manager's link certificate, 64 hex digits, with or without colons, as the page gives it: the only certificate this fit links to. |
+| `token` | string |  | The enrollment token the manager made for this fit, fite1.<ID>.<secret>, used once: this fit proves it to the manager, which answers a credential of this fit's own, kept in the store, or without one in a file beside the config (fit.cluster-member beside fit.json); the token is not used again. Left out once this fit has a credential; a new token enrolls this fit again. |
+| `token_file` | string |  | A file holding the enrollment token, in place of token. |
 
 <a id="https-by-default"></a>
 

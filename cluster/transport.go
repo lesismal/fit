@@ -69,6 +69,27 @@ type certError struct {
 
 func (e *certError) Error() string { return e.msg }
 
+// caller is how a member is reached: over HTTP, its connections
+// (transport), or over the link it opened to the manager (linkTransport).
+// Every call goes out without blocking, and its done is called once.
+type caller interface {
+	// do sends method path, with header and body, to the member, and calls
+	// done once with its answer or why there is none, from a fib worker,
+	// a timer or the caller's goroutine. It never blocks.
+	do(method, path string, header stdhttp.Header, body []byte, done func(*reply, error))
+	// failure returns the Problem of err, a call's failure that started at
+	// start.
+	failure(err error, start time.Time) *Problem
+	// certificate is the certificate of the latest TLS handshake with the
+	// member, or nil.
+	certificate() *CertInfo
+	// abandon abandons the calls in flight; their done hear errClosed.
+	abandon()
+	// close abandons the calls in flight and closes what is the
+	// caller's own.
+	close()
+}
+
 // transport is a member's connections: a fib client whose TLS checks the
 // member's certificate as its TLS says, keeping what it saw.
 type transport struct {
@@ -161,6 +182,8 @@ func (t *transport) tlsConfig(trust TLS, serverName string) *tls.Config {
 	}
 }
 
+func (t *transport) certificate() *CertInfo { return t.seen.Load() }
+
 // certInfo is what c says.
 func certInfo(c *x509.Certificate) *CertInfo {
 	sum := sha256.Sum256(c.Raw)
@@ -178,6 +201,8 @@ type reply struct {
 	status int
 	header stdhttp.Header
 	body   []byte
+	// took is how long the call that answered it took.
+	took time.Duration
 }
 
 // call is a call in flight, which the transport's close cancels.
@@ -204,7 +229,9 @@ func (t *transport) do(method, path string, header stdhttp.Header, body []byte, 
 	req.Header.Set("User-Agent", "fit-cluster-manager")
 	if body != nil {
 		req.Body, req.ContentLength = fibhttp.NewBufferedBody(body), int64(len(body))
-		req.Header.Set("Content-Type", "application/json")
+		if req.Header.Get("Content-Type") == "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
 	}
 	k := &call{}
 	t.mu.Lock()

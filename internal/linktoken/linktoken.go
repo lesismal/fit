@@ -97,6 +97,27 @@ func (s Secret) String() string {
 	return config.LinkTokenPrefix + s.ID + "." + base64.RawURLEncoding.EncodeToString(s.secret)
 }
 
+// StringAs is the token as String writes it, with prefix in place of
+// config.LinkTokenPrefix: for the tokens of other uses, as a cluster's
+// enrollment tokens.
+func (s Secret) StringAs(prefix string) string {
+	return prefix + s.ID + "." + base64.RawURLEncoding.EncodeToString(s.secret)
+}
+
+// ParseAs reads a token StringAs wrote with prefix.
+func ParseAs(tok, prefix string) (Secret, error) {
+	rest, ok := strings.CutPrefix(tok, prefix)
+	id, enc, dot := strings.Cut(rest, ".")
+	if !ok || !dot || !config.ValidLinkTokenID(id) {
+		return Secret{}, errors.New("linktoken: not a token of " + prefix + "<16 hex digits>.<secret>")
+	}
+	s, err := base64.RawURLEncoding.DecodeString(enc)
+	if err != nil || len(s) < 16 || len(s) > 64 {
+		return Secret{}, errors.New("linktoken: the token's secret is not 16 to 64 bytes of base64url")
+	}
+	return Secret{ID: id, secret: s}, nil
+}
+
 func (s Secret) client() []byte {
 	m := hmac.New(sha256.New, s.secret)
 	m.Write([]byte(labelClient))

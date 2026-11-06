@@ -130,7 +130,7 @@ func TestNodesAPI(t *testing.T) {
 		t.Errorf("log: %s", f.log.String())
 	}
 	// The store holds them, and nothing else does.
-	if sec := string(f.store.Section(Section)); !strings.Contains(sec, fakePassword) || !strings.Contains(sec, `"version":1`) {
+	if sec := string(f.store.Section(Section)); !strings.Contains(sec, fakePassword) || !strings.Contains(sec, `"version":2`) {
 		t.Errorf("the store: %s", sec)
 	}
 }
@@ -191,11 +191,12 @@ func TestInvalidKept(t *testing.T) {
 	if !strings.Contains(f.log.String(), "is not polled") {
 		t.Errorf("%s", f.log.String())
 	}
-	// A document of no version is read as version 1, and written so.
+	// A document of no version is read as version 1, and written as the
+	// version this fit writes.
 	if _, err := f.m.Add("u", tokenInput("b", "http://127.0.0.1:1")); err != nil {
 		t.Fatal(err)
 	}
-	if got := string(f.store.Section(Section)); !strings.Contains(got, `"version":1`) || !strings.Contains(got, `"groups":[]`) {
+	if got := string(f.store.Section(Section)); !strings.Contains(got, `"version":2`) || !strings.Contains(got, `"groups":[]`) {
 		t.Errorf("%s", got)
 	}
 }

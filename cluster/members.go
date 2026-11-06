@@ -26,7 +26,10 @@ const Section = "cluster"
 // an earlier version is read and written back as this one; one of a later
 // version, which a newer fit wrote, is read for its members and never
 // written over: the manager is then read-only.
-const DocVersion = 1
+//
+// Version 2 (I149) added the members that link out to the manager: a
+// member's link, and the link listener's certificate.
+const DocVersion = 2
 
 // The ways a manager reaches a member.
 const (
@@ -36,6 +39,11 @@ const (
 	AccessConsole = "console"
 	// AccessAdminAPI calls the member's Admin API with its bearer token.
 	AccessAdminAPI = "admin_api"
+	// AccessLink reaches a member that links out to the manager
+	// (admin.cluster_member on the member) through its link: the
+	// member's Admin API, served in process, over a WebSocket the member
+	// opened. Such a member is added by enrollment, not by its URL.
+	AccessLink = "link"
 )
 
 // The bounds of what a member holds.
@@ -89,8 +97,52 @@ type Member struct {
 	Password string            `json:"password,omitempty"`
 	Token    string            `json:"token,omitempty"`
 	TLS      TLS               `json:"tls,omitzero"`
-	Created  time.Time         `json:"created"`
-	Updated  time.Time         `json:"updated"`
+	// Link is a member's link, for AccessLink.
+	Link    *Link     `json:"link,omitempty"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
+}
+
+// Link is what the manager keeps of a member that links out to it
+// (AccessLink): its credential, made when it enrolled, and the enrollment
+// token waiting for it, each only as the hash its proofs are checked with
+// (package linktoken).
+type Link struct {
+	// CredentialID and CredentialHash are the member's credential, which
+	// it links with; Enrolled is when it was made.
+	CredentialID   string    `json:"credential_id,omitempty"`
+	CredentialHash string    `json:"credential_hash,omitempty"`
+	Enrolled       time.Time `json:"enrolled,omitzero"`
+	// TokenID and TokenHash are the enrollment token made for it, used
+	// once, until TokenExpires; TokenMade is when it was made.
+	TokenID      string    `json:"token_id,omitempty"`
+	TokenHash    string    `json:"token_hash,omitempty"`
+	TokenMade    time.Time `json:"token_made,omitzero"`
+	TokenExpires time.Time `json:"token_expires,omitzero"`
+	// UsedTokenID is the token the member last enrolled with, refused as
+	// used from then on.
+	UsedTokenID string `json:"used_token_id,omitempty"`
+}
+
+// LinkView is what the API answers of a member's link: whether it has a
+// credential, and its enrollment token's dates; never a hash.
+type LinkView struct {
+	Enrolled      time.Time `json:"enrolled,omitzero"`
+	CredentialSet bool      `json:"credential_set"`
+	// TokenWaiting is an enrollment token made and not used yet, which
+	// expires at TokenExpires; TokenExpired says it did.
+	TokenWaiting bool      `json:"token_waiting"`
+	TokenMade    time.Time `json:"token_made,omitzero"`
+	TokenExpires time.Time `json:"token_expires,omitzero"`
+}
+
+// view returns what the API shows of l, at now.
+func (l *Link) view() *LinkView {
+	if l == nil {
+		return nil
+	}
+	return &LinkView{Enrolled: l.Enrolled, CredentialSet: l.CredentialHash != "", TokenWaiting: l.TokenHash != "",
+		TokenMade: l.TokenMade, TokenExpires: l.TokenExpires}
 }
 
 // MemberView is what the API answers of a member: its credentials only as
@@ -104,8 +156,10 @@ type MemberView struct {
 	PasswordSet bool              `json:"password_set"`
 	TokenSet    bool              `json:"token_set"`
 	TLS         TLS               `json:"tls"`
-	Created     time.Time         `json:"created"`
-	Updated     time.Time         `json:"updated"`
+	// Link is a linked member's (AccessLink).
+	Link    *LinkView `json:"link,omitempty"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
 }
 
 // View returns what the API shows of m.
@@ -115,13 +169,25 @@ func (m *Member) View() MemberView {
 		labels = map[string]string{}
 	}
 	return MemberView{Name: m.Name, Labels: labels, URL: m.URL, Access: m.Access, Username: m.Username,
-		PasswordSet: m.Password != "", TokenSet: m.Token != "", TLS: m.TLS, Created: m.Created, Updated: m.Updated}
+		PasswordSet: m.Password != "", TokenSet: m.Token != "", TLS: m.TLS, Link: m.Link.view(), Created: m.Created, Updated: m.Updated}
 }
 
 // clone returns a copy of m that shares nothing with it.
 func (m Member) clone() Member {
 	m.Labels = maps.Clone(m.Labels)
+	if m.Link != nil {
+		l := *m.Link
+		m.Link = &l
+	}
 	return m
+}
+
+// credentialID is the ID of a linked member's credential, or "".
+func (m *Member) credentialID() string {
+	if m.Link == nil {
+		return ""
+	}
+	return m.Link.CredentialID
 }
 
 // sameLink reports whether a and b reach the member the same way: the same
@@ -129,7 +195,7 @@ func (m Member) clone() Member {
 // one serve the other.
 func sameLink(a, b *Member) bool {
 	return a.URL == b.URL && a.Access == b.Access && a.Username == b.Username && a.Password == b.Password &&
-		a.Token == b.Token && a.TLS == b.TLS
+		a.Token == b.Token && a.TLS == b.TLS && a.credentialID() == b.credentialID()
 }
 
 // Input is a member as the API takes it, to add or replace one: a password
@@ -171,8 +237,25 @@ func (in *Input) member(old *Member, now time.Time) (Member, error) {
 	if len(in.Labels) > 0 {
 		m.Labels = maps.Clone(in.Labels)
 	}
-	if m.Access == "" {
+	switch {
+	case m.Access != "":
+	case old != nil && old.Access == AccessLink:
+		m.Access = AccessLink
+	default:
 		m.Access = AccessConsole
+	}
+	if m.Access == AccessLink {
+		// A linked member keeps its link; only its name and labels
+		// change here.
+		if old == nil || old.Access != AccessLink {
+			return Member{}, fieldErr("access", "a member that links out to the manager is added by enrollment, not by its URL")
+		}
+		m.URL, m.Username, m.Password, m.Token, m.TLS = "", "", "", "", TLS{}
+		m.Created, m.Link = old.Created, old.clone().Link
+		if err := m.check(); err != nil {
+			return Member{}, err
+		}
+		return m, nil
 	}
 	if old != nil {
 		m.Created = old.Created
@@ -217,6 +300,15 @@ func (m *Member) check() error {
 			return fieldErr("labels", "the value of %q is not 0 to %d letters, digits, '_', '.', '/' and '-', starting and ending with a letter or digit", k, MaxLabelValue)
 		}
 	}
+	if m.Access == AccessLink {
+		if m.Link == nil || m.Link.CredentialHash == "" && m.Link.TokenHash == "" {
+			return fieldErr("link", "the linked member has neither a credential nor an enrollment token: make it a token")
+		}
+		if m.URL != "" || m.Username != "" || m.Password != "" || m.Token != "" || m.TLS != (TLS{}) {
+			return fieldErr("access", "a linked member has no URL, credentials or TLS of its own: it is reached through its link")
+		}
+		return nil
+	}
 	if err := checkURL(m.URL); err != nil {
 		return err
 	}
@@ -233,7 +325,7 @@ func (m *Member) check() error {
 			return fieldErr("token", "the Admin API's token is 1 to %d printable characters without spaces", MaxTokenBytes)
 		}
 	default:
-		return fieldErr("access", "%q is not an access: %s or %s", m.Access, AccessConsole, AccessAdminAPI)
+		return fieldErr("access", "%q is not an access: %s or %s (or %s, added by enrollment)", m.Access, AccessConsole, AccessAdminAPI, AccessLink)
 	}
 	if m.TLS.CA != "" && m.TLS.Fingerprint != "" {
 		return fieldErr("tls", "ca and fingerprint are two ways to trust the member's certificate: set one")
@@ -350,6 +442,10 @@ const (
 	ActionAdd    = "node.add"
 	ActionUpdate = "node.update"
 	ActionRemove = "node.remove"
+	// ActionEnrollToken is an enrollment token made for a member that
+	// links out; ActionEnrolled the member's use of it.
+	ActionEnrollToken = "node.enroll_token"
+	ActionEnrolled    = "node.enrolled"
 )
 
 // document is the store's section: the members, and what I144 to I148 keep
@@ -361,6 +457,15 @@ type document struct {
 	Templates []json.RawMessage `json:"templates"`
 	Rollouts  []json.RawMessage `json:"rollouts"`
 	Audit     []AuditEntry      `json:"audit"`
+	// LinkCert is the link listener's certificate and key, PEM, made once
+	// and kept, so that the members' pins of it stay good.
+	LinkCert *linkCert `json:"link_cert,omitempty"`
+}
+
+// linkCert is a certificate and its key, PEM.
+type linkCert struct {
+	Cert string `json:"cert"`
+	Key  string `json:"key"`
 }
 
 // readDocument reads the store's section, or an empty document for none.

@@ -266,6 +266,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 				tempUser, admin.DefaultConsolePassword, until.Format(time.RFC3339))
 		}
 	}
+	var nodeID string
 	if c.Admin != nil {
 		// Who this fit is, for the Admin API's /node: its ID is the
 		// config's, or made once and kept in the store, or beside the
@@ -283,6 +284,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		}
 		fitVersion, fibVersion := versions()
 		configs.UseNode(admin.Node{ID: id, IDKept: kept, FitVersion: fitVersion, FibVersion: fibVersion, Started: started})
+		nodeID = id
 	}
 	// The llm and tunnel roles run on the listeners' engine, and
 	// write what their pages change back into the config through configs.
@@ -319,16 +321,27 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		adminLog.Infof("admin API on %s", as.Addr())
 	}
 	var console *admin.Console
+	var memberLink *cluster.MemberLink
 	// The manager of other fits, admin.cluster, served in the console as
 	// the module cluster; the config checked that it has a store and a
 	// console.
 	var manager *cluster.Manager
 	if c.Admin != nil && c.Admin.Cluster != nil && c.Admin.Console != nil && boot != nil {
 		adminLog := root.Logger(config.LoggerAdmin)
-		// The settings, the store and the engine are there: New cannot fail.
-		manager, _ = cluster.New(cluster.Options{Engine: s.Engine(), Settings: c.Admin.Cluster, Store: boot.st, Logf: adminLog.Infof})
+		// The settings, the store and the engine are there: New fails only
+		// for link_address, which it listens on.
+		manager, err = cluster.New(cluster.Options{Engine: s.Engine(), Settings: c.Admin.Cluster, Store: boot.st, Logf: adminLog.Infof})
+		if err != nil {
+			fmt.Fprintf(stderr, "fit run: %v\n", err)
+			_ = as.Shutdown(context.Background())
+			_ = s.Close()
+			return 1
+		}
 		defer manager.Close() // closed already, unless serve fails before shutdown
 		fmt.Fprintf(stdout, "fit: managing %d members (admin.cluster)\n", len(manager.Members()))
+		if info := manager.LinkInfo(""); info.Enabled {
+			fmt.Fprintf(stdout, "fit: members link to %s (certificate %s)\n", info.Address, info.Fingerprint)
+		}
 	}
 	if c.Admin != nil && c.Admin.Console != nil {
 		adminLog := root.Logger(config.LoggerAdmin)
@@ -346,6 +359,40 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 			return 1
 		}
 		adminLog.Infof("console on %s", console.URL())
+	}
+	// A member of a manager's that links out to it, admin.cluster_member:
+	// the manager reaches the Admin API, in process, over the link.
+	if c.Admin != nil && c.Admin.ClusterMember != nil {
+		adminLog := root.Logger(config.LoggerAdmin)
+		keep := cluster.MemoryKeeper()
+		switch prefix := app.BesidePrefix(paths[0]); {
+		case boot != nil:
+			keep = cluster.StoreKeeper(boot.st)
+		case prefix != "":
+			keep = cluster.FileKeeper(prefix + cluster.MemberFileSuffix)
+		default:
+			fmt.Fprintf(warnWriter(stderr), "fit: the credential admin.cluster_member enrolls for is kept nowhere, with no store and a config on standard input: it lasts until fit stops\n")
+		}
+		host, _ := os.Hostname()
+		fitVersion, _ := versions()
+		link, err := cluster.StartMember(cluster.MemberOptions{Engine: s.Engine(), Settings: c.Admin.ClusterMember,
+			API:             admin.LinkAPI(c.Admin, configs, func(r admin.Result) { printApplied(stdout, stderr, r) }, adminLog.Infof),
+			MaxRequestBytes: c.Admin.ConfigBytes() + 64<<10, Keeper: keep,
+			Node: cluster.MemberNode{ID: nodeID, Hostname: host, FitVersion: fitVersion}, Logf: adminLog.Infof})
+		if err != nil {
+			fmt.Fprintf(stderr, "fit run: %v\n", err)
+			if console != nil {
+				_ = console.Shutdown(context.Background())
+			}
+			if as != nil {
+				_ = as.Shutdown(context.Background())
+			}
+			_ = s.Close()
+			return 1
+		}
+		defer link.Close() // closed already, unless serve fails before shutdown
+		memberLink = link
+		fmt.Fprintf(stdout, "fit: linking to the manager at %s (admin.cluster_member)\n", c.Admin.ClusterMember.Manager)
 	}
 	if telemetry != nil && telemetry.Metrics != nil {
 		exporter, err := observe.NewMetricsExporter(telemetry, configs.WriteMetricsTo, telemetryLog)
@@ -461,6 +508,10 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	}
 	if as != nil {
 		_ = as.Shutdown(sctx)
+	}
+	// The link to a manager serves the Admin API too.
+	if memberLink != nil {
+		memberLink.Close()
 	}
 	// The manager's calls go out on the listeners' engine: closed before
 	// it is.

@@ -26,8 +26,8 @@ TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或�
   [Traefik](docs/migrating-from-traefik.zh-CN.md) 迁移。
 - [控制台](docs/console.zh-CN.md)：配置加密保存在 store 中（`admin.store`），并在需要登录的网页上修改
   （`admin.console`）；`fit store export` 和 `import`。
-- [集群管理](docs/cluster.zh-CN.md)：由一个 fit 在工作台的“集群”页面管理其他 fit，集中查看其状态，凭据保存在其 store 中；
-  不在数据路径上。
+- [集群管理](docs/cluster.zh-CN.md)：由一个 fit 在工作台的“集群”页面管理其他 fit，集中查看其状态，凭据保存在其 store 中，
+  NAT 后面的成员主动连接它；不在数据路径上。
 - [tunnel](docs/tunnel.zh-CN.md) 与 [llm](docs/llm.zh-CN.md)：与网关一起运行在其引擎上的角色，用于访问 NAT 后的
   服务，以及在多台机器间共享 AI 模型。
 - [WebRTC](docs/webrtc.zh-CN.md)：基于 fib WebRTC 的 TURN 服务器，与网关一起运行；以 fit 为媒体服务器的

@@ -34,7 +34,8 @@ iterations are done, 1.0's included, and 1.0's external security review is still
 - [The console](docs/console.md): the config kept encrypted in a store, `admin.store`, and changed
   from web pages behind logins, `admin.console`; `fit store export` and `import`.
 - [Cluster management](docs/cluster.md): one fit managing others from the workbench's Cluster pages,
-  their states together, their credentials kept in its store; not in the data path.
+  their states together, their credentials kept in its store, members behind NAT linking out to it;
+  not in the data path.
 - [The tunnel](docs/tunnel.md) and [the LLM feature](docs/llm.md): roles run beside the gateway on its
   engine, reaching services behind NAT and sharing AI models among machines.
 - [WebRTC](docs/webrtc.md): a TURN server on fib's WebRTC, beside the gateway, WHIP and WHEP

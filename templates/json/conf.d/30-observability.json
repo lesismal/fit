@@ -674,6 +674,49 @@
       // // large. 4 MiB when left out or 0; 16 KiB at least.
       // // integer, 0 to 67108864; default 4194304.
       // "max_response_bytes": 4194304,
+
+      // // Where members that link out to the manager reach it, as ":7444" or "0.0.0.0:7444": a
+      // // WebSocket listener over TLS, with a self-signed certificate the manager makes once and keeps
+      // // in the store, which each member pins when it enrolls. Members behind NAT, or with no port
+      // // open, link here with the config line Add by enrollment gives, and are managed through their
+      // // link as the others are over HTTP. Off when left out: no member can enroll.
+      // // string.
+      // "link_address": "",
+
+      // // The URL members reach link_address at, as "wss://manager.example.com:7444/cluster/link",
+      // // which the config line Add by enrollment gives names; when left out, the host the page was
+      // // opened at and link_address's port. Only a wss URL.
+      // // string.
+      // "link_url": "",
+    // },
+
+    // // Link this fit out to a manager of many fits, which then manages it through the link as it
+    // // manages others over HTTP: for a fit behind NAT, or with no port open to the manager. The
+    // // manager's Add by enrollment gives the line to paste here. Off when left out, and then
+    // // nothing is dialed. Read when fit starts. See decision 033.
+    // // object.
+    // "cluster_member": {
+      // // The manager's link URL, as its Add by enrollment page gives it:
+      // // wss://host:port/cluster/link.
+      // // string; required.
+      // "manager": "",
+
+      // // The SHA-256 of the manager's link certificate, 64 hex digits, with or without colons, as the
+      // // page gives it: the only certificate this fit links to.
+      // // string; required.
+      // "fingerprint": "",
+
+      // // The enrollment token the manager made for this fit, fite1.<ID>.<secret>, used once: this fit
+      // // proves it to the manager, which answers a credential of this fit's own, kept in the store,
+      // // or without one in a file beside the config (fit.cluster-member beside fit.json); the token
+      // // is not used again. Left out once this fit has a credential; a new token enrolls this fit
+      // // again.
+      // // string.
+      // "token": "",
+
+      // // A file holding the enrollment token, in place of token.
+      // // string.
+      // "token_file": "/etc/fit/token",
     // },
   // },
 
