@@ -76,6 +76,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A61 | An RTSP server's UDP bindings removed | requested | 4, 11 | I116 (030) |
 | A62 | A proxied HTTP/1.1 upload moved by splice(2) | done, fib `main` at `60d67aa` | 12 | — |
 | A63 | Multipath TCP as a listener's option | done, fib `5c0e5b9` | — | — |
+| A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` (branch `i131`) | 1, 11 | I131–I134 (032) |
 
 ## Evidence
 
@@ -2014,6 +2015,79 @@ has no `mptcp` there yet. A client or peer without Multipath TCP falls back to p
 no config to require it, and Unix sockets and UDP take none. The workbench's Engine menu tags a port
 that has it.
 
+
+## A64: A reader of MP4 files that are not fragmented
+
+**Status.** Requested on 2026-11-06, for the media library (I131–I136, [decision 032](decisions/032-media-library.md)).
+Done in fib at `8998d58` (with `ba47477`), made by fit's session per [rule 15](rules.md#7-when-fib-falls-short),
+on fib's branch `i131` until it is pushed to `main`; fit then moves to that commit ([rule 19](rules.md#9-the-fib-version)).
+
+**Problem.** The media library serves files as HLS without transcoding (I133) and plays them into the hub as
+channels (I134). For both, fit must know each track's codec and every sample's place and time in a file: the
+MP4 files ffmpeg, encoders and cameras write, which are not fragmented, the samples described by the `moov`'s
+sample tables. A file of a two-hour film holds hundreds of thousands of samples and a `moov` of megabytes,
+at the front of the file or at its end; reading the file, or its `moov`, whole would break
+[rule 11](rules.md#4-timeouts-and-limits), and an entry a sample would make the memory of the tables
+unknown until they are read.
+
+**Evidence.** fib's `media/fmp4` reads fragmented MP4 only: `ParseInit` takes a `moov` held whole as bytes
+and reads each track's sample entry, and `ParseFragment` reads `moof` and `mdat`; it reads none of `stts`,
+`ctts`, `stss`, `stsc`, `stsz`/`stz2`, `stco`/`co64` or `elst`, and it says that it leaves edit lists out.
+Nothing else in fib reads a file's sample tables.
+
+**Suggested API.** A reader in `media/fmp4` or a new `media/mp4` that parses the `moov` through an
+`io.ReaderAt` without reading the whole file, finds a `moov` at the end as well as at the front, gives each
+track's codec config as `media/av` does (H.264, H.265, AV1; AAC, Opus), finds samples by time and by
+keyframe, keeps its sample table in a compact form whose size is known before it is built, and is fuzzed.
+
+**As built.** A new package `media/mp4`, since `fmp4` reads fragments held in memory and this reads a file
+through a `ReaderAt` and keeps tables; the two share `fmp4.ParseSampleEntry`, the sample entry reader
+`ParseInit` uses, exported for it.
+
+- `mp4.Open(r io.ReaderAt, size int64) (*File, error)` reads the top-level box headers to the `moov`,
+  wherever it is, and the `moov`'s boxes but for the sample tables, of which it reads only where they are
+  and their entry counts. `File` has `Size`, `MajorBrand`, `Timescale`, `Duration`, `MoovOffset` and
+  `MoovSize`, and `Tracks []*Track`. A `Track` has `ID`, `Handler` (`vide`, `soun`, ...), `Language`,
+  `Timescale`, `Duration`, `Track *av.Track` (codec, `Config` as `media/av` has it, picture size, sample
+  rate, channels; `av.CodecUnknown` for other formats), `Edits []Edit`, `Shift` (what the edit list adds
+  to a media time), `Samples` and `Chunks`. A file whose `moov` has an `mvex` is `ErrFragmented`; one
+  without a `moov`, or cut before it, `ErrNoMoov`. `File` holds nothing of the reader.
+- `Track.TableBytes() int64` is the memory the track's table will take, from the counts alone: 4 bytes a
+  sample for `stsz` sizes (2 for `stz2`, none when every sample has one size), 12 a chunk, 16 an `stts`
+  entry, 4 a sync sample, the smaller of 8 a `ctts` entry and 4 a sample, and the `Table` itself. It is
+  never more than four times the bytes of the file's own tables.
+- `Track.ReadTable(r io.ReaderAt) (*Table, error)` reads the tables in one pass through a 16 KiB buffer and
+  allocates `TableBytes`; it checks that `stts` and `stsc` cover every sample and that every chunk's samples
+  lie within the file (`ErrSampleData`). A `Table` is immutable and safe from several goroutines:
+  `Len`, `Sample(i) Sample` (O(log n)), `Samples(from) iter.Seq2[int, Sample]` (decode order, constant cost a
+  sample), `IndexAt(d)`, `SeekKeyframe(d)`, `Keyframes`, `Keyframe(k)`, `KeyframeBefore(i)`,
+  `KeyframeAfter(i)`, `Time(ticks)` and `Ticks(d)` (the presentation timeline, after the edit list),
+  `MinCTS` (the decode delay negative composition offsets need), `End`, `DataSize` and `Bytes`. A `Sample` has
+  `Offset`, `Size`, `DTS`, `CTS`, `Duration` (ticks of the track's timescale) and `Keyframe`;
+  `ReadSample(r, s, buf)` reads its data.
+- Edit lists: the empty edits before the first that plays delay the track, and that edit's media time is
+  presented at its start, as ffmpeg and players do; later edits are in `Edits`, not applied.
+- Limits: `MaxTracks` (256), `MaxBoxes` (65536 headers), `MaxSampleEntries` (1 MiB of `stsd`), `MaxEdits`
+  (1024) and `MaxSamples` (2^31-1); past them `ErrTooLarge`. Nothing in a file is trusted.
+- Tests: seven files ffmpeg 7.1 wrote (`media/mp4/testdata/gen.sh`, 129 KB with ffprobe's output): H.264,
+  H.265 and AV1 with AAC and Opus, `moov` at the front and the back, B-frames, negative composition offsets
+  (`ctts` version 1), and audio 0.2 s late (an empty edit); every track's codec, size, rate, channels and
+  configuration (its SHA-256 against ffprobe's `extradata_hash`), and every sample's offset, size, duration,
+  DTS, PTS and sync flag match ffprobe's, without the edit list and with it; the same after the tables are
+  rewritten as `co64` and `stz2`. Files built with every form of each table (`stz2` of 4, 8 and 16 bits,
+  constant sizes, `ctts` of both versions or none, `stss` absent, empty or out of order, 64-bit `mdat`,
+  version 1 headers and edit lists) read back sample for sample, every lookup checked against a walk of
+  all of them. An hour at 60 fps with B-frames: 216,000 samples, a table of 1.82 MB (8.4 bytes a sample),
+  1.86 MB allocated by `ReadTable` in all. `FuzzOpen` ran a minute locally with no failure and joins fib CI's
+  fuzz job; `media/interop`'s `TestMP4` has ffmpeg write ten-second files of the same pairs, two audio
+  tracks, AAC at 44.1 kHz, and checks them against ffprobe in the `media-interop` job.
+
+**How fit uses it.** I132 probes each file with `mp4.Open` on the library's file pool (a few kilobytes
+read, whatever the file's length) for the catalog's durations, tracks and codecs; I133 admits a track's
+table to the library's bounded table cache by `TableBytes` before it reads it on the pool, and cuts HLS
+segments at the sync samples `SeekKeyframe` and `KeyframeAfter` find, reading their bytes on the pool with the
+offsets and sizes of `Samples`; MPEG-TS segments decode `-MinCTS` earlier where it is negative. I134 paces a
+channel by `Table.Time` of the samples it reads.
 
 ## A65: A refused protocol switch streamed back
 

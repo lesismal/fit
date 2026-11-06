@@ -74,6 +74,7 @@
 | A61 | 移除 RTSP 服务器的 UDP 绑定 | 已提出 | 4, 11 | I116（030） |
 | A62 | 用 splice(2) 搬运代理的 HTTP/1.1 上传 | 已完成，fib `main` 的 `60d67aa` | 12 | — |
 | A63 | 多路径 TCP 作为监听器的选项 | 已完成，fib `5c0e5b9` | — | — |
+| A64 | 非分片 MP4 文件的读取器 | 已完成，fib `8998d58`（`i131` 分支） | 1、11 | I131–I134（032） |
 
 ## 证据
 
@@ -1526,6 +1527,63 @@ TURN 服务器并排空旧的。tunnel 与 LLM 功能自身的链路监听仍为
 还没有 `mptcp`。没有多路径 TCP 的客户端或对端回退到普通 TCP，也没有要求必须使用它的配置；Unix 套接字与 UDP 没有该功能。
 workbench 的引擎菜单会为带它的端口加上标记。
 
+
+## A64：非分片 MP4 文件的读取器
+
+**状态。** 2026-11-06 为媒体库（I131–I136，[决定 032](decisions/032-media-library.zh-CN.md)）提出。已在 fib 的 `8998d58`
+（连同 `ba47477`）完成，由 fit 的会话按 [规则 15](rules.zh-CN.md) 实现；推送到 `main` 之前在 fib 的 `i131` 分支上，
+之后 fit 移到该提交（[规则 19](rules.zh-CN.md)）。
+
+**问题。** 媒体库不转码地把文件作为 HLS 提供（I133），并把它们作为频道播放进 hub（I134）。两者都要求 fit 知道一个文件
+中每条轨道的编码，以及每个采样的位置和时间：ffmpeg、编码器和摄像机写出的 MP4 文件是非分片的，采样由 `moov` 中的
+采样表描述。一部两小时影片的文件有几十万个采样，`moov` 有几 MB，可能在文件开头也可能在末尾；把文件或其 `moov`
+整个读入会违反 [规则 11](rules.zh-CN.md)，而每个采样一个条目会让采样表的内存在读完之前无从得知。
+
+**依据。** fib 的 `media/fmp4` 只读取分片 MP4：`ParseInit` 接收整个放在内存中的 `moov` 并读取每条轨道的采样条目，
+`ParseFragment` 读取 `moof` 和 `mdat`；它不读取 `stts`、`ctts`、`stss`、`stsc`、`stsz`/`stz2`、`stco`/`co64` 或
+`elst`，并说明它不处理编辑列表。fib 中没有其它代码读取文件的采样表。
+
+**建议的 API。** 在 `media/fmp4` 或新的 `media/mp4` 中提供读取器：通过 `io.ReaderAt` 解析 `moov` 而不读取整个文件，
+`moov` 在末尾和开头都能找到，按 `media/av` 的方式给出每条轨道的编码配置（H.264、H.265、AV1；AAC、Opus），按时间和
+关键帧查找采样，采样表以紧凑形式保存且其大小在构建之前可知，并做 fuzz。
+
+**实际实现。** 新包 `media/mp4`：`fmp4` 读取内存中的分片，而这里通过 `ReaderAt` 读取文件并保留采样表；两者共用
+`fmp4.ParseSampleEntry`，即 `ParseInit` 所用的采样条目读取函数，为此导出。
+
+- `mp4.Open(r io.ReaderAt, size int64) (*File, error)` 读取顶层盒子头直到 `moov`（无论在哪），读取 `moov` 中除采样表
+  外的盒子，采样表只读位置和条目数。`File` 有 `Size`、`MajorBrand`、`Timescale`、`Duration`、`MoovOffset`、`MoovSize`
+  和 `Tracks []*Track`。`Track` 有 `ID`、`Handler`（`vide`、`soun` 等）、`Language`、`Timescale`、`Duration`、
+  `Track *av.Track`（编码、按 `media/av` 形式的 `Config`、画面尺寸、采样率、声道数；其它格式为 `av.CodecUnknown`）、
+  `Edits []Edit`、`Shift`（编辑列表加到媒体时间上的量）、`Samples` 和 `Chunks`。`moov` 中有 `mvex` 的文件返回
+  `ErrFragmented`；没有 `moov` 或在其之前被截断的返回 `ErrNoMoov`。`File` 不持有读取器的任何东西。
+- `Track.TableBytes() int64` 仅凭条目数给出该轨道采样表将占用的内存：`stsz` 大小每个采样 4 字节（`stz2` 为 2 字节，
+  所有采样大小相同时为 0），每个 chunk 12 字节，每个 `stts` 条目 16 字节，每个同步采样 4 字节，`ctts` 取每条目 8 字节
+  与每采样 4 字节中较小者，再加 `Table` 本身。它绝不超过文件中这些表本身字节数的四倍。
+- `Track.ReadTable(r io.ReaderAt) (*Table, error)` 通过 16 KiB 缓冲区一次读完各表，分配 `TableBytes`；它检查 `stts`
+  和 `stsc` 覆盖每个采样、每个 chunk 的采样都在文件之内（`ErrSampleData`）。`Table` 不可变，可在多个 goroutine 中使用：
+  `Len`、`Sample(i) Sample`（O(log n)）、`Samples(from) iter.Seq2[int, Sample]`（解码顺序，每个采样恒定开销）、
+  `IndexAt(d)`、`SeekKeyframe(d)`、`Keyframes`、`Keyframe(k)`、`KeyframeBefore(i)`、`KeyframeAfter(i)`、`Time(ticks)`
+  与 `Ticks(d)`（应用编辑列表后的呈现时间线）、`MinCTS`（负的合成偏移所需的解码提前量）、`End`、`DataSize` 和 `Bytes`。
+  `Sample` 有 `Offset`、`Size`、`DTS`、`CTS`、`Duration`（轨道时间刻度的 tick）和 `Keyframe`；`ReadSample(r, s, buf)`
+  读取其数据。
+- 编辑列表：第一个实际播放的编辑之前的空编辑使轨道延后，该编辑的媒体时间在其起点呈现，与 ffmpeg 和播放器一致；之后
+  的编辑保留在 `Edits` 中，不应用。
+- 上限：`MaxTracks`（256）、`MaxBoxes`（65536 个盒子头）、`MaxSampleEntries`（`stsd` 1 MiB）、`MaxEdits`（1024）和
+  `MaxSamples`（2^31-1）；超出时返回 `ErrTooLarge`。文件中的任何内容都不被信任。
+- 测试：ffmpeg 7.1 写出的七个文件（`media/mp4/testdata/gen.sh`，连同 ffprobe 的输出共 129 KB）：H.264、H.265 和 AV1
+  搭配 AAC 和 Opus，`moov` 在前和在后，B 帧，负的合成偏移（`ctts` 版本 1），以及晚 0.2 秒开始的音频（空编辑）；每条
+  轨道的编码、尺寸、采样率、声道数和配置（其 SHA-256 对照 ffprobe 的 `extradata_hash`），以及每个采样的偏移、大小、
+  时长、DTS、PTS 和同步标志，在不应用和应用编辑列表时都与 ffprobe 一致；把表改写为 `co64` 和 `stz2` 后同样一致。用每种
+  表形式（4、8、16 位的 `stz2`，大小相同，两种版本或没有 `ctts`，`stss` 缺失、为空或乱序，64 位 `mdat`，版本 1 的头和
+  编辑列表）构建的文件逐个采样读回，每种查找都对照逐个遍历检查。60 fps 一小时带 B 帧：216,000 个采样，表 1.82 MB
+  （每个采样 8.4 字节），`ReadTable` 总共分配 1.86 MB。`FuzzOpen` 在本地运行一分钟无失败，并加入 fib CI 的 fuzz 任务；
+  `media/interop` 的 `TestMP4` 让 ffmpeg 写出同样编码组合的十秒文件、两条音轨、44.1 kHz 的 AAC，并在 `media-interop`
+  任务中对照 ffprobe 检查。
+
+**fit 的使用方式。** I132 在媒体库的文件池上用 `mp4.Open` 探测每个文件（无论文件多长只读几 KB），得到目录中的时长、
+轨道和编码；I133 在文件池上读取某条轨道的采样表之前，先按 `TableBytes` 决定是否放入媒体库有界的表缓存，并在
+`SeekKeyframe` 和 `KeyframeAfter` 找到的同步采样处切分 HLS 分片，按 `Samples` 给出的偏移和大小在文件池上读取字节；
+`MinCTS` 为负时 MPEG-TS 分片提前 `-MinCTS` 解码。I134 按读取的采样的 `Table.Time` 控制频道节奏。
 
 ## A65：被拒绝的协议切换以流式返回
 
