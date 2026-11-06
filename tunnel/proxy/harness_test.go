@@ -29,23 +29,10 @@ import (
 )
 
 // The tests run the hub and node roles on an app.Manager, and the
-// proxy beside them, whose host they borrow from a role that only hands
+// proxy beside them, on the host of tunneltest's role, which only hands
 // its host over: the proxy's own registration is left out of the configs
 // the manager applies, so that the test holds the Proxy.
-var hosts = make(chan *app.Host, 16)
-
-func init() {
-	app.Register(app.Info{ID: "test.host", Member: func(c *config.Config) any { return c },
-		New: func(h *app.Host) (app.Role, error) {
-			hosts <- h
-			return nopRole{}, nil
-		}})
-}
-
-type nopRole struct{}
-
-func (nopRole) Apply(any) error      { return nil }
-func (nopRole) Stop(context.Context) {}
+func init() { tunneltest.RegisterHostRole() }
 
 var hashOnce = sync.OnceValue(func() string {
 	h, _ := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
@@ -67,6 +54,11 @@ func freeAddr(t *testing.T) string {
 	return tunneltest.FreeAddr(t)
 }
 
+// nowhere is an address nothing listens on: port 1, a privileged port no
+// test binds. A free port let go of could be another process's by the
+// time it is dialed.
+const nowhere = "127.0.0.1:1"
+
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	for deadline := time.Now().Add(20 * time.Second); !cond(); time.Sleep(10 * time.Millisecond) {
@@ -87,42 +79,64 @@ type harness struct {
 	doc map[string]any
 }
 
-// start runs doc, a config with a tunnel member, its proxy member run by
-// the harness's Proxy.
-func start(t *testing.T, doc string) *harness {
+// start runs the doc build returns, a config with a tunnel member, its
+// proxy member run by the harness's Proxy. build picks the addresses it
+// listens on with freeAddr; when one was taken before the harness bound
+// it, the start is undone and build asked again, for other addresses.
+func start(t *testing.T, build func() string) *harness {
+	t.Helper()
+	return tunneltest.Start(t, func() (*harness, error) { return tryStart(t, build()) })
+}
+
+// tryStart runs doc, and undoes what it started when it does not start.
+func tryStart(t *testing.T, doc string) (_ *harness, err error) {
 	t.Helper()
 	h := &harness{t: t}
 	if err := json.Unmarshal([]byte(doc), &h.doc); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load([]byte(doc))
+	if err != nil {
 		t.Fatal(err)
 	}
 	root, err := logs.New(nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = root.Close() })
 	h.log = root.Logger(config.LoggerTunnel)
+	// Each start has an engine of its own, which ends with the test.
 	engine := tunneltest.Engine(t)
 	h.m = app.NewManager(engine, nil, nil, h.edit)
-	cfg, err := config.Load([]byte(doc))
-	if err != nil {
-		t.Fatal(err)
+	stop := func() {
+		if h.c != nil {
+			h.c.Stop(context.Background())
+		}
+		h.m.Stop(context.Background())
+		_ = root.Close()
 	}
+	defer func() {
+		if err != nil {
+			stop()
+		}
+	}()
 	proxy := cfg.Tunnel.Proxy
 	cfg.Tunnel.Proxy = nil
-	if err := h.m.Apply(cfg); err != nil {
-		t.Fatal(err)
+	err = h.m.Apply(cfg)
+	// The host is taken whether the rest applied or not: it is this
+	// start's alone either way.
+	host := *tunneltest.Host(t, engine)
+	if err != nil {
+		return nil, err
 	}
-	t.Cleanup(func() { h.m.Stop(context.Background()) })
-	host := *<-hosts
 	host.ID, host.Log = ID, h.log
 	h.c = New(&host)
-	t.Cleanup(func() { h.c.Stop(context.Background()) })
 	if proxy != nil {
 		if err := h.c.Apply(proxy); err != nil {
-			t.Fatal(err)
+			return nil, err
 		}
 	}
-	return h
+	t.Cleanup(stop)
+	return h, nil
 }
 
 // edit is the manager's editor: it changes the member at path of the
@@ -242,6 +256,25 @@ func (p *page) expect(path string, body any, code int, want string) {
 	if got, s := p.do("POST", path, body, nil); got != code || !strings.Contains(s, want) {
 		p.t.Errorf("POST %s %v: %d %s", path, body, got, s)
 	}
+}
+
+// forward adds the forward body is, on a free address, and returns the
+// address.
+func (p *page) forward(body map[string]string) string {
+	p.t.Helper()
+	return tunneltest.Bind(p.t, "tcp", func(addr string) error {
+		body["listen"] = addr
+		code, s := p.do("POST", "/api/forwards", body, nil)
+		if code == 200 && strings.Contains(s, "ok") {
+			return nil
+		}
+		if tunneltest.IsTakenText(s) {
+			// The forward is kept, with its error: it goes before
+			// the next address is tried.
+			p.do("POST", "/api/forwards/delete", map[string]string{"listen": addr}, nil)
+		}
+		return fmt.Errorf("POST /api/forwards %v: %d %s", body, code, s)
+	})
 }
 
 // echoOnce sends msg through addr and reads it back.
