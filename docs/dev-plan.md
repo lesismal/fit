@@ -2730,6 +2730,28 @@ keeps the reads behind one interface so that it can be added).
     `max_bytes`, playlists rewritten. Alternative: no encrypted channels until A69.
 11. **`key_rotation`** defaults to 10 segments (at most 100,000) and means nothing without `encrypt`.
 
+**Low-Latency HLS across new tracks** (fib A70, after I136, 2026-11-06), decisions pending review:
+
+12. **Fixed in fib's playlist and segment ends, not worked around in hls.js or fit**: the preload hint
+    of a segment's first part follows that segment's discontinuity and `EXT-X-MAP` (alternative: a
+    `TYPE=MAP` preload hint, which hls.js ignores); hls.js's keeping the old init section for a
+    fragment hint (`mergeDetails`) and placing the next discontinuity by the `EXTINF` of a segment read
+    by its parts are taken as players' behaviour to meet, not reported upstream.
+13. **The hint names the key in force again after a new `EXT-X-MAP`**, not the next segment's, which
+    no playlist names before that segment is cut (`KeyEpoch`); hls.js reads the next segment's key
+    from the playlist that lists its first part.
+14. **A segment ended by new tracks, the stream's end or a jump in the clock lasts until the earliest
+    of its tracks ends** (each track's last packet and the step before it; a track that ended before
+    the last part began does not count): when audio and video end apart, the next item overlaps the
+    longer track's tail rather than leaving a hole, as a player replaces an overlap but stalls at a
+    hole. Alternative: the video's end alone, which left an audio-only hole when the audio ends first.
+15. **Left as it is**: tracks changing twice before the new tracks' first keyframe leave a playlist
+    that hinted the first change's init section; hls.js would keep that one. Rare (a publisher's
+    tracks set again within one keyframe interval) and not handled.
+16. **The interop test**: `live/secll` plays items whose tracks differ again (a and c), a clear
+    `live/mixll` beside it, both required to load a discontinuity by their parts; ffprobe reads
+    `live/mixll`'s Low-Latency playlist; the page reports its load and append log on a fatal error.
+
 ### I137 A video site, end to end
 
 - **Do**: an example in [fit-examples](https://github.com/lesismal/fit-examples): a library, `vod`

@@ -2318,3 +2318,37 @@ goroutine of its own); a library not loaded is an error (503). It answers the ke
 handler, under its `auth`, for `ok && epoch <= cur` of `SessionMuxer(stream, session).KeyEpoch()`,
 and ends a channel's Muxers at a playlist request when a reload changed the channel's encryption,
 so that fib starts them again under the new one. Low-Latency HLS works for encrypted channels.
+
+## A70: Low-Latency HLS parts after new tracks
+
+**Status.** Found on 2026-11-06, from I136 (encrypted segments) and I134 (channels). Done in fib at
+`925f292` and `0ddaba3`, made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on
+`0ddaba3`.
+
+**Problem.** A channel moving to an item whose tracks differ (`hub.Publisher.SetTracks`: another SPS,
+another resolution) played by Low-Latency HLS failed in hls.js at the first segment after the
+discontinuity (`bufferAppendError`, part 1: the media element had already failed), clear or encrypted
+alike, while whole segments played on. Two things in `media/hls`:
+
+1. Until a segment's first part was listed, the media playlist ended with the hint of that part and
+   none of the segment's tags. hls.js makes the segment to come (its fragment hint) of the tags in force
+   before the hint, the last discontinuity sequence and init section, and keeps that init section once
+   the segment is listed (`mergeDetails` copies it from the fragment of the same number), so it appended
+   the new item's parts after the old init section, and the decoder failed on them.
+2. A segment ended by new tracks lasted until the last packet of any track and the stream's last step:
+   AAC runs on past an item's last video frame (about 100ms), and hls.js, which places the segment after
+   a discontinuity by the duration of a segment it read by its parts, left a hole past what the muxed
+   buffer held, and stalled there two seconds at every item.
+
+**Evidence.** In `TestChannelInterop` with hls.js 1.5.20: the init appended at the first segment after
+the discontinuity carried the old codec string (`avc1.4D400D`), the new one (`avc1.4D4015`) came a
+segment later; then, fixed, a buffer hole from 6.08s to 6.176s where segment 5's `EXTINF` was 1.096s.
+
+**As built.** The hint of a segment's first part follows that segment's `EXT-X-DISCONTINUITY` and
+`EXT-X-MAP` (with the key in force named again after a new map), the open segment's or, before it
+begins, the next one's, known when the tracks change; a segment or part ended with no packet after it
+lasts until the earliest of the tracks in its last part ends. No API changes.
+
+**How fit uses it.** Nothing changes in fit but the version; `TestChannelInterop` plays `live/secll`
+and `live/mixll` by their parts across items whose tracks differ.
+
