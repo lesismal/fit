@@ -7,7 +7,7 @@ import (
 )
 
 func TestWebRTCMembers(t *testing.T) {
-	good := `{"webrtc": {"turn": {"listen": [":3478", "[::1]:3478"], "realm": "example.com",
+	good := `{"webrtc": {"turn": {"listen": [":3478", "[::1]:3479"], "realm": "example.com",
 		"users": [{"name": "alice", "password": "pw"}, {"name": "bob", "key": "0x0123456789abcdef0123456789ABCDEF"}],
 		"secret": "s", "relay_ip": "10.0.0.5", "public_ip": "203.0.113.5", "port_min": 49152, "port_max": 49999,
 		"allowed_peers": ["10.1.0.0/16", "10.0.0.5", "10.0.0.5:8189", "[fd00::1]:9"], "denied_peers": ["198.51.100.0/24"], "default_lifetime": "5m",
@@ -46,7 +46,7 @@ func TestWebRTCMembers(t *testing.T) {
 		{turn(`"users": []`), "no one could log in"},
 		{turn(`"secret": "s", "realm": " "`), "duplicate"},
 		{`{"webrtc": {"turn": {"listen": [], "realm": "r", "relay_ip": "10.0.0.5", "secret": "s"}}}`, "at least one address"},
-		{`{"webrtc": {"turn": {"listen": [":3478", ":3478"], "realm": "r", "relay_ip": "10.0.0.5", "secret": "s"}}}`, "listed already"},
+		{`{"webrtc": {"turn": {"listen": [":3478", ":3478"], "realm": "r", "relay_ip": "10.0.0.5", "secret": "s"}}}`, "webrtc.turn.listen[0] listens on UDP :3478 already"},
 		{`{"webrtc": {"turn": {"listen": ["nope"], "realm": "r", "relay_ip": "10.0.0.5", "secret": "s"}}}`, "not a host and port"},
 		{`{"webrtc": {"turn": {"listen": [":3478"], "realm": " ", "relay_ip": "10.0.0.5", "secret": "s"}}}`, "realm is empty"},
 		{turn(`"users": [{"name": "a", "password": "p"}, {"name": "a", "password": "q"}]`), "already named"},
@@ -62,7 +62,7 @@ func TestWebRTCMembers(t *testing.T) {
 		{turn(`"secret": "s", "allowed_peers": ["10.0.0.0/33"]`), "not an address, an address and port, or a prefix"},
 		{turn(`"secret": "s", "denied_peers": ["x"]`), "not an address, an address and port, or a prefix"},
 		{turn(`"secret": "s", "listen_tcp": ["nope"]`), "not a host and port"},
-		{turn(`"secret": "s", "listen_tcp": [":3478"], "listen_tls": [":3478"], "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}]}`), "listed already in listen_tcp or listen_tls"},
+		{turn(`"secret": "s", "listen_tcp": [":3478"], "listen_tls": [":3478"], "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}]}`), "webrtc.turn.listen_tcp[0] listens on TCP :3478 already"},
 		{turn(`"secret": "s", "listen_tls": [":5349"]`), "listen_tls needs certificates"},
 		{turn(`"secret": "s", "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}]}`), "tls is for listen_tls"},
 		{turn(`"secret": "s", "listen_tls": [":5349"], "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}], "acme": ["a.example"]}`), "unknown field"},
@@ -135,7 +135,7 @@ func TestWebRTCProxy(t *testing.T) {
 	for _, bad := range []struct{ doc, want string }{
 		{`{"webrtc": {"proxy": {"listen": "nope"}}}`, "not a host and port"},
 		{`{"webrtc": {"proxy": {"listen": ":8190", "public_ips": ["0.0.0.0"]}}}`, "wildcard"},
-		{`{"webrtc": {"media": {"listen": ":8189"}, "proxy": {"listen": ":8189"}}}`, "webrtc.media listens on :8189"},
+		{`{"webrtc": {"media": {"listen": ":8189"}, "proxy": {"listen": ":8189"}}}`, "webrtc.media listens on UDP :8189 already"},
 		{`{"webrtc": {"proxy": {"listen": ":8190", "max_relays": -1}}}`, "less than the minimum"},
 		{`{"webrtc": {"proxy": {"listen": ":8190", "relay_ip": "x"}}}`, "not an IP address"},
 		{`{"webrtc": {"proxy": {"listen": ":8190", "relay_ip": "::"}}}`, "wildcard"},

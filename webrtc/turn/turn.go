@@ -40,7 +40,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
-	"github.com/lesismal/fit/internal/nettcp"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/tlsmgr"
@@ -417,30 +417,14 @@ func (s *Server) addLive(r *running) {
 }
 
 // checkFree fails when another socket holds one of cfg's addresses that the
-// running server old does not: fib binds with SO_REUSEPORT, and the kernel
-// would let it share another process's port, splitting its clients between
-// two servers. A plain bind, which a reuseport socket refuses, tells; UDP
-// for listen, TCP for listen_tcp and listen_tls. Port 0 picks a free port.
+// running server old does not (see package bindcheck): UDP for listen, TCP
+// for listen_tcp and listen_tls.
 func checkFree(cfg *config.TURNServer, old *running) error {
 	try := func(network, a string, held bool) error {
 		if held {
 			return nil
 		}
-		if _, port, err := net.SplitHostPort(a); err == nil && port == "0" {
-			return nil
-		}
-		if network == "udp" {
-			pc, err := net.ListenPacket(network, a)
-			if err != nil {
-				return fmt.Errorf("listen on %s: %w", a, err)
-			}
-			return pc.Close()
-		}
-		l, err := nettcp.Listen(network, a, false)
-		if err != nil {
-			return fmt.Errorf("listen on tcp %s: %w", a, err)
-		}
-		return l.Close()
+		return bindcheck.Free(network, a)
 	}
 	for _, a := range cfg.Listen {
 		if err := try("udp", a, old != nil && old.holds(a, false)); err != nil {

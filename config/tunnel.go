@@ -517,7 +517,6 @@ func checkTunnelHub(s *TunnelHub, add func(Value, string, ...any)) {
 		add(s.At.Field("name"), "%s", msg)
 	}
 	checkLinkTokens(s.Tokens, s.At.Field("tokens"), add)
-	seen := map[string]int{}
 	for i, l := range s.Listeners {
 		at := s.At.Field("listeners").Index(i)
 		if _, msg := checkAddress(l.Address); msg != "" {
@@ -542,19 +541,6 @@ func checkTunnelHub(s *TunnelHub, add func(Value, string, ...any)) {
 			if host, _, err := net.SplitHostPort(l.Address); err == nil && !TunnelLoopback(host) {
 				add(at.Field("protocol"), "a %s listener on %q, which is not a loopback address, carries the links in the clear and unauthenticated: use tls or wss, with the hub's certificate pinned by the nodes and proxies, or quic; or set the hub's body_password", l.Protocol, l.Address)
 			}
-		}
-		// tcp, tls, ws and wss listen on TCP, quic on UDP; port 0 picks a
-		// free one.
-		network := "tcp"
-		if l.Protocol == TunnelQUIC {
-			network = "udp"
-		}
-		if _, port, _ := net.SplitHostPort(l.Address); port != "0" {
-			key := network + " " + l.Address
-			if j, ok := seen[key]; ok {
-				add(at.Field("address"), "listener %d listens on %s already", j, l.Address)
-			}
-			seen[key] = i
 		}
 	}
 	if cs := s.ConsoleSocket; cs != nil {
@@ -653,23 +639,16 @@ func checkTunnelProxy(cl *TunnelProxy, add func(Value, string, ...any)) {
 		add(cl.At.Field("name"), "%s", msg)
 	}
 	checkTunnelUplinks(cl.Hubs, cl.At.Field("hubs"), add)
-	listens := map[string]string{}
-	listen := func(at Value, address, what string) {
+	// Two of its addresses on one port, or one of them on another part's,
+	// are checkBinds'.
+	listen := func(at Value, address string) {
 		if _, msg := checkAddress(address); msg != "" {
 			add(at, "%s", msg)
-			return
 		}
-		if _, port, _ := net.SplitHostPort(address); port == "0" {
-			return
-		}
-		if other, ok := listens[address]; ok {
-			add(at, "%s listens on %s already", other, address)
-		}
-		listens[address] = what
 	}
 	for i, f := range cl.Forwards {
 		at := cl.At.Field("forwards").Index(i)
-		listen(at.Field("listen"), f.Listen, "a forward")
+		listen(at.Field("listen"), f.Listen)
 		if f.Hub != "" && !slices.ContainsFunc(cl.Hubs, func(u TunnelUplink) bool { return u.HubName() == f.Hub }) {
 			add(at.Field("hub"), "there is no hub named %q", f.Hub)
 		}
@@ -682,7 +661,7 @@ func checkTunnelProxy(cl *TunnelProxy, add func(Value, string, ...any)) {
 	}
 	for i, w := range cl.WebProxies {
 		at := cl.At.Field("web_proxies").Index(i)
-		listen(at.Field("listen"), w.Listen, "a web proxy")
+		listen(at.Field("listen"), w.Listen)
 		if u, err := url.Parse(w.URL); err != nil || u.Scheme != TunnelWS || u.Host == "" {
 			add(at.Field("url"), "%q is not a ws:// URL", w.URL)
 		}

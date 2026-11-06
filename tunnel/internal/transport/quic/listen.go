@@ -16,6 +16,7 @@ import (
 	fq "github.com/lesismal/fib/http3/quic"
 	fibtls "github.com/lesismal/fib/tls"
 
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/tunnel/internal/transport"
 )
 
@@ -89,6 +90,9 @@ func (relay) Listen(engine *fib.Engine, addr string, o transport.ListenOptions, 
 	l.config.DisableNewTokens = true
 	if server := fibtls.NewQUICServer(tc); server != nil {
 		l.config.NewTLS = func(bool, *tls.Config) fq.TLSConn { return server.NewConn() }
+	}
+	if err = bindcheck.Free("udp", hostport); err != nil {
+		return nil, err
 	}
 	if l.index, err = engine.AddBinding(fib.Binding{Network: "udp", Addr: hostport, Handler: l}); err != nil {
 		return nil, err

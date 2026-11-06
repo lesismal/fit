@@ -77,6 +77,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A62 | A proxied HTTP/1.1 upload moved by splice(2) | done, fib `main` at `60d67aa` | 12 | — |
 | A63 | Multipath TCP as a listener's option | done, fib `5c0e5b9` | — | — |
 | A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` | 1, 11 | I131–I134 (032) |
+| A70 | TURN relays that never share a port of the range | done, fib `856ad5b` | 11 | I162 |
 
 ## Evidence
 
@@ -2318,3 +2319,32 @@ goroutine of its own); a library not loaded is an error (503). It answers the ke
 handler, under its `auth`, for `ok && epoch <= cur` of `SessionMuxer(stream, session).KeyEpoch()`,
 and ends a channel's Muxers at a playlist request when a reload changed the channel's encryption,
 so that fib starts them again under the new one. Low-Latency HLS works for encrypted channels.
+
+## A70: TURN relays that never share a port of the range
+
+**Status.** Requested on 2026-11-06, from I162 (one address, one server). Done in fib at `856ad5b`,
+made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on that commit. No
+stopgap in fit: fit's TURN role cannot choose its relays' ports.
+
+**Problem.** With `Config.PortMin` and `PortMax` set, `turnserver.bindRelay` tried each port of the
+range with `Engine.AddBinding`. The engine binds with SO_REUSEPORT (`Config.ReusePort`, fib's
+default), and the kernel lets a socket that sets it join a port another such socket holds: so a
+relay could bind the port of another allocation's relay, of a fit listener's UDP port in the range,
+or of another fib process, and the kernel would split the peers' datagrams between the two.
+
+**Evidence.** A test with a one-port range: the first relay bound with the kernel's choice of port,
+the range set to that port, and a second `bindRelay` bound the same port without an error
+(`127.0.0.1:55826` twice), where it should have answered `turn.ErrNoRelay`.
+
+**Suggested API.** None: a fix inside `bindRelay`. A port of the range is reserved in the server's
+set of relayed ports, so two setup goroutines cannot both pick it, and claimed with a bind without
+SO_REUSEPORT, which a socket on it refuses, before the relay binds; a port that fails is skipped as
+a taken one always was. The reservation is given back once the relay's binding is removed.
+
+**How fit uses it.** `webrtc.turn`'s `port_min` and `port_max` go to `Config.PortMin` and `PortMax`
+as before; allocations now get ports of their own.
+
+**As built.** As suggested (`claimPort`, `releasePort`, `relay.port`), with
+`TestRelayPortsNotShared` (a port another relay or another engine with SO_REUSEPORT holds is
+skipped, and is the range's again once its relay closes) and `TestRelayPortsConcurrent` (relays bound
+at once over a range of four ports each get a port of their own).

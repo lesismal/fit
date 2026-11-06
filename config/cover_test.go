@@ -40,7 +40,7 @@ func TestAccessLogZoneUnset(t *testing.T) {
 // share the port of a WebRTC proxy that runs with no media role.
 func TestStreamingWebRTCOnProxyPort(t *testing.T) {
 	_, err := Load([]byte(`{"webrtc": {"proxy": {"listen": ":8190"}}, "streaming": {"webrtc": {"listen": "0.0.0.0:8190"}}}`))
-	if err == nil || !strings.Contains(err.Error(), "webrtc.proxy listens on 0.0.0.0:8190 already") {
+	if err == nil || !strings.Contains(err.Error(), "streaming.webrtc listens on UDP 0.0.0.0:8190 already, the same address as :8190") {
 		t.Errorf("Load: %v, want the proxy's port taken", err)
 	}
 }

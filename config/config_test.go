@@ -188,11 +188,11 @@ func TestValidate(t *testing.T) {
 ]}`,
 			want: []string{
 				`3:12: listeners[1].name: another listener is already named "a"`,
-				`3:28: listeners[1].address: listener "a" already listens on :80`,
 				`4:12: listeners[2].name: "-b" is not a valid name: use letters, digits, '_', '.' and '-', starting with a letter or digit`,
 				`4:29: listeners[2].address: "localhost" is not a host and port, as in ":8080" or "127.0.0.1:8080"`,
 				`5:28: listeners[3].address: "http" is not a port between 0 and 65535`,
 				`7:55: listeners[5].protocols[1]: "h2c" is listed twice`,
+				`3:28: listeners[1].address: listener "a" listens on TCP :80 already; two servers on one address would share its connections, so give one of them another port`,
 			},
 		},
 		{
@@ -340,10 +340,10 @@ func TestValidate(t *testing.T) {
 ], "upstreams": [{"name": "ns", "addresses": ["a:53"]}],
 "services": [{"name": "dns", "listeners": ["dns", "dnstcp", "dns2", "mixed", "secure", "quic"], "upstream": "ns"}]}`,
 			want: []string{
-				`4:31: listeners[2].address: listener "dns" already listens on :53`,
 				`5:53: listeners[3].protocols[0]: a udp listener serves UDP alone: list udp without other protocols`,
 				`6:69: listeners[4].tls: tls serves the listener's HTTP, and this one serves none: tcp and udp are proxied as they are, TLS and all`,
-				`8:31: listeners[6].address: listener "web" already listens on :443`,
+				`4:31: listeners[2].address: listener "dns" listens on UDP :53 already; two servers on one address would share its connections, so give one of them another port`,
+				`8:31: listeners[6].address: listener "web" listens on UDP :443 already; two servers on one address would share its connections, so give one of them another port`,
 			},
 		},
 		{

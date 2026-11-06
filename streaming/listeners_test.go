@@ -101,7 +101,7 @@ func TestListenerRefusals(t *testing.T) {
 		SRT:    &config.StreamSRT{Listen: udp},
 		WebRTC: &config.StreamWebRTC{Listen: udp},
 	})
-	for _, want := range []string{"rtmp: listen on " + tcp, "rtsp: listen on " + tcp, "srt: listen on " + udp, "webrtc: listen on " + udp} {
+	for _, want := range []string{"rtmp: TCP " + tcp + " is taken", "rtsp: TCP " + tcp + " is taken", "srt: UDP " + udp + " is taken", "webrtc: UDP " + udp + " is taken"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("want %q: %v", want, err)
 		}
@@ -143,7 +143,7 @@ func TestListenerKeptOnError(t *testing.T) {
 		RTMP:   &config.StreamRTMP{Listen: tcp},
 		WebRTC: &config.StreamWebRTC{Listen: s.Addr("webrtc").String(), PublicIPs: []string{"not-an-ip"}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "rtmp: listen on "+tcp) || !strings.Contains(err.Error(), "webrtc: public_ips") {
+	if err == nil || !strings.Contains(err.Error(), "rtmp: TCP "+tcp+" is taken") || !strings.Contains(err.Error(), "webrtc: public_ips") {
 		t.Fatalf("the errors: %v", err)
 	}
 	if a := s.Addr("rtmp"); a == nil || a.String() != rtmpAddr.String() {

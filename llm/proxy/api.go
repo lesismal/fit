@@ -22,6 +22,7 @@ import (
 	fibtls "github.com/lesismal/fib/tls"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/llm/internal/mesh"
 	"github.com/lesismal/fit/llm/internal/model"
 	"github.com/lesismal/fit/llm/internal/wire"
@@ -115,6 +116,9 @@ func startAPI(c *Proxy, cfg *config.LLMProxyAPI) (*apiServer, error) {
 		h = fibtls.NewServer(fibhttp.ConfigureTLS(&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}), h)
 	}
 	s.limit = newConnLimit(h, cfg.Conns())
+	if err := bindcheck.Free("tcp", cfg.Address); err != nil {
+		return nil, fmt.Errorf("api: %w", err)
+	}
 	i, err := s.engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: s.limit})
 	if err != nil {
 		return nil, fmt.Errorf("api: %w", err)

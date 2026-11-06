@@ -19,7 +19,7 @@ import (
 	"github.com/lesismal/fib/webrtc"
 
 	"github.com/lesismal/fit/config"
-	"github.com/lesismal/fit/internal/nettcp"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/mediaauth"
 )
@@ -108,26 +108,9 @@ func sameAddress(a, b string) bool {
 	return ha == hb || wild(ha) || wild(hb)
 }
 
-// checkFree fails when another socket holds address: fib binds with
-// SO_REUSEPORT, and the kernel would let it share another process's port.
-// A plain bind, which a reuseport socket refuses, tells. Port 0 is free.
-func checkFree(network, address string) error {
-	if _, port, err := net.SplitHostPort(address); err == nil && port == "0" {
-		return nil
-	}
-	if network == "udp" {
-		pc, err := net.ListenPacket("udp", address)
-		if err != nil {
-			return fmt.Errorf("listen on %s: %w", address, err)
-		}
-		return pc.Close()
-	}
-	ln, err := nettcp.Listen("tcp", address, false)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", address, err)
-	}
-	return ln.Close()
-}
+// checkFree fails when another socket holds address: see package
+// bindcheck.
+func checkFree(network, address string) error { return bindcheck.Free(network, address) }
 
 func (s *Server) applyRTMP(cfg *config.StreamRTMP) error {
 	if cfg == nil {

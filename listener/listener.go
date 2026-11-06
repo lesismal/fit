@@ -37,8 +37,8 @@ import (
 	fibtls "github.com/lesismal/fib/tls"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/internal/fibconf"
-	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/l4"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
@@ -528,37 +528,16 @@ func addrsOf(bs []*binding) []Addr {
 	return addrs
 }
 
-// checkFree fails when another socket already listens on address. fib
-// listens with SO_REUSEPORT, so that its loops share the accepts, and the
-// kernel would let a second process's listener share the address too,
-// splitting connections between two servers without a word. A plain bind,
-// which a reuseport listener refuses, tells. Port 0 picks a free port.
-func checkFree(address string) error {
-	if _, port, err := net.SplitHostPort(address); err == nil && port == "0" {
-		return nil
-	}
-	ln, err := nettcp.Listen("tcp", address, false)
-	if err != nil {
-		return err
-	}
-	return ln.Close()
-}
+// checkFree fails when another socket already listens on address: see
+// package bindcheck.
+func checkFree(address string) error { return bindcheck.Free("tcp", address) }
 
 // checkUDP is checkFreeUDP for an HTTP/3 port, which a test replaces to
 // find the port taken.
 var checkUDP = checkFreeUDP
 
 // checkFreeUDP is checkFree for HTTP/3's UDP port.
-func checkFreeUDP(address string) error {
-	if _, port, err := net.SplitHostPort(address); err == nil && port == "0" {
-		return nil
-	}
-	pc, err := net.ListenPacket("udp", address)
-	if err != nil {
-		return err
-	}
-	return pc.Close()
-}
+func checkFreeUDP(address string) error { return bindcheck.Free("udp", address) }
 
 // StreamThreshold is the body size past which a request body streams to its
 // handler rather than being read whole first.

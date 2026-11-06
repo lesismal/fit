@@ -75,6 +75,7 @@
 | A62 | 用 splice(2) 搬运代理的 HTTP/1.1 上传 | 已完成，fib `main` 的 `60d67aa` | 12 | — |
 | A63 | 多路径 TCP 作为监听器的选项 | 已完成，fib `5c0e5b9` | — | — |
 | A64 | 非分片 MP4 文件的读取器 | 已完成，fib `8998d58` | 1、11 | I131–I134（032） |
+| A70 | TURN 中继不共用端口范围内的同一端口 | 已完成，fib `856ad5b` | 11 | I162 |
 
 ## 证据
 
@@ -1755,3 +1756,25 @@ fit 的 `hls` 处理器给 fib 的处理器一个 `Encrypt`：对设置了 `encr
 错误（503）。它在 fib 的处理器之前、在自己的 `auth` 下回答密钥 URI，只提供 `SessionMuxer(stream, session).KeyEpoch()` 中
 `ok && epoch <= cur` 的密钥；重新加载改变了频道的加密时，它在播放列表请求时结束该频道的 Muxer，让 fib 按新的加密重新启动。
 加密频道可以使用低延迟 HLS。
+
+## A70：TURN 中继不共用端口范围内的同一端口
+
+**状态。** 2026-11-06 由 I162（一个地址，一个服务器）提出。已在 fib 的 `856ad5b` 完成，由 fit 的会话按
+[规则 15](rules.zh-CN.md#七fib-满足不了时) 实现；fit 已在该提交上。fit 中没有临时方案：fit 的 TURN 角色无法选择中继的端口。
+
+**问题。** 设置 `Config.PortMin` 和 `PortMax` 时，`turnserver.bindRelay` 用 `Engine.AddBinding` 逐个尝试范围内的端口。引擎以
+SO_REUSEPORT 绑定（`Config.ReusePort`，fib 的默认），内核允许设置了它的套接字加入另一个同样设置了它的套接字占着的端口：于是中继
+可能绑定到另一个分配的中继的端口、范围内 fit 监听器的 UDP 端口，或另一个 fib 进程的端口，内核会把对端的数据报分给两者。
+
+**依据。** 一个只有一个端口的范围的测试：第一个中继由内核选端口绑定，把范围设为该端口，第二次 `bindRelay` 无错误地绑定了同一端口
+（两次都是 `127.0.0.1:55826`），而它本应返回 `turn.ErrNoRelay`。
+
+**建议的 API。** 无：在 `bindRelay` 内部修复。范围内的端口先在服务器的中继端口集合中预留，使两个 setup 协程不会选中同一个，并在中继
+绑定之前以不带 SO_REUSEPORT 的绑定占位（端口上已有套接字时会被拒绝）；失败的端口像以往被占用的端口一样跳过。中继的绑定移除后归还
+预留。
+
+**fit 的使用方式。** `webrtc.turn` 的 `port_min` 和 `port_max` 照旧传给 `Config.PortMin` 和 `PortMax`；各分配现在得到各自的端口。
+
+**实际实现。** 与建议相同（`claimPort`、`releasePort`、`relay.port`），附 `TestRelayPortsNotShared`（另一个中继或另一个以
+SO_REUSEPORT 监听的引擎占着的端口被跳过，中继关闭后端口回到范围中）和 `TestRelayPortsConcurrent`（在四个端口的范围上同时绑定的中继
+各得一个端口）。

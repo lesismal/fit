@@ -232,16 +232,22 @@ func TestSelfSignedKeptBesideConfig(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 	b.Stop(context.Background())
-	if b2, _ := start(); b2.Mesh.Listen().Fingerprint != fp {
+	b2, _ := start()
+	if b2.Mesh.Listen().Fingerprint != fp {
 		t.Fatalf("restarted with %s, was %s", b2.Mesh.Listen().Fingerprint, fp)
 	}
+	// Each start listens on the same address, which the one before must
+	// leave first: it would be refused as taken.
+	b2.Stop(context.Background())
 
 	if err := os.WriteFile(kept, []byte("nothing"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if b3, _ := start(); b3.Mesh.Listen().Fingerprint != "" || b3.Mesh.Listen().Error == "" {
+	b3, _ := start()
+	if b3.Mesh.Listen().Fingerprint != "" || b3.Mesh.Listen().Error == "" {
 		t.Fatalf("a bad file: %+v", b3.Mesh.Listen())
 	}
+	b3.Stop(context.Background())
 	if data, _ := os.ReadFile(kept); string(data) != "nothing" {
 		t.Fatal("the bad file was overwritten")
 	}
