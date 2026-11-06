@@ -111,6 +111,8 @@ type Manager struct {
 	tpl tplState
 	// ro is the rollouts (rollouts.go).
 	ro rolloutsState
+	// al is the alerts and the drift reads (alerts.go, I147).
+	al alertsState
 }
 
 // New returns the manager o.Settings turns on, with the members the store
@@ -164,6 +166,9 @@ func New(o Options) (*Manager, error) {
 		}
 		return nil, err
 	}
+	m.loadAlerts()
+	m.syncSenders()
+	go m.runAlerts()
 	go m.run()
 	return m, nil
 }
@@ -181,6 +186,7 @@ func (m *Manager) Close() {
 	m.close.Do(func() {
 		close(m.stop)
 		<-m.done
+		m.stopAlerts(closeWait)
 		m.mu.Lock()
 		m.closed = true
 		nodes := slices.Collect(maps.Values(m.nodes))
@@ -568,6 +574,7 @@ func (m *Manager) routes(api *console.API) {
 	m.rolloutRoutes(api)
 	m.passRoutes(api)
 	m.templateRoutes(api)
+	m.alertRoutes(api)
 }
 
 func (m *Manager) list(r *console.Request) {
