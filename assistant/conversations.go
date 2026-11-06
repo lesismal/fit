@@ -187,10 +187,19 @@ func (u *userChats) boundLocked(max int) {
 	}
 }
 
-// convBytes is the size of c as it is kept.
+// convBytes is about the size of c as it is kept: its text, and a little
+// for each message's JSON around it. It is counted, not encoded, since it
+// runs under a.chats.mu, on the goroutines that end chats.
 func convBytes(c *Conversation) int {
-	b, _ := json.Marshal(c)
-	return len(b)
+	n := 128 + len(c.ID) + len(c.Title) + len(c.Summary)
+	for i := range c.Messages {
+		m := &c.Messages[i]
+		n += 64 + len(m.Content) + len(m.Thinking) + len(m.ThinkingSignature) + len(m.ToolCallID) + len(m.ToolName) + len(m.Error)
+		for _, tc := range m.ToolCalls {
+			n += 48 + len(tc.ID) + len(tc.Name) + len(tc.Arguments) + len(tc.Signature)
+		}
+	}
+	return n
 }
 
 // trimLocked keeps c within MaxConversationBytes: the messages a summary

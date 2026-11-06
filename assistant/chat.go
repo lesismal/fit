@@ -559,7 +559,9 @@ func (c *chat) request() (req *model.Request, fold int) {
 		req.Tools = modelTools(c.tools)
 	}
 	toolsJSON, _ := json.Marshal(req.Tools)
-	b := budget{window: c.window, output: req.MaxTokens, fixed: tokens(req.System) + tokens(string(toolsJSON))}
+	// The answer's share is its max_output_tokens, at most a quarter of the
+	// window, so that a small window still holds the conversation.
+	b := budget{window: c.window, output: min(req.MaxTokens, c.window/4), fixed: tokens(req.System) + tokens(string(toolsJSON))}
 	req.Messages = history(msgs[from:])
 	if fitHistory(req.Messages, b.room()) || c.summarized.Load() {
 		return req, 0

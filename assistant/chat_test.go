@@ -317,7 +317,7 @@ func TestChatSummarizes(t *testing.T) {
 		t.Errorf("the last call: %d bytes, %s", len(last.Raw), fakeapi.System(last)[len(fakeapi.System(last))-200:])
 	}
 	for _, r := range reqs {
-		if fakeapi.System(r) != summaryPrompt && len(r.Raw) > 3000*3+4096*0 && tokens(string(r.Raw)) > 3000 {
+		if fakeapi.System(r) != summaryPrompt && tokens(string(r.Raw)) > 3000 {
 			t.Errorf("a call of %d bytes outgrew the window", len(r.Raw))
 		}
 	}
