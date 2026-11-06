@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/netip"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -73,8 +74,120 @@ type Assistant struct {
 	Data         *AssistantData      `json:"data,omitempty" doc:"What of fit's logs may be sent to a model, and more of what is redacted before anything is."`
 	Users        []AssistantUser     `json:"users,omitempty" doc:"What each console user may have the assistant do, by user name; a user not listed has default_level."`
 	DefaultLevel string              `json:"default_level,omitempty" enum:"off,read,edit,propose,apply" default:"\"read\"" doc:"The level of a console user that users does not list: off, read (the read tools only), edit (also drafts on the open page, never submitted), propose (also proposals) or apply (also applies them). read when left out."`
+	MCP          *AssistantMCP       `json:"mcp,omitempty" doc:"An MCP server at /mcp on the console's address, for outside agents (Claude Code, Cursor, an SDK's client) to call the assistant's tools, read the config, the schema and the docs, and use the skills as prompts, with the MCP tokens users make on the workbench's MCP page. A token has its user's level, at most propose: what it proposes is applied only in the workbench. Off when left out."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// The MCP server's defaults and bounds.
+const (
+	DefaultAssistantMCPTokensPerUser   = 10
+	DefaultAssistantMCPTokenDays       = 90
+	DefaultAssistantMCPSessions        = 4
+	DefaultAssistantMCPSessionIdle     = time.Hour
+	DefaultAssistantMCPRequestBytes    = 1 << 20
+	DefaultAssistantMCPConcurrentCalls = 4
+	DefaultAssistantMCPCallsPerMinute  = 120
+	MaxAssistantMCPAllow               = 64
+	MaxAssistantMCPTokenDays           = 3650
+)
+
+// AssistantMCP is the assistant's MCP server: who may reach it, and its
+// bounds per token.
+type AssistantMCP struct {
+	Allow              []string `json:"allow,omitempty" doc:"The addresses (as 127.0.0.1) and prefixes (as 10.0.0.0/8) MCP clients may call from; a token may narrow them further. Loopback only when left out."`
+	MaxTokensPerUser   int      `json:"max_tokens_per_user,omitempty" min:"0" default:"10" doc:"The most MCP tokens a console user may hold. 10 when left out or 0."`
+	MaxTokenDays       int      `json:"max_token_days,omitempty" min:"0" max:"3650" default:"90" doc:"The longest a token may last, in days, from when it is made. 90 when left out or 0."`
+	MaxSessions        int      `json:"max_sessions,omitempty" min:"0" default:"4" doc:"The most sessions a token keeps for clients of the protocol's versions before 2026-07-28, which open one with initialize; one more ends the one used least recently. 4 when left out or 0."`
+	SessionIdleTimeout Duration `json:"session_idle_timeout,omitempty" default:"\"1h\"" doc:"How long such a session is kept without a request. 1h when left out."`
+	MaxRequestBytes    int64    `json:"max_request_bytes,omitempty" min:"0" max:"8388608" default:"1048576" doc:"The most bytes of a request's body, beside the console's own bound. 1 MiB when left out or 0."`
+	MaxConcurrentCalls int      `json:"max_concurrent_calls,omitempty" min:"0" max:"64" default:"4" doc:"The most requests of one token served at once; one more is answered 429. 4 when left out or 0."`
+	MaxCallsPerMinute  int      `json:"max_calls_per_minute,omitempty" min:"0" max:"6000" default:"120" doc:"The most requests of one token in a minute; past it they are answered 429 until the minute's share comes back. 120 when left out or 0."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// The MCP settings' accessors return a setting, its default when left out;
+// they take a nil receiver.
+func (m *AssistantMCP) TokensPerUser() int {
+	if m == nil {
+		return DefaultAssistantMCPTokensPerUser
+	}
+	return int(orDefault(int64(m.MaxTokensPerUser), DefaultAssistantMCPTokensPerUser))
+}
+func (m *AssistantMCP) TokenDays() int {
+	if m == nil {
+		return DefaultAssistantMCPTokenDays
+	}
+	return int(orDefault(int64(m.MaxTokenDays), DefaultAssistantMCPTokenDays))
+}
+func (m *AssistantMCP) Sessions() int {
+	if m == nil {
+		return DefaultAssistantMCPSessions
+	}
+	return int(orDefault(int64(m.MaxSessions), DefaultAssistantMCPSessions))
+}
+func (m *AssistantMCP) SessionIdle() time.Duration {
+	if m == nil {
+		return DefaultAssistantMCPSessionIdle
+	}
+	return durOr(m.SessionIdleTimeout, DefaultAssistantMCPSessionIdle)
+}
+func (m *AssistantMCP) RequestBytes() int64 {
+	if m == nil {
+		return DefaultAssistantMCPRequestBytes
+	}
+	return orDefault(m.MaxRequestBytes, DefaultAssistantMCPRequestBytes)
+}
+func (m *AssistantMCP) ConcurrentCalls() int {
+	if m == nil {
+		return DefaultAssistantMCPConcurrentCalls
+	}
+	return int(orDefault(int64(m.MaxConcurrentCalls), DefaultAssistantMCPConcurrentCalls))
+}
+func (m *AssistantMCP) CallsPerMinute() int {
+	if m == nil {
+		return DefaultAssistantMCPCallsPerMinute
+	}
+	return int(orDefault(int64(m.MaxCallsPerMinute), DefaultAssistantMCPCallsPerMinute))
+}
+
+// AllowedPrefixes returns Allow as prefixes, an address its own; loopback
+// when Allow is empty. What does not parse, which the check refuses, is
+// left out.
+func (m *AssistantMCP) AllowedPrefixes() []netip.Prefix {
+	if m == nil || len(m.Allow) == 0 {
+		return []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128")}
+	}
+	out := make([]netip.Prefix, 0, len(m.Allow))
+	for _, s := range m.Allow {
+		if p, ok := ParseAddrOrPrefix(s); ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ParseAddrOrPrefix parses an address, as 127.0.0.1, as the prefix of
+// itself alone, or a prefix, as 10.0.0.0/8; an IPv4 address mapped into
+// IPv6 is unmapped.
+func ParseAddrOrPrefix(s string) (netip.Prefix, bool) {
+	if strings.Contains(s, "/") {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			return netip.Prefix{}, false
+		}
+		if p.Addr().Is4In6() {
+			p = netip.PrefixFrom(p.Addr().Unmap(), max(p.Bits()-96, 0))
+		}
+		return p.Masked(), true
+	}
+	a, err := netip.ParseAddr(s)
+	if err != nil || a.Zone() != "" {
+		return netip.Prefix{}, false
+	}
+	a = a.Unmap()
+	return netip.PrefixFrom(a, a.BitLen()), true
 }
 
 // AssistantProvider is a model API the assistant calls.
@@ -357,6 +470,16 @@ func checkAssistant(a *Assistant, console *Console, add func(Value, string, ...a
 		for i, re := range d.Redact {
 			if _, err := regexp.Compile(re); err != nil || re == "" || len(re) > 256 {
 				add(d.At.Field("redact").Index(i), "%q is not a regular expression of 1 to 256 bytes", re)
+			}
+		}
+	}
+	if m := a.MCP; m != nil {
+		if len(m.Allow) > MaxAssistantMCPAllow {
+			add(m.At.Field("allow"), "%d addresses, more than %d", len(m.Allow), MaxAssistantMCPAllow)
+		}
+		for i, s := range m.Allow {
+			if _, ok := ParseAddrOrPrefix(s); !ok {
+				add(m.At.Field("allow").Index(i), "%q is not an address, as 127.0.0.1, nor a prefix, as 10.0.0.0/8", s)
 			}
 		}
 	}

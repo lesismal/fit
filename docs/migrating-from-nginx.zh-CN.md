@@ -19,7 +19,11 @@ fit validate -c fit.conf
 可嵌套），以及其中的 `proxy_pass` 和 `upstream` 块、`root`、`alias`、`index`、`try_files`、`return`、`rewrite`、
 `limit_req` 与 `limit_req_zone`、`client_max_body_size`、`add_header`、取字面值的 `proxy_set_header`、`gzip`，以及
 `error_log` 和 `access_log`。
-请阅读它报告的内容，再参照下面的表格手工补全配置。
+请阅读它报告的内容，再参照下面的表格手工补全配置。`auth_basic` 保护的内容在换成带用户的 `basic_auth` 中间件之前一律回答
+401，以免密码保护的内容对所有人开放；OpenResty 的 `*_by_lua_block` 块会被略过，并按行号报告。
+
+其余部分可交给工作台助手的技能 `migrate`：先用转换器，再处理它剩下的内容，合并进运行中的配置，生成一个提案，并列出无法迁移的项
+（见[控制台](console.zh-CN.md#迁移与安全审查)）。
 
 ## 各部分的对应
 

@@ -432,11 +432,11 @@ It needs `admin.console`, and like all of `admin` it is read when fit starts.
 ```json
 "assistant": {
   "providers": [
-    {"name": "claude", "kind": "anthropic", "models": [{"name": "claude-sonnet-4-5", "context": 200000}]},
+    {"name": "claude", "kind": "anthropic", "models": [{"name": "claude-sonnet-5-5", "context": 200000}]},
     {"name": "local", "kind": "ollama", "base_url": "http://127.0.0.1:11434", "models": [{"name": "qwen3:8b"}]},
     {"name": "mesh", "kind": "llm_proxy"}
   ],
-  "default_model": {"provider": "claude", "model": "claude-sonnet-4-5"},
+  "default_model": {"provider": "claude", "model": "claude-sonnet-5-5"},
   "users": [{"username": "ops", "level": "propose"}]
 }
 ```
@@ -538,7 +538,9 @@ together as one `POST /config/reconcile`; or one rollback, `POST /rollback/{n}`.
 of them and run after the config. No step may touch `admin` (its members are out of every tool's
 reach, and it changes only when fit restarts), nor write a secret: a value the model saw as
 `[redacted]` may be written back only where the config has it, and is then the config's own again.
-At most 32 steps and 256 KiB of arguments.
+At most 32 steps and 256 KiB of arguments. A `config_propose` step may list what it did not carry over
+from a config moved from another server (`unconverted`, at most 100 items of 500 bytes), shown with
+the proposal.
 
 The panel shows the pending proposal above the composer: its steps, the members it changes, whether
 it checks, its diff in `.conf`, `.yaml` and `.json` (redacted), **Review and apply…** and
@@ -560,7 +562,7 @@ across restarts, and is read on the **Audit log** page.
 The endpoints are `GET /api/m/ai/proposals` (the pending proposals: the user's, and every user's for
 one whose level is `apply`), `GET /api/m/ai/proposals/{conversation}` (`?user=` for another's: the
 proposal checked on the running config, with `revision`, `etag`, `stale`, `steps` and each step's
-error, `changed`, `diff` by format, `valid`, `errors`, `can_apply`), `POST
+error, `changed`, `diff` by format, `valid`, `errors`, `unconverted`, `can_apply`), `POST
 /api/m/ai/proposals/{conversation}/apply` (`{"id", "revision", "etag", "user"}`; `200` with
 `outcome` `applied` or `partial`, the `version` and the purges; `403` below `apply`; `409` for a
 revision not the proposal's or a conversation answering; `412` when stale, with the proposal
@@ -630,7 +632,7 @@ inputs:
   - name: upstream
     description: The pool to look at.
     required: false
-model: anthropic/claude-sonnet-4-5
+model: anthropic/claude-sonnet-5-5
 examples:
   - Is everything up this morning?
 ---
@@ -706,6 +708,130 @@ says so; while an answer runs, a click is refused with a note. Secrets stay out:
 names a secret goes without its value, the text's lines that set a secret go with `[redacted]`, and
 the selection is bounded (strings cut at 1,500 characters, lists at 40 items, the whole at 8 KiB)
 before the server redacts it and cuts it to 16 KiB as all page context. An input is at most 2 KiB.
+
+### Migration and security review
+
+Two of the built-in skills do whole tasks, and fit checks them on fixed sets of configs.
+
+**`migrate`** moves a config from nginx, Caddy or Traefik to fit: pasted after `/migrate`, with
+the input `from` (`nginx`, `caddyfile` or `traefik`) when it is not plain. nginx and Caddyfile text
+go through `adapt_convert`, the converter of `fit adapt`, first; its warnings, each with its source
+line, are what the model converts by hand (nginx's `allow` and `deny` as a `remote_ip` match beside
+a route answering 403, `expires` as a `Cache-Control` header) or names as not converted. Traefik's
+YAML (entry points, routers, services, middlewares) and its Docker labels have no converter: the
+model converts them by the mapping of [Migrating from Traefik](migrating-from-traefik.md). The
+result is merged into the running config: fit's listeners, routes and upstreams are kept, a listener
+on an address fit listens on already is reused, names that clash are renamed, and neither `admin`
+nor a secret is written, so a route guarded by passwords the config cannot carry answers 401 until
+they are added on the page. It is checked with `config_validate`, and becomes one proposal, whose
+`unconverted` lists each item not carried over, with its source line, why, and the closest fit has.
+The panel and the Proposals page show the list with the diff; the proposal is applied as any other.
+
+**`security-review`** reads the config, the status and the certificates, and writes its findings
+one a line, as ``- **high** `routes[2]` (admin-panel): what is wrong. Fix: the change.``, the most
+severe first, then what it checked and found fine. It looks at least for the console reachable from
+everywhere, plain HTTP beside HTTPS without a redirect, certificates near expiry, client
+certificates asked for but not required, routes to internal or metadata addresses for anyone, admin
+or internal routes without auth, uploads and logins without limits, `trusted_proxies` trusting every
+address, directory listings and dotfiles served, very long timeouts, and secrets written in the
+config. Asked to, it proposes each fix it can, one step per finding; a change to `admin` or to a
+secret it describes for the file instead.
+
+**The evaluation.** `assistant/testdata/eval` holds the two sets: five configs to migrate (two of
+nginx, a Caddyfile, a Traefik YAML and Docker labels), each with requests and where they must go
+once its proposal is applied on a small running config, and the items it must name as not
+converted; and two fit configs with planted problems, each with the findings the review must make,
+by member. `make assistant-eval` runs them against a model:
+
+```bash
+FIT_EVAL_KIND=anthropic FIT_EVAL_MODEL=claude-sonnet-5-5 FIT_EVAL_API_KEY=... make assistant-eval
+```
+
+It reports, case by case, whether the proposal checks (as `fit validate` checks a config: loaded
+and compiled), is applied and keeps the routes, how many of the items not converted it names, and
+how many planted problems the review finds, with the calls and tokens each took; and then how many
+cases of each set pass. `FIT_EVAL_BASE_URL`, `FIT_EVAL_API_VERSION` and `FIT_EVAL_CONTEXT` set the
+provider as `admin.assistant` would, `FIT_EVAL_CASES` picks cases by a regular expression,
+`FIT_EVAL_REPORT` writes the report as JSON, and `FIT_EVAL_RECORD=1` writes the model's answers
+back as each case's `recorded.json`. Files a config names that are not on this machine
+(certificates, a static root) stand for those on the machine it came from. CI calls no model:
+`go test ./assistant` runs the same sets against the recorded answers, and every case must pass.
+
+### The MCP server
+
+`admin.assistant.mcp`, off when left out, serves the assistant over the
+[Model Context Protocol](https://modelcontextprotocol.io) at `/mcp` on the console's address, so that
+outside agents — Claude Code, Cursor, a client of an MCP SDK — use what the panel uses:
+
+| MCP | What fit serves |
+| --- | --- |
+| tools | the registry's tools the token's level allows under the settings, with their schemas, results redacted and cut as for the model; not `ask_user` nor the page tools, which need the person and the open page |
+| prompts | the enabled skills, each skill's inputs its arguments; a prompt is the skill's prompt with the tools it uses |
+| resources | `fit://config/base`, `fit://config/effective`, `fit://status`, `fit://versions`, `fit://schema`, `fit://docs/reference` and each of its chapters; templates `fit://schema/{path}`, `fit://versions/{n}` and `fit://docs/reference/{chapter}`; redacted as for the model, at most 1 MiB each |
+
+```json
+{
+  "admin": {
+    "console": {"users": [{"username": "ada", "password_hash": "$2a$10$..."}]},
+    "assistant": {
+      "users": [{"username": "ada", "level": "apply"}],
+      "mcp": {"allow": ["127.0.0.1", "::1"], "max_calls_per_minute": 120}
+    }
+  }
+}
+```
+
+An agent authenticates with an **MCP token**, made on the workbench's **Assistant → MCP** page: a
+name, a level (`read`, or `propose` for a user whose level is `propose` or `apply`), a number of
+days (at most `max_token_days`, 90) and, if wanted, the addresses it is used from. The token is
+shown once — fit keeps only a SHA-256 of its secret, in the store's section `assistant.mcp`, or in
+memory until fit restarts without a store — and is revoked on the same page. A token's calls have
+its level within its user's level in the settings in use at each request, so a user lowered to
+`read` or `off` takes their tokens with them; a token's user no longer a console user is refused.
+A user sees their own tokens; one whose level is `apply` sees and revokes everyone's.
+
+A token whose level is `propose` is offered the propose tools: each adds a step to the token's one
+pending proposal, kept in a conversation of its user's named `MCP: <token name>`, and answers with
+the proposal's ID and a link to the **Proposals** page. There is no apply tool: the proposal is
+applied only there, by a user whose level is `apply`, with the Apply click and the dialog's confirm,
+as every proposal is. A token's propose calls run one after another, so that its proposal takes one
+step at a time.
+
+The transport is Streamable HTTP, for both of the protocol's eras: revision `2026-07-28`, stateless,
+whose every request carries its version in `_meta` and the headers `Mcp-Protocol-Version`,
+`Mcp-Method` and `Mcp-Name`, which fit checks against the body (`server/discover` answers what fit
+serves); and `2025-11-25`, `2025-06-18` and `2025-03-26`, which open a session with `initialize`
+(`Mcp-Session-Id`, ended with `DELETE`). A request is a `POST` of one JSON-RPC message; `tools/call`
+is answered as an SSE stream (pings while the tool runs, then the result) to a client that accepts
+one, the rest as JSON; a stream the client cuts cancels the call, and `GET` answers `405`, as fit
+sends nothing unasked.
+
+Each request is checked, in this order: the caller's address against `allow` (loopback when left
+out; `403`), the token in `Authorization: Bearer` (`401` when missing, wrong, revoked or expired),
+the token's own addresses (`403`), the user's level (`403` when `off`), and the token's bounds:
+`max_calls_per_minute` (120) and `max_concurrent_calls` (4) answer `429` with `Retry-After`,
+`max_request_bytes` (1 MiB) `413`, and `max_sessions` (4) ends the session used least recently,
+`session_idle_timeout` (1h) an idle one. A tool call runs on the console's pool within 30 seconds;
+a client that takes nothing of its stream is cut a minute after its queue passed the watermark.
+Every tool call, resource read and prompt is in the audit log with the source `mcp` and the token's
+name. The console's `Origin` check refuses browsers of other sites, as for every request.
+
+To add fit to Claude Code, with the token in place of `<token>`:
+
+```sh
+claude mcp add --transport http fit http://127.0.0.1:2020/mcp --header "Authorization: Bearer <token>"
+```
+
+A client configured by JSON (Cursor, a project's `.mcp.json`) takes
+`{"mcpServers": {"fit": {"type": "http", "url": "http://127.0.0.1:2020/mcp", "headers": {"Authorization": "Bearer <token>"}}}}`.
+The MCP page shows both with the console's own address. fit's assistant calls no outside MCP
+server.
+
+The endpoints of the page are `GET /api/m/ai/mcp` (the server on or off, its settings with their
+defaults, the endpoint, and the tokens, never their hashes), `POST /api/m/ai/mcp/tokens`
+(`{"name", "level", "days", "allow"}`: `{"token", "view"}`, the token shown this once; `409` for a
+name taken or past `max_tokens_per_user`) and `DELETE /api/m/ai/mcp/tokens/{id}`. The settings are
+saved with the assistant's through `PUT /api/m/ai/settings`.
 
 ## Roles' pages
 

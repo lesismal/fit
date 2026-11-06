@@ -1,0 +1,143 @@
+{
+  "model": "hand-written for the eval, in the shape a model answers",
+  "turns": [
+    {
+      "calls": [
+        {
+          "name": "config_get",
+          "args": {}
+        },
+        {
+          "name": "status_get",
+          "args": {}
+        },
+        {
+          "name": "certs_list",
+          "args": {}
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_validate",
+          "args": {
+            "patch": {
+              "listeners": [
+                {
+                  "name": "http",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "https",
+                  "address": ":443",
+                  "protocols": [
+                    "http/1.1",
+                    "h2"
+                  ],
+                  "tls": {
+                    "certificates": [
+                      {
+                        "cert_file": "/etc/fit/api.crt",
+                        "key_file": "/etc/fit/api.key"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "partners",
+                  "address": ":8443",
+                  "protocols": [
+                    "http/1.1"
+                  ],
+                  "tls": {
+                    "certificates": [
+                      {
+                        "cert_file": "/etc/fit/partners.crt",
+                        "key_file": "/etc/fit/partners.key"
+                      }
+                    ],
+                    "client_auth": {
+                      "ca_files": [
+                        "/etc/fit/partners-ca.pem"
+                      ],
+                      "mode": "require"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Require the partners' certificates",
+            "ops": [
+              {
+                "op": "replace",
+                "path": "/listeners/2/tls/client_auth/mode",
+                "value": "require"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Trust no proxy for the API's rate limit",
+            "ops": [
+              {
+                "op": "remove",
+                "path": "/routes/1/middleware/0/params/trusted_proxies"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "No listings or dotfiles in /files/",
+            "ops": [
+              {
+                "op": "remove",
+                "path": "/routes/3/handler/params/browse"
+              },
+              {
+                "op": "remove",
+                "path": "/routes/3/handler/params/dotfiles"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Shorter timeouts for reports",
+            "ops": [
+              {
+                "op": "replace",
+                "path": "/upstreams/1/response_timeout",
+                "value": "10m"
+              },
+              {
+                "op": "remove",
+                "path": "/upstreams/1/response_header_timeout"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "Findings:\n\n- **high** `listeners[1].tls` (https): the certificate for api.example.com expires in 5 days, and it is a file, so nothing renews it. Fix: renew it now, or let ACME obtain it with tls.acme.\n- **high** `listeners[2].tls.client_auth` (partners): mode verify_if_given lets a client without a certificate in, and the route partners never asks for one. Fix: set mode to require, or add the client_cert middleware to the route.\n- **medium** `routes[1].middleware[0]` (api): rate_limit's trusted_proxies is 0.0.0.0/0, so any client sets X-Forwarded-For and escapes its limit. Fix: trust only your load balancers' addresses.\n- **medium** `routes[3]` (files): static with browse on and dotfiles allow lists the directory and serves .env or .git. Fix: turn browse off and dotfiles back to deny.\n- **low** `upstreams[1]` (reports): response_timeout 24h and response_header_timeout 30m keep slow requests open for long on a public route. Fix: a few minutes at most.\n\nChecked and fine: plain HTTP is redirected to HTTPS, the console listens on loopback, no route proxies to internal addresses.\n\nI proposed the fixes of the config; renewing the certificate is yours."
+    }
+  ]
+}

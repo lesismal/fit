@@ -1,4 +1,4 @@
-.PHONY: all build dist test race test-changed vet lint fmt fmt-check schema fuzz bench check m2-exit m3-exit
+.PHONY: all build dist test race test-changed vet lint fmt fmt-check schema assistant-eval fuzz bench check m2-exit m3-exit
 
 GO ?= go
 STATICCHECK ?= staticcheck
@@ -36,6 +36,16 @@ fmt:
 
 fmt-check:
 	@unformatted=$$(gofmt -l .); if [ -n "$$unformatted" ]; then echo "These files need gofmt:"; echo "$$unformatted"; exit 1; fi
+
+# The assistant's evaluation (I129): the skills migrate and security-review on
+# their fixed sets of configs (assistant/testdata/eval), against the model
+# FIT_EVAL_KIND and FIT_EVAL_MODEL name, its key in FIT_EVAL_API_KEY; see
+# assistant/eval_test.go and docs/console.md. Never in CI, which runs the
+# same sets against the recorded answers.
+assistant-eval:
+	@if [ -z "$$FIT_EVAL_KIND" ] || [ -z "$$FIT_EVAL_MODEL" ]; then \
+		echo "make assistant-eval: set FIT_EVAL_KIND and FIT_EVAL_MODEL, and FIT_EVAL_API_KEY for a model that takes a key"; exit 2; fi
+	$(GO) test -count=1 -timeout 60m -run '^TestAssistantEval$$' -v ./assistant
 
 # Regenerate schema/fit.schema.json after changing a config type, a struct tag
 # or a standard module.

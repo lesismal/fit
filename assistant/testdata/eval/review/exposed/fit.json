@@ -1,0 +1,184 @@
+{
+  "admin": {
+    "console": {
+      "address": "0.0.0.0:2020",
+      "cert_file": "/etc/fit/console.crt",
+      "key_file": "/etc/fit/console.key",
+      "users": [
+        {
+          "username": "ops",
+          "password_hash": "$2a$10$CxqkYTkoAYMek4trypkDEuUt/nhKROr0d7T37QflWrceXY4zTatq6"
+        }
+      ]
+    }
+  },
+  "listeners": [
+    {
+      "name": "http",
+      "address": ":80",
+      "protocols": [
+        "http/1.1"
+      ]
+    },
+    {
+      "name": "https",
+      "address": ":443",
+      "protocols": [
+        "http/1.1",
+        "h2"
+      ],
+      "tls": {
+        "certificates": [
+          {
+            "cert_file": "/etc/fit/shop.crt",
+            "key_file": "/etc/fit/shop.key"
+          }
+        ]
+      }
+    }
+  ],
+  "limits": {
+    "max_body_bytes": 4294967296
+  },
+  "upstreams": [
+    {
+      "name": "shop",
+      "addresses": [
+        "10.0.4.10:8080"
+      ]
+    },
+    {
+      "name": "backoffice",
+      "addresses": [
+        "10.0.4.20:8000"
+      ]
+    },
+    {
+      "name": "metadata",
+      "addresses": [
+        "169.254.169.254:80"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "name": "shop",
+      "match": {
+        "host": [
+          "shop.example.com"
+        ]
+      },
+      "handler": {
+        "module": "proxy",
+        "params": {
+          "upstream": "shop"
+        }
+      }
+    },
+    {
+      "name": "login",
+      "match": {
+        "host": [
+          "shop.example.com"
+        ],
+        "path": [
+          "/api/login"
+        ]
+      },
+      "handler": {
+        "module": "proxy",
+        "params": {
+          "upstream": "shop"
+        }
+      }
+    },
+    {
+      "name": "admin-panel",
+      "listeners": [
+        "https"
+      ],
+      "match": {
+        "host": [
+          "shop.example.com"
+        ],
+        "path": [
+          "/admin/*"
+        ]
+      },
+      "handler": {
+        "module": "proxy",
+        "params": {
+          "upstream": "backoffice"
+        }
+      }
+    },
+    {
+      "name": "uploads",
+      "listeners": [
+        "https"
+      ],
+      "match": {
+        "host": [
+          "shop.example.com"
+        ],
+        "path": [
+          "/upload/*"
+        ],
+        "method": [
+          "POST",
+          "PUT"
+        ]
+      },
+      "handler": {
+        "module": "proxy",
+        "params": {
+          "upstream": "shop"
+        }
+      }
+    },
+    {
+      "name": "cloud-info",
+      "listeners": [
+        "https"
+      ],
+      "match": {
+        "host": [
+          "shop.example.com"
+        ],
+        "path": [
+          "/cloud/*"
+        ]
+      },
+      "middleware": [
+        {
+          "module": "rewrite",
+          "params": {
+            "strip_prefix": [
+              "/cloud"
+            ]
+          }
+        }
+      ],
+      "handler": {
+        "module": "proxy",
+        "params": {
+          "upstream": "metadata"
+        }
+      }
+    }
+  ],
+  "media_auth": [
+    {
+      "name": "viewers",
+      "tokens": [
+        {
+          "name": "tv",
+          "token": "tv-token-0123456789abcdef",
+          "play": [
+            "live/*"
+          ]
+        }
+      ]
+    }
+  ]
+}

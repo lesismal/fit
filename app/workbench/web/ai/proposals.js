@@ -25,6 +25,7 @@
     ['pr.urls', '{n} URLs', '{n} 个 URL'], ['pr.tags', 'tags {tags}', '标签 {tags}'], ['pr.all', 'everything', '全部'],
     ['pr.rollback', 'Rolls back to version {n}, as a new version.', '回滚到版本 {n}（作为新版本）。'],
     ['pr.fixes', 'Consistency fixes: {fixes}', '一致性修复：{fixes}'],
+    ['pr.unconverted', 'Not carried over from the config moved here ({n}):', '未从迁入的配置中带过来的项（{n}）：'],
     ['pr.level', 'Your level is {level}: a user whose level is apply applies proposals.', '你的级别为 {level}：只有级别为 apply 的用户才能应用提案。'],
     ['pr.lastError', 'The last apply failed: {error}', '上次应用失败：{error}'],
     ['pr.confirmTitle', 'Apply this proposal?', '应用此提案？'],
@@ -87,6 +88,8 @@
       v.rollback ? h('div.small', t('pr.rollback', { n: v.rollback })) : null,
       v.fixes && v.fixes.length ? h('div.small', t('pr.fixes', { fixes: v.fixes.map(function (f) { return f.id + ' (' + f.action + ')'; }).join(', ') })) : null,
       (v.purges || []).map(function (p) { return h('div.small', purgeText(UI, p)); }),
+      v.unconverted && v.unconverted.length ? h('div.small.ai-prop__unconverted', t('pr.unconverted', { n: v.unconverted.length }),
+        h('ul', v.unconverted.map(function (u) { return h('li', u); }))) : null,
       v.errors && v.errors.length ? h('ul.small.ai-err', v.errors.map(function (e) { return h('li', e.path ? h('code', e.path) : null, e.path ? ' ' : '', e.msg); })) : null);
   }
 

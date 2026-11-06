@@ -1,0 +1,70 @@
+{
+  "from": "nginx",
+  "source": "source.conf",
+  "routes": [
+    {
+      "port": 80,
+      "host": "shop.example.com",
+      "path": "/cart",
+      "want": {
+        "redirect": "https://"
+      }
+    },
+    {
+      "port": 443,
+      "host": "shop.example.com",
+      "path": "/api/orders",
+      "want": {
+        "upstream": [
+          "10.0.1.10:8080",
+          "10.0.1.11:8080"
+        ],
+        "contains": [
+          "rate_limit"
+        ]
+      }
+    },
+    {
+      "port": 443,
+      "host": "shop.example.com",
+      "path": "/admin/users",
+      "remote": "192.168.10.7",
+      "want": {
+        "upstream": [
+          "10.0.1.20:9000"
+        ]
+      }
+    },
+    {
+      "port": 443,
+      "host": "shop.example.com",
+      "path": "/admin/users",
+      "remote": "203.0.113.9",
+      "want": {
+        "denied": true
+      }
+    },
+    {
+      "port": 443,
+      "host": "shop.example.com",
+      "path": "/",
+      "want": {
+        "upstream": [
+          "10.0.1.30:3000"
+        ]
+      }
+    },
+    {
+      "port": 8080,
+      "host": "localhost",
+      "path": "/healthz",
+      "want": {
+        "module": "respond"
+      }
+    }
+  ],
+  "unconverted": [
+    "sub_filter",
+    "error_page"
+  ]
+}

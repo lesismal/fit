@@ -194,3 +194,40 @@ func TestLoadAssistant(t *testing.T) {
 		t.Error("settings without a console loaded")
 	}
 }
+
+// TestAssistantMCP: admin.assistant.mcp's addresses are checked, and its
+// bounds have their defaults.
+func TestAssistantMCP(t *testing.T) {
+	_, err := loadAssistantConfig(t, `{"mcp": {"allow": ["10.0.0.0/8", "nowhere", "fe80::1%eth0", "10.0.0.0/99"]}}`)
+	for _, w := range []string{"mcp.allow[1]: \"nowhere\" is not an address", "mcp.allow[2]:", "mcp.allow[3]:"} {
+		if err == nil || !strings.Contains(err.Error(), w) {
+			t.Errorf("%v lacks %q", err, w)
+		}
+	}
+	if _, err := loadAssistantConfig(t, `{"mcp": {"max_token_days": 4000}}`); err == nil || !strings.Contains(err.Error(), "max_token_days") {
+		t.Errorf("max_token_days: %v", err)
+	}
+	many := strings.Repeat(`"::1",`, MaxAssistantMCPAllow) + `"::1"`
+	if _, err := loadAssistantConfig(t, `{"mcp": {"allow": [`+many+`]}}`); err == nil || !strings.Contains(err.Error(), "more than") {
+		t.Errorf("too many addresses: %v", err)
+	}
+	cfg, err := loadAssistantConfig(t, `{"mcp": {"allow": ["10.1.2.3", "::ffff:192.168.0.0/112"]}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := cfg.Admin.Assistant.MCP
+	if p := m.AllowedPrefixes(); len(p) != 2 || p[0].String() != "10.1.2.3/32" || p[1].String() != "192.168.0.0/16" {
+		t.Errorf("prefixes: %v", p)
+	}
+	var none *AssistantMCP
+	if len(none.AllowedPrefixes()) != 2 || none.TokensPerUser() != 10 || none.TokenDays() != 90 || none.Sessions() != 4 || none.SessionIdle() != time.Hour ||
+		none.RequestBytes() != 1<<20 || none.ConcurrentCalls() != 4 || none.CallsPerMinute() != 120 {
+		t.Error("the defaults of none")
+	}
+	set := &AssistantMCP{MaxTokensPerUser: 1, MaxTokenDays: 2, MaxSessions: 3, SessionIdleTimeout: Duration(time.Minute), MaxRequestBytes: 5,
+		MaxConcurrentCalls: 6, MaxCallsPerMinute: 7, Allow: []string{"x"}}
+	if set.TokensPerUser() != 1 || set.TokenDays() != 2 || set.Sessions() != 3 || set.SessionIdle() != time.Minute || set.RequestBytes() != 5 ||
+		set.ConcurrentCalls() != 6 || set.CallsPerMinute() != 7 || len(set.AllowedPrefixes()) != 0 {
+		t.Error("the settings")
+	}
+}

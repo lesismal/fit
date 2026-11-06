@@ -75,7 +75,7 @@
   WB.module({
     id: 'ai', icon: 'chat', label: 'm.ai', words: WORDS,
     nav: [{ id: 'functions', icon: 'code', label: 'n.functions' }, { id: 'skills', icon: 'book', label: 'n.skills' }, { id: 'proposals', icon: 'layers', label: 'n.proposals' },
-      { id: 'audit', icon: 'history', label: 'n.audit' }, { id: 'settings', icon: 'settings', label: 'n.settings' }],
+      { id: 'audit', icon: 'history', label: 'n.audit' }, { id: 'mcp', icon: 'plug', label: 'n.mcp' }, { id: 'settings', icon: 'settings', label: 'n.settings' }],
     // The chat panel, opened from the top bar of every page (ai/panel.js). / 对话面板，从每个页面的顶栏打开（ai/panel.js）。
     topbar: function (UI, shell) { return window.FitAI && FitAI.panel ? FitAI.panel(UI, shell) : null; },
     setup: function (UI, sh) {
@@ -425,7 +425,9 @@
       // The Functions, Skills, Proposals and Audit log pages are ai/functions.js's, ai/skills.js's, ai/proposals.js's and
       // ai/audit.js's. / 功能页、技能页、提案页与审计日志页分别由 ai/functions.js、ai/skills.js、ai/proposals.js 与 ai/audit.js 提供。
       return { routes: { settings: settingsPage, functions: function () { FitAI.functionsPage(UI, sh); }, skills: function () { FitAI.skillsPage(UI, sh); },
-        proposals: function () { FitAI.proposal.page(UI, sh); }, audit: function () { FitAI.auditPage(UI, sh); } } };
+        proposals: function () { FitAI.proposal.page(UI, sh); }, audit: function () { FitAI.auditPage(UI, sh); },
+        // The MCP page is ai/mcp.js's. / MCP 页由 ai/mcp.js 提供。
+        mcp: function () { FitAI.mcpPage(UI, sh); } } };
     }
   });
 })();

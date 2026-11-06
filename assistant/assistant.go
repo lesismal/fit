@@ -131,8 +131,9 @@ type Assistant struct {
 	settings  *config.Assistant
 	keys      map[string]string // by provider, from the store
 	fromStore bool
-	rev       uint64 // counts the saves, for the pages' version
-	running   int    // the chats under way
+	rev       uint64                   // counts the saves, for the pages' version
+	running   int                      // the chats under way
+	extra     []func(api *console.API) // routes added by Extend
 
 	registry *Registry
 	skills   skillSet
@@ -398,6 +399,12 @@ func (a *Assistant) routes(api *console.API) {
 	api.Handle("GET", "/api/skills", a.skillsHandler)
 	api.Handle("POST", "/api/skills", a.skillsPost)
 	api.HandlePrefix("", "/api/skills/", a.skillHandler)
+	a.mu.Lock()
+	extra := a.extra
+	a.mu.Unlock()
+	for _, fn := range extra {
+		fn(api)
+	}
 }
 
 // putBody is a change of the settings: the settings whole, the keys to set

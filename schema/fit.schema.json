@@ -257,6 +257,10 @@
           "$ref": "#/$defs/config.AssistantLimits",
           "description": "Bounds on the assistant's conversations, tool calls and model answers; the defaults when left out."
         },
+        "mcp": {
+          "$ref": "#/$defs/config.AssistantMCP",
+          "description": "An MCP server at /mcp on the console's address, for outside agents (Claude Code, Cursor, an SDK's client) to call the assistant's tools, read the config, the schema and the docs, and use the skills as prompts, with the MCP tokens users make on the workbench's MCP page. A token has its user's level, at most propose: what it proposes is applied only in the workbench. Off when left out."
+        },
         "params": {
           "$ref": "#/$defs/config.AssistantParams",
           "description": "What a model call asks for: its output, temperature and thinking."
@@ -349,6 +353,65 @@
           "description": "The most turns a conversation keeps, a user's message and the answer to it each. 40 when left out or 0.",
           "minimum": 0,
           "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "config.AssistantMCP": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "description": "The addresses (as 127.0.0.1) and prefixes (as 10.0.0.0/8) MCP clients may call from; a token may narrow them further. Loopback only when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_calls_per_minute": {
+          "default": 120,
+          "description": "The most requests of one token in a minute; past it they are answered 429 until the minute's share comes back. 120 when left out or 0.",
+          "maximum": 6000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_concurrent_calls": {
+          "default": 4,
+          "description": "The most requests of one token served at once; one more is answered 429. 4 when left out or 0.",
+          "maximum": 64,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_request_bytes": {
+          "default": 1048576,
+          "description": "The most bytes of a request's body, beside the console's own bound. 1 MiB when left out or 0.",
+          "maximum": 8388608,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_sessions": {
+          "default": 4,
+          "description": "The most sessions a token keeps for clients of the protocol's versions before 2026-07-28, which open one with initialize; one more ends the one used least recently. 4 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_token_days": {
+          "default": 90,
+          "description": "The longest a token may last, in days, from when it is made. 90 when left out or 0.",
+          "maximum": 3650,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tokens_per_user": {
+          "default": 10,
+          "description": "The most MCP tokens a console user may hold. 10 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_idle_timeout": {
+          "default": "1h",
+          "description": "How long such a session is kept without a request. 1h when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
         }
       },
       "type": "object"

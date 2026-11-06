@@ -82,7 +82,9 @@ func TestToolConfigGet(t *testing.T) {
 	}
 	wantErr(t, a, "config_get", `{"source":"x"}`, "base or effective")
 	wantErr(t, a, "config_get", `{"format":"x"}`, "json, conf or yaml")
-	wantErr(t, a, "config_get", `{"members":["nope"]}`, `no member "nope"`)
+	if out := mustRun(t, a, "config_get", `{"members":["nope"]}`); out != `{"nope":null}` { // I129: not set is null
+		t.Errorf("%s", out)
+	}
 	wantErr(t, a, "config_get", `{"members":"x"}`, "not what the tool takes")
 
 	// The Admin API's answers that are not what they should be.

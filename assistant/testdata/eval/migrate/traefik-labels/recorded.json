@@ -1,0 +1,273 @@
+{
+  "model": "hand-written for the eval, in the shape a model answers",
+  "turns": [
+    {
+      "text": "",
+      "calls": [
+        {
+          "name": "config_get",
+          "args": {
+            "members": [
+              "listeners",
+              "routes",
+              "upstreams"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_validate",
+          "args": {
+            "patch": {
+              "listeners": [
+                {
+                  "name": "web",
+                  "address": ":8080",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "http",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                }
+              ],
+              "upstreams": [
+                {
+                  "name": "whoami",
+                  "addresses": [
+                    "whoami:8080"
+                  ]
+                },
+                {
+                  "name": "status",
+                  "addresses": [
+                    "status:80"
+                  ]
+                },
+                {
+                  "name": "auth",
+                  "addresses": [
+                    "auth:4181"
+                  ]
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "whoami",
+                  "listeners": [
+                    "http"
+                  ],
+                  "match": {
+                    "host": [
+                      "whoami.example.com"
+                    ],
+                    "path": [
+                      "/v2*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "headers",
+                      "params": {
+                        "response": {
+                          "set": {
+                            "X-Served-By": "edge"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "module": "forward_auth",
+                      "params": {
+                        "upstream": "auth",
+                        "uri": "/verify"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "whoami"
+                    }
+                  }
+                },
+                {
+                  "name": "status",
+                  "listeners": [
+                    "http"
+                  ],
+                  "match": {
+                    "host": [
+                      "status.example.com"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "status"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Move the traefik config over",
+            "members": {
+              "listeners": [
+                {
+                  "name": "web",
+                  "address": ":8080",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "http",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                }
+              ],
+              "upstreams": [
+                {
+                  "name": "whoami",
+                  "addresses": [
+                    "whoami:8080"
+                  ]
+                },
+                {
+                  "name": "status",
+                  "addresses": [
+                    "status:80"
+                  ]
+                },
+                {
+                  "name": "auth",
+                  "addresses": [
+                    "auth:4181"
+                  ]
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "whoami",
+                  "listeners": [
+                    "http"
+                  ],
+                  "match": {
+                    "host": [
+                      "whoami.example.com"
+                    ],
+                    "path": [
+                      "/v2*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "headers",
+                      "params": {
+                        "response": {
+                          "set": {
+                            "X-Served-By": "edge"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "module": "forward_auth",
+                      "params": {
+                        "upstream": "auth",
+                        "uri": "/verify"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "whoami"
+                    }
+                  }
+                },
+                {
+                  "name": "status",
+                  "listeners": [
+                    "http"
+                  ],
+                  "match": {
+                    "host": [
+                      "status.example.com"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "status"
+                    }
+                  }
+                }
+              ]
+            },
+            "unconverted": [
+              "lines 22-24: the middleware status-errors (errors: 500-599 answered from /{status}.html): fit has no custom error pages; the upstream's own error answers pass through"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "The labels are converted by hand: the entry point web, on :80, is the listener http (web is taken by your :8080 listener); each router is a route on it, each service an upstream at its compose name and port, whoami-headers the headers middleware and whoami-auth forward_auth to an upstream for auth:4181. Not converted: the errors middleware (lines 22-24)."
+    }
+  ]
+}

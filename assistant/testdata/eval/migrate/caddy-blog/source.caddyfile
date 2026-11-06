@@ -1,0 +1,32 @@
+# The blog: its files, the comments API on two backends, the feed rendered
+# as a template, and the old www name sent to the new one.
+{
+	email ops@example.net
+}
+
+blog.example.net {
+	encode zstd gzip
+	root * /var/www/blog
+
+	handle_path /api/* {
+		reverse_proxy 10.0.2.5:4000 10.0.2.6:4000 {
+			lb_policy least_conn
+			health_uri /healthz
+			health_interval 10s
+		}
+	}
+
+	handle /feed.xml {
+		templates
+		file_server
+	}
+
+	@bots header_regexp User-Agent (?i)(gptbot|ccbot)
+	respond @bots 403
+
+	file_server
+}
+
+www.blog.example.net {
+	redir https://blog.example.net{uri} permanent
+}

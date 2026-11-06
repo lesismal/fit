@@ -8,7 +8,10 @@ Caddy leaves to plugins) and in costing less per connection. fit's own config fo
 [.conf file](reference/fit.md), is written in blocks of directives as a Caddyfile is, with a `site`
 for each set of host names, but its directives are fit's own fields. `fit adapt` converts a
 Caddyfile's common subset to it, to start from; there is no converter from Caddy's JSON. This guide
-maps one to the other, and the [config reference](reference/config.md) has every field.
+maps one to the other, and the [config reference](reference/config.md) has every field. The
+workbench's assistant converts a Caddyfile with its skill `migrate`: the converter first, then what it
+left, as one proposal that lists what could not be carried over
+([the console](console.md#migration-and-security-review)).
 
 ## A site
 

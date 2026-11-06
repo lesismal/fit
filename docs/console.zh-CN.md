@@ -342,11 +342,11 @@ workbench 的菜单中显示 **助手**。不设置时没有该模块，也不�
 ```json
 "assistant": {
   "providers": [
-    {"name": "claude", "kind": "anthropic", "models": [{"name": "claude-sonnet-4-5", "context": 200000}]},
+    {"name": "claude", "kind": "anthropic", "models": [{"name": "claude-sonnet-5-5", "context": 200000}]},
     {"name": "local", "kind": "ollama", "base_url": "http://127.0.0.1:11434", "models": [{"name": "qwen3:8b"}]},
     {"name": "mesh", "kind": "llm_proxy"}
   ],
-  "default_model": {"provider": "claude", "model": "claude-sonnet-4-5"},
+  "default_model": {"provider": "claude", "model": "claude-sonnet-5-5"},
   "users": [{"username": "ops", "level": "propose"}]
 }
 ```
@@ -418,7 +418,8 @@ schema 及本用户能否调用）。
 补丁，合并后以一次 `PUT /config/text?members=` 应用其改动的顶层成员；一致性修复，以一次 `POST /config/reconcile` 一起应用；
 或一次回滚，`POST /rollback/{n}`。缓存清除可与任何一种同在，在配置之后执行。任何步骤都不能触及 `admin`（其成员不在任何工具
 的范围内，且只在 fit 重启时生效），也不能写入密钥：模型看到的 `[redacted]` 值只能写回配置中原有的位置，届时恢复为配置原值。
-最多 32 个步骤、256 KiB 参数。
+最多 32 个步骤、256 KiB 参数。`config_propose` 的步骤可以列出从其他服务器迁来的配置中没有带过来的项（`unconverted`，
+最多 100 项，每项 500 字节），随提案一起显示。
 
 面板在输入框上方显示待处理的提案：各步骤、改动的成员、是否通过检查、`.conf`、`.yaml` 与 `.json` 三种格式的差异（已脱敏），
 以及 **审阅并应用…** 与 **丢弃**。“应用”会打开含完整差异的对话框，只有其中的 **应用** 才会以该用户的身份应用，带上所见的 ETag
@@ -433,7 +434,7 @@ schema 及本用户能否调用）。
 
 端点为 `GET /api/m/ai/proposals`（待处理的提案：用户自己的；级别为 `apply` 时为所有用户的）、
 `GET /api/m/ai/proposals/{conversation}`（`?user=` 读取他人的：在运行中的配置上检查后的提案，含 `revision`、`etag`、`stale`、
-`steps` 及各步骤的错误、`changed`、按格式的 `diff`、`valid`、`errors`、`can_apply`）、
+`steps` 及各步骤的错误、`changed`、按格式的 `diff`、`valid`、`errors`、`unconverted`、`can_apply`）、
 `POST /api/m/ai/proposals/{conversation}/apply`（`{"id", "revision", "etag", "user"}`；`200` 带 `outcome` 为 `applied` 或
 `partial`、`version` 与清除结果；级别低于 `apply` 时 `403`；修订号不符或对话正在回答时 `409`；过期时 `412` 并重新提供提案；
 检查未通过或 Admin API 拒绝时 `422`）、`POST /api/m/ai/proposals/{conversation}/discard`（`{"id", "user"}`）以及
@@ -485,7 +486,7 @@ inputs:
   - name: upstream
     description: The pool to look at.
     required: false
-model: anthropic/claude-sonnet-4-5
+model: anthropic/claude-sonnet-5-5
 examples:
   - Is everything up this morning?
 ---
@@ -541,6 +542,100 @@ fit 内置 14 个技能，嵌入在二进制中：`explain`、`route-builder`、
 也没有；面板读到用户级别之前按钮保持隐藏。已停用的技能不使用——问题照常发送，对话中会说明；回答进行中点击会被拒绝并提示。密钥不外泄：路径含密钥的字段
 不带其值，文本中设置密钥的行以 `[redacted]` 代替，选中项先在页面上限定大小（字符串截断为 1,500 字符，列表截断为 40 项，整体
 8 KiB），再像所有页面上下文一样由服务端脱敏并截断为 16 KiB。每个输入至多 2 KiB。
+
+### 迁移与安全审查
+
+内置技能中有两个完成整件任务，fit 在固定的配置集上检验它们。
+
+**`migrate`** 把 nginx、Caddy 或 Traefik 的配置迁移到 fit：把配置粘贴在 `/migrate` 之后，来源不明显时给出输入 `from`
+（`nginx`、`caddyfile` 或 `traefik`）。nginx 与 Caddyfile 的文本先经过 `adapt_convert`，即 `fit adapt` 的转换器；它的
+警告各带源行号，是留给模型的部分：模型手工转换（nginx 的 `allow` 与 `deny` 写成 `remote_ip` 匹配，旁边加一条回答 403 的
+路由；`expires` 写成 `Cache-Control` 头），或列为未转换。Traefik 的 YAML（entry point、router、service、middleware）与
+Docker 标签没有转换器，由模型按[从 Traefik 迁移](migrating-from-traefik.zh-CN.md)中的对应自行转换。结果合并进运行中的配置：
+保留 fit 已有的 listener、路由与上游，在 fit 已监听的地址上复用那个 listener，重名的改名，不写 `admin` 也不写任何密钥，
+因此配置无法带上的密码所保护的路由会回答 401，直到有人在页面上添加它们。结果用 `config_validate` 检查后成为一个提案，其
+`unconverted` 列出每个未迁移的项，带源行号、原因以及 fit 中最接近的做法。面板与提案页把这份清单与差异一起显示；提案的应用与
+其他提案相同。
+
+**`security-review`** 读取配置、状态与证书，每行写一条发现，形如 ``- **high** `routes[2]` (admin-panel): what is wrong. Fix: the change.``，
+最严重的在前，最后一行列出检查过且没有问题的内容。它至少检查：控制台可从任何地方访问、与 HTTPS 并存却不重定向的明文 HTTP、
+即将到期的证书、要求客户端证书却不强制、任何人都能访问的指向内网或元数据地址的路由、没有认证的管理或内部路由、没有限制的
+上传与登录、信任所有地址的 `trusted_proxies`、目录列表与点文件、过长的超时，以及写在配置里的密钥。用户要求时，它为能修复的
+每条发现提出一个步骤；对 `admin` 或密钥的修改则说明如何在文件中修改。
+
+**评估。** `assistant/testdata/eval` 中有两组配置：五个待迁移的配置（两个 nginx、一个 Caddyfile、一个 Traefik YAML 与一组
+Docker 标签），每个都带一组请求及其提案应用到一个小型运行配置后这些请求应到达的地方，以及必须列为未转换的项；还有两个埋了问题
+的 fit 配置，每个都带审查必须给出的发现（按成员）。`make assistant-eval` 用某个模型运行它们：
+
+```bash
+FIT_EVAL_KIND=anthropic FIT_EVAL_MODEL=claude-sonnet-5-5 FIT_EVAL_API_KEY=... make assistant-eval
+```
+
+它逐个报告：提案是否通过检查（与 `fit validate` 相同：加载并编译）、是否已应用并保留了路由、列出了多少未转换的项、审查找到了
+多少埋下的问题，以及各自的工具调用与 token 数；最后给出每组通过的数量。`FIT_EVAL_BASE_URL`、`FIT_EVAL_API_VERSION` 与
+`FIT_EVAL_CONTEXT` 像 `admin.assistant` 那样设定提供方，`FIT_EVAL_CASES` 用正则表达式挑选用例，`FIT_EVAL_REPORT` 把报告写成
+JSON，`FIT_EVAL_RECORD=1` 把模型的回答写回各用例的 `recorded.json`。配置中提到、而本机没有的文件（证书、静态根目录）代表来源
+机器上的那些文件。CI 不调用任何模型：`go test ./assistant` 用记录的回答运行同样的用例，每个都必须通过。
+
+### MCP 服务器
+
+`admin.assistant.mcp`（不设置时关闭）在控制台地址的 `/mcp` 上以 [Model Context Protocol](https://modelcontextprotocol.io)
+提供助手，让外部代理（Claude Code、Cursor、MCP SDK 的客户端）使用面板所用的能力：
+
+| MCP | fit 提供的内容 |
+| --- | --- |
+| tools | 当前设置下令牌级别允许的注册表工具及其 schema，结果像发给模型时一样脱敏并截断；不提供 `ask_user` 与页面工具，它们需要用户本人与打开的页面 |
+| prompts | 已启用的技能，技能的输入即其参数；提示词为技能的提示词及其使用的工具 |
+| resources | `fit://config/base`、`fit://config/effective`、`fit://status`、`fit://versions`、`fit://schema`、`fit://docs/reference` 及其各章；模板 `fit://schema/{path}`、`fit://versions/{n}` 与 `fit://docs/reference/{chapter}`；像发给模型时一样脱敏，每个最多 1 MiB |
+
+```json
+{
+  "admin": {
+    "console": {"users": [{"username": "ada", "password_hash": "$2a$10$..."}]},
+    "assistant": {
+      "users": [{"username": "ada", "level": "apply"}],
+      "mcp": {"allow": ["127.0.0.1", "::1"], "max_calls_per_minute": 120}
+    }
+  }
+}
+```
+
+代理以 **MCP 令牌** 认证，令牌在工作台的 **助手 → MCP** 页上创建：名称、级别（`read`，或级别为 `propose`、`apply` 的用户可选
+`propose`）、天数（最多 `max_token_days`，默认 90），以及可选的使用来源地址。令牌只显示一次：fit 只保存其密钥的 SHA-256，存于
+store 的 `assistant.mcp` 段中，没有 store 时只保存在内存中直到 fit 重启；令牌在同一页上吊销。令牌的调用具有其级别，并受每次请求时
+所用设置中其用户级别的限制，因此用户被降为 `read` 或 `off` 时其令牌随之降级；令牌的用户不再是控制台用户时被拒绝。用户看到自己的
+令牌；级别为 `apply` 的用户可查看并吊销所有人的令牌。
+
+级别为 `propose` 的令牌可使用提案工具：每次调用向该令牌唯一的待定提案加入一步，提案保存在其用户名为 `MCP: <令牌名>` 的对话中，
+并返回提案 ID 与 **提案** 页的链接。没有应用工具：提案只在那里应用，由级别为 `apply` 的用户点击应用并在对话框中再次确认，与所有
+提案相同。同一令牌的提案调用依次执行，使提案一次只加入一步。
+
+传输方式为 Streamable HTTP，支持协议的两个时代：修订版 `2026-07-28` 为无状态，每个请求在 `_meta` 中带协议版本，并带
+`Mcp-Protocol-Version`、`Mcp-Method` 与 `Mcp-Name` 请求头，fit 会将其与请求体核对（`server/discover` 返回 fit 提供的内容）；
+`2025-11-25`、`2025-06-18` 与 `2025-03-26` 以 `initialize` 打开会话（`Mcp-Session-Id`，以 `DELETE` 结束）。每个请求是一条
+JSON-RPC 消息的 `POST`；客户端接受 SSE 时 `tools/call` 以 SSE 流应答（工具运行期间发送 ping，然后是结果），其余以 JSON 应答；
+客户端切断流即取消调用；`GET` 返回 `405`，因为 fit 不主动发送任何内容。
+
+每个请求依次检查：调用方地址是否在 `allow` 中（不设置时仅限回环地址；`403`）、`Authorization: Bearer` 中的令牌（缺失、错误、
+已吊销或已过期时 `401`）、令牌自身的来源地址（`403`）、用户级别（`off` 时 `403`），以及令牌的上限：`max_calls_per_minute`
+（120）与 `max_concurrent_calls`（4）超出时回答 `429` 并带 `Retry-After`，`max_request_bytes`（1 MiB）超出时 `413`，
+`max_sessions`（4）超出时结束最久未用的会话，`session_idle_timeout`（1h）结束空闲会话。工具调用在控制台的线程池上运行，
+最长 30 秒；不读取其流的客户端在队列超过水位一分钟后被切断。每次工具调用、资源读取与提示词获取都记入审计日志，来源为 `mcp`
+并带令牌名称。与所有请求一样，控制台的 `Origin` 检查会拒绝其他网站的浏览器。
+
+把 fit 加入 Claude Code（用你的令牌替换 `<token>`）：
+
+```sh
+claude mcp add --transport http fit http://127.0.0.1:2020/mcp --header "Authorization: Bearer <token>"
+```
+
+以 JSON 配置的客户端（Cursor、项目的 `.mcp.json`）使用
+`{"mcpServers": {"fit": {"type": "http", "url": "http://127.0.0.1:2020/mcp", "headers": {"Authorization": "Bearer <token>"}}}}`。
+MCP 页以控制台自己的地址显示这两者。fit 的助手不调用任何外部 MCP 服务器。
+
+该页的端点为 `GET /api/m/ai/mcp`（服务器是否开启、带默认值的设置、端点与令牌，从不含哈希）、`POST /api/m/ai/mcp/tokens`
+（`{"name", "level", "days", "allow"}`：返回 `{"token", "view"}`，令牌只显示这一次；名称已被占用或超过
+`max_tokens_per_user` 时 `409`）与 `DELETE /api/m/ai/mcp/tokens/{id}`。设置经 `PUT /api/m/ai/settings` 与助手设置一起保存。
 
 ## 角色的页面
 

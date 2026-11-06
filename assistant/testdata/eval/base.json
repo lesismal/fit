@@ -1,0 +1,9 @@
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1"]}
+  ],
+  "routes": [
+    {"name": "health", "listeners": ["web"], "match": {"path": ["/healthz"]},
+     "handler": {"module": "respond", "params": {"status": 200, "body": "ok"}}}
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "from": "nginx",
+  "source": "source.conf",
+  "routes": [
+    {
+      "port": 8080,
+      "host": "docs.example.org",
+      "path": "/guide/intro.html",
+      "want": {
+        "module": "static",
+        "contains": [
+          "/srv/docs"
+        ]
+      }
+    },
+    {
+      "port": 8080,
+      "host": "docs.example.org",
+      "path": "/assets/app.css",
+      "want": {
+        "module": "static",
+        "contains": [
+          "max-age=2592000"
+        ]
+      }
+    },
+    {
+      "port": 8080,
+      "host": "docs.example.org",
+      "path": "/search",
+      "want": {
+        "upstream": [
+          "127.0.0.1:7700"
+        ]
+      }
+    },
+    {
+      "port": 8080,
+      "host": "docs.example.org",
+      "path": "/private/plan.md",
+      "want": {
+        "denied": true
+      }
+    },
+    {
+      "port": 8080,
+      "host": "localhost",
+      "path": "/healthz",
+      "want": {
+        "module": "respond"
+      }
+    }
+  ],
+  "unconverted": [
+    "stub_status",
+    "auth_basic",
+    "lua"
+  ]
+}

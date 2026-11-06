@@ -135,18 +135,44 @@ workers.
   fenced as fit's own instructions that never override the rules, in place of the catalog. A
   skill's tools are those it names that the user's level and the settings allow, and `ask_user`;
   a skill's `model` is used from the message that starts it.
+- **Migration and review (I129)**: `migrate` converts with `fit adapt`'s converter first and the
+  model for what it left (Traefik by the model alone), merged into the running config as one
+  proposal whose `config_propose` step lists, in `unconverted`, what was not carried over;
+  `security-review` writes findings one a line, severity, member and fix, and proposes the fixes it
+  may. Both are evaluated on fixed sets of configs (`assistant/testdata/eval`): in CI against
+  recorded answers, and against a model in the environment with `make assistant-eval`, never in
+  CI. A member `config_get` is asked for and the config does not set comes back null, and
+  rate_limit's `key` (`ip`, `route`, `header:Name`) is a selector, read and written as it is.
+- **The MCP server (I130)** is `admin.assistant.mcp`, off by default, at `/mcp` on the console's
+  address (package `assistant/mcp`): the registry's tools that run in fit (not `ask_user` nor the
+  page tools), the enabled skills as prompts, and the config, status, versions, schema and the
+  config's reference as resources, each redacted and bounded as for the model. It speaks the
+  protocol's revision 2026-07-28 (stateless, its headers checked against the body, `server/discover`)
+  and the revisions 2025-03-26 to 2025-11-25 (sessions opened with `initialize`) on one endpoint;
+  `tools/call` answers with an SSE stream whose cut cancels the call. A caller holds an MCP token,
+  made by a console user on the MCP page, shown once and kept as a SHA-256 of its 256-bit secret in
+  the store's section `assistant.mcp`; its level is its own (`read` or `propose`) within its user's,
+  checked on every request, so it is never `apply`. A propose call adds a step to the token's one
+  pending proposal, kept in a conversation of its user's, and the proposal is applied only in the
+  workbench, as every proposal is. Each token is bounded in sessions, request bytes, requests at
+  once and requests a minute, and reaches the server only from `allow` (loopback by default) and its
+  own addresses; every call, read and prompt is in the audit log with the source `mcp` and the
+  token's name. fit's assistant calls no outside MCP server. The official Go MCP SDK is used only
+  by a test, in a module of its own (`test/mcpsdk`), so that fit's own dependencies do not grow.
 
 ## Consequences
 
 - The workbench's menu has the module Assistant when `admin.assistant` is set, with its Functions,
-  Skills, Proposals, Audit log and Settings pages, and every page's top bar has the chat panel's button.
+  Skills, Proposals, Audit log, MCP (I130) and Settings pages, and every page's top bar has the chat panel's button.
 - `GET /api/m/ai/settings`, `PUT /api/m/ai/settings`, `POST /api/m/ai/providers/test`,
   `POST /api/m/ai/chat`, `POST /api/m/ai/chat/stop`, `POST /api/m/ai/chat/page` (I154), `GET /api/m/ai/tools`,
   `GET /api/m/ai/conversations`, `GET`/`DELETE /api/m/ai/conversations/{id}`, and, from I126,
   `GET /api/m/ai/proposals`, `GET /api/m/ai/proposals/{conversation}`, its `POST .../apply` and
   `POST .../discard`, `GET /api/m/ai/audit`, and, from I127, `GET`/`POST /api/m/ai/skills`, `GET`/`PUT`/`DELETE
-  /api/m/ai/skills/{name}` and its `POST .../enable` and `.../disable` are the console's, behind its login and CSRF token,
-  as every module's API is.
+  /api/m/ai/skills/{name}` and its `POST .../enable` and `.../disable`, and, from I130, `GET /api/m/ai/mcp`,
+  `POST /api/m/ai/mcp/tokens` and `DELETE /api/m/ai/mcp/tokens/{id}` are the console's, behind its login and CSRF token,
+  as every module's API is. `/mcp` is the console's too, behind an MCP token instead, which marks
+  its connection as a login does.
 - A chat holds one of the console's connections for as long as it streams, and the tools take the
   console pool's workers for as long as they run; `max_concurrent_chats` (4) keeps both few.
 - A store saved by a fit with the assistant's settings is version 3; an older fit cannot open it.
