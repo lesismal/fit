@@ -4981,6 +4981,10 @@
           "description": "Whether a member's camera is on when it joins a call in the pages: off when left out, for the member to switch on, and a publisher sends a frame with its name while it is off, so a switch never renegotiates. The URL's cam=0 or cam=1 overrides it.",
           "type": "boolean"
         },
+        "channels": {
+          "description": "List the streaming role's channels on the library page too, those the viewer may play, with what each plays now and next, played from hls, which must be set, through a playback URL signed for the viewer as an item's is. Off when left out.",
+          "type": "boolean"
+        },
         "chat": {
           "default": true,
           "description": "Whether a room call has a chat: the pages show it, and the room API carries the members' text messages and small files between them. False answers the chat's API 404 and shows no chat window. True when left out.",
@@ -4994,6 +4998,13 @@
           "description": "STUN and TURN servers the pages' PeerConnections use, as a browser's iceServers. None when left out: fit's media server is an ICE lite agent that browsers reach directly, and tells them of its own ICE servers in its answers' Link headers.",
           "items": {
             "$ref": "#/$defs/config.ICEServer"
+          },
+          "type": "array"
+        },
+        "libraries": {
+          "description": "The media_library names whose items the library page lists, at most 16: those the viewer may play, play on vod/<library>/<id> under auth, that can be served, with their posters, searched and paged; the player page plays one with hls.js, vendored in the binary. With the auth policy's url_signing, and playing not public, the player plays through a playback URL the pages sign for the viewer, its address and a session of its own, good for url_signing's ttl, whose playlists hand the player its grant; otherwise through the plain URL, which the login's cookie lets in. None when left out: no library page.",
+          "items": {
+            "type": "string"
           },
           "type": "array"
         },
@@ -5063,6 +5074,11 @@
         },
         "title": {
           "description": "The pages' title; fit media when left out.",
+          "type": "string"
+        },
+        "vod": {
+          "default": "/vod/{library}/{id}/index.m3u8",
+          "description": "The URL of an item's multivariant playlist, as a vod handler serves it, {library} standing for its library's name and {id} for its ID: a path on this server or an http or https URL, ending in {id}/ and the playlist's name. The item's poster is beside it, poster and its extension. /vod/{library}/{id}/index.m3u8 when left out, the vod handler's own prefix.",
           "type": "string"
         },
         "whep": {
