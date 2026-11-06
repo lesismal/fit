@@ -16,7 +16,10 @@
 #
 # The items play only through playback URLs that expire (media_auth's
 # url_signing), which collector.py, standing for the site's API, asks
-# media_tokens' /urls for.
+# media_tokens' /urls for; under /vod/films/ clear, and under /vod/enc/ with
+# their segments encrypted (encrypt), hls.js loading each item's key, and
+# TestInteropEncrypted playing them with ffmpeg and finding a segment alone
+# undecodable.
 #
 # Safari's own player (AVFoundation) cannot be driven from here; by hand, on
 # a Mac with ffmpeg (libx264, libx265, libsvtav1, libopus) and Go:

@@ -25,6 +25,9 @@ func TestChannels(t *testing.T) {
 	if err != nil || loc.String() != "Asia/Shanghai" || ch.Looped() || !ch.Shuffled() || ch.ReadAheadOr() != 5*time.Second || ch.BufferBytes() != 2<<20 {
 		t.Fatalf("%+v %v", ch, err)
 	}
+	if ch.Rotation() != DefaultChannelKeyRotation || (&StreamChannel{KeyRotation: 3}).Rotation() != 3 {
+		t.Errorf("key_rotation: %d", ch.Rotation())
+	}
 	news := &s.Channels[1]
 	if loc, _ := news.Location(); loc != time.UTC || !news.Looped() || news.Shuffled() || news.ReadAheadOr() != DefaultChannelReadAhead ||
 		news.BufferBytes() != DefaultChannelMaxBufferBytes {
@@ -67,6 +70,8 @@ func TestChannels(t *testing.T) {
 		{`{"channels": [{"name": "x", "library": "films", "items": ["a"], "time_zone": "Mars/Base"}]}`, "not a time zone"},
 		{`{"channels": [{"name": "x", "library": "films", "items": ["a"], "read_ahead": "100ms"}]}`, "500ms to 1m"},
 		{`{"channels": [{"name": "x", "library": "films", "items": ["a"], "max_buffer_bytes": 1000}]}`, "at least 1048576"},
+		{`{"channels": [{"name": "x", "library": "films", "items": ["a"], "encrypt": true}]}`, `set media_library "films"'s secret`},
+		{`{"channels": [{"name": "x", "library": "films", "items": ["a"], "key_rotation": 100001}]}`, "greater than the maximum"},
 		{`{"channels": [{"name": "x", "library": "films", "items": ["a"], "push": [{"stream": "y", "url": "rtmp://h/a/b"}]}]}`, "leave stream out"},
 		{`{"rtmp": {"listen": ":1935"}, "push": [{"url": "rtmp://h/a/b"}]}`, "names the stream"},
 		{`{"rtmp": {"listen": ":1935"}, "push": [{"stream": "a b", "url": "rtmp://h/a/b"}]}`, "not a stream's name"},

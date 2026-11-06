@@ -1495,6 +1495,15 @@
           // // pool; past it the answer is 503. 30s when left out.
           // // duration, as "1.5s" or "2m"; default "30s".
           // "timeout": "30s",
+
+          // // Encrypts the segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, each item under
+          // // a key of its own derived from the library's secret, which the media playlists name as
+          // // aes.key in the item's directory and the handler serves only to a request auth lets play that
+          // // item: segments copied, as a CDN keeps them, do not play without it. The files themselves are
+          // // then not served; initialization sections, subtitles and posters stay clear. Needs auth and
+          // // the library's secret or secret_file. Off when left out.
+          // // boolean.
+          // "encrypt": true,
         // },
       // },
     // },
@@ -5357,6 +5366,20 @@
             // "connect_timeout": "10s",
           // },
         // ],
+
+        // // Encrypts the channel's HLS segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike,
+        // // under a key derived from the library's secret, which the hls handler serves only to a
+        // // request its auth lets play the channel; so that segments copied, as a CDN keeps them, do not
+        // // play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are not
+        // // served for it. The other egresses play the channel as before, under their auth. Off when
+        // // left out.
+        // // boolean.
+        // "encrypt": true,
+
+        // // With encrypt, how many segments one key encrypts before the next takes over, so that a key
+        // // handed out opens a few segments only. 10 when left out or 0.
+        // // integer, 0 to 100000; default 10.
+        // "key_rotation": 10,
       // },
     // ],
 
@@ -5497,6 +5520,20 @@
       // // 10s when left out.
       // // duration, as "1.5s" or "2m"; default "10s".
       // "file_timeout": "10s",
+
+      // // The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for
+      // // each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation
+      // // segments. Changing it changes every key, so that segments encrypted before, kept by a CDN,
+      // // no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of
+      // // the library can be encrypted.
+      // // string.
+      // "secret": "",
+
+      // // A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time
+      // // the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one
+      // // of the two. None when left out.
+      // // string.
+      // "secret_file": "",
     // },
   // ],
 

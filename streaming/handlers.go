@@ -18,6 +18,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/mediaauth"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/streaming/channels"
 )
 
 func init() {
@@ -203,6 +204,11 @@ type hlsShared struct {
 
 	cur atomic.Pointer[hlsHandler]
 	mu  sync.Mutex
+
+	// enc keeps the segments of encrypted channels, encrypted, within
+	// max_bytes; libs are the libraries whose keys encrypt them.
+	enc  *encCache
+	libs encLibs
 }
 
 type hlsHandler struct {
@@ -255,7 +261,7 @@ func (h *HLS) Provision(ctx *module.Context) error {
 	defer hlsMu.Unlock()
 	sh := hlsByID[key]
 	if sh == nil {
-		sh = &hlsShared{key: key, cfg: cfg}
+		sh = &hlsShared{key: key, cfg: cfg, enc: newEncCache(maxBytes)}
 		hlsByID[key] = sh
 	}
 	sh.refs++
@@ -329,12 +335,22 @@ func (h *HLS) ServeHTTP(c *fibhttp.Context) {
 	// the playlist's or segment's name.
 	resource := c.Request.URL.Path[:len(h.b.prefix)+i+1]
 	h.b.auth.GuardResource(c, stream, resource, h.CORS, func(a mediaauth.Access) {
+		fh := h.shared.handler(hb)
+		// A channel that encrypts its HLS has its keys and segments served
+		// here, and its playlists name the keys.
+		enc, encrypted := channels.Lookup(h.b.engine).Encryption(stream)
+		if encrypted && h.serveEncrypted(c, fh, stream, name, enc) {
+			return
+		}
 		if strings.HasSuffix(name, ".m3u8") {
 			// A live stream's grant lives play_grace past its URL.
-			if query, cookie := a.PassOn(0); query != "" || cookie != "" {
+			if query, cookie := a.PassOn(0); query != "" || cookie != "" || encrypted {
 				c.OnResponse(func(r *fibhttp.Response) {
 					if r.StatusCode != stdhttp.StatusOK {
 						return
+					}
+					if encrypted {
+						r.Body = withKeys(r.Body, enc.Rotation)
 					}
 					if query != "" {
 						r.Body = withQuery(r.Body, query)
@@ -348,7 +364,7 @@ func (h *HLS) ServeHTTP(c *fibhttp.Context) {
 				})
 			}
 		}
-		h.shared.handler(hb).ServeHTTP(c)
+		fh.ServeHTTP(c)
 	})
 }
 

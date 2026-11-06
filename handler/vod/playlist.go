@@ -283,8 +283,12 @@ func contains(list []string, s string) bool {
 }
 
 // renderMedia returns the media playlist of p, in container c, of the
-// rendition or audio file ref (audio, i), its URIs with query.
-func renderMedia(p *plan, audio bool, i int, c container, query string) []byte {
+// rendition or audio file ref (audio, i), its URIs with query; with
+// encrypted, its segments under the item's key. The key's tag follows
+// EXT-X-MAP, which it would apply to too before it, so that the
+// initialization section stays clear; and names no IV, so that each
+// segment's is its number, as the segments are encrypted.
+func renderMedia(p *plan, audio bool, i int, c container, query string, encrypted bool) []byte {
 	b := make([]byte, 0, 256+40*len(p.segs))
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:"...)
 	b = strconv.AppendInt(b, int64(version(c)), 10)
@@ -299,6 +303,11 @@ func renderMedia(p *plan, audio bool, i int, c container, query string) []byte {
 		b = append(b, "#EXT-X-MAP:URI=\""...)
 		name = appendInitName(name[:0], audio, i)
 		b = appendURI(b, name, query)
+		b = append(b, "\"\n"...)
+	}
+	if encrypted {
+		b = append(b, "#EXT-X-KEY:METHOD=AES-128,URI=\""...)
+		b = appendURI(b, []byte(keyName), query)
 		b = append(b, "\"\n"...)
 	}
 	for n := range p.segs {

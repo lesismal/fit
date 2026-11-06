@@ -84,6 +84,10 @@ type Manager struct {
 
 	randMu sync.Mutex
 	rand   *rand.Rand
+
+	// enc is how the channels that encrypt their HLS do it, by name, read
+	// without a lock.
+	enc atomic.Pointer[map[string]Encryption]
 }
 
 // New returns a Manager with nothing to run, which Apply gives its
@@ -170,6 +174,8 @@ func (m *Manager) Apply(chs []config.StreamChannel, targets []config.PushTarget)
 			end = append(end, p.remove)
 		}
 	}
+	enc := encryptions(chs)
+	m.enc.Store(&enc)
 	m.mu.Unlock()
 	// Ended first, so that a channel renamed frees its stream, and pushes
 	// dial outside the manager's lock.
@@ -186,6 +192,7 @@ func (m *Manager) Apply(chs []config.StreamChannel, targets []config.PushTarget)
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	m.stopped = true
+	m.enc.Store(nil)
 	chs, ps := m.channels, m.pushes
 	m.channels, m.pushes = map[string]*Channel{}, map[string]*Push{}
 	m.mu.Unlock()

@@ -17,6 +17,7 @@ import (
 //	s0.m3u8, s0.vtt        subtitle 0's playlist, and the subtitle as WebVTT
 //	v0.mp4, a0.m4a         the file itself, its own extension, with Range
 //	poster.jpg             the poster, its own extension
+//	aes.key                the AES-128 key of an encrypted item's segments
 type kind uint8
 
 const (
@@ -28,7 +29,11 @@ const (
 	kindVTT
 	kindFile
 	kindPoster
+	kindKey
 )
+
+// keyName is the name of an encrypted item's key.
+const keyName = "aes.key"
 
 // container is a segment format.
 type container uint8
@@ -61,8 +66,11 @@ type name struct {
 // parseName parses the last part of a request's path; false for a name the
 // handler does not serve.
 func parseName(s string) (name, bool) {
-	if s == "index.m3u8" {
+	switch s {
+	case "index.m3u8":
 		return name{kind: kindMaster}, true
+	case keyName:
+		return name{kind: kindKey}, true
 	}
 	parts := strings.Split(s, ".")
 	switch len(parts) {

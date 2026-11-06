@@ -146,6 +146,7 @@ route films {
 | `s0.m3u8`、`s0.vtt` | 字幕 0 的播放列表，以及 WebVTT 形式的字幕 |
 | `v0.mp4`、`a0.m4a` | 文件本身，扩展名不变，支持 `Range`，供下载和普通播放器使用 |
 | `poster.jpg` | 条目的海报，扩展名不变 |
+| `aes.key` | 设置 `encrypt` 时，条目分片的 AES-128 密钥（[加密分片](#加密分片)） |
 
 所以 `/vod/films/films/bbb/index.m3u8` 播放条目 `films/bbb`。多变体播放列表把各版本列为变体，带 `BANDWIDTH` 与
 `AVERAGE-BANDWIDTH`（文件字节数除以时长）、`CODECS` 和 `RESOLUTION`；条目的音频文件列为一个音频组，各版本自带的音频
@@ -181,7 +182,7 @@ Opus；MPEG-TS 承载除 AV1 外的同样编码，因此 AV1 的版本不出现�
 **谁可以播放。** `auth` 指定一个 [`media_auth`](reference/config.md#media-auth) 策略，每个请求都必须满足它对流
 `vod/<library>/<id>`（如 `vod/films/films/*`）的 `play`：bearer token、Basic、`token` 查询参数或 `fit_media_token`
 cookie。以 `?token=` 取得的播放列表，其列出的内容也带上该 token，使不发送请求头的 Safari 和 ffmpeg 能继续播放。策略设置了
-`url_signing` 时，该条目的[签名 URL](#会过期的播放地址) 也可播放。加密分片在[开发计划](dev-plan.zh-CN.md)的后续迭代中加入。
+`url_signing` 时，该条目的[签名 URL](#会过期的播放地址) 也可播放。设置 `encrypt` 时分片[加密](#加密分片)。
 
 ## 会过期的播放地址
 
@@ -247,6 +248,46 @@ cookie `fit_media_grant`，`HttpOnly`、`SameSite=Lax`，TLS 下为 `Secure; Sam
 
 **绝不进入日志。** 无论请求如何应答，访问日志写出的 URI 中请求的 `token` 和 `sig` 都被替换为 `REDACTED`；cookie 中的授权
 从不记录。
+
+## 加密分片
+
+设置 `encrypt` 后，`vod` 处理器用 AES-128（RFC 8216 的 `METHOD=AES-128`）加密它提供的每个分片：fMP4 与 MPEG-TS
+都一样，整个分片以 CBC 模式加 PKCS#7 填充加密，IV 为分片在媒体播放列表中的序号。频道的 `encrypt` 对其 HLS 做同样的事
+（[频道](channels.zh-CN.md#加密的-hls)）。它需要媒体库的 `secret` 或 `secret_file`，以及处理器的 `auth`：
+
+```json
+{
+  "media_library": [{"name": "films", "roots": ["/srv/films"], "secret_file": "/etc/fit/films-secret"}],
+  "routes": [{"match": {"path": ["/vod/films/*"]},
+              "handler": {"module": "vod", "params": {"library": "films", "auth": "site", "encrypt": true,
+                                                      "cache_control": "public, max-age=86400"}}}]
+}
+```
+
+每个条目有自己的密钥，其媒体播放列表把它命名为条目目录中的 `aes.key`，放在初始化段之后，使初始化段保持明文：
+
+```
+#EXT-X-MAP:URI="v0.init.mp4?exp=...&g=1&sig=..."
+#EXT-X-KEY:METHOD=AES-128,URI="aes.key?exp=...&g=1&sig=..."
+```
+
+**密钥**不存储：每把都由媒体库的密钥（至少 16 字节）用 HMAC-SHA256、在媒体库自己的派生密钥下，从条目 ID（或频道名与
+密钥周期）派生；因此密钥相同的每个 fit 提供同样的分片，而这些密钥打不开别的媒体库的任何内容，也打不开 `media_auth`
+的任何 token。密钥从不进入日志。改变它会改变每一把密钥以及分片的 ETag：CDN 此前保存的分片在新密钥下无法再播放，
+请清除它们，或等它们的 `max-age` 过去。
+
+**谁能拿到密钥。** `aes.key` 位于条目的资源之下，因此对它的请求与其他请求一样检查：凭播放列表从[签名 URL](#会过期的播放地址)
+传下来的授权，或凭对该条目有 `play` 的 token、Basic 或 cookie。没有凭据时回答 401；持另一条目的授权时回答 403。它总是带着
+`Cache-Control: private, no-store` 发出，不论 `cache_control` 如何，使任何 CDN 都不保存它。
+
+**它带来什么。** CDN 保存的、或任何人复制的分片，只有用密钥才能解码，而 fit 只把密钥交给网站 API 放行的观众，并且只在
+授权有效期内。它不是 DRM：被放行的观众拥有密钥，正如其播放器必须拥有一样。文件本身（`v0.mp4`）是明文，所以加密的处理器
+不提供它们；海报、字幕和初始化段保持明文。
+
+**开销。** 分片在构建时于媒体库的文件池上原地加密一次，并以加密后的形式保留；缓存提供它与提供明文分片无异。在基准主机
+（Ryzen 7 7800X3D，单核）上 AES-128-CBC 为 1.24 GiB/s：1 MiB 的分片（2 Mbit/s 的 4 秒）构建多花 0.79 ms，4 MiB 的
+多花 3.2 ms；测试媒体库的小分片多花 24 µs（fMP4）和 48 µs（MPEG-TS），由 153 µs 到 177 µs、由 174 µs 到 222 µs，
+包括其密钥的派生。
 
 ## 指标
 
