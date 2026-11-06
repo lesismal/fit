@@ -593,6 +593,11 @@ func TestRoutes(t *testing.T) {
 	n1 := v.dial(v.listen()).mustRegister(proto.TypeNode, "lab", svc)
 	n2 := v.dial(v.listen()).mustRegister(proto.TypeNode, "lab", svc)
 	c := v.dial(v.listen()).mustRegister(proto.TypeProxy, "me")
+	// The hub picks among the links it may send on, which a link is only
+	// once its answer has gone out (readyLink): both of the node's first.
+	node := v.s.peerByName(proto.TypeNode, "lab")
+	waitFor(t, "both of the node's links to send on", func() bool { return len(v.s.peerLinks(node)) == 2 })
+	readyLink(t, v, v.s.peerByName(proto.TypeProxy, "me"))
 	var opened [2]chan uint64
 	for i, n := range []*peer{n1, n2} {
 		ch := make(chan uint64, 4)

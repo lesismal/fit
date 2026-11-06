@@ -138,12 +138,16 @@ func TestTokenRegister(t *testing.T) {
 	}
 
 	// Revoking a closes its links at once, and frees the node.
+	// Each binding is a config edit of its own, made after the
+	// registration's answer: proxy/z's may not be written yet.
 	var m map[string]any
-	_ = json.Unmarshal([]byte(v.current()), &m)
-	ts := m["tokens"].([]any)
-	if mem := ts[0].(map[string]any)["members"].([]any); len(mem) != 3 {
-		t.Fatalf("members %v", mem)
-	}
+	var ts []any
+	waitFor(t, "the three members in the config", func() bool {
+		m = nil
+		_ = json.Unmarshal([]byte(v.current()), &m)
+		ts = m["tokens"].([]any)
+		return len(ts[0].(map[string]any)["members"].([]any)) == 3
+	})
 	m["tokens"] = ts[1:]
 	data, _ := json.Marshal(m)
 	if err := v.apply(string(data)); err != nil {
