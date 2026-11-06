@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/certtest"
@@ -64,13 +65,24 @@ func TestStatus(t *testing.T) {
 		}
 	}
 
-	resp, body := f.get(t, "/status")
-	if resp.StatusCode != 200 || resp.Header.Get(VersionHeader) != "1" {
-		t.Fatalf("GET /status: %d %s", resp.StatusCode, body)
-	}
+	// A request is counted once its answer is over, which may be after the
+	// client has read it: read the status until the last one is counted.
 	var st Status
-	if err := json.Unmarshal([]byte(body), &st); err != nil {
-		t.Fatal(err)
+	var body string
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		var resp *http.Response
+		resp, body = f.get(t, "/status")
+		if resp.StatusCode != 200 || resp.Header.Get(VersionHeader) != "1" {
+			t.Fatalf("GET /status: %d %s", resp.StatusCode, body)
+		}
+		st = Status{}
+		if err := json.Unmarshal([]byte(body), &st); err != nil {
+			t.Fatal(err)
+		}
+		if st.Requests == nil || st.Requests.Total >= 6 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if st.Version != 1 || st.Source != SourceFile || st.Applied.IsZero() || len(st.Listeners) != 2 || st.Listeners[1].Name != "secure" {
 		t.Errorf("status: %+v", st)
