@@ -1,7 +1,8 @@
 // The config's shared draft and its schema-driven form editor, for the gateway's and the system's modules (the admin
 // server module). Every page that edits the config edits the same draft, read once with its ETag, and one bar in
-// the top bar saves it whole (PUT /config with If-Match) or discards it; the problems of a save link to the page and
-// the field they are about. admin is left out of the forms: it is set in the file fit was started with.
+// the top bar saves it whole (PUT /config with If-Match), checks it without applying it (Check: the same request with
+// ?dry_run=1, which the server loads and compiles as an apply does), or discards it; the problems of a save or a check
+// link to the page and the field they are about. admin is left out of the forms: it is set in the file fit was started with.
 //
 //   var C = FitConfig.with(UI)          the store, sharing one draft whoever asks
 //   C.ensure() → Promise                 the schema and the config read (again when it changed and nothing is unsaved)
@@ -30,8 +31,8 @@
 // has one that asks explain about its schema path (its input path), the field's path and value as the selection.
 //
 // 配置的共享草稿及由 schema 生成的表单编辑器，供网关与系统各模块（admin 服务端模块）使用。所有编辑配置的页面都编辑同一份
-// 草稿（连同 ETag 只读取一次），顶栏中的同一个保存栏整体保存（带 If-Match 的 PUT /config）或放弃修改；保存失败的问题
-// 链接到其所在的页面与字段。表单不含 admin：它在 fit 启动时所用的配置文件中设置。带 opts.members 的页面另外还有 UI、
+// 草稿（连同 ETag 只读取一次），顶栏中的同一个保存栏整体保存（带 If-Match 的 PUT /config）、只检查而不应用（“检查”：
+// 同一请求带上 ?dry_run=1，服务端像应用时一样加载并编译）或放弃修改；保存或检查发现的问题链接到其所在的页面与字段。表单不含 admin：它在 fit 启动时所用的配置文件中设置。带 opts.members 的页面另外还有 UI、
 // .conf、.yaml、.json 四个标签页：后三者编辑该页所管配置成员在对应格式下的文本，保存时经 /config/text 整体校验后应用。
 // 带 opts.members 的页面还会通过 WB.editor 登记其编辑器（I154），供助手的页面工具使用：page_get 读取本页在草稿中的部分，
 // page_edit 把修改写入草稿（整体设置成员、按 JSON 指针的操作，或某个标签页格式的文本，像手工输入的文本一样经 /config/parse
@@ -58,6 +59,16 @@
     ['cf.reread', 'Discard and read again', '放弃并重新读取'],
     ['cf.problems', 'The config was not applied; the running config stays.', '配置未应用；运行中的配置保持不变。'],
     ['cf.failed', 'Saving failed: {e}', '保存失败：{e}'],
+    ['cf.check', 'Check', '检查'],
+    ['cf.check.title', 'Check the changes through the whole apply path, loaded and compiled, without applying them',
+      '让修改走完整个应用流程（加载并编译）进行检查，但不应用'],
+    ['cf.check.ok', 'Checked: the changes would apply as they are. Nothing was applied.', '检查通过：这些修改可以按原样应用。未应用任何修改。'],
+    ['cf.check.okw', 'Checked: the changes would apply, with these notes. Nothing was applied.', '检查通过：这些修改可以应用，但请注意以下事项。未应用任何修改。'],
+    ['cf.check.problems', 'The check found problems; nothing was applied, and the running config stays.', '检查发现问题；未应用任何修改，运行中的配置保持不变。'],
+    ['cf.check.same', 'Checked: the draft is the running config itself. Nothing was applied.', '检查通过：草稿与运行中的配置完全相同。未应用任何修改。'],
+    ['cf.check.failed', 'Checking failed: {e}', '检查失败：{e}'],
+    ['cf.check.added', 'Listener {n} on {a} would be added.', '将新增监听器 {n}（{a}）。'],
+    ['cf.check.removed', 'Listener {n} on {a} would be removed.', '将移除监听器 {n}（{a}）。'],
     ['cf.whole', 'the config', '整个配置'], ['cf.line', 'line {l}, column {c}', '第 {l} 行第 {c} 列'],
     ['cf.raw.bad', 'The JSON page holds text that does not parse: fix it or discard it before saving. The forms show the last JSON that parsed.',
       'JSON 页面中的文本无法解析：保存前请修正或放弃。表单显示的是最后一次可解析的 JSON。'],
@@ -133,7 +144,8 @@
   // The store: one, whichever module asks. / 存储：只有一个，供所有模块共用。
   var S = {
     ui: null, schema: null, draft: null, baseDraft: null, etag: '', version: '', dirty: false,
-    errors: [],      // the problems of the last save, {path, line, column, message} / 上次保存的问题
+    errors: [],      // the problems of the last save or check, {path, line, column, message} / 上次保存或检查的问题
+    checked: false,  // errors and message are a check's, not a save's / errors 与 message 来自检查而非保存
     message: null,   // {kind, text, list, action} shown above the forms / 显示在表单上方的消息
     rawText: null,   // the JSON page's text while it does not parse / JSON 页面中无法解析的文本
     rawError: '',
@@ -616,7 +628,13 @@
     });
   }
 
-  function save() {
+  // save applies the draft; check sends what save would send with ?dry_run=1, which the server checks through the whole
+  // apply path without applying it, and shows its problems where save shows them. / save 应用草稿；check 发送 save 会发送
+  // 的同一请求并带上 ?dry_run=1，服务端走完整个应用流程检查但不应用，其问题显示在保存问题的同一位置。
+  function save() { return submit(false); }
+  function check() { return submit(true); }
+
+  function submit(dry) {
     if (S.rawText != null) { UI.toast(t('cf.raw.bad'), 'error'); return Promise.resolve(); }
     var c = S.current, key = c ? c.key : null, tb = key ? S.tabs[key] : null;
     var fmt = tb && RAW_FORMATS.indexOf(tb.fmt) >= 0 ? tb.fmt : null;
@@ -628,19 +646,51 @@
       // unsaved changes, so that its problems carry the text's line and column; otherwise save the whole draft.
       // 原始文本保存只把本页成员合并进运行中的配置：仅当只有它们未保存时才用它（其问题带有文本的行列）；
       // 否则整体保存草稿，以免丢掉其他页面（或本页 UI 标签页）未保存的修改。
+      var done = dry ? handleCheck : handleSave;
       if (fmt && members.length && !otherChanges(members)) {
         S.lastRaw = { key: key, fmt: fmt };
-        var q = '/config/text?format=' + encodeURIComponent(fmt) + '&members=' + encodeURIComponent(members.join(','));
-        return call('PUT', q, rawOf(key, fmt).text, { 'Content-Type': 'text/plain; charset=utf-8', 'If-Match': S.etag }).then(handleSave);
+        var q = '/config/text?format=' + encodeURIComponent(fmt) + '&members=' + encodeURIComponent(members.join(',')) + (dry ? '&dry_run=1' : '');
+        return call('PUT', q, rawOf(key, fmt).text, { 'Content-Type': 'text/plain; charset=utf-8', 'If-Match': S.etag }).then(done);
       }
-      return call('PUT', '/config', JSON.stringify(S.draft, null, 2), { 'If-Match': S.etag }).then(handleSave);
+      return call('PUT', '/config' + (dry ? '?dry_run=1' : ''), JSON.stringify(S.draft, null, 2), { 'If-Match': S.etag }).then(done);
     }).catch(UI.fail);
+  }
+
+  // handleCheck shows a dry run's answer: what an apply would do, or the problems that would refuse it, linked as a
+  // save's are; the draft stays unsaved either way. / 显示试运行的应答：应用会做什么，或会导致拒绝的问题（链接方式同保存）；
+  // 无论结果如何，草稿都保持未保存状态。
+  function handleCheck(r) {
+    return readJSON(r).then(function (res) {
+      S.checked = true;
+      if (r.ok) {
+        var notes = (res.listeners_added || []).map(function (l) { return t('cf.check.added', { n: l.name, a: l.address }); })
+          .concat((res.listeners_removed || []).map(function (l) { return t('cf.check.removed', { n: l.name, a: l.address }); }))
+          .concat(res.warnings || []);
+        S.errors = [];
+        S.message = { kind: notes.length ? 'warn' : 'ok', text: t(notes.length ? 'cf.check.okw' : res.unchanged ? 'cf.check.same' : 'cf.check.ok'),
+          list: notes.length ? notes : null };
+        UI.toast(t('cf.check.ok'));
+      } else if (r.status === 401) {
+        return;
+      } else if (r.status === 412) {
+        S.errors = [];
+        S.message = { kind: 'danger', text: t('cf.changed'), action: [t('cf.reread'), reload] };
+      } else {
+        S.errors = res.errors || [];
+        S.message = S.errors.length ? null : { kind: 'danger', text: t('cf.check.failed', { e: res.error || r.status + ' ' + r.statusText }),
+          ask: res.error || r.status + ' ' + r.statusText };
+      }
+      paintNotice(); redraw();
+      var n = notice && notice.firstChild;
+      if (n && n.scrollIntoView) n.scrollIntoView({ block: 'nearest' });
+    });
   }
 
   // handleSave handles the answer of a save, of the whole config or of a page's raw text: the same answers, the same
   // notice, and the problems linked to where each is edited. / 处理整体保存或页面原始文本保存的应答：相同的提示与问题链接。
   function handleSave(r) {
     return readJSON(r).then(function (res) {
+      S.checked = false;
       if (r.ok) {
         var w = res.warnings || [];
         return fetchConfig(false).then(function () {
@@ -781,14 +831,17 @@
   function paintBar() {
     if (!bar) {
       var saveB = UI.btn(t('cf.save'), 'save', function () { UI.busy(saveB, save()).then(paintBar, paintBar); }, 'primary sm');
+      var checkB = UI.btn(t('cf.check'), 'check', function () { UI.busy(checkB, check()).then(paintBar, paintBar); }, 'sm');
+      checkB.title = t('cf.check.title');
       var disc = UI.btn(t('cf.discard'), 'undo', function () { UI.busy(disc, discard()).catch(UI.fail).then(paintBar); }, 'sm');
-      bar = { el: h('div.row', h('span.cf-state'), disc, saveB), state: null, save: saveB, discard: disc };
+      bar = { el: h('div.row', h('span.cf-state'), disc, checkB, saveB), state: null, save: saveB, check: checkB, discard: disc };
       bar.state = bar.el.firstChild;
     }
     var dirty = isDirty();
     UI.mount(bar.state, dirty ? UI.badge(t('cf.unsaved'), 'warn', true) : h('span.muted.small', S.version ? t('cf.version', { v: S.version }) : ''),
       S.ai ? UI.badge(t('cf.ai.badge'), 'primary', true) : null);
     bar.save.disabled = !dirty;
+    bar.check.disabled = !dirty;
     bar.discard.disabled = !dirty;
   }
 
@@ -825,7 +878,7 @@
         m.list ? h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, m.list.map(function (x) { return h('li', x); })) : null));
     }
     if (S.errors.length) {
-      parts.push(h('div.callout.callout--danger', h('div.ai-askrow', h('b', t('cf.problems')), askBtn(saveAsk('', S.errors, lastRaw(), 'cf.ask.save'))),
+      parts.push(h('div.callout.callout--danger', h('div.ai-askrow', h('b', t(S.checked ? 'cf.check.problems' : 'cf.problems')), askBtn(saveAsk('', S.errors, lastRaw(), 'cf.ask.save'))),
         h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, S.errors.map(problemLink))));
     }
     UI.mount(notice, parts);
@@ -1674,7 +1727,7 @@
   };
   var api = {
     ensure: function () { return ensure(); },
-    page: page, section: section, subsection: subsection, redraw: redraw, changed: changed, save: save, discard: discard, reload: reload, rollback: rollback,
+    page: page, section: section, subsection: subsection, redraw: redraw, changed: changed, save: save, check: check, discard: discard, reload: reload, rollback: rollback,
     place: function (fn) { S.places.push(fn); },
     // exportDialog(members, fmt) and importDialog(members): the whole config without members. / 无 members 时为整个配置。
     exportDialog: function (members, fmt) { exportDialog(members, fmt); }, importDialog: function (members) { importDialog(members); },

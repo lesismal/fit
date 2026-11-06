@@ -47,6 +47,11 @@ const maxHeaderBytes = 64 << 10
 // VersionHeader carries the version of the config a response is about.
 const VersionHeader = "Fit-Config-Version"
 
+// DryRunHeader is set, to 1, on the answer of a dry run that passed: the
+// config was checked, not applied, and VersionHeader and ETag are still the
+// running config's.
+const DryRunHeader = "Fit-Dry-Run"
+
 // Server serves the Admin API:
 //
 //	GET    /config[/<pointer>]  the running config, as it was written, or
@@ -73,6 +78,9 @@ const VersionHeader = "Fit-Config-Version"
 //	PUT    /config/text         apply the text as the whole config, or, with
 //	                            ?members=a,b, as those top-level members
 //	                            only, leaving the rest as it is
+//	GET    /node                this fit: its node ID, host name, versions,
+//	                            start, running config, roles, the schema's
+//	                            digest and the API's capabilities (node.go)
 //	GET    /status              what fit is doing now: listeners,
 //	                            connections, upstreams and their backends'
 //	                            health, certificates
@@ -128,6 +136,14 @@ const VersionHeader = "Fit-Config-Version"
 // /config is the base config, as the file or the API wrote it; what
 // providers provide is merged into it, and only GET /config/effective
 // shows that.
+//
+// PUT, PATCH and DELETE /config, POST /load and PUT /config/text take
+// ?dry_run=1: the config the request would apply is checked through the
+// whole path an apply takes, If-Match, loaded, compiled and its listeners'
+// new addresses tried, and answered as an apply is, with its errors or with
+// "dry_run": true, the running config's version and ETag, the ETag the
+// config would have and the listeners it would add and remove; nothing is
+// applied, kept or counted (Configs.DryRun).
 //
 // GET /config/check compares what fit runs with the config it runs from and
 // lists each difference, a drift with the fixes that end it or an info that
@@ -258,6 +274,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /versions/{n}", s.version)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /status", s.status)
+	mux.HandleFunc("GET /node", s.node)
 	mux.HandleFunc("GET /cache", s.cacheZones)
 	mux.HandleFunc("POST /cache/purge", s.purge)
 	mux.HandleFunc("GET /logs", s.logs)
@@ -466,12 +483,39 @@ func (s *Server) readBody(w http.ResponseWriter, r *http.Request, types ...strin
 	return data, true
 }
 
+// isDryRun reports whether r asks for a dry run: ?dry_run=1 or true. Any
+// other value but 0, false or none is an error.
+func isDryRun(r *http.Request) (bool, error) {
+	switch v := r.URL.Query().Get("dry_run"); v {
+	case "", "0", "false":
+		return false, nil
+	case "1", "true":
+		return true, nil
+	default:
+		return false, badRequest("dry_run is 1 or true, 0 or false, not %q", v)
+	}
+}
+
+// update applies the config edit makes, with the request's If-Match, or
+// only checks it when dry.
+func (s *Server) update(r *http.Request, dry bool, edit func(cur *Version) ([]byte, error)) (Result, error) {
+	if dry {
+		return s.configs.DryRun(s.source, r.Header.Get("If-Match"), edit)
+	}
+	return s.configs.Update(s.source, r.Header.Get("If-Match"), edit)
+}
+
 func (s *Server) load(w http.ResponseWriter, r *http.Request) {
+	dry, err := isDryRun(r)
+	if err != nil {
+		writeUpdateError(w, err)
+		return
+	}
 	data, ok := s.readBody(w, r, "application/json")
 	if !ok {
 		return
 	}
-	res, err := s.configs.Update(s.source, r.Header.Get("If-Match"), func(*Version) ([]byte, error) { return data, nil })
+	res, err := s.update(r, dry, func(*Version) ([]byte, error) { return data, nil })
 	s.applied(w, res, err)
 }
 
@@ -502,7 +546,12 @@ func (s *Server) deleteConfig(w http.ResponseWriter, r *http.Request) {
 		writeUpdateError(w, err)
 		return
 	}
-	res, err := s.configs.Update(s.source, r.Header.Get("If-Match"), func(cur *Version) ([]byte, error) {
+	dry, err := isDryRun(r)
+	if err != nil {
+		writeUpdateError(w, err)
+		return
+	}
+	res, err := s.update(r, dry, func(cur *Version) ([]byte, error) {
 		root, err := decodeJSON(cur.data)
 		if err == nil {
 			root, err = remove(root, tokens)
@@ -523,6 +572,11 @@ func (s *Server) edit(w http.ResponseWriter, r *http.Request, types []string, ch
 		writeUpdateError(w, err)
 		return
 	}
+	dry, err := isDryRun(r)
+	if err != nil {
+		writeUpdateError(w, err)
+		return
+	}
 	data, ok := s.readBody(w, r, types...)
 	if !ok {
 		return
@@ -532,7 +586,7 @@ func (s *Server) edit(w http.ResponseWriter, r *http.Request, types []string, ch
 		writeUpdateError(w, err)
 		return
 	}
-	res, err := s.configs.Update(s.source, r.Header.Get("If-Match"), func(cur *Version) ([]byte, error) {
+	res, err := s.update(r, dry, func(cur *Version) ([]byte, error) {
 		if tokens == nil && r.Method == http.MethodPut {
 			return data, nil // a whole config, kept as written
 		}
@@ -558,22 +612,27 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 	s.applied(w, res, err)
 }
 
-// applied answers a request that applied a config, or tried to.
+// applied answers a request that applied a config, or tried to, or only
+// checked it (Result.DryRun).
 func (s *Server) applied(w http.ResponseWriter, res Result, err error) {
 	if err != nil {
 		writeUpdateError(w, err)
 		return
 	}
-	if s.report != nil {
+	if s.report != nil && !res.DryRun {
 		s.report(res)
 	}
 	w.Header().Set("ETag", res.ETag)
 	w.Header().Set(VersionHeader, strconv.FormatUint(res.Version, 10))
+	if res.DryRun {
+		w.Header().Set(DryRunHeader, "1")
+	}
 	warnings := slices.Clone(res.Warnings)
 	for _, e := range res.Deprecated {
 		warnings = append(warnings, e.Error())
 	}
-	writeJSON(w, http.StatusOK, loaded{Version: res.Version, ETag: res.ETag, Added: listeners(res.Added), Removed: listeners(res.Removed), Warnings: warnings})
+	writeJSON(w, http.StatusOK, loaded{DryRun: res.DryRun, Version: res.Version, ETag: res.ETag, NewETag: res.NewETag, Unchanged: res.Unchanged,
+		Added: listeners(res.Added), Removed: listeners(res.Removed), Warnings: warnings})
 }
 
 func writeUpdateError(w http.ResponseWriter, err error) {
@@ -619,13 +678,18 @@ func (s *Server) version(w http.ResponseWriter, r *http.Request) {
 	writeConfig(w, v)
 }
 
-// loaded is POST /load's answer.
+// loaded is POST /load's answer, and every change's. A dry run's has
+// dry_run, the running config's version and ETag, new_etag, the ETag the
+// config checked would have, and unchanged when that is the running one.
 type loaded struct {
-	Version  uint64         `json:"version"`
-	ETag     string         `json:"etag"`
-	Added    []listenerJSON `json:"listeners_added,omitempty"`
-	Removed  []listenerJSON `json:"listeners_removed,omitempty"`
-	Warnings []string       `json:"warnings,omitempty"`
+	DryRun    bool           `json:"dry_run,omitempty"`
+	Version   uint64         `json:"version"`
+	ETag      string         `json:"etag"`
+	NewETag   string         `json:"new_etag,omitempty"`
+	Unchanged bool           `json:"unchanged,omitempty"`
+	Added     []listenerJSON `json:"listeners_added,omitempty"`
+	Removed   []listenerJSON `json:"listeners_removed,omitempty"`
+	Warnings  []string       `json:"warnings,omitempty"`
 }
 
 type listenerJSON struct {

@@ -1,7 +1,12 @@
 The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `DELETE` on
 `/config/` and a JSON pointer into it, `POST /load` for a whole config, ETags against lost updates,
-the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
-effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
+the configs applied (`/versions`) and rollback to one. A change sent with `?dry_run=1` is checked
+through the whole path an apply takes, loaded, compiled and its new listeners' addresses tried, and
+answered as an apply would answer it, with nothing applied. `GET /node` says who this fit is: its
+node ID (`node_id`, or one made once and kept in the store or beside the config), host name, fit's
+and fib's versions, start time, running config version and ETag, roles, the schema's digest and the
+capabilities a manager of many fits checks before it calls an endpoint. It also serves metrics at
+`/metrics`, the effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
 unless told otherwise. To listen anywhere but a loopback address or a Unix socket it needs
 `token_file`, and `cert_file` and `key_file` to be served over TLS (1.2 or later), so that the
 token never crosses a network in the clear; TLS may be set on loopback too. The certificate files

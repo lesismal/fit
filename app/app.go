@@ -389,18 +389,25 @@ func (m *Manager) SetDrainTimeout(d time.Duration) { m.drain.Store(int64(d)) }
 // /etc/fit/fit.json, or a directory of them, whose files are fit.* in it.
 // "" or "-", standard input, keeps none. Call it before Apply.
 func (m *Manager) KeepBeside(path string) {
-	prefix := ""
-	if path != "" && path != "-" {
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
-		}
-		if fi, err := os.Stat(path); err == nil && fi.IsDir() {
-			prefix = filepath.Join(path, "fit")
-		} else {
-			prefix = strings.TrimSuffix(path, filepath.Ext(path))
-		}
-	}
+	prefix := BesidePrefix(path)
 	m.kept.Store(&prefix)
+}
+
+// BesidePrefix is what the names of the files kept beside the config at path
+// begin with: the config file's path without its extension, as /etc/fit/fit
+// for /etc/fit/fit.json, or fit in a directory of config files; "" for ""
+// or "-", standard input, beside which nothing is kept.
+func BesidePrefix(path string) string {
+	if path == "" || path == "-" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		return filepath.Join(path, "fit")
+	}
+	return strings.TrimSuffix(path, filepath.Ext(path))
 }
 
 func (m *Manager) edit(id string, edit func([]byte) ([]byte, error), done func([]string, error)) {
