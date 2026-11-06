@@ -143,7 +143,7 @@ func (p *Policy) GuardResource(c *fibhttp.Context, stream, resource, cors string
 			return
 		}
 	}
-	p.guard(c, Play, stream, cors, func(subject string) { next(Access{Subject: subject, p: p, req: r}) })
+	p.guard(c, Play, stream, cors, nil, next)
 }
 
 // letIn checks g, from the query of c's request or a cookie, against
@@ -226,20 +226,22 @@ func FromQuery(query string) Credentials {
 // retained, and next is then called there; otherwise next is called before
 // Guard returns. A nil policy calls next at once with "".
 func (p *Policy) Guard(c *fibhttp.Context, a Action, stream string, next func(subject string)) {
-	p.guard(c, a, stream, "", next)
-}
-
-// guard is Guard, its refusals sent with cors as Access-Control-Allow-Origin
-// when it is not empty, so that a player on another origin reads them.
-func (p *Policy) guard(c *fibhttp.Context, a Action, stream, cors string, next func(subject string)) {
 	if p == nil {
 		next("")
 		return
 	}
+	p.guard(c, a, stream, "", next, nil)
+}
+
+// guard is Guard, its refusals sent with cors as Access-Control-Allow-Origin
+// when it is not empty, so that a player on another origin reads them; it
+// calls next, or, when that is nil, nextAccess with the Access of the
+// subject, which spares GuardResource a closure of its own.
+func (p *Policy) guard(c *fibhttp.Context, a Action, stream, cors string, next func(subject string), nextAccess func(Access)) {
 	creds := FromHTTP(c.Request)
 	subject, err := p.Allow(a, stream, creds)
 	if !errors.Is(err, ErrPending) {
-		finish(c, subject, err, cors, next)
+		p.finish(c, subject, err, cors, next, nextAccess)
 		return
 	}
 	var result struct {
@@ -250,7 +252,7 @@ func (p *Policy) guard(c *fibhttp.Context, a Action, stream, cors string, next f
 		if c.Err() != nil {
 			return // the client has gone
 		}
-		finish(c, result.subject, result.err, cors, next)
+		p.finish(c, result.subject, result.err, cors, next, nextAccess)
 	})
 	p.Check(a, stream, creds, func(subject string, err error) {
 		result.subject, result.err = subject, err
@@ -258,7 +260,7 @@ func (p *Policy) guard(c *fibhttp.Context, a Action, stream, cors string, next f
 	})
 }
 
-func finish(c *fibhttp.Context, subject string, err error, cors string, next func(string)) {
+func (p *Policy) finish(c *fibhttp.Context, subject string, err error, cors string, next func(string), nextAccess func(Access)) {
 	if err != nil {
 		writeError(c, err, cors)
 		return
@@ -266,7 +268,11 @@ func finish(c *fibhttp.Context, subject string, err error, cors string, next fun
 	if subject != "" {
 		observe.Authenticate(c).User = subject
 	}
-	next(subject)
+	if next != nil {
+		next(subject)
+		return
+	}
+	nextAccess(Access{Subject: subject, p: p, req: c.Request})
 }
 
 // The challenges of a 401: a bearer token, said to be invalid when one was
