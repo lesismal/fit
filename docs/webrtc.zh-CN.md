@@ -529,6 +529,9 @@ webrtc { media { listen :8189 } }
   样式或字体，应答带内容安全策略（CSP），只允许访问本服务器和端点所在的源。`pages` 为 false 时一个页面也不提供：
   前缀下所有不是 API 的路径，包括从 `<prefix>` 到 `<prefix>/` 的重定向，都应答 404，供页面由自己实现的部署使用；
   登录和房间 API 保留，供那个页面使用。
+- **片库和播放器。** 设了 `libraries`（媒体库）或 `channels`（流媒体角色的频道）时，`/media/library` 列出已登录用户可以
+  播放的内容，`/media/watch` 用内置在二进制中的 hls.js，经由页面为该用户签名的播放地址播放它；见
+  [媒体库](media-library.zh-CN.md#一个视频网站)。
 - **登录。** 设了 `auth` 和 `login` 时，页面让策略的用户登录：`POST /media/api/login` 核对密码
   （`password_hash` 在 mediaauth 的 bcrypt 池上核对），应答一个策略签名、有效期为 `token_ttl` 的令牌，设为
   cookie `fit_media_token`（`HttpOnly`、`SameSite=Strict`、TLS 上加 `Secure`、`Path=/`），`whip`、`whep`
