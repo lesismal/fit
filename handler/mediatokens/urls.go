@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	stdhttp "net/http"
 	"net/netip"
@@ -123,11 +122,9 @@ func (t *Tokens) urlsBody(c *fibhttp.Context, body []byte) {
 		}
 		query, err := t.auth.SignURL(res, v, expiry, key)
 		if err != nil {
-			if errors.Is(err, mediaauth.ErrUnavailable) || errors.Is(err, mediaauth.ErrNoURLSigning) {
-				plain(c, stdhttp.StatusServiceUnavailable, "the media_auth policy is not loaded", stdhttp.Header{"Retry-After": {retryAfter}})
-				return
-			}
-			bad(fmt.Sprintf("paths[%d]: %v", i, err))
+			// What the request holds is checked above: the policy was
+			// removed, or lost url_signing, by a reload under way.
+			plain(c, stdhttp.StatusServiceUnavailable, "the media_auth policy is not loaded with url_signing", stdhttp.Header{"Retry-After": {retryAfter}})
 			return
 		}
 		out.URLs = append(out.URLs, t.urlBase+path+"?"+query)
