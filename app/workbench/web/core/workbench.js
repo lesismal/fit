@@ -23,12 +23,19 @@
 //           module's first visit. UI is the library scoped to the module; sh.page(navId, title, crumb) marks the
 //           menu item, sets the title and returns the emptied content element, and sh.tools is the top bar's tools.
 //   boot(UI)  optional: called once after the shell is built; its promise may do async work and then WB.refreshMenu.
+//   topbar(UI, shell) optional: called each time the shell is built; what it returns goes in the top bar beside the
+//           preferences, on every page, and shell is the shell's root, for a panel beside the pages (the assistant's).
+//
+// WB.page() is the page shown, as a panel sends it for context: {module, page, title, crumb, hash, selection}, where
+// selection is what the page last gave WB.select(value) (a port, a route, a difference), cleared when the page changes.
 //
 // workbench：先登录，左侧菜单的第一级即各模块（网关的全局页、账户页面、各协议与功能模块、隧道与 LLM 各角色），第二级为模块的
 // 页面，右侧为所选页面。控制台提供某服务端模块时（GET /api/workbench 列出）才显示该模块：admin.console 提供配置本身的
 // 模块与同进程运行的每个角色的模块，角色自己的控制台只提供该角色的。模块用 WB.module(def) 注册，字段见上。
 // nav 也可为函数（菜单重建时再次调用，其标签为模块自己取好的文字）；条目可为指向其他模块页面的外链，或带 kids 的可折叠节点，
-// 其子项为第三级链接。boot 在外框构建完成后调用一次。
+// 其子项为第三级链接。boot 在外框构建完成后调用一次。topbar 在每次构建外框时调用，返回的元素放在顶栏中（每个页面都有），
+// shell 为外框根元素，供页面旁的面板（助手）使用。WB.page() 返回当前页面（面板作为上下文发送），WB.select(value) 记录页面的
+// 选中项，切换页面时清除。
 (function () {
   'use strict';
   var h = UI.h, t = UI.t;
@@ -92,7 +99,18 @@
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore / 忽略 */ } }
 
   var refresh = function () { return Promise.resolve(); };
+  // selection is what the page shown says is selected. / 当前页面声明的选中项。
+  var selection = null;
   window.WB = {
+    // page returns the page shown, for a panel's context. / 返回当前页面，供面板作为上下文。
+    page: function () {
+      return {
+        module: shownPage.module, page: shownPage.navId, title: titleEl ? titleEl.textContent : '',
+        crumb: crumbEl ? crumbEl.textContent : '', hash: location.hash, selection: selection
+      };
+    },
+    // select records what the page shown has selected. / 记录当前页面的选中项。
+    select: function (v) { selection = v == null ? null : v; },
     // refresh reads the modules served again and rebuilds the menu when they changed, as after a config that starts
     // or stops a role. / 重新读取所提供的模块，变化时重建菜单（如启动或停止角色的配置之后）。
     refresh: function () { return refresh(); },
@@ -395,6 +413,7 @@
     if (locked) return;
     UI.stopTimers();
     UI.closeModals();
+    selection = null;
     root.classList.remove('nav-open');
     markLinks();
     var path = location.hash.replace(/^#\/?/, '').split('?')[0];
@@ -448,8 +467,14 @@
     var side = h('aside.sidebar', h('div.brand', h('div.brand__logo', UI.icon('logo')), h('div.brand__text', h('div.brand__name', 'fit'), h('div.brand__sub', t('wb.sub'))), fold),
       filterEl, navEl, foot);
     var menu = h('button.btn.btn--ghost.btn--icon.menu-btn', { type: 'button', 'aria-label': t('menu'), onclick: function () { root.classList.toggle('nav-open'); } }, UI.icon('menu'));
-    var top = h('header.topbar', menu, h('div', titleEl, crumbEl), h('div.topbar__spacer'), toolsEl, UI.prefs());
+    var extra = h('div.row.topbar__extra');
+    var top = h('header.topbar', menu, h('div', titleEl, crumbEl), h('div.topbar__spacer'), toolsEl, extra, UI.prefs());
     root = h('div.shell' + (load(MINI_KEY) === '1' ? '.is-mini' : ''), side, h('div.main', top, content));
+    // The modules' own tools in the top bar, on every page. / 模块自己放在顶栏的工具，每个页面都有。
+    mods.forEach(function (m) {
+      if (typeof m.def.topbar !== 'function') return;
+      try { var x = m.def.topbar(m.ui, root); if (x) extra.appendChild(x); } catch (e) { UI.fail(e); }
+    });
     if (!mods.length) UI.mount(content, UI.empty(t('wb.empty')));
     return root;
   }

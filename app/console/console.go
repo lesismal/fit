@@ -394,6 +394,21 @@ func (r *Request) goOn(queue chan func(), fn, then func()) {
 	})
 }
 
+// Submit runs fn on the console's pool, as Go does, but neither holds the
+// request nor answers it: for the work of a handler that already answers
+// from elsewhere, as a stream does, and keeps the request retained itself.
+// It reports false, and fn never runs, when the pool's queue is full; fn
+// never runs either once the console has stopped, so a caller bounds its
+// wait for fn with a timeout of its own.
+func (r *Request) Submit(fn func()) bool {
+	select {
+	case r.c.tasks <- fn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Decode decodes the request's JSON body into v, answering 400 or 415 and
 // returning false when it cannot.
 func (r *Request) Decode(v any) bool {

@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="gateway/features.css">
   <link rel="stylesheet" href="gateway/engine.css">
   <link rel="stylesheet" href="gateway/logs.css">
+  <link rel="stylesheet" href="ai/ai.css">
   <script src="core/ui.js"></script>
 </head>
 <body>
@@ -32,7 +33,10 @@
   <script src="gateway/logs.js"></script>
   <!-- The account pages: the console users' own and each other's passwords. / 账户页面：控制台用户自己的及彼此的密码。 -->
   <script src="account/account.js"></script>
-  <!-- The assistant's module, when admin.assistant is set: its settings. / 助手模块（设置了 admin.assistant 时）：其设置。 -->
+  <!-- The assistant's module, when admin.assistant is set: the chat panel on every page, its functions and its settings. /
+       助手模块（设置了 admin.assistant 时）：每个页面上的对话面板、其功能与设置。 -->
+  <script src="ai/panel.js"></script>
+  <script src="ai/functions.js"></script>
   <script src="ai/settings.js"></script>
   <!-- The tunnel's roles. / 隧道各角色。 -->
   <script src="tunnel/shared.js"></script>

@@ -371,6 +371,38 @@ workbench 的菜单中显示 **助手**。不设置时没有该模块，也不�
 各路径的错误，没有 store 时 `409`，版本过期时 `412`）和 `POST /api/m/ai/providers/test`（`{"provider", "key", "model",
 "models_only"}`；同时最多四个，超出时 `429`；浏览器离开时取消测试中的调用）。
 
+### 对话面板
+
+每个页面的顶栏都有助手按钮（用户级别为 `off` 时没有），点开后对话面板显示在页面旁。消息发往默认模型，并以当前页面作为上下文
+（其模块、页面与标题、页面声明的选中项，以及页面上选中的文字；取消勾选 **将本页作为上下文发送** 则不发送）。回答以流的形式到来：
+Markdown 随到随画，每次工具调用为一行可展开的记录（参数与结果），`ask_user` 的问题显示为一排按钮，所选会回传给模型。
+**停止** 结束回答并保留已生成的部分；**重试** 重新回答最后一条消息；面板头部可选择对话、新建或删除对话。
+
+助手只读取，自己从不修改任何东西：它调用的工具（**功能** 页列出它们、各自所需级别以及是否启用）读取配置、schema、版本、
+状态、指标、上游健康、一致性检查、证书、缓存、fit 自身日志与访问日志，像 `fit validate` 一样检查配置，转换 nginx 或
+Caddyfile 文本，并向用户提问。它们在控制台的线程池上、经进程内的 Admin API 运行，每次最多 30 秒。每个结果在交给模型前都会
+脱敏（密钥、密码哈希、令牌、私钥、各提供方的密钥、`data.redact` 的模式，以及任何工具都不读取的成员：`admin.assistant`、
+`admin.console.users`、`admin.store`、`admin.address` 与 `admin.token_file`），截断到 `limits.max_tool_result_bytes` 并注明，
+且作为数据加以标示，系统提示要求模型绝不把它当作指令。`log_tail` 需要 `data.send_logs`，读取 fit 日志在内存中保留的最近
+1000 条消息；`access_log_sample` 需要 `data.send_access_log`，读取访问日志文件的末尾。用户的话按原样发给模型。
+
+**上限。** `max_tool_calls` 限制一条消息的回答可调用的工具数（超出时调用失败、回答结束），`max_turns` 限制一个对话的消息数
+（超出后请新建对话），`max_concurrent_chats` 限制同时生成的回答数（超出时 `429`），`max_tokens_per_day` 限制每个用户每天的
+token（超出时 `429`，或正在进行的回答结束），`max_tool_result_bytes` 限制工具结果，`max_stream_bytes` 限制模型的一次回答，
+`max_conversations` 限制每个用户保留的对话数（再多一个会删除最旧的）。对话超出模型的上下文窗口（模型的 `context`，未设置时为
+32768 个 token）时，先截断早期的工具结果，再由模型把早期轮次总结为摘要；摘要随对话保存，并代替这些轮次发送。
+
+**对话** 按用户保存：有 admin.store 时保存在其 `assistant.chats.<用户名的哈希>` 段中，与 store 的其余内容一起加密，重启后仍在；
+每个对话最多 512 KiB，每个用户合计最多 8 MiB；没有 store 时只保留到 fit 重启。用户只能看到自己的对话。
+
+端点为 `POST /api/m/ai/chat`（`{"conversation", "message" | "retry": true | "answer": {"id", "choice"}, "page", "lang"}`；
+以 SSE 应答：类型为 `start`、`text`、`thinking`、`tool_call`、`tool_result`、`ask`、`usage` 与 `summary` 的 `data:` 事件，
+最后是带 `{"type": "done", "reason"}`（`answer`、`ask`、`max_tool_calls`、`max_tokens_per_day`、`stopped`）的 `event: end`，
+或带 `{"message"}` 的 `event: error`；级别为 `off` 的用户 `403`，对话不存在 `404`，没有模型、对话正在回答或已达轮数时 `409`，
+超出同时回答数或当天 token 时 `429`）、`POST /api/m/ai/chat/stop`（`{"conversation"}`）、`GET /api/m/ai/conversations`、
+`GET` 与 `DELETE /api/m/ai/conversations/{id}`，以及 `GET /api/m/ai/tools`（用户的级别、模型，以及每个工具的级别、分组、
+schema 及本用户能否调用）。
+
 ## 角色的页面
 
 [llm](llm.zh-CN.md) 和 [tunnel](tunnel.zh-CN.md) 的角色也可以有自己的页面，各由角色的 `console` 设置：字段与
@@ -384,4 +416,5 @@ workbench 的菜单中显示 **助手**。不设置时没有该模块，也不�
 
 页面是 `app/workbench/web` 中的纯 HTML、CSS 和 JavaScript，嵌入二进制、从内存提供，不从别处获取任何东西。`core/` 中是各模块
 共用的库（`ui.js`、`ui.css`）与 workbench 本身（`workbench.js`）；每个模块是一个脚本，用 `WB.module` 注册自己，写明它调用
-哪个服务端模块的 API、在菜单中的位置以及它的页面。提供页面的控制台提供某模块的服务端模块时，该模块才显示。
+哪个服务端模块的 API、在菜单中的位置以及它的页面。提供页面的控制台提供某模块的服务端模块时，该模块才显示。模块还可以在每个页面的
+顶栏放一个工具（`topbar`，如助手的按钮）；页面可以用 `WB.select` 声明其选中项，`WB.page` 会把它与当前页面一起交给助手面板。

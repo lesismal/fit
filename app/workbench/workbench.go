@@ -7,7 +7,10 @@ package workbench
 
 import (
 	"embed"
+	"encoding/json"
 	"io/fs"
+	"strings"
+	"sync"
 )
 
 //go:embed web
@@ -18,3 +21,27 @@ func Pages() fs.FS {
 	sub, _ := fs.Sub(files, "web")
 	return sub
 }
+
+// zh is the Chinese of the schema's descriptions, read once.
+var zh = sync.OnceValue(func() map[string]string {
+	src, err := fs.ReadFile(files, "web/gateway/schema-zh.js")
+	if err != nil {
+		return nil
+	}
+	s := string(src)
+	const set = "window.FitSchemaZh = "
+	start, end := strings.Index(s, set), strings.LastIndex(s, ";")
+	if start < 0 || end < start {
+		return nil
+	}
+	var m map[string]string
+	if json.Unmarshal([]byte(s[start+len(set):end]), &m) != nil {
+		return nil
+	}
+	return m
+})
+
+// SchemaZh returns the Chinese of the config schema's descriptions, by
+// their English text, as the pages show them: gateway/schema-zh.js's. The
+// assistant's schema_describe answers in Chinese with it.
+func SchemaZh() map[string]string { return zh() }

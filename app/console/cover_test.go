@@ -211,6 +211,24 @@ func TestConsoleBusyAndStopTimeout(t *testing.T) {
 	c.Stop(context.Background())
 }
 
+// TestSubmit: Submit runs a task on the pool without holding or answering
+// the request, and refuses one past the queue.
+func TestSubmit(t *testing.T) {
+	c := &Console{tasks: make(chan func(), 1)}
+	r := &Request{c: c}
+	ran := false
+	if !r.Submit(func() { ran = true }) {
+		t.Fatal("a queue with room refused a task")
+	}
+	if r.Submit(func() {}) {
+		t.Error("a full queue took a task")
+	}
+	(<-c.tasks)()
+	if !ran {
+		t.Error("the task did not run")
+	}
+}
+
 func TestConsoleTLS(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile := writeCert(t, dir)

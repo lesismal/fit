@@ -48,11 +48,28 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   `limits` 限制对话、工具调用与结果，`data` 限制可发送的日志，`users` 与 `default_level`（off、read、edit、propose、apply）
   决定各控制台用户可做的事。
 
+- **代理循环（I125）** 在 fit 中运行，而不在浏览器中：一次对话是一个请求 `POST /api/m/ai/chat`，以 SSE 应答；期间 fit
+  调用模型、运行它要求的工具、再调用模型，直到得到回答、向用户提问或达到上限。每次调用都重新组装上下文：系统提示（角色、
+  概念、规则、回答的语言）、浏览器所在的页面、技能目录（I127 之前为空），以及模型窗口内的历史：先截断早期的工具结果，再由
+  模型把早期轮次总结为摘要，摘要随对话保存。用户的话按原样发送。
+- **工具注册表**（`assistant.Registry`）：每个工具有名称、分组、JSON Schema、所需的最低级别、可选的低于
+  `max_tool_result_bytes` 的上限，以及运行的位置。读取类工具在控制台的线程池（控制台自己的四个工作线程）上运行，以进程内调用
+  Admin API 处理函数的方式读取（与 workbench 页面的调用方式相同），每次最多 30 秒；`ask_user` 以其问题结束本次流，所选随下一个
+  请求作为该调用的结果返回。每个结果都会脱敏（密钥、哈希、令牌、私钥、各提供方的密钥、`data.redact`），不读取的成员被略去，
+  截断到上限并注明，并作为数据加以标示。
+- **fit 自身的日志保留一个环形缓冲**，存放最近 1000 条消息（每条最多 2 KiB），供 `log_tail` 使用；`access_log_sample` 读取访问
+  日志文件的末尾，而不在热路径上为每个请求的日志行另存一份。
+- **对话保存在 store 中**，每个用户一个分区（`assistant.chats.<哈希>`），由助手自己的一个保存协程写入，因此对话从不等待 store
+  的磁盘；没有 store 时保存在内存中，直到 fit 重启。
+
 ## 影响
 
-- 设置了 `admin.assistant` 时，workbench 的菜单中有“助手”模块及其设置页；对话面板随 I125 提供。
-- `GET /api/m/ai/settings`、`PUT /api/m/ai/settings` 与 `POST /api/m/ai/providers/test` 属于控制台，与其他模块的 API 一样
-  需要登录与 CSRF 令牌。
+- 设置了 `admin.assistant` 时，workbench 的菜单中有“助手”模块及其功能页与设置页，每个页面的顶栏都有对话面板的按钮。
+- `GET /api/m/ai/settings`、`PUT /api/m/ai/settings`、`POST /api/m/ai/providers/test`、`POST /api/m/ai/chat`、
+  `POST /api/m/ai/chat/stop`、`GET /api/m/ai/tools`、`GET /api/m/ai/conversations` 与 `GET`/`DELETE /api/m/ai/conversations/{id}`
+  属于控制台，与其他模块的 API 一样需要登录与 CSRF 令牌。
+- 一次对话在流式输出期间占用控制台的一个连接，工具在运行期间占用控制台线程池的工作线程；`max_concurrent_chats`（4）使两者
+  都保持很少。
 - 保存了助手设置的 fit 写出的 store 为版本 3，旧版 fit 无法打开。这是把密钥与配置一同加密保存的代价。
 - 模型客户端在监听的引擎上打开自己的连接，每个主机最多 8 个，最多 16 种传输（按连接超时与固定的证书区分），满足控制台用户
   同时发起的少量调用。
