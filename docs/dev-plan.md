@@ -292,7 +292,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | done |
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | done |
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | done |
-| I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | todo |
+| I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | done |
 | I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | todo |
 | I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | todo |
 | **Cluster management** | | | |
@@ -2712,6 +2712,33 @@ keeps the reads behind one interface so that it can be added).
   and a channel through the URLs it issues, seeks, and is refused once a URL and its grant expire;
   `TestChapterExamples` and the schema's descriptions cover the new fields.
 - **Touches**: `handler/mediapages`, `schema`, `docs`, `test/docker`, fit-examples.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The new fields**: `libraries` a list, `vod` a URL template with `{library}` and `{id}`, `channels`
+   a switch that needs `hls`. Alternatives: one library a handler; `vod` read from the config's routes.
+2. **The player pages sign** through the policy's `url_signing` themselves, not `media_tokens`, so no
+   credential more is needed; the subject is the user's name, as these users are fit's own staff;
+   each URL bound to the requester's address, a new session a play, `url_signing`'s `ttl`; without
+   `url_signing`, the plain URL and the login's cookie. Alternatives: no address bound; a hashed subject.
+3. **Listings are filtered** to what the viewer may play, hiding the rest. Alternative: list all,
+   refuse at play.
+4. **Bounds**: 16 libraries, 60 items a page (500 at most), 1,000 channels listed, a library not yet
+   scanned retried 30 times by the page.
+5. **hls.js 1.5.20**, the version the harnesses use, vendored untouched (its `sourceMappingURL` line
+   too) and served while the pages are on, so a page of the same site loads it, as the example's does.
+6. **The dependency** is recorded as an I137 entry in decision 032, not a decision of its own.
+7. **The example's API** lives in fit-examples' root module, so CI's `go vet ./...` covers it;
+   `golang.org/x/crypto` becomes a direct requirement there. Alternative: a nested module.
+8. **A placeholder secret is committed** (`video-site/secret`, "replace-me"), as `media_tokens` needs a
+   `secret_file`; the comments say to replace it.
+9. **The example's lifetimes**: URLs 2 minutes, `play_grace` 30 minutes, `max_sessions` 2 with
+   `end_oldest`; viewers alice and bob, staff `staff`, with the other examples' `example-password`.
+10. **The e2e** lives in fit (`test/docker/videosite`), takes the fit-examples checkout as `EXAMPLES`,
+    drives Chromium from Python's standard library over `--remote-debugging-pipe`, and shortens the
+    lifetimes by editing the example's `fit.conf`, failing loudly if those lines change.
+11. **`mediaauth.Whois` and `ViewerAddr`** are exported rather than the token and address logic copied
+    into `mediapages`.
 
 ### I138 The workbench's media library pages
 

@@ -282,7 +282,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | done |
 | I135 | 会过期的播放 URL：绑定资源、地址或会话的 `url_signing`，授权传递到分片，`media_tokens` 的 `POST <prefix>/urls`，`max_sessions` | I119, I133 | done |
 | I136 | 加密分片：AES-128 HLS，密钥只提供给持有该资源授权的请求 | I135 | done |
-| I137 | 影视站端到端：示例、`media_pages` 的媒体库与播放页面、文档 | I134, I135 | todo |
+| I137 | 影视站端到端：示例、`media_pages` 的媒体库与播放页面、文档 | I134, I135 | done |
 | I138 | workbench 的媒体库页面：菜单条目、配置页面、带预览的媒体库浏览、时间线上的频道、推流目标、测试 URL、密钥与当前会话、指标 | I135, I123 | todo |
 | I139 | 在 workbench 中管理媒体文件：断点续传上传、重命名、移动、删除与 sidecar，有上限并需确认 | I138 | todo |
 | **集群管理** | | | |
@@ -2167,6 +2167,26 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
 - **完成标准**：在 Linux 的 Docker 中，无头 Chromium 登录示例 API，经其签发的 URL 播放一部电影和一个频道、拖动进度，并在 URL 及其授权过期
   后被拒绝；`TestChapterExamples` 和 schema 描述覆盖新字段。
 - **涉及**：`handler/mediapages`、`schema`、`docs`、`test/docker`、fit-examples。
+
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **新字段**：`libraries` 为列表，`vod` 为含 `{library}` 与 `{id}` 的 URL 模板，`channels` 为开关且需要 `hls`。备选：每个处理器一个库；
+   从配置的路由读取 `vod`。
+2. **播放页自己签名**，经策略的 `url_signing` 而不是 `media_tokens`，因此不需要额外的凭据；主体是用户名，因为这些用户是 fit 自己的员工；
+   每个 URL 绑定请求者的地址，每次播放一个新会话，有效期为 `url_signing` 的 `ttl`；没有 `url_signing` 时用普通 URL 加登录 cookie。备选：
+   不绑定地址；哈希后的主体。
+3. **列表经过过滤**，只显示观众可以播放的内容，其余隐藏。备选：全部列出，播放时拒绝。
+4. **上限**：16 个库，每页 60 个条目（最多 500），最多列出 1,000 个频道，页面对尚未扫描的库最多重试 30 次。
+5. **hls.js 1.5.20**，与测试框架相同的版本，原样收入（包括 `sourceMappingURL` 行），页面开启时一直提供，同一站点的页面（如示例的页面）都能
+   加载。
+6. **该依赖** 作为决定 032 中的 I137 条目记录，而不是单独的决定。
+7. **示例的 API** 放在 fit-examples 的根模块中，使 CI 的 `go vet ./...` 覆盖它；`golang.org/x/crypto` 成为那里的直接依赖。备选：嵌套模块。
+8. **提交了占位的 secret**（`video-site/secret`，“replace-me”），因为 `media_tokens` 需要 `secret_file`；注释说明要替换。
+9. **示例的有效期**：URL 2 分钟，`play_grace` 30 分钟，`max_sessions` 2 且 `end_oldest`；观众 alice 与 bob，员工 `staff`，口令与其他示例
+   一样是 `example-password`。
+10. **端到端测试** 放在 fit 中（`test/docker/videosite`），以 `EXAMPLES` 接收 fit-examples 的检出，用 Python 标准库经
+    `--remote-debugging-pipe` 驱动 Chromium，并通过修改示例的 `fit.conf` 缩短有效期，那几行改变时会明确失败。
+11. **导出 `mediaauth.Whois` 与 `ViewerAddr`**，而不是把 token 与地址的逻辑复制到 `mediapages`。
 
 ### I138 workbench 的媒体库页面
 

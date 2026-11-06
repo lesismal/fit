@@ -4487,3 +4487,16 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
      所以那里大小、时间都相同的替换无法识别：它只有大小和时间可比。
   6. 根目录所在文件系统大小写不敏感时，事件按磁盘上的写法给出文件名，用别的大小写请求的 lookup 要等间隔到期。
      大小写不敏感的 inotify 根目录很少见。
+
+
+### I137 影视站端到端 — 已完成
+
+- **fit-examples 的 `video-site`**：由 `vod` 点播并作为频道播放的媒体库，位于 loopback 且在 `basic_auth` 之后的 `media_tokens`，一个登录观众并
+  向 `/media-tokens/urls` 申请绑定观众不透明 ID 与地址的 URL 的小型 Go API，以及用 hls.js 播放它们的页面。
+- **`media_pages`** 新增 `libraries`、`vod` 与 `channels`：库页面（`<prefix>/library`）列出登录用户可以播放的内容，播放页面（`<prefix>/watch`）
+  经页面签名的 URL（`api/play`）用 hls.js 播放，被拒绝时停止并提供重新播放；hls.js 1.5.20（Apache-2.0）连同许可证收入，位于
+  `<prefix>/vendor/hls.min.js`。`mediaauth` 新增 `Whois` 与 `ViewerAddr`。
+- **文档**：`docs/media-library.md` 中的“影视站”一节，中英文；决定 032 的 I137 条目。
+- **测试**：列表、按权限过滤、分页与搜索、bcrypt 登录、签名与过期的 URL、频道；基准机 Docker 中的 `test/docker/videosite`：无头 Chromium
+  登录示例的 API，播放一部影片与频道并跳转，URL 与授权过期后被拒绝，在站点页面以及库与播放页面上都如此：16 项检查全部通过。
+- **缺口**：未测试 Safari 自带的播放器；`/media/play` 仍只用原生方式播放 HLS。实现时所做的决策在计划的 I137 一节，待审查。

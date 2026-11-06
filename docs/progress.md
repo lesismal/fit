@@ -6325,3 +6325,22 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
      not told apart at all: size and times are all it has, whatever `check_interval` is.
   6. On a root that folds case, an event names the file as written on disk, and a lookup by another
      case waits for the interval. inotify roots that fold case are rare.
+
+
+### I137 A video site, end to end — done
+
+- **fit-examples `video-site`**: a media library played by `vod` and as a channel, `media_tokens` on the
+  loopback behind `basic_auth`, a small Go API that logs viewers in and asks `/media-tokens/urls` for
+  URLs bound to each viewer's opaque ID and address, and a page playing them with hls.js.
+- **`media_pages`** gains `libraries`, `vod` and `channels`: a library page (`<prefix>/library`) of what
+  the logged-in user may play, and a player page (`<prefix>/watch`) that plays it with hls.js through a
+  URL the pages sign (`api/play`), stopping and offering to play again once refused; hls.js 1.5.20
+  (Apache-2.0) vendored with its license at `<prefix>/vendor/hls.min.js`. `mediaauth` gains `Whois`
+  and `ViewerAddr`.
+- **Docs**: "A video site" in `docs/media-library.md`, English and Chinese; decision 032's I137 entry.
+- **Tests**: listing, filtering by permission, paging and search, a bcrypt login, signed and expired
+  URLs, channels; `test/docker/videosite` on the benchmark host's Docker: headless Chromium logs in to
+  the example's API, plays a film and the channel, seeks, and is refused once a URL and its grant
+  expire, on the site's page and on the library and player pages: 16 checks of 16.
+- **Gaps**: Safari's own player not tested; `/media/play` still plays HLS natively only. The decisions
+  made are in the plan's I137 section, pending review.
