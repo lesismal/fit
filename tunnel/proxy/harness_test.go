@@ -60,15 +60,11 @@ func uplinkJSON(name, addr string) string {
 	return fmt.Sprintf(`{"name": %q, "endpoints": [{"address": %q}], "password": "pw", "pool_size": 2, "retry_interval": "100ms", "ping_interval": "200ms"}`, name, addr)
 }
 
-// freeAddr is a local address nothing listens on.
+// freeAddr is a local address nothing listens on, and no other test of
+// the package was given.
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().String()
+	return tunneltest.FreeAddr(t)
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {

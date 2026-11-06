@@ -183,15 +183,11 @@ func busyAddr(t *testing.T) string {
 	return l.Addr().String()
 }
 
-// freeAddr is a local address nothing listens on.
+// freeAddr is a local address nothing listens on, and no other test of
+// the package was given.
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().String()
+	return tunneltest.FreeAddr(t)
 }
 
 // note is a notify a peer received.

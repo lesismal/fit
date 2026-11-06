@@ -52,3 +52,20 @@ func TestEngine(t *testing.T) {
 		t.Fatal("no engine")
 	}
 }
+
+// FreeAddr never hands out a port twice, though the kernel may.
+func TestFreeAddr(t *testing.T) {
+	seen := map[string]bool{}
+	for range 200 {
+		addr := FreeAddr(t)
+		if seen[addr] {
+			t.Fatalf("%s handed out twice", addr)
+		}
+		seen[addr] = true
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			t.Fatalf("%s: %v", addr, err)
+		}
+		_ = l.Close()
+	}
+}
