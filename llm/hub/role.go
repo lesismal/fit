@@ -27,7 +27,8 @@ func init() {
 			}
 			return c.LLM.Hub
 		},
-		New: func(h *app.Host) (app.Role, error) { return New(h), nil },
+		New:       func(h *app.Host) (app.Role, error) { return New(h), nil },
+		CertFiles: func(c *config.Config) []string { return role.ListenCertFiles(c.LLM.Hub.Listen) },
 	})
 }
 

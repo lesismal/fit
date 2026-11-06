@@ -423,10 +423,21 @@ func dialReq(p config.LLMPeer) model.DialReq {
 		ServerName: p.ServerName}
 }
 
+// ListenCertFiles is the certificate and key files l has its listener read,
+// which fit run's -watch-certs has applied again when they change.
+func ListenCertFiles(l *config.LLMListen) []string {
+	if l == nil || l.CertFile == "" {
+		return nil
+	}
+	return []string{l.CertFile, l.KeyFile}
+}
+
 // selfSigned gives a self_signed listener without a certificate one: made
-// once, used at once, and written into the config, so that it outlives a
-// restart and the pins of the peers stay good. Until the config has it, the
-// same one is used.
+// once, used at once, and kept so that it outlives a restart and the pins of
+// the peers stay good: without admin.store in a file beside the config
+// (app.Host.KeptFile), made there the first time, and otherwise written
+// into the config, which the store keeps. Until the config has it, the same
+// one is used.
 func (b *Base) selfSigned(l *model.ListenConfig) error {
 	b.mu.Lock()
 	if !l.SelfSigned || l.CertFile != "" || l.Cert != "" {
@@ -437,6 +448,7 @@ func (b *Base) selfSigned(l *model.ListenConfig) error {
 		return nil
 	}
 	made := b.generated[0] == ""
+	kept := ""
 	if made {
 		hosts := []string{"localhost"}
 		if b.hostname != "" {
@@ -445,17 +457,37 @@ func (b *Base) selfSigned(l *model.ListenConfig) error {
 		if host, _, err := net.SplitHostPort(l.Addr); err == nil && host != "" && host != "localhost" && host != b.hostname {
 			hosts = append(hosts, host)
 		}
-		c, k, err := certpin.SelfSigned("fit llm "+b.Role, hosts...)
+		var c, k []byte
+		var err error
+		var madeKept bool
+		if kept = b.H.KeptFile("pem"); kept != "" {
+			c, k, madeKept, err = certpin.Keep(kept, "fit llm "+b.Role, hosts...)
+			if err != nil && c != nil {
+				// Not written: kept in the config, as with a store, which
+				// keeps it only as long as fit runs.
+				b.Log.Warnf("the listener's self-signed certificate cannot be kept in %s, so it changes when fit restarts, and the peers' pins of it fail: %v", kept, err)
+				kept, err = "", nil
+			}
+		} else {
+			c, k, err = certpin.SelfSigned("fit llm "+b.Role, hosts...)
+		}
 		if err != nil {
 			b.mu.Unlock()
 			return err
 		}
 		b.generated = [2]string{string(c), string(k)}
+		if kept != "" {
+			verb := "the listener's self-signed certificate is"
+			if madeKept {
+				verb = "made the listener's self-signed certificate,"
+			}
+			b.Log.Infof("%s kept in %s", verb, kept)
+		}
 	}
 	cert, key := b.generated[0], b.generated[1]
 	b.mu.Unlock()
 	l.Cert, l.Key = cert, key
-	if made {
+	if made && kept == "" {
 		b.H.Edit(func(cur []byte) ([]byte, error) {
 			return EditJSON(cur, func(m map[string]json.RawMessage) error {
 				var lm map[string]json.RawMessage

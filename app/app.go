@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -81,6 +83,23 @@ type Info struct {
 	// Check, when not nil, checks the role's member, when c sets it,
 	// beyond what loading the config does, as when the config is compiled.
 	Check func(c *config.Config) error
+	// CertFiles, when not nil, returns the certificate and key files the
+	// role's member of c, when c sets it, has the role read when it is
+	// applied: fit run's -watch-certs applies the running config again
+	// when they change, as it does for the listeners' (see CertFiles).
+	CertFiles func(c *config.Config) []string
+}
+
+// CertFiles is the certificate and key files the members of c have their
+// roles read, those of every role registered.
+func CertFiles(c *config.Config) []string {
+	var out []string
+	for _, info := range Roles() {
+		if info.CertFiles != nil && set(info.Member(c)) {
+			out = append(out, info.CertFiles(c)...)
+		}
+	}
+	return out
 }
 
 // Path returns the parts of the role's member's path, as in
@@ -272,6 +291,23 @@ func (h *Host) DrainTimeout() time.Duration {
 	return DefaultDrainTimeout
 }
 
+// KeptFile is the file the role keeps what it made of name in, such as a
+// self-signed certificate whose fingerprint its peers pin, beside the
+// config: prefix.ID.name, prefix being the Manager's KeepBeside. It is ""
+// when there is none, as when the config is kept in admin.store: the role
+// then writes what it made into its member, through Edit, which the store
+// keeps.
+func (h *Host) KeptFile(name string) string {
+	if h.m == nil {
+		return ""
+	}
+	p := h.m.kept.Load()
+	if p == nil || *p == "" {
+		return ""
+	}
+	return *p + "." + h.ID + "." + name
+}
+
 // ErrBusy is an Edit refused because too many are waiting already.
 var ErrBusy = errors.New("app: too many config changes are waiting; try again")
 
@@ -319,6 +355,8 @@ type Manager struct {
 
 	// drain is the roles' drain timeout, in nanoseconds; 0 for the default.
 	drain atomic.Int64
+	// kept is KeepBeside's prefix of the files the roles keep.
+	kept atomic.Pointer[string]
 
 	edits   chan editReq
 	stop    chan struct{}
@@ -340,6 +378,27 @@ func NewManager(engine, upstream *fib.Engine, root *logs.Root, editor Editor) *M
 // SetDrainTimeout sets how long a role may let what a server it replaced
 // holds run out, as the listeners' drain timeout does for their requests.
 func (m *Manager) SetDrainTimeout(d time.Duration) { m.drain.Store(int64(d)) }
+
+// KeepBeside has the roles keep what they make that must outlive a restart,
+// and that the config, without admin.store, would not keep, in files
+// beside the config at path: a config file, whose files are named after
+// it without its extension, as /etc/fit/fit.tunnel.hub.pem beside
+// /etc/fit/fit.json, or a directory of them, whose files are fit.* in it.
+// "" or "-", standard input, keeps none. Call it before Apply.
+func (m *Manager) KeepBeside(path string) {
+	prefix := ""
+	if path != "" && path != "-" {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+			prefix = filepath.Join(path, "fit")
+		} else {
+			prefix = strings.TrimSuffix(path, filepath.Ext(path))
+		}
+	}
+	m.kept.Store(&prefix)
+}
 
 func (m *Manager) edit(id string, edit func([]byte) ([]byte, error), done func([]string, error)) {
 	select {

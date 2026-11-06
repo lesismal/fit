@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"crypto/tls"
 	"log/slog"
 	"net"
 	"slices"
@@ -23,7 +24,10 @@ const WSPath = wire.Path
 // least one role the mesh accepts (see credentials). The new
 // configuration is kept even when it cannot bind: the error is returned and
 // shown in Listen().Error, and the role runs without a listener until it is
-// fixed. Setting what already runs, with the same limits, does nothing.
+// fixed. Setting what already runs, with the same limits, does nothing but
+// read the cert_file and key_file of a listener with them again: a
+// certificate rotated on disk is taken by the links that open from then on,
+// and those open stay (see reloadCertLocked).
 func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 	if cfg.Addr != "" {
 		addr, err := ValidateAddr(cfg.Addr, false)
@@ -43,6 +47,9 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 	opts := m.o()
 	running := m.binding >= 0
 	if cfg == m.lcfg && m.lerr == "" && running == (cfg.Addr != "") && (!running || sameLimits(opts, m.lopts)) {
+		if running && cfg.CertFile != "" {
+			return m.reloadCertLocked(cfg)
+		}
 		return nil
 	}
 	m.stopListenerLocked()
@@ -59,6 +66,13 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 	if err != nil {
 		m.lerr = err.Error()
 		return err
+	}
+	if tc != nil && cfg.CertFile != "" {
+		// The files' certificate is swapped in place when they change, for
+		// the handshakes after.
+		m.lcert.Store(&tc.Certificates[0])
+		tc.Certificates = nil
+		tc.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return m.lcert.Load(), nil }
 	}
 	creds := m.credentials(cfg)
 	wc := m.connConfig(nil, creds)
@@ -89,6 +103,28 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 				"addr", m.laddr, "roles", strings.Join(c.Roles, ","))
 		}
 	}
+	return nil
+}
+
+// reloadCertLocked reads the running listener's cert_file and key_file
+// again, and, when they hold another certificate, has the handshakes from
+// now on present it; the links open keep theirs. Files that do not load, as
+// when one is written and the other not yet, leave the listener as it is,
+// running with the certificate it has, which is logged; their next change
+// is read again. lmu is held.
+func (m *Mesh) reloadCertLocked(cfg model.ListenConfig) error {
+	tc, fp, err := serverTLS(cfg)
+	if err != nil {
+		m.log(slog.LevelWarn, "mesh: the listener's certificate files do not load; it keeps the certificate it has", "addr", m.laddr, "error", err.Error())
+		return nil
+	}
+	if fp == m.lfp {
+		return nil
+	}
+	m.lcert.Store(&tc.Certificates[0])
+	m.lfp = fp
+	m.log(slog.LevelInfo, "mesh: the listener's certificate changed on disk; links from now on are taken with it, and peers that pin it need its new fingerprint",
+		"addr", m.laddr, "fingerprint", fp)
 	return nil
 }
 

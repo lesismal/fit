@@ -265,6 +265,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	// write what their pages change back into the config through configs.
 	apps := app.NewManager(s.Engine(), env.Engine, root, configs.EditMember)
 	apps.SetDrainTimeout(*grace)
+	if boot == nil {
+		// Without a store, what the roles make and must keep, such as a
+		// self-signed certificate their peers pin, goes beside the config.
+		apps.KeepBeside(paths[0])
+	}
 	defer apps.Stop(context.Background()) // stopped already, unless serve fails before shutdown
 	if err := apps.Apply(c); err != nil {
 		fmt.Fprintf(stderr, "fit run: %v\n", err)

@@ -32,7 +32,8 @@ func init() {
 			}
 			return c.LLM.Proxy
 		},
-		New: func(h *app.Host) (app.Role, error) { return New(h), nil },
+		New:       func(h *app.Host) (app.Role, error) { return New(h), nil },
+		CertFiles: func(c *config.Config) []string { return role.ListenCertFiles(c.LLM.Proxy.Listen) },
 	})
 }
 

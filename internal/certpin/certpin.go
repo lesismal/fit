@@ -17,8 +17,11 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -66,6 +69,66 @@ func SelfSigned(org string, hosts ...string) (certPEM, keyPEM []byte, err error)
 	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 	return certPEM, keyPEM, nil
+}
+
+// Keep returns the self-signed certificate and key kept in the file path,
+// as PEM: those it holds, or, when it does not exist, ones SelfSigned makes
+// for org and hosts, which it writes there first, mode 0600, so that they
+// outlive a restart and the peers' pins of them stay good. made reports
+// whether it made them. A file that exists and does not hold a certificate
+// and its key is an error, and is left as it is. One that cannot be written,
+// as in a read-only directory, is an error returned with the certificate
+// and key made, for the caller to use until it stops, saying that they
+// will not outlive it.
+func Keep(path, org string, hosts ...string) (certPEM, keyPEM []byte, made bool, err error) {
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		certPEM, keyPEM = splitPEM(data)
+		if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+			return nil, nil, false, fmt.Errorf("%s does not hold a certificate and its key: %w", path, err)
+		}
+		return certPEM, keyPEM, false, nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return nil, nil, false, err
+	}
+	if certPEM, keyPEM, err = SelfSigned(org, hosts...); err != nil {
+		return nil, nil, false, err
+	}
+	err = writeFile(path, append(append([]byte(nil), certPEM...), keyPEM...))
+	return certPEM, keyPEM, true, err
+}
+
+// splitPEM is data's certificates and its keys, PEM each.
+func splitPEM(data []byte) (certPEM, keyPEM []byte) {
+	for {
+		var b *pem.Block
+		if b, data = pem.Decode(data); b == nil {
+			return certPEM, keyPEM
+		}
+		if b.Type == "CERTIFICATE" {
+			certPEM = append(certPEM, pem.EncodeToMemory(b)...)
+		} else {
+			keyPEM = append(keyPEM, pem.EncodeToMemory(b)...)
+		}
+	}
+}
+
+// writeFile writes data to path, mode 0600, whole or not at all: into a
+// file beside it, which CreateTemp makes 0600, renamed over it once written.
+func writeFile(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if err = errors.Join(werr, f.Sync(), f.Close()); err == nil {
+		err = os.Rename(f.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+	}
+	return err
 }
 
 // Fingerprint is the SHA-256 of a certificate's leaf, in lower-case hex, or

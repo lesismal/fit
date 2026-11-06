@@ -11,8 +11,10 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
@@ -97,6 +99,76 @@ func TestApplyMoves(t *testing.T) {
 	st := v.s.Status()
 	if st.QUICFingerprint != "" || st.Socket != "" || len(st.Listeners) != 2 || st.Listeners[1].Error == "" {
 		t.Fatalf("status %+v", st)
+	}
+}
+
+// A hub without admin.store keeps the certificate it made in a file beside
+// the config, 0600, not in the config, which nothing would keep: after a
+// restart it presents the same one, so the pins of its peers stay good. A
+// file that does not hold one fails the Apply, and is left as it is.
+func TestCertKeptBesideConfig(t *testing.T) {
+	dir := t.TempDir()
+	member := `{"password": "pw", "listeners": [{"protocol": "tls", "address": "127.0.0.1:0"}, {"protocol": "quic", "address": "127.0.0.1:0"}]}`
+	start := func() *env {
+		v := newEnv(t)
+		v.m.KeepBeside(filepath.Join(dir, "fit.json"))
+		if err := v.apply(member); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	v := start()
+	fp := v.s.Fingerprint()
+	// The test's host is test.host's; fit's is tunnel.hub's.
+	kept := filepath.Join(dir, "fit."+v.s.h.ID+".pem")
+	fi, err := os.Stat(kept)
+	if err != nil || fp == "" {
+		t.Fatalf("kept %v, fingerprint %q", err, fp)
+	}
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", fi.Mode())
+	}
+	if l := v.s.Status().Listeners; len(l) != 2 || l[0].Fingerprint != fp || l[1].Fingerprint != fp {
+		t.Fatalf("listeners %+v", l)
+	}
+	// Applied again, it keeps it, and the config is not edited.
+	if err := v.apply(member); err != nil || v.s.Fingerprint() != fp {
+		t.Fatalf("again: %v %s", err, v.s.Fingerprint())
+	}
+	select {
+	case err := <-v.edited:
+		t.Fatalf("the config was edited: %v %s", err, v.current())
+	case <-time.After(100 * time.Millisecond):
+	}
+	v.s.Stop(context.Background())
+
+	// A restart presents the same certificate.
+	if w := start(); w.s.Fingerprint() != fp {
+		t.Fatalf("restarted with %s, was %s", w.s.Fingerprint(), fp)
+	}
+
+	// A file that holds no certificate fails the first Apply.
+	if err := os.WriteFile(kept, []byte("nothing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := newEnv(t)
+	w.m.KeepBeside(filepath.Join(dir, "fit.json"))
+	if err := w.apply(member); err == nil || !strings.Contains(err.Error(), "does not hold a certificate") {
+		t.Fatalf("a bad file: %v", err)
+	}
+	if data, _ := os.ReadFile(kept); string(data) != "nothing" {
+		t.Fatal("the bad file was overwritten")
+	}
+
+	// Where nothing can be written, the certificate goes into the config,
+	// as with a store, and the hub starts.
+	r := newEnv(t)
+	r.m.KeepBeside(filepath.Join(dir, "none", "fit.json"))
+	if err := r.apply(member); err != nil || r.s.Fingerprint() == "" {
+		t.Fatalf("unwritable: %v", err)
+	}
+	if err := r.waitEdit(); err != nil || !strings.Contains(r.current(), "BEGIN CERTIFICATE") {
+		t.Fatalf("not kept in the config: %v %s", err, r.current())
 	}
 }
 

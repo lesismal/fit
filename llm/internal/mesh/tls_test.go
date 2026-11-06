@@ -114,6 +114,62 @@ func TestMeshTLSNewCertificate(t *testing.T) {
 	}
 }
 
+// A listener's cert_file and key_file rotated on disk are read again when
+// the same listener is set again, as -watch-certs has the role applied:
+// links from then on are taken with the new certificate, the link open
+// stays, and files that do not load leave the listener as it is.
+func TestMeshTLSRotatedFiles(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := filepath.Join(dir, "l.crt"), filepath.Join(dir, "l.key")
+	write := func(cert, key string) {
+		t.Helper()
+		if err := os.WriteFile(certFile, []byte(cert), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(keyFile, []byte(key), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c1, k1 := selfSigned(t)
+	c2, k2 := selfSigned(t)
+	fp1, fp2 := fingerprint(t, c1, k1), fingerprint(t, c2, k2)
+	write(c1, k1)
+	addr := freeAddr(t)
+	lc := model.ListenConfig{Addr: addr, Password: "pw", CertFile: certFile, KeyFile: keyFile}
+	node, _ := newTestMesh(t, model.RoleNode, "n1", allPeers)
+	if err := node.Configure(lc, nil); err != nil {
+		t.Fatal(err)
+	}
+	hub, _ := newTestMesh(t, model.RoleHub, "h1", allPeers)
+	start(t, hub, "", model.DialReq{Addr: addr, Password: "pw", Role: model.RoleNode, Pin: fp1})
+	waitFor(t, "the link", func() bool { return hub.Online("n1") })
+
+	// Set again with the files as they are: nothing changes.
+	if err := node.SetListen(lc); err != nil || node.Listen().Fingerprint != fp1 {
+		t.Fatalf("unchanged: %v %s", err, node.Listen().Fingerprint)
+	}
+	// Rotated: the new certificate, and the link open stays.
+	write(c2, k2)
+	if err := node.SetListen(lc); err != nil || node.Listen().Fingerprint != fp2 {
+		t.Fatalf("rotated: %v %s", err, node.Listen().Fingerprint)
+	}
+	if !hub.Online("n1") {
+		t.Fatal("the open link closed")
+	}
+	newer, _ := newTestMesh(t, model.RoleProxy, "p1", allPeers)
+	start(t, newer, "", model.DialReq{Addr: addr, Password: "pw", Role: model.RoleNode, Pin: fp2})
+	older, _ := newTestMesh(t, model.RoleProxy, "p2", allPeers)
+	start(t, older, "", model.DialReq{Addr: addr, Password: "pw", Role: model.RoleNode, Pin: fp1})
+	waitFor(t, "the new pin to link and the old to fail", func() bool {
+		return newer.Online("n1") && strings.Contains(targetErr(older, addr), "does not match the pin")
+	})
+	// Half written: the certificate stays.
+	write(c1, k2)
+	if err := node.SetListen(lc); err != nil || node.Listen().Fingerprint != fp2 || node.Listen().Error != "" {
+		t.Fatalf("half written: %v %+v", err, node.Listen())
+	}
+}
+
 func clientConfigOf(t *testing.T, m *Mesh, addr string) *tls.Config {
 	t.Helper()
 	m.mu.RLock()
