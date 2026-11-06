@@ -344,6 +344,12 @@ func TestModelsAndErrors(t *testing.T) {
 	if ms := out.([]CatalogModel); len(ms) != 3 || ms[1].Name != "claude" || ms[1].Routes[0].Kind != RouteHub || !ms[1].Ready || ms[0].Ready {
 		t.Fatalf("catalog = %+v", ms)
 	}
+	// The call is counted over once its answer is written, which may be
+	// after the client has read it. / 调用在回答写完后才计为结束，可能晚于客户端读到它。
+	waitFor(t, "the call counted over", func() bool {
+		st := f.c.stats.snapshot()
+		return st.Total.Inflight == 0 && st.Total.Errors == 1
+	})
 	st := f.c.stats.snapshot()
 	if st.Total.Calls != 1 || st.Total.Errors != 1 || st.Total.Inflight != 0 {
 		t.Fatalf("stats = %+v", st)
