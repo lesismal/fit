@@ -1691,9 +1691,10 @@ writer 从上一个的 `End()`（最大者）开始；`media/rtsp` 的播放器�
 
 ## A69：加密的 HLS 分片
 
-**状态。** 2026-11-06 由 I136（加密分片）提出。尚未实现：I136 的会话无法修改 fib。在此期间，fit 在其 `hls` 处理器中自行加密
-频道的分片（`streaming/hlsenc.go`），并遵守全部规则：复制 Muxer 切出的每个分片，在频道所属媒体库的文件池上为所有观众加密一次，
-在处理器的 `max_bytes` 之内保留，并在媒体播放列表中改写出密钥标签。fib 实现后，这一临时方案即移除。
+**状态。** 2026-11-06 由 I136（加密分片）提出。已在 fib 的 `70a9acc`（连同 `9852eee` 与 `b4a9036`）完成，由 fit 的会话按
+[规则 15](rules.zh-CN.md#七fib-满足不了时) 实现，如下文“实际实现”所述；fit 已在该提交上。在此之前，fit 在其 `hls` 处理器中自行加密
+频道的分片（`streaming/hlsenc.go`）：复制 Muxer 切出的每个分片，在媒体库的文件池上加密，在 `max_bytes` 之内保留，在媒体播放
+列表中改写出密钥标签，并且不提供低延迟 HLS 的部分分片。这一临时方案已移除。
 
 **问题。** `media/hls` 不加密任何内容（其文档写明："Left out: ... and encryption"）。以 RFC 8216 第 4.3.2.4 节的 AES-128
 （`METHOD=AES-128`）提供加密的直播流，需要媒体播放列表在开头和每次换密钥处带上 `#EXT-X-KEY` 标签，并避开 `#EXT-X-MAP`
@@ -1736,3 +1737,21 @@ type Encryption struct {
 **fit 的使用方式。** `hls` 处理器的 `HandlerConfig.Encrypt` 对设置了 `encrypt` 的频道返回一个按其 `key_rotation` 的 `Encryption`，
 其 `Key` 由媒体库的密钥（`medialib.Keys`）派生密钥，并命名为 `key-<session>-<epoch>.key`；密钥 URI 照旧回答，用 `Session` 与
 `Next` 检查。`withKeys`、加密分片的缓存和副本都可移除；加密频道的部分分片得以提供。
+
+**实际实现。** 与建议相同，以下几点不同：
+
+- `Key` 还返回错误，错误会结束该流（`EXT-X-ENDLIST`）而不是以明文提供；它在加密运行处调用，不持有 Muxer 的锁，也不在发布者的
+  goroutine 上。
+- `Encryption.Run func(job func()) bool` 在调用方的池上运行加密；为 nil 或返回 false 时在单独的 goroutine 上运行。分片和部分
+  分片加密之后才列出和提供，等待加密的分片超过 4 个时流结束。
+- 部分分片用其所属分片的密钥和 IV（媒体序号）单独加密，而不是用自己的 IV：规范没有规定部分分片的 IV，hls.js 取其所属分片的。
+  `#EXT-X-KEY` 位于该分片第一个 `#EXT-X-PART` 之前；之后出现的 `#EXT-X-MAP` 之前先加 `METHOD=NONE`，其后再次写出密钥。
+- `HandlerConfig.Encrypt` 返回 `(*Encryption, error)`，在持有 Handler 锁时调用；出错时不启动 Muxer，播放列表请求回答 503。
+- 密钥服务不用 `Next`，而用 `Handler.SessionMuxer(path, session)` 与 `Muxer.KeyEpoch()`（正在切的分片的周期）检查。
+
+fit 的 `hls` 处理器给 fib 的处理器一个 `Encrypt`：对设置了 `encrypt` 的频道返回按其 `key_rotation` 的 `Encryption`，其 `Key`
+与临时方案一样派生 `medialib.Keys.Key(KeyChannel, "<stream>/<session>", epoch)` 并命名为 `key-<session>-<epoch>.key`，其 `Run`
+为媒体库的文件池（`Library.Submit`，在队列中等待超过 `file_timeout` 的任务改在单独的 goroutine 上运行）；媒体库未加载时返回
+错误（503）。它在 fib 的处理器之前、在自己的 `auth` 下回答密钥 URI，只提供 `SessionMuxer(stream, session).KeyEpoch()` 中
+`ok && epoch <= cur` 的密钥；重新加载改变了频道的加密时，它在播放列表请求时结束该频道的 Muxer，让 fib 按新的加密重新启动。
+加密频道可以使用低延迟 HLS。

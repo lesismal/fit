@@ -252,8 +252,8 @@ cookie `fit_media_grant`，`HttpOnly`、`SameSite=Lax`，TLS 下为 `Secure; Sam
 ## 加密分片
 
 设置 `encrypt` 后，`vod` 处理器用 AES-128（RFC 8216 的 `METHOD=AES-128`）加密它提供的每个分片：fMP4 与 MPEG-TS
-都一样，整个分片以 CBC 模式加 PKCS#7 填充加密，IV 为分片在媒体播放列表中的序号。频道的 `encrypt` 对其 HLS 做同样的事
-（[频道](channels.zh-CN.md#加密的-hls)）。它需要媒体库的 `secret` 或 `secret_file`，以及处理器的 `auth`：
+都一样，整个分片以 CBC 模式加 PKCS#7 填充加密，IV 为分片在媒体播放列表中的序号。频道的 `encrypt` 对其 HLS 做同样的事，
+低延迟 HLS 的部分分片也各自单独加密（[频道](channels.zh-CN.md#加密的-hls)）。它需要媒体库的 `secret` 或 `secret_file`，以及处理器的 `auth`：
 
 ```json
 {
@@ -271,7 +271,7 @@ cookie `fit_media_grant`，`HttpOnly`、`SameSite=Lax`，TLS 下为 `Secure; Sam
 #EXT-X-KEY:METHOD=AES-128,URI="aes.key?exp=...&g=1&sig=..."
 ```
 
-**密钥**不存储：每把都由媒体库的密钥（至少 16 字节）用 HMAC-SHA256、在媒体库自己的派生密钥下，从条目 ID（或频道名与
+**密钥**不存储：每把都由媒体库的密钥（至少 16 字节）用 HMAC-SHA256、在媒体库自己的派生密钥下，从条目 ID（或频道名、会话与
 密钥周期）派生；因此密钥相同的每个 fit 提供同样的分片，而这些密钥打不开别的媒体库的任何内容，也打不开 `media_auth`
 的任何 token。密钥从不进入日志。改变它会改变每一把密钥以及分片的 ETag：CDN 此前保存的分片在新密钥下无法再播放，
 请清除它们，或等它们的 `max-age` 过去。
@@ -287,7 +287,8 @@ cookie `fit_media_grant`，`HttpOnly`、`SameSite=Lax`，TLS 下为 `Secure; Sam
 **开销。** 分片在构建时于媒体库的文件池上原地加密一次，并以加密后的形式保留；缓存提供它与提供明文分片无异。在基准主机
 （Ryzen 7 7800X3D，单核）上 AES-128-CBC 为 1.24 GiB/s：1 MiB 的分片（2 Mbit/s 的 4 秒）构建多花 0.79 ms，4 MiB 的
 多花 3.2 ms；测试媒体库的小分片多花 24 µs（fMP4）和 48 µs（MPEG-TS），由 153 µs 到 177 µs、由 174 µs 到 222 µs，
-包括其密钥的派生。
+包括其密钥的派生。频道的分片和部分分片由 fib 的 HLS muxer 在切出时于同一个池上各加密一次，加密之后才列出：不另存副本，
+除 muxer 自己的之外也没有缓存。
 
 ## 一个视频网站
 

@@ -5159,9 +5159,9 @@ upstreams:
       # # Encrypts the channel's HLS segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike,
       # # under a key derived from the library's secret, which the hls handler serves only to a
       # # request its auth lets play the channel; so that segments copied, as a CDN keeps them, do not
-      # # play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are not
-      # # served for it. The other egresses play the channel as before, under their auth. Off when
-      # # left out.
+      # # play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are
+      # # encrypted too, each on its own. The other egresses play the channel as before, under their
+      # # auth. Off when left out.
       # # boolean.
       # encrypt: true
 

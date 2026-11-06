@@ -6270,9 +6270,13 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   the file pool before they are cached, within the cache's bound; a key served only to a grant or
   token for its resource, `private, no-store`; init sections, subtitles and posters clear; an
   encrypting `vod` serves no clear file.
-- **Channels**: a stopgap in fit's `hls` handler until fib request A69 lets fib's Muxer encrypt: each
-  segment copied and encrypted once on the library's pool, cached within `max_bytes`, playlists
-  rewritten, no Low-Latency HLS parts. A69 is being added to fib.
+- **Channels**: encrypted by fib's HLS Muxer (fib request A69, done at fib `70a9acc` with `9852eee` and
+  `b4a9036`), which replaced fit's stopgap (segments copied, encrypted on the library's pool, cached
+  within `max_bytes`, playlists rewritten, no parts): the `hls` handler gives fib's handler an
+  `Encrypt` (keys as before, `Run` on the library's file pool), serves the keys under its `auth` for
+  `epoch <= KeyEpoch()` of the session's Muxer, and restarts a channel's segmenting when a reload
+  changes its encryption; Low-Latency HLS parts are encrypted too, and hls.js plays them
+  (`TestChannelInterop`, live/secll).
 - **Tests**: `make test-changed` under the race detector; on the benchmark host, ffmpeg plays every
   encrypted item frame for frame and hls.js plays them through signed URLs (`TestInteropEncrypted`,
   `test/docker/vod`), ffprobe and hls.js play encrypted channels across key rotations and
@@ -6280,8 +6284,9 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   grant (401) and with another resource's (403).
 - **Cost** (benchmark host, one core): AES-128-CBC at 1.24 GiB/s, 0.79 ms a 1 MiB segment; building a
   test library's segment +24 µs with fMP4 and +48 µs with MPEG-TS; a cached segment nothing more.
-- **Gaps**: subtitles are clear; the channel stopgap's busy-pool and client-left paths have no test of
-  their own; Safari's player not tried by hand. The decisions made are in the plan's I136 section,
+- **Gaps**: subtitles are clear; hls.js fails to append Low-Latency parts after a discontinuity
+  where the tracks change, clear or encrypted alike (fib's LL-HLS, not A69); Safari's player not
+  tried by hand. The decisions made are in the plan's I136 section,
   pending review.
 
 ## Static files follow the disk

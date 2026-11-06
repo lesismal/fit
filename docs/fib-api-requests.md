@@ -2238,11 +2238,12 @@ pass them on as they are. The tolerance of 0.2s for such items in `TestChannelIn
 
 ## A69: Encrypted HLS segments
 
-**Status.** Requested on 2026-11-06, from I136 (encrypted segments). Not made yet: I136's session
-could not change fib. Meanwhile fit encrypts a channel's segments itself, in its `hls` handler
-(`streaming/hlsenc.go`), within every rule: it copies each segment the Muxer cut, encrypts it on the
-channel's library's file pool once for every viewer, keeps it within the handler's `max_bytes`, and
-rewrites the media playlists with the keys' tags. That stopgap goes once fib does it.
+**Status.** Requested on 2026-11-06, from I136 (encrypted segments). Done in fib at `70a9acc` (with
+`9852eee` and `b4a9036`), made by fit's session per [rule 15](rules.md#7-when-fib-falls-short), as
+"As built" below has it; fit is on that commit. Until then fit encrypted a channel's segments itself,
+in its `hls` handler (`streaming/hlsenc.go`): it copied each segment the Muxer cut, encrypted it on
+the library's file pool, kept it within `max_bytes`, rewrote the media playlists with the keys' tags,
+and served no Low-Latency parts. That stopgap is gone.
 
 **Problem.** `media/hls` encrypts nothing (its doc says so: "Left out: ... and encryption"). A live
 stream served encrypted, AES-128 of RFC 8216 section 4.3.2.4 (`METHOD=AES-128`), needs the media
@@ -2292,3 +2293,28 @@ check a key's session and epoch without rendering a playlist.
 secret (`medialib.Keys`) and names it `key-<session>-<epoch>.key`; its key URIs are answered as now,
 checked with `Session` and `Next`. `withKeys`, the encrypted segments' cache and the copy go; parts of
 encrypted channels are served.
+
+**As built.** As suggested, with these differences:
+
+- `Key` returns an error too, which ends the stream (`EXT-X-ENDLIST`) rather than serve it clear, and
+  is called where the encryption runs, without the Muxer's lock, not on the publisher's goroutine.
+- `Encryption.Run func(job func()) bool` runs the encryption on the caller's pool; nil, or false, on
+  a goroutine of its own. Segments and parts are listed and served only once encrypted, and a stream
+  with more than 4 segments waiting for their encryption ends.
+- A part is encrypted on its own with its segment's key and IV (its media sequence number), not an
+  IV of its own: the specification says nothing of a part's IV, and hls.js takes its segment's. The
+  `#EXT-X-KEY` goes before the segment's first `#EXT-X-PART`; a later `#EXT-X-MAP` is preceded by
+  `METHOD=NONE`, and the key named again after it.
+- `HandlerConfig.Encrypt` returns `(*Encryption, error)`, asked with the Handler's lock held; an
+  error starts no Muxer and answers the playlist 503.
+- In place of `Next`, a key server checks `Handler.SessionMuxer(path, session)` and
+  `Muxer.KeyEpoch()`, the epoch of the segment being cut.
+
+fit's `hls` handler gives fib's handler an `Encrypt` that, for a channel with `encrypt`, returns an
+`Encryption` of its `key_rotation`, whose `Key` derives `medialib.Keys.Key(KeyChannel,
+"<stream>/<session>", epoch)` as the stopgap did and names it `key-<session>-<epoch>.key`, and whose
+`Run` is the library's file pool (`Library.Submit`, a job that waited past `file_timeout` run on a
+goroutine of its own); a library not loaded is an error (503). It answers the key URIs before fib's
+handler, under its `auth`, for `ok && epoch <= cur` of `SessionMuxer(stream, session).KeyEpoch()`,
+and ends a channel's Muxers at a playlist request when a reload changed the channel's encryption,
+so that fib starts them again under the new one. Low-Latency HLS works for encrypted channels.

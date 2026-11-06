@@ -28,8 +28,9 @@ import (
 // plays the channels with hls.js; with FIT_PUSH_RTMP and FIT_PUSH_SRT set,
 // the channel is pushed to an outside server, which the script restarts
 // when the test asks it to, through FIT_PUSH_SIGNAL, a directory. live/sec,
-// encrypted (encrypt), is played under auth with a token: ffprobe reads it
-// on, and hls.js loads its keys, while a segment of it alone does not
+// encrypted (encrypt) by fib's HLS Muxer, is played under auth with a
+// token: ffprobe reads it on, and hls.js loads its keys, by whole segments
+// and by Low-Latency HLS's parts, while a segment of it alone does not
 // decode.
 
 // makeItem writes an item of d seconds, 25 fps with a keyframe a second
@@ -103,17 +104,20 @@ func TestChannelInterop(t *testing.T) {
     "rtmp": {"listen": "127.0.0.1:0"}, "rtsp": {"listen": "127.0.0.1:0"}, "srt": {"listen": "127.0.0.1:0"},
     "channels": [{"name": "live/tv", "library": "lib", "items": ["a", "b"]`+push+`},
                  {"name": "live/mix", "library": "lib", "items": ["a", "c"]},
-                 {"name": "live/sec", "library": "lib", "items": ["a", "c"], "encrypt": true, "key_rotation": 3}]
+                 {"name": "live/sec", "library": "lib", "items": ["a", "c"], "encrypt": true, "key_rotation": 3},
+                 {"name": "live/secll", "library": "lib", "items": ["a", "b"], "encrypt": true, "key_rotation": 3}]
   },
   "routes": [
     {"match": {"path": ["/flv/*"]}, "handler": {"module": "httpflv", "params": {"prefix": "/flv/", "cors": "*"}}},
     {"match": {"path": ["/hls/*"]}, "handler": {"module": "hls", "params": {"prefix": "/hls/", "target_duration": "1s", "cors": "*"}}},
-    {"match": {"path": ["/shls/*"]}, "handler": {"module": "hls", "params": {"prefix": "/shls/", "target_duration": "1s", "cors": "*", "auth": "live"}}}
+    {"match": {"path": ["/shls/*"]}, "handler": {"module": "hls", "params": {"prefix": "/shls/", "target_duration": "1s", "cors": "*", "auth": "live"}}},
+    {"match": {"path": ["/sll/*"]}, "handler": {"module": "hls", "params": {"prefix": "/sll/", "target_duration": "1s", "part_duration": "250ms", "cors": "*", "auth": "live"}}}
   ]
 }`)
 	f.waitLive(t, "live/tv")
 	f.waitLive(t, "live/mix")
 	f.waitLive(t, "live/sec")
+	f.waitLive(t, "live/secll")
 	ctx := context.Background()
 	rtmpAddr, rtspAddr, srtAddr := f.addr(t, "rtmp"), f.addr(t, "rtsp"), f.addr(t, "srt")
 
@@ -197,10 +201,12 @@ func TestChannelInterop(t *testing.T) {
 // to /result after 30s.
 const hlsjsPage = `<!doctype html><meta charset=utf-8><video id=v muted autoplay playsinline></video>
 <script src="/hls.js"></script><script>
-const v = document.getElementById('v'), out = {errors: [], cc: 0, keys: 0, times: [], src: SRC};
+const v = document.getElementById('v'), out = {errors: [], cc: 0, keys: 0, parts: 0, times: [], src: SRC};
 const h = new Hls();
-h.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) out.errors.push(d.type + ': ' + d.details) });
+h.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) out.errors.push(d.type + ': ' + d.details + (d.error ? ' (' + d.error.message + ')' : '') +
+  (d.frag ? ' sn ' + d.frag.sn + ' cc ' + d.frag.cc : '') + (d.part ? ' part ' + d.part.index : '')) });
 h.on(Hls.Events.KEY_LOADED, () => { out.keys++ });
+h.on(Hls.Events.FRAG_LOADED, (e, d) => { if (d.part) out.parts++ });
 h.on(Hls.Events.FRAG_CHANGED, (e, d) => { out.cc = Math.max(out.cc, d.frag.cc) });
 h.loadSource(SRC); h.attachMedia(v); v.play().catch(e => out.errors.push('play: ' + e));
 const t0 = Date.now();
@@ -216,20 +222,29 @@ type hlsResult struct {
 	Errors []string     `json:"errors"`
 	CC     int          `json:"cc"`
 	Keys   int          `json:"keys"`
+	Parts  int          `json:"parts"`
 	Times  [][4]float64 `json:"times"`
 	Src    string       `json:"src"`
 }
 
-// hlsjs plays live/tv, live/mix and live/sec, encrypted, with hls.js in a
-// headless Chromium.
+// hlsjs plays live/tv, live/mix and live/sec, encrypted, by whole
+// segments, and live/secll, encrypted, by Low-Latency HLS's parts, with
+// hls.js in a headless Chromium.
 func hlsjs(t *testing.T, f *fit) {
-	results := make(chan hlsResult, 3)
+	names := []string{"tv", "mix", "sec", "secll"}
+	results := make(chan hlsResult, len(names))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/hls.js", func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, os.Getenv("FIT_HLSJS")) })
 	mux.HandleFunc("/play/{name}", func(w http.ResponseWriter, r *http.Request) {
 		src := f.base + "/hls/live/" + r.PathValue("name") + "/index.m3u8"
-		if r.PathValue("name") == "sec" {
+		switch r.PathValue("name") {
+		case "sec":
 			src = f.base + "/shls/live/sec/index.m3u8?token=" + viewToken
+		case "secll":
+			// Low-Latency HLS, over items of the same tracks: hls.js
+			// fails to append the parts after a discontinuity, clear
+			// or encrypted alike (live/mix and live/sec over /sll/).
+			src = f.base + "/sll/live/secll/index.m3u8?token=" + viewToken
 		}
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = io.WriteString(w, strings.Replace(hlsjsPage, "SRC", strconv.Quote(src), 2))
@@ -248,7 +263,7 @@ func hlsjs(t *testing.T, f *fit) {
 	go func() { _ = srv.Serve(ln) }()
 	defer srv.Close()
 	var cmds []*exec.Cmd
-	for _, name := range []string{"tv", "mix", "sec"} {
+	for _, name := range names {
 		cmd := exec.Command(os.Getenv("FIT_CHROMIUM"), "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
 			"--no-first-run", "--autoplay-policy=no-user-gesture-required", "--user-data-dir="+t.TempDir(),
 			"http://"+ln.Addr().String()+"/play/"+name)
@@ -264,7 +279,7 @@ func hlsjs(t *testing.T, f *fit) {
 			_ = c.Wait()
 		}
 	}()
-	for range 3 {
+	for range names {
 		select {
 		case res := <-results:
 			checkHLSJS(t, res)
@@ -278,7 +293,7 @@ func hlsjs(t *testing.T, f *fit) {
 // checkHLSJS checks that hls.js played on, through a discontinuity for
 // live/mix, without a fatal error or a stall of 2s.
 func checkHLSJS(t *testing.T, res hlsResult) {
-	t.Logf("hls.js %s: cc %d, errors %v, times %v", res.Src, res.CC, res.Errors, res.Times)
+	t.Logf("hls.js %s: cc %d, keys %d, parts %d, errors %v, times %v", res.Src, res.CC, res.Keys, res.Parts, res.Errors, res.Times)
 	if len(res.Errors) > 0 || len(res.Times) < 20 {
 		t.Errorf("hls.js %s: %v", res.Src, res.Errors)
 		return
@@ -292,6 +307,9 @@ func checkHLSJS(t *testing.T, res hlsResult) {
 	}
 	if strings.Contains(res.Src, "/sec/") && res.Keys < 2 {
 		t.Errorf("hls.js %s: %d keys loaded, a new one every 3 segments", res.Src, res.Keys)
+	}
+	if strings.Contains(res.Src, "/sll/") && (res.Parts == 0 || res.Keys < 2) {
+		t.Errorf("hls.js %s: %d parts and %d keys loaded", res.Src, res.Parts, res.Keys)
 	}
 	stalled := 0
 	for i := 1; i < len(res.Times); i++ {

@@ -18,7 +18,6 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/mediaauth"
 	"github.com/lesismal/fit/module"
-	"github.com/lesismal/fit/streaming/channels"
 )
 
 func init() {
@@ -205,10 +204,11 @@ type hlsShared struct {
 	cur atomic.Pointer[hlsHandler]
 	mu  sync.Mutex
 
-	// enc keeps the segments of encrypted channels, encrypted, within
-	// max_bytes; libs are the libraries whose keys encrypt them.
-	enc  *encCache
-	libs encLibs
+	// libs are the libraries whose keys encrypt the channels; started is
+	// the encryption the Muxers of each encrypted channel last started
+	// with (encStart, by stream), restartStale's.
+	libs    encLibs
+	started sync.Map
 }
 
 type hlsHandler struct {
@@ -261,7 +261,9 @@ func (h *HLS) Provision(ctx *module.Context) error {
 	defer hlsMu.Unlock()
 	sh := hlsByID[key]
 	if sh == nil {
-		sh = &hlsShared{key: key, cfg: cfg, enc: newEncCache(maxBytes)}
+		sh = &hlsShared{key: key, cfg: cfg}
+		// Encrypted channels (hlsenc.go): fib's Muxer encrypts them.
+		sh.cfg.Encrypt = sh.encrypt
 		hlsByID[key] = sh
 	}
 	sh.refs++
@@ -336,21 +338,18 @@ func (h *HLS) ServeHTTP(c *fibhttp.Context) {
 	resource := c.Request.URL.Path[:len(h.b.prefix)+i+1]
 	h.b.auth.GuardResource(c, stream, resource, h.CORS, func(a mediaauth.Access) {
 		fh := h.shared.handler(hb)
-		// A channel that encrypts its HLS has its keys and segments served
-		// here, and its playlists name the keys.
-		enc, encrypted := channels.Lookup(h.b.engine).Encryption(stream)
-		if encrypted && h.serveEncrypted(c, fh, stream, name, enc) {
+		// A channel that encrypts its HLS has its keys served here; fib's
+		// Muxer encrypts its segments and parts, and names the keys.
+		if h.serveKey(c, fh, stream, name) {
 			return
 		}
 		if strings.HasSuffix(name, ".m3u8") {
+			h.shared.restartStale(fh, stream)
 			// A live stream's grant lives play_grace past its URL.
-			if query, cookie := a.PassOn(0); query != "" || cookie != "" || encrypted {
+			if query, cookie := a.PassOn(0); query != "" || cookie != "" {
 				c.OnResponse(func(r *fibhttp.Response) {
 					if r.StatusCode != stdhttp.StatusOK {
 						return
-					}
-					if encrypted {
-						r.Body = withKeys(r.Body, enc.Rotation)
 					}
 					if query != "" {
 						r.Body = withQuery(r.Body, query)
