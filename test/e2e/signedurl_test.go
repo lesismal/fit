@@ -69,12 +69,22 @@ func TestSignedURLAccessLog(t *testing.T) {
 	if strings.Contains(string(data), sig) {
 		t.Fatalf("the access log holds the signature:\n%s", data)
 	}
-	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
-	var last map[string]any
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
-		t.Fatal(err)
+	// The lines of the 503s before the first scan ended may come after
+	// the 200's: the line looked at is the 200's, wherever it is.
+	var ok map[string]any
+	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatal(err)
+		}
+		if uri, _ := m["uri"].(string); !strings.Contains(uri, "sig=REDACTED") {
+			t.Fatalf("a line without the signature redacted: %v", m)
+		}
+		if m["status"] == 200.0 {
+			ok = m
+		}
 	}
-	if uri, _ := last["uri"].(string); !strings.Contains(uri, "sig=REDACTED") || last["status"] != 200.0 || last["user"] != "viewer-7" {
-		t.Fatalf("the line: %v", last)
+	if ok == nil || ok["user"] != "viewer-7" {
+		t.Fatalf("no line of the 200 by viewer-7:\n%s", data)
 	}
 }

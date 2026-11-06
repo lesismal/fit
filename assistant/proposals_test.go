@@ -319,9 +319,12 @@ func TestProposeAndApply(t *testing.T) {
 		t.Errorf("the view: %s", body)
 	}
 	// Reading it changed nothing: no change, and the store's sections
-	// as they were.
+	// as they were. The saver may still be writing what the chat
+	// changed, so what is pending is written first, and again after.
+	f.a.saveDirty()
 	before := f.store.Section(sectionOf("ada"))
 	f.view(conv)
+	f.a.saveDirty()
 	if len(f.cfgs.changed()) != 0 || !bytes.Equal(before, f.store.Section(sectionOf("ada"))) {
 		t.Error("viewing a proposal changed something")
 	}
