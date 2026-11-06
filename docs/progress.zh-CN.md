@@ -4464,7 +4464,7 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **fib** `925f292` 与 `0ddaba3`（请求 A70），在基准机上用 hls.js 1.5.20 发现：分片第一个 part 的 preload hint 现在写在该分片的
   `EXT-X-DISCONTINUITY` 与 `EXT-X-MAP` 之后，轨道一变就写出（hls.js 依 hint 之前的标签确定将来的分片，并为它保留旧的 init，随后把新条目
   的 part 接在旧 init 之后追加：媒体元素解码失败，`bufferAppendError`）；因新轨道而结束的分片，时长到其各轨道中最早结束的那个为止（其
-  `EXTINF` 曾把最后一个视频帧之后的 AAC 也算进去，hls.js 据此放置下一个条目，每个条目处卡住两秒）。fit 已在 `0ddaba3` 上。
+  `EXTINF` 曾把最后一个视频帧之后的 AAC 也算进去，hls.js 据此放置下一个条目，每个条目处卡住两秒）。fit 已在包含它的 `856ad5b` 上。
 - **测试**：`TestChannelInterop` 用 hls.js 按 part 播放 `live/secll`（加密）与新增的 `live/mixll`（明文），两者的条目轨道不同：30 秒内
   以每秒 25 帧穿过五个不连续点，没有卡顿，也没有丢帧；ffprobe 读取 `live/mixll` 的低延迟播放列表；出现致命错误时，页面报告 hls.js
   加载与追加的内容以及最后一个播放列表。

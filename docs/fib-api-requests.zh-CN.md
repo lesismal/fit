@@ -1759,7 +1759,7 @@ fit 的 `hls` 处理器给 fib 的处理器一个 `Encrypt`：对设置了 `encr
 ## A70：新轨道之后的低延迟 HLS part
 
 **状态。** 2026-11-06 由 I136（加密分片）与 I134（频道）发现。已在 fib 的 `925f292` 与 `0ddaba3` 完成，由 fit 的会话按
-[规则 15](rules.zh-CN.md#七fib-满足不了时) 实现；fit 已在 `0ddaba3` 上。
+[规则 15](rules.zh-CN.md#七fib-满足不了时) 实现；fit 已在包含它的 `856ad5b` 上。
 
 **问题。** 频道切换到轨道不同的条目时（`hub.Publisher.SetTracks`：另一个 SPS、另一个分辨率），用低延迟 HLS 播放，hls.js 在不连续点
 之后的第一个分片失败（`bufferAppendError`，part 1：媒体元素此前已经出错），明文与加密相同，而整个分片可以继续播放。`media/hls` 中有两处：

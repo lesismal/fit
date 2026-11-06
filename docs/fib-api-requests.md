@@ -2323,7 +2323,7 @@ so that fib starts them again under the new one. Low-Latency HLS works for encry
 
 **Status.** Found on 2026-11-06, from I136 (encrypted segments) and I134 (channels). Done in fib at
 `925f292` and `0ddaba3`, made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on
-`0ddaba3`.
+`856ad5b`, which has it.
 
 **Problem.** A channel moving to an item whose tracks differ (`hub.Publisher.SetTracks`: another SPS,
 another resolution) played by Low-Latency HLS failed in hls.js at the first segment after the

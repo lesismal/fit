@@ -6297,7 +6297,7 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   hint and kept the old init section for it, then appended the new item's parts after it: the media
   element failed to decode them, `bufferAppendError`); and a segment ended by new tracks lasts until
   the earliest of its tracks ends (its `EXTINF` had counted the AAC past the last video frame, and
-  hls.js, placing the next item by it, stalled two seconds at every item). fit is on `0ddaba3`.
+  hls.js, placing the next item by it, stalled two seconds at every item). fit is on `856ad5b`, which has it.
 - **Tests**: `TestChannelInterop` plays `live/secll` (encrypted) and a new `live/mixll` (clear) by
   their parts across items whose tracks differ, with hls.js, 30s at 25 frames a second through five
   discontinuities without a stall or a dropped frame, and ffprobe reads `live/mixll`'s Low-Latency
