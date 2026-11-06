@@ -4516,6 +4516,8 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **Admin API**：`/media/preview`，`/media/auth` 及其 `sessions`、`sessions/end`、`rotate` 与 `urls`，`/media/stats`，库页面的 `min_height` 与
   `max_height`；`vod`、样本表与 URL 拒绝的指标。控制台的 CSP 允许 `vod` 与 `hls` 的 listener；hls.js 1.5.20 只在 workbench 中收入一份，由
   `media_pages` 从那里提供。
-- **测试**：在浏览器中对运行着三个库与两个频道的 fit 以中英文检查，并对模拟的端点检查；竞态检测下的 `test-changed`。
+- **测试**：在浏览器中对运行着三个库与两个频道的 fit 以中英文检查，并对模拟的端点检查；竞态检测下的 `test-changed`。`vod` 路径上的计数
+  没有可测出的开销：基准机上 `BenchmarkServeSegment` 20 轮，open 6.08 到 6.09 µs、token 7.00 到 6.92 µs、signed 7.59 到 7.61 µs，均不显著
+  （`bench/microbench.sh` 现在让每个构建在其包的 `testdata` 旁运行）。
 - **缺口**：cookie 模式的 `url_signing` 无法用于预览（cookie 不会发往其他源）；每次预览都是新会话，`max_sessions` 较低且为 `refuse` 时重复预览
   可能被拒；写在配置中的密钥仍会显示在配置编辑器的原始标签页中。实现时所做的决策在计划的 I138 一节，待审查。

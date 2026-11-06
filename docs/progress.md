@@ -6370,7 +6370,10 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   metrics. The console's CSP admits the `vod` and `hls` listeners; hls.js 1.5.20 is vendored once in the
   workbench, and `media_pages` serves it from there.
 - **Tests**: checked in a browser against a running fit with three libraries and two channels, English
-  and Chinese, and against mocked endpoints; `test-changed` under the race detector.
+  and Chinese, and against mocked endpoints; `test-changed` under the race detector. The counters on
+  `vod`'s path cost nothing measured: `BenchmarkServeSegment` on the benchmark host, 20 rounds,
+  open 6.08 to 6.09 µs, token 7.00 to 6.92 µs, signed 7.59 to 7.61 µs, none significant
+  (`bench/microbench.sh`, which now runs each build beside its package's `testdata`).
 - **Gaps**: cookie-mode `url_signing` does not reach the preview (the cookie is not sent to another
   origin); each preview is a new session, so a low `max_sessions` with `refuse` may refuse repeated
   previews; secrets written in the config still show in the config editor's raw tabs. The decisions
