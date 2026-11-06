@@ -5,6 +5,7 @@ package tunneltest
 import (
 	"io"
 	"net"
+	"sync"
 	"testing"
 
 	"github.com/lesismal/fib"
@@ -21,6 +22,49 @@ func Engine(t testing.TB) *fib.Engine {
 	go func() { _ = e.Run(); close(done) }()
 	t.Cleanup(func() { e.Stop(); <-done; _ = e.Close() })
 	return e
+}
+
+// handed is every port FreeAddr has handed out in this process.
+var handed struct {
+	sync.Mutex
+	ports map[int]bool
+}
+
+// FreeAddr is a local TCP address nothing listens on, whose port no other
+// call in this process has handed out. The kernel may give a port it gave
+// before, once that listener closed; and fib's engines listen with
+// SO_REUSEPORT, so two bindings handed the same port both listen on it
+// without an error, and the kernel spreads connections between them: a
+// test would talk to one server when it means the other.
+func FreeAddr(t testing.TB) string {
+	t.Helper()
+	handed.Lock()
+	defer handed.Unlock()
+	if handed.ports == nil {
+		handed.ports = map[int]bool{}
+	}
+	// A port handed out before stays held while the kernel is asked
+	// again, so that it is not given back at once.
+	var held []net.Listener
+	defer func() {
+		for _, l := range held {
+			_ = l.Close()
+		}
+	}()
+	for range 1000 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, l)
+		addr := l.Addr().(*net.TCPAddr)
+		if !handed.ports[addr.Port] {
+			handed.ports[addr.Port] = true
+			return addr.String()
+		}
+	}
+	t.Fatal("no local port that was not handed out before")
+	return ""
 }
 
 // Echo listens on 127.0.0.1 and echoes what each connection sends, after
