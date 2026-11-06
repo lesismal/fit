@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -124,6 +123,9 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
 	cs.c, err = console.Start(engine, console.Options{
 		Config: rc, Cookie: sessionCookie, Pages: workbench.Pages(), Logf: logf, Endpoints: endpoints,
+		// GET /api/node, beside /api/m/admin/node: who this fit is, where a
+		// manager looks first, whatever modules the console serves.
+		Routes: func(api *console.API) { api.Handle("GET", "/api/node", cs.proxy) },
 		// The routes of the console's own pages, the workbench's, beside
 		// the modules': /api/m/admin/schema and the like.
 		Modules: func() []*console.Module {
@@ -150,6 +152,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 	if err != nil {
 		return nil, fmt.Errorf("console: %w", err)
 	}
+	configs.console.Store(true)
 	cs.logins = cs.c.Logins()
 	logins.Store(cs.logins)
 	if user, until := configs.TemporaryPassword(); user != "" {
@@ -230,14 +233,20 @@ func (cs *Console) proxy(r *console.Request) {
 		}
 		// The change is logged before the answer goes, so that whoever
 		// has the answer finds the change in the log.
-		cs.logChange(r.User, req.Method, path, w)
+		dry, _ := isDryRun(req)
+		cs.logChange(r.User, req.Method, path, dry, w)
 		_ = r.Context.WriteResponse(fibhttp.Response{StatusCode: w.status, Header: h, Body: w.body.Bytes()})
 	})
 }
 
-// logChange says what a user's request changed; reads say nothing.
-func (cs *Console) logChange(user, method, path string, w *recorder) {
+// logChange says what a user's request changed; reads say nothing, and a
+// dry run says it changed nothing.
+func (cs *Console) logChange(user, method, path string, dry bool, w *recorder) {
 	if method == http.MethodGet || method == http.MethodHead {
+		return
+	}
+	if dry {
+		cs.logf("console: %q: %s %s?dry_run=1: %d, checked and not applied", user, method, path, w.status)
 		return
 	}
 	if w.status < 300 {
@@ -308,23 +317,28 @@ func (cs *Console) accountPassword(r *console.Request) {
 		return
 	}
 	// The check is admitted as a login's is: one from an address at a
-	// time, each failure counted before the next is checked.
-	t, wait, busy := cs.logins.Admit(addr)
+	// time, each failure counted before the next is checked, against the
+	// address and the user.
+	t, wait, busy, slowed := cs.logins.AdmitUser(addr, r.User)
 	if t == nil {
-		refuseChecks(r, wait, busy)
+		refuseChecks(r, wait, busy, slowed)
 		return
 	}
 	user, token := r.User, cs.sessionToken(r)
 	r.GoThen(func() {
 		if wait := t.LockedOut(); wait > 0 {
-			refuseChecks(r, wait, false)
+			refuseChecks(r, wait, false, false)
 			return
 		}
 		ok, err := cs.logins.Check(r.Context.Context(), user, body.CurrentPassword)
 		if err != nil {
 			return // the client left
 		}
-		t.Done(!ok)
+		if ok {
+			t.Passed()
+		} else {
+			t.Done(true)
+		}
 		if !ok {
 			cs.failedPassword(r, addr)
 			return
@@ -406,7 +420,7 @@ func passwordProblem(password string) string {
 func (cs *Console) passwordReady(r *console.Request) (addr string, ok bool) {
 	addr = clientHost(r.Context.Request)
 	if wait := cs.logins.LockedOut(addr); wait > 0 {
-		refuseChecks(r, wait, false)
+		refuseChecks(r, wait, false, false)
 		return addr, false
 	}
 	if _, stored := cs.configs.ConsoleUsers(); !stored {
@@ -420,7 +434,7 @@ func (cs *Console) passwordReady(r *console.Request) (addr string, ok bool) {
 // ticket counted: 403, or 429 once it has locked the address out.
 func (cs *Console) failedPassword(r *console.Request, addr string) {
 	if wait := cs.logins.LockedOut(addr); wait > 0 {
-		refuseChecks(r, wait, false)
+		refuseChecks(r, wait, false, false)
 		return
 	}
 	_ = console.Error(r.Context, http.StatusForbidden, "the current password is wrong")
@@ -428,14 +442,16 @@ func (cs *Console) failedPassword(r *console.Request, addr string) {
 
 // refuseChecks answers 429 for checks an address may not make for wait, as
 // the console refuses logins from it, or, when busy, while another check
-// from it is under way.
-func refuseChecks(r *console.Request, wait time.Duration, busy bool) {
-	r.Context.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+// from it is under way, or, when slowed, while its user's are slowed.
+func refuseChecks(r *console.Request, wait time.Duration, busy, slowed bool) {
 	msg := "too many failed password checks from this address; try again later"
-	if busy {
+	switch {
+	case busy:
 		msg = "another password check from this address is under way; try again"
+	case slowed:
+		msg = "too many failed password checks of this user; try again later"
 	}
-	_ = console.Error(r.Context, http.StatusTooManyRequests, msg)
+	console.Refuse(r.Context, wait, msg)
 }
 
 // savePassword writes hash as user's password hash beside the config in the

@@ -296,7 +296,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | done |
 | I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | done |
 | **Cluster management** | | | |
-| I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | todo |
+| I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | done |
 | I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | todo |
 | I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | todo |
 | I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | todo |
@@ -2971,6 +2971,41 @@ binaries (I151 records the question, not a plan).
   **Check** button beside Save that runs the dry run and shows its errors where Save would.
 - **Touches**: `docs/decisions` (033), `admin`, `admin/store`, `login`, `app/console`,
   `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The node ID without a store** is kept in a file beside the config (`fit.node-id`), where the
+   roles keep theirs; a fit that gains a store takes it over. Alternatives: `$XDG_STATE_HOME`; no ID
+   without a store.
+2. **A random UUIDv4**; `admin.node_id` takes 1–64 of `[A-Za-z0-9._-]`. Alternative: the host name,
+   which changes with the host and collides in containers.
+3. **`admin.node_id`**, not in the plan, for containers with a read-only config and no store, which
+   would otherwise get a new ID at each start.
+4. **Dry runs** on `PUT`, `PATCH` and `DELETE /config`, `/load` and `/config/text`; not rollback,
+   reconcile or import.
+5. **A dry run tries new addresses with a brief bind**, so a port taken is refused as an apply refuses
+   it.
+6. **A dry run compiles without an engine**, as `fit validate` does, so upstream pools neither dial nor
+   probe. Alternative: the real environment, which would also find differences in shared pools.
+7. **A slowed user is refused (429), not delayed**, as holding the request would tie up the login pool;
+   at most 5 minutes after each guess. Alternatives: a delay; loopback exempt.
+8. **Names that are not users share one failure count**, keeping the table bounded; unknown names slow
+   down together.
+9. **Address lockouts double** from 15 minutes to an hour, starting over after 15 quiet minutes.
+   Alternative: a flat 15 minutes.
+10. **A user is slowed after 10 failures in a row**, above an address's 5, so that a guesser from one
+    address cannot slow the real user.
+11. **A failed password check on the Account page counts** as a failed login.
+12. **`/api/node` at the console's top level** as well as `/api/m/admin/node`, as the plan names it.
+13. **A dry run's answer** gives the running config's `version` and `etag` (for the next `If-Match`),
+    `new_etag` and `unchanged`, with `Fit-Dry-Run: 1`; it is not counted as a reload.
+14. **Capability names** are dotted, sorted and never change meaning; `store` and `console` appear only
+    when on.
+15. **Check is enabled only with unsaved changes**, as Save is.
+16. **Decision 033 also writes down the plan's seven open questions as proposed**, such as binary
+    upgrades (I151) not taken up, pending review.
+17. **`Retry-After` keeps its rounding** (whole seconds plus one), and the body's `retry_after` the same
+    number.
 
 ### I141 The manager: members, their credentials and their state
 

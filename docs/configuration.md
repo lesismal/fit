@@ -201,7 +201,10 @@ address without an error, and split the connections between the two. fit does no
 directory's files are added or taken out, whatever their format. A config that fails to load or
 compile is refused, and the running one stays. The [Admin API](reference/config.md#admin-api)
 reads and replaces the running config as JSON, by whole config or by JSON pointer, with versions
-to roll back to.
+to roll back to. Any change sent with `?dry_run=1` is checked through the whole path an apply takes,
+loaded, compiled and its new listeners' addresses tried, and answered as the apply would be, with
+nothing applied; `GET /node` says who this fit is (its node ID, versions, running config and the
+API's capabilities), for a fit that manages others ([decision 033](decisions/033-cluster-management.md)).
 
 With `admin.store`, the config is kept encrypted in a file of its own, the store, and fit runs from
 it: the files fit is started with give `admin`, and the rest of what they hold is only the store's

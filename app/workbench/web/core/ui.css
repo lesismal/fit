@@ -332,6 +332,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .callout { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--text-2); font-size: 13px; border: 1px solid color-mix(in srgb, var(--info) 25%, transparent); }
 .callout--warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.callout--ok { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
 .callout--danger { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
 .spinner { width: 18px; height: 18px; border: 2px solid var(--border-2); border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -446,6 +447,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
    账户页面（account/account.js）：宽度适中的表单，以及用户表。 */
 .acct-form { max-width: 480px; }
 .acct-table td:first-child { white-space: nowrap; }
+.node-id, .node-digest { overflow-wrap: anywhere; word-break: break-all; }
 @media (max-width: 700px) {
   .cf-state { display: none; }
   .cf-field { grid-template-columns: 1fr; }
