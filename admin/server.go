@@ -280,6 +280,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /node", s.node)
+	mux.HandleFunc("GET /schema", s.schemaHandler)
 	mux.HandleFunc("GET /cache", s.cacheZones)
 	mux.HandleFunc("POST /cache/purge", s.purge)
 	mux.HandleFunc("GET /logs", s.logs)

@@ -159,6 +159,11 @@ type Module struct {
 	// Routes adds the module's endpoints, as Options.Routes does: an
 	// endpoint the module adds as /api/x is served at /api/m/<ID>/x.
 	Routes func(api *API)
+	// Prefixes are paths outside /api/m/<ID>/ that the module serves as
+	// well, as "/api/n/": a request under one is looked up in its routes
+	// by its whole path, behind the same login and CSRF token as any
+	// other. The console's own endpoints come first.
+	Prefixes []string
 
 	once  sync.Once
 	table routeTable
@@ -580,6 +585,8 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 			return
 		}
 		t, rel = m.routes(), "/api/"+sub
+	} else if m := c.prefixed(p); m != nil && t.lookup(r.Method, p) == nil {
+		t = m.routes()
 	}
 	hd := t.lookup(r.Method, rel)
 	if hd == nil {
@@ -630,6 +637,21 @@ func (c *Console) module(id string) *Module {
 	for _, m := range c.modules() {
 		if m.ID == id {
 			return m
+		}
+	}
+	return nil
+}
+
+// prefixed returns the module whose Prefixes hold the path p, or nil.
+func (c *Console) prefixed(p string) *Module {
+	if c.modules == nil {
+		return nil
+	}
+	for _, m := range c.modules() {
+		for _, pre := range m.Prefixes {
+			if strings.HasPrefix(p, pre) {
+				return m
+			}
 		}
 	}
 	return nil

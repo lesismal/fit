@@ -1,0 +1,35 @@
+/* The node switcher (I143, cluster/switcher.js): its select in the top bar, and a member's pages marked in the
+   member's colour (--member, set on the shell): a line over the top bar, the member's name before the page's title,
+   and a band above the page; a read-only member's buttons that save are dimmed.
+
+   节点切换器（I143，cluster/switcher.js）：顶栏中的选择框；成员的页面以该成员的颜色（--member，设置在外框上）标出：顶栏上方
+   的线条、页面标题前的成员名，以及页面上方的横条；只读成员的保存按钮变暗。 */
+
+.sw { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.sw .sw-select { width: auto; max-width: 220px; }
+
+.shell.is-member .topbar { border-top: 4px solid var(--member); }
+.shell.is-member .sw .sw-select { border-color: var(--member); }
+.sw-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 28px; padding: 0 12px; border-radius: 999px;
+  background: var(--member); color: #fff; font-weight: 650; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+.sw-pill svg { width: 14px; height: 14px; flex: none; }
+
+.sw-band { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; padding: 9px 28px; font-size: 13px;
+  border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--member) 12%, var(--bg)); }
+.sw-band__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--member); flex: none; }
+.sw-band__what { color: var(--muted); }
+.sw-band__name { font-weight: 700; }
+.sw-band__bits { color: var(--text-2); }
+.sw-band__why { color: var(--text-2); font-size: 12.5px; flex-basis: 100%; }
+.sw-band__err { color: var(--danger); flex-basis: 100%; overflow-wrap: anywhere; }
+.sw-band__spacer { flex: 1; }
+.sw-ro svg { width: 12px; height: 12px; }
+
+/* A read-only member: what saves is dimmed, and refused if clicked. / 只读成员：保存类按钮变暗，点击也会被拒绝。 */
+.shell.is-readonly .topbar .btn--primary { opacity: .4; }
+
+@media (max-width: 760px) {
+  .sw-band { padding-left: 16px; padding-right: 16px; }
+  .sw .sw-label { display: none; }
+  .sw-pill { max-width: 120px; }
+}

@@ -2,12 +2,16 @@
 // Load it synchronously in <head>: it applies the saved theme before the first paint.
 // Never put user data into innerHTML: build nodes with UI.h (text is always set as text).
 // A module gets UI.scope(server, ns): the same library, whose requests go to its server module's API, /api/m/<server>/,
-// and whose words are looked up in its namespace first.
+// and whose words are looked up in its namespace first. A page opened against a member of a manager (the node switcher,
+// I143: the page's URL has ?node=<member>) sends them to /api/n/<member>/m/<server>/ instead, which the manager passes
+// on to that member; UI.target() names the member ('' for the manager's own pages).
 //
 // fit workbench UI 核心库，workbench 各模块共用。原生 JS，无构建步骤。
 // 在 <head> 中同步加载：首帧渲染前即应用已保存的主题。
 // 禁止把用户数据放进 innerHTML：用 UI.h 构建节点（文本始终以文本方式设置）。
 // 模块拿到 UI.scope(server, ns)：同一套库，其请求发往服务端模块的 API /api/m/<server>/，其词条先在其命名空间中查找。
+// 通过节点切换器（I143，页面 URL 带 ?node=<成员>）针对管理端的某个成员打开的页面，请求改发 /api/n/<成员>/m/<server>/，
+// 由管理端转给该成员；UI.target() 为该成员名（管理端自己的页面为 ''）。
 (function () {
   'use strict';
 
@@ -193,6 +197,30 @@
   // {"must_change_password": true}). / 应答表明会话须先修改默认密码（403 {"must_change_password": true}）时调用。
   var onMustChange = null;
   function setCsrf(v) { csrfToken = v || ''; }
+
+  // ---- The member the pages are drawn against (I143) / 页面所针对的成员（I143） ----
+  // target is the member the URL's ?node= names, '' for the manager's own pages; it changes only by loading another
+  // URL, so that nothing of one fit's pages is left on another's. readOnly: the member's version is not the
+  // manager's, whose pages it opens read-only (GET /api/n/<member>/workbench says), and a page's writes are refused
+  // here as the manager refuses them: anything but a GET or a HEAD, the text conversions and a dry run.
+  // target 为 URL 中 ?node= 所指的成员（管理端自己的页面为 ''）；只有加载另一个 URL 才会改变，因此一个 fit 的页面数据不会
+  // 留在另一个 fit 的页面上。readOnly：成员的版本与管理端不同，其页面只读打开（由 GET /api/n/<成员>/workbench 告知），页面的
+  // 写操作在此即被拒绝，与管理端的拒绝一致：GET、HEAD、文本转换与试运行（dry run）之外的请求。
+  var target = '';
+  try { target = new URLSearchParams(location.search).get('node') || ''; } catch (e) { target = ''; }
+  var readOnly = false;
+  function targetURL(name, hash) {
+    return location.pathname + (name ? '?node=' + encodeURIComponent(name) : '') + (hash == null ? location.hash : hash);
+  }
+  function blocked(self, method, path) {
+    if (!readOnly || !self || !self.member || method === 'GET' || method === 'HEAD') return null;
+    var at = path.indexOf('?'), p = at < 0 ? path : path.slice(0, at), q = at < 0 ? '' : path.slice(at + 1);
+    if (method === 'POST' && /\/m\/admin\/config\/(render|parse)$/.test(p)) return null;
+    if (/(^|&)dry_run=(1|true)(&|$)/.test(q)) return null;
+    var e = new Error(t('member.readonly'));
+    e.status = 409; e.readOnly = true;
+    return e;
+  }
   function addCsrf(method, headers) { if (method !== 'GET' && method !== 'HEAD' && csrfToken) headers[CSRF] = csrfToken; }
   // httpError builds the Error of a failed reply: JSON {"error": "message", "code": <int>}.
   // httpError 构建失败应答的 Error：JSON {"error": "message", "code": <int>}。
@@ -219,6 +247,8 @@
   // quiet（内部使用）：401 时不调用未登录回调（由会话检查与登录表单自行处理）。
   function api(method, path, body, quiet) {
     if (this && this.base && path.indexOf('/api/') === 0) path = this.base + path.slice(4);
+    var no = blocked(this, method, path);
+    if (no) return Promise.reject(no);
     var opt = { method: method, headers: {}, credentials: 'same-origin' };
     addCsrf(method, opt.headers);
     if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
@@ -242,6 +272,8 @@
   // 相应回调；状态码由调用方检查。
   function raw(method, path, body, headers) {
     if (this && this.base && path.indexOf('/api/') === 0) path = this.base + path.slice(4);
+    var no = blocked(this, method, path);
+    if (no) return Promise.reject(no);
     var opt = { method: method, headers: {}, credentials: 'same-origin' };
     Object.keys(headers || {}).forEach(function (k) { opt.headers[k] = headers[k]; });
     addCsrf(method, opt.headers);
@@ -276,6 +308,8 @@
   // HTTP 错误（同 api）或连接提前关闭时 reject。opts：{signal（AbortController.signal：中止即在服务端取消流），headers}。
   function stream(path, body, onData, opts) {
     if (this && this.base && path.indexOf('/api/') === 0) path = this.base + path.slice(4);
+    var no = blocked(this, 'POST', path);
+    if (no) return Promise.reject(no);
     opts = opts || {};
     var headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' };
     addCsrf('POST', headers);
@@ -342,8 +376,17 @@
   function login(user, pass) { return api('POST', '/api/login', { username: user, password: pass }, true).then(remember); }
   function logout() { return api('POST', '/api/logout', {}).then(function (v) { setCsrf(''); return v; }, function (e) { setCsrf(''); throw e; }); }
   function me() { return (this && this.api ? this : UI).api('GET', '/api/me'); }
-  // GET /api/workbench → {user, modules: [the IDs of the server modules served]}. / 已登录用户与服务端模块 ID 列表。
-  function workbench() { return api('GET', '/api/workbench'); }
+  // GET /api/workbench → {user, modules: [the IDs of the server modules served]}; against a member, GET
+  // /api/n/<member>/workbench, the member's modules the manager opens, and member: {name, access, fit_version,
+  // read_only, reason, ...}. / 已登录用户与服务端模块 ID 列表；针对成员时为 GET /api/n/<成员>/workbench：管理端可打开的
+  // 成员模块，以及 member：{name, access, fit_version, read_only, reason, ...}。
+  function workbench() {
+    if (!target) return api('GET', '/api/workbench');
+    return api('GET', '/api/n/' + encodeURIComponent(target) + '/workbench').then(function (wb) {
+      readOnly = !!(wb && wb.member && wb.member.read_only);
+      return wb;
+    });
+  }
 
   // ---- Feedback / 反馈 ----
   var toastBox = null;
@@ -550,7 +593,9 @@
   // words first. / 模块用的库：/api/... 请求发往 /api/m/<server>/...，t 先查 ns 的词条。
   function scope(server, ns) {
     var s = Object.create(UI);
-    s.base = server ? '/api/m/' + encodeURIComponent(server) : '';
+    s.base = !server ? '' : target ? '/api/n/' + encodeURIComponent(target) + '/m/' + encodeURIComponent(server) : '/api/m/' + encodeURIComponent(server);
+    // member: the module's requests go to the member the page is drawn against. / 模块的请求发往页面所针对的成员。
+    s.member = !!(server && target);
     // Bound, so that a module may pass them around, as PeersPanel's call. / 绑定，模块可把它们作为回调传递。
     s.raw = raw.bind(s); s.api = api.bind(s); s.rpc = rpc.bind(s); s.stream = stream.bind(s); s.rpcStream = rpcStream.bind(s); s.me = me.bind(s);
     if (ns) {
@@ -566,6 +611,7 @@
     api: api, raw: raw, rpc: rpc, stream: stream, rpcStream: rpcStream, setUnauthorized: function (fn) { onUnauthorized = fn; },
     setMustChange: function (fn) { onMustChange = fn; },
     session: session, login: login, logout: logout, me: me, workbench: workbench, configNote: configNote, scope: scope,
+    target: function () { return target; }, readOnly: function () { return readOnly; }, targetURL: targetURL,
     toast: toast, fail: fail, modal: modal, closeModals: closeModals, confirm: confirmBox, busy: busy, copy: copyText,
     fmtMB: fmtMB, fmtNum: fmtNum, fmtDur: fmtDur, ago: ago, fmtTime: fmtTime,
     badge: badge, onlineBadge: onlineBadge, meter: meter, stat: stat, kv: kv, empty: empty, card: card, table: table,

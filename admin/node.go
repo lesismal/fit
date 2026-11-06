@@ -87,6 +87,9 @@ const (
 	CapTokens = "tokens"
 	// CapMedia: /media/... and /streaming/....
 	CapMedia = "media"
+	// CapSchema: GET /schema, the JSON Schema of the config this fit
+	// takes, whose digest is schema_digest.
+	CapSchema = "schema"
 	// CapStore: admin.store keeps the config, the console users and the
 	// sections beside them.
 	CapStore = "store"
@@ -253,11 +256,27 @@ func writeNodeID(path, id string) error {
 	return err
 }
 
+// schemaJSON is the schema GET /schema answers, made once.
+var schemaJSON = sync.OnceValue(func() []byte {
+	data, _ := schema.Generate()
+	return data
+})
+
+// schemaHandler answers GET /schema: the config's JSON Schema, as the
+// console's /api/m/admin/schema, for a manager whose node switcher opens
+// this fit's pages through its Admin API.
+func (s *Server) schemaHandler(w http.ResponseWriter, _ *http.Request) {
+	data := schemaJSON()
+	w.Header().Set("Content-Type", "application/schema+json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
+}
+
 // schemaDigest is the SHA-256 of the schema the console serves, made once:
 // two fits with the same digest take the same configs.
 var schemaDigest = sync.OnceValue(func() string {
-	data, err := schema.Generate()
-	if err != nil {
+	data := schemaJSON()
+	if data == nil {
 		return ""
 	}
 	sum := sha256.Sum256(data)
@@ -289,7 +308,7 @@ type nodeBody struct {
 // capabilities lists what this fit's Admin API offers, sorted.
 func (cs *Configs) capabilities() []string {
 	caps := []string{CapNode, CapIfMatch, CapDryRun, CapText, CapEffective, CapDrift, CapVersions, CapTransfer,
-		CapReload, CapStatus, CapMetrics, CapCache, CapCachePrefix, CapLogs, CapTokens, CapMedia}
+		CapReload, CapStatus, CapMetrics, CapCache, CapCachePrefix, CapLogs, CapTokens, CapMedia, CapSchema}
 	if cs.Sealer() != nil {
 		caps = append(caps, CapStore)
 	}

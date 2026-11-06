@@ -2,7 +2,7 @@
 
 [English](033-cluster-management.md) | [简体中文](033-cluster-management.zh-CN.md)
 
-Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I144 and I149 built; the choices marked *pending review*
+Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I143, I144 and I149 built; the choices marked *pending review*
 stand until the user rules on them. The track is I140–I151 of the
 [development plan](../dev-plan.md#cluster-management).
 
@@ -153,6 +153,17 @@ What I144 adds, groups and operations on many ([groups and operations](../cluste
   the audit log with each member's outcome.
 - **On every fit, for them**: `POST /reload` (`config.reload`), the running config applied again;
   `POST /cache/purge` takes `prefixes` (`cache.prefix`).
+
+What I143 adds, a member's own pages opened from the manager ([the node switcher](../cluster.md#a-members-own-pages-the-node-switcher)):
+
+- **The pass-through** `/api/n/<member>/...` on the manager's console: `workbench`, `node` and
+  `m/<module>/<path>`, passed on to the member as the manager reaches it, its answer back, the
+  headers both ways by lists, writes audited (`node.api`) and refused for a member of another
+  schema; served by the module `cluster` through `console.Module.Prefixes`.
+- **The node switcher** in the workbench's header: `?node=<member>` draws the manager's own pages
+  against that member, marked in its colour, read-only for another version; **Open** on every
+  member's card, row and page.
+- **On every fit, for it**: `GET /schema` in the Admin API (`schema`).
 
 ## Pending review
 
@@ -323,6 +334,55 @@ Decided while building I144 (2026-11-06):
     selected at first), the operations bar, the latest results and the recent operations;
     `#/cluster/ops` is the same over every member, for a selection that is no group. No cancel of
     an operation under way.
+
+Decided while building I143 (2026-11-06):
+
+56. **The pass-through is the plan's `/api/n/<member>/...`**, at the console's top level, which a
+    module may now claim (`console.Module.Prefixes`); a member's module API is at
+    `m/<module>/<path>`, beside `workbench` and `node`. Alternative: `/api/m/cluster/n/...` inside
+    the module, with no change to the console; that path is refused, so that one path passes on.
+57. **It reaches the member through the node's own call**, not `Manager.Call`, to see the session
+    (a 403 asking for a password change ends it) and to reach the roles' modules at the console's
+    paths; `Manager.Call` stays the one way for I145 and I146.
+58. **The member the pages show is the URL's `?node=<member>`**, and switching loads the page
+    again, so that nothing of one fit's pages is left on another's, a member's page has a link and
+    a tab of its own, and the browser's own prompt guards unsaved changes. Alternatives: switching
+    in place, resetting every module's state; the choice kept in the session's storage.
+59. **A version the bundle knows is the manager's config schema**: the member's `schema_digest` is
+    the manager's. Another opens read-only, and the manager refuses its writes too (`409`), by the
+    latest poll's digest, as well as a member not read yet. Alternatives: the same fit version, or
+    the same minor version; read-only in the pages alone.
+60. **A write** is any request but a GET or a HEAD, the text conversions (`POST /config/render`,
+    `/config/parse`) and dry runs. Each is audited, whatever the member answered: `METHOD path:
+    outcome`, a write never answered as one that may or may not have been applied, one whose login
+    failed as not sent. Reads and dry runs are not.
+61. **Audit entries are written off the request**: logged at once, then written to the store by a
+    goroutine of the manager's, in batches, without changing the members' ETag (so that an open
+    Nodes form is not refused for a save elsewhere); 64 writes may wait for theirs, one more is
+    refused before it is sent. A manager whose document a newer fit wrote refuses the switcher's
+    writes, which it could not record. Alternative: the entry written before the answer, on the
+    console's pool.
+62. **The bounds**: 3 calls to a member at once, 16 waiting (a wait past `timeout` answered `503`,
+    not sent), 64 to all members (`429`); bodies and answers within `max_response_bytes`.
+63. **Headers both ways by lists**, and a `Content-Type` a browser would render answered as
+    `application/octet-stream`; a member's 401 and 403 asking for a password change answered `502`
+    with the problem, so that a page never takes them for the manager's session; streams refused
+    (`501`).
+64. **Not passed on**: a member's console users and passwords (the manager never changes them), its
+    pprof and dashboard, its `cluster` and `ai` modules, and the LLM roles, whose pages read through
+    POST RPCs and streams (each poll would be an audited write); the tunnel roles' pages are, through
+    a member's console. The manager's Cluster menu, account pages and assistant are not shown
+    against a member. Alternative: the LLM roles with their RPCs read as reads.
+65. **`GET /schema` in the Admin API** (`schema`), so that a member reached by token or link draws
+    with its own schema; one older than it is drawn with the manager's, answered with
+    `Fit-Schema-From: manager`, read-only anyway. Alternative: no schema for those, and no pages.
+66. **The marks**: the member's name in a pill before the title, in the tab's title and in a band
+    above the page, its colour a hue made from its name, also the top bar's line; read-only says
+    why, dims Save and refuses a write with a toast. A member that cannot be read shows its error
+    and the way back.
+67. **Two fixes on the way**: an HTTP member's call now takes an escaped path with its query (the
+    query was escaped into the path before, which no caller had needed); a refused login's problem
+    is copied for each caller, which changed it unlocked (a data race the tests found).
 
 Open questions of the plan, answered as proposed until reviewed:
 

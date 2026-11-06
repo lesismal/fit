@@ -217,11 +217,13 @@ var errClosed = errors.New("the member's connections were closed")
 // once with its answer or why there is none, from a fib worker or the
 // caller's goroutine. It never blocks.
 func (t *transport) do(method, path string, header stdhttp.Header, body []byte, done func(*reply, error)) {
-	u := *t.base
-	u.Path = strings.TrimSuffix(u.Path, "/") + path
-	// The URL parsed when the member was checked, and the method is the
-	// manager's own: the request is made.
-	req, _ := stdhttp.NewRequest(method, u.String(), nil)
+	// path is escaped, with its query, as the member's API takes it: the
+	// node switcher passes on what a page asked for.
+	req, err := stdhttp.NewRequest(method, strings.TrimSuffix(t.base.String(), "/")+path, nil)
+	if err != nil {
+		done(nil, err)
+		return
+	}
 	for k, v := range header {
 		req.Header[k] = v
 	}
