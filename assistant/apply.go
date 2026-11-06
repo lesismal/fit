@@ -95,6 +95,9 @@ func toolPropose(name string) func(c *Call) (string, error) {
 		if len(b.purges) > 0 {
 			out["purges"] = b.purges
 		}
+		if len(b.media) > 0 {
+			out["media"] = a.modelMedia(c.Settings, b.media)
+		}
 		if b.rollback > 0 {
 			out["rollback"] = b.rollback
 		}
@@ -145,6 +148,11 @@ type ProposalView struct {
 	Fixes        []FixRef          `json:"fixes,omitempty"`
 	Rollback     uint64            `json:"rollback,omitempty"`
 	Purges       []PurgeStep       `json:"purges,omitempty"`
+	// Media are the media steps, checked on what runs now, with what uses
+	// the items they change; MediaTag is a digest of that, which an apply
+	// names to confirm what it was shown.
+	Media    []MediaAction `json:"media,omitempty"`
+	MediaTag string        `json:"media_tag,omitempty"`
 	// Unconverted is what the steps say they did not carry over from a
 	// config moved from another server.
 	Unconverted []string `json:"unconverted,omitempty"`
@@ -170,7 +178,7 @@ func (a *Assistant) viewFrom(ctx context.Context, user, conv string, p *Proposal
 	v := &ProposalView{ID: p.ID, User: user, Conversation: conv, Revision: p.Revision, Created: p.Created, Updated: p.Updated,
 		BaseVersion: p.BaseVersion, BaseETag: p.BaseETag, Version: b.cur.version, ETag: b.cur.etag, Stale: b.kind != "" && p.BaseETag != b.cur.etag,
 		Kind: b.kind, Changed: b.changed, Diff: map[string]string{}, Valid: b.valid, Errors: b.errors, Fixes: b.fixes, Rollback: b.rollback,
-		Purges: b.purges, Error: p.Error, Level: level, CanApply: level == config.AssistantApply}
+		Purges: b.purges, Media: b.media, MediaTag: b.mediaTag, Error: p.Error, Level: level, CanApply: level == config.AssistantApply}
 	if v.Changed == nil {
 		v.Changed = []string{}
 	}
@@ -226,13 +234,14 @@ func (a *Assistant) setProposal(user, id, was string, rev int, p *Proposal, note
 }
 
 // proposalBody is an apply's or a discard's body: the proposal, its
-// revision and the config's ETag the person confirmed, and, for another
-// user's proposal, whose it is.
+// revision, the config's ETag and the media tag of what uses its files the
+// person confirmed, and, for another user's proposal, whose it is.
 type proposalBody struct {
 	User     string `json:"user"`
 	ID       string `json:"id"`
 	Revision int    `json:"revision"`
 	ETag     string `json:"etag"`
+	MediaTag string `json:"media_tag"`
 }
 
 // pendingView is a pending proposal as GET /api/proposals lists it.
@@ -379,6 +388,7 @@ type applyResult struct {
 	ETag     string         `json:"etag,omitempty"`
 	Warnings []string       `json:"warnings,omitempty"`
 	Purged   []purgeResult  `json:"purged,omitempty"`
+	Media    []mediaResult  `json:"media,omitempty"`
 	Proposal *ProposalView  `json:"proposal,omitempty"`
 	Error    string         `json:"error,omitempty"`
 	Errors   []apiProblem   `json:"errors,omitempty"`
@@ -438,7 +448,10 @@ func (a *Assistant) apply(r *console.Request, viewer, user, conv string, body pr
 		return
 	case b.kind != "" && (v.Stale || body.ETag != b.cur.etag):
 		// Purges alone are not of a config, and are never stale.
-		a.rebase(r, user, conv, p, b, viewer, entry)
+		a.rebase(r, user, conv, p, b, viewer, entry, "")
+		return
+	case body.MediaTag != b.mediaTag:
+		a.rebase(r, user, conv, p, b, viewer, entry, "what uses the files the proposal changes is not what was confirmed: it is offered again with what uses them now; review it and apply again")
 		return
 	case !b.valid:
 		refuse(422, OutcomeRefused, "the proposal does not check, so it cannot be applied", p, v)
@@ -452,7 +465,7 @@ func (a *Assistant) apply(r *console.Request, viewer, user, conv string, body pr
 			var ae *apiError
 			if errors.As(err, &ae) {
 				if ae.Status == 412 {
-					a.rebase(r, user, conv, p, b, viewer, entry)
+					a.rebase(r, user, conv, p, b, viewer, entry, "")
 					return
 				}
 				res.Error, res.Errors = ae.Msg, ae.Errors
@@ -467,6 +480,13 @@ func (a *Assistant) apply(r *console.Request, viewer, user, conv string, body pr
 			return
 		}
 		res.Version, res.ETag, res.Warnings = ans.Version, ans.ETag, ans.Warnings
+	}
+	for _, m := range b.media {
+		mr := a.applyMedia(ctx, viewer, m)
+		if mr.Error != "" {
+			res.Outcome = OutcomePartial
+		}
+		res.Media = append(res.Media, mr)
 	}
 	for _, pg := range b.purges {
 		pr := purgeResult{PurgeStep: pg}
@@ -488,11 +508,24 @@ func (a *Assistant) apply(r *console.Request, viewer, user, conv string, body pr
 	if res.Version > 0 {
 		note += fmt.Sprintf(" as config version %d", res.Version)
 	}
-	if res.Outcome == OutcomePartial {
-		note += "; a cache purge failed"
+	for _, mr := range res.Media {
+		if mr.Error != "" {
+			note += fmt.Sprintf("; its step %d (%s) failed: %s", mr.Step, mr.Op, mr.Error)
+		}
+	}
+	for _, pr := range res.Purged {
+		if pr.Error != "" {
+			note += "; a cache purge failed"
+			break
+		}
 	}
 	a.setProposal(user, conv, p.ID, p.Revision, nil, note+".")
 	entry.Outcome, entry.Version = res.Outcome, res.Version
+	for _, mr := range res.Media {
+		if mr.Error != "" && entry.Detail == "" {
+			entry.Detail = mr.Error
+		}
+	}
 	for _, pr := range res.Purged {
 		if pr.Error != "" {
 			entry.Detail = pr.Error
@@ -504,14 +537,17 @@ func (a *Assistant) apply(r *console.Request, viewer, user, conv string, body pr
 }
 
 // rebase moves a stale proposal to the running config, b's, and answers
-// 412 with it, to be confirmed again.
-func (a *Assistant) rebase(r *console.Request, user, conv string, p *Proposal, b *built, viewer string, entry AuditEntry) {
+// 412 with it, to be confirmed again, saying why: msg, or the config's
+// change when "".
+func (a *Assistant) rebase(r *console.Request, user, conv string, p *Proposal, b *built, viewer string, entry AuditEntry, msg string) {
 	p.BaseETag, p.BaseVersion, p.Updated = b.cur.etag, b.cur.version, nowMs()
 	p.Revision++
 	p.Valid = b.valid
 	a.setProposal(user, conv, p.ID, p.Revision-1, p, "")
 	v := a.viewFrom(context.Background(), user, conv, p, viewer, b)
-	msg := fmt.Sprintf("the config changed since the proposal was checked: it is offered again on version %d; review it and apply again", v.Version)
+	if msg == "" {
+		msg = fmt.Sprintf("the config changed since the proposal was checked: it is offered again on version %d; review it and apply again", v.Version)
+	}
 	entry.Outcome, entry.Detail = OutcomeStale, msg
 	a.Audit(entry)
 	_ = r.JSON(412, applyResult{Outcome: OutcomeStale, Error: msg, Proposal: v})

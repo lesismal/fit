@@ -284,6 +284,8 @@ func TestChatTokensSpentInLoop(t *testing.T) {
 // its early turns summarized by the model, the summary kept with it, and
 // the calls after it carry the summary instead of the turns.
 func TestChatSummarizes(t *testing.T) {
+	// The window holds the system prompt and the read tools, with some room.
+	const window = 5600
 	long := strings.Repeat("The upstream api has backends in three zones. ", 60)
 	var summaries int
 	var mu sync.Mutex
@@ -296,7 +298,7 @@ func TestChatSummarizes(t *testing.T) {
 		}
 		return fakeapi.Turn{Text: long[:400]}
 	}, func(o *Options) {
-		o.Settings.Providers[0].Models[0].Context = 3600
+		o.Settings.Providers[0].Models[0].Context = window
 	})
 	id := ""
 	for i := range 8 {
@@ -317,7 +319,7 @@ func TestChatSummarizes(t *testing.T) {
 		t.Errorf("the last call: %d bytes, %s", len(last.Raw), fakeapi.System(last)[len(fakeapi.System(last))-200:])
 	}
 	for _, r := range reqs {
-		if fakeapi.System(r) != summaryPrompt && tokens(string(r.Raw)) > 3600 {
+		if fakeapi.System(r) != summaryPrompt && tokens(string(r.Raw)) > window {
 			t.Errorf("a call of %d bytes outgrew the window", len(r.Raw))
 		}
 	}
@@ -516,7 +518,7 @@ func TestToolsEndpoint(t *testing.T) {
 	if status != 200 || json.Unmarshal([]byte(body), &b) != nil {
 		t.Fatalf("%d %s", status, body)
 	}
-	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools())+len(pageTools())+1 || b.Tools[0].Group != GroupConfig {
+	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools())+len(mediaTools())+len(pageTools())+1 || b.Tools[0].Group != GroupConfig {
 		t.Fatalf("%+v", b)
 	}
 	byName := map[string]toolView{}

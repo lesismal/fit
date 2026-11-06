@@ -177,7 +177,7 @@ func checkPageEdit(c *Call) (string, error) {
 		if err := onPage(ed, c.Level, tokens[0]); err != nil {
 			return "", fmt.Errorf("ops[%d]: %v", n, err)
 		}
-		if slices.ContainsFunc(tokens, secretName) {
+		if slices.ContainsFunc(tokens, secretName) || secretPath(tokens) {
 			return "", fmt.Errorf("ops[%d]: %s is a secret field, which the assistant never writes: the person sets it on the page", n, op.Path)
 		}
 		if op.Op == opRemove {
@@ -266,7 +266,8 @@ func guardDraft(tokens []string, v any, secret bool) error {
 	switch t := v.(type) {
 	case *jobject:
 		for _, k := range t.keys {
-			if err := guardDraft(append(tokens[:len(tokens):len(tokens)], k), t.vals[k], secret || secretName(k)); err != nil {
+			sub := append(tokens[:len(tokens):len(tokens)], k)
+			if err := guardDraft(sub, t.vals[k], secret || secretPath(sub)); err != nil {
 				return err
 			}
 		}

@@ -26,6 +26,7 @@
 package assistant
 
 import (
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -141,8 +142,11 @@ type Assistant struct {
 	audit    auditLog
 	// applyMu lets one proposal be applied at a time.
 	applyMu sync.Mutex
-	started time.Time
-	close   sync.Once
+	// subjectKey is the key playback sessions' subjects are hashed with
+	// for the model, made anew each time fit starts (tools_media.go).
+	subjectKey []byte
+	started    time.Time
+	close      sync.Once
 }
 
 // kept is the store's section.
@@ -169,7 +173,9 @@ func New(o Options) (*Assistant, error) {
 	a := &Assistant{o: o, client: model.NewClient(o.Engine, o.Limits), tests: make(chan struct{}, MaxTests),
 		raw: raw, settings: o.Settings, registry: NewRegistry(), started: time.Now(),
 		chats: chats{users: map[string]*userChats{}, dirty: map[string]bool{}, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}}
-	for _, t := range slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), pageTools(), o.Tools) {
+	a.subjectKey = make([]byte, 32)
+	_, _ = rand.Read(a.subjectKey) // crypto/rand.Read never fails
+	for _, t := range slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), mediaTools(), pageTools(), o.Tools) {
 		if err := a.registry.Add(t); err != nil {
 			return nil, err
 		}

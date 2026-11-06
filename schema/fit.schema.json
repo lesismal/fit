@@ -299,6 +299,10 @@
         "send_logs": {
           "description": "Let the tools hand lines of fit's own log to the model, redacted. Off by default.",
           "type": "boolean"
+        },
+        "send_subjects": {
+          "description": "Let the media tools hand playback sessions' subjects to the model as they are. Off by default: each subject is replaced by a hash of it, the same for one subject while fit runs, which the propose tools take back.",
+          "type": "boolean"
         }
       },
       "type": "object"

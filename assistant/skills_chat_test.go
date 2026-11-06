@@ -25,21 +25,30 @@ func offered(r fakeapi.Request) []string {
 // skillRuns are what each built-in skill does in TestBuiltinSkillsRun: a
 // read call, and the change it proposes when it proposes one, on propBase.
 var skillRuns = map[string][2]string{
-	"explain":         {`{"members": ["routes"]}`, ""},
-	"route-builder":   {`{"members": ["routes", "upstreams", "listeners"]}`, `{"summary": "Answer /healthz", "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "health", "match": {"path": ["/healthz"]}, "handler": {"module": "respond", "params": {"body": "ok"}}}}]}`},
-	"reverse-proxy":   {`{"members": ["upstreams"]}`, `{"summary": "A second backend, health checked", "members": {"upstreams": [{"name": "app", "addresses": ["10.0.0.7:9000", "10.0.0.8:9000"], "max_fails": 3, "fail_timeout": "10s", "health_check": {"path": "/healthz", "interval": "5s"}}]}}`},
-	"tls-acme":        {`{"members": ["listeners"]}`, `{"summary": "An ACME account", "members": {"acme": {"email": "ops@example.com"}}}`},
-	"rate-limit-auth": {`{"members": ["routes"]}`, `{"summary": "Limit /api", "ops": [{"op": "add", "path": "/routes/0/middleware/0", "value": {"module": "rate_limit", "params": {"rate": 10, "burst": 20}}}]}`},
-	"cache-tuning":    {`{"members": ["routes"]}`, `{"summary": "Purge the zone", "zone": "main", "all": true}`},
-	"diagnose":        {`{"members": ["routes", "upstreams"]}`, ""},
-	"drift-explain":   {`{}`, ""},
-	"log-analysis":    {`{"level": "warn"}`, ""},
-	"security-review": {`{}`, `{"summary": "No internal addresses through app", "ops": [{"op": "add", "path": "/upstreams/0/deny_internal", "value": true}]}`},
-	"migrate":         {`{"from": "nginx", "text": "http { server { listen 8080; location / { proxy_pass http://10.0.0.1:9000; } } }"}`, `{"summary": "The converted site", "ops": [{"op": "add", "path": "/routes/-", "value": {"name": "site", "match": {"path": ["/*"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}}}}]}`},
-	"media-setup":     {`{"members": ["listeners", "routes"]}`, `{"summary": "Serve the HLS output", "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "live", "match": {"path": ["/live/*"]}, "handler": {"module": "static", "params": {"root": "/var/lib/fit/hls"}}}}]}`},
-	"llm-mesh-setup":  {`{"members": ["listeners"]}`, `{"summary": "Route the mesh's API", "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "llm", "match": {"path": ["/v1/*"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}}}}]}`},
-	"tunnel-setup":    {`{"members": ["listeners"]}`, `{"summary": "Route the tunnel's web service", "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "home", "match": {"host": ["home.example.com"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}}}}]}`},
+	"explain":               {`{"members": ["routes"]}`, ""},
+	"route-builder":         {`{"members": ["routes", "upstreams", "listeners"]}`, `{"summary": "Answer /healthz", "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "health", "match": {"path": ["/healthz"]}, "handler": {"module": "respond", "params": {"body": "ok"}}}}]}`},
+	"reverse-proxy":         {`{"members": ["upstreams"]}`, `{"summary": "A second backend, health checked", "members": {"upstreams": [{"name": "app", "addresses": ["10.0.0.7:9000", "10.0.0.8:9000"], "max_fails": 3, "fail_timeout": "10s", "health_check": {"path": "/healthz", "interval": "5s"}}]}}`},
+	"tls-acme":              {`{"members": ["listeners"]}`, `{"summary": "An ACME account", "members": {"acme": {"email": "ops@example.com"}}}`},
+	"rate-limit-auth":       {`{"members": ["routes"]}`, `{"summary": "Limit /api", "ops": [{"op": "add", "path": "/routes/0/middleware/0", "value": {"module": "rate_limit", "params": {"rate": 10, "burst": 20}}}]}`},
+	"cache-tuning":          {`{"members": ["routes"]}`, `{"summary": "Purge the zone", "zone": "main", "all": true}`},
+	"diagnose":              {`{"members": ["routes", "upstreams"]}`, ""},
+	"drift-explain":         {`{}`, ""},
+	"log-analysis":          {`{"level": "warn"}`, ""},
+	"security-review":       {`{}`, `{"summary": "No internal addresses through app", "ops": [{"op": "add", "path": "/upstreams/0/deny_internal", "value": true}]}`},
+	"migrate":               {`{"from": "nginx", "text": "http { server { listen 8080; location / { proxy_pass http://10.0.0.1:9000; } } }"}`, `{"summary": "The converted site", "ops": [{"op": "add", "path": "/routes/-", "value": {"name": "site", "match": {"path": ["/*"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}}}}]}`},
+	"media-setup":           {`{"members": ["listeners", "routes"]}`, `{"summary": "Serve the HLS output", "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "live", "match": {"path": ["/live/*"]}, "handler": {"module": "static", "params": {"root": "/var/lib/fit/hls"}}}}]}`},
+	"llm-mesh-setup":        {`{"members": ["listeners"]}`, `{"summary": "Route the mesh's API", "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "llm", "match": {"path": ["/v1/*"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}}}}]}`},
+	"tunnel-setup":          {`{"members": ["listeners"]}`, `{"summary": "Route the tunnel's web service", "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "home", "match": {"host": ["home.example.com"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}}}}]}`},
+	"vod-setup":             {`{"members": ["media_library", "routes"]}`, `{"summary": "Serve the films on demand", "members": {"media_library": [{"name": "films", "roots": ["/srv/media/films"]}]}, "ops": [{"op": "add", "path": "/routes/0", "value": {"name": "vod", "match": {"path": ["/vod/*"]}, "handler": {"module": "vod", "params": {"library": "films"}}}}]}`},
+	"channel-scheduler":     {`{"members": ["streaming"]}`, `{"summary": "Loop the films on tv/films", "members": {"media_library": [{"name": "films", "roots": ["/srv/media/films"]}], "streaming": {"channels": [{"name": "tv/films", "library": "films", "items": ["films/bbb", "films/news"]}]}}}`},
+	"library-health":        {`{"library": "films", "errors": true}`, `{"summary": "Keep the broken file aside", "library": "films", "item": "films/broken", "op": "rename", "name": "broken-old.mp4"}`},
+	"playback-troubleshoot": {`{}`, `{"summary": "End bob's old player", "policy": "site", "sessions": [{"subject": "{{bob}}", "id": "s3"}]}`},
 }
+
+// skillProposes is the propose tool a skill's run calls, when not
+// config_propose.
+var skillProposes = map[string]string{"cache-tuning": ToolPurgePropose, "library-health": ToolMediaFilePropose,
+	"playback-troubleshoot": ToolMediaSessionEndPropose}
 
 // TestBuiltinSkillsRun: each built-in skill, run by /name with its first
 // example, does its task on a fixed config against a recorded model: its
@@ -61,13 +70,19 @@ func TestBuiltinSkillsRun(t *testing.T) {
 			propose := ""
 			if run[1] != "" {
 				propose = ToolConfigPropose
-				if sk.Name == "cache-tuning" {
-					propose = ToolPurgePropose
+				if p, ok := skillProposes[sk.Name]; ok {
+					propose = p
 				}
 				turns = append(turns, fakeapi.Turn{Calls: []fakeapi.Call{call("p1", propose, run[1])}})
 			}
 			turns = append(turns, fakeapi.Turn{Text: "Done: " + sk.Title})
 			f := startProposals(t, `"default_level": "propose"`, turns...)
+			// A subject as playback_sessions shows it.
+			for i := range turns {
+				for k := range turns[i].Calls {
+					turns[i].Calls[k].Args = strings.ReplaceAll(turns[i].Calls[k].Args, "{{bob}}", f.a.subjectOut(f.a.Settings(), mediaBob))
+				}
+			}
 			body, _ := json.Marshal(map[string]string{"message": "/" + sk.Name + " " + sk.Examples[0]})
 			s := f.chat(string(body))
 			if s.end == nil || s.end.Reason != ReasonAnswer {

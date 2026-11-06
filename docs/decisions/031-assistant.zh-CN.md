@@ -78,7 +78,7 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   ETag 与 `/versions` 只在人点击 **保存并应用** 时才变化，记为此人的修改。`page_revert` 把页面恢复到助手首次起草之前，人在此
   之后改过页面时拒绝。
 - **技能（I127）** 是带 YAML front matter（`name`、`title`、`title_zh`、`description`、`description_zh`、`inputs`、`tools`、
-  `model`、`examples`）的 Markdown，其后为提示词，最多 32 KiB；不符合技能格式的 front matter 会被拒绝并给出行号。计划中的 14 个
+  `model`、`examples`）的 Markdown，其后为提示词，最多 32 KiB；不符合技能格式的 front matter 会被拒绝并给出行号。计划中的 18 个
   内置技能嵌入在二进制中；用户添加的技能由控制台的所有用户共享，最多 64 个，与停用的内置技能一起保存在 store 的
   `assistant.skills` 段中，只有级别为 `apply` 的用户能添加、编辑、启用或停用。技能按需加载：没有技能时，系统提示列出已启用技能的
   名称与英文描述（不超过窗口的十分之一），`skill_load` 把某个技能的完整提示词交给模型；`/name`、面板的选择器或 `skill_load`
@@ -99,6 +99,15 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   都有上限，且只能从 `allow`（默认仅回环地址）及令牌自身的地址访问；每次调用、读取与提示词都记入审计日志，来源为 `mcp` 并带
   令牌名称。fit 的助手不调用任何外部 MCP 服务器。官方 Go MCP SDK 只用于一个测试，位于独立的模块（`test/mcpsdk`）中，
   不增加 fit 自身的依赖。
+- **媒体库的工具（I152）** 经进程内的 Admin API 读取决策 032 中的媒体库、频道与播放（`media_library_search`、`media_item_get`、
+  `channels_status`、`playback_sessions`），并可提议重新扫描、结束会话、轮换保存在文件中的密钥，或对条目的文件改名、移动、删除
+  或写入 sidecar。这些步骤是操作而非配置：与任何一种配置变更同在一个提案中（与缓存清除一样），在配置之后按顺序以应用者的身份
+  经 Admin API 的媒体接口执行，因此文件修改以该用户的 `media` 条目记入审计日志，助手不再重复记录。文件步骤带有条目的使用情况
+  （引用或播放它的频道、观众），随提案与确认对话框一起显示；应用时回传所见内容的摘要（`media_tag`），不一致时重新提供提案；
+  只对用户确认过正在使用的条目发送 `force`，某一步失败时其余步骤仍会完成（`partial`）。密钥、签名与播放 URL 都不会交给模型：
+  推流目标的 `url` 整体视为密钥，任何带 `sig=` 的 URL 或路径无论出现在何处都会被脱敏；主体以每次启动生成的密钥做 HMAC 后发送，
+  除非 `data.send_subjects` 允许原样发送。媒体工具与其他工具一样按令牌级别经 MCP 提供。技能 `vod-setup`、`channel-scheduler`、
+  `library-health` 与 `playback-troubleshoot` 使用这些工具，媒体页面的“问 AI”按钮运行后三者。
 
 ## 影响
 

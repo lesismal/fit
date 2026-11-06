@@ -16,7 +16,7 @@
       '助手可以调用的工具。每个工具都在控制台的线程池上、经进程内的 Admin API 读取本 fit 的运行情况；每个结果都会脱敏并受大小限制。没有任何工具会写入配置、版本或 store：页面工具只在打开的页面上起草，由你自己保存；提案工具只向提案加入步骤，由级别为 apply 的人再次确认后应用。'],
     ['fn.name', 'Tool', '工具'], ['fn.needs', 'Level', '级别'], ['fn.state', 'State', '状态'], ['fn.what', 'What it does', '作用'],
     ['fn.on', 'enabled', '已启用'], ['fn.off', 'disabled', '未启用'], ['fn.schema', 'Arguments', '参数'],
-    ['g.config', 'Config', '配置'], ['g.runtime', 'Runtime', '运行时'], ['g.roles', 'Roles', '角色'], ['g.logs', 'Logs', '日志'],
+    ['g.config', 'Config', '配置'], ['g.runtime', 'Runtime', '运行时'], ['g.roles', 'Roles', '角色'], ['g.media', 'Media', '媒体'], ['g.logs', 'Logs', '日志'],
     ['g.page', 'Page', '页面'], ['g.change', 'Change', '变更'], ['g.convert', 'Convert', '转换'], ['g.agent', 'Agent', '代理'],
     ['why.data.send_logs is off', 'off: data.send_logs is not set', '未启用：未设置 data.send_logs'],
     ['why.data.send_access_log is off', 'off: data.send_access_log is not set', '未启用：未设置 data.send_access_log'],
@@ -48,7 +48,15 @@
       '向对话的提案加入一项配置变更：顶层成员，或按 JSON 指针的操作；整体检查，助手从不自行应用。'],
     ['t.reconcile_propose', 'Adds Consistency fixes to the proposal, by difference and action; applied together through the reconcile endpoint.', '向提案加入一致性修复（按差异与操作）；经 reconcile 接口一起应用。'],
     ['t.rollback_propose', 'Proposes applying a kept version again, as a new version.', '提议将保存的某个版本重新应用为新版本。'],
-    ['t.cache_purge_propose', 'Adds a cache purge, by zone, URL, tag or all, run after the proposal\'s config change.', '加入一次缓存清除（按缓存区、URL、标签或全部），在提案的配置变更之后执行。']
+    ['t.cache_purge_propose', 'Adds a cache purge, by zone, URL, tag or all, run after the proposal\'s config change.', '加入一次缓存清除（按缓存区、URL、标签或全部），在提案的配置变更之后执行。'],
+    ['t.media_library_search', 'The media libraries, or one library\'s items searched and filtered by codec, resolution and probe errors, paged.', '列出媒体库，或按编码、分辨率与探测错误搜索、过滤某个库的条目（分页）。'],
+    ['t.media_item_get', 'An item\'s tracks, codecs, renditions, subtitles, sidecar and probe errors, and what uses it now.', '条目的轨道、编码、码率版本、字幕、sidecar 与探测错误，以及当前使用它的频道与会话。'],
+    ['t.channels_status', 'Each channel\'s now and next with the position, and its push targets\' state, bytes and last error; never a stream key.', '各频道正在与即将播放的条目及进度，以及推流目标的状态、字节数与最近错误；从不含推流密钥。'],
+    ['t.playback_sessions', 'Playback sessions by resource and address, each subject\'s against max_sessions, and the 403s by reason; subjects hashed unless data.send_subjects.', '按资源与地址列出播放会话、各主体相对 max_sessions 的数量与按原因统计的 403；除非设置 data.send_subjects，主体以哈希显示。'],
+    ['t.media_scan_propose', 'Adds a rescan of a library to the proposal.', '向提案加入一次媒体库重新扫描。'],
+    ['t.media_session_end_propose', 'Adds the end of playback sessions to the proposal, by subject and session.', '向提案加入结束播放会话（按主体与会话）。'],
+    ['t.media_key_rotate_propose', 'Adds the rotation of a media_auth key, or all, to the proposal; the new secret is never shown.', '向提案加入 media_auth 某个或全部密钥的轮换；新密钥从不显示。'],
+    ['t.media_file_propose', 'Adds a rename, move, delete or sidecar edit of a library\'s files to the proposal, with what plays them now.', '向提案加入媒体库文件的重命名、移动、删除或 sidecar 编辑，并附上当前播放它们的频道与观众。']
   ];
   var en = {}, zh = {};
   WORDS.forEach(function (w) { en[w[0]] = w[1]; zh[w[0]] = w[2]; });

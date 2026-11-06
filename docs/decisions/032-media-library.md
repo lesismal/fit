@@ -107,7 +107,8 @@ What each iteration decides:
   into a temporary file kept across restarts and renamed into place once whole. Rename, move, delete
   and sidecar edits act on an item and all its files, on the pool, one at a time, never writing out of
   a root; a change to an item a channel names or plays, or a viewer plays, is refused unless forced,
-  so that the workbench warns first; each is written to the assistant's audit log. A full tus server
+  so that the workbench warns first (and the assistant's file proposals, I152, which say what uses
+  the item); each is written to the assistant's audit log. A full tus server
   (its `Upload-Metadata`, `Tus-Resumable` and extensions) was not taken: the workbench and scripts need
   the three calls alone.
 
