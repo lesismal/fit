@@ -81,9 +81,9 @@ func (w *wsProxy) session(password string) *wscrypt.Session {
 // one message before the console is connected; it refuses WebSockets past
 // max_conns, a bad hello, and messages once the console is gone.
 func TestConsoleSocket(t *testing.T) {
-	sock := freeAddr(t)
-	v := newHub(t, fmt.Sprintf(`{"password": "pw", "console": %s, "console_socket": {"address": %q, "password": "s", "max_conns": 1}}`,
-		consoleJSON("127.0.0.1:0"), sock))
+	v := newHub(t, fmt.Sprintf(`{"password": "pw", "console": %s, "console_socket": {"address": "127.0.0.1:0", "password": "s", "max_conns": 1}}`,
+		consoleJSON("127.0.0.1:0")))
+	sock := v.s.SocketAddr()
 	w := v.dialSocket(sock)
 	sess := w.session("s")
 	// The request goes in more than one message, the second while the
@@ -177,9 +177,9 @@ func TestSocketUnauthenticated(t *testing.T) {
 	old := socketAuthTimeout
 	socketAuthTimeout = 300 * time.Millisecond
 	t.Cleanup(func() { socketAuthTimeout = old })
-	sock := freeAddr(t)
-	v := newHub(t, fmt.Sprintf(`{"password": "pw", "console": %s, "console_socket": {"address": %q, "password": "s", "max_conns": 8}}`,
-		consoleJSON("127.0.0.1:0"), sock))
+	v := newHub(t, fmt.Sprintf(`{"password": "pw", "console": %s, "console_socket": {"address": "127.0.0.1:0", "password": "s", "max_conns": 8}}`,
+		consoleJSON("127.0.0.1:0")))
+	sock := v.s.SocketAddr()
 	count := func() int {
 		h := v.s.socket.h
 		h.mu.Lock()
