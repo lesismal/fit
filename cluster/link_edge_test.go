@@ -622,8 +622,10 @@ func TestMemberServe(t *testing.T) {
 	e := enrollIn(t, f, "srv")
 	block := make(chan struct{})
 	canceled := make(chan struct{}, 64)
+	entered := make(chan struct{}, 64)
 	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/block" {
+			entered <- struct{}{}
 			select {
 			case <-block:
 			case <-r.Context().Done():
@@ -650,9 +652,17 @@ func TestMemberServe(t *testing.T) {
 			t.Errorf("%q", m)
 		}
 	}
-	// The workers and the queue taken, one more is busy.
-	for i := range memberWorkers + memberQueue {
+	// The workers and the queue taken, one more is busy. The workers are
+	// waited for in the handler first: until a worker has taken its
+	// request, that request still holds a place in the queue.
+	for i := range memberWorkers {
 		ln.serve(fakeWS, encodeCall(msgRequest, uint64(100+i), requestHead{Method: "GET", Path: "/block", Timeout: 60000}, nil)[1:])
+	}
+	for range memberWorkers {
+		<-entered
+	}
+	for i := range memberQueue {
+		ln.serve(fakeWS, encodeCall(msgRequest, uint64(100+memberWorkers+i), requestHead{Method: "GET", Path: "/block", Timeout: 60000}, nil)[1:])
 	}
 	ln.serve(fakeWS, encodeCall(msgRequest, 999, requestHead{Method: "GET", Path: "/block"}, nil)[1:])
 	m := <-got
