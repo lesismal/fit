@@ -1,13 +1,11 @@
 package streaming
 
 import (
-	"container/list"
 	"errors"
 	stdhttp "net/http"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	fibhttp "github.com/lesismal/fib/http"
 	"github.com/lesismal/fib/media/hls"
@@ -17,188 +15,131 @@ import (
 )
 
 // Encrypted HLS of channels (encrypt, I136). A channel publishes its
-// packets clear; the hls handler encrypts the segments fib's Muxer cuts of
-// it, AES-128 (METHOD=AES-128) under keys of the channel's library, a key
-// every key_rotation segments, and serves those keys to whoever its auth
-// lets play the channel:
+// packets clear; fib's HLS Muxer encrypts what it cuts of it (fib request
+// A69), its segments and its Low-Latency parts, AES-128 (METHOD=AES-128)
+// under keys of the channel's library, a key every key_rotation segments,
+// and names them in its media playlists; the hls handler gives each Muxer
+// of an encrypted channel its Encryption as it starts, and serves the keys
+// to whoever its auth lets play the channel:
 //
-//   - a media playlist gains an EXT-X-KEY wherever the key changes, its URI
-//     key-<session>-<epoch>.key in the stream's directory, and names no IV,
-//     so that a segment's IV is its media sequence number; an EXT-X-MAP after
-//     a key is preceded by METHOD=NONE, so that initialization sections stay
-//     clear. Low-Latency HLS's tags are left out: parts are not encrypted.
-//   - a segment, seg-<session>-<msn>.<ext>, is copied from the Muxer and
-//     encrypted on the library's file pool, once for every request that
-//     waits for it, and kept in a cache bounded by the handler's max_bytes.
+//   - a key, key-<session>-<epoch>.key beside the segments, is derived from
+//     the library's secret (medialib.Keys, KeyChannel, of <stream>/<session>
+//     and the epoch), as the Muxer asks for it, on the library's file pool,
+//     where the Muxer's encryption runs too.
 //   - a key is served for a session the stream's Muxer runs, and an epoch no
-//     later than its next segment's, so that a viewer cannot fetch the keys
-//     of segments not yet cut; by a handler with auth alone, since without
-//     it anyone could take the keys; and a part is not served.
+//     later than that of the segment it cuts, so that a viewer cannot fetch
+//     the keys of segments not yet cut; by a handler with auth alone, since
+//     without it anyone could take the keys.
+//   - a Muxer started under another encryption than the channel's now (a
+//     reload turned encrypt on or off, or changed its library, secret or
+//     key_rotation) is ended at the next playlist request, and starts again
+//     under the new one, so that a channel is never served clear past the
+//     reload that encrypts it.
 //
 // <session> is the Muxer's, which a restart of the stream's segmenting
-// changes, so that its keys and IVs never repeat. This is fit's side of
-// fib's HLS, which encrypts nothing (fib-api-requests.md, A69): once fib's
-// Muxer encrypts, it goes.
+// changes, so that its keys and IVs never repeat.
 
-// The errors of encrypted segments.
-var (
-	errEncFull    = errors.New("streaming: the encrypted segments' cache is full of what is being encrypted")
-	errEncWaiters = errors.New("streaming: too many requests wait for the same encrypted segment")
-)
+// errNoKeys is the error of an encrypted channel whose library, or its
+// keys, are not loaded: fib's handler answers its playlist 503.
+var errNoKeys = errors.New("streaming: the channel's media library, and its keys, are not loaded")
 
-// maxEncWaiters is the most requests that may wait for one segment being
-// encrypted.
-const maxEncWaiters = 1024
+// encLibs are the libraries an hls handler's channels are encrypted with,
+// found once and kept until a reload removes them.
+type encLibs struct{ m sync.Map } // name -> *medialib.Library
 
-// encEntryBytes is what an entry is reckoned to take beside its segment.
-const encEntryBytes = 128
-
-// encKey names an encrypted segment: of a stream, by its name, under keys
-// of an ID and a rotation.
-type encKey struct {
-	stream, name, keys string
-}
-
-type encEntry struct {
-	key     encKey
-	data    []byte
-	bytes   int64
-	waiters []func([]byte, error)
-	elem    *list.Element // in the LRU once encrypted
-}
-
-// encCache keeps the encrypted segments of an hls handler's channels,
-// bounded in bytes: what is being encrypted holds its bytes from when it is
-// asked for, and the least recently used are dropped for it.
-type encCache struct {
-	mu   sync.Mutex
-	max  int64
-	used int64
-	m    map[encKey]*encEntry
-	lru  list.List
-}
-
-func newEncCache(max int64) *encCache { return &encCache{max: max, m: map[encKey]*encEntry{}} }
-
-// get calls fn with the segment k, kept or encrypted by build, which takes
-// size bytes: once, for every request that waits for it. build is called
-// without the lock and calls done once.
-func (c *encCache) get(k encKey, size int64, build func(done func([]byte, error)), fn func([]byte, error)) {
-	c.mu.Lock()
-	if e := c.m[k]; e != nil {
-		if e.elem != nil {
-			c.lru.MoveToFront(e.elem)
-			c.mu.Unlock()
-			fn(e.data, nil)
-			return
+// library returns the library name of the handler's engine, or nil.
+func (sh *hlsShared) library(name string) *medialib.Library {
+	if v, ok := sh.libs.m.Load(name); ok {
+		if l := v.(*medialib.Library); !l.Removed() {
+			return l
 		}
-		if len(e.waiters) >= maxEncWaiters {
-			c.mu.Unlock()
-			fn(nil, errEncWaiters)
-			return
-		}
-		e.waiters = append(e.waiters, fn)
-		c.mu.Unlock()
-		return
 	}
-	need := size + encEntryBytes
-	if !c.room(need) {
-		c.mu.Unlock()
-		fn(nil, errEncFull)
-		return
+	l := medialib.Lookup(sh.key.engine, name)
+	if l != nil {
+		sh.libs.m.Store(name, l)
 	}
-	e := &encEntry{key: k, bytes: need, waiters: []func([]byte, error){fn}}
-	c.m[k] = e
-	c.used += need
-	c.mu.Unlock()
-	build(func(data []byte, err error) { c.done(e, data, err) })
+	return l
 }
 
-// room drops the least recently used until need fits, and reports whether
-// it does. c.mu is held.
-func (c *encCache) room(need int64) bool {
-	if need > c.max {
-		return false
-	}
-	for c.used+need > c.max && c.lru.Len() > 0 {
-		c.evict(c.lru.Back().Value.(*encEntry))
-	}
-	return c.used+need <= c.max
+// encStart is an encryption a Muxer of a stream starts with: the channel's,
+// under keys of an ID.
+type encStart struct {
+	enc  channels.Encryption
+	keys string
 }
 
-func (c *encCache) evict(e *encEntry) {
-	c.lru.Remove(e.elem)
-	delete(c.m, e.key)
-	c.used -= e.bytes
-}
-
-// done ends the encryption of e: kept, or forgotten on an error, and its
-// waiters answered.
-func (c *encCache) done(e *encEntry, data []byte, err error) {
-	c.mu.Lock()
-	waiters := e.waiters
-	e.waiters = nil
-	if err != nil {
-		delete(c.m, e.key)
-		c.used -= e.bytes
-	} else {
-		c.used += int64(cap(data)) + encEntryBytes - e.bytes
-		e.data, e.bytes = data, int64(cap(data))+encEntryBytes
-		e.elem = c.lru.PushFront(e)
-		// What was reckoned is what it takes, give or take its padding.
-		c.room(0)
-	}
-	c.mu.Unlock()
-	for _, fn := range waiters {
-		fn(data, err)
-	}
-}
-
-// bytes returns the bytes the cache holds, for tests.
-func (c *encCache) bytes() int64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.used
-}
-
-// fileName is a name of fib's Muxer, parsed: kind (init, seg, part or key,
-// the last fit's), its session and number, and its extension.
-type fileName struct {
-	kind, session, ext string
-	n                  uint64
-}
-
-// parseFile parses a name of fib's Muxer, or of a key, as
-// seg-<session>-<msn>.m4s: false when it is neither.
-func parseFile(s string) (fileName, bool) {
-	kind, rest, ok := strings.Cut(s, "-")
+// want returns the encryption a Muxer of stream starts with now, and false
+// for none.
+func (sh *hlsShared) want(stream string) (encStart, bool) {
+	enc, ok := channels.Lookup(sh.key.engine).Encryption(stream)
 	if !ok {
-		return fileName{}, false
+		return encStart{}, false
 	}
-	switch kind {
-	case "init", "seg", "part", "key":
-	default:
-		return fileName{}, false
+	keys := ""
+	if l := sh.library(enc.Library); l != nil {
+		keys = l.Keys().ID()
 	}
-	dot := strings.LastIndexByte(rest, '.')
-	if dot < 0 {
-		return fileName{}, false
+	return encStart{enc: enc, keys: keys}, true
+}
+
+// encrypt is fib's HandlerConfig.Encrypt: the Encryption of a Muxer of the
+// stream at path as it starts, nil for a stream that is not a channel with
+// encrypt, errNoKeys (503) when the channel's library or its keys are not
+// loaded. fib's handler calls it with its lock held: it calls no Handler.
+func (sh *hlsShared) encrypt(path string) (*hls.Encryption, error) {
+	enc, ok := channels.Lookup(sh.key.engine).Encryption(path)
+	if !ok {
+		return nil, nil
 	}
-	f := fileName{kind: kind, ext: rest[dot:]}
-	rest = rest[:dot]
-	session, num, ok := strings.Cut(rest, "-")
-	if !ok || session == "" {
-		return fileName{}, false
+	l := sh.library(enc.Library)
+	var keys *medialib.Keys
+	if l != nil {
+		keys = l.Keys()
 	}
-	if kind == "part" {
-		num, _, _ = strings.Cut(num, "-")
+	if keys == nil {
+		return nil, errNoKeys
 	}
-	n, err := strconv.ParseUint(num, 10, 63)
-	if err != nil {
-		return fileName{}, false
+	sh.started.Store(path, encStart{enc: enc, keys: keys.ID()})
+	return &hls.Encryption{
+		Rotation: enc.Rotation,
+		Key: func(session string, epoch uint64) ([16]byte, string, error) {
+			return keys.Key(medialib.KeyChannel, path+"/"+session, epoch), keyName(session, epoch), nil
+		},
+		// On the library's pool, as the segments it reads are; a job that
+		// waited past file_timeout runs at once on a goroutine of its own,
+		// since the Muxer lists nothing until it has run.
+		Run: func(job func()) bool { return l.Submit(job, func() { go job() }) },
+	}, nil
+}
+
+// restartStale ends the Muxers of stream when they were started under
+// another encryption than its channel's now, so that fib's handler starts
+// them again under it: called for a playlist request, before fib's.
+func (sh *hlsShared) restartStale(fh *hls.Handler, stream string) {
+	want, encrypted := sh.want(stream)
+	v, started := sh.started.Load(stream)
+	if started == encrypted && (!started || v.(encStart) == want) {
+		return
 	}
-	f.session, f.n = session, n
-	return f, true
+	var muxers []*hls.Muxer
+	for _, f := range []hls.Format{hls.FMP4, hls.MPEGTS} {
+		if m := fh.FormatMuxer(stream, f.Name); m != nil {
+			muxers = append(muxers, m)
+		}
+	}
+	// A Muxer fib's handler shows was started, its encryption stored,
+	// before: what is stored now tells whether a request just started
+	// it under what is wanted.
+	v, started = sh.started.Load(stream)
+	if started == encrypted && (!started || v.(encStart) == want) {
+		return
+	}
+	if started {
+		sh.started.CompareAndDelete(stream, v)
+	}
+	for _, m := range muxers {
+		m.Close()
+	}
 }
 
 // keyName is the name of key epoch of session.
@@ -206,194 +147,60 @@ func keyName(session string, epoch uint64) string {
 	return "key-" + session + "-" + strconv.FormatUint(epoch, 10) + ".key"
 }
 
-// withKeys returns playlist, a media playlist of fib's Muxer of a stream
-// encrypted a key every rotation segments, with the EXT-X-KEY tags that name
-// them and without Low-Latency HLS's tags; a multivariant playlist, or one
-// that names no segment, as it is.
-func withKeys(playlist []byte, rotation int) []byte {
-	if rotation <= 0 || !strings.Contains(string(playlist), "#EXTINF") {
-		return playlist
+// parseKey parses a key's name, key-<session>-<epoch>.key.
+func parseKey(name string) (session string, epoch uint64, ok bool) {
+	rest, ok1 := strings.CutPrefix(name, "key-")
+	rest, ok2 := strings.CutSuffix(rest, ".key")
+	i := strings.LastIndexByte(rest, '-')
+	if !ok1 || !ok2 || i <= 0 {
+		return "", 0, false
 	}
-	lines := strings.Split(string(playlist), "\n")
-	out := make([]string, 0, len(lines)+8)
-	// The segment line after each #EXTINF names its msn and session.
-	keyed, epoch := false, uint64(0)
-	for i, line := range lines {
-		switch {
-		case strings.HasPrefix(line, "#EXT-X-PART:"), strings.HasPrefix(line, "#EXT-X-PRELOAD-HINT:"),
-			strings.HasPrefix(line, "#EXT-X-PART-INF:"), strings.HasPrefix(line, "#EXT-X-SERVER-CONTROL:"):
-			continue
-		case strings.HasPrefix(line, "#EXT-X-MAP:"):
-			if keyed {
-				// A key before it would encrypt the init section too.
-				out = append(out, "#EXT-X-KEY:METHOD=NONE")
-				keyed = false
-			}
-		case strings.HasPrefix(line, "#EXTINF:"):
-			f, ok := segmentAfter(lines[i+1:])
-			if ok {
-				e := f.n / uint64(rotation)
-				if !keyed || e != epoch {
-					out = append(out, `#EXT-X-KEY:METHOD=AES-128,URI="`+keyName(f.session, e)+`"`)
-					keyed, epoch = true, e
-				}
-			}
-		}
-		out = append(out, line)
-	}
-	return []byte(strings.Join(out, "\n"))
+	epoch, err := strconv.ParseUint(rest[i+1:], 10, 64)
+	return rest[:i], epoch, err == nil
 }
 
-// segmentAfter returns the segment the first line of lines that is not a
-// tag names.
-func segmentAfter(lines []string) (fileName, bool) {
-	for _, l := range lines {
-		l = strings.TrimRight(l, "\r")
-		if l == "" || strings.HasPrefix(l, "#") {
-			continue
-		}
-		f, ok := parseFile(l)
-		return f, ok && f.kind == "seg"
-	}
-	return fileName{}, false
-}
-
-// encLibs are the libraries an hls handler's channels are encrypted with,
-// found once and kept until a reload removes them.
-type encLibs struct{ m sync.Map } // name -> *medialib.Library
-
-func (h *HLS) library(name string) *medialib.Library {
-	if v, ok := h.shared.libs.m.Load(name); ok {
-		if l := v.(*medialib.Library); !l.Removed() {
-			return l
-		}
-	}
-	l := medialib.Lookup(h.b.engine, name)
-	if l != nil {
-		h.shared.libs.m.Store(name, l)
-	}
-	return l
-}
-
-// serveEncrypted serves name of stream, a channel whose HLS enc encrypts,
-// and reports whether it did: a key, a segment encrypted, or a part
-// refused; playlists and init sections are fib's, the playlists given their
-// keys by the caller.
-func (h *HLS) serveEncrypted(c *fibhttp.Context, fh *hls.Handler, stream, name string, enc channels.Encryption) bool {
-	f, ok := parseFile(name)
-	if !ok || f.kind == "init" {
+// serveKey serves name of stream when it is a key of a channel that
+// encrypts its HLS, and reports whether it did.
+func (h *HLS) serveKey(c *fibhttp.Context, fh *hls.Handler, stream, name string) bool {
+	session, epoch, ok := parseKey(name)
+	if !ok {
 		return false
 	}
-	if f.kind == "part" {
-		h.respond(c, stdhttp.StatusNotFound, "the parts of an encrypted stream are not served", "")
+	enc, encrypted := channels.Lookup(h.b.engine).Encryption(stream)
+	if !encrypted {
+		return false
+	}
+	if h.b.auth == nil {
+		// Everyone could take the key: the handler serves none.
+		h.respond(c, stdhttp.StatusForbidden, "the keys of an encrypted channel are served only by an hls handler with auth", "")
 		return true
 	}
-	l := h.library(enc.Library)
-	keys := (*medialib.Keys)(nil)
-	if l != nil {
+	var keys *medialib.Keys
+	if l := h.shared.library(enc.Library); l != nil {
 		keys = l.Keys()
 	}
 	if keys == nil {
-		h.respond(c, stdhttp.StatusServiceUnavailable, "the channel's media library, and its keys, are not loaded", "1")
+		h.respond(c, stdhttp.StatusServiceUnavailable, errNoKeys.Error(), "1")
 		return true
 	}
-	resource := stream + "/" + f.session
-	switch f.kind {
-	case "key":
-		if h.b.auth == nil {
-			// Everyone could take the key: the handler serves none.
-			h.respond(c, stdhttp.StatusForbidden, "the keys of an encrypted channel are served only by an hls handler with auth", "")
-			return true
-		}
-		if f.ext != ".key" || !h.keyServed(fh, stream, f, enc.Rotation) {
-			h.respond(c, stdhttp.StatusNotFound, "no such key", "")
-			return true
-		}
-		key := keys.Key(medialib.KeyChannel, resource, f.n)
-		hdr := stdhttp.Header{"Content-Type": {"application/octet-stream"}, "Cache-Control": {"private, no-store"}}
-		if h.CORS != "" {
-			hdr["Access-Control-Allow-Origin"] = []string{h.CORS}
-		}
-		_ = c.WriteResponse(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: hdr, Body: key[:]})
+	// Of a session the stream's Muxer runs, and not past the segment it
+	// cuts: a playlist has named no later key.
+	m := fh.SessionMuxer(stream, session)
+	if m == nil {
+		h.respond(c, stdhttp.StatusNotFound, "no such key", "")
 		return true
 	}
-	// A segment: of the Muxer of its session, in whichever format.
-	var data []byte
-	contentType := ""
-	for _, fm := range []hls.Format{hls.FMP4, hls.MPEGTS} {
-		if fm.Extension != f.ext {
-			continue
-		}
-		if m := fh.FormatMuxer(stream, fm.Name); m != nil {
-			if d, ok := m.File(name); ok {
-				data, contentType = d, fm.ContentType
-			}
-		}
-	}
-	if data == nil {
-		h.respond(c, stdhttp.StatusNotFound, "no such segment", "")
+	if cur, ok := m.KeyEpoch(); !ok || epoch > cur {
+		h.respond(c, stdhttp.StatusNotFound, "no such key", "")
 		return true
 	}
-	key := keys.Key(medialib.KeyChannel, resource, f.n/uint64(enc.Rotation))
-	k := encKey{stream: stream, name: name, keys: keys.ID() + "/" + strconv.Itoa(enc.Rotation)}
-	var answered atomic.Bool
-	c.Retain()
-	answer := func(seg []byte, err error) {
-		if !answered.CompareAndSwap(false, true) {
-			return
-		}
-		defer c.Release()
-		if err != nil {
-			h.respond(c, stdhttp.StatusServiceUnavailable, "the media library is busy", "1")
-			return
-		}
-		hdr := stdhttp.Header{"Content-Type": {contentType}, "Cache-Control": {"max-age=3600"}}
-		if h.CORS != "" {
-			hdr["Access-Control-Allow-Origin"] = []string{h.CORS}
-		}
-		_ = c.WriteResponse(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: hdr, Body: seg})
+	key := keys.Key(medialib.KeyChannel, stream+"/"+session, epoch)
+	hdr := stdhttp.Header{"Content-Type": {"application/octet-stream"}, "Cache-Control": {"private, no-store"}}
+	if h.CORS != "" {
+		hdr["Access-Control-Allow-Origin"] = []string{h.CORS}
 	}
-	c.OnCancel(func(error) {
-		if answered.CompareAndSwap(false, true) {
-			c.Release()
-		}
-	})
-	h.shared.enc.get(k, int64(len(data))+16, func(done func([]byte, error)) {
-		ok := l.Submit(func() {
-			// The Muxer's segment is not modified: a copy is encrypted.
-			out := make([]byte, len(data), len(data)+16)
-			copy(out, data)
-			done(medialib.Encrypt(key, f.n, out), nil)
-		}, func() { done(nil, medialib.ErrBusy) })
-		if !ok {
-			done(nil, medialib.ErrBusy)
-		}
-	}, answer)
+	_ = c.WriteResponse(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: hdr, Body: key[:]})
 	return true
-}
-
-// keyServed reports whether f, a key's name, is of a session of the
-// stream's Muxer, and an epoch no later than that of the segment it cuts
-// next.
-func (h *HLS) keyServed(fh *hls.Handler, stream string, f fileName, rotation int) bool {
-	for _, fm := range []hls.Format{hls.FMP4, hls.MPEGTS} {
-		m := fh.FormatMuxer(stream, fm.Name)
-		if m == nil {
-			continue
-		}
-		pl, ok := m.MediaPlaylist(nil)
-		if !ok {
-			continue
-		}
-		prefix := "seg-" + f.session + "-"
-		i := strings.LastIndex(string(pl), prefix)
-		if i < 0 {
-			continue
-		}
-		last, ok := parseFile(strings.TrimRight(strings.SplitN(string(pl[i:]), "\n", 2)[0], "\r"))
-		return ok && f.n <= (last.n+1)/uint64(rotation)
-	}
-	return false
 }
 
 // respond answers with status and a plain text message, with the handler's

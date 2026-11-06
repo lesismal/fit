@@ -112,17 +112,22 @@ route hls { match { path /hls/* }; handler hls { prefix /hls/ } }
 {"name": "tv/films", "library": "films", "items": ["films/bbb", "films/sintel"], "encrypt": true, "key_rotation": 10}
 ```
 
-由 `hls` 处理器完成，对任何设置了 `encrypt` 的频道的流：
+由 fib 的 HLS muxer 完成（fib 请求 [A69](fib-api-requests.zh-CN.md#a69加密的-hls-分片)），`hls` 处理器对任何设置了
+`encrypt` 的频道的流都让它这样做：
 
-- 媒体播放列表在每次换密钥处加入 `#EXT-X-KEY`，其 URI 为分片旁的 `key-<session>-<n>.key`，并去掉低延迟 HLS 的部分分片：
-  加密的频道按完整分片播放。密钥之后（在不连续处）出现的 `#EXT-X-MAP` 之前先加 `METHOD=NONE`，使初始化段保持明文。
-- 密钥只提供给处理器的 `auth` 允许播放该频道的请求，带 `Cache-Control: private, no-store`，且只提供已切出的分片和下一个
-  分片的密钥，使观众无法取得未来内容的密钥；没有 `auth` 的 `hls` 处理器不提供任何密钥（403）。
-- 分片在媒体库的文件池上加密一次，供请求它的所有观众使用，并在处理器的 `max_bytes` 之内保留。
+- 媒体播放列表在每次换密钥处带有 `#EXT-X-KEY`，其 URI 为分片旁的 `key-<session>-<n>.key`，不带 IV，使分片的 IV 就是它的
+  媒体序号。密钥之后（在不连续处）出现的 `#EXT-X-MAP` 之前先加 `METHOD=NONE`，使初始化段保持明文。
+- 低延迟 HLS（`part_duration`）与明文频道一样可用：每个部分分片用其所属分片的密钥与 IV 单独加密，密钥的标签位于该分片的
+  第一个部分分片之前。
+- 每个分片和部分分片在切出时于媒体库的文件池上加密一次，加密之后才列出和提供，比切出时稍晚；没有请求等待加密，加密落后
+  超过 4 个分片的流会结束，而不是无限积压媒体。
+- 密钥只提供给处理器的 `auth` 允许播放该频道的请求，带 `Cache-Control: private, no-store`，且只提供已切出的分片与正在切的分片的密钥，
+  使观众无法取得未来内容的密钥；没有 `auth` 的 `hls` 处理器不提供任何密钥（403）。
+- 媒体库未加载或没有 secret 时，该频道的播放列表和密钥回答 503：绝不会以明文代替。
 
 每当流的切片重新开始（如 `idle_timeout` 之后），`<session>` 就会改变，所有密钥随之改变，因此同一密钥与 IV 不会用两次。
-RTMP、RTSP、SRT、HTTP-FLV、WHEP 和推流目标照旧在各自的 `auth` 下传送该频道。fib 的 HLS 尚不加密：由 fit 加密 fib 的
-muxer 切出的分片（[fib 请求 A69](fib-api-requests.zh-CN.md#a69加密的-hls-分片)）。
+重新加载配置时若打开或关闭 `encrypt`，或改变媒体库、其 secret 或 `key_rotation`，切片会在下一个播放列表请求时以新密钥
+重新开始：播放器随后加载新会话的播放列表。RTMP、RTSP、SRT、HTTP-FLV、WHEP 和推流目标照旧在各自的 `auth` 下传送该频道。
 
 ## 推流目标
 

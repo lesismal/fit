@@ -130,22 +130,29 @@ handed out opens a few segments only.
 {"name": "tv/films", "library": "films", "items": ["films/bbb", "films/sintel"], "encrypt": true, "key_rotation": 10}
 ```
 
-The `hls` handler does it, for any stream that is a channel with `encrypt`:
+fib's HLS muxer does it (fib request [A69](fib-api-requests.md#a69-encrypted-hls-segments)), as the
+`hls` handler asks it to for any stream that is a channel with `encrypt`:
 
-- a media playlist gains an `#EXT-X-KEY` wherever the key changes, its URI `key-<session>-<n>.key`
-  beside the segments, and none of Low-Latency HLS's parts: an encrypted channel is played by whole
-  segments. An `#EXT-X-MAP` after a key, at a discontinuity, is preceded by `METHOD=NONE`, so that
-  initialization sections stay clear.
+- a media playlist carries an `#EXT-X-KEY` wherever the key changes, its URI `key-<session>-<n>.key`
+  beside the segments, and no IV, so that a segment's IV is its media sequence number. An
+  `#EXT-X-MAP` after a key, at a discontinuity, is preceded by `METHOD=NONE`, so that initialization
+  sections stay clear.
+- Low-Latency HLS (`part_duration`) works as for a clear channel: each part is encrypted on its own,
+  with its segment's key and IV, and the key's tag comes before the segment's first part.
+- each segment and part is encrypted once, as it is cut, on the library's file pool, and listed and
+  served only once encrypted, a little later than it is cut; no request waits on a cipher, and a
+  stream whose encryption falls more than 4 segments behind ends rather than holding media.
 - a key is served only to a request the handler's `auth` lets play the channel, with
-  `Cache-Control: private, no-store`, and only for the segments cut so far and the next, so that a
-  viewer cannot take the keys of what is to come; an `hls` handler without `auth` serves none (403).
-- a segment is encrypted once, on the library's file pool, for every viewer that asks for it, and
-  kept, within the handler's `max_bytes`.
+  `Cache-Control: private, no-store`, and only for the segments cut so far and the one being cut, so
+  that a viewer cannot take the keys of what is to come; an `hls` handler without `auth` serves none (403).
+- a library not loaded, or without its secret, answers the channel's playlists and keys 503: the
+  channel is never served clear in their place.
 
 `<session>` changes whenever the stream's segmenting starts again, as after `idle_timeout`, and with
-it every key, so that no key and IV are used twice. RTMP, RTSP, SRT, HTTP-FLV, WHEP and push targets
-carry the channel as before, under their own `auth`. fib's HLS encrypts nothing yet: fit encrypts
-the segments fib's muxer cuts ([fib request A69](fib-api-requests.md#a69-encrypted-hls-segments)).
+it every key, so that no key and IV are used twice. A reload that turns `encrypt` on or off, or
+changes the library, its secret or `key_rotation`, starts the segmenting again at the next playlist
+request, under the new keys: players then load the new session's playlist. RTMP, RTSP, SRT,
+HTTP-FLV, WHEP and push targets carry the channel as before, under their own `auth`.
 
 ## Push targets
 

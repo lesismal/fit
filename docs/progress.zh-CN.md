@@ -4447,14 +4447,16 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **`vod` 与频道 HLS 上的 `encrypt`**（以及默认 10 的 `key_rotation`）：fMP4 与 MPEG-TS 的 AES-128（`METHOD=AES-128`），密钥由库新增的
   `secret` 或 `secret_file` 派生（`medialib.Keys`），每个条目一个，或每个频道会话与周期一个；分段在缓存之前于文件池上加密，受缓存上限
   限制；密钥只提供给持有该资源授权或 token 的请求，`private, no-store`；init、字幕与海报保持明文；加密的 `vod` 不提供明文文件。
-- **频道**：在 fib 请求 A69 让 fib 的 Muxer 能够加密之前，fit 的 `hls` 处理器中的临时方案：每个分段复制一次并在库的池上加密一次，在
-  `max_bytes` 内缓存，重写播放列表，不提供低延迟 HLS 的 part。A69 正在加入 fib。
+- **频道**：由 fib 的 HLS Muxer 加密（fib 请求 A69，已在 fib `70a9acc` 连同 `9852eee`、`b4a9036` 完成），取代了 fit 的临时方案（复制
+  分段、在库的池上加密、在 `max_bytes` 内缓存、重写播放列表、不提供 part）：`hls` 处理器给 fib 的处理器一个 `Encrypt`（密钥同前，
+  `Run` 在库的文件池上），在自己的 `auth` 下为会话的 Muxer 提供 `epoch <= KeyEpoch()` 的密钥，重新加载改变频道的加密时重启其切片；
+  低延迟 HLS 的 part 也加密，hls.js 可以播放（`TestChannelInterop`，live/secll）。
 - **测试**：竞态检测下的 `make test-changed`；在基准机上，ffmpeg 逐帧播放每个加密条目，hls.js 经签名 URL 播放它们（`TestInteropEncrypted`、
   `test/docker/vod`），ffprobe 与 hls.js 跨密钥轮换与不连续点播放加密频道（`TestChannelInterop`）；单独取得的分段无法解码；没有授权时
   密钥被拒（401），持其他资源的授权时也被拒（403）。
 - **开销**（基准机，单核）：AES-128-CBC 1.24 GiB/s，1 MiB 分段 0.79 ms；测试库的分段构建 fMP4 增加 24 µs，MPEG-TS 增加 48 µs；缓存的分段
   没有额外开销。
-- **缺口**：字幕为明文；频道临时方案的池满与客户端离开路径没有专门的测试；没有手工试用 Safari 的播放器。实现时所做的决策在计划的 I136
+- **缺口**：字幕为明文；hls.js 在轨道改变的不连续点之后无法追加低延迟 HLS 的 part，明文与加密相同（fib 的 LL-HLS 问题，与 A69 无关）；没有手工试用 Safari 的播放器。实现时所做的决策在计划的 I136
   一节，待审查。
 
 ## 静态文件跟随磁盘

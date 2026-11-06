@@ -319,8 +319,8 @@ log writes, however it is answered, and a grant in a cookie is never logged.
 
 With `encrypt`, a `vod` handler encrypts every segment it serves with AES-128, `METHOD=AES-128` of
 RFC 8216: fMP4 and MPEG-TS alike, the whole segment in CBC mode with PKCS#7 padding, its IV its
-number in the media playlist. A channel's `encrypt` does the same for its HLS
-([channels](channels.md#encrypted-hls)). It needs the library's `secret` or `secret_file`, and the
+number in the media playlist. A channel's `encrypt` does the same for its HLS, its Low-Latency
+parts too, each encrypted on its own ([channels](channels.md#encrypted-hls)). It needs the library's `secret` or `secret_file`, and the
 handler's `auth`:
 
 ```json
@@ -341,8 +341,8 @@ after the initialization section, so that the initialization section stays clear
 ```
 
 **The keys** are not stored: each is derived from the library's secret (16 bytes or more) with
-HMAC-SHA256, under a key of the library's own, from the item's ID, or a channel's name and key
-period; so every fit with the same secret serves the same segments, and the keys open nothing of
+HMAC-SHA256, under a key of the library's own, from the item's ID, or a channel's name, session and
+key period; so every fit with the same secret serves the same segments, and the keys open nothing of
 another library, nor any of `media_auth`'s tokens. The secret never reaches a log. Changing it
 changes every key, and the segments' ETags: segments a CDN kept from before no longer play under
 the new keys, so purge them, or wait for their `max-age`.
@@ -362,7 +362,9 @@ not serve them; posters, subtitles and initialization sections stay clear.
 kept encrypted; the cache serves it as it serves a clear one. On the benchmark host (Ryzen 7 7800X3D,
 one core) AES-128-CBC runs at 1.24 GiB/s: a 1 MiB segment, 4s of 2 Mbit/s, takes 0.79 ms more to
 build, a 4 MiB one 3.2 ms; the test library's small segments took 24 µs (fMP4) and 48 µs (MPEG-TS)
-more, 153 µs to 177 µs and 174 µs to 222 µs, its key's derivation included.
+more, 153 µs to 177 µs and 174 µs to 222 µs, its key's derivation included. A channel's segments
+and parts are encrypted by fib's HLS muxer, once each, as they are cut, on the same pool, and are
+listed once encrypted: no copy is kept, nor any cache beside the muxer's own.
 
 ## A video site
 
