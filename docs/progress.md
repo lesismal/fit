@@ -6283,3 +6283,45 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: subtitles are clear; the channel stopgap's busy-pool and client-left paths have no test of
   their own; Safari's player not tried by hand. The decisions made are in the plan's I136 section,
   pending review.
+
+## Static files follow the disk
+
+### fib filewatch; check_interval 5s, 0 for every request — done
+
+- **The gap** (found 2026-11-06): `handler/static` told a file by size and modification time only, so a
+  file replaced by one of the same size and time (`rsync -t`, `cp -p`, `tar x`, reproducible builds)
+  was served from memory as it was, for good; a change showed only after `check_interval` (1s), which
+  could not be set to 0.
+- **fib** (`3ac534d`): a public `filewatch` package. `filewatch.Watcher` is the inotify watch
+  `http.FileCache` had to itself, now watching every directory on the way from the root (a renamed
+  directory is a `Dir` event, its old watches dropped), the directories of symbolic links on the way to
+  the root (a deploy's `current` pointed elsewhere is `All`), and a swapped link to a directory under
+  the root. `filewatch.Stamp` adds the status change time and device to size, mtime and inode.
+  `FileCacheConfig.CheckInterval` (5s by default, negative for every request) bounds what a watch
+  misses, and replaces the stat on every request off Linux.
+- **fit**: fib bumped to that commit. `check_interval` is 5s when left out, and `0` looks at the disk for
+  every request with no watch, so that the next response after a replacement is the new file. On
+  Linux the handler watches the root with `filewatch`; an event drops the lookups that depend on what
+  it names, through an index (the path, its compressed twins, the entries of a directory whose index
+  file or listing was found, and everything under a directory that went), and a lookup resolved while
+  an event came is not kept. Contents are served while the file's stamp is the one they were read
+  with. `Cleanup` closes the watch.
+- **Tests**: on Linux under `-race`, a same-stamp replacement, a file created and removed, an index file
+  that comes before another, a directory swapped, a root link swapped, each seen at once with
+  `check_interval` 1h; with no watch, the same-stamp replacement past the interval and at once with 0;
+  what each kind of event drops.
+- **Decisions pending review**:
+  1. The ETag stays mtime and size, as nginx makes it: a file replaced with the same size and time
+     keeps its ETag, so a client revalidating its old copy is answered 304. Adding the inode or change
+     time would make ETags differ between machines serving the same files.
+  2. Watched lookups still expire at `check_interval`, a bound on what inotify cannot see (writes on a
+     network file system by another machine, a symbolic link under the root to a file elsewhere).
+  3. No `watch: false` parameter: `check_interval: 0` turns the watch off, and the interval bounds the
+     rest.
+  4. fib's `FileCache` off Linux now trusts a file for 5s rather than stat it on every request; a
+     negative `CheckInterval` keeps the old behaviour.
+  5. Windows has no inode or change time; the stamp takes the creation time, which NTFS tunneling may
+     carry over to a file renamed into another's place, so a same-size, same-time replacement there is
+     not told apart at all: size and times are all it has, whatever `check_interval` is.
+  6. On a root that folds case, an event names the file as written on disk, and a lookup by another
+     case waits for the interval. inotify roots that fold case are rare.

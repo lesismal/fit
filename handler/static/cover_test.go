@@ -15,6 +15,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/lesismal/fib/filewatch"
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/internal/fibtest"
@@ -86,17 +87,17 @@ func TestCacheEdges(t *testing.T) {
 		t.Fatalf("lookups %v", c.lookups)
 	}
 	info, _ := os.Stat(full)
-	if e := c.load(full, info, variant{name: "a"}); e == nil || c.bytes != 4 {
+	if e := c.load(full, info, filewatch.StampOf(info), variant{name: "a"}); e == nil || c.bytes != 4 {
 		t.Fatalf("load: %v, %d bytes", e, c.bytes)
 	}
-	if e := c.load(filepath.Join(root, "missing"), info, variant{name: "missing"}); e != nil {
+	if e := c.load(filepath.Join(root, "missing"), info, filewatch.StampOf(info), variant{name: "missing"}); e != nil {
 		t.Fatalf("a missing file loaded: %v", e)
 	}
 	if err := os.WriteFile(full, []byte("aaaaaaaa"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	info, _ = os.Stat(full)
-	if e := c.load(full, info, variant{name: "a"}); e == nil || string(e.data) != "aaaaaaaa" || c.entries[full] != nil || c.bytes != 0 {
+	if e := c.load(full, info, filewatch.StampOf(info), variant{name: "a"}); e == nil || string(e.data) != "aaaaaaaa" || c.entries[full] != nil || c.bytes != 0 {
 		t.Fatalf("too big: %v, %v, %d bytes", e, c.entries[full], c.bytes)
 	}
 }

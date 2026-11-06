@@ -4,11 +4,20 @@
 // No file operation runs on a fib worker. What the handler learns of a
 // request path, the file it names, its index file or its compressed twins,
 // and the contents of small files, is kept in memory and trusted for
-// check_interval; a request it answers from what it knows costs no system
-// call. What it keeps of request paths is bounded, to 16384 paths and 16 MiB,
-// and a path longer than 4096 bytes is not kept. Anything else, a path not seen lately, a file to read, open or list,
-// goes to a pool of goroutines of the package's own for the disk, bounded in
-// size and queue, with a timeout, and is answered from there. A file larger
+// check_interval, 5s by default, or until a watch of the directories under
+// the root, on Linux, reports a change to it, within moments of the change:
+// a file written, replaced or removed, a directory on its way renamed, or a
+// symbolic link on the way to the root pointed elsewhere. A request it
+// answers from what it knows costs no system call. A file's contents are
+// served from memory while the file's stamp, its size, modification and
+// status change times and inode, is what it was when they were read, which
+// tells apart a file replaced by one of the same size and modification time.
+// A check_interval of 0 looks at the disk for every request. What it keeps
+// of request paths is bounded, to 16384 paths and 16 MiB, and a path longer
+// than 4096 bytes is not kept. Anything else, a path not seen lately, a file
+// to read, open or list, goes to a pool of goroutines of the package's own
+// for the disk, bounded in size and queue, with a timeout, and is answered
+// from there. A file larger
 // than max_file_bytes, or one that does not fit in what is left of
 // max_cache_bytes, is sent from disk each time, through fib's SendFile:
 // sendfile(2) on a plain HTTP/1 connection, and pieces read on fib's own
@@ -57,6 +66,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lesismal/fib/filewatch"
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
@@ -69,11 +79,12 @@ func init() {
 	module.Register(module.Info{ID: module.Handlers + ".static", New: func() any { return new(Static) }, Doc: "Serves files from a directory, with directory listings, precompressed variants and small files kept in memory."})
 }
 
-// The defaults for the cache and listing limits.
+// The defaults for the cache and listing limits, and for check_interval.
 const (
 	DefaultMaxFileBytes  = 1 << 20
 	DefaultMaxCacheBytes = 64 << 20
 	DefaultBrowseMax     = 10000
+	DefaultCheckInterval = 5 * time.Second
 )
 
 // Static serves files under a root directory.
@@ -89,7 +100,7 @@ type Static struct {
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out."`
 
-	CheckInterval config.Duration `json:"check_interval,omitempty" default:"\"1s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out."`
+	CheckInterval *config.Duration `json:"check_interval,omitempty" default:"\"5s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again. On Linux a watch of the directories under the root reports a change within moments, a file written, replaced or removed, a directory renamed, or a symbolic link on the way to the root pointed elsewhere, and this bounds what it cannot see, as a write another machine makes on a network file system; elsewhere a change shows within it. A file is told by its size, modification and status change times and inode, so one replaced by another of the same size and modification time is seen too. 0 looks at the disk for every request, with no watch, so that a response always carries the file as it is on disk then. 5s when left out."`
 
 	root         string
 	index        []string
@@ -114,6 +125,9 @@ type Static struct {
 	cache         cache
 	stall         time.Duration
 	pool          *filepool.Pool
+	// watch reports changes under the root to the cache; nil where the
+	// system has none, or with a check_interval of 0.
+	watch *filewatch.Watcher
 }
 
 // Provision checks the root and the index names.
@@ -178,13 +192,26 @@ func (s *Static) Provision(ctx *module.Context) error {
 	s.cache.lookups = make(map[string]*lookup)
 	s.cache.maxLookups = DefaultMaxLookups
 	s.cache.maxLookupBytes = DefaultMaxLookupBytes
-	s.cache.check = s.CheckInterval.Std()
-	if s.cache.check == 0 {
-		s.cache.check = time.Second
+	s.cache.index = make(map[string]map[string]struct{})
+	s.cache.check = DefaultCheckInterval
+	if s.CheckInterval != nil {
+		s.cache.check = s.CheckInterval.Std()
 	}
 	s.stall = ctx.WriteStallTimeout()
 	s.pool = defaultPool()
+	if s.cache.check > 0 {
+		// Where the system offers no watch, the check interval alone
+		// bounds how long a change goes unseen.
+		if w, err := filewatch.New(root, s.cache.event); err == nil {
+			s.watch = w
+		}
+	}
 	return nil
+}
+
+// Cleanup stops the watch of the root.
+func (s *Static) Cleanup() {
+	_ = s.watch.Close()
 }
 
 // ServeHTTP serves the file the request's path names: at once from what
@@ -285,10 +312,10 @@ func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queue
 		s.list(c, listPath, l.full, q)
 		return true
 	}
-	v, full, info := s.variant(c.Request, l)
-	e := s.cache.current(full, info)
+	v, full, info, stamp := s.variant(c.Request, l)
+	e := s.cache.current(full, stamp)
 	if e == nil && q != nil && s.cache.fits(full, info.Size()) {
-		e = s.cache.load(full, info, v)
+		e = s.cache.load(full, info, stamp, v)
 	}
 	switch {
 	case e != nil:
