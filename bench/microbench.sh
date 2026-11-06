@@ -53,16 +53,29 @@ mkdir -p "$stage/$id"
 
 linux() { env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOWORK=off "$@"; }
 
-# build REF NAME builds the test binary of pkg at REF.
+# build REF NAME builds the test binary of pkg at REF into the directory
+# NAME, beside the package's testdata at REF, which its benchmarks may read
+# as the package's tests do: from the directory they run in.
 build() {
+	mkdir -p "$stage/$id/$2"
 	if [ "$1" = work ]; then
-		(cd "$root" && linux go test -c -o "$stage/$id/$2.test" "$pkg")
+		(cd "$root" && linux go test -c -o "$stage/$id/$2/$2.test" "$pkg")
+		testdata "$root" "$2"
 		return
 	fi
 	wt="$stage/wt-$2"
 	git -C "$root" worktree add -q --detach "$wt" "$1"
-	(cd "$wt" && linux go test -c -o "$stage/$id/$2.test" "$pkg")
+	(cd "$wt" && linux go test -c -o "$stage/$id/$2/$2.test" "$pkg")
+	testdata "$wt" "$2"
 	git -C "$root" worktree remove --force "$wt"
+}
+
+# testdata copies the package's testdata under DIR, if it has one, beside
+# the binary being built; links are kept as links.
+testdata() {
+	if [ -d "$1/$pkg/testdata" ]; then
+		(cd "$1/$pkg" && COPYFILE_DISABLE=1 tar cf - testdata) | (cd "$stage/$id/$2" && tar xf -)
+	fi
 }
 echo "microbench: building $pkg at A ($1) and B ($2)"
 build "$1" a
@@ -73,7 +86,7 @@ cat > "$stage/$id/run.sh" <<EOF
 cd $BENCH_DIR/$id
 for i in \$(seq 1 $count); do
   for v in a b; do
-    ./\$v.test -test.run '^\$' -test.bench '$pattern' -test.benchmem -test.benchtime $benchtime -test.count 1 >> \$v.txt 2>&1
+    (cd \$v && ./\$v.test -test.run '^\$' -test.bench '$pattern' -test.benchmem -test.benchtime $benchtime -test.count 1) >> \$v.txt 2>&1
   done
 done
 EOF
