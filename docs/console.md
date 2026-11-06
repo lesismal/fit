@@ -91,8 +91,11 @@ is refused while there is a store: `admin` comes from the bootstrap file alone.
 Argon2id's settings, a salt and a nonce), then a JSON payload sealed with XChaCha20-Poly1305, the
 header as its additional data. Version 2, which fit writes, seals
 `{"config": <the base config>, "users": [{"username", "password_hash"}]}`: the console users whose
-passwords changed from the pages, beside the config. A version 1 store, which seals the config alone,
-is still read, and is written as version 2 from then on. The key is derived from the password with
+passwords changed from the pages, beside the config. Version 3 adds `"sections"`, named JSON values
+other parts of fit keep there, as the [assistant](#the-assistant)'s settings and model API keys; a
+store is written as version 3 only while it keeps a section, so one without stays readable by a fit
+that predates them, and an export never holds sections. A version 1 store, which seals the config
+alone, is still read, and is written as version 2 or 3 from then on. The key is derived from the password with
 Argon2id (time 3, 64 MiB, 4 threads) once, when fit starts; each write takes a new nonce, so writes
 cost no derivation. A write goes to a temporary file beside the store, made 0600, synced and renamed
 over it, so a crash leaves the old store or the new one, never half of one. A file imported through
@@ -418,6 +421,52 @@ differences and their counts) and `POST /config/reconcile` (a JSON body of the c
 | Admin API calls and role methods at once | 4 running, 64 waiting, each waiting at most 30s; past them `503` |
 | A password change | bcrypt's time on the console's pool, two checks at once, then one store write |
 | Failed logins | 5 an address (an IPv6 /64) in 15 minutes, then refused for 15 minutes, one check at a time; a wrong current password in a password change counts too; 4,096 addresses kept |
+
+## The assistant
+
+`admin.assistant` turns on the workbench's assistant (see
+[decision 031](decisions/031-assistant.md)): the console then serves the module `ai`, and the
+workbench's menu shows **Assistant**. Left out, there is no module, and nothing is sent anywhere.
+It needs `admin.console`, and like all of `admin` it is read when fit starts.
+
+```json
+"assistant": {
+  "providers": [
+    {"name": "claude", "kind": "anthropic", "models": [{"name": "claude-sonnet-4-5", "context": 200000}]},
+    {"name": "local", "kind": "ollama", "base_url": "http://127.0.0.1:11434", "models": [{"name": "qwen3:8b"}]},
+    {"name": "mesh", "kind": "llm_proxy"}
+  ],
+  "default_model": {"provider": "claude", "model": "claude-sonnet-4-5"},
+  "users": [{"username": "ops", "level": "propose"}]
+}
+```
+
+**Providers.** `kind` is one of `anthropic`, `openai`, `openai_responses`, `gemini`, `azure_openai`
+(with `api_version`), `ollama`, `openai_compatible` (any server that speaks Chat Completions, with
+`base_url`) and `llm_proxy`, this fit's own [llm.proxy](llm.md), called on its `api` address over
+loopback with one of its API keys, its certificate pinned when it has TLS. Each provider has
+`connect_timeout` (10s), `first_byte_timeout` (2m), `idle_timeout` (1m), `timeout` (10m) and
+`retries` (2, only while none of the answer has been taken).
+
+**The Settings page** lists the providers with their keys' state, edits each in a dialog, and
+**Test**s one before it is saved: the provider's model list, then a short call to a model, each with
+its time; **Read the provider's list** adds the models it lists. The default model, its parameters,
+the limits, what of the logs may be sent and each console user's level are set below. **Save
+settings** keeps them in the store, from then on in place of `admin.assistant`'s; without a store
+they cannot be saved here, and keys come from `api_key_env`.
+
+**Keys** are written, never read back. A key typed on the page goes to the store with the settings,
+encrypted with the rest of it; the page shows only whether a provider has one, where from, and its
+last four characters. `api_key_env` names an environment variable instead, read at each call, which
+a key in the store overrides. A key is never in an answer, a log line or an error, even when an API
+says it back, and is sent only over https or to a loopback host.
+
+The endpoints are `GET /api/m/ai/settings` (the settings in use, where from, whether a store keeps
+them, a version, and each provider's key as the page sees it), `PUT /api/m/ai/settings`
+(`{"settings", "keys": {"<provider>": "<key>" or "" to remove}, "version"}`; `400` with each error at
+its path, `409` without a store, `412` when the version is stale) and
+`POST /api/m/ai/providers/test` (`{"provider", "key", "model", "models_only"}`; four at once, past
+them `429`; a browser that leaves cancels the test's call).
 
 ## Roles' pages
 

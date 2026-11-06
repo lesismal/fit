@@ -118,7 +118,7 @@ func (c *chatCodec) call(p *Provider, r *Request) (string, []byte) {
 	if len(r.Tools) > 0 {
 		tools := make([]chatTool, len(r.Tools))
 		for i, t := range r.Tools {
-			tools[i] = chatTool{Type: "function", Function: functionDecl{Name: t.Name, Description: t.Description, Parameters: t.Parameters}}
+			tools[i] = chatTool{Type: "function", Function: functionDecl(t)}
 		}
 		body["tools"] = tools
 	}

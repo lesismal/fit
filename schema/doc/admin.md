@@ -29,7 +29,11 @@ user name and password from which every part of the config but `admin` is change
 made from the schema and a JSON editor; off a loopback address it needs `cert_file` and
 `key_file`. Its `mptcp` does the same for the console's listener. See
 [the console and the store](../console.md) and
-[decision 027](../decisions/027-console-and-store.md).
+[decision 027](../decisions/027-console-and-store.md). `admin.assistant`, off when left out, adds
+the workbench's assistant: the model APIs it calls (Anthropic, OpenAI, Gemini, Azure OpenAI, Ollama,
+any Chat Completions server, or this fit's `llm.proxy`), its limits and each console user's level;
+the Settings page keeps them, with the keys, in the store. See
+[the assistant](../console.md#the-assistant) and [decision 031](../decisions/031-assistant.md).
 
 ```json
 {

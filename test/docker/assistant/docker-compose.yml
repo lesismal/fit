@@ -1,0 +1,21 @@
+# Docker test of the assistant's model client against real model servers:
+# Ollama, called both as kind ollama (/api/chat, NDJSON) and as kind
+# openai_compatible (its /v1/chat/completions, SSE). The test itself runs on
+# the host (go test -tags e2e ./test/docker/assistant/e2e), against the port
+# published here; test/docker/assistant/e2e.sh starts Ollama, pulls the model
+# and runs it.
+name: fit-assistant-e2e
+
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_TAG:-0.12.6}
+    restart: "no"
+    ports: ["127.0.0.1:${OLLAMA_PORT:-21434}:11434"]
+    volumes: ["models:/root/.ollama"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 2s
+      retries: 60
+
+volumes:
+  models:

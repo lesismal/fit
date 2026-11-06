@@ -78,8 +78,10 @@ SIGHUP 重新读取 store 并应用，例如在 `fit store import` 之后；有 
 
 **格式** 是 fit 自己的 `fitstore`：59 字节的头部（魔数 `FITSTORE`、版本、Argon2id 参数、salt 和 nonce），之后是用
 XChaCha20-Poly1305 封存的 JSON 载荷，头部作为附加数据。fit 写入的第 2 版封存的是
-`{"config": <基础配置>, "users": [{"username", "password_hash"}]}`：改过密码的控制台用户与配置放在一起。第 1 版的 store
-只封存配置，仍可读取，之后按第 2 版写入。密钥由密码经 Argon2id（time 3、64 MiB、4 线程）派生，只在 fit 启动时派生一次；每次
+`{"config": <基础配置>, "users": [{"username", "password_hash"}]}`：改过密码的控制台用户与配置放在一起。第 3 版增加
+`"sections"`，即 fit 其他部分保存在其中的命名 JSON 值，如[助手](#助手)的设置与模型 API 密钥；只有保存了分区时才写为第 3 版，
+没有分区的 store 仍能被不支持分区的旧版 fit 读取，导出的文件也从不包含分区。第 1 版的 store 只封存配置，仍可读取，之后按第 2
+或第 3 版写入。密钥由密码经 Argon2id（time 3、64 MiB、4 线程）派生，只在 fit 启动时派生一次；每次
 写入使用新的 nonce，所以写入不再派生密钥。写入先写到 store 旁的临时文件，权限 0600，同步后重命名覆盖 store，因此崩溃只会留下
 旧的或新的 store，不会留下半个。经 Admin API 或页面导入的文件，最多可要求上述参数的两倍（time 6、128 MiB、8 线程），
 且同时只打开一个；其间再导入 store 文件得到 `503`。
@@ -330,6 +332,44 @@ fit check -c /etc/fit/fit.json -ca /etc/fit/admin-ca.pem -server-name admin.exam
 | 同时进行的 Admin API 调用与角色方法 | 4 个运行、64 个等待，每个最多等待 30s；超出时 `503` |
 | 修改密码 | 在控制台的有界池上用 bcrypt，同时最多 2 次检查，之后一次 store 写入 |
 | 登录失败 | 每个地址（IPv6 按 /64）15 分钟内 5 次，之后拒绝 15 分钟，同一地址同时只检查一次；修改密码时当前密码错误也计入；保留 4,096 个地址 |
+
+## 助手
+
+`admin.assistant` 开启 workbench 的助手（见 [决定 031](decisions/031-assistant.zh-CN.md)）：此时控制台提供 `ai` 模块，
+workbench 的菜单中显示 **助手**。不设置时没有该模块，也不向任何地方发送任何内容。它需要 `admin.console`，并与整个 `admin`
+一样在 fit 启动时读取。
+
+```json
+"assistant": {
+  "providers": [
+    {"name": "claude", "kind": "anthropic", "models": [{"name": "claude-sonnet-4-5", "context": 200000}]},
+    {"name": "local", "kind": "ollama", "base_url": "http://127.0.0.1:11434", "models": [{"name": "qwen3:8b"}]},
+    {"name": "mesh", "kind": "llm_proxy"}
+  ],
+  "default_model": {"provider": "claude", "model": "claude-sonnet-4-5"},
+  "users": [{"username": "ops", "level": "propose"}]
+}
+```
+
+**提供方。** `kind` 为 `anthropic`、`openai`、`openai_responses`、`gemini`、`azure_openai`（带 `api_version`）、`ollama`、
+`openai_compatible`（任何支持 Chat Completions 的服务器，需 `base_url`）或 `llm_proxy`，即本 fit 自己的
+[llm.proxy](llm.zh-CN.md)，经回环地址调用其 `api`，使用它的某个 API 密钥；有 TLS 时固定其证书。每个提供方都有
+`connect_timeout`（10s）、`first_byte_timeout`（2m）、`idle_timeout`（1m）、`timeout`（10m）与 `retries`（2，仅在尚未取得
+任何回答时重试）。
+
+**设置页** 列出各提供方及其密钥状态，在对话框中编辑，并可在保存前 **测试**：先取提供方的模型列表，再对某个模型做一次简短
+调用，各自给出用时；**读取提供方的模型列表** 会添加它列出的模型。下方设置默认模型及其参数、上限、可发送的日志以及各控制台
+用户的级别。**保存设置** 把它们保存到 store，此后取代 `admin.assistant` 中的设置；没有 store 时无法在此保存，密钥来自
+`api_key_env`。
+
+**密钥** 只写不读。在页面输入的密钥随设置进入 store，与 store 的其余内容一起加密；页面只显示提供方是否有密钥、来自哪里以及
+末四位。`api_key_env` 则指定一个环境变量，每次调用时读取，store 中的密钥优先。密钥从不出现在响应、日志行或错误中（即使 API
+把它回显），且只经 https 发送，或发往回环主机。
+
+端点为 `GET /api/m/ai/settings`（正在使用的设置、来源、是否有 store 保存、版本，以及页面所见的各提供方密钥信息）、
+`PUT /api/m/ai/settings`（`{"settings", "keys": {"<提供方>": "<密钥>"，或 "" 表示删除}, "version"}`；设置无效时 `400` 并给出
+各路径的错误，没有 store 时 `409`，版本过期时 `412`）和 `POST /api/m/ai/providers/test`（`{"provider", "key", "model",
+"models_only"}`；同时最多四个，超出时 `429`；浏览器离开时取消测试中的调用）。
 
 ## 角色的页面
 

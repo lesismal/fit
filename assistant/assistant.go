@@ -556,7 +556,7 @@ func (t *providerTest) chat() {
 	q.FirstByteTimeout, q.Timeout, q.Retries = min(q.FirstByteTimeout, testCallWait), min(q.Timeout, testCallWait), 0
 	t.res.Model = t.model
 	req := &model.Request{Model: t.model, System: "You are being tested. Reply with the single word OK.",
-		Messages: []model.Message{{Role: model.RoleUser, Content: "ping"}}, MaxTokens: 16}
+		Messages: []model.Message{{Role: model.RoleUser, Content: "ping"}}, MaxTokens: 32}
 	start := time.Now()
 	t.setCall(t.a.client.Stream(&q, req, 64<<10, nil, func(res *model.Result, err error) {
 		t.res.CallMs = time.Since(start).Milliseconds()
