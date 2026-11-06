@@ -90,7 +90,7 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `routes` | 每类请求的匹配条件、中间件和处理器 | [Routes](reference/config.md#routes) |
 | `upstreams` | 被代理的服务器，带负载均衡和健康检查 | [Upstreams](reference/config.md#upstreams) |
 | `services` | TCP 和 UDP 代理 | [Services](reference/config.md#services) |
-| 处理器 | `proxy`、`static`、`respond`、`fastcgi`、`forward_proxy`；WebRTC 用的 `whip`、`whep` 和 `webrtc_proxy`；流媒体用的 `httpflv`、`hls`、`stream_whip` 和 `stream_whep` | [Handlers](reference/config.md#handlers) |
+| 处理器 | `proxy`、`static`、`respond`、`fastcgi`、`forward_proxy`；WebRTC 用的 `whip`、`whep` 和 `webrtc_proxy`；流媒体用的 `httpflv`、`hls`、`stream_whip` 和 `stream_whep`；媒体库用的 `vod` | [Handlers](reference/config.md#handlers) |
 | 中间件 | 认证、限流、缓存、压缩、头部、改写等 | [Middleware](reference/config.md#middleware) |
 | `log`、`access_log`、`telemetry`、`metrics` | 日志、链路追踪和指标 | [Log](reference/config.md#log)、[Access log](reference/config.md#access-log)、[Telemetry](reference/config.md#telemetry)、[Metrics](reference/config.md#metrics) |
 | `limits` | 连接、头部、请求体和内存的上限 | [Limits](reference/config.md#limits) |

@@ -33,7 +33,7 @@ TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或�
 - [流媒体](docs/streaming.zh-CN.md)：基于 fib 媒体 hub，一路流经 RTMP、RTSP、SRT 或 WHIP 推送一次，即可经这些协议以及
   HTTP-FLV、HLS 和 WHEP 播放，每种协议都可受 `media_auth` 策略保护。
 - [媒体库](docs/media-library.zh-CN.md)：为电影和剧集文件所在的目录编目，不转码，按版本、音轨、字幕和海报分组，
-  扫描不占用 fib 的 worker。
+  扫描不占用 fib 的 worker；并以 HLS 点播提供，fMP4 或 MPEG-TS 分片按文件原样切出。
 - [频道](docs/channels.zh-CN.md)：把媒体库的条目作为直播流播放，按顺序、随机或按排期，经流媒体角色的每种出口播放，并可
   转推到 RTMP 和 SRT 服务器。
 - [编写模块](docs/modules.zh-CN.md)：用 Go 扩展 fit，通过 `fit build` 编入。

@@ -1,0 +1,5 @@
+{
+  "listeners": [{"name": "web", "address": "127.0.0.1:9401"}],
+  "media_library": [{"name": "films", "roots": ["/w/lib"]}],
+  "routes": [{"match": {"path": ["/vod/*"]}, "handler": {"module": "vod", "params": {"library": "films", "cors": "*"}}}]
+}

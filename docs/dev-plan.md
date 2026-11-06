@@ -287,8 +287,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | done |
 | **Media library** | | | |
 | I131 | Decision 032; fib A64, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | done |
-| I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | todo |
-| I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | todo |
+| I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | done |
+| I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | done |
 | I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | todo |
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | todo |
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | todo |
@@ -2464,6 +2464,38 @@ keeps the reads behind one interface so that it can be added).
   the bounds and a reload hold under the race detector.
 - **Touches**: `medialib` (new), `config`, `app`, `admin`, `schema`, `docs`, `test/workers`.
 
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The patterns' names** are `files` and `exclude`, not the plan's "include and exclude", as
+   `include` is a directive of the `.conf` format. Alternatives: `match` and `ignore`; a block.
+2. **Pattern syntax**: one without `/` matches the name, one with `/` the path under the root, `**`
+   spans directories; `exclude` prunes directories; dot-names are always skipped. Alternatives:
+   gitignore's rules; regular expressions.
+3. **IDs** are the path under the root without the rendition label and extension when that is safe
+   in a URL; otherwise unsafe runs become `-` and 8 hex digits of the path's hash follow, so IDs stay
+   stable and unique. Alternatives: reversible escaping (unreadable for CJK names); a hash only on a
+   collision (an ID would change when a colliding file appears).
+4. **An ID taken twice** (across roots or sidecars): the first in root and path order wins, the
+   other is reported. Alternative: the root in the ID.
+5. **Naming**: rendition labels `NNNp[fps]`, `Nk`, `Nkbps` and `audio[-lang…]`; subtitles and posters
+   go to the item with the longest matching base; a sidecar's lists merge with the files named after
+   it, and may name subdirectories but not above its own.
+6. **A pool a library**, made at once, with the static handler's defaults (4 a CPU, at least 16; queue
+   4096; 10s); `max_probes` keeps scans from crowding out serving. Alternative: one pool an engine.
+7. **The sample-table cache lives in `medialib`**, shared by I133 and I134 under one bound
+   (`max_table_bytes`), with `Table` and `Subtitle`; this adds `max_table_bytes`,
+   `max_subtitle_bytes`, `file_workers`, `file_queue` and `file_timeout`.
+8. **Sidecars** are read again at each scan, their bytes in a scan bounded by `max_catalog_bytes`.
+9. **Defaults**: `scan_interval` 10m (at least 10s; it cannot be turned off), `max_items` 20,000,
+   `max_files` 200,000, `max_catalog_bytes` 64 MiB, `max_probes` 4, sidecars 64 KiB (at most 1 MiB),
+   subtitles 2 MiB, tables 128 MiB.
+10. **The Admin API finds a library** with `medialib.Lookup` on the upstream engine, not through
+    `app.Manager`, whose lock is held for a whole apply.
+11. **`HasApps` does not count `media_library`**, as for `media_auth`: a config still needs a listener
+    or routes.
+12. **Fixtures' line endings**: `medialib/testdata/.gitattributes` sets `* -text`, so that Windows CI
+    does not change the subtitles compared byte for byte.
+
 ### I133 Video on demand
 
 - **Do**: a handler `vod` on a library: for each item a master playlist (renditions as variants
@@ -2479,6 +2511,52 @@ keeps the reads behind one interface so that it can be added).
   and its cache entries dropped; the bounds hold under the race detector; on Linux, segments a
   second and RSS measured against nginx serving the same files cut beforehand.
 - **Touches**: `handler/vod` (new), `medialib`, `schema`, `docs`, `test/workers`, `bench`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **URL names** are flat in the item's directory (`index[.c].m3u8`, `v0.c.m3u8`, `v0.N.m4s`,
+   `v0.mp4` …), both containers always there, `container` picking only what `index.m3u8` is.
+   Alternatives: a directory a container; a `?format=` query as the `hls` handler has, which a CDN's
+   key and I135's path signing would not like.
+2. **One clock for both containers**, the file's time 0 at 1.4s as in ffmpeg's MPEG-TS, keeping
+   B-frame and AAC priming times without edit lists in fMP4, and one `X-TIMESTAMP-MAP` for subtitles.
+   Alternatives: fMP4 from 0 with an edit list in the init, which players honour unevenly; an offset
+   an item.
+3. **Where a segment is cut**: the keyframe nearest its start plus `segment_duration`, never nearer
+   than half of it; the file's end counts as a keyframe; `max_segment_bytes` counts the audio.
+   Alternative: ffmpeg's first keyframe at or after the duration, with longer, less even segments.
+4. **A segment's audio** is what plays under its video, so a seek has sound at once; alternate audio
+   files are cut on a grid of their own.
+5. **The main audio**: the renditions' own audio is the audio group's default, without a URI, only when
+   every rendition has audio; otherwise the sidecar's default audio file, or the first.
+6. **BANDWIDTH** is the catalog's average bitrate (with the largest alternate audio), so the
+   multivariant playlist needs no tables. Alternative: the peak, read from every rendition's tables.
+7. **The cache**: one LRU a store for plans, media playlists (only without a query), init sections,
+   segments and WebVTT; a build holds its bytes only once its pool work starts; a segment larger than
+   the cache is served, not kept; a build that finds no room answers 503.
+8. **Caches are shared** by handlers of the same params across reloads, as the `hls` handler shares
+   its muxers.
+9. **`cache_control` is a param of the handler**, unset by default, where the plan said the route sets
+   it, as a headers middleware cannot tell a segment from a 404; ETags are the file's time and size
+   with the kind and a hash of the cutting params.
+10. **Bounds**: `max_segment_bytes` 32 MiB (64 KiB to the smaller of 1 GiB and a quarter of the cache),
+    `segment_duration` 1s to 60s, `timeout` 30s.
+11. **Statuses**: a library not applied yet, or before its first scan, answers 503 with Retry-After 1;
+    a segment too large or without a keyframe 500.
+12. **Range sending** is copied from `handler/static/send.go`, not moved to a shared package, as
+    static's tests use its internals.
+13. **Only a file's first video and audio tracks** are played; MP3 is not served (neither muxer carries
+    it).
+14. **`test/workers`** lists `vod` in `notCovered`, pointing to `handler/vod`'s `TestNoWorkerBlocks`, as
+    it needs the library role and a scan.
+15. **ffmpeg's seek check** runs only where ffmpeg seeks in its own cut of the same file, as 6.1 and 7.1
+    fail on their own fMP4 HLS.
+16. **hls.js 1.5.20** is downloaded when the test image is built, not vendored (I137 may vendor it).
+17. **The benchmark**: fit in `ubuntu:24.04` and nginx in its image, host networking, on CPUs 0–3, wrk on
+    8–15; a synthetic library; nginx with `open_file_cache`.
+18. **No fib request**: `fmp4.Fragment`, `AppendInit`, `mpegts.Muxer` and `SendFileStall` sufficed. What
+    would close the gap with nginx for cached segments is sending them without a copy in user space
+    (a memory-backed SendFile, or sendfile from a tmpfs cache): not asked yet.
 
 ### I134 Channels: files played as live streams, and pushed out
 

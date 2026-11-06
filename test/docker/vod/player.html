@@ -1,0 +1,112 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>vod player test</title>
+<!--
+  The browser check of the vod handler: hls.js plays each item's
+  multivariant playlist, of fMP4 and of MPEG-TS segments, muted, until 2s have
+  played; seeks to 60% of its length and plays 1s more there; and lists its
+  audio and subtitle tracks. What it found is POSTed, as JSON, to the
+  collector that served the page (collector.py), which prints it and exits.
+
+    player.html?base=<the vod prefix URL>&items=films/bbb,clips/av1&containers=fmp4,ts
+
+  An item whose codecs this browser's Media Source Extensions do not take
+  (H.265 in a Chromium without a hardware decoder) is reported as skipped.
+-->
+<video id="v" muted playsinline width="320"></video>
+<pre id="log"></pre>
+<script src="hls.min.js"></script>
+<script>
+const q = new URLSearchParams(location.search);
+const base = q.get('base');
+const items = (q.get('items') || '').split(',').filter(Boolean);
+const containers = (q.get('containers') || 'fmp4,ts').split(',');
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// waitFor resolves once cond() holds, or rejects after ms.
+async function waitFor(cond, ms, what) {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) throw new Error('timed out waiting for ' + what);
+    await sleep(50);
+  }
+}
+
+// codecsOf returns the CODECS of the first variant of a multivariant
+// playlist, and whether the browser's MSE takes them.
+async function codecsOf(url) {
+  const resp = await fetch(url);
+  if (resp.status === 404) return { codecs: '', supported: false, missing: true };
+  const text = await resp.text();
+  const m = text.match(/CODECS="([^"]*)"/);
+  const codecs = m ? m[1] : '';
+  const types = codecs.split(',').map((c) => /^(avc|hvc|hev|av01)/.test(c) ? `video/mp4; codecs="${c}"` : `audio/mp4; codecs="${c}"`);
+  return { codecs, supported: types.every((t) => MediaSource.isTypeSupported(t)) };
+}
+
+async function play(item, container) {
+  const url = `${base}${item}/index.${container}.m3u8`;
+  const r = { item, container, url };
+  const { codecs, supported, missing } = await codecsOf(url);
+  r.codecs = codecs;
+  if (missing) {
+    r.skipped = 'not carried in ' + container + ' (404)';
+    return r;
+  }
+  if (!supported) {
+    r.skipped = 'this browser does not play ' + codecs;
+    return r;
+  }
+  const v = document.getElementById('v');
+  const hls = new Hls({ enableWorker: true });
+  const errors = [];
+  hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) errors.push(d.type + ': ' + d.details); });
+  try {
+    hls.attachMedia(v);
+    hls.loadSource(url);
+    await waitFor(() => hls.levels && hls.levels.length > 0 || errors.length, 15000, 'the playlist');
+    r.levels = hls.levels.length;
+    v.currentTime = 0;
+    await v.play();
+    await waitFor(() => v.currentTime >= 2 || errors.length, 20000, 'two seconds played');
+    r.audioTracks = hls.audioTracks.length;
+    r.subtitleTracks = hls.subtitleTracks.length;
+    r.width = v.videoWidth;
+    r.height = v.videoHeight;
+    r.duration = v.duration;
+    const target = Math.round(v.duration * 0.6 * 10) / 10;
+    v.currentTime = target;
+    await waitFor(() => !v.seeking || errors.length, 15000, 'the seek');
+    const from = v.currentTime;
+    await waitFor(() => v.currentTime >= from + 1 || errors.length, 15000, 'a second played after the seek');
+    r.seekTo = target;
+    r.seekLanded = Math.round(from * 1000) / 1000;
+    const q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : {};
+    r.framesDecoded = q.totalVideoFrames;
+    r.framesDropped = q.droppedVideoFrames;
+  } catch (e) {
+    errors.push(String(e));
+  } finally {
+    hls.destroy();
+    v.removeAttribute('src');
+    v.load();
+  }
+  r.errors = errors;
+  r.ok = errors.length === 0 && Math.abs(r.seekLanded - r.seekTo) < 0.5;
+  return r;
+}
+
+(async () => {
+  const results = [];
+  for (const item of items) {
+    for (const c of containers) {
+      const r = await play(item, c);
+      log(JSON.stringify(r));
+      results.push(r);
+    }
+  }
+  await fetch('/result', { method: 'POST', body: JSON.stringify({ hls: Hls.version, ua: navigator.userAgent, results }) });
+  log('done');
+})();
+</script>

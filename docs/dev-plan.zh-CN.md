@@ -277,8 +277,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I130 | 基于工具注册表的 MCP 服务器：工具、作为 prompts 的 skill、作为 resources 的配置与 schema；按用户签发、最高 `propose` 的 token；提议只在 workbench 中应用 | I126, I127 | done |
 | **媒体库** | | | |
 | I131 | 决定 032；fib A64，非分片 MP4 文件的读取器：经 `io.ReaderAt` 读取样本表，按时间和关键帧查找样本，内存有上限 | I116 | done |
-| I132 | 媒体库：扫描 `media_library` 的根目录生成条目目录（轨道、编码、多码率、字幕、海报），在有上限的文件池上探测，Admin API | I131 | todo |
-| I133 | 点播：处理器 `vod`，从样本表按关键帧切分的 HLS（fMP4 或 MPEG-TS）、多码率、音轨与字幕组、Range、`auth` | I132 | todo |
+| I132 | 媒体库：扫描 `media_library` 的根目录生成条目目录（轨道、编码、多码率、字幕、海报），在有上限的文件池上探测，Admin API | I131 | done |
+| I133 | 点播：处理器 `vod`，从样本表按关键帧切分的 HLS（fMP4 或 MPEG-TS）、多码率、音轨与字幕组、Range、`auth` | I132 | done |
 | I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | todo |
 | I135 | 会过期的播放 URL：绑定资源、地址或会话的 `url_signing`，授权传递到分片，`media_tokens` 的 `POST <prefix>/urls`，`max_sessions` | I119, I133 | todo |
 | I136 | 加密分片：AES-128 HLS，密钥只提供给持有该资源授权的请求 | I135 | todo |
@@ -2005,6 +2005,28 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
   重新扫描后体现；损坏的文件连同错误列出；根目录之外的路径或符号链接被拒绝；上限和重载在 race 检测下成立。
 - **涉及**：`medialib`（新）、`config`、`app`、`admin`、`schema`、`docs`、`test/workers`。
 
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **模式字段的名字** 是 `files` 与 `exclude`，而不是计划中的“include 与 exclude”，因为 `include` 是 `.conf` 格式的指令。备选：`match` 与
+   `ignore`；一个块。
+2. **模式语法**：不含 `/` 的匹配文件名，含 `/` 的匹配根目录下的路径，`**` 跨目录；`exclude` 也剪掉目录；点开头的名字总是跳过。备选：
+   gitignore 的规则；正则表达式。
+3. **ID** 在 URL 中安全时为根目录下去掉版本标签与扩展名的路径；否则不安全的部分变为 `-`，后接路径哈希的 8 位十六进制，使 ID 稳定且唯一。
+   备选：可逆转义（中日韩文件名不可读）；只在冲突时加哈希（出现冲突文件时已有 ID 会改变）。
+4. **重复的 ID**（跨根目录或 sidecar）：按根目录与路径顺序第一个胜出，其余的报告出来。备选：ID 中带根目录。
+5. **命名**：版本标签为 `NNNp[fps]`、`Nk`、`Nkbps` 与 `audio[-lang…]`；字幕与海报归到基名匹配最长的条目；sidecar 的列表与以它命名的文件
+   合并，可引用子目录但不能高于自身所在目录。
+6. **每个库一个池**，立即创建，默认值与 static 处理器相同（每 CPU 4 个，至少 16；队列 4096；10 秒）；`max_probes` 防止扫描挤占服务。
+   备选：每个引擎一个池。
+7. **样本表缓存放在 `medialib`**，由 I133 与 I134 在同一上限（`max_table_bytes`）下共用，连同 `Table` 与 `Subtitle`；为此新增
+   `max_table_bytes`、`max_subtitle_bytes`、`file_workers`、`file_queue` 与 `file_timeout`。
+8. **sidecar** 每次扫描重新读取，一次扫描中的字节数受 `max_catalog_bytes` 限制。
+9. **默认值**：`scan_interval` 10 分钟（至少 10 秒，不能关闭），`max_items` 20,000，`max_files` 200,000，`max_catalog_bytes` 64 MiB，
+   `max_probes` 4，sidecar 64 KiB（最多 1 MiB），字幕 2 MiB，样本表 128 MiB。
+10. **Admin API 查找库** 用上游引擎上的 `medialib.Lookup`，而不是经过 `app.Manager`，后者的锁在整个应用过程中都被持有。
+11. **`HasApps` 不计 `media_library`**，与 `media_auth` 一样：配置仍需要 listener 或路由。
+12. **测试文件的换行**：`medialib/testdata/.gitattributes` 设为 `* -text`，使 Windows CI 不改动逐字节比较的字幕。
+
 ### I133 点播
 
 - **做**：基于媒体库的处理器 `vod`：每个条目一个主播放列表（多码率作为 variant，带 `BANDWIDTH`、`RESOLUTION` 和 `CODECS`；音轨组与字幕
@@ -2016,6 +2038,34 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
   原生播放器手动验证；ffprobe 认为每个分片都有效；播放中被修改或删除的文件返回 404 并清除其缓存；上限在 race 检测下成立；在 Linux 上测量
   每秒分片数和 RSS，对比 nginx 提供事先切好的同样文件。
 - **涉及**：`handler/vod`（新）、`medialib`、`schema`、`docs`、`test/workers`、`bench`。
+
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **URL 名字** 平铺在条目的目录下（`index[.c].m3u8`、`v0.c.m3u8`、`v0.N.m4s`、`v0.mp4` …），两种容器都始终可用，`container` 只决定
+   `index.m3u8` 是哪一种。备选：每种容器一个目录；像 `hls` 处理器那样用 `?format=` 查询参数，这对 CDN 的缓存键与 I135 的路径签名都不友好。
+2. **两种容器共用一个时钟**，文件的 0 时刻在 1.4 秒，与 ffmpeg 的 MPEG-TS 相同，使 fMP4 不需要编辑列表也保留 B 帧与 AAC 预滚的时间，字幕
+   只需一个 `X-TIMESTAMP-MAP`。备选：fMP4 从 0 开始并在 init 中放编辑列表，播放器对此支持不一；每个条目一个偏移。
+3. **分段位置**：离起点加 `segment_duration` 最近的关键帧，但不早于其一半；文件末尾算作关键帧；`max_segment_bytes` 计入音频。备选：
+   ffmpeg 的“到达时长时或之后的第一个关键帧”，分段更长也更不均匀。
+4. **分段中的音频** 是在其视频下播放的那部分，使跳转后立即有声音；备用音频文件按自己的网格切分。
+5. **主音频**：只有每个版本都带音频时，版本自带的音频才作为音频组的默认项（不带 URI）；否则用 sidecar 的默认音频文件，或第一个。
+6. **BANDWIDTH** 是目录中的平均码率（加上最大的备用音频），使多版本播放列表无需读取样本表。备选：峰值，需读取每个版本的样本表。
+7. **缓存**：每个 store 一个 LRU，存放切分计划、媒体播放列表（仅无查询参数时）、init、分段与 WebVTT；构建只在其池上的工作开始时占用
+   字节；大于缓存的分段照常提供但不保存；找不到空间的构建回答 503。
+8. **缓存共享**：参数相同的处理器在重载之间共用，与 `hls` 处理器共用 muxer 一样。
+9. **`cache_control` 是处理器的参数**，默认不设，而计划说由路由设置，因为 headers 中间件分不清分段与 404；ETag 由文件的时间与大小，加上
+   类型与切分参数的哈希构成。
+10. **上限**：`max_segment_bytes` 32 MiB（64 KiB 到 1 GiB 与缓存四分之一中较小者之间），`segment_duration` 1 到 60 秒，`timeout` 30 秒。
+11. **状态码**：库尚未应用或首次扫描之前回答 503 并带 Retry-After 1；过大或没有关键帧的分段回答 500。
+12. **Range 发送** 从 `handler/static/send.go` 复制，而不是移到共用的包，因为 static 的测试用到其内部实现。
+13. **只播放文件的第一条视频与音频轨道**；不提供 MP3（两种 muxer 都不支持）。
+14. **`test/workers`** 把 `vod` 列在 `notCovered` 中，指向 `handler/vod` 的 `TestNoWorkerBlocks`，因为它需要库角色与一次扫描。
+15. **ffmpeg 的跳转检查** 只在 ffmpeg 能在它自己切分的同一文件中跳转时进行，因为 6.1 与 7.1 在其自己的 fMP4 HLS 上都会失败。
+16. **hls.js 1.5.20** 在构建测试镜像时下载，不随仓库提供（I137 可以收入）。
+17. **基准测试**：fit 运行于 `ubuntu:24.04`，nginx 用其镜像，均为主机网络，使用 CPU 0–3，wrk 使用 8–15；合成的库；nginx 开启
+    `open_file_cache`。
+18. **无需 fib 请求**：`fmp4.Fragment`、`AppendInit`、`mpegts.Muxer` 与 `SendFileStall` 已足够。要缩小缓存分段与 nginx 的差距，需要不在用户
+    空间复制地发送它们（基于内存的 SendFile，或从 tmpfs 缓存 sendfile）：尚未提出。
 
 ### I134 频道：把文件作为直播流播放并向外推流
 

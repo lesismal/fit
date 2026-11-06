@@ -10,6 +10,7 @@ import (
 	_ "github.com/lesismal/fit/handler/proxy"
 	_ "github.com/lesismal/fit/handler/respond"
 	_ "github.com/lesismal/fit/handler/static"
+	_ "github.com/lesismal/fit/handler/vod"
 	_ "github.com/lesismal/fit/middleware/auth"
 	_ "github.com/lesismal/fit/middleware/breaker"
 	_ "github.com/lesismal/fit/middleware/cache"

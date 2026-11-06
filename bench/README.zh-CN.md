@@ -50,6 +50,10 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
   八分钟。
 - `bench/microbench.sh [-C 仓库] -pkg 包 -bench 正则 A B` 在压测机上对两个 ref 交替各跑 10 次某个包的微基准，
   本机用 benchstat 对比；`-C ../fib` 用于 fib。约一分钟。
+- `bench/vod.sh [输出目录]` 对比 `vod` 处理器与用 nginx 提供事先用 ffmpeg 切好的同一批文件的 HLS：每秒分片数、MB/s、
+  p99 以及服务器的常驻内存；fit 分两种情形：缓存装得下所有分片（`fit-hot`），以及只装得下少数分片（`fit-cold`，
+  每个分片都重新读取和封装）。它在本机构建 fit，在压测机上以 `flock /root/bench.lock` 运行 `bench/vod/host.sh`；
+  媒体库在第一次运行时在压测机上用 ffmpeg 生成。约五分钟。
 
 ## 各进程跑在哪里
 

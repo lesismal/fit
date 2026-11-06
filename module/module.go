@@ -161,6 +161,8 @@ type Env struct {
 	Engine *fib.Engine
 	// MediaAuth are the config's media_auth policies, as written.
 	MediaAuth []config.MediaAuth
+	// MediaLibrary are the config's media libraries, as written.
+	MediaLibrary []config.MediaLibrary
 }
 
 // Graph returns the hold a module takes on its config for a request that
@@ -217,6 +219,22 @@ func (c *Context) MediaAuth(name string) *config.MediaAuth {
 	for i := range c.env.MediaAuth {
 		if c.env.MediaAuth[i].Name == name {
 			return &c.env.MediaAuth[i]
+		}
+	}
+	return nil
+}
+
+// MediaLibrary returns the media library of the module's config named name,
+// as written, or nil when there is none. A handler that serves a library
+// checks its name with it; package medialib's Lookup finds the library
+// itself, once the role media_library has applied the config.
+func (c *Context) MediaLibrary(name string) *config.MediaLibrary {
+	if c.env == nil {
+		return nil
+	}
+	for i := range c.env.MediaLibrary {
+		if c.env.MediaLibrary[i].Name == name {
+			return &c.env.MediaLibrary[i]
 		}
 	}
 	return nil
