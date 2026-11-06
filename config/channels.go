@@ -21,6 +21,7 @@ const (
 	MaxChannelItems               = 10000
 	MaxChannelSlots               = 1000
 	MaxChannels                   = 256
+	DefaultChannelKeyRotation     = 10
 	MaxStreamPushTargets          = 256
 	DefaultPushRetryMin           = time.Second
 	DefaultPushRetryMax           = 30 * time.Second
@@ -56,6 +57,8 @@ type StreamChannel struct {
 	ReadAhead      Duration      `json:"read_ahead,omitempty" default:"\"3s\"" doc:"How much of the items is read ahead of what is sent, on the library's file pool, so that a slow disk does not stall the channel and the next item follows the last without a gap. 500ms to 1m. 3s when left out."`
 	MaxBufferBytes int64         `json:"max_buffer_bytes,omitempty" min:"0" default:"16777216" doc:"The most bytes read ahead and not yet sent, whatever read_ahead says, at least 1 MiB; a sample larger than it ends its item. 16 MiB when left out or 0."`
 	Push           []StreamPush  `json:"push,omitempty" doc:"Outside servers the channel is relayed to, as streaming's push names them, their stream being the channel's."`
+	Encrypt        bool          `json:"encrypt,omitempty" doc:"Encrypts the channel's HLS segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, under a key derived from the library's secret, which the hls handler serves only to a request its auth lets play the channel; so that segments copied, as a CDN keeps them, do not play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are not served for it. The other egresses play the channel as before, under their auth. Off when left out."`
+	KeyRotation    int           `json:"key_rotation,omitempty" min:"0" max:"100000" default:"10" doc:"With encrypt, how many segments one key encrypts before the next takes over, so that a key handed out opens a few segments only. 10 when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -88,6 +91,11 @@ func (c *StreamChannel) ReadAheadOr() time.Duration {
 // BufferBytes returns max_buffer_bytes, or its default.
 func (c *StreamChannel) BufferBytes() int64 {
 	return orDefault(c.MaxBufferBytes, DefaultChannelMaxBufferBytes)
+}
+
+// Rotation returns key_rotation, or its default.
+func (c *StreamChannel) Rotation() int {
+	return int(orDefault(int64(c.KeyRotation), DefaultChannelKeyRotation))
 }
 
 // Looped reports whether loop is on, as it is when left out.
@@ -396,8 +404,10 @@ func (c *Config) checkChannels(add func(Value, string, ...any)) {
 		case slices.IndexFunc(s.Channels, func(o StreamChannel) bool { return o.Name == ch.Name }) < i:
 			add(ch.At.Field("name"), "another channel is already named %q", ch.Name)
 		}
-		if ch.Library != "" && c.MediaLibraryNamed(ch.Library) == nil {
+		if lib := c.MediaLibraryNamed(ch.Library); ch.Library != "" && lib == nil {
 			add(ch.At.Field("library"), "there is no media_library named %q", ch.Library)
+		} else if ch.Encrypt && lib != nil && !lib.Encryptable() {
+			add(ch.At.Field("encrypt"), "encrypt needs a key: set media_library %q's secret or secret_file", ch.Library)
 		}
 		if len(ch.Items) == 0 && len(ch.Schedule) == 0 {
 			add(ch.At, "a channel plays items, a schedule or both: neither is set")

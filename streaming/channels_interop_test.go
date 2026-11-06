@@ -27,7 +27,10 @@ import (
 // FIT_CHROMIUM and FIT_HLSJS (the path of hls.js) set, a headless Chromium
 // plays the channels with hls.js; with FIT_PUSH_RTMP and FIT_PUSH_SRT set,
 // the channel is pushed to an outside server, which the script restarts
-// when the test asks it to, through FIT_PUSH_SIGNAL, a directory.
+// when the test asks it to, through FIT_PUSH_SIGNAL, a directory. live/sec,
+// encrypted (encrypt), is played under auth with a token: ffprobe reads it
+// on, and hls.js loads its keys, while a segment of it alone does not
+// decode.
 
 // makeItem writes an item of d seconds, 25 fps with a keyframe a second
 // and B-frames, and AAC, at size, from source, filtered by vf.
@@ -94,19 +97,23 @@ func TestChannelInterop(t *testing.T) {
 	}
 	f := startFit(t, `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
-  "media_library": [{"name": "lib", "roots": [`+strconv.Quote(dir)+`]}],
+  "media_library": [{"name": "lib", "roots": [`+strconv.Quote(dir)+`], "secret": "the library's secret of 16 bytes"}],
+  "media_auth": [{"name": "live", "tokens": [{"name": "view", "token": "`+viewToken+`", "play": ["live/*"]}]}],
   "streaming": {
     "rtmp": {"listen": "127.0.0.1:0"}, "rtsp": {"listen": "127.0.0.1:0"}, "srt": {"listen": "127.0.0.1:0"},
     "channels": [{"name": "live/tv", "library": "lib", "items": ["a", "b"]`+push+`},
-                 {"name": "live/mix", "library": "lib", "items": ["a", "c"]}]
+                 {"name": "live/mix", "library": "lib", "items": ["a", "c"]},
+                 {"name": "live/sec", "library": "lib", "items": ["a", "c"], "encrypt": true, "key_rotation": 3}]
   },
   "routes": [
     {"match": {"path": ["/flv/*"]}, "handler": {"module": "httpflv", "params": {"prefix": "/flv/", "cors": "*"}}},
-    {"match": {"path": ["/hls/*"]}, "handler": {"module": "hls", "params": {"prefix": "/hls/", "target_duration": "1s", "cors": "*"}}}
+    {"match": {"path": ["/hls/*"]}, "handler": {"module": "hls", "params": {"prefix": "/hls/", "target_duration": "1s", "cors": "*"}}},
+    {"match": {"path": ["/shls/*"]}, "handler": {"module": "hls", "params": {"prefix": "/shls/", "target_duration": "1s", "cors": "*", "auth": "live"}}}
   ]
 }`)
 	f.waitLive(t, "live/tv")
 	f.waitLive(t, "live/mix")
+	f.waitLive(t, "live/sec")
 	ctx := context.Background()
 	rtmpAddr, rtspAddr, srtAddr := f.addr(t, "rtmp"), f.addr(t, "rtsp"), f.addr(t, "srt")
 
@@ -129,6 +136,11 @@ func TestChannelInterop(t *testing.T) {
 		{"mix-hls-fmp4", f.base + "/hls/live/mix/index.m3u8", nil, 0.1},
 		{"mix-rtmp", "rtmp://" + rtmpAddr + "/live/mix", nil, 0.1},
 		{"mix-srt", "srt://" + srtAddr + "?streamid=live/mix", nil, 0.1},
+		// live/sec encrypted, a key every 3 segments, through a
+		// discontinuity: ffmpeg fetches the keys with the token the
+		// playlists hand on.
+		{"enc-hls-fmp4", f.base + "/shls/live/sec/index.m3u8?token=" + viewToken, nil, 0.1},
+		{"enc-hls-ts", f.base + "/shls/live/sec/index.m3u8?format=ts&token=" + viewToken, nil, 0.1},
 	}
 	var wg sync.WaitGroup
 	for _, c := range checks {
@@ -171,6 +183,7 @@ func TestChannelInterop(t *testing.T) {
 			time.Sleep(200 * time.Millisecond)
 		}
 	})
+	wg.Go(func() { encryptedAlone(t, f) })
 	if os.Getenv("FIT_CHROMIUM") != "" && os.Getenv("FIT_HLSJS") != "" {
 		wg.Go(func() { hlsjs(t, f) })
 	}
@@ -184,9 +197,10 @@ func TestChannelInterop(t *testing.T) {
 // to /result after 30s.
 const hlsjsPage = `<!doctype html><meta charset=utf-8><video id=v muted autoplay playsinline></video>
 <script src="/hls.js"></script><script>
-const v = document.getElementById('v'), out = {errors: [], cc: 0, times: [], src: SRC};
+const v = document.getElementById('v'), out = {errors: [], cc: 0, keys: 0, times: [], src: SRC};
 const h = new Hls();
 h.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) out.errors.push(d.type + ': ' + d.details) });
+h.on(Hls.Events.KEY_LOADED, () => { out.keys++ });
 h.on(Hls.Events.FRAG_CHANGED, (e, d) => { out.cc = Math.max(out.cc, d.frag.cc) });
 h.loadSource(SRC); h.attachMedia(v); v.play().catch(e => out.errors.push('play: ' + e));
 const t0 = Date.now();
@@ -201,17 +215,22 @@ const timer = setInterval(() => {
 type hlsResult struct {
 	Errors []string     `json:"errors"`
 	CC     int          `json:"cc"`
+	Keys   int          `json:"keys"`
 	Times  [][4]float64 `json:"times"`
 	Src    string       `json:"src"`
 }
 
-// hlsjs plays live/tv and live/mix with hls.js in a headless Chromium.
+// hlsjs plays live/tv, live/mix and live/sec, encrypted, with hls.js in a
+// headless Chromium.
 func hlsjs(t *testing.T, f *fit) {
-	results := make(chan hlsResult, 2)
+	results := make(chan hlsResult, 3)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/hls.js", func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, os.Getenv("FIT_HLSJS")) })
 	mux.HandleFunc("/play/{name}", func(w http.ResponseWriter, r *http.Request) {
 		src := f.base + "/hls/live/" + r.PathValue("name") + "/index.m3u8"
+		if r.PathValue("name") == "sec" {
+			src = f.base + "/shls/live/sec/index.m3u8?token=" + viewToken
+		}
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = io.WriteString(w, strings.Replace(hlsjsPage, "SRC", strconv.Quote(src), 2))
 	})
@@ -229,7 +248,7 @@ func hlsjs(t *testing.T, f *fit) {
 	go func() { _ = srv.Serve(ln) }()
 	defer srv.Close()
 	var cmds []*exec.Cmd
-	for _, name := range []string{"tv", "mix"} {
+	for _, name := range []string{"tv", "mix", "sec"} {
 		cmd := exec.Command(os.Getenv("FIT_CHROMIUM"), "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
 			"--no-first-run", "--autoplay-policy=no-user-gesture-required", "--user-data-dir="+t.TempDir(),
 			"http://"+ln.Addr().String()+"/play/"+name)
@@ -245,7 +264,7 @@ func hlsjs(t *testing.T, f *fit) {
 			_ = c.Wait()
 		}
 	}()
-	for range 2 {
+	for range 3 {
 		select {
 		case res := <-results:
 			checkHLSJS(t, res)
@@ -268,8 +287,11 @@ func checkHLSJS(t *testing.T, res hlsResult) {
 	if played := last[1] - first[1]; played < 20 {
 		t.Errorf("hls.js %s: %.1fs played in 30s", res.Src, played)
 	}
-	if strings.Contains(res.Src, "/mix/") && res.CC < 1 {
+	if (strings.Contains(res.Src, "/mix/") || strings.Contains(res.Src, "/sec/")) && res.CC < 1 {
 		t.Errorf("hls.js %s: no discontinuity played through", res.Src)
+	}
+	if strings.Contains(res.Src, "/sec/") && res.Keys < 2 {
+		t.Errorf("hls.js %s: %d keys loaded, a new one every 3 segments", res.Src, res.Keys)
 	}
 	stalled := 0
 	for i := 1; i < len(res.Times); i++ {
@@ -332,6 +354,50 @@ func pushOutside(t *testing.T, f *fit) {
 		t.Logf("%s: %+v", p.Name, p)
 		if p.Connects < 2 || p.Failures < 1 || p.State != channels.PushConnected {
 			t.Errorf("%s did not reconnect: %+v", p.Name, p)
+		}
+	}
+}
+
+// encryptedAlone checks that a segment of live/sec, fetched alone, as a
+// copy kept by a CDN would be, does not decode: ffprobe reads no packet of
+// it, after its init section or not.
+func encryptedAlone(t *testing.T, f *fit) {
+	base := f.base + "/shls/live/sec/"
+	tok := "?token=" + viewToken
+	for _, format := range []string{"", "&format=ts"} {
+		_, body := get(t, base+"media.m3u8"+tok+format, 1<<16, nil)
+		var init, seg string
+		for _, l := range strings.Split(string(body), "\n") {
+			switch {
+			case strings.HasPrefix(l, "#EXT-X-MAP:URI=\""):
+				init = strings.TrimSuffix(strings.TrimPrefix(l, "#EXT-X-MAP:URI=\""), "\"")
+			case l != "" && !strings.HasPrefix(l, "#") && seg == "":
+				seg = l
+			}
+		}
+		if seg == "" {
+			t.Errorf("no segment in %s", body)
+			return
+		}
+		var data []byte
+		if init != "" {
+			_, data = get(t, base+init, 1<<20, nil)
+		}
+		resp, s := get(t, base+seg, 64<<20, nil)
+		if resp.StatusCode != 200 {
+			t.Errorf("%s: %d", seg, resp.StatusCode)
+			return
+		}
+		p := filepath.Join(t.TempDir(), "alone"+strings.TrimPrefix(format, "&format="))
+		if err := os.WriteFile(p, append(data, s...), 0o644); err != nil {
+			t.Error(err)
+			return
+		}
+		out, err := exec.Command("ffprobe", "-v", "quiet", "-show_entries", "packet=codec_type", "-of", "csv=p=0", p).Output()
+		if err == nil && strings.TrimSpace(string(out)) != "" {
+			t.Errorf("%s alone: ffprobe reads %d packets", seg, strings.Count(string(out), "\n"))
+		} else {
+			t.Logf("%s alone: undecodable", seg)
 		}
 	}
 }

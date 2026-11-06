@@ -171,6 +171,7 @@ An item's URLs are its ID's path after `prefix`, `/vod/<library>/` unless set, a
 | `s0.m3u8`, `s0.vtt` | subtitle 0's playlist, and the subtitle as WebVTT |
 | `v0.mp4`, `a0.m4a` | the file itself, of its own extension, with `Range`, for downloads and plain players |
 | `poster.jpg` | the item's poster, of its own extension |
+| `aes.key` | with `encrypt`, the AES-128 key of the item's segments ([encrypted segments](#encrypted-segments)) |
 
 So `/vod/films/films/bbb/index.m3u8` plays the item `films/bbb`. The multivariant playlist lists
 the renditions as variants, with `BANDWIDTH` and `AVERAGE-BANDWIDTH` (the file's bytes over its
@@ -221,8 +222,7 @@ answered 304 and ranges of a segment 206. `cache_control` is sent with each, as
 `token` query parameter or the `fit_media_token` cookie. A playlist fetched with `?token=` names
 what it lists with the token too, so that Safari and ffmpeg, which send no header, play on.
 With the policy's `url_signing`, a [signed URL](#playback-urls-that-expire) of the item plays too.
-Encrypted segments come later in the
-[development plan](dev-plan.md#media-library-video-on-demand-and-channels).
+With `encrypt`, the segments are [encrypted](#encrypted-segments).
 
 ## Playback URLs that expire
 
@@ -302,6 +302,55 @@ at once the URLs and grants that key signed, and only those; rotating a single s
 
 **Never in a log.** A request's `token` and `sig` are replaced by `REDACTED` in the URI the access
 log writes, however it is answered, and a grant in a cookie is never logged.
+
+## Encrypted segments
+
+With `encrypt`, a `vod` handler encrypts every segment it serves with AES-128, `METHOD=AES-128` of
+RFC 8216: fMP4 and MPEG-TS alike, the whole segment in CBC mode with PKCS#7 padding, its IV its
+number in the media playlist. A channel's `encrypt` does the same for its HLS
+([channels](channels.md#encrypted-hls)). It needs the library's `secret` or `secret_file`, and the
+handler's `auth`:
+
+```json
+{
+  "media_library": [{"name": "films", "roots": ["/srv/films"], "secret_file": "/etc/fit/films-secret"}],
+  "routes": [{"match": {"path": ["/vod/films/*"]},
+              "handler": {"module": "vod", "params": {"library": "films", "auth": "site", "encrypt": true,
+                                                      "cache_control": "public, max-age=86400"}}}]
+}
+```
+
+Each item has a key of its own, which its media playlists name as `aes.key` in the item's directory,
+after the initialization section, so that the initialization section stays clear:
+
+```
+#EXT-X-MAP:URI="v0.init.mp4?exp=...&g=1&sig=..."
+#EXT-X-KEY:METHOD=AES-128,URI="aes.key?exp=...&g=1&sig=..."
+```
+
+**The keys** are not stored: each is derived from the library's secret (16 bytes or more) with
+HMAC-SHA256, under a key of the library's own, from the item's ID, or a channel's name and key
+period; so every fit with the same secret serves the same segments, and the keys open nothing of
+another library, nor any of `media_auth`'s tokens. The secret never reaches a log. Changing it
+changes every key, and the segments' ETags: segments a CDN kept from before no longer play under
+the new keys, so purge them, or wait for their `max-age`.
+
+**Who gets a key.** `aes.key` lies under the item's resource, so a request for it is checked as
+every other is: by the grant the playlist handed on from a [signed URL](#playback-urls-that-expire),
+or by a token, Basic or the cookie, with `play` on the item. Without credentials it is answered 401;
+with a grant of another item, 403. It goes out with `Cache-Control: private, no-store`, whatever
+`cache_control` says, so that no CDN keeps it.
+
+**What it buys.** Segments a CDN keeps, or anyone copies, decode only with the key, which fit hands
+only to a viewer the site's API let in, while the grant lives. It is not DRM: a viewer let in has the
+key, as their player must. The files themselves (`v0.mp4`) are clear, so an encrypting handler does
+not serve them; posters, subtitles and initialization sections stay clear.
+
+**The cost.** A segment is encrypted once, on the library's file pool, as it is built, in place, and
+kept encrypted; the cache serves it as it serves a clear one. On the benchmark host (Ryzen 7 7800X3D,
+one core) AES-128-CBC runs at 1.24 GiB/s: a 1 MiB segment, 4s of 2 Mbit/s, takes 0.79 ms more to
+build, a 4 MiB one 3.2 ms; the test library's small segments took 24 µs (fMP4) and 48 µs (MPEG-TS)
+more, 153 µs to 177 µs and 174 µs to 222 µs, its key's derivation included.
 
 ## A video site
 

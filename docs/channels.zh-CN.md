@@ -103,6 +103,27 @@ route hls { match { path /hls/* }; handler hls { prefix /hls/ } }
 `max_buffer_bytes`（16 MiB）。上一个条目播放时，下一个条目就已加载并读取。文件池或磁盘太慢时，频道会暂停，而不是把迟到
 的内容一次性突发发送，并计一次欠载。播放中被修改或删除的文件，其条目在已读到的位置结束；下次扫描会按其现状列出。
 
+## 加密的 HLS
+
+设置 `encrypt` 后，频道的 HLS 与 `vod` 的分片一样加密（[加密分片](media-library.zh-CN.md#加密分片)）：AES-128，密钥由
+媒体库的 `secret` 或 `secret_file` 派生，每 `key_rotation` 个分片（10）换一把，使交出的一把密钥只能打开少数分片。
+
+```json
+{"name": "tv/films", "library": "films", "items": ["films/bbb", "films/sintel"], "encrypt": true, "key_rotation": 10}
+```
+
+由 `hls` 处理器完成，对任何设置了 `encrypt` 的频道的流：
+
+- 媒体播放列表在每次换密钥处加入 `#EXT-X-KEY`，其 URI 为分片旁的 `key-<session>-<n>.key`，并去掉低延迟 HLS 的部分分片：
+  加密的频道按完整分片播放。密钥之后（在不连续处）出现的 `#EXT-X-MAP` 之前先加 `METHOD=NONE`，使初始化段保持明文。
+- 密钥只提供给处理器的 `auth` 允许播放该频道的请求，带 `Cache-Control: private, no-store`，且只提供已切出的分片和下一个
+  分片的密钥，使观众无法取得未来内容的密钥；没有 `auth` 的 `hls` 处理器不提供任何密钥（403）。
+- 分片在媒体库的文件池上加密一次，供请求它的所有观众使用，并在处理器的 `max_bytes` 之内保留。
+
+每当流的切片重新开始（如 `idle_timeout` 之后），`<session>` 就会改变，所有密钥随之改变，因此同一密钥与 IV 不会用两次。
+RTMP、RTSP、SRT、HTTP-FLV、WHEP 和推流目标照旧在各自的 `auth` 下传送该频道。fib 的 HLS 尚不加密：由 fit 加密 fib 的
+muxer 切出的分片（[fib 请求 A69](fib-api-requests.zh-CN.md#a69加密的-hls-分片)）。
+
 ## 推流目标
 
 | 字段 | 默认值 | |

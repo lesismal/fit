@@ -108,6 +108,10 @@ func (l *Library) Catalog() *Catalog { return l.cat.Load() }
 // Item returns the item of the library's catalog whose ID is id, or nil.
 func (l *Library) Item(id string) *Item { return l.cat.Load().Item(id) }
 
+// Keys returns the keys of the library's encrypted HLS, derived from the
+// secret of the config last applied, or nil when it has none.
+func (l *Library) Keys() *Keys { return l.set.Load().keys }
+
 // Pool returns the library's file pool, on which work that reads its files
 // runs. It is replaced when a reload changes its bounds; the one replaced
 // runs what it has queued.

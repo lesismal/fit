@@ -13,7 +13,7 @@ if [ -x /w/vod.test ]; then
 	# The test finds genlib.sh as it does in the repository.
 	mkdir -p /w/t/handler/vod /w/t/test/docker/vod
 	cp /w/genlib.sh /w/t/test/docker/vod/
-	(cd /w/t/handler/vod && FIT_MEDIA_INTEROP=1 /w/vod.test -test.run '^TestInterop$' -test.v -test.timeout 20m) \
+	(cd /w/t/handler/vod && FIT_MEDIA_INTEROP=1 /w/vod.test -test.run '^TestInterop(Encrypted)?$' -test.v -test.timeout 30m) \
 		>/w/out/interop.log 2>&1 || status=1
 	grep -E '^(---|ok|FAIL|PASS)|segments valid|interop_test' /w/out/interop.log
 fi
@@ -23,6 +23,9 @@ sh /w/genlib.sh /w/lib "${SECONDS_FILM:-30}"
 # collector stands for the site's API, which asks media_tokens' /urls for
 # them with its own password.
 head -c 32 /dev/urandom | base64 >/w/site-secret
+# The library's secret, which the keys of /vod/enc/'s encrypted segments
+# derive from.
+head -c 32 /dev/urandom | base64 >/w/lib-secret
 hash=$(printf 'site-api-password\n' | /w/fit hash-password -cost 4)
 sed "s|@HASH@|$hash|" /w/fit.json >/w/fit-run.json
 /w/fit run -c /w/fit-run.json >/w/out/fit.log 2>&1 &
@@ -34,7 +37,7 @@ collector=$!
 sleep 1
 chromium --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run \
 	--autoplay-policy=no-user-gesture-required --user-data-dir=/tmp/chrome \
-	"http://127.0.0.1:9400/player.html?base=http://127.0.0.1:9401/vod/films/&signed=1&items=${ITEMS:-films/bbb,clips/hevc,clips/av1,clips/opus,clips/gop3s,music/song}" \
+	"http://127.0.0.1:9400/player.html?base=http://127.0.0.1:9401/vod/films/,http://127.0.0.1:9401/vod/enc/&encrypted=http://127.0.0.1:9401/vod/enc/&signed=1&items=${ITEMS:-films/bbb,clips/hevc,clips/av1,clips/opus,clips/gop3s,music/song}" \
 	>/w/out/chromium.log 2>&1 &
 wait $collector || status=1
 # The access log, flushed every second, holds no signature.

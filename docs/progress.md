@@ -6260,3 +6260,26 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: sessions are counted by each fit alone; RTMP, RTSP, SRT and WHEP take no signed URLs;
   Safari's player was not tried again by hand. The decisions made are in the plan's I135 section,
   pending review.
+
+
+### I136 Encrypted segments — done
+
+- **`encrypt`** on `vod` and on a channel's HLS (with `key_rotation`, 10 by default): AES-128
+  (`METHOD=AES-128`) for fMP4 and MPEG-TS, keys derived from the library's new `secret` or
+  `secret_file` (`medialib.Keys`), one an item, or a channel's session and period; segments encrypted on
+  the file pool before they are cached, within the cache's bound; a key served only to a grant or
+  token for its resource, `private, no-store`; init sections, subtitles and posters clear; an
+  encrypting `vod` serves no clear file.
+- **Channels**: a stopgap in fit's `hls` handler until fib request A69 lets fib's Muxer encrypt: each
+  segment copied and encrypted once on the library's pool, cached within `max_bytes`, playlists
+  rewritten, no Low-Latency HLS parts. A69 is being added to fib.
+- **Tests**: `make test-changed` under the race detector; on the benchmark host, ffmpeg plays every
+  encrypted item frame for frame and hls.js plays them through signed URLs (`TestInteropEncrypted`,
+  `test/docker/vod`), ffprobe and hls.js play encrypted channels across key rotations and
+  discontinuities (`TestChannelInterop`); segments alone do not decode; a key is refused without a
+  grant (401) and with another resource's (403).
+- **Cost** (benchmark host, one core): AES-128-CBC at 1.24 GiB/s, 0.79 ms a 1 MiB segment; building a
+  test library's segment +24 µs with fMP4 and +48 µs with MPEG-TS; a cached segment nothing more.
+- **Gaps**: subtitles are clear; the channel stopgap's busy-pool and client-left paths have no test of
+  their own; Safari's player not tried by hand. The decisions made are in the plan's I136 section,
+  pending review.

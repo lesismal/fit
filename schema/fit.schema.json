@@ -2327,6 +2327,14 @@
           "description": "How often the roots are scanned again, at least 10s; a scan also runs when the library is made, when the config changes its roots, patterns or bounds, and on the Admin API's POST /media/library/<name>/rescan. A file whose size and time are unchanged is not probed again. 10m when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "secret": {
+          "description": "The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation segments. Changing it changes every key, so that segments encrypted before, kept by a CDN, no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of the library can be encrypted.",
+          "type": "string"
+        },
+        "secret_file": {
+          "description": "A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. None when left out.",
+          "type": "string"
         }
       },
       "required": [
@@ -2845,12 +2853,23 @@
     "config.StreamChannel": {
       "additionalProperties": false,
       "properties": {
+        "encrypt": {
+          "description": "Encrypts the channel's HLS segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, under a key derived from the library's secret, which the hls handler serves only to a request its auth lets play the channel; so that segments copied, as a CDN keeps them, do not play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are not served for it. The other egresses play the channel as before, under their auth. Off when left out.",
+          "type": "boolean"
+        },
         "items": {
           "description": "The IDs of the library's items the channel plays, in this order unless order is shuffle, and again from the first when loop is on; between the schedule's slots too. An item the library does not hold, or cannot serve, is skipped. At most 10000.",
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "key_rotation": {
+          "default": 10,
+          "description": "With encrypt, how many segments one key encrypts before the next takes over, so that a key handed out opens a few segments only. 10 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
         },
         "library": {
           "description": "The media_library the channel's items are of.",
@@ -5375,6 +5394,10 @@
         "cors": {
           "description": "Sent as Access-Control-Allow-Origin, as \"*\", for players on other origins. None when left out.",
           "type": "string"
+        },
+        "encrypt": {
+          "description": "Encrypts the segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, each item under a key of its own derived from the library's secret, which the media playlists name as aes.key in the item's directory and the handler serves only to a request auth lets play that item: segments copied, as a CDN keeps them, do not play without it. The files themselves are then not served; initialization sections, subtitles and posters stay clear. Needs auth and the library's secret or secret_file. Off when left out.",
+          "type": "boolean"
         },
         "library": {
           "description": "The media_library whose items are served.",

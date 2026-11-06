@@ -291,7 +291,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | done |
 | I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | done |
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | done |
-| I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | todo |
+| I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | done |
 | I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | todo |
 | I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | todo |
 | I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | todo |
@@ -2672,6 +2672,34 @@ keeps the reads behind one interface so that it can be added).
   or with one for another resource, is refused; segments fetched alone do not decode; the cost a
   segment measured on Linux.
 - **Touches**: `handler/vod`, `streaming`, `medialib`, `schema`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Encryption needs `auth`**: `vod`'s `encrypt` requires it, and an `hls` handler without `auth`
+   serves no channel keys (403), as an open key protects nothing.
+2. **A key an item, the IV the segment's number**, none written: an item's renditions share the key
+   and a segment number's IV, which tells only whether their first blocks match. Alternatives: a key a
+   rendition; an IV written a segment, which needs a key tag a segment.
+3. **Init sections stay clear**: the key comes after `#EXT-X-MAP` in a title's playlist, and
+   `METHOD=NONE` before a later MAP in a channel's. Alternative: init sections encrypted too, with IVs
+   written.
+4. **Key names**: `aes.key` for an item, `key-<session>-<epoch>.key` for a channel.
+5. **Keys are derived, never stored**: the first 16 bytes of HMAC-SHA256 under a key the library
+   derives from its `secret`, over the kind, the resource and the period; fits with one secret serve the
+   same segments; a new secret changes every key and ETag, and copies a CDN holds must be purged
+   (documented).
+6. **A channel's key names the Muxer's session**, so a restart never uses a key and IV again; a key is
+   served only up to the next segment's period, so no viewer takes keys ahead.
+7. **An encrypting `vod` serves no clear file** (404), as a download would undo it; subtitles and
+   posters stay clear.
+8. **Channels encrypt HLS only**; RTMP, RTSP, SRT, HTTP-FLV, WHEP and push stay clear under their own
+   `auth`.
+9. **No Low-Latency HLS for an encrypted channel** (its tags removed, parts 404), as parts cannot be
+   encrypted outside fib.
+10. **The channels' encryption is a stopgap in fit** until fib request A69 lets fib's Muxer encrypt:
+    each segment copied and encrypted once on the library's pool, cached within the handler's
+    `max_bytes`, playlists rewritten. Alternative: no encrypted channels until A69.
+11. **`key_rotation`** defaults to 10 segments (at most 100,000) and means nothing without `encrypt`.
 
 ### I137 A video site, end to end
 
