@@ -1,0 +1,20 @@
+file|clips/Av1 Opus.mp4|1.000000
+stream|clips/Av1 Opus.mp4|codec_name=av1|width=64|height=48|start_time=0.000000|duration=1.000000
+stream|clips/Av1 Opus.mp4|codec_name=opus|sample_rate=48000|channels=1|start_time=0.000000|duration=1.000000
+file|clips/late.mp4|1.010000
+stream|clips/late.mp4|codec_name=h264|width=64|height=48|start_time=0.000000|duration=1.000000
+stream|clips/late.mp4|codec_name=aac|sample_rate=48000|channels=1|start_time=0.178000|duration=0.832000
+file|films/bbb.360p.mp4|1.000000
+stream|films/bbb.360p.mp4|codec_name=h264|width=128|height=96|start_time=0.000000|duration=1.000000
+stream|films/bbb.360p.mp4|codec_name=aac|sample_rate=48000|channels=1|start_time=0.000000|duration=1.000000
+file|films/bbb.audio-fr.m4a|1.000000
+stream|films/bbb.audio-fr.m4a|codec_name=aac|sample_rate=48000|channels=1|start_time=0.000000|duration=1.000000
+file|films/bbb.mp4|1.000000
+stream|films/bbb.mp4|codec_name=h264|width=64|height=48|start_time=0.000000|duration=1.000000
+stream|films/bbb.mp4|codec_name=aac|sample_rate=48000|channels=1|start_time=0.000000|duration=1.000000
+file|films/sintel-hd.mp4|1.000000
+stream|films/sintel-hd.mp4|codec_name=hevc|width=64|height=48|start_time=0.000000|duration=1.000000
+stream|films/sintel-hd.mp4|codec_name=aac|sample_rate=48000|channels=1|start_time=0.000000|duration=1.000000
+file|films/sintel-sd.mp4|1.000000
+stream|films/sintel-sd.mp4|codec_name=h264|width=64|height=48|start_time=0.000000|duration=1.000000
+stream|films/sintel-sd.mp4|codec_name=opus|sample_rate=48000|channels=1|start_time=0.000000|duration=1.000000

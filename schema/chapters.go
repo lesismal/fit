@@ -39,6 +39,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"webrtc", "WebRTC", "webrtc", "webrtc.md"},
 	{"media_auth", "Media auth", "media-auth", "media_auth.md"},
 	{"streaming", "Streaming", "streaming", "streaming.md"},
+	{"media_library", "Media library", "media-library", "media_library.md"},
 	{"providers", "Providers", "providers", "providers.md"},
 }
 

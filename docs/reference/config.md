@@ -41,6 +41,7 @@ a config against it and more.
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey)
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc)
+- [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
@@ -119,6 +120,7 @@ In JSON:
 | `webrtc` | [object](#config-webrtc) |  | What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out. |
 | `media_auth` | list of [object](#config-mediaauth) |  | Named policies of who may publish and play which streams, with tokens, users and keys for tokens fit signs: the handlers and roles that take media (whip, whep, webrtc_proxy) refer to one with their auth param. A handler without auth lets everyone in, as the route's middleware allow. |
 | `streaming` | [object](#config-streaming) |  | fit's streaming role, beside the gateway on its engine: one media hub where a stream is published once, over RTMP, RTSP, SRT or WHIP, and played over any of them, HTTP-FLV and HLS too, each listener and handler with its media_auth policy. None when left out. |
+| `media_library` | list of [object](#config-medialibrary) |  | Named libraries of media files: directories scanned into a catalog of items, each a title with its renditions, audio, subtitles and poster, probed off fib's workers on a bounded file pool of the library's own, and read by the Admin API's /media/library. None when left out: no files are scanned or served. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -3070,6 +3072,136 @@ In JSON:
 | `connect_timeout` | duration | `"15s"` | How long a session may take from its answer to a connected PeerConnection before it is ended; once connected, ICE consent bounds it. 15s when left out. |
 | `play_wait` | duration |  | How long a WHEP offer may wait for a stream with no publisher yet, its request held, before it is answered 404. Answered 404 at once when left out. |
 | `max_offer_bytes` | integer, 0 to 65536 | `32768` | The largest offer taken; a larger one is answered 400. At most 64 KiB. 32 KiB when left out or 0. |
+
+<a id="media-library"></a>
+
+## Media library
+
+Named libraries of media files: each library's `roots` are directories, scanned with their
+subdirectories into a catalog of items. An item is a title: its renditions, MP4 files (`.mp4`,
+`.m4v`, `.mov`, and `.m4a` for audio alone) of the codecs fit serves as they are stored (H.264,
+H.265, AV1; AAC, Opus), made beforehand, since fit does not transcode; its subtitles, `.vtt`, and
+`.srt` served as WebVTT; and its poster, a `.jpg`, `.png` or `.webp`. Files are grouped by their
+names: `bbb.mp4` and `bbb.720p.mp4` are renditions of the item `bbb`, `bbb.audio-fr.m4a` its
+French audio, `bbb.en.srt` and `bbb.fr.forced.vtt` its subtitles, and `bbb.jpg` or
+`bbb.poster.jpg` its poster; or by a sidecar, `bbb.json`, which gives the item its `id`, `title`
+and `poster` and lists its `renditions`, `audio` and `subtitles` by their paths from the sidecar's
+directory, which they may not lead out of. An item's `id` is the sidecar's, or its path under
+its root, as `films/bbb`; a path with what an ID may not hold, spaces among them, gets those made
+`-` and a hash of the path after it, so that every scan gives it the same ID.
+
+A library is scanned when it is made, every `scan_interval`, when a reload changes its roots,
+patterns or bounds, and on the Admin API's `POST /media/library/<name>/rescan`. A scan walks the
+roots on a goroutine of the library's own and probes the media files on the library's file pool,
+`max_probes` at once, reading a few kilobytes of each whatever its length; a file whose size and
+time are unchanged since the last scan is not probed again, and the catalog a scan makes replaces
+the last one only once it is whole. A file that fails to probe is listed with its error and not
+served. `files` and `exclude` choose the files looked at, by pattern, and names starting with `.` are
+never looked at. A path out of the roots is refused: a sidecar's path with `..` or from `/`, and a
+symbolic link that leads out of its root, unless `follow_symlinks`; links within the root are
+followed, and each directory is walked once. What a scan cannot list, as such a link, is in the
+catalog's problems.
+
+Every part is bounded: the catalog by `max_items` and `max_catalog_bytes`, a scan by `max_files`
+(files and directories, read a few hundred at a time) and 32 directories of depth, a sidecar by
+`max_sidecar_bytes`, a subtitle by `max_subtitle_bytes`, the sample tables kept for the files being
+served by `max_table_bytes`, and the file pool by `file_workers`, `file_queue` and `file_timeout`.
+Nothing touches the disk on a fib worker. A reload changes a library in place. The Admin API's
+`GET /media/library`, `GET /media/library/<name>` (a page of its items, with `offset`, `limit`,
+`q`, `codec` and `error`) and `GET /media/library/<name>/items/<id>` read the catalogs. See
+[decision 032](../decisions/032-media-library.md) and [Media library](../media-library.md).
+
+In a .conf file:
+
+```fit
+listener web :8080
+
+media_library films {
+	roots /srv/media/films /srv/media/shows
+	files *.mp4 *.m4a *.srt *.vtt *.jpg *.json
+	exclude **/extras/**
+	scan_interval 30m
+	max_items 50000
+	max_probes 4
+}
+
+route {
+	handler respond { body "the library is read by the Admin API for now" }
+}
+```
+
+In YAML:
+
+```yaml
+listeners:
+  - name: web
+    address: :8080
+media_library:
+  - name: films
+    roots:
+      - /srv/media/films
+      - /srv/media/shows
+    files:
+      - '*.mp4'
+      - '*.m4a'
+      - '*.srt'
+      - '*.vtt'
+      - '*.jpg'
+      - '*.json'
+    exclude:
+      - '**/extras/**'
+    scan_interval: 30m
+    max_items: 50000
+    max_probes: 4
+routes:
+  - handler:
+      module: respond
+      params:
+        body: the library is read by the Admin API for now
+```
+
+In JSON:
+
+```json
+{
+  "listeners": [{"name": "web", "address": ":8080"}],
+  "media_library": [
+    {
+      "name": "films",
+      "roots": ["/srv/media/films", "/srv/media/shows"],
+      "files": ["*.mp4", "*.m4a", "*.srt", "*.vtt", "*.jpg", "*.json"],
+      "exclude": ["**/extras/**"],
+      "scan_interval": "30m",
+      "max_items": 50000,
+      "max_probes": 4
+    }
+  ],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "the library is read by the Admin API for now"}}}]
+}
+```
+
+<a id="config-medialibrary"></a>
+
+### `media_library[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The library's name, which handlers and the Admin API's /media/library/<name> refer to it by. Letters, digits, '_', '.' and '-'. |
+| `roots` | list of string |  | Required. The directories whose files the library holds, scanned with their subdirectories; an item's id is its path under its root. A root may not lie inside another. A root missing when scanned is reported, and the others are scanned. |
+| `files` | list of string |  | The files looked at, by pattern: a pattern without '/' matches a file's name, as *.mp4, and one with '/' its path under the root, as films/**/*.mp4, where * matches within a name and ** any run of directories. Every file when left out; names starting with '.' are never looked at. |
+| `exclude` | list of string |  | Files and directories left out, by pattern, as files writes them, as trailers or **/extras/**; a directory left out is not walked. None when left out. |
+| `follow_symlinks` | boolean |  | Follow symbolic links that lead out of the library's roots. A link that stays within its root is followed either way; one that leads out is refused, and reported, when left out or false. |
+| `scan_interval` | duration | `"10m"` | How often the roots are scanned again, at least 10s; a scan also runs when the library is made, when the config changes its roots, patterns or bounds, and on the Admin API's POST /media/library/<name>/rescan. A file whose size and time are unchanged is not probed again. 10m when left out. |
+| `max_items` | integer, 0 or more | `20000` | The most items the catalog holds; past it the rest are left out, and the scan says so. 20000 when left out or 0. |
+| `max_files` | integer, 0 or more | `200000` | The most files and directories a scan looks at, across the roots; past it the scan stops there, and says so. 200000 when left out or 0. |
+| `max_catalog_bytes` | integer, 0 or more | `67108864` | The most memory the catalog takes, as reckoned from its items' paths, titles, tracks and codec configurations; past it the rest of the items are left out, and the scan says so. 64 MiB when left out or 0. |
+| `max_probes` | integer, 0 or more | `4` | The most files probed at once on the library's file pool, so that a scan leaves the pool's other workers to the files being served. 4 when left out or 0. |
+| `max_sidecar_bytes` | integer, 0 to 1048576 | `65536` | The largest sidecar, <name>.json, read; a larger one is reported and left out. At most 1 MiB. 64 KiB when left out or 0. |
+| `max_subtitle_bytes` | integer, 0 or more | `2097152` | The largest subtitle file served, .vtt or .srt turned into WebVTT; a larger one is listed with its error and not served. 2 MiB when left out or 0. |
+| `max_table_bytes` | integer, 0 or more | `134217728` | The most memory the sample tables read from the files take, kept for the files being served; past it the least recently used are dropped, and a table larger than all of it is refused. 128 MiB when left out or 0. |
+| `file_workers` | integer, 0 or more |  | The goroutines of the library's file pool, which probe, read sample tables and read the files' bytes, so that no fib worker waits on the disk: all the disk is asked to do at once. 4 a CPU, and at least 16, when left out or 0. |
+| `file_queue` | integer, 0 or more | `4096` | The most jobs that wait for the file pool; one more is refused, as a request answered 503. 4096 when left out or 0. |
+| `file_timeout` | duration | `"10s"` | How long a job may wait for the file pool before it is given up, as a request answered 503. 10s when left out. |
 
 <a id="providers"></a>
 
