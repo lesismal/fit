@@ -119,7 +119,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I162.
+Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -296,7 +296,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | done |
 | I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | done |
 | **Cluster management** | | | |
-| I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | todo |
+| I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | done |
 | I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | todo |
 | I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | todo |
 | I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | todo |
@@ -321,6 +321,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | done |
 | I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | done |
 | I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | done |
+| I162 | One address, one server: config validation refuses two parts of the config on one address and transport, across listeners, the Admin API, consoles and every role, with an error naming both; every binding checks at bind time that no other socket holds its address; fib's TURN relays never share a port of the range (A70) | — | done |
 
 ## M0, foundations
 
@@ -2730,6 +2731,28 @@ keeps the reads behind one interface so that it can be added).
     `max_bytes`, playlists rewritten. Alternative: no encrypted channels until A69.
 11. **`key_rotation`** defaults to 10 segments (at most 100,000) and means nothing without `encrypt`.
 
+**Low-Latency HLS across new tracks** (fib A71, after I136, 2026-11-06), decisions pending review:
+
+12. **Fixed in fib's playlist and segment ends, not worked around in hls.js or fit**: the preload hint
+    of a segment's first part follows that segment's discontinuity and `EXT-X-MAP` (alternative: a
+    `TYPE=MAP` preload hint, which hls.js ignores); hls.js's keeping the old init section for a
+    fragment hint (`mergeDetails`) and placing the next discontinuity by the `EXTINF` of a segment read
+    by its parts are taken as players' behaviour to meet, not reported upstream.
+13. **The hint names the key in force again after a new `EXT-X-MAP`**, not the next segment's, which
+    no playlist names before that segment is cut (`KeyEpoch`); hls.js reads the next segment's key
+    from the playlist that lists its first part.
+14. **A segment ended by new tracks, the stream's end or a jump in the clock lasts until the earliest
+    of its tracks ends** (each track's last packet and the step before it; a track that ended before
+    the last part began does not count): when audio and video end apart, the next item overlaps the
+    longer track's tail rather than leaving a hole, as a player replaces an overlap but stalls at a
+    hole. Alternative: the video's end alone, which left an audio-only hole when the audio ends first.
+15. **Left as it is**: tracks changing twice before the new tracks' first keyframe leave a playlist
+    that hinted the first change's init section; hls.js would keep that one. Rare (a publisher's
+    tracks set again within one keyframe interval) and not handled.
+16. **The interop test**: `live/secll` plays items whose tracks differ again (a and c), a clear
+    `live/mixll` beside it, both required to load a discontinuity by their parts; ffprobe reads
+    `live/mixll`'s Low-Latency playlist; the page reports its load and append log on a fatal error.
+
 ### I137 A video site, end to end
 
 - **Do**: an example in [fit-examples](https://github.com/lesismal/fit-examples): a library, `vod`
@@ -2970,6 +2993,41 @@ binaries (I151 records the question, not a plan).
   **Check** button beside Save that runs the dry run and shows its errors where Save would.
 - **Touches**: `docs/decisions` (033), `admin`, `admin/store`, `login`, `app/console`,
   `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The node ID without a store** is kept in a file beside the config (`fit.node-id`), where the
+   roles keep theirs; a fit that gains a store takes it over. Alternatives: `$XDG_STATE_HOME`; no ID
+   without a store.
+2. **A random UUIDv4**; `admin.node_id` takes 1–64 of `[A-Za-z0-9._-]`. Alternative: the host name,
+   which changes with the host and collides in containers.
+3. **`admin.node_id`**, not in the plan, for containers with a read-only config and no store, which
+   would otherwise get a new ID at each start.
+4. **Dry runs** on `PUT`, `PATCH` and `DELETE /config`, `/load` and `/config/text`; not rollback,
+   reconcile or import.
+5. **A dry run tries new addresses with a brief bind**, so a port taken is refused as an apply refuses
+   it.
+6. **A dry run compiles without an engine**, as `fit validate` does, so upstream pools neither dial nor
+   probe. Alternative: the real environment, which would also find differences in shared pools.
+7. **A slowed user is refused (429), not delayed**, as holding the request would tie up the login pool;
+   at most 5 minutes after each guess. Alternatives: a delay; loopback exempt.
+8. **Names that are not users share one failure count**, keeping the table bounded; unknown names slow
+   down together.
+9. **Address lockouts double** from 15 minutes to an hour, starting over after 15 quiet minutes.
+   Alternative: a flat 15 minutes.
+10. **A user is slowed after 10 failures in a row**, above an address's 5, so that a guesser from one
+    address cannot slow the real user.
+11. **A failed password check on the Account page counts** as a failed login.
+12. **`/api/node` at the console's top level** as well as `/api/m/admin/node`, as the plan names it.
+13. **A dry run's answer** gives the running config's `version` and `etag` (for the next `If-Match`),
+    `new_etag` and `unchanged`, with `Fit-Dry-Run: 1`; it is not counted as a reload.
+14. **Capability names** are dotted, sorted and never change meaning; `store` and `console` appear only
+    when on.
+15. **Check is enabled only with unsaved changes**, as Save is.
+16. **Decision 033 also writes down the plan's seven open questions as proposed**, such as binary
+    upgrades (I151) not taken up, pending review.
+17. **`Retry-After` keeps its rounding** (whole seconds plus one), and the body's `retry_after` the same
+    number.
 
 ### I141 The manager: members, their credentials and their state
 
@@ -3481,6 +3539,70 @@ Principles, in the order they bind:
    dotfiles are still skipped over as before.
 7. **The nginx converter.** It writes a `~` regexp containing `\.php` as `(?i)` and warns, beside
    the migration docs. Alternative: the docs only.
+
+### I162 One address, one server
+
+- **Why**: fib's engines listen with SO_REUSEPORT, so that each poller accepts on a socket of its
+  own, and the kernel lets any other socket of the same user that sets it too listen on the same
+  address, without an error, splitting the connections between the two. The TestWebProxy flake of
+  2026-11-06 showed it: a web proxy and a console forced onto one port both listened, and the wrong
+  server answered 13 of 20 requests. Config validation refused some clashes within one role (two
+  listeners, a forward and a web proxy) but not across roles, and the consoles, the LLM roles'
+  listeners and API, and the tunnel hub's listeners, console socket, forwards and web proxies bound
+  without the plain-bind check `listener`, `streaming`, `webrtc/turn` and `webrtc/media` made.
+- **Do**: one check in `config` over every address the config has fit listen on (listeners, the
+  ones HTTPS by default makes, `admin`, `admin.console`, the `llm` roles' consoles, listeners and
+  API, the tunnel roles' consoles, the hub's listeners and console socket, the proxy's forwards and
+  web proxies, streaming's four ports, TURN's three lists, `webrtc.media` and `webrtc.proxy`),
+  addresses normalized, reported at the later of two with the earlier named; the per-role
+  duplicate checks it replaces go. One package, `internal/bindcheck`, for the plain-bind check at
+  bind time, used by every binding fit adds. Decide what to do about another process.
+- **Done when**: every two kinds of address clash in validation, with tests; each role refuses an
+  address another fib engine holds with SO_REUSEPORT, with tests that fail without the check; docs
+  in English and Chinese; the race tests and CI pass.
+- **Touches**: `config`, `internal/bindcheck`, `internal/bindtest`, `listener`, `app/console`,
+  `llm`, `tunnel`, `streaming`, `webrtc`, `docs`; fib's `webrtc/turn/turnserver` (A70).
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Another process: a plain bind at bind time, fib's ReusePort kept.** fib's own answer for an
+   engine without `ReusePort` is the same probe (`claimAddress` in its `internal/listener` binds
+   without SO_REUSEPORT and closes before the pollers bind), so neither is atomic: a socket that
+   takes the address in the microseconds between is not caught, and a socket of the same user that
+   sets SO_REUSEPORT itself can join afterwards, which is that socket's choice. Turning `ReusePort`
+   off is engine-wide and would put every UDP address (HTTP/3, the tunnel's QUIC, TURN, WebRTC, SRT)
+   on one poller, and end the zero-gap reload of a listener replaced on its own address. So no fib
+   API was requested for fit's bindings. Alternative: a fib `Binding.Exclusive` that keeps the
+   claiming socket (SO_REUSEPORT set after its bind), atomic, if the window ever matters.
+2. **Wildcard and specific addresses on one port clash.** `:8080` and `127.0.0.1:8080` are refused,
+   though the kernel would route the specific address's connections to its own socket rather than
+   split them: on Linux the bind-time check refuses such a pair anyway (a plain bind of one
+   conflicts with a listening socket on the other), so validation says so first and on every OS
+   alike. Two addresses of one TURN `listen` list that overlap are refused too. Alternative: exact
+   matches only.
+3. **Normalization.** An empty host, `0.0.0.0`, `::` and `::ffff:0.0.0.0` are one wildcard, so
+   `0.0.0.0:80` and `[::1]:80` clash though Linux would let them both bind (an over-refusal);
+   `localhost` is `127.0.0.1`, as Go resolves it to listen; IPs compare in canonical form, zones
+   included; other host names compare in lower case and are not resolved at load, so two names of
+   one IP are caught only when they bind.
+4. **One check, new messages.** The per-role checks (listeners, streaming's ports, the tunnel hub's
+   listeners, the tunnel proxy's forwards and web proxies, TURN's lists, `webrtc.proxy` against
+   `webrtc.media`, streaming's WebRTC port against the WebRTC roles) are replaced; the messages now
+   name the earlier part by its config path or listener name, and the transport. Parts are
+   ordered listeners, `admin`, `llm`, `tunnel`, `streaming`, `webrtc`; the error is at the later.
+5. **What validation does not see.** Listeners that providers (Docker, Kubernetes Gateways) make at
+   run time, and a role's address its pages change, are checked at bind time only. TURN's relay
+   range and `webrtc.proxy`'s source port range are not listen addresses and are not checked against
+   the listeners; a relay now skips a port of the range another socket holds (A70).
+6. **A move between kinds in one reload.** A reload that moves an address from one kind of binding
+   to another (a web proxy's to a forward, a role console's to another role's) can fail the new
+   binding's check if the old one is still open when it binds; it is reported, the rest runs, and
+   the next apply binds it. Each kind closes its own old bindings before binding new ones, as
+   before.
+7. **fib's TURN relays (A70).** Found here: with `port_min`/`port_max`, two allocations could share
+   one relayed port. Fixed in fib (`856ad5b`) with a set of reserved ports and the same plain bind;
+   fit moved to that commit, which also brings `925f292` and `0ddaba3` (media/hls) from another
+   session.
 
 ## Performance
 

@@ -75,6 +75,7 @@
 | A62 | 用 splice(2) 搬运代理的 HTTP/1.1 上传 | 已完成，fib `main` 的 `60d67aa` | 12 | — |
 | A63 | 多路径 TCP 作为监听器的选项 | 已完成，fib `5c0e5b9` | — | — |
 | A64 | 非分片 MP4 文件的读取器 | 已完成，fib `8998d58` | 1、11 | I131–I134（032） |
+| A70 | TURN 中继不共用端口范围内的同一端口 | 已完成，fib `856ad5b` | 11 | I162 |
 
 ## 证据
 
@@ -1755,3 +1756,49 @@ fit 的 `hls` 处理器给 fib 的处理器一个 `Encrypt`：对设置了 `encr
 错误（503）。它在 fib 的处理器之前、在自己的 `auth` 下回答密钥 URI，只提供 `SessionMuxer(stream, session).KeyEpoch()` 中
 `ok && epoch <= cur` 的密钥；重新加载改变了频道的加密时，它在播放列表请求时结束该频道的 Muxer，让 fib 按新的加密重新启动。
 加密频道可以使用低延迟 HLS。
+
+## A70：TURN 中继不共用端口范围内的同一端口
+
+**状态。** 2026-11-06 由 I162（一个地址，一个服务器）提出。已在 fib 的 `856ad5b` 完成，由 fit 的会话按
+[规则 15](rules.zh-CN.md#七fib-满足不了时) 实现；fit 已在该提交上。fit 中没有临时方案：fit 的 TURN 角色无法选择中继的端口。
+
+**问题。** 设置 `Config.PortMin` 和 `PortMax` 时，`turnserver.bindRelay` 用 `Engine.AddBinding` 逐个尝试范围内的端口。引擎以
+SO_REUSEPORT 绑定（`Config.ReusePort`，fib 的默认），内核允许设置了它的套接字加入另一个同样设置了它的套接字占着的端口：于是中继
+可能绑定到另一个分配的中继的端口、范围内 fit 监听器的 UDP 端口，或另一个 fib 进程的端口，内核会把对端的数据报分给两者。
+
+**依据。** 一个只有一个端口的范围的测试：第一个中继由内核选端口绑定，把范围设为该端口，第二次 `bindRelay` 无错误地绑定了同一端口
+（两次都是 `127.0.0.1:55826`），而它本应返回 `turn.ErrNoRelay`。
+
+**建议的 API。** 无：在 `bindRelay` 内部修复。范围内的端口先在服务器的中继端口集合中预留，使两个 setup 协程不会选中同一个，并在中继
+绑定之前以不带 SO_REUSEPORT 的绑定占位（端口上已有套接字时会被拒绝）；失败的端口像以往被占用的端口一样跳过。中继的绑定移除后归还
+预留。
+
+**fit 的使用方式。** `webrtc.turn` 的 `port_min` 和 `port_max` 照旧传给 `Config.PortMin` 和 `PortMax`；各分配现在得到各自的端口。
+
+**实际实现。** 与建议相同（`claimPort`、`releasePort`、`relay.port`），附 `TestRelayPortsNotShared`（另一个中继或另一个以
+SO_REUSEPORT 监听的引擎占着的端口被跳过，中继关闭后端口回到范围中）和 `TestRelayPortsConcurrent`（在四个端口的范围上同时绑定的中继
+各得一个端口）。
+
+## A71：新轨道之后的低延迟 HLS part
+
+**状态。** 2026-11-06 由 I136（加密分片）与 I134（频道）发现。已在 fib 的 `925f292` 与 `0ddaba3` 完成，由 fit 的会话按
+[规则 15](rules.zh-CN.md#七fib-满足不了时) 实现；fit 已在包含它的 `856ad5b` 上。
+
+**问题。** 频道切换到轨道不同的条目时（`hub.Publisher.SetTracks`：另一个 SPS、另一个分辨率），用低延迟 HLS 播放，hls.js 在不连续点
+之后的第一个分片失败（`bufferAppendError`，part 1：媒体元素此前已经出错），明文与加密相同，而整个分片可以继续播放。`media/hls` 中有两处：
+
+1. 分片的第一个 part 列出之前，媒体播放列表以该 part 的 hint 结尾，没有该分片的任何标签。hls.js 依 hint 之前生效的标签（最后的
+   discontinuity 序号与 init）确定将来的分片（fragment hint），分片列出后仍保留那个 init（`mergeDetails` 从同序号的分片复制），于是把新
+   条目的 part 接在旧 init 之后追加，解码器随之失败。
+2. 因新轨道而结束的分片，时长到任一轨道的最后一个包再加上流的最后步长为止：AAC 比条目最后一个视频帧多出约 100 ms，而 hls.js 对按
+   part 读过的分片按其时长放置不连续点之后的分片，于是在复用缓冲区所持有的范围之后留下空洞，每个条目处卡住两秒。
+
+**证据。** 在 `TestChannelInterop` 中用 hls.js 1.5.20：不连续点之后第一个分片处追加的 init 带的是旧的 codec 字符串（`avc1.4D400D`），
+新的（`avc1.4D4015`）晚了一个分片才出现；修复第一处之后，缓冲区在 6.08 s 到 6.176 s 之间有空洞，而分片 5 的 `EXTINF` 为 1.096 s。
+
+**实际实现。** 分片第一个 part 的 hint 写在该分片的 `EXT-X-DISCONTINUITY` 与 `EXT-X-MAP` 之后（新的 map 之后再次写出生效的密钥），
+即打开的分片的，或在它开始之前、轨道改变时就已知的下一个分片的；没有后续包而结束的分片或 part，时长到其最后一个 part 中各轨道最早
+结束的那个为止。API 不变。
+
+**fit 如何使用。** fit 除版本外不变；`TestChannelInterop` 按 part 播放轨道不同的条目上的 `live/secll` 与 `live/mixll`。
+

@@ -40,6 +40,7 @@ import (
 	fibtls "github.com/lesismal/fib/tls"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/login"
 	"github.com/lesismal/fit/logs"
 )
@@ -322,6 +323,9 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 	// mptcp is the pages member's own, on a role's console and on
 	// admin.console alike: the login behind the binding is the same either
 	// way, only the sockets the kernel opens differ.
+	if err := bindcheck.Free("tcp", cfg.Address); err != nil {
+		return nil, fmt.Errorf("console: %w", err)
+	}
 	var err error
 	if c.index, err = engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: c.limit, MultipathTCP: cfg.MPTCP}); err != nil {
 		return nil, fmt.Errorf("console: %w", err)

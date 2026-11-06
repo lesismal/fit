@@ -1,7 +1,6 @@
 package config
 
 import (
-	"net"
 	"slices"
 	"strings"
 	"time"
@@ -211,27 +210,19 @@ func (c *Config) checkStreaming(add func(Value, string, ...any)) {
 			add(at, "there is no media_auth policy named %q", name)
 		}
 	}
-	// TCP and UDP ports of the role's own, which may not clash with each
-	// other; listeners and other roles are checked when they bind.
-	tcp, udp := map[string]string{}, map[string]string{}
-	address := func(at Value, a, name string, ports map[string]string) {
-		port, msg := checkAddress(a)
-		if msg != "" {
+	// Two of its ports on one address, or one of them on another part's,
+	// are checkBinds'.
+	address := func(at Value, a string) {
+		if _, msg := checkAddress(a); msg != "" {
 			add(at, "%s", msg)
-			return
 		}
-		if other, ok := ports[a]; ok && port != 0 {
-			add(at, "%s listens on %s already", other, a)
-			return
-		}
-		ports[a] = name
 	}
 	if r := s.RTMP; r != nil {
-		address(r.At.Field("listen"), r.Listen, "rtmp", tcp)
+		address(r.At.Field("listen"), r.Listen)
 		policy(r.At.Field("auth"), r.Auth)
 	}
 	if r := s.RTSP; r != nil {
-		address(r.At.Field("listen"), r.Listen, "rtsp", tcp)
+		address(r.At.Field("listen"), r.Listen)
 		policy(r.At.Field("auth"), r.Auth)
 		for i, m := range r.AuthMethods {
 			if slices.Index(r.AuthMethods, m) < i {
@@ -243,55 +234,15 @@ func (c *Config) checkStreaming(add func(Value, string, ...any)) {
 		}
 	}
 	if r := s.SRT; r != nil {
-		address(r.At.Field("listen"), r.Listen, "srt", udp)
+		address(r.At.Field("listen"), r.Listen)
 		policy(r.At.Field("auth"), r.Auth)
 		if n := len(r.Passphrase); n != 0 && (n < 10 || n > 79) {
 			add(r.At.Field("passphrase"), "the passphrase is %d characters: SRT takes 10 to 79", n)
 		}
 	}
 	if w := s.WebRTC; w != nil {
-		address(w.At.Field("listen"), w.Listen, "webrtc", udp)
+		address(w.At.Field("listen"), w.Listen)
 		checkPublicIPs(w.At.Field("public_ips"), w.PublicIPs, add)
 		checkICEServers(w.At.Field("ice_servers"), w.ICEServers, add)
-		if c.WebRTC != nil {
-			for _, other := range []struct {
-				name   string
-				listen string
-				on     bool
-			}{
-				{"webrtc.media", listenOf(c.WebRTC.Media), c.WebRTC.Media != nil},
-				{"webrtc.proxy", listenOfProxy(c.WebRTC.Proxy), c.WebRTC.Proxy != nil},
-			} {
-				if other.on && samePort(other.listen, w.Listen) {
-					add(w.At.Field("listen"), "%s listens on %s already: the role needs a UDP port of its own", other.name, w.Listen)
-				}
-			}
-		}
 	}
-}
-
-func listenOf(m *WebRTCMedia) string {
-	if m == nil {
-		return ""
-	}
-	return m.Listen
-}
-
-func listenOfProxy(p *WebRTCProxy) string {
-	if p == nil {
-		return ""
-	}
-	return p.Listen
-}
-
-// samePort reports whether two addresses bind the same port: the same port,
-// not 0, on hosts of which one is a wildcard or which are the same.
-func samePort(a, b string) bool {
-	ha, pa, err1 := net.SplitHostPort(a)
-	hb, pb, err2 := net.SplitHostPort(b)
-	if err1 != nil || err2 != nil || pa != pb || pa == "0" {
-		return false
-	}
-	wild := func(h string) bool { return h == "" || h == "0.0.0.0" || h == "::" }
-	return ha == hb || wild(ha) || wild(hb)
 }

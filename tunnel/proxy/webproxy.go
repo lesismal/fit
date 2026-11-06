@@ -10,6 +10,7 @@ import (
 	"github.com/lesismal/fib"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/tunnel/internal/common"
 	"github.com/lesismal/fit/tunnel/internal/transport/ws"
 	"github.com/lesismal/fit/tunnel/internal/wscrypt"
@@ -110,7 +111,10 @@ func (c *Proxy) startProxy(pc *config.TunnelWebProxy) *webProxy {
 		p.err = err.Error()
 		return p
 	}
-	i, err := c.h.Engine.AddBinding(fib.Binding{Addr: pc.Listen, Handler: p})
+	i, err := -1, bindcheck.Free("tcp", pc.Listen)
+	if err == nil {
+		i, err = c.h.Engine.AddBinding(fib.Binding{Addr: pc.Listen, Handler: p})
+	}
 	if err != nil {
 		p.err = err.Error()
 		c.log.Warnf("web proxy %s: %v", pc.Listen, err)

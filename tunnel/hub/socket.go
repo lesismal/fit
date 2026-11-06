@@ -10,6 +10,7 @@ import (
 	"github.com/lesismal/fib"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/tunnel/internal/common"
 	"github.com/lesismal/fit/tunnel/internal/transport/ws"
 	"github.com/lesismal/fit/tunnel/internal/wscrypt"
@@ -65,6 +66,9 @@ func (s *Hub) applySocket(cfg *config.TunnelConsoleSocket) error {
 	}
 	if cfg == nil {
 		return nil
+	}
+	if err := bindcheck.Free("tcp", cfg.Address); err != nil {
+		return err
 	}
 	h := &socketHandler{s: s, conns: map[*fib.Connection]*proxy{}, unauth: map[netip.Addr]int{}}
 	h.max.Store(int64(cfg.Conns()))

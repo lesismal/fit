@@ -77,6 +77,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A62 | A proxied HTTP/1.1 upload moved by splice(2) | done, fib `main` at `60d67aa` | 12 | — |
 | A63 | Multipath TCP as a listener's option | done, fib `5c0e5b9` | — | — |
 | A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` | 1, 11 | I131–I134 (032) |
+| A70 | TURN relays that never share a port of the range | done, fib `856ad5b` | 11 | I162 |
 
 ## Evidence
 
@@ -2318,3 +2319,66 @@ goroutine of its own); a library not loaded is an error (503). It answers the ke
 handler, under its `auth`, for `ok && epoch <= cur` of `SessionMuxer(stream, session).KeyEpoch()`,
 and ends a channel's Muxers at a playlist request when a reload changed the channel's encryption,
 so that fib starts them again under the new one. Low-Latency HLS works for encrypted channels.
+
+## A70: TURN relays that never share a port of the range
+
+**Status.** Requested on 2026-11-06, from I162 (one address, one server). Done in fib at `856ad5b`,
+made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on that commit. No
+stopgap in fit: fit's TURN role cannot choose its relays' ports.
+
+**Problem.** With `Config.PortMin` and `PortMax` set, `turnserver.bindRelay` tried each port of the
+range with `Engine.AddBinding`. The engine binds with SO_REUSEPORT (`Config.ReusePort`, fib's
+default), and the kernel lets a socket that sets it join a port another such socket holds: so a
+relay could bind the port of another allocation's relay, of a fit listener's UDP port in the range,
+or of another fib process, and the kernel would split the peers' datagrams between the two.
+
+**Evidence.** A test with a one-port range: the first relay bound with the kernel's choice of port,
+the range set to that port, and a second `bindRelay` bound the same port without an error
+(`127.0.0.1:55826` twice), where it should have answered `turn.ErrNoRelay`.
+
+**Suggested API.** None: a fix inside `bindRelay`. A port of the range is reserved in the server's
+set of relayed ports, so two setup goroutines cannot both pick it, and claimed with a bind without
+SO_REUSEPORT, which a socket on it refuses, before the relay binds; a port that fails is skipped as
+a taken one always was. The reservation is given back once the relay's binding is removed.
+
+**How fit uses it.** `webrtc.turn`'s `port_min` and `port_max` go to `Config.PortMin` and `PortMax`
+as before; allocations now get ports of their own.
+
+**As built.** As suggested (`claimPort`, `releasePort`, `relay.port`), with
+`TestRelayPortsNotShared` (a port another relay or another engine with SO_REUSEPORT holds is
+skipped, and is the range's again once its relay closes) and `TestRelayPortsConcurrent` (relays bound
+at once over a range of four ports each get a port of their own).
+
+## A71: Low-Latency HLS parts after new tracks
+
+**Status.** Found on 2026-11-06, from I136 (encrypted segments) and I134 (channels). Done in fib at
+`925f292` and `0ddaba3`, made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on
+`856ad5b`, which has it.
+
+**Problem.** A channel moving to an item whose tracks differ (`hub.Publisher.SetTracks`: another SPS,
+another resolution) played by Low-Latency HLS failed in hls.js at the first segment after the
+discontinuity (`bufferAppendError`, part 1: the media element had already failed), clear or encrypted
+alike, while whole segments played on. Two things in `media/hls`:
+
+1. Until a segment's first part was listed, the media playlist ended with the hint of that part and
+   none of the segment's tags. hls.js makes the segment to come (its fragment hint) of the tags in force
+   before the hint, the last discontinuity sequence and init section, and keeps that init section once
+   the segment is listed (`mergeDetails` copies it from the fragment of the same number), so it appended
+   the new item's parts after the old init section, and the decoder failed on them.
+2. A segment ended by new tracks lasted until the last packet of any track and the stream's last step:
+   AAC runs on past an item's last video frame (about 100ms), and hls.js, which places the segment after
+   a discontinuity by the duration of a segment it read by its parts, left a hole past what the muxed
+   buffer held, and stalled there two seconds at every item.
+
+**Evidence.** In `TestChannelInterop` with hls.js 1.5.20: the init appended at the first segment after
+the discontinuity carried the old codec string (`avc1.4D400D`), the new one (`avc1.4D4015`) came a
+segment later; then, fixed, a buffer hole from 6.08s to 6.176s where segment 5's `EXTINF` was 1.096s.
+
+**As built.** The hint of a segment's first part follows that segment's `EXT-X-DISCONTINUITY` and
+`EXT-X-MAP` (with the key in force named again after a new map), the open segment's or, before it
+begins, the next one's, known when the tracks change; a segment or part ended with no packet after it
+lasts until the earliest of the tracks in its last part ends. No API changes.
+
+**How fit uses it.** Nothing changes in fit but the version; `TestChannelInterop` plays `live/secll`
+and `live/mixll` by their parts across items whose tracks differ.
+

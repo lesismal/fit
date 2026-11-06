@@ -32,6 +32,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/tunnel/internal/common"
 	"github.com/lesismal/fit/tunnel/internal/link"
@@ -440,7 +441,10 @@ func (c *Proxy) listen(fc *config.TunnelForward) *forward {
 			go c.open(e, f.cfg.Load())
 		},
 	}
-	i, err := c.h.Engine.AddBinding(fib.Binding{Addr: fc.Listen, Handler: handler})
+	i, err := -1, bindcheck.Free("tcp", fc.Listen)
+	if err == nil {
+		i, err = c.h.Engine.AddBinding(fib.Binding{Addr: fc.Listen, Handler: handler})
+	}
 	if err != nil {
 		f.err = err.Error()
 		c.log.Warnf("forward %s: %v", fc.Listen, err)

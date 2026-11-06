@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/hex"
-	"net"
 	"net/netip"
 	"slices"
 	"strings"
@@ -320,11 +319,10 @@ func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
 	for i, a := range t.Listen {
 		if _, msg := checkAddress(a); msg != "" {
 			add(t.At.Field("listen").Index(i), "%s", msg)
-		} else if _, port, _ := net.SplitHostPort(a); port != "0" && slices.Index(t.Listen, a) < i {
-			add(t.At.Field("listen").Index(i), "%s is listed already", a)
 		}
 	}
-	// TCP and TLS share the port space: an address is one or the other.
+	// TCP and TLS share the port space, which checkBinds checks with the
+	// other parts'.
 	stream := slices.Concat(t.ListenTCP, t.ListenTLS)
 	for i, a := range stream {
 		at := t.At.Field("listen_tcp").Index(i)
@@ -333,8 +331,6 @@ func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
 		}
 		if _, msg := checkAddress(a); msg != "" {
 			add(at, "%s", msg)
-		} else if _, port, _ := net.SplitHostPort(a); port != "0" && slices.Index(stream, a) < i {
-			add(at, "%s is listed already in listen_tcp or listen_tls", a)
 		}
 	}
 	switch {
@@ -417,8 +413,6 @@ func (c *Config) checkProxy(add func(Value, string, ...any)) {
 	}
 	if _, msg := checkAddress(p.Listen); msg != "" {
 		add(p.At.Field("listen"), "%s", msg)
-	} else if m := c.WebRTC.Media; m != nil && m.Listen == p.Listen && !strings.HasSuffix(p.Listen, ":0") {
-		add(p.At.Field("listen"), "webrtc.media listens on %s already", p.Listen)
 	}
 	checkPublicIPs(p.At.Field("public_ips"), p.PublicIPs, add)
 	if p.RelayIP != "" {
