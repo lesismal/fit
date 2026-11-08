@@ -4387,6 +4387,20 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **与计划的差异**：加了 `fit sync snapshot`；连接器自己的 `Test` 方法（file、Elasticsearch、ClickHouse、HTTP、WASM）没有写，
   因此它们的测试显示 `tested: false`。
 - **缺口**：计划 I188 小节中的决定，待审查。暂停不会跨 fit 重启保留；延迟是确认的延迟，不是落后于源头部的延迟（I189）。
+
+### I188b 早先连接器的连接测试 — 已完成
+
+- **连接测试**（`fitsync.Tester`）：`elasticsearch` 每次重新请求根端点（`Conn.Test`），源还会对其索引 `/_count`（404 算
+  通过）；`clickhouse` 在其数据库中执行 `SELECT 1`（`Conn.Test`），源还会以 `LIMIT 0` 执行其表或查询；`redis` 拨一个自己的
+  连接（HELLO、AUTH、SELECT）并 PING；`s3` 列出一个键，源在其前缀下，目标遇到 `AccessDenied` 算通过；`file`
+  （`sync/file/conntest.go`）检查源的 glob 起始目录可列出、匹配到的文件可打开，目标的路径可追加打开，或其目录能新建一个
+  立即删除的文件；`http` 目标带头部和凭据发送 `HEAD`，2xx 和除 401/403/407 外的 4xx 算通过；`http` 源直接通过。
+- **未做**：`wasm` 源与目标，它们访问的对象只有插件知道（计划，决定 8）。
+- **文档**：计划的 I188b 小节。
+- **测试**：每个连接器的测试在各包 fake 上的通过与失败（凭据被拒，数据库、表、桶或目录不存在，不可读和只读的文件，卡住的
+  端点，已关闭的服务器）。新代码覆盖率 100%（客户端自建引擎的错误分支除外）；六个包跑了竞态检测；staticcheck 和 vet 无告警。
+- **缺口**：计划 I188b 小节中的决定，待审查；没有对真实服务器做互通测试（`test/sync` 的测试还没有调用 `Test`）。
+
 ### I187 S3 及兼容存储作为源与目标 — 已完成
 
 - **SigV4 与连接**（`sync/s3/sigv4.go`、`client.go`，包 `syncs3`）：`Signer`，对整个请求体做 SHA-256 的 AWS 签名第 4 版，在 fit

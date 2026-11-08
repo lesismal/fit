@@ -452,6 +452,54 @@ func TestConnFailover(t *testing.T) {
 	s.conn.Close()
 }
 
+// TestConnTest: SELECT 1 in the database, and the source's table with
+// LIMIT 0.
+func TestConnTest(t *testing.T) {
+	var mu sync.Mutex
+	one, limit := "1\n", ""
+	f := newFakeCH(t, func(q url.Values, sql, _ string) (int, int, string) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case sql == "SELECT 1":
+			if q.Get("database") != "db" {
+				return 404, 81, "Code: 81. DB::Exception: Database x does not exist"
+			}
+			return 200, 0, one
+		case sql == "SELECT * FROM (SELECT * FROM `t`) LIMIT 0" && q.Get("date_time_output_format") == "iso":
+			if limit != "" {
+				return 404, 60, limit
+			}
+			return 200, 0, ""
+		}
+		return 400, 62, "unexpected " + sql
+	})
+	ctx := context.Background()
+	sink := fakeSink(t, f, map[string]any{"database": "db"})
+	src := fakeSource(t, f, map[string]any{"database": "db", "table": "t", "key": []string{"id"}})
+	if err := sink.Test(ctx); err != nil {
+		t.Fatalf("sink: %v", err)
+	}
+	if err := src.Test(ctx); err != nil {
+		t.Fatalf("source: %v", err)
+	}
+	if err := fakeSink(t, f, nil).Test(ctx); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("no database: %v", err)
+	}
+	mu.Lock()
+	limit = "Code: 60. DB::Exception: Table db.t does not exist"
+	mu.Unlock()
+	if err := src.Test(ctx); err == nil || !strings.Contains(err.Error(), "Table db.t does not exist") {
+		t.Errorf("no table: %v", err)
+	}
+	mu.Lock()
+	one = "<html>"
+	mu.Unlock()
+	if err := src.Test(ctx); err == nil || !strings.Contains(err.Error(), "not ClickHouse") {
+		t.Errorf("not ClickHouse: %v", err)
+	}
+}
+
 // The answers' header lines.
 const pageHead = `["id", "c", "gone", "__fit_0", "__fit_1"]
 ["UInt64", "DateTime", "Bool", "String", "String"]

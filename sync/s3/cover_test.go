@@ -405,3 +405,52 @@ func TestCanonicalQueryOdd(t *testing.T) {
 		t.Error("the message")
 	}
 }
+
+// TestConnTest lists one key, under the source's prefix; the sink passes an
+// AccessDenied, not a bad key or a missing bucket.
+func TestConnTest(t *testing.T) {
+	f := newFake(t)
+	f.objs["l/1"] = []byte("1\n")
+	sink := loadSink(t, f.params(""))
+	src := loadSource(t, f.params(`"prefix": "l/"`))
+	var queries []string
+	f.hook = func(w http.ResponseWriter, r *http.Request, key string) bool {
+		queries = append(queries, r.URL.Query().Get("prefix")+" "+r.URL.Query().Get("max-keys"))
+		return false
+	}
+	ctx := context.Background()
+	if err := sink.Test(ctx); err != nil {
+		t.Fatalf("sink: %v", err)
+	}
+	if err := src.Test(ctx); err != nil {
+		t.Fatalf("source: %v", err)
+	}
+	f.mu.Lock()
+	if fmt.Sprint(queries) != "[ 1 l/ 1]" {
+		t.Errorf("listings %q", queries)
+	}
+	f.mu.Unlock()
+	for _, c := range []struct {
+		code     string
+		sinkPass bool
+	}{{"AccessDenied", true}, {"InvalidAccessKeyId", false}} {
+		f.mu.Lock()
+		f.hook = func(w http.ResponseWriter, r *http.Request, key string) bool {
+			s3Error(w, 403, c.code)
+			return true
+		}
+		f.mu.Unlock()
+		if err := sink.Test(ctx); (err == nil) != c.sinkPass {
+			t.Errorf("sink, %s: %v", c.code, err)
+		}
+		if err := src.Test(ctx); err == nil || !strings.Contains(err.Error(), c.code) {
+			t.Errorf("source, %s: %v", c.code, err)
+		}
+	}
+	f.mu.Lock()
+	f.hook, f.bucket = nil, "other"
+	f.mu.Unlock()
+	if err := sink.Test(ctx); err == nil || !strings.Contains(err.Error(), "NoSuchBucket") {
+		t.Errorf("no bucket: %v", err)
+	}
+}

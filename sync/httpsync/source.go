@@ -93,6 +93,9 @@ type Outcome struct {
 	Err string
 }
 
+// Test passes: the source reaches nothing, its clients reach fit (I188b).
+func (*Source) Test(context.Context) error { return nil }
+
 // Provision loads the codec.
 func (s *Source) Provision(ctx *module.Context) error {
 	if s.MaxPendingRequests == 0 {

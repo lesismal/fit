@@ -353,6 +353,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | done |
 | I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | done |
 | I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | done |
+| I188b | Connection tests for the earlier connectors | I188 | done |
 | I189 | Metrics, logs and dead letters, replayed from the Admin API | I188 | todo |
 | I190 | The workbench's Sync pages, and the assistant's tools for sync | I188, I189, I123 | todo |
 | I191 | Exactly once into MySQL, TiDB and PostgreSQL: the checkpoint written in the sink's transaction | I176, I180 | todo |
@@ -6069,6 +6070,64 @@ review:
 12. **Size**: about 1,600 lines of code with their comments (sync 930, admin 360, cli 340) and 910
     of tests; nothing of the plan is left out, but the connectors' `Test` methods (point 8) are
     left to I188b or to the connectors' own iterations.
+
+### I188b Connection tests for the earlier connectors
+
+- **Do**: `fitsync.Tester` (I188) for the connectors built before it: `file`, `elasticsearch`,
+  `clickhouse`, `http`, `redis` and `s3`, source and sink, and `wasm` if it has a sensible test; a
+  cheap check that writes no record, against each package's fakes.
+- **Done when**: each tests what it reaches as it will reach it, passing and failing in unit tests.
+- **Touches**: `sync/file`, `sync/elasticsearch`, `sync/clickhouse`, `sync/httpsync`, `sync/redis`,
+  `sync/s3`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **Elasticsearch and OpenSearch.** `Conn.Test` asks the root endpoint again each time (what `Info`
+   kept is not trusted), so the cluster answers, the credentials are taken and it is one of the two
+   (an API key against OpenSearch fails, as at a write). The sink stops there: whether it may write
+   the indices is not known without writing, and `_has_privileges` is Elasticsearch's only. The
+   source also counts `index` (`/_count`), which needs the right to read it; a pattern or index that
+   matches nothing (404) passes, since the source reads it as empty. Alternative: a 404 failing.
+2. **ClickHouse.** `SELECT 1` in `database` (an unknown database fails), its answer checked to be
+   `1`. The sink stops there (an insert right cannot be checked without inserting); the source also
+   runs `SELECT * FROM (<table or query>) LIMIT 0` with its settings, which reads no row but needs the
+   table and the right to select from it. Alternative: `EXISTS TABLE` for a sink whose `table` has no
+   `{namespace}`, which needs a right a write-only user may lack.
+3. **Redis and Valkey.** A connection of the test's own (the module's belongs to its pipeline's
+   goroutine, used by one at a time): the dial says HELLO, authenticates and selects `db`, then
+   `PING`, then it is closed. The streams or keys are not looked at (`TYPE` needs `@keyspace`).
+4. **S3.** A `ListObjectsV2` of one key: under `prefix` for the source, which lists as it reads; at
+   the bucket's root for the sink, where `AccessDenied` passes, since S3 answers it only to a request
+   it authenticated (a bad key is `InvalidAccessKeyId`, a bad secret `SignatureDoesNotMatch`, a
+   missing bucket `NoSuchBucket`) and a sink's user may put objects without listing them. No `HEAD`
+   of the bucket: its answer has no body, so the code that tells those apart is lost. Alternative:
+   a put of a marker object, which writes.
+5. **file.** The source: the directory each path or glob starts from (its longest leading part
+   without `*`, `?` or `[`) is there and lists, and each regular file the globs match now opens for
+   reading, the first 1,000 at most; no file matching passes, since the source waits for its files;
+   only regular files are opened (a FIFO would wait for a writer). The sink: none of fit's logs
+   writes the path; a file there is a regular file (not a link, as the log files refuse) that opens
+   for appending, without creating; and when there is none, or `rotate` makes files beside it, its
+   directory takes a new file, `.<name>.fit-test-*`, made and removed at once: the only write of any
+   test, of no record. Another file sink writing the path is not reported: a config tested before
+   it is applied (`POST /sync/test`) replaces the running one's sink, and could not be told from a
+   real clash. Alternative: `access(2)` on Unix, which Windows lacks.
+6. **http sink: a `HEAD` of `url`** with the sink's headers and credentials, no body and no
+   idempotency key: safe by HTTP's rules, and not a batch to any receiver. It passes on 2xx and on
+   4xx other than 401, 403 and 407, since an ingest endpoint routing only its method may answer HEAD
+   404 or 405, which still says the host, its TLS and its server are there; 401, 403 and 407 fail
+   (credentials refused), as do a redirect (the sink does not follow one), 5xx, and a connection's
+   or TLS's error. Alternatives: only a TCP and TLS handshake (tests no credentials), or a
+   `test_method`/`test_url` param.
+7. **http source: passes at once**, as `generate` does: it reaches nothing, its clients reach fit;
+   whether it takes requests is the pipeline's state, not a connection.
+8. **wasm source and sink: no test.** What they reach is the plugin's own: fit knows only
+   `allow_hosts`, patterns with no scheme, port or path, so probing them would test nothing the
+   plugin uses, and a test that passed would mislead. They stay `tested: false`, pointing at the dry
+   run. A guest export, `fit_sync_test`, called by an optional `Tester` when the plugin has it, is the
+   way; it changes the guest ABI and `plugin/wasm/guest`, so it is left to a later item.
+9. **Size**: about 300 lines of code with their comments and 400 of tests; the Redis fake answers `PING`. Nothing is
+   left of the plan but decision 8.
 
 ### I189 Metrics, logs and dead letters
 

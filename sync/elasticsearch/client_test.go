@@ -169,3 +169,49 @@ func TestBulkFails(t *testing.T) {
 		}
 	}
 }
+
+// TestConnTest asks the root endpoint each time, not what Info kept, and
+// the source counts its index too.
+func TestConnTest(t *testing.T) {
+	f := newSearch(t, false)
+	s := load(t, fmt.Sprintf(`{"urls": [%q]}`, f.srv.URL))
+	src := loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx"}`, f.srv.URL))
+	ctx := context.Background()
+	if err := s.Test(ctx); err != nil {
+		t.Fatalf("sink: %v", err)
+	}
+	if err := src.Test(ctx); err != nil {
+		t.Fatalf("source: %v", err)
+	}
+	f.mu.Lock()
+	f.fail = func(r *http.Request) int {
+		if r.URL.Path == "/" {
+			return 401
+		}
+		return 0
+	}
+	f.mu.Unlock()
+	if err := s.Test(ctx); err == nil || !strings.Contains(err.Error(), "answered 401") {
+		t.Errorf("sink, refused: %v", err)
+	}
+	if err := src.Test(ctx); err == nil || !strings.Contains(err.Error(), "answered 401") {
+		t.Errorf("source, refused: %v", err)
+	}
+	for _, c := range []struct {
+		status int
+		want   string
+	}{{404, ""}, {403, "counting idx: 403"}} {
+		f.mu.Lock()
+		f.fail = func(r *http.Request) int {
+			if strings.HasSuffix(r.URL.Path, "/_count") {
+				return c.status
+			}
+			return 0
+		}
+		f.mu.Unlock()
+		err := src.Test(ctx)
+		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("count %d: %v, want %q", c.status, err, c.want)
+		}
+	}
+}

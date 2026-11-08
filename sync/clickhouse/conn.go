@@ -182,6 +182,19 @@ func (c *Conn) Close() {
 	}
 }
 
+// Test runs SELECT 1 in the database, if any (I188b): the server answers,
+// the credentials are taken, and the database is there.
+func (c *Conn) Test(ctx context.Context) error {
+	b, err := c.Do(ctx, url.Values{"query": {"SELECT 1"}}, nil)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(b)) != "1" {
+		return fmt.Errorf("SELECT 1 answered %q: not ClickHouse", clip(b))
+	}
+	return nil
+}
+
 // ServerError is the server's answer to a query that failed: its HTTP
 // status, and ClickHouse's error code and message.
 type ServerError struct {

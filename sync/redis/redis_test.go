@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -622,5 +623,40 @@ func TestTransient(t *testing.T) {
 		if err == nil || fitsync.IsPermanent(err) == want {
 			t.Errorf("%s: %v", code, err)
 		}
+	}
+}
+
+// TestConnTest dials a connection of the test's own and PINGs, refused or
+// not, and an address that answers nothing fails.
+func TestConnTest(t *testing.T) {
+	srv := newServer(t)
+	ctx := context.Background()
+	s := sinkOf(t, srv, map[string]any{"db": 2})
+	src := sourceOf(t, srv, map[string]any{"streams": []string{"s"}, "protocol": 2})
+	if err := s.Test(ctx); err != nil {
+		t.Fatalf("sink: %v", err)
+	}
+	if err := src.Test(ctx); err != nil {
+		t.Fatalf("source: %v", err)
+	}
+	if s.conn.c != nil || !slices.Contains(srv.sent(), "PING") {
+		t.Errorf("the module's own connection made, or no PING: %v", srv.sent())
+	}
+	srv.setInject(func(args []string) (string, bool) {
+		if args[0] == "PING" {
+			return "-NOPERM this user has no permissions to run the 'ping' command\r\n", true
+		}
+		return "", false
+	})
+	if err := s.Test(ctx); err == nil || !strings.Contains(err.Error(), "PING: redis: NOPERM") {
+		t.Errorf("refused: %v", err)
+	}
+	srv.setInject(func(args []string) (string, bool) { return "?\r\n", args[0] == "PING" })
+	if err := src.Test(ctx); err == nil {
+		t.Error("a broken reply passed")
+	}
+	srv.ln.Close()
+	if err := src.Test(ctx); err == nil {
+		t.Error("a closed server passed")
 	}
 }

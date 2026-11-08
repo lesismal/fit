@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -160,6 +161,21 @@ func loadCodec(ctx *module.Context, ref *config.ModuleRef) (fitsync.Codec, error
 // ParallelWrites marks the sink as one a job may write through several
 // writers at once: each writer's objects have names of their own.
 func (s *Sink) ParallelWrites() {}
+
+// Test lists one key of the bucket, which writes nothing: the endpoint
+// answers, the bucket is there and the request's signature is taken. A
+// sink's credentials may put objects without the right to list them, so
+// AccessDenied passes: S3 says so only to a request it authenticated, and
+// InvalidAccessKeyId or SignatureDoesNotMatch to one it did not. Whether
+// they may put is not known before the first batch.
+func (s *Sink) Test(ctx context.Context) error {
+	_, _, err := s.conn.List(ctx, "", "", "", 1)
+	var e *Error
+	if errors.As(err, &e) && e.Code == "AccessDenied" {
+		return nil
+	}
+	return err
+}
 
 // Cleanup closes the client and lets the codec go.
 func (s *Sink) Cleanup() {
