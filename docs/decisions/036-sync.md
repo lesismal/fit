@@ -260,6 +260,17 @@ The plan's I170 section lists them all; these change the record above.
    values as the position, so rows that share a cursor value are read once each, and in a job its
    snapshot splits by ranges of the key (`Chunker`).
 
+## Decisions made while building I172 (pending review)
+
+The plan's I172 section lists them all; these change the record above.
+
+1. **A database's connection is a blocking `net.Conn` on its goroutine**, not one of fib's: MySQL's
+   client (`sync/mysql/wire`) reads its answers in order on the goroutine that asked, with
+   `crypto/tls`, every wait bounded by a timeout and every call by its context; HTTP-based systems stay
+   on fib's asynchronous client.
+2. **TLS to a database is required when configured, never preferred**, and verified; a server that
+   does not offer it is refused rather than spoken to in plain text.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and

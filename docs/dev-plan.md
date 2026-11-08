@@ -335,7 +335,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | done |
 | I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | done |
 | I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | done |
-| I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | todo |
+| I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | done |
 | I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | todo |
 | I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | todo |
 | I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | todo |
@@ -5031,6 +5031,79 @@ track can place it); exactly-once into sinks with no transactions.
   prepared statement; authentication with each plugin; a server closing the connection mid-result is
   an error, not a hang.
 - **Touches**: `sync/mysql/wire`, `test/sync`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/mysql/wire`, named `mysqlwire`: a library with no module, params
+   or schema of its own; I174–I176 declare the connector's params and hand them to `mysqlwire.Config`.
+   Alternative: the name `wire`, which I177's PostgreSQL package would share.
+2. **A blocking connection on a goroutine, not fib's.** A `Conn` is a `net.Conn` (with `crypto/tls`)
+   used by one goroutine at a time, as decision 036 says databases' connections are: few, long, each
+   on a goroutine of its own, off fib's workers. MySQL's protocol is a request and its answer, a
+   result set streamed in order, then (I174) the binlog read in order; fib's asynchronous conns
+   would need the packets reassembled on fib's loop and handed to the pipeline's goroutine anyway,
+   with backpressure of their own. Alternative: a parser on fib's loop feeding a channel.
+3. **Timeouts.** `Config.Timeout` (60s) bounds every wait for the server, the dial and each read and
+   write of a call, not the whole call, so a long result read steadily is not cut; a call's context
+   bounds the call (its deadline and its cancellation). A call ended by either closes the connection,
+   as does any error of the stream, since what the server sends next can no longer be told apart; the
+   server's own errors (`*Error`) leave it usable. A cancelled query is not killed from a second
+   connection (`KILL QUERY`): the server stops it when it finds the connection gone. Alternative: a
+   second connection that kills the query.
+4. **TLS.** A `Config.TLS` is required, never "preferred": a server that does not offer it is refused,
+   and the name verified is the address's host unless the config names one. MySQL 5.7's official
+   image offers only RSA and DHE key exchange, of which Go has only RSA's, off by default since Go
+   1.22: a 5.7 client must list the `TLS_RSA_*` suites in its `tls.Config`, as the interop test does;
+   the connector (I174) decides whether to offer a param for it. Alternative: the RSA suites turned on
+   by the package for every server.
+5. **Password plugins**: `mysql_native_password`; `caching_sha2_password` with its fast path and its
+   full authentication, sent in clear over TLS or a Unix socket, else encrypted with
+   `ServerPublicKey`, else with the key asked of the server when `AllowPublicKeyRetrieval` is set
+   (off by default: a man in the middle can answer with its own); `sha256_password` the same way;
+   `mysql_clear_password` only over TLS or a Unix socket, or with `AllowCleartextPassword`. A greeting
+   naming a plugin the client does not have is answered with `mysql_native_password`, and the server
+   switches to the user's. Not supported: MariaDB's `client_ed25519` and `parsec`, GSSAPI and the
+   pre-4.1 hash, each an error naming it. Alternative: `client_ed25519`, which needs MariaDB's own
+   Ed25519 variant written in fit.
+6. **Values are typed by their column**, the same from the text protocol and the binary one:
+   `int64` or `uint64` (by `UNSIGNED`) for the integers and `YEAR`, `float32` for `FLOAT`, `float64`
+   for `DOUBLE`, `mysqlwire.DateTime` for `DATE`, `DATETIME` and `TIMESTAMP` (no zone; the zero date
+   and zero parts kept, which `time.Time` cannot hold), `time.Duration` for `TIME`, `nil` for NULL,
+   and `[]byte` for the rest (strings, `DECIMAL` as its text, `BIT`, `ENUM`, `SET`, `JSON`,
+   `GEOMETRY`), whose meaning the column's type and collation give. A row's `[]byte` point into the
+   connection's buffer until the next `Next`, so a snapshot is read without a copy a value. Mapping to
+   `fitsync.Value` is I174's and I175's. Alternative: `fitsync.Value` straight from the wire.
+7. **Parameters** are Go values: `nil`, `bool`, the integer kinds (as `BIGINT`, signed or not),
+   `float32`, `float64`, `string`, `[]byte` and `json.RawMessage` (all as `MYSQL_TYPE_STRING`, so a
+   JSON column takes them on every server), `time.Time` (a `DATETIME` in `Config.Location`, UTC by
+   default), `DateTime` and `time.Duration`; anything else is refused before sending.
+8. **`Exec` and `Query` with arguments prepare, execute and close** the statement each time, without a
+   cache of statements; without arguments they send text. `Prepare` gives a statement to run many
+   times. Alternative: a cache, or client-side interpolation.
+9. **Multi-row inserts** (`InsertRows`): `head`, a `(?,...)` per row and `tail` (`ON DUPLICATE KEY
+   UPDATE ...`), in as few statements as 65,535 placeholders and the server's `max_allowed_packet`
+   (asked once per connection, with 1 KiB of slack) allow; a statement is prepared once per count of
+   rows in a call and closed at its end. The statements are not one unit unless run in a
+   transaction (`Begin`, `Commit`, `Rollback`, `InTransaction` from the server's status).
+10. **One call at a time.** A result's rows are read or closed before the next call (`ErrBusy`
+    otherwise); `Rows.Close` reads what is left rather than breaking the connection. Several result
+    sets (a procedure's) are walked with `NextResultSet`.
+11. **Bounds**: a packet read at most `MaxPacketSize` (64 MiB) with its row, buffers grown past 1 MiB
+    let go after use, 4,096 columns at most.
+12. **Left out**: compression, `LOAD DATA LOCAL` (answered with an empty file and refused),
+    `CLIENT_MULTI_STATEMENTS`, `COM_STMT_SEND_LONG_DATA` (a value must fit `max_allowed_packet`),
+    cursors, connection attributes and session tracking. The replica's commands
+    (`COM_REGISTER_SLAVE`, `COM_BINLOG_DUMP_GTID`) and a raw packet API for them are I174's.
+13. **Interop.** `test/sync/mysql.sh`, sourced by `test/sync/run.sh` and runnable alone (`-run MySQL`),
+    starts `mysql:5.7` (as `linux/amd64`), `mysql:8.0`, `mysql:8.4` (with
+    `--mysql-native-password=ON`), `mariadb:10.11` and `mariadb:11` (`fit-sync-my-*`, ports
+    29210–29214), each with TLS from a CA made by `openssl`, a root password and a
+    `max_allowed_packet` of 64 MiB; the tests (`test/sync/mysql_test.go`) read `FIT_SYNC_MYSQL`
+    (`name=host:port,...`), `FIT_SYNC_MYSQL_PASSWORD` and `FIT_SYNC_MYSQL_CA` and skip without them.
+    The CI job's name still lists the systems before MySQL; `.github` was not touched. Alternative: a
+    job of MySQL's own.
+14. **Size**: about 1,630 lines of code, 1,890 of unit tests against an in-process fake server (96.8%
+    of statements, no containers) and 700 of interop; nothing is left, so there is no I172b.
 
 ### I173 The MySQL binlog: events and values
 

@@ -325,7 +325,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I169 | Elasticsearch 与 OpenSearch 作为源：point in time 快照，之后按游标轮询 | I168 | done |
 | I170 | ClickHouse 作为目标（去重令牌、`ReplacingMergeTree`）与源（按游标轮询） | I163 | done |
 | I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | done |
-| I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | todo |
+| I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | done |
 | I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | todo |
 | I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | todo |
 | I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | todo |
@@ -3730,6 +3730,57 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 - **完成标准**：在 Docker 中与每个版本互通：每种列类型经预处理语句往返一致；每种认证插件都能认证；服务端在结果中途关闭
   连接时返回错误，而不是挂起。
 - **涉及**：`sync/mysql/wire`、`test/sync`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前一直有效）：
+
+1. **放在哪里。** 包 `sync/mysql/wire`，包名 `mysqlwire`：一个库，没有自己的模块、参数或 schema；I174–I176 声明连接器的
+   参数，再交给 `mysqlwire.Config`。备选：包名 `wire`，会与 I177 的 PostgreSQL 包同名。
+2. **在 goroutine 上的阻塞连接，而不是 fib 的连接。** `Conn` 是一个 `net.Conn`（TLS 用 `crypto/tls`），同一时刻只由一个
+   goroutine 使用，正如决定 036 所说的数据库连接：少、长，各在自己的 goroutine 上，不占 fib 的 worker。MySQL 协议是请求和
+   应答、按顺序流式返回的结果集，之后（I174）是按顺序读的 binlog；用 fib 的异步连接也要在 fib 的事件循环上重组包，再交给
+   流水线的 goroutine，并另做背压。备选：在 fib 的事件循环上解析，经 channel 交出。
+3. **超时。** `Config.Timeout`（60s）限制每次等待服务端的时间：拨号以及一次调用中的每次读和写，而不是整个调用，因此
+   持续读取的长结果不会被截断；调用的 context 限制整个调用（截止时间与取消）。被二者之一结束的调用会关闭连接，流的任何
+   错误也是如此，因为之后无法分辨服务端发来的是什么；服务端自己的错误（`*Error`）不影响连接。被取消的查询不会经第二个
+   连接 `KILL QUERY`：服务端发现连接断开后自行停止。备选：用第二个连接杀掉查询。
+4. **TLS。** 设置了 `Config.TLS` 就必须用 TLS，没有“preferred”：不提供 TLS 的服务端被拒绝；除非配置给出名字，校验的是
+   地址中的主机名。MySQL 5.7 官方镜像只提供 RSA 与 DHE 密钥交换，Go 只有 RSA 的，且自 Go 1.22 起默认关闭：连 5.7 的客户端
+   须在 `tls.Config` 中列出 `TLS_RSA_*` 套件，互通测试就是这样做的；是否为此提供参数由连接器（I174）决定。备选：由本包对
+   所有服务端打开 RSA 套件。
+5. **密码插件**：`mysql_native_password`；`caching_sha2_password` 的快速路径与完整认证，经 TLS 或 Unix socket 明文发送，
+   否则用 `ServerPublicKey` 加密，再否则在设置了 `AllowPublicKeyRetrieval` 时向服务端索取公钥（默认关闭：中间人可以换成自己
+   的公钥）；`sha256_password` 同理；`mysql_clear_password` 只经 TLS 或 Unix socket，或设置 `AllowCleartextPassword`。握手中
+   的插件客户端没有时，以 `mysql_native_password` 应答，由服务端切换到用户的插件。不支持：MariaDB 的 `client_ed25519` 和
+   `parsec`、GSSAPI 以及 4.1 之前的口令散列，各自报错并给出名字。备选：`client_ed25519`，需要在 fit 中实现 MariaDB 自己的
+   Ed25519 变体。
+6. **值按列的类型给出**，文本协议与二进制协议一致：整数与 `YEAR` 为 `int64` 或 `uint64`（按 `UNSIGNED`），`FLOAT` 为
+   `float32`，`DOUBLE` 为 `float64`，`DATE`、`DATETIME`、`TIMESTAMP` 为 `mysqlwire.DateTime`（没有时区；保留零日期和为零的
+   部分，`time.Time` 表示不了），`TIME` 为 `time.Duration`，NULL 为 `nil`，其余为 `[]byte`（字符串、`DECIMAL` 的文本、`BIT`、
+   `ENUM`、`SET`、`JSON`、`GEOMETRY`），含义由列的类型与排序规则给出。一行中的 `[]byte` 在下一次 `Next` 之前指向连接的缓冲区，
+   因此读快照时不必逐值复制。转换为 `fitsync.Value` 是 I174 与 I175 的事。备选：直接从协议得到 `fitsync.Value`。
+7. **参数**是 Go 的值：`nil`、`bool`、各种整数（作为有符号或无符号的 `BIGINT`）、`float32`、`float64`、`string`、`[]byte`
+   与 `json.RawMessage`（都作为 `MYSQL_TYPE_STRING`，因此每种服务端的 JSON 列都能接收）、`time.Time`（`Config.Location` 中的
+   `DATETIME`，默认 UTC）、`DateTime` 与 `time.Duration`；其他类型在发送前即被拒绝。
+8. **带参数的 `Exec` 与 `Query` 每次都预处理、执行并关闭**语句，不缓存语句；不带参数时发送文本。要多次执行时用 `Prepare`
+   得到的语句。备选：语句缓存，或在客户端拼接参数。
+9. **多行插入**（`InsertRows`）：`head`、每行一个 `(?,...)` 与 `tail`（`ON DUPLICATE KEY UPDATE ...`），在 65,535 个占位符
+   和服务端的 `max_allowed_packet`（每个连接查询一次，留 1 KiB 余量）允许的范围内用尽量少的语句；一次调用中每种行数的语句
+   只预处理一次，调用结束时关闭。这些语句不是一个整体，除非在事务中执行（`Begin`、`Commit`、`Rollback`，以及取自服务端
+   状态的 `InTransaction`）。
+10. **一次一个调用。** 下一个调用之前必须读完或关闭结果的行（否则 `ErrBusy`）；`Rows.Close` 读完剩下的部分，而不是断开
+    连接。多个结果集（存储过程的）用 `NextResultSet` 遍历。
+11. **上限**：一次读的包（连同它的行）至多 `MaxPacketSize`（64 MiB），超过 1 MiB 的缓冲区用后释放，至多 4,096 列。
+12. **没有做的**：压缩、`LOAD DATA LOCAL`（以空文件应答并拒绝）、`CLIENT_MULTI_STATEMENTS`、`COM_STMT_SEND_LONG_DATA`
+    （一个值必须放得进 `max_allowed_packet`）、游标、连接属性与会话跟踪。副本的命令（`COM_REGISTER_SLAVE`、
+    `COM_BINLOG_DUMP_GTID`）以及为它们准备的原始包接口归 I174。
+13. **互通。** `test/sync/mysql.sh` 由 `test/sync/run.sh` 引入，也可单独运行（`-run MySQL`），启动 `mysql:5.7`（以
+    `linux/amd64` 运行）、`mysql:8.0`、`mysql:8.4`（带 `--mysql-native-password=ON`）、`mariadb:10.11` 与 `mariadb:11`
+    （`fit-sync-my-*`，端口 29210–29214），各自使用由 `openssl` 生成的 CA 签发的 TLS 证书、root 密码以及 64 MiB 的
+    `max_allowed_packet`；测试（`test/sync/mysql_test.go`）读取 `FIT_SYNC_MYSQL`（`name=host:port,...`）、
+    `FIT_SYNC_MYSQL_PASSWORD` 与 `FIT_SYNC_MYSQL_CA`，没有时跳过。CI 作业的名字仍只列出 MySQL 之前的系统；没有改动
+    `.github`。备选：为 MySQL 单设一个作业。
+14. **规模**：代码约 1,630 行，针对进程内假服务端的单元测试约 1,890 行（不用容器时语句覆盖率 96.8%），互通测试约 700 行；
+    没有剩余工作，因此没有 I172b。
 
 ### I173 MySQL binlog：事件与值
 
