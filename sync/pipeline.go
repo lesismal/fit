@@ -144,7 +144,7 @@ func (r *run) emit(rec *Record) error {
 		r.mu.Unlock()
 		return errStopped
 	}
-	rec.seq = r.next
+	rec.seq, rec.made = r.next, false
 	r.next++
 	r.pending = append(r.pending, entry{left: -1, size: size, pos: rec.Position, boundary: rec.boundary()})
 	r.inRecords++
@@ -196,6 +196,9 @@ func (r *run) ack(items []item) {
 func (r *run) dispatch() {
 	cfg := r.p.cfg
 	var outs, next []*Record
+	var seq uint64
+	// emit is made once, not for each record and transform.
+	emit := func(o *Record) { o.seq = seq; next = append(next, o) }
 	for {
 		r.mu.Lock()
 		for len(r.queue) == 0 && !r.srcDone {
@@ -219,12 +222,13 @@ func (r *run) dispatch() {
 		}
 		r.mu.Unlock()
 		for _, rec := range batch {
+			seq = rec.seq
 			outs = append(outs[:0], rec)
 			for i, t := range r.p.transforms {
 				next = next[:0]
 				var err error
 				for _, in := range outs {
-					if err = t.Apply(in, func(o *Record) { o.seq = rec.seq; next = append(next, o) }); err != nil {
+					if err = t.Apply(in, emit); err != nil {
 						break
 					}
 				}

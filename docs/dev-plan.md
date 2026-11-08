@@ -326,7 +326,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | I162 | One address, one server: config validation refuses two parts of the config on one address and transport, across listeners, the Admin API, consoles and every role, with an error naming both; every binding checks at bind time that no other socket holds its address; fib's TURN relays never share a port of the range (A70) | — | done |
 | **Sync** | | | |
 | I163 | Decision 036; `sync`: the record model, pipelines (source, transforms, sinks, `stream` or `once`), a bounded queue, batches, acknowledgements to a watermark that never splits a transaction, the checkpoint file, retries and `on_error` | I04 | done |
-| I164 | Built-in transforms: `filter`, `route`, `fields`, `key`, `cast`, `mask`, `envelope` | I163 | todo |
+| I164 | Built-in transforms: `filter`, `route`, `fields`, `key`, `cast`, `mask`, `envelope` | I163 | done |
 | I165 | WASM plugins for sync: transforms, codecs, and source and sink connectors on fit's HTTP client and timers; the guest SDKs | I163 | todo |
 | I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | todo |
 | I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | todo |
@@ -4267,6 +4267,51 @@ track can place it); exactly-once into sinks with no transactions.
   allocates no more than one record copy per record; a delete keeps its key through every transform
   that would drop the key's fields, or the config is refused.
 - **Touches**: `sync/transform`, `schema`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where they live.** In package `fitsync` itself (`sync/transform*.go`), not a package
+   `sync/transform`: they read values' internals and the record's copy flag. Alternative: a
+   subpackage, on exported accessors alone.
+2. **One copy per chain.** `Record.Own` returns the record when a transform made it with `Clone`,
+   and a clone otherwise; `Emit` clears the flag, so the source's record stays as read (a dead letter
+   holds it), and a chain copies a record once, however many transforms change it. A transform emits
+   each record it owns once. The dispatcher's `emit` closure is now made once rather than per record
+   and transform, which allocated. Changed values still allocate their new field lists. Alternative:
+   a copy per changing transform, or changing the source's record in place.
+3. **Fields are named at the row's top level**, no dotted paths; `fields`' `unnest` and `nest` move
+   them in and out of maps. The row is `after`, or `before` when `after` is null. Alternative: dotted
+   paths or JSON pointers everywhere.
+4. **`filter` compares fields as text**: `equals` and `in` are strings, matched against the value's
+   text (`"42"`, `"true"`, RFC 3339 times), and `present` tests missing or null. Alternative: typed
+   values in the canonical JSON form.
+5. **`route`**: `map` exactly first, then glob `rules` whose `to` is a template of `{namespace}`,
+   `{first}`, `{rest}` and `{last}`; `unmatched` `keep` or `drop`. No lowercasing or regular
+   expressions. Alternative: regular expressions with capture groups.
+6. **`fields`** applies `unnest`, `nest`, `rename`, `drop` or `keep` (not both), then `set`; a
+   collision fails the record; renames apply to the key's fields too, so the key names the sink's
+   columns; nothing else touches the key; `set` takes values in the canonical JSON form.
+7. **`key`**: a delete whose `before` lacks the fields keeps the key it has; any other record
+   missing one fails; DDL passes untouched; formats `map`, `value` and `join` (`:`).
+8. **A key built after a field is removed is refused at validation**: a `key` after `fields`
+   dropping, not keeping, renaming away, nesting or unnesting one of its fields, after `mask` with
+   `null`, or after `envelope` `pair` or `debezium`. Alternative: allow it and fail records at run
+   time.
+9. **`cast`** applies to the key too, by the table in its doc: ints and uints as Unix seconds for
+   times, a time's date in its own offset, any value to `json` as plain JSON, bytes to string only
+   when UTF-8; null stays null. Alternative: a `layout` or unit option for times.
+10. **`mask`** defaults to `hmac_sha256`, with the key only from `key_env` (no inline key), read when
+    the pipeline loads, so `fit validate` needs the variable too; `sha256` is allowed and documented
+    as reversible for small sets; `null`. A value hashes as its text, to a lowercase hex string; hashes
+    apply to the key's fields, `null` does not. Alternative: the key in `admin.store`, or the key read
+    lazily at the first record.
+11. **`envelope`** reshapes inserts, updates and deletes only (DDL and messages pass); `before`
+    becomes null and the document is `after`; a flat delete is `before`, or the key when it has none;
+    `deletes` `keep`, `drop`, or `rewrite` to an update. Debezium's shape takes `ts_ms` from the
+    commit time (top level and `source`), `op` `c`, `u` or `d` (no `r` until snapshots exist), and
+    `db` and `table` split at the namespace's first `.`.
+12. **Size**: about 1,170 lines of code and 730 of tests, past the plan's 1,500, since the seven
+    transforms only make sense together (the chain check, the copy count); no I164b.
 
 ### I165 WASM plugins for sync: transforms, codecs and connectors
 

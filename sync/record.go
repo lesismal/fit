@@ -87,6 +87,9 @@ type Record struct {
 	// seq is the number of the source's record this one comes from, which
 	// acknowledgements count by; a transform's records keep it.
 	seq uint64
+	// made says a transform made r, with Clone, so that the transforms
+	// after it may change it in place.
+	made bool
 }
 
 // boundary reports whether the source can resume after r: r ends a
@@ -98,7 +101,20 @@ func (r *Record) boundary() bool { return r.Tx.ID == "" || r.Tx.Last }
 // made.
 func (r *Record) Clone() *Record {
 	c := *r
+	c.made = true
 	return &c
+}
+
+// Own returns r for a transform to change: r itself when a transform before
+// it in the chain made it with Clone, and so holds the only reference to it,
+// or a clone otherwise, so that the source's record stays as it was read. A
+// chain of transforms thus copies a record once, however many change it. A
+// transform emits each record it owns once.
+func (r *Record) Own() *Record {
+	if r.made {
+		return r
+	}
+	return r.Clone()
 }
 
 // recordOverhead is what a record is reckoned to take besides its strings

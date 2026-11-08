@@ -77,6 +77,13 @@ only: the record, the pipeline, the queue, acknowledgements and the checkpoint.
   `sync.transforms`; a config names one with `module` and `params`, decoded as strictly as a
   handler's, checked by `fit validate` (the role's check loads every module), and described in the
   schema and the reference. I163 ships the test connectors `generate`, `memory` and `stdout`.
+- **Transforms copy a record once, and deletes keep their keys** (I164, pending review with its
+  plan section). A transform changes a record only through `Record.Own`, which returns the record
+  when a transform before it made it with `Clone`, and a clone otherwise, so the source's record
+  stays as read and a chain copies it once. The built-in `filter`, `route`, `fields`, `key`, `cast`,
+  `mask` and `envelope` never drop a record's key; a `key` transform built from a field an earlier
+  transform removes is refused when the config is checked, and one whose delete lacks the fields
+  keeps the key the delete has.
 - **The sync role.** `sync` is an app role (decision 028's registry): the manager starts it with a
   config that sets `sync`, applies each config to it, and stops it with one that leaves it out. A
   reload starts the pipelines added, stops those removed and restarts only those whose settings
