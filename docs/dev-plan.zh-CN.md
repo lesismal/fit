@@ -333,7 +333,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | done |
 | I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | todo |
 | I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
-| I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | todo |
+| I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | done |
 | I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | done |
 | I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | todo |
 | I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | todo |
@@ -3897,6 +3897,39 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   再合并，需要时保持源事务；类型由记录的值映射，映射写进文档。
 - **完成标准**：PostgreSQL 到 PostgreSQL、MySQL 到 PostgreSQL 的流水线在混合负载下，经过重放和一次杀进程后，结束时校验和相同。
 - **涉及**：`sync/postgres`、`test/sync`、`docs`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定前按此执行）：
+
+1. **位置**：包 `sync/postgres/sink`（`syncpgsink`），而非同时由 I178 的源使用的 `sync/postgres`；连接参数（`address`、
+   `user`、`password_env`、`database`、`sslmode`、`ca_file`、`cert_file`、`key_file`、`server_name`、`channel_binding`、
+   `timeout`）为目标自己的扁平参数，如 I168、I186，两者都完成后可与源共用。`user` 必填；不提供 MD5 和明文密码。备选：与源同一个包。
+2. **连接**：阻塞的 `pgwire` 连接组成的小池，每个写入者一个（流一个，作业 `job.max_parallel` 个，即 `ParallelSink`），
+   在流水线的 goroutine 上；断开或停在事务中的连接被关闭。`Test`（I188 的 `Tester`）连接并执行 `SELECT 1`。
+3. **语句**：upsert 为 `INSERT ... VALUES (...),(...) ON CONFLICT (key) DO UPDATE SET` 行的其他各列 `= EXCLUDED.col`
+   （只有键列的行为 `DO NOTHING`）；删除为 `DELETE ... WHERE key IN (...)`（多列键用行构造）。一条语句是同一表、操作和列集合的
+   连续记录，最多 `max_statement_rows`（1000）行、65535 个参数，同一键只出现一次（取 upsert 的最后一行，避免服务器的
+   “cannot affect row a second time”；仍遇到时（如 `1.0` 与 `1.00`）逐行写入）。参数以文本发送，由服务器按列定类型。
+   备选：固定大小的预备语句。
+4. **快照按大小用 COPY，而非按类型**：`copy_min_rows`（100）行及以上的一串 upsert 先 COPY 到
+   `CREATE TEMPORARY TABLE ... ON COMMIT DROP AS SELECT cols FROM t WITH NO DATA`，再用一条 `INSERT ... SELECT ... ON CONFLICT`
+   合并；`copy: "always"` 或 `"never"` 可覆盖。快照的记录与其他插入无异，只能看一串的大小。备选：只在作业中用 COPY。
+5. **类型映射**：值写成 PostgreSQL 能读的文本（见文档中的表）：时间带自己的偏移（`timestamp` 列取墙上时间，`timestamptz` 取时刻），
+   日期为 `YYYY-MM-DD`，字节在语句中也写成 bytea 的十六进制文本（`\x..`），使复制和插入的行相同，数组为数组字面量，映射为 JSON；
+   字符串含 NUL 时记录失败。备选：按列类型发送二进制参数。
+6. **表**为 `table`（`{namespace}`），在第一个点处分为模式和表，MySQL 源的 `db.table` 即模式和表；目标不建表。键列为键的字段
+   或 `key_columns`（取自键或行）；upsert 的行补上缺少的键列。
+7. **事务**：`batch`（默认）每个批次一个事务。`source` 每个源事务一个；未结束事务的记录在目标中跨批次暂存、被确认
+   （检查点不会落在事务中，不能越过它们），随其最后一条写入；暂存的事务若下一条记录属于别的事务或又是其第一条（重放），则丢弃。
+   备选：跨写入保持打开的事务，连接断开时会丢掉已确认的记录。
+8. **错误**：SQLSTATE 类 22 和 23 为永久错误；其他错误（表或列不存在、无唯一索引的 `42P10`、连接断开、`40001`）回滚批次并重试。
+   遇到永久错误时在保存点后逐条重写以找出那条记录：`batch` 时其前的记录提交、它失败；`source` 时其整个源事务不写入
+   （其后的记录确认但不写），暂存记录被拒绝时由批次的第一条记录承担失败，错误中写明事务。备选：`source` 时写入去掉被拒记录的事务。
+9. **DDL 被确认而不执行**（决策 036）。备选：`ddl: "stop"`。
+10. **互通**：`test/sync/postgres_sink_test.go` 使用 `test/sync/postgres.sh` 的服务器（此处在 13 和 17 上，TLS 加 SCRAM）：
+    generate 的所有类型分别插入和复制，校验和相同，并按映射读回；被拒绝的值与不存在的表；37 个双列键在三条一组的事务中混合
+    upsert 和删除，流水线在每个崩溃点被杀后重启，两种事务模式下结束时校验和都等于按序应用的结果。计划中的 PostgreSQL 到
+    PostgreSQL、MySQL 到 PostgreSQL 流水线需要 I178 和 I174 的源，均未完成，留给 I192 的矩阵。备选：等源完成。
+11. **规模**：约 900 行代码、1,400 行测试（进程内运行目标语句的假服务器上的单元测试覆盖包的 98.8%）；无遗留，因此没有 I180b。
 
 ### I181 MongoDB 客户端：BSON 与 OP_MSG
 
