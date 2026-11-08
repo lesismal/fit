@@ -26,6 +26,7 @@ package l4
 
 import (
 	"errors"
+	"math"
 	"math/rand/v2"
 	"net"
 	stdhttp "net/http"
@@ -121,7 +122,10 @@ func (s *Service) start(c *fib.Connection, release func(), initial []byte, dst n
 	}
 	c.SetAttachment(r)
 	s.add(r)
-	r.timer = time.AfterFunc(r.idle, r.checkIdle)
+	// The timer is kept before it is armed: checkIdle reads r.timer, and a
+	// short idle timeout could fire before an AfterFunc's result is stored.
+	r.timer = time.AfterFunc(math.MaxInt64, r.checkIdle)
+	r.timer.Reset(r.idle)
 	r.dial()
 }
 
