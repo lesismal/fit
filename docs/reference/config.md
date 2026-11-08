@@ -48,8 +48,8 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -6027,9 +6027,124 @@ after.
 
 | Module | What it does |
 | --- | --- |
+| [`clickhouse`](#sync-sources-clickhouse) | A ClickHouse table or query: a snapshot in pages by the key, then polling by a cursor column; chunked in a job |
 | [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
+
+<a id="sync-sources-clickhouse"></a>
+
+### `clickhouse`
+
+Reads a ClickHouse table, or a query's rows, over its HTTP interface: a snapshot in pages ordered by the cursor column and the key, after the last row read, then, with a cursor, polling for rows past it every poll_interval. Its position is the cursor's and the key's values of the last row read, so a restart resumes after it, rows with the same cursor value included. Every row is an insert, or a delete when deleted_column says so; a row deleted from ClickHouse is not seen. In a job (mode once) with chunk_rows, the snapshot is split into ranges of the key, read job.max_parallel at a time.
+
+Reads a ClickHouse table, or a query's rows, over its HTTP interface, through fib's asynchronous
+HTTP client. It reads in pages of `page_rows`, ordered by `cursor` and then `key`, each page after
+the last row read: `SELECT * FROM (<table or query>) WHERE (cursor, key) > (...) ORDER BY cursor,
+key LIMIT page_rows`. Its position is the cursor's and the key's values of the last row read, so a
+restart resumes right after it, and rows that share a cursor value are each read once. Once the
+rows there are read, a source with a `cursor` asks again every `poll_interval`; one without a
+cursor, or in a job, ends.
+
+The cursor is a column that grows as rows are written or changed, as an update time
+(`DEFAULT now64()`) or a version: a row written later with a cursor value at or below one already
+read is not seen. Every row is an `insert`, or a `delete` when `deleted_column` is true or non-zero;
+a row deleted from ClickHouse is not seen. Values are typed by their column's type: integers as int
+or uint (past 64 bits as decimal), decimals, floats, `Bool`, `Date` as a date, `DateTime` as a time
+(also the records' commit time when it is the cursor), strings, `UUID`, enums and addresses as
+strings, arrays as arrays, `Map`, `Tuple` and `JSON` as JSON.
+
+`snapshot: "never"` starts past the greatest cursor value there is. In a job (`mode: "once"`) with
+`chunk_rows`, the snapshot is split into ranges of the key, planned by skipping `chunk_rows` rows
+from each chunk's start, and read `job.max_parallel` at a time.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines events-out {
+		source clickhouse {
+			urls http://ch1:8123
+			username fit
+			password_env CH_PASSWORD
+			query "SELECT * FROM app.events WHERE kind != 'debug'"
+			key id
+			cursor updated_at
+			poll_interval 10s
+		}
+		sinks out { sink stdout }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: events-out
+      source:
+        module: clickhouse
+        params:
+          urls:
+            - http://ch1:8123
+          username: fit
+          password_env: CH_PASSWORD
+          query: SELECT * FROM app.events WHERE kind != 'debug'
+          key:
+            - id
+          cursor: updated_at
+          poll_interval: 10s
+      sinks:
+        - name: out
+          sink:
+            module: stdout
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "events-out",
+        "source": {"module": "clickhouse", "params": {
+          "urls": ["http://ch1:8123"], "username": "fit", "password_env": "CH_PASSWORD",
+          "query": "SELECT * FROM app.events WHERE kind != 'debug'",
+          "key": ["id"], "cursor": "updated_at", "poll_interval": "10s"}},
+        "sinks": [{"name": "out", "sink": {"module": "stdout"}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urls` | list of string |  | Required. The server's HTTP interface, as http://ch1:8123 or https://ch1:8443, each a server of the cluster or a load balancer: the one that answered last is used, and the next in turn when it fails to (a connection's error, a timeout, a 502, 503 or 504). |
+| `username` | string |  | The user, sent with basic authentication; the server's default user when left out. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
+| `database` | string |  | The database of a table named without one, and the query's; the user's default when left out. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; each URL's host when left out. |
+| `timeout` | duration | `"60s"` | How long one request may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `settings` | object of string |  | ClickHouse settings sent with every query, the name to the value, as {"max_threads": "4"}; they cannot be query, database, insert_deduplication_token, insert_deduplicate or a param_. |
+| `table` | string |  | The table read, as db.table or a table of database. Either table or query. |
+| `query` | string |  | A SELECT whose rows are read, as SELECT * FROM shop.orders FINAL WHERE region = 'eu': the source reads from it as a subquery, adding its own WHERE, ORDER BY and LIMIT, so it has the key's and the cursor's columns and no ORDER BY, LIMIT, FORMAT or SETTINGS of its own. Either table or query. |
+| `key` | list of string |  | Required. The columns that identify a row, in order, not Nullable: the records' key, and what rows are ordered by after the cursor, so that rows with the same cursor value are read once each. |
+| `cursor` | string |  | A column whose value grows as rows are written or changed (an update time, a version), not Nullable, polled by: rows past the position's are read every poll_interval. A row written later with a value at or below one already read is not seen. Without it the source reads the rows once by the key and ends. |
+| `deleted_column` | string |  | A column (a Bool or a number) whose true or non-zero value makes the row a delete rather than an insert, as the sink's _deleted. None when left out. |
+| `namespace` | string |  | The records' namespace. table when left out, or clickhouse for a query. |
+| `snapshot` | string: `initial`, `never` | `"initial"` | Where a pipeline without a checkpoint starts: initial, at the first row, reading what is there; never, after the greatest cursor value now there, reading only what comes after (needs cursor). initial when left out. |
+| `page_rows` | integer, 0 to 1000000 | `10000` | How many rows one query reads. 10000 when left out or 0. |
+| `poll_interval` | duration | `"5s"` | How long to wait, once the rows past the cursor are read, before asking again. 5s when left out or 0. |
+| `chunk_rows` | integer, 0 or more |  | In a job (mode once), split the snapshot into ranges of the key of about this many rows, read job.max_parallel at a time and resumed by chunk; the next job starts from the beginning. Not split when left out, and the job reads by the cursor, the next job going on after it. |
 
 <a id="sync-sources-file"></a>
 
@@ -6163,11 +6278,133 @@ since what came after the checkpoint is written again after a crash.
 
 | Module | What it does |
 | --- | --- |
+| [`clickhouse`](#sync-sinks-clickhouse) | ClickHouse, with `INSERT ... FORMAT JSONEachRow`: a deduplication token per insert, updates and deletes as rows of a `ReplacingMergeTree` |
 | [`elasticsearch`](#sync-sinks-elasticsearch) | Elasticsearch and OpenSearch, with `_bulk`: documents by `_id` from the key, per-item errors, 429s waited out |
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
 | [`wasm`](#sync-sinks-wasm) | A WebAssembly plugin that writes each batch through fit's HTTP client to the hosts it is allowed |
+
+<a id="sync-sinks-clickhouse"></a>
+
+### `clickhouse`
+
+Writes records to ClickHouse over its HTTP interface: each run of a batch's records for one table is an INSERT of JSONEachRow rows with an insert_deduplication_token made from the run's first and last positions, so a batch written again after a crash is dropped by the server. Inserts and updates are the row, with a version column; a delete is a row of the key (or the row as it was) with the version and a deleted flag set to 1, so that a ReplacingMergeTree(version, deleted) table read with FINAL holds each key's last state. deletes: delete writes them as lightweight DELETEs instead. A row the server cannot parse fails its record, which on_error takes, the rows before it written.
+
+Writes records to ClickHouse over its HTTP interface, through fib's asynchronous HTTP client. Each
+run of a batch's records for one table is one `INSERT INTO ... FORMAT JSONEachRow`, its rows the
+records' rows as plain JSON (numbers bare, decimals as numbers, times in RFC 3339, read with
+`date_time_input_format=best_effort`, bytes in base64), with an `insert_deduplication_token` made
+from the run's table, first and last positions and count: written again after a crash, the same
+records make the same token and the server drops them. The token works on a replicated table, and
+on a plain `MergeTree` only with `non_replicated_deduplication_window` set.
+
+An insert, an update or a message is its row (`after`) with two more columns: `_version`
+(`version_column`), the commit time in Unix nanoseconds or `version_field`'s value, and `_deleted`
+(`deleted_column`) set to 0. A delete is the row as it was (`before`), or its key, with `_deleted`
+set to 1. So a `ReplacingMergeTree(_version, _deleted)` ordered by the key, read with `FINAL`, holds
+each key's last state, however often a replay writes the records again. Two changes of one key with
+the same version (a source whose commit times are seconds) leave the one inserted last: set
+`version_field` to a column that tells them apart. `deletes: "delete"` writes deletes as lightweight
+`DELETE`s by the key instead, in order between the inserts, which are then not deduplicated; `plain`
+writes rows as they are, for an append-only table. DDL is not written. The table is not made.
+
+A row the server cannot parse fails its record for good (`on_error` takes it), the rows before it
+in its insert written again without it; any other failure is retried by the pipeline. A
+connection that fails, or a 502, 503 or 504, moves on to the next of `urls`. In a job, the sink
+has `job.max_parallel` writers, each key going to one of them.
+
+```sql
+CREATE TABLE shop.orders (id UInt64, status String, total Decimal(12, 2),
+  _version UInt64, _deleted UInt8)
+ENGINE = ReplacingMergeTree(_version, _deleted) ORDER BY id
+SETTINGS non_replicated_deduplication_window = 1000
+```
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-ch {
+		source generate
+		sinks ch {
+			sink clickhouse {
+				urls http://ch1:8123 http://ch2:8123
+				username fit
+				password_env CH_PASSWORD
+				table shop.orders
+			}
+			batch { max_records 10000; max_wait 1s }
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-to-ch
+      source:
+        module: generate
+      sinks:
+        - name: ch
+          sink:
+            module: clickhouse
+            params:
+              urls:
+                - http://ch1:8123
+                - http://ch2:8123
+              username: fit
+              password_env: CH_PASSWORD
+              table: shop.orders
+          batch:
+            max_records: 10000
+            max_wait: 1s
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-to-ch",
+        "source": {"module": "generate"},
+        "sinks": [{"name": "ch", "sink": {"module": "clickhouse", "params": {
+          "urls": ["http://ch1:8123", "http://ch2:8123"], "username": "fit", "password_env": "CH_PASSWORD",
+          "table": "shop.orders"}},
+          "batch": {"max_records": 10000, "max_wait": "1s"}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urls` | list of string |  | Required. The server's HTTP interface, as http://ch1:8123 or https://ch1:8443, each a server of the cluster or a load balancer: the one that answered last is used, and the next in turn when it fails to (a connection's error, a timeout, a 502, 503 or 504). fib's client does not follow redirects. |
+| `username` | string |  | The user, sent with basic authentication; the server's default user when left out. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
+| `database` | string |  | The database of a table named without one; the user's default when left out. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; each URL's host when left out. |
+| `timeout` | duration | `"60s"` | How long one request may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `settings` | object of string |  | ClickHouse settings sent with every query, the name to the value, as {"async_insert": "1"}; they cannot be query, database, insert_deduplication_token, insert_deduplicate or a param_. |
+| `table` | string | `"{namespace}"` | The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, a ReplacingMergeTree(_version, _deleted) ordered by the key for updates and deletes, with non_replicated_deduplication_window set unless it is replicated, so that the deduplication token works. {namespace} when left out. |
+| `plain` | boolean |  | Write rows as they are, without the version and deleted columns, as for a log's MergeTree; deletes must then be delete or ignore. false when left out. |
+| `version_column` | string | `"_version"` | The UInt64 column each row's version goes in, which a ReplacingMergeTree keeps the greatest of: the record's commit time in Unix nanoseconds, or version_field's value. _version when left out. |
+| `version_field` | string |  | A field of the row (an int, a uint, or a time, in Unix nanoseconds) whose value is the version, for a source whose commit times can tie for one key, as a binlog's seconds; a record without it fails. The commit time when left out, or, when the source gives none, the time the record is written. |
+| `deleted_column` | string | `"_deleted"` | The UInt8 column set to 1 for a delete and 0 otherwise, a ReplacingMergeTree's is_deleted. _deleted when left out. |
+| `deletes` | string: `flag`, `delete`, `ignore` | `"flag"` | How deletes are written: flag, as a row with the deleted column set to 1; delete, as a lightweight DELETE of the key's rows, run in order between the inserts, which are then not deduplicated (a DELETE written again would remove a row a deduplicated insert would not bring back), so a replay stores rows again and the table is best a ReplacingMergeTree; ignore, not at all. flag when left out. |
+| `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one INSERT's rows; a batch larger is sent in several, in order, each with a token of its own, and a row larger fails its record. 8 MiB when left out or 0. |
 
 <a id="sync-sinks-elasticsearch"></a>
 

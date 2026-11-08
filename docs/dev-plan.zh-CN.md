@@ -323,7 +323,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I167 | 像 DataX 一样的批处理作业：分块并行快照、按块续传，`fit sync run --once`，调度 | I163 | done |
 | I168 | Elasticsearch 与 OpenSearch 作为目标：按 `_id` 的 `_bulk`、逐条错误、遇 429 退避 | I163 | done |
 | I169 | Elasticsearch 与 OpenSearch 作为源：point in time 快照，之后按游标轮询 | I168 | todo |
-| I170 | ClickHouse 作为目标（去重令牌、`ReplacingMergeTree`）与源（按游标轮询） | I163 | todo |
+| I170 | ClickHouse 作为目标（去重令牌、`ReplacingMergeTree`）与源（按游标轮询） | I163 | done |
 | I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | todo |
 | I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | todo |
 | I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | todo |
@@ -3539,6 +3539,62 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   配置时使用轻量 `DELETE`）；源 `clickhouse`，按查询做快照，之后按游标列轮询。
 - **完成标准**：在 Docker 中与 ClickHouse 互通；同一批次发送两次只存一份；重放后用 `FINAL` 查询的最终状态正确；源从游标继续。
 - **涉及**：`sync/clickhouse`、`test/sync`、`docs`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前一直有效）：
+
+1. **放在哪里。** 包 `sync/clickhouse`（`syncclickhouse`）：目标、源和它们自己的 `Conn`（带故障转移的 URL、basic 认证、TLS、
+   `database`、角色的引擎或自己的引擎，与 I168 相同），从 `X-ClickHouse-Exception-Code` 读取 ClickHouse 的错误码。连接参数
+   由每个连接器各自平铺声明，与 I168 相同。备选：与 `sync/elasticsearch` 共用一个 HTTP 连接包。
+2. **一行是什么。** insert、update 或 message 写成其行（`after`，`after` 为 null 时取 `before`）的普通 JSON
+   （`fitsync.AppendPlain`：数字原样，decimal 写成数字，bytes 为 base64，时间为 RFC 3339，以
+   `date_time_input_format=best_effort` 读取，JSON 值写成对象，ClickHouse 可读入 `String` 列），再加上 `_version`
+   （`version_column`）和 `_deleted`（`deleted_column`，为 0）。`deletes: "flag"` 时 delete 写成删除前的行（`before`），
+   没有时写键的字段，`_deleted` 为 1。DDL 被确认但不写。目标从不创建或修改表：文档给出要建的
+   `ReplacingMergeTree(_version, _deleted)`。`plain: true` 写不带这两列的行，用于只追加的表。备选：按第一条记录的类型建表。
+3. **版本**是提交时间的 Unix 纳秒，或 `version_field` 的值（uint、非负 int，或取纳秒的时间）；只有源没有提交时间时才用写入
+   时间。版本必须来自记录而不是时钟：有去重时，重放可能以新令牌再次写入某个键较旧的变更，而它曾写过的后一个批次被当作重复
+   丢弃，时钟版本会让较旧的变更胜出。同一个键的两次变更版本相同时，留下最后插入的那次（binlog 的提交时间只到秒），
+   `version_field` 就是为此而设。备选：从位置生成版本，但并非每个源的位置都是数字。
+4. **去重令牌**是 `fit-` 加上对表、首尾记录的位置和条数做 SHA-256 后的 40 个十六进制数字；没有位置的记录以它之前最近的有
+   位置记录（`+n`）或之后的（`-n`）定位，完全没有位置的一段不带令牌发送。一个批次按同一张表的连续记录分段，每段一个
+   `INSERT`，受 `max_request_bytes`（8 MiB）限制，各有自己的令牌。令牌对复制表有效，对普通 `MergeTree` 只在设置了
+   `non_replicated_deduplication_window` 时有效，文档和 `table` 参数的说明写明了这一点；目标不做检查。备选：对每条记录的
+   位置做哈希，但批次切法不同时它也会变。
+5. **轻量删除时关闭去重。** `deletes: "delete"` 时每段连续的删除是一条 `DELETE FROM t WHERE (k1 = v1 AND k2 = v2) OR ...`
+   （至多 128 KiB，低于 `max_query_size`），在插入之间按顺序执行，插入则带 `insert_deduplicate=0` 发送：重放时再次执行的
+   `DELETE` 会删掉之后的插入写入的行，而去重的插入不会把它补回来。这是互通测试发现的（应有 180 行，只有 162 行）。因此
+   重放会再次存入行，由 `ReplacingMergeTree` 合并。键用 `=` 与字面量比较（数字原样，字符串加引号，时间经
+   `parseDateTime64BestEffort`，日期经 `toDate`，null 用 `IS NULL`），因为字面量类型与列类型不同时 ClickHouse 拒绝元组的
+   `IN`。备选：用带类型的查询参数做 `IN`，这需要知道键列的类型。
+6. **错误。** 指出某一行（`(at row N)`）的数据错误使该记录永久失败（`fitsync.Permanent`），同一插入中它之前的行以自己的
+   令牌单独重发，因此只有它失败，与 I168 的坏文档一样；没有指出行的数据错误（解析、转换或类型错误码）使该段第一条记录
+   永久失败。其他错误（未知的表或列、认证、分区片过多、5xx、连接）都由流水线重试，这样在建表期间不会跳过记录。目标不在
+   一次写入内重试：ClickHouse 没有逐行的 429。备选：把未知的表或列视为永久错误。
+7. **`settings`**，随每个查询发送的映射，用于 `async_insert` 之类；连接器自己使用的名称（`query`、`database`、
+   `insert_deduplication_token`、`insert_deduplicate`、`param_*`）被拒绝。备选：不支持设置，或为常用设置各设一个参数。
+8. **源按键集分页读取。** 它读 `SELECT * FROM (<表或查询>) WHERE (cursor, key) > (...) ORDER BY cursor, key LIMIT page_rows`，
+   边界作为与列同类型的查询参数，其值取 `toString` 的输出，因此任何类型都能精确往返（fit 自己不格式化浮点数或时间）。位置为
+   `{"after": [{"t": "<类型>", "v": "<文本>"}, ...]}`，即最后读到的行的排序列。`key` 必须给出，不从 `system.tables` 读取；
+   查询须包含键列和游标列，且没有自己的 `ORDER BY`、`LIMIT` 或 `FORMAT`。备选：默认用表的排序键。
+9. **行都是 insert**（轮询分不出插入和更新；目标都按 upsert 写），`deleted_column` 为 true 或非零时为 delete，因此目标写出
+   的表用 `deleted_column: "_deleted"` 即可读回；从 ClickHouse 中删除的行看不到。`DateTime` 类型的游标作为记录的提交时间。
+   值按列类型转换（`ToValue`）：128 和 256 位整数为 decimal，`Map`、`Tuple` 和 `JSON` 为 JSON。备选：快照之后读到的行
+   作为 `update`。
+10. **迟到的行会漏掉。** 之后写入、游标值不大于已读值的行（两次插入的分区片可见顺序与游标顺序不同，时钟落后）看不到；文档
+    说明游标必须增长，如 `DEFAULT now64()`。备选：`poll_lag`，只读早于某个延迟的行。
+11. **`snapshot: "never"`** 在没有检查点的流水线启动时查询最大的游标值；在第一条记录写入检查点之前重启会再查一次，漏掉期间
+    写入的行。备选：让源能立即保存起始位置。
+12. **没有游标时**源按键读一遍就结束，流模式也是如此，这会停止流水线。备选：拒绝没有游标的流。
+13. **I167 的 `Chunker`。** 设置 `chunk_rows` 时，作业按键规划分块：先 `count()`，再从上一块的 `lo` 起用
+    `ORDER BY key LIMIT 1 OFFSET chunk_rows` 找到每块的 `lo`，每块一次查询，排序至多需要 `chunk_rows` 个键的内存，键是表的
+    排序键时按序读取；`lo` 和 `hi` 与位置用同样的边界形式。分块按键分页读取；下一个作业从头重新规划（I167 的决策 6）。没有
+    `chunk_rows` 时作业按游标读取，下一个作业从它之后继续。备选：对整个键用 `row_number()` 的一次查询，它会一次排序所有键。
+14. **互通。** `test/sync/run.sh` 还会启动 `clickhouse/clickhouse-server:25.8`（`fit-sync-ch`，端口 29202，带密码的用户
+    `fit`，走 HTTP），测试（`test/sync/clickhouse_test.go`）读取 `FIT_SYNC_CH_URL`、`FIT_SYNC_CH_USER` 和
+    `FIT_SYNC_CH_PASSWORD`，没有时跳过；CI 的 `sync-interop` 作业与其他测试一起运行它们。没有针对 ClickHouse 试 TLS（其 TLS
+    需要容器内单独的配置文件）；代码与 I168 相同。备选：一个带 TLS 的容器。
+15. **`ParallelSink`**，与 I168 相同：作业给目标 `job.max_parallel` 个写入者，一个键对应一个写入者。
+16. **规模**：代码约 1,000 行，测试约 500 行，加上文档在计划的规模之内；没有剩余工作，因此没有 I170b。
 
 ### I171 HTTP 作为源与目标
 
