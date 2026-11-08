@@ -24,6 +24,17 @@ written, found one at a time after savepoints; with `source` its whole transacti
 for a held record the batch's first record is the one failed. Every other error, a table or column
 missing, a lost connection, a serialization failure, rolls the batch back and is tried again.
 
+Exactly once: with `checkpoint: "sink"` the pipeline's checkpoint is also kept in a table of the
+server's (`checkpoint_table`, `_fit_sync_checkpoints` found by the `search_path` when left out,
+made when missing), a row per pipeline, written in the same transaction as the records it covers:
+each commit writes the position of its last record that ends a source transaction. When the
+pipeline starts it reads the row back and starts from there rather than from its file, so that a
+crash between the server's commit and the file's next checkpoint writes no record twice. It needs
+`transactions: "source"`, which it is when left out: a batch's transaction may end inside a source
+transaction. The row is used while every sink of the pipeline keeps the same position and it is
+of the file's lineage (a reset, a position set by hand and a new job start another); otherwise the
+file serves, at least once as without it. A job read in chunks keeps to its file.
+
 Values become the text PostgreSQL reads for the column, whose type the server gives:
 
 | Record value | Written as | Columns it suits |

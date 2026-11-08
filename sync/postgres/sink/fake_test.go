@@ -192,6 +192,8 @@ func (s *session) query(sql string) bool {
 		return true
 	case strings.HasPrefix(sql, "COPY "):
 		return s.copy(sql)
+	case reSelectCk.MatchString(sql):
+		return s.selectCk(sql)
 	}
 	tag, code := s.exec(sql, nil)
 	if code == "drop" {
@@ -207,7 +209,44 @@ var (
 	reDelete = regexp.MustCompile(`^DELETE FROM (\S+) WHERE \(?([^)]*?)\)? IN \(`)
 	reTemp   = regexp.MustCompile(`^CREATE TEMPORARY TABLE (\S+) ON COMMIT DROP AS SELECT (\S+) FROM (\S+) WITH NO DATA$`)
 	reCopy   = regexp.MustCompile(`^COPY (\S+) \(([^)]*)\) FROM STDIN$`)
+	// The checkpoint's statements.
+	reCreate   = regexp.MustCompile(`^CREATE TABLE IF NOT EXISTS (\S+) \(`)
+	reSelectCk = regexp.MustCompile(`^SELECT "lineage", "position" FROM (\S+) WHERE "pipeline" = '(.*)'$`)
 )
+
+// selectCk answers the checkpoint's SELECT from the committed rows.
+func (s *session) selectCk(sql string) bool {
+	m := reSelectCk.FindStringSubmatch(sql)
+	f := s.f
+	f.mu.Lock()
+	f.log = append(f.log, sql)
+	code := ""
+	if f.inject != nil {
+		code = f.inject(sql, nil)
+	}
+	name := m[2]
+	r, ok := f.tables[m[1]][keyOf([]*string{&name})]
+	f.mu.Unlock()
+	switch code {
+	case "drop":
+		return false
+	case "":
+	default:
+		s.result("", code)
+		return true
+	}
+	field := func(n string) []byte {
+		return append(cs(n), append(u32(0), append(u16(0), append(u32(25), append(u16(0xFFFF), append(u32(0xFFFFFFFF), u16(0)...)...)...)...)...)...)
+	}
+	s.send('T', u16(2), field("lineage"), field("position"))
+	if ok {
+		l, p := *r[`"lineage"`], *r[`"position"`]
+		s.send('D', u16(2), u32(uint32(len(l))), []byte(l), u32(uint32(len(p))), []byte(p))
+	}
+	s.send('C', cs("SELECT 1"))
+	s.ready()
+	return true
+}
 
 // exec runs a statement, returning its tag or an SQLSTATE.
 func (s *session) exec(sql string, args []*string) (string, string) {
@@ -242,6 +281,9 @@ func (s *session) exec(sql string, args []*string) (string, string) {
 	case strings.HasPrefix(sql, "SAVEPOINT "):
 		s.savepoints = append(s.savepoints, cloneTables(s.work))
 		return "SAVEPOINT", ""
+	}
+	if reCreate.MatchString(sql) {
+		return "CREATE TABLE", ""
 	}
 	if !s.inTx {
 		f.t.Errorf("%s outside a transaction", sql)

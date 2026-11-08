@@ -314,7 +314,7 @@ func (rt *Runtime) dropCheckpoint(name string, confirm, force bool) (Status, err
 	rt.mu.Lock()
 	p, err := rt.pipe(name)
 	if err == nil {
-		err = p.checkConfirm(confirm, func(c *Checkpoint) bool { return c == nil })
+		err = p.checkConfirm(confirm, func(c *Checkpoint) bool { return c == nil || c.Position == nil && c.Job == nil })
 	}
 	if err == nil {
 		what := "reset"
@@ -326,6 +326,14 @@ func (rt *Runtime) dropCheckpoint(name string, confirm, force bool) (Status, err
 			// dropping it all.
 			if err := p.store.remove(); err != nil {
 				return err
+			}
+			// Sinks that keep the checkpoint keep it of the lineage
+			// dropped: a file of none says it was dropped, not lost.
+			if p.keepsCheckpoint() {
+				p.store.lineage = newLineage()
+				if err := p.store.save(nil, nil); err != nil {
+					return err
+				}
 			}
 			p.noteSaved(nil)
 			p.mu.Lock()
@@ -409,6 +417,7 @@ func (rt *Runtime) SetCheckpoint(name string, pos json.RawMessage, confirm bool)
 			if prog != nil {
 				prog.Finished = nil
 			}
+			p.store.lineage = newLineage() // a position set by hand starts a lineage
 			if err := p.store.save(Position(compact), prog); err != nil {
 				return err
 			}

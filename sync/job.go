@@ -56,8 +56,11 @@ var errJobDone = errors.New("sync: the job has finished")
 // last ended, so a file or a cursor copies what is new.
 func (p *pipe) start(again bool) (Position, error) {
 	from, prog, err := p.store.load()
-	if err != nil || !p.cfg.Once() {
+	if err != nil {
 		return from, err
+	}
+	if !p.cfg.Once() {
+		return p.sinkCheckpoint(from)
 	}
 	if prog != nil && prog.Finished != nil {
 		if !again {
@@ -98,7 +101,11 @@ func (p *pipe) start(again bool) (Position, error) {
 			}
 		}
 		// The new job is saved at once, its plan with it, so that one
-		// interrupted before its first checkpoint is known to be.
+		// interrupted before its first checkpoint is known to be. One
+		// from the source's start is of a lineage of its own.
+		if from == nil {
+			p.store.lineage = newLineage()
+		}
 		if err := p.store.save(from, prog); err != nil {
 			return nil, err
 		}
@@ -106,7 +113,10 @@ func (p *pipe) start(again bool) (Position, error) {
 	p.mu.Lock()
 	p.job = prog
 	p.mu.Unlock()
-	return from, nil
+	if len(prog.Chunks) > 0 {
+		return from, nil
+	}
+	return p.sinkCheckpoint(from)
 }
 
 // interrupted reports whether the pipeline's checkpoint is of a job not

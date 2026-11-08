@@ -354,7 +354,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | done |
 | I189 | Metrics, logs and dead letters, replayed from the Admin API | I188 | todo |
 | I190 | The workbench's Sync pages, and the assistant's tools for sync | I188, I189, I123 | todo |
-| I191 | Exactly once into MySQL, TiDB and PostgreSQL: the checkpoint written in the sink's transaction | I176, I180 | todo |
+| I191 | Exactly once into MySQL, TiDB and PostgreSQL: the checkpoint written in the sink's transaction | I176, I180 | done |
 | I192 | The interoperability and recovery matrix in CI | I176, I180, I183, I185 | todo |
 | I193 | Benchmarks against Filebeat, Canal, Debezium and DataX | I192 | todo |
 | I194 | Sync's documentation and examples | I190 | todo |
@@ -6071,6 +6071,59 @@ track can place it); exactly-once into sinks with no transactions.
   written twice (checked with a sink table that counts writes); the local file still serves other
   sinks.
 - **Touches**: `sync/mysql`, `sync/postgres`, `sync`.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **A small interface in `fitsync`**: `CheckpointSink`, a `Sink` with `KeepsCheckpoint()` (its params
+   say `checkpoint: "sink"`) and `ReadCheckpoint(ctx, pipeline, lineage)`, called on the pipeline's
+   goroutine before each run, which returns the position the sink keeps and its lineage and tells the
+   sink what to write from then on (`sync/sinkcheckpoint.go`; hooks in `start`, the reset and
+   `SetCheckpoint`, and a `lineage` field in the checkpoint file). Each commit writes the position of
+   its last record that ends a source transaction. Alternative: the position handed to every `Write`.
+2. **When the sinks' position is used**: only when every sink of the pipeline keeps the checkpoint,
+   all at the same position, of the file's lineage; otherwise the file serves, at least once as
+   before. So exactly once holds in a pipeline of transactional sinks only, and a slower sink beside
+   them keeps their replays. Alternative: each keeping sink skips, by matching positions, the records
+   up to its own, which gives exactly once beside other sinks but loses everything after a position
+   a source does not give again byte for byte.
+3. **Lineage**: a random ID in the checkpoint file, new at a reset, a position set by hand and a new
+   job from the source's start, saved to the file before the sinks write it; a sink's row of another
+   lineage is ignored, so those are not undone by an older position in the sink. A reset of a
+   pipeline with a keeping sink leaves a file of no position rather than none, so that it is not taken
+   for a lost file; a stream whose file is gone (a `state_dir` lost) takes the sinks' shared lineage and
+   position; a job does not, its plan being in its file. Alternative: the reset clears the sinks' rows,
+   which needs every sink reachable at the time.
+4. **Jobs read in chunks keep to their file**: their positions are the job's, written by several writers
+   at once, whose commits come in any order. Alternative: a row per writer.
+5. **The sink's row may lag the file** (a DDL record alone commits nothing), which is safe: a run starts
+   at what the sink committed, never past it. What a commit holds past its last position is written
+   again after a crash: a source transaction larger than `max_transaction_bytes` committed in parts,
+   records without positions, and, with `on_error: "stop"`, what the MySQL sink commits before a
+   refused record.
+6. **The table is the sink's own and made by it** (`CREATE TABLE IF NOT EXISTS`, unlike the data tables of
+   decision 036's ninth decision): `checkpoint_table`, `_fit_sync_checkpoints` by default, in
+   `database` for MySQL (one is then required) and by the `search_path` for PostgreSQL; a row per
+   pipeline name (`pipeline`, `lineage`, `position` as text, not JSON, which `jsonb` would reorder,
+   `updated`). Two fits writing pipelines of one name to one table would share a row; deleting the row
+   and the file starts over. Alternative: a key of the fit's node and the pipeline.
+7. **What an earlier run left held is dropped** at `ReadCheckpoint` (MySQL's open transaction, PostgreSQL's
+   held records): the run starts before it. Without `checkpoint: "sink"` the MySQL sink still writes it
+   again on a new connection, as I176 does.
+8. **PostgreSQL needs `transactions: "source"`**, which `checkpoint: "sink"` makes the default; `batch` is
+   refused, since its transaction may end inside a source transaction. MySQL keeps both modes: `batch`
+   commits at a batch's last record that ends one already. TiDB is as MySQL.
+9. **Interop**: `test/sync/exactly_once_test.go`, a test source of 3,000 inserts of distinct keys in
+   transactions of one to four, into a table whose `BEFORE INSERT` trigger counts every row written
+   (an upsert written again fires it too), through pipelines killed twelve times at random points
+   (after the commit and before the file's checkpoint among them) and run to the end: with
+   `checkpoint: "sink"` as many writes as rows, every record once; with `checkpoint: "file"` none lost
+   and some written twice, reported. MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and 11 with both
+   `transactions` modes as jobs; PostgreSQL 13 to 17 as streams, runs copied with `COPY` too. TiDB has
+   no triggers: `TestMySQLSinkAcrossKills` gains a mode with `checkpoint: "sink"`, run on every server
+   and TiDB, ending equal by checksum across kills and a replay.
+10. **Size**: about 330 lines of code, 900 of unit tests (the runtime against a sink of the tests'
+    that keeps its checkpoint, killed at every point, and each sink against its fake server) and 230 of
+    interop; nothing left, so no I191b.
 
 ### I192 The interoperability and recovery matrix
 

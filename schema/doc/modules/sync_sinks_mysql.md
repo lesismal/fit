@@ -31,6 +31,18 @@ out, a conflict at commit or a connection lost is tried again by the pipeline's 
 records are logged and not applied (`ddl: "report"`), or fail (`ddl: "stop"`), so that `on_error:
 "stop"` stops the pipeline before them, for a person to change the table.
 
+Exactly once: with `checkpoint: "sink"` the pipeline's checkpoint is also kept in a table of the
+server's (`checkpoint_table`, `_fit_sync_checkpoints` in `database` when left out, made when
+missing), a row per pipeline, written in the same transaction as the records it covers: each
+commit writes the position of its last record that ends a source transaction. When the pipeline
+starts it reads the row back and starts from there rather than from its file, so that a crash
+between the server's commit and the file's next checkpoint writes no record twice. The row is used
+while every sink of the pipeline keeps the same position and it is of the file's lineage (a reset,
+a position set by hand and a new job start another); otherwise the file serves, at least once as
+without it. A source transaction larger than `max_transaction_bytes`, committed in parts, can still
+be written twice after a crash, as can a job read in chunks, which keeps to its file. TiDB keeps
+the checkpoint as MySQL does.
+
 TLS, when `tls` is set, is required and verified. **Test connection** logs in and runs `SELECT 1`.
 
 ```json

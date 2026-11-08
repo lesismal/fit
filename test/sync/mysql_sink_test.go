@@ -200,11 +200,13 @@ func loadChecksum(t *testing.T, c *mysqlwire.Conn, table string) string {
 // everything: the table ends equal, by checksum, to one the rows the load
 // leaves were written to directly. With transactions source and batch;
 // the key is AUTO_INCREMENT, AUTO_RANDOM on TiDB, and the load writes a
-// key of 0 too.
+// key of 0 too. Mode sink is transactions source with checkpoint sink
+// (I191), the checkpoint kept in the database too, which TiDB is checked
+// with here: it has no triggers for TestMySQLExactlyOnce to count with.
 func TestMySQLSinkAcrossKills(t *testing.T) {
 	for _, m := range mysqlTargets(t) {
 		t.Run(m.name, func(t *testing.T) {
-			for _, mode := range []string{"source", "batch"} {
+			for _, mode := range []string{"source", "batch", "sink"} {
 				t.Run(mode, func(t *testing.T) { mysqlSinkAcrossKills(t, m, mode) })
 			}
 		})
@@ -247,12 +249,16 @@ func mysqlSinkAcrossKills(t *testing.T, m mysqlTarget, mode string) {
 		t.Fatal(err)
 	}
 
+	sinkParams := map[string]any{"transactions": mode}
+	if mode == "sink" {
+		sinkParams = map[string]any{"transactions": "source", "checkpoint": "sink", "database": db}
+	}
 	stateDir := t.TempDir()
 	pipeline := map[string]any{"name": "p", "mode": "once", "on_error": "stop", "checkpoint_interval": "1ms",
 		"queue":  map[string]any{"max_records": 20 + rnd.IntN(300)},
 		"source": map[string]any{"module": "mysqlload", "params": map[string]any{"txs": txs, "seed": seed, "namespace": db + ".dst"}},
 		"sinks": []any{map[string]any{"name": "my", "batch": map[string]any{"max_records": 1 + rnd.IntN(60), "max_wait": "1ms"},
-			"sink": map[string]any{"module": "mysql", "params": m.params(t, map[string]any{"transactions": mode})}}}}
+			"sink": map[string]any{"module": "mysql", "params": m.params(t, sinkParams)}}}}
 	b, _ := json.Marshal(map[string]any{"sync": map[string]any{"state_dir": stateDir, "pipelines": []any{pipeline}}})
 	cfg, err := config.Load(b)
 	if err != nil {

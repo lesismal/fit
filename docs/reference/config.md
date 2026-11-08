@@ -7696,6 +7696,18 @@ out, a conflict at commit or a connection lost is tried again by the pipeline's 
 records are logged and not applied (`ddl: "report"`), or fail (`ddl: "stop"`), so that `on_error:
 "stop"` stops the pipeline before them, for a person to change the table.
 
+Exactly once: with `checkpoint: "sink"` the pipeline's checkpoint is also kept in a table of the
+server's (`checkpoint_table`, `_fit_sync_checkpoints` in `database` when left out, made when
+missing), a row per pipeline, written in the same transaction as the records it covers: each
+commit writes the position of its last record that ends a source transaction. When the pipeline
+starts it reads the row back and starts from there rather than from its file, so that a crash
+between the server's commit and the file's next checkpoint writes no record twice. The row is used
+while every sink of the pipeline keeps the same position and it is of the file's lineage (a reset,
+a position set by hand and a new job start another); otherwise the file serves, at least once as
+without it. A source transaction larger than `max_transaction_bytes`, committed in parts, can still
+be written twice after a crash, as can a job read in chunks, which keeps to its file. TiDB keeps
+the checkpoint as MySQL does.
+
 TLS, when `tls` is set, is required and verified. **Test connection** logs in and runs `SELECT 1`.
 
 In a .conf file:
@@ -7794,6 +7806,8 @@ In JSON:
 | `table` | string | `"{namespace}"` | The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, with a primary or unique key on the record's key columns, which the upserts rely on. {namespace} when left out. |
 | `transactions` | string: `source`, `batch` | `"source"` | How records are grouped in the server's transactions: source, each source transaction as one, and the records without one (a snapshot's) of a batch together; batch, a batch's records up to the last that ends a source transaction in one, several source transactions together, and those after it, a part of one source transaction, in one held open into the next batch. Either way a source transaction is never committed in part, unless it is larger than max_transaction_bytes. source when left out. |
 | `ddl` | string: `report`, `stop` | `"report"` | What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes it, which with on_error stop stops the pipeline before it, for a person to change the table. report when left out. |
+| `checkpoint` | string: `file`, `sink` | `"file"` | Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash between a commit and the file's next checkpoint writes the records after it again (to the same rows); sink, also in checkpoint_table, written in the same transaction as the records it covers and read back when the pipeline starts, in preference to the file, so that no record is written twice: exactly once, while every sink of the pipeline keeps it. file when left out. |
+| `checkpoint_table` | string | `"_fit_sync_checkpoints"` | With checkpoint sink, the table the checkpoint is kept in, a row a pipeline, made when missing (which needs CREATE on it); db.table names the database too, database's otherwise. _fit_sync_checkpoints when left out. |
 | `max_transaction_bytes` | integer, 0 or more |  | The most bytes of values one of the server's transactions holds: past it, a transaction is committed at the next record that ends a source transaction, and a source transaction larger than this alone is committed in parts, with a warning. Against TiDB, whose transactions are bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and MariaDB. |
 
 <a id="sync-sinks-postgres"></a>
@@ -7827,6 +7841,17 @@ read, or 23, a constraint) fails, and `on_error` takes it: with `batch` the rows
 written, found one at a time after savepoints; with `source` its whole transaction is left out, and
 for a held record the batch's first record is the one failed. Every other error, a table or column
 missing, a lost connection, a serialization failure, rolls the batch back and is tried again.
+
+Exactly once: with `checkpoint: "sink"` the pipeline's checkpoint is also kept in a table of the
+server's (`checkpoint_table`, `_fit_sync_checkpoints` found by the `search_path` when left out,
+made when missing), a row per pipeline, written in the same transaction as the records it covers:
+each commit writes the position of its last record that ends a source transaction. When the
+pipeline starts it reads the row back and starts from there rather than from its file, so that a
+crash between the server's commit and the file's next checkpoint writes no record twice. It needs
+`transactions: "source"`, which it is when left out: a batch's transaction may end inside a source
+transaction. The row is used while every sink of the pipeline keeps the same position and it is
+of the file's lineage (a reset, a position set by hand and a new job start another); otherwise the
+file serves, at least once as without it. A job read in chunks keeps to its file.
 
 Values become the text PostgreSQL reads for the column, whose type the server gives:
 
@@ -7928,7 +7953,9 @@ In JSON:
 | `timeout` | duration | `"60s"` | How long connecting and writing one batch may take; a write that takes longer breaks its connection and is tried again. 60s when left out or 0. |
 | `table` | string | `"{namespace}"` | The table a record goes to: text with {namespace}, the record's namespace; split at its first dot into the schema and the table (shop.orders is the table orders of the schema shop), a name without a dot found by the search_path. The table is not made: it must have a primary key or unique index on the key's columns. {namespace} when left out. |
 | `key_columns` | list of string |  | The columns of the key the upserts conflict on and the deletes delete by, their values taken from the record's key, or from its row. The record's key's fields when left out, so that the key must then be a map of columns. |
-| `transactions` | string: `batch`, `source` | `"batch"` | What a transaction of the sink's holds: batch, each batch written; source, each of the source's transactions, its records held across batches until its last arrives, so that a reader never sees part of one. A transaction with a record the server refuses for good is then not written at all; on_error takes the record refused, or the first of the batch for one held. batch when left out. |
+| `transactions` | string: `batch`, `source` | `"batch"` | What a transaction of the sink's holds: batch, each batch written; source, each of the source's transactions, its records held across batches until its last arrives, so that a reader never sees part of one. A transaction with a record the server refuses for good is then not written at all; on_error takes the record refused, or the first of the batch for one held. batch when left out, source with checkpoint sink, which batch cannot go with. |
+| `checkpoint` | string: `file`, `sink` | `"file"` | Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash between a commit and the file's next checkpoint writes the records after it again (to the same rows); sink, also in checkpoint_table, written in the same transaction as the records it covers and read back when the pipeline starts, in preference to the file, so that no record is written twice: exactly once, while every sink of the pipeline keeps it. Needs transactions source. file when left out. |
+| `checkpoint_table` | string | `"_fit_sync_checkpoints"` | With checkpoint sink, the table the checkpoint is kept in, a row a pipeline, made when missing (which needs CREATE on its schema); schema.table names the schema too, found by the search_path otherwise. _fit_sync_checkpoints when left out. |
 | `copy` | string: `auto`, `always`, `never` | `"auto"` | When a run of upserts is copied: COPY into a temporary table, then one INSERT ... SELECT ... ON CONFLICT DO UPDATE from it, faster for many rows, as a snapshot's: auto, a run of copy_min_rows or more; always; never. auto when left out. |
 | `copy_min_rows` | integer, 0 or more | `100` | With copy auto, the fewest rows of a run that is copied. 100 when left out or 0. |
 | `max_statement_rows` | integer, 0 to 65535 | `1000` | The most rows of one INSERT or DELETE (and fewer when its parameters would pass PostgreSQL's 65535); a longer run is written in several. 1000 when left out or 0. |

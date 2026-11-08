@@ -6344,6 +6344,34 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I180 section, pending review. The connection params are the
   sink's own until I178's source can share them.
 
+### I191 Exactly once into transactional sinks — done
+
+- **`checkpoint: "sink"`** on the `mysql` sink (MySQL, MariaDB, TiDB) and the `postgres` sink: the
+  pipeline's position written to `checkpoint_table` (`_fit_sync_checkpoints`, made when missing) in
+  the same transaction as the records, the position of each commit's last record that ends a source
+  transaction, and read back at start in preference to the file through `fitsync.CheckpointSink`
+  (`sync/sinkcheckpoint.go`), while every sink of the pipeline keeps the same position of the file's
+  lineage; the file is still saved and serves otherwise. The checkpoint file gains `lineage`, renewed
+  by a reset, a position set by hand and a new job, so that those are not undone by a sink's older
+  row. PostgreSQL's needs `transactions: "source"`, its default with it.
+- **Docs**: the schema and reference (both sinks' chapters, the new params), the templates, the
+  Chinese descriptions in `schema-zh.js`.
+- **Tests**: the runtime against a test sink that keeps its checkpoint with its records, killed at
+  random points in a stream and a job (every record once), lineage across a reset, a position set by
+  hand and a lost file, mixed sinks keeping to the file, errors and a stop while reading; each sink
+  against its fake server (the row in the commit, not for a held transaction, what is held dropped at
+  a new run, a refused record, each statement failing). `test/sync/exactly_once_test.go` against
+  `test/sync/mysql.sh`'s MySQL 5.7, 8.0, 8.4 and MariaDB 10.11 and 11 and `test/sync/postgres.sh`'s
+  PostgreSQL 13 to 17: 3,000 inserts through pipelines killed twelve times at random points, a
+  trigger counting every row written: no record written twice and none lost with `checkpoint:
+  "sink"`, 16 to 588 written twice with `checkpoint: "file"`; `TestMySQLSinkAcrossKills` gains a
+  mode with it, on TiDB v8.5.3 too. Coverage without containers: `sync` 94.5% (as before),
+  `sync/mysql` 98.6%, `sync/postgres/sink` 99.0%. Unit tests under the race detector on macOS; interop against
+  `fit-i191-*` containers made for the run and removed.
+- **Gaps**: the decisions in the plan's I191 section, pending review: exactly once only when every
+  sink keeps the checkpoint; jobs read in chunks keep to their file; a source transaction committed in
+  parts can still be written twice.
+
 ### I186 Redis as a source and a sink — done
 
 - **Client** (`sync/redis/wire`, package `wire`): RESP2 and RESP3 over TCP or TLS; `HELLO 3` with

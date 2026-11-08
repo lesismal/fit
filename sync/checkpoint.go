@@ -22,6 +22,10 @@ type Checkpoint struct {
 	Saved    time.Time       `json:"saved"`
 	// Job is the progress of a pipeline of mode once.
 	Job *Progress `json:"job,omitempty"`
+	// Lineage names the line of positions the checkpoint is of, for the
+	// sinks that keep the checkpoint too (CheckpointSink): a reset, a
+	// position set by hand and a new job start another.
+	Lineage string `json:"lineage,omitempty"`
 }
 
 // store keeps one pipeline's checkpoint.
@@ -29,6 +33,8 @@ type store struct {
 	dir, name string
 	// crash, when not nil, is asked at CrashCheckpointWritten.
 	crash func(Point) bool
+	// lineage is what save writes as the checkpoint's Lineage.
+	lineage string
 }
 
 func (s *store) path() string { return filepath.Join(s.dir, s.name+".json") }
@@ -71,7 +77,7 @@ var errCrashed = errors.New("sync: crashed")
 // temporary file, synced, then renamed over the last, so that a crash
 // leaves the old one or the new one whole.
 func (s *store) save(pos Position, job *Progress) error {
-	data, err := json.MarshalIndent(Checkpoint{Version: CheckpointVersion, Pipeline: s.name, Position: json.RawMessage(pos), Saved: time.Now().UTC(), Job: job}, "", "  ")
+	data, err := json.MarshalIndent(Checkpoint{Version: CheckpointVersion, Pipeline: s.name, Position: json.RawMessage(pos), Saved: time.Now().UTC(), Job: job, Lineage: s.lineage}, "", "  ")
 	if err != nil {
 		return err
 	}
