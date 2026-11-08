@@ -78,6 +78,14 @@ func serve(t *testing.T, script func(f *fake)) string {
 
 type fakeEnd struct{}
 
+// bufConn reads a connection through the reader buffering it.
+type bufConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (b bufConn) Read(p []byte) (int, error) { return b.r.Read(p) }
+
 // read reads a logical packet; at the stream's end the script stops.
 func (f *fake) read() []byte {
 	var out []byte
@@ -165,7 +173,10 @@ func (f *fake) response() {
 		if f.caps&capSSL == 0 {
 			f.t.Error("fake: an SSL request without capSSL")
 		}
-		tc := tls.Server(f.nc, &tls.Config{Certificates: []tls.Certificate{testCert(f.t)}})
+		// The client sends its ClientHello right after the SSL request,
+		// without waiting: it may already be in f.br, so TLS reads
+		// through it, not from the socket.
+		tc := tls.Server(bufConn{f.nc, f.br}, &tls.Config{Certificates: []tls.Certificate{testCert(f.t)}})
 		if err := tc.Handshake(); err != nil {
 			panic(fakeEnd{})
 		}
