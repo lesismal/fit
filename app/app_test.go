@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -453,5 +454,47 @@ func isClosed(ch chan struct{}) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// A role's policy is its own list, then the global access of the config
+// the Manager applied last; a Host of no Manager goes by its own alone, and
+// a list that does not compile is an error.
+func TestHostAccess(t *testing.T) {
+	m := NewManager(nil, nil, nil, nil)
+	defer m.Stop(context.Background())
+	if err := m.Apply(&config.Config{Access: &config.Access{Deny: []string{"10.0.0.0/8"}}}); err != nil {
+		t.Fatal(err)
+	}
+	h := m.Host("x")
+	own := &config.Access{Allow: []string{"10.1.0.0/16"}, Deny: []string{"10.1.2.0/24"}}
+	p, err := h.Access(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for addr, want := range map[string]bool{"10.1.1.1": true, "10.1.2.1": false, "10.2.0.1": false, "192.0.2.1": false} {
+		if p.Allows(netip.MustParseAddr(addr)) != want {
+			t.Errorf("own and global: %s", addr)
+		}
+	}
+	if p, err = h.Access(nil); err != nil {
+		t.Fatal(err)
+	}
+	for addr, want := range map[string]bool{"10.1.1.1": false, "192.0.2.1": true} {
+		if p.Allows(netip.MustParseAddr(addr)) != want {
+			t.Errorf("global alone: %s", addr)
+		}
+	}
+	if err := m.Apply(&config.Config{}); err != nil {
+		t.Fatal(err)
+	}
+	if p, err = h.Access(nil); err != nil || p != nil {
+		t.Fatalf("no access anywhere: %v %v", p, err)
+	}
+	if p, err = (&Host{}).Access(&config.Access{Deny: []string{"10.0.0.0/8"}}); err != nil || p.Allows(netip.MustParseAddr("10.0.0.1")) || !p.Allows(netip.MustParseAddr("192.0.2.1")) {
+		t.Fatalf("no Manager: %v", err)
+	}
+	if _, err := h.Access(&config.Access{DenyFiles: []string{filepath.Join(t.TempDir(), "missing")}}); err == nil {
+		t.Fatal("a list file that is not there")
 	}
 }

@@ -603,6 +603,15 @@ type Access struct {
 	At Value `json:"-" fit:"self"`
 }
 
+// Files returns a's allow_files and deny_files, for a role to have them
+// watched (app.Info.CertFiles); nil for a nil a.
+func (a *Access) Files() []string {
+	if a == nil {
+		return nil
+	}
+	return append(append([]string(nil), a.AllowFiles...), a.DenyFiles...)
+}
+
 // ProxyProtocol is what a listener takes PROXY protocol headers from.
 type ProxyProtocol struct {
 	Trusted []string `json:"trusted" fit:"required" doc:"The addresses and CIDR ranges of the proxies that send the header, as \"10.0.0.0/8\": a connection from one of them must begin with a header, within 10s, or it is closed, and one from elsewhere is served as it is, with no header."`

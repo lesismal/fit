@@ -15,6 +15,7 @@ import (
 	"github.com/lesismal/fib"
 	"github.com/lesismal/fib/webrtc/ice"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
@@ -50,6 +51,8 @@ func init() {
 			return c.WebRTC.Proxy
 		},
 		New: func(h *app.Host) (app.Role, error) { return NewProxy(h), nil },
+		// The access's list files, read when the role applies.
+		CertFiles: func(c *config.Config) []string { return c.WebRTC.Proxy.Access.Files() },
 	})
 }
 
@@ -78,9 +81,18 @@ func LookupProxy(engine *fib.Engine) *Proxy {
 // the media server sees each peer address as a peer of its own, a
 // peer-reflexive candidate, and its replies come back to the relay that
 // sent for them. Everything else that comes first is dropped.
+//
+// Before any of that, the member's access decides which peer addresses the
+// port serves at all, asked by fib as a new address's first datagram
+// arrives (fib.Binding.Filter): its policy, the member's list and then the
+// global one, is set again by every Apply, which keeps the port when listen
+// is the same; the addresses already relayed are not asked again.
 type Proxy struct {
 	engine, key *fib.Engine
+	host        *app.Host
 	log         *logs.Logger
+	// access is the policy the port's Filter asks, set by every Apply.
+	access access.Gate
 
 	set atomic.Pointer[proxySettings]
 
@@ -144,7 +156,7 @@ type Cred struct {
 
 // NewProxy returns the role, which its first Apply starts.
 func NewProxy(h *app.Host) *Proxy {
-	return &Proxy{engine: h.Engine, key: h.Upstream, log: h.Log,
+	return &Proxy{engine: h.Engine, key: h.Upstream, host: h, log: h.Log,
 		sessions: map[string]*proxySession{}, ufrags: map[string]*route{}}
 }
 
@@ -164,6 +176,10 @@ func (p *Proxy) Apply(member any) error {
 		}
 		st.public = append(st.public, a.Unmap())
 	}
+	policy, err := p.host.Access(cfg.Access)
+	if err != nil {
+		return fmt.Errorf("access: %w", err)
+	}
 	p.applyMu.Lock()
 	defer p.applyMu.Unlock()
 	p.mu.Lock()
@@ -173,6 +189,7 @@ func (p *Proxy) Apply(member any) error {
 		return app.ErrStopped
 	}
 	if old != nil && old.listen == cfg.Listen {
+		p.access.Set(policy)
 		p.set.Store(st)
 		return nil
 	}
@@ -188,8 +205,11 @@ func (p *Proxy) Apply(member any) error {
 			return err
 		}
 	}
+	prevAccess := p.access.Policy()
+	p.access.Set(policy)
 	port, err := p.bind(cfg.Listen)
 	if err != nil {
+		p.access.Set(prevAccess)
 		return err
 	}
 	if old != nil {
@@ -210,7 +230,7 @@ func (p *Proxy) Apply(member any) error {
 }
 
 func (p *Proxy) bind(listen string) (*proxyPort, error) {
-	i, err := p.engine.AddBinding(fib.Binding{Network: "udp", Addr: listen, Handler: portHandler{p}})
+	i, err := p.engine.AddBinding(fib.Binding{Network: "udp", Addr: listen, Handler: portHandler{p}, Filter: p.access.Allows})
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", listen, err)
 	}

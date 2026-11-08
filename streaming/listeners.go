@@ -42,12 +42,13 @@ func (l *tcpListener) close(engine *fib.Engine) {
 // bindTCP binds address to h, at most max connections at once, listening
 // with Multipath TCP when mptcp is set: the member's own choice, off unless
 // it asks, whatever GODEBUG says. The free-port check is always plain TCP.
+// A connection the role's access refuses is closed as it is accepted.
 func (s *Server) bindTCP(address string, h fib.Handler, max int, mptcp bool) (*tcpListener, error) {
 	if err := checkFree("tcp", address); err != nil {
 		return nil, err
 	}
 	limit := newConnLimit(h, max)
-	i, err := s.engine.AddBinding(fib.Binding{Addr: address, Handler: limit, MultipathTCP: mptcp})
+	i, err := s.engine.AddBinding(fib.Binding{Addr: address, Handler: limit, MultipathTCP: mptcp, Filter: s.access.Allows})
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", address, err)
 	}
@@ -263,7 +264,7 @@ func (s *Server) applySRT(cfg *config.StreamSRT) error {
 			if err := checkFree("udp", c.Listen); err != nil {
 				return nil, err
 			}
-			i, err := s.engine.AddBinding(fib.Binding{Network: "udp", Addr: c.Listen, Handler: srv})
+			i, err := s.engine.AddBinding(fib.Binding{Network: "udp", Addr: c.Listen, Handler: srv, Filter: s.access.Allows})
 			if err != nil {
 				return nil, fmt.Errorf("listen on %s: %w", c.Listen, err)
 			}

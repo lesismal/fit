@@ -26,10 +26,19 @@
 // the hub as live streams, and its push targets relay streams of the hub to
 // outside RTMP and SRT servers.
 //
-// A reload changes in place what it can: each listener's auth, and the
-// channels and push targets. A change of any other field of a listener
-// starts that listener again, closing its connections; a change of the
-// hub's limits starts everything again, ending every stream.
+// The role's access decides which client addresses its RTMP, RTSP and SRT
+// listeners serve, asked by fib as it accepts a connection or meets a new
+// SRT peer (fib.Binding.Filter), before a Connection is made. Its policy,
+// the role's own list and then the global one, is set again by every
+// Apply, for the global access may change when the member does not; the
+// connections and peers already served are not asked again. The WebRTC
+// port does not check it yet: fib's webrtc.Mux takes no filter (fit's fib
+// request A74).
+//
+// A reload changes in place what it can: each listener's auth, the access,
+// and the channels and push targets. A change of any other field of a
+// listener starts that listener again, closing its connections; a change of
+// the hub's limits starts everything again, ending every stream.
 package streaming
 
 import (
@@ -44,6 +53,7 @@ import (
 	"github.com/lesismal/fib/media/hub"
 	"github.com/lesismal/fib/media/rtc"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
@@ -60,6 +70,8 @@ func init() {
 		ID:     ID,
 		Member: func(c *config.Config) any { return c.Streaming },
 		New:    func(h *app.Host) (app.Role, error) { return New(h), nil },
+		// The access's list files, read when the role applies.
+		CertFiles: func(c *config.Config) []string { return c.Streaming.Access.Files() },
 	})
 }
 
@@ -109,7 +121,12 @@ var protoNames = [numProtos]string{"rtmp", "rtsp", "srt"}
 type Server struct {
 	engine *fib.Engine
 	key    *fib.Engine
+	host   *app.Host
 	log    *logs.Logger
+
+	// access is the policy the RTMP, RTSP and SRT bindings' Filter asks,
+	// set by every Apply.
+	access access.Gate
 
 	// auth is each listener's policy, swapped whole by every Apply.
 	auth [numProtos]atomic.Pointer[guard]
@@ -139,7 +156,7 @@ type current struct {
 
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Server {
-	return &Server{engine: h.Engine, key: h.Upstream, log: h.Log}
+	return &Server{engine: h.Engine, key: h.Upstream, host: h, log: h.Log}
 }
 
 // Hub returns the hub, or nil while the role does not run.
@@ -192,12 +209,19 @@ func (s *Server) Apply(member any) error {
 	if !ok || cfg == nil {
 		return errors.New("streaming: no member")
 	}
+	policy, err := s.host.Access(cfg.Access)
+	if err != nil {
+		return fmt.Errorf("access: %w", err)
+	}
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 	if s.stopped {
 		return app.ErrStopped
 	}
 	s.setAuth(cfg)
+	// Before the listeners start, which go by it from their first peer;
+	// those kept take it on as they are.
+	s.access.Set(policy)
 	key := fmt.Sprint(cfg.Streams(), cfg.Players(), cfg.GOPCache())
 	if s.hub != nil && key != s.hubKey {
 		// The hub's limits are fixed when it is made: everything starts

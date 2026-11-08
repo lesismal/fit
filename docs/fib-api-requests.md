@@ -79,6 +79,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` | 1, 11 | I131–I134 (032) |
 | A70 | TURN relays that never share a port of the range | done, fib `856ad5b` | 11 | I162 |
 | A72 | A segment's tracks begin at its keyframe | done, fib `e4e10c0` | 11 | I134, I136 |
+| A74 | `webrtc.MuxConfig.Filter`: a Mux that refuses peers at their first datagram | requested | 11 | access on WebRTC ports |
 
 ## Evidence
 
@@ -2417,3 +2418,26 @@ allocations are unchanged (`BenchmarkMuxerEncryption`).
 **How fit uses it.** Nothing changes in fit but the version; `TestChannelInterop` now checks every
 channel hls.js plays for its decoded frames (95% of 25 a second played) and for the largest step
 between frames presented one after the other (at most 0.2s).
+
+## A74: A Mux that refuses peers at their first datagram
+
+**Status.** Requested on 2026-11-08, from the client-address access of the roles. Not done yet. No
+stopgap in fit: the access of the `whip`, `whep`, `stream_whip` and `stream_whep` routes decides who
+may open a session, and the WebRTC ports of `streaming` and `webrtc.media` check no address.
+
+**Problem.** fit decides a role's access where fib accepts a peer, with `fib.Binding.Filter`, before
+a Connection is made: the `streaming` role's RTMP, RTSP and SRT listeners, `webrtc.turn`'s and
+`webrtc.proxy`'s port do. `webrtc.NewMux` adds its UDP binding itself, from `MuxConfig`, which has no
+filter to pass, so the port `streaming.webrtc` and `webrtc.media` listen on answers STUN from every
+address.
+
+**Evidence.** `webrtc/mux.go`: `engine.AddBinding(fib.Binding{Network: network, Addr: addr,
+Handler: muxHandler{m}})`, with nothing of the config's beyond the address.
+
+**Suggested API.** `MuxConfig.Filter func(peer netip.AddrPort) bool`, passed as the binding's
+`Filter`, with `Binding.Filter`'s meaning: asked about each new peer, a refused one's datagrams
+dropped before a Connection is made.
+
+**How fit uses it.** `streaming` and `webrtc.media` set `Filter: gate.Allows` in their `MuxConfig`,
+the gate set by every Apply as the other roles' are, and `webrtc.media` takes an `access` of its own.
+

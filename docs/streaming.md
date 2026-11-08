@@ -98,6 +98,24 @@ next attempt passes at once. Tokens and plaintext passwords pass the first time.
 by `fit media-token` or static ones, for encoders that do not retry; the HTTP handlers wait for the
 check, the request held without a worker.
 
+## Client addresses
+
+`streaming.access` is the role's [access](reference/config.md#access): allow and deny lists of the
+client addresses its RTMP, RTSP and SRT listeners serve. It decides first, then the global
+`access`. A refused RTMP or RTSP connection is closed as soon as it is accepted, and a refused SRT
+caller's datagrams are dropped, so its handshake goes unanswered. A reload applies a change of it,
+or of the global access, to the next connection and caller without starting a listener again; the
+clients connected are not checked again. Its list files are watched, and a change applies the
+config again. The WebRTC port does not check it yet (fib's Mux takes no filter, request A74): the
+`access` of the `stream_whip` and `stream_whep` routes decides who may open a session there.
+
+```json
+"streaming": {
+  "rtmp": {"listen": ":1935", "auth": "live"},
+  "access": {"allow": ["10.0.0.0/8"], "deny_files": ["/etc/fit/drop.txt"]}
+}
+```
+
 ## RTSP
 
 RTP goes interleaved on the RTSP connection (RTP/AVP/TCP). A SETUP that asks for UDP is answered

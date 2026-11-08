@@ -87,6 +87,21 @@ worker。因此，使用 `password_hash` 的用户，若其密码自策略加载
 密码被记住，客户端的下一次尝试立即通过。token 和明文密码第一次就能通过。对不会重试的编码器，请使用 token（`fit media-token`
 签发的或静态的）；HTTP 处理器会等待检查完成，期间请求被保留而不占用 worker。
 
+## 客户端地址
+
+`streaming.access` 是本角色的 [access](reference/config.md#access)：允许和拒绝的客户端地址列表，作用于它的 RTMP、RTSP
+和 SRT listener。它先决定，然后才轮到全局的 `access`。被拒绝的 RTMP 或 RTSP 连接在接受时立即关闭，被拒绝的 SRT 呼叫方的
+数据报被丢弃，因此其握手得不到应答。重载时它或全局 access 的变化作用于之后的连接和呼叫方，不会重启 listener；已连接的
+客户端不会被再次检查。它的列表文件会被监视，变化时重新应用配置。WebRTC 端口暂不检查它（fib 的 Mux 还不接受过滤器，见请求
+A74）：由 `stream_whip` 和 `stream_whep` 路由的 `access` 决定谁能在那里建立会话。
+
+```json
+"streaming": {
+  "rtmp": {"listen": ":1935", "auth": "live"},
+  "access": {"allow": ["10.0.0.0/8"], "deny_files": ["/etc/fit/drop.txt"]}
+}
+```
+
 ## RTSP
 
 RTP 交织在 RTSP 连接上传输（RTP/AVP/TCP）。要求 UDP 的 SETUP 得到 `461 Unsupported Transport`；ffmpeg 和多数播放器随后

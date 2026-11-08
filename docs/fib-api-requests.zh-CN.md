@@ -77,6 +77,7 @@
 | A64 | 非分片 MP4 文件的读取器 | 已完成，fib `8998d58` | 1、11 | I131–I134（032） |
 | A70 | TURN 中继不共用端口范围内的同一端口 | 已完成，fib `856ad5b` | 11 | I162 |
 | A72 | 分片的各轨道从其关键帧开始 | 已完成，fib `e4e10c0` | 11 | I134、I136 |
+| A74 | `webrtc.MuxConfig.Filter`：在对端的第一个数据报就拒绝它的 Mux | 已提出 | 11 | WebRTC 端口上的 access |
 
 ## 证据
 
@@ -1825,3 +1826,22 @@ SO_REUSEPORT 监听的引擎占着的端口被跳过，中继关闭后端口回�
 
 **fit 如何使用。** fit 除版本外不变；`TestChannelInterop` 现在检查 hls.js 播放的每个频道解码的帧数（每播放一秒至少 25 帧的 95%），
 以及相邻两帧呈现之间的最大间隔（至多 0.2 s）。
+
+## A74：在对端的第一个数据报就拒绝它的 Mux
+
+**状态。** 2026-11-08 由各角色的客户端地址 access 提出。尚未完成。fit 中没有临时方案：由 `whip`、`whep`、`stream_whip` 和
+`stream_whep` 路由的 access 决定谁能建立会话，`streaming` 和 `webrtc.media` 的 WebRTC 端口不检查地址。
+
+**问题。** fit 在 fib 接受对端之处、用 `fib.Binding.Filter` 在建立 Connection 之前判定角色的 access：`streaming` 角色的 RTMP、
+RTSP 和 SRT 监听器、`webrtc.turn` 和 `webrtc.proxy` 的端口都如此。`webrtc.NewMux` 按 `MuxConfig` 自己添加其 UDP 绑定，而
+`MuxConfig` 没有可传入的过滤器，于是 `streaming.webrtc` 和 `webrtc.media` 监听的端口应答所有地址的 STUN。
+
+**依据。** `webrtc/mux.go`：`engine.AddBinding(fib.Binding{Network: network, Addr: addr, Handler: muxHandler{m}})`，除地址外不带
+配置的其他内容。
+
+**建议的 API。** `MuxConfig.Filter func(peer netip.AddrPort) bool`，作为绑定的 `Filter` 传入，含义与 `Binding.Filter` 相同：对每个新
+对端询问一次，被拒绝的对端的数据报在建立 Connection 之前丢弃。
+
+**fit 的使用方式。** `streaming` 和 `webrtc.media` 在其 `MuxConfig` 中设置 `Filter: gate.Allows`，该 gate 像其他角色的一样由每次
+Apply 设置，`webrtc.media` 也有自己的 `access`。
+
