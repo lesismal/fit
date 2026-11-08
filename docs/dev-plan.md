@@ -341,7 +341,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | todo |
 | I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | done |
 | I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | done |
-| I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | todo |
+| I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | done |
 | I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | todo |
 | I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | done |
 | I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | done |
@@ -5316,6 +5316,94 @@ track can place it); exactly-once into sinks with no transactions.
   truncate, a server restart; the slot's `confirmed_flush_lsn` never passes what the sinks have; `kill
   -9` of fit loses no transaction.
 - **Touches**: `sync/postgres`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/postgres`, named `syncpostgres` as the other connectors are,
+   the source in `source*.go` beside I180's sink in the same package; it registers
+   `sync.sources.postgres`. Alternative: a package per direction.
+2. **One replication connection does everything.** The source connects with `replication=database`
+   and runs its catalog queries (`SHOW wal_level`, `pg_publication`, `pg_publication_tables`,
+   `pg_class`, `pg_replication_slots`) and `CREATE PUBLICATION` on it, through the simple protocol,
+   before `CREATE_REPLICATION_SLOT` and `START_REPLICATION`; a run is one connection on the
+   pipeline's goroutine, made anew after any error. Alternative: a second, normal connection for the
+   catalog and the slot's lag.
+3. **`create`** makes a missing publication `FOR TABLE` the `tables` (not `FOR ALL TABLES`, which
+   needs a superuser) and a missing slot with no snapshot; neither is ever altered or dropped, so a
+   removed pipeline's slot is the operator's to drop (the docs say so). Without `create` both must
+   exist; an existing publication must hold every table `tables` names. Alternative: drop the slot
+   when the pipeline leaves the config, or alter the publication to match `tables`.
+4. **Replica identities are checked at the start**: when the publication publishes updates or
+   deletes, a table with `REPLICA IDENTITY NOTHING`, or the default without a primary key, is an
+   error (so the pipeline restarts and says why, as any source error). A publication of inserts
+   alone needs no keys. Alternative: a warning, and records without keys.
+5. **The key** is the primary key (read from the catalog), or, with `REPLICA IDENTITY USING
+   INDEX` or no primary key, the identity's columns (every column for `FULL` without a key). An
+   update whose key changed is a delete of the old key and an insert of the new row, both in its
+   transaction, so a sink writing by key does not keep both. Alternative: an update whose `before`
+   holds the old key, left to sinks.
+6. **An unchanged TOASTed value** (pgoutput's `u`) is left out of `after`, taken from `before` with
+   `REPLICA IDENTITY FULL`; sinks that update the fields given keep the old value. Alternative: read
+   it with a query (racy against later writes) or fail the record.
+7. **A truncate** is a `ddl` record of each table, `after` `{"statement": "TRUNCATE schema.table
+   [RESTART IDENTITY] [CASCADE]", "truncate": true}`, reported, not applied, as decision 036 has DDL.
+   Alternative: an operation of its own that sinks apply.
+8. **Values from pgoutput's text, by type OID**: the session sets `DateStyle ISO`, `TimeZone UTC`,
+   `extra_float_digits 3`, `bytea_output hex` and `IntervalStyle postgres` at startup, so the forms
+   are known. Integers and `oid` are ints, floats floats (`NaN`, `Infinity`), `numeric` a decimal,
+   `bytea` bytes, `json`/`jsonb` JSON, `date` a date, `timestamp` a UTC time, `timestamptz` a time
+   with the server's offset, arrays of those (bounds, nesting, quoting) arrays; `uuid` and every
+   other type (`time`, `interval`, `inet`, enums, ranges, composites), BC dates, years past 9999 and
+   infinities the server's text, as I177's binary values have them. pgoutput's `binary` option
+   (14+) is not used. Alternative: binary, where the server has it.
+9. **Transactions**: a record's `Tx.ID` is the transaction's xid in decimal; the source holds back
+   one record so the last is flagged `Last`; only the last carries the position, `{"lsn":
+   "X/Y"}`, the end LSN of the commit, which `START_REPLICATION` resumes from. A transaction whose
+   commit is before the checkpoint (the slot started earlier) is skipped. A transaction with no
+   record for the pipeline emits nothing.
+10. **What the slot is told**: write, flush and apply are the last saved checkpoint, sent at each
+    `Confirm`, every `status_interval` (10s) whether it moved or not (a keepalive against
+    `wal_sender_timeout`), and at once when the server asks. **While every transaction handed on is
+    in the checkpoint**, the slot is told the latest position before which nothing is owed: the end
+    of a transaction with no records, a keepalive's position outside a transaction; so a quiet
+    table does not hold the WAL of busy unpublished ones. This tells the slot a position beyond the
+    checkpoint file's, safe because nothing between them is the pipeline's; a checkpoint set back
+    by hand cannot go before the slot's `confirmed_flush_lsn`, which the docs say. Alternative: the
+    checkpoint alone, with the slot holding WAL until the next published change (Debezium's
+    default without heartbeats).
+11. **Streaming** (`streaming: "auto"`): protocol 2 with `streaming on` from PostgreSQL 14,
+    protocol 1 on 13 (`off` keeps protocol 1). A streamed transaction's messages are kept in a file
+    of its own under `spool_dir` (the system's temporary directory by default) until its stream
+    commit, then read back as one transaction; a stream abort removes the file, a subtransaction's
+    abort drops its changes by xid; files left by a run are removed when it ends. Their size is
+    bounded by the server's transaction alone. Protocols 3 and 4 (two-phase, parallel apply) are not
+    used. Alternative: streaming off, the server spilling large transactions and sending them at
+    their commit.
+12. **The slot's lag** is the WAL between the server's end (from `XLogData` and keepalives) and the
+    position the slot was last told; a warning is logged when it passes `lag_warning` (1 GiB) and
+    an info line when it falls back; `Source.Lag` is there for I189's metrics. Alternative: query
+    `pg_replication_slots` on a second connection.
+13. **A job** (`mode: "once"`) reads up to the server's WAL end at its start (`IDENTIFY_SYSTEM`)
+    and stops, asking for a keepalive with each status; with I179 it will be the snapshot's mode.
+14. **`Test`** connects and checks `wal_level`, the publication, its tables' identities and the
+    slot, creating nothing.
+15. **I179's seam**: `prepare` returns the slot it made (`setup.slot`, with its consistent point),
+    created with `SnapshotNothing` where I179 asks for the exported snapshot, and `Run` has the
+    place where the snapshot runs before `START_REPLICATION`; the position is a struct I179 adds
+    its progress to.
+16. **Interop** (`test/sync/postgres_source_test.go`, PostgreSQL 13 to 17 from
+    `test/sync/postgres.sh`): changes across two tables in one transaction, a key changed, a
+    TOASTed value unchanged, `REPLICA IDENTITY FULL`, a truncate, a 30,000-row transaction with a
+    savepoint rolled back (`logical_decoding_work_mem` set to 64kB with `ALTER SYSTEM` on the test
+    servers, so it streams on 14+, checked by `pg_stat_replication_slots.stream_txns`, and spills on
+    13); `confirmed_flush_lsn` unmoved before any checkpoint and exactly at each one; a restart from
+    a checkpoint; writes to an unpublished table moving the slot on; the walsender terminated and,
+    with `FIT_SYNC_PG_PREFIX` (now exported by `postgres.sh`), the server restarted with `docker
+    restart`, losing nothing; and a pipeline to a memory sink killed at random points as `kill -9`
+    would, while 300 transactions are written, ending with every row. Alternative: a container of
+    the test's own to restart.
+17. **Size**: about 1,360 lines of code, 970 of unit tests (a fake replication connection, 98.6% of
+    the package's statements without containers) and 510 of interop; nothing left, no I178b.
 
 ### I179 The PostgreSQL snapshot
 

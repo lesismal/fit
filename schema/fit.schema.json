@@ -8340,6 +8340,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "postgres"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.postgres"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "redis"
               }
             }
@@ -8395,6 +8411,7 @@
             "generate",
             "http",
             "mongo",
+            "postgres",
             "redis",
             "s3",
             "wasm"
@@ -8860,6 +8877,122 @@
       },
       "required": [
         "uri"
+      ],
+      "type": "object"
+    },
+    "sync.sources.postgres": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:5432",
+          "description": "The server's host and port, the port 5432 when only a host is given. 127.0.0.1:5432 when left out.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, presented to a server that asks for one; needs key_file.",
+          "type": "string"
+        },
+        "channel_binding": {
+          "default": "prefer",
+          "description": "SCRAM-SHA-256's channel binding to the TLS connection: prefer, when TLS is used and the server offers it; require, fail without it; disable. prefer when left out.",
+          "enum": [
+            "prefer",
+            "require",
+            "disable"
+          ],
+          "type": "string"
+        },
+        "connect_timeout": {
+          "default": "10s",
+          "description": "How long connecting, TLS and authentication may take. 10s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "create": {
+          "description": "Create the publication and the slot when they do not exist, rather than fail. The slot is made with no snapshot: changes come from its creation on.",
+          "type": "boolean"
+        },
+        "database": {
+          "description": "The database whose changes are read: a slot belongs to one database.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "lag_warning": {
+          "default": 1073741824,
+          "description": "The slot's lag, in bytes of WAL between the server's end and the position confirmed, past which a warning is logged: the WAL the server keeps for the pipeline. 1 GiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password, read when the pipeline loads; none when left out.",
+          "type": "string"
+        },
+        "publication": {
+          "description": "The publication read: the tables whose changes come, and which operations. With create, made FOR TABLE tables when it does not exist; it is never changed.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; address's host when left out.",
+          "type": "string"
+        },
+        "slot": {
+          "description": "The logical replication slot read, of plugin pgoutput: lowercase letters, digits and underscores. With create, made when it does not exist; it is never dropped: drop it (pg_drop_replication_slot) when the pipeline is gone, or the server keeps its WAL for good.",
+          "type": "string"
+        },
+        "spool_dir": {
+          "description": "The directory streamed transactions are kept in until they commit or abort, a file each, removed then. The system's temporary directory when left out.",
+          "type": "string"
+        },
+        "sslmode": {
+          "default": "verify-full",
+          "description": "TLS to the server: verify-full, the certificate and the host name checked against the system's roots or ca_file's; verify-ca, the certificate alone; require, TLS unchecked; disable, none. There is no prefer: a silent fall back to plain text is not offered. verify-full when left out.",
+          "enum": [
+            "disable",
+            "require",
+            "verify-ca",
+            "verify-full"
+          ],
+          "type": "string"
+        },
+        "status_interval": {
+          "default": "10s",
+          "description": "How often the source tells the server the position the sinks have, also when it has not moved, which keeps the connection alive (below the server's wal_sender_timeout). 10s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "streaming": {
+          "default": "auto",
+          "description": "Large transactions streamed by the server while they run (PostgreSQL 14 and later), kept in files under spool_dir until they commit, rather than spilled by the server and sent at their commit: auto, on servers that have it; off. auto when left out.",
+          "enum": [
+            "auto",
+            "off"
+          ],
+          "type": "string"
+        },
+        "tables": {
+          "description": "The tables, schema.table or table (in public), the publication is made for with create; with a publication that exists, each must be in it. Required with create.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "user": {
+          "description": "The user to connect as: one with the REPLICATION attribute (or a superuser), allowed to read the published tables, and, with create, to create the publication.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user",
+        "database",
+        "publication",
+        "slot"
       ],
       "type": "object"
     },
