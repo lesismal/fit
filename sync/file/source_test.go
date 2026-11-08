@@ -71,7 +71,9 @@ func (c *collector) lines() []string {
 func once(t *testing.T, s *Source, from fitsync.Position) *collector {
 	t.Helper()
 	c := &collector{}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Only a guard against a hang: ten thousand files take ~2s, ~10s under
+	// the race detector, and several times that on CI's runners.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if err := s.Run(ctx, &fitsync.Run{From: from, Once: true, Emit: c.emit}); err != nil {
 		t.Fatal(err)
