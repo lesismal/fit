@@ -50,6 +50,9 @@ func TestTemplatesUpToDate(t *testing.T) {
 // of every module's params.
 func TestTemplatesLoad(t *testing.T) {
 	names := map[string]bool{}
+	// none are lists of modules of a namespace that has none yet, as sync's
+	// transforms, which a .conf file has nothing to write for.
+	none := map[string]bool{}
 	var collect func(reflect.Type)
 	seen := map[reflect.Type]bool{}
 	collect = func(typ reflect.Type) {
@@ -63,12 +66,15 @@ func TestTemplatesLoad(t *testing.T) {
 		for _, f := range config.Fields(typ) {
 			if !f.Self {
 				names[f.Name] = true
+				if f.Type.Kind() == reflect.Slice && f.Module != "" && len(module.Namespace(f.Module)) == 0 {
+					none[f.Name] = true
+				}
 				collect(f.Type)
 			}
 		}
 	}
 	collect(reflect.TypeFor[config.Config]())
-	for _, ns := range []string{module.Handlers, module.Middlewares} {
+	for _, ns := range []string{module.Handlers, module.Middlewares, "sync.sources", "sync.sinks", "sync.transforms"} {
 		for _, info := range module.Namespace(ns) {
 			collect(reflect.TypeOf(info.New()))
 		}
@@ -100,7 +106,7 @@ func TestTemplatesLoad(t *testing.T) {
 			case "fit":
 				// A module is its name and a block of its params, with
 				// no module or params fields.
-				if name == "module" || name == "params" || fitDirective(string(data), name) || fitDirective(string(data), fitSingular[name]) {
+				if name == "module" || name == "params" || none[name] || fitDirective(string(data), name) || fitDirective(string(data), fitSingular[name]) {
 					continue
 				}
 				t.Errorf("%s has no field %s", file, name)

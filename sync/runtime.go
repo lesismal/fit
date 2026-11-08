@@ -1,0 +1,384 @@
+package fitsync
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/lesismal/fit/app"
+	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
+	"github.com/lesismal/fit/module"
+)
+
+// ID is the role's, and its member's path in the config.
+const ID = "sync"
+
+func init() {
+	app.Register(app.Info{
+		ID: ID,
+		Member: func(c *config.Config) any {
+			if c.Sync == nil {
+				return nil
+			}
+			return c.Sync
+		},
+		New: func(h *app.Host) (app.Role, error) {
+			return &role{rt: NewRuntime(Options{Log: h.Log, StopTimeout: h.DrainTimeout()})}, nil
+		},
+		Check: func(c *config.Config) error { return Check(c.Sync) },
+	})
+}
+
+// role runs the config's pipelines.
+type role struct{ rt *Runtime }
+
+func (r *role) Apply(member any) error {
+	s, ok := member.(*config.Sync)
+	if !ok {
+		return fmt.Errorf("sync: a member of type %T", member)
+	}
+	return r.rt.Apply(s)
+}
+
+func (r *role) Stop(ctx context.Context) { r.rt.Close(ctx) }
+
+// Check loads every module s names, which checks their params, and lets
+// them go.
+func Check(s *config.Sync) error {
+	if s == nil {
+		return nil
+	}
+	var errs config.Errors
+	for i := range s.Pipelines {
+		m, err := load(&s.Pipelines[i])
+		if err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+			continue
+		}
+		m.cleanup()
+	}
+	if len(errs) > 0 {
+		return errs
+	}
+	return nil
+}
+
+// Options are a Runtime's.
+type Options struct {
+	// Log is where pipelines say what they do; nil says nothing.
+	Log *logs.Logger
+	// StopTimeout bounds how long a pipeline stopped, by a reload or Close
+	// without a deadline, may take to write what it holds: 30s when 0.
+	StopTimeout time.Duration
+	// Crash, for tests, is asked at each Point of each pipeline; true kills
+	// the pipeline there, as kill -9 would: it writes and saves nothing
+	// more, its checkpoint included, and is not restarted.
+	Crash func(pipeline string, at Point) bool
+}
+
+// Runtime runs pipelines, and moves them to each config applied.
+type Runtime struct {
+	opts  Options
+	mu    sync.Mutex // held for a whole Apply or Close
+	pipes map[string]*pipe
+}
+
+// NewRuntime returns a Runtime running no pipeline yet.
+func NewRuntime(opts Options) *Runtime {
+	if opts.StopTimeout <= 0 {
+		opts.StopTimeout = 30 * time.Second
+	}
+	return &Runtime{opts: opts, pipes: map[string]*pipe{}}
+}
+
+// modules are a pipeline's modules, loaded.
+type modules struct {
+	src        Source
+	transforms []Transform
+	sinks      []Sink
+	dl         Sink
+}
+
+func (m *modules) cleanup() {
+	module.Cleanup(m.src)
+	for _, t := range m.transforms {
+		module.Cleanup(t)
+	}
+	for _, s := range m.sinks {
+		module.Cleanup(s)
+	}
+	if m.dl != nil {
+		module.Cleanup(m.dl)
+	}
+}
+
+// load loads a pipeline's modules.
+func load(p *config.SyncPipeline) (*modules, error) {
+	m := &modules{}
+	var errs config.Errors
+	get := func(ns string, ref config.ModuleRef) any {
+		v, err := module.Load(ns, ref, nil)
+		if err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+			return nil
+		}
+		return v
+	}
+	if v := get(Sources, p.Source); v != nil {
+		if m.src, _ = v.(Source); m.src == nil {
+			errs = append(errs, p.Source.At.Field("module").Errorf("%s is not a source", p.Source.Module))
+		}
+	}
+	for _, ref := range p.Transforms {
+		if v := get(Transforms, ref); v != nil {
+			t, ok := v.(Transform)
+			if !ok {
+				errs = append(errs, ref.At.Field("module").Errorf("%s is not a transform", ref.Module))
+			}
+			m.transforms = append(m.transforms, t)
+		}
+	}
+	sink := func(s *config.SyncSink) Sink {
+		v := get(Sinks, s.Sink)
+		if v == nil {
+			return nil
+		}
+		k, ok := v.(Sink)
+		if !ok {
+			errs = append(errs, s.Sink.At.Field("module").Errorf("%s is not a sink", s.Sink.Module))
+		}
+		return k
+	}
+	for i := range p.Sinks {
+		m.sinks = append(m.sinks, sink(&p.Sinks[i]))
+	}
+	if p.DeadLetter != nil {
+		m.dl = sink(p.DeadLetter)
+	}
+	if len(errs) > 0 {
+		m.cleanup()
+		return nil, errs
+	}
+	return m, nil
+}
+
+// key is what a pipeline is restarted for when it changes: its settings and
+// the state directory.
+func key(dir string, p *config.SyncPipeline) string {
+	b, _ := json.Marshal(p) // a config always marshals
+	return dir + "\x00" + string(b)
+}
+
+// Apply moves the runtime to s, nil for none: it starts the pipelines s adds,
+// stops those it removes, and restarts those whose settings changed, each
+// stopped pipeline writing what it holds and its checkpoint first. The
+// others run on. An error loading a pipeline's modules leaves every
+// pipeline as it was.
+func (rt *Runtime) Apply(s *config.Sync) error {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	want := map[string]*config.SyncPipeline{}
+	dir := ""
+	if s != nil {
+		dir = s.StateDir
+		for i := range s.Pipelines {
+			want[s.Pipelines[i].Name] = &s.Pipelines[i]
+		}
+	}
+	var stop []*pipe
+	for name, p := range rt.pipes {
+		if w := want[name]; w == nil || key(dir, w) != p.key {
+			stop = append(stop, p)
+		}
+	}
+	var start []*pipe
+	var errs []error
+	for name, w := range want {
+		if p := rt.pipes[name]; p != nil && key(dir, w) == p.key {
+			continue
+		}
+		m, err := load(w)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("pipeline %s: %w", name, err))
+			continue
+		}
+		start = append(start, rt.newPipe(dir, w, m))
+	}
+	if len(errs) > 0 {
+		for _, p := range start {
+			p.modules.cleanup()
+		}
+		return errors.Join(errs...)
+	}
+	for _, p := range stop {
+		rt.stopPipe(context.Background(), p)
+		delete(rt.pipes, p.cfg.Name)
+	}
+	for _, p := range start {
+		rt.pipes[p.cfg.Name] = p
+		rt.opts.Log.Infof("pipeline %s starts", p.cfg.Name)
+		go p.loop()
+	}
+	return nil
+}
+
+// Close stops every pipeline, waiting for each to write what it holds and
+// its checkpoint until ctx ends at most.
+func (rt *Runtime) Close(ctx context.Context) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, p := range rt.pipes {
+		wg.Add(1)
+		go func() { defer wg.Done(); rt.stopPipe(ctx, p) }()
+	}
+	wg.Wait()
+	clear(rt.pipes)
+}
+
+// stopPipe stops p and lets its modules go; the caller takes it out of
+// rt.pipes.
+func (rt *Runtime) stopPipe(ctx context.Context, p *pipe) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, rt.opts.StopTimeout)
+		defer cancel()
+	}
+	p.stopCtx = ctx
+	close(p.stopping)
+	<-p.done
+	p.modules.cleanup()
+}
+
+// Status is a pipeline's state.
+type Status struct {
+	Name string
+	// State is starting, running, retrying (its source failed, and it
+	// starts again after a backoff), finished (its source ended, all
+	// written), stopped (on_error stop, or a dead letter not written) or
+	// killed (by a crash hook).
+	State string
+	// Err is the last error, if any.
+	Err string
+	// Checkpoint is the position last saved.
+	Checkpoint Position
+}
+
+// Status returns every pipeline's state, by name.
+func (rt *Runtime) Status() []Status {
+	rt.mu.Lock()
+	ps := make([]*pipe, 0, len(rt.pipes))
+	for _, p := range rt.pipes {
+		ps = append(ps, p)
+	}
+	rt.mu.Unlock()
+	out := make([]Status, 0, len(ps))
+	for _, p := range ps {
+		p.mu.Lock()
+		out = append(out, Status{Name: p.cfg.Name, State: p.state, Err: p.err, Checkpoint: p.saved})
+		p.mu.Unlock()
+	}
+	slices.SortFunc(out, func(a, b Status) int {
+		if a.Name < b.Name {
+			return -1
+		}
+		if a.Name > b.Name {
+			return 1
+		}
+		return 0
+	})
+	return out
+}
+
+// pipe is a pipeline as the config sets it, and the goroutine that runs it,
+// again after its source fails.
+type pipe struct {
+	*modules
+	rt       *Runtime
+	cfg      *config.SyncPipeline
+	key      string
+	store    *store
+	stopping chan struct{}
+	stopCtx  context.Context
+	done     chan struct{}
+
+	mu    sync.Mutex
+	state string
+	err   string
+	saved Position
+}
+
+func (rt *Runtime) newPipe(dir string, cfg *config.SyncPipeline, m *modules) *pipe {
+	p := &pipe{modules: m, rt: rt, cfg: cfg, key: key(dir, cfg), stopping: make(chan struct{}), done: make(chan struct{}), state: "starting"}
+	p.store = &store{dir: dir, name: cfg.Name}
+	if h := rt.opts.Crash; h != nil {
+		p.store.crash = func(pt Point) bool { return h(cfg.Name, pt) }
+	}
+	return p
+}
+
+func (p *pipe) setState(state string, err error) {
+	p.mu.Lock()
+	p.state = state
+	if err != nil {
+		p.err = err.Error()
+	}
+	p.mu.Unlock()
+}
+
+func (p *pipe) noteSaved(pos Position) {
+	p.mu.Lock()
+	p.saved = pos
+	p.mu.Unlock()
+}
+
+// loop runs the pipeline from its checkpoint, again after a backoff each
+// time its source fails, until it ends or is stopped.
+func (p *pipe) loop() {
+	defer close(p.done)
+	log := p.rt.opts.Log
+	for attempt := 1; ; {
+		from, err := p.store.load()
+		if err == nil {
+			p.noteSaved(from)
+			p.setState("running", nil)
+			r := newRun(p)
+			var out outcome
+			out, err = r.do(from)
+			if r.saved {
+				attempt = 1
+			}
+			switch out {
+			case outFinished:
+				p.setState("finished", nil)
+				log.Infof("pipeline %s finished", p.cfg.Name)
+				return
+			case outStopped:
+				return
+			case outKilled:
+				p.setState("killed", nil)
+				return
+			case outFailed:
+				p.setState("stopped", err)
+				log.Errorf("pipeline %s stopped: %v", p.cfg.Name, err)
+				return
+			}
+		}
+		p.setState("retrying", err)
+		wait := p.cfg.Backoff(attempt)
+		log.Warnf("pipeline %s: %v; it starts again from its checkpoint in %s", p.cfg.Name, err, wait)
+		attempt++
+		t := time.NewTimer(wait)
+		select {
+		case <-t.C:
+		case <-p.stopping:
+			t.Stop()
+			return
+		}
+	}
+}

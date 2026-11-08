@@ -2177,7 +2177,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
+          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server), sync (its pipelines) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
           "type": "object"
         },
         "loggers": {
@@ -3430,6 +3430,185 @@
           "description": "The UDP port the PeerConnections of the stream_whip and stream_whep handlers share, which publish into the hub with WHIP and play from it with WHEP. Routes with those handlers answer 503 without it. None when left out."
         }
       },
+      "type": "object"
+    },
+    "config.Sync": {
+      "additionalProperties": false,
+      "properties": {
+        "pipelines": {
+          "description": "The pipelines, each a source, its transforms in order and its sinks, with one checkpoint. A reload starts the pipelines added, stops those removed and restarts only those whose settings changed.",
+          "items": {
+            "$ref": "#/$defs/config.SyncPipeline"
+          },
+          "type": "array"
+        },
+        "state_dir": {
+          "description": "The directory each pipeline's checkpoint is kept in, as <state_dir>/<pipeline>.json, written to a temporary file, synced and renamed into place. Made when missing. A pipeline starts from its checkpoint there; moving a pipeline to another fit means moving its file.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state_dir"
+      ],
+      "type": "object"
+    },
+    "config.SyncBatch": {
+      "additionalProperties": false,
+      "properties": {
+        "max_bytes": {
+          "default": 4194304,
+          "description": "The most bytes in a batch, as the records' sizes are reckoned; a record larger than it is a batch of its own. 4 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_records": {
+          "default": 500,
+          "description": "The most records in a batch. 500 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_wait": {
+          "default": "1s",
+          "description": "How long a batch waits for more records after its first arrived. 1s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.SyncPipeline": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint_interval": {
+          "default": "5s",
+          "description": "How often, at most, the checkpoint is written when it has moved; it is also written when the pipeline stops. Records after the last checkpoint written are written again after a crash, so sinks write idempotently. 5s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "dead_letter": {
+          "$ref": "#/$defs/config.SyncSink",
+          "description": "The sink records go to when on_error is dead_letter, each a message record holding the record's canonical JSON, the error, where it failed and the attempts made. Needed with dead_letter, and only with it. A dead letter it cannot write either, after its attempts, stops the pipeline."
+        },
+        "mode": {
+          "default": "stream",
+          "description": "stream follows the source for good; once stops at the source's end, as a batch job, with the checkpoint written. A pipeline also stops when its source has an end and reaches it. stream when left out.",
+          "enum": [
+            "stream",
+            "once"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "description": "The pipeline's name, unique, which names its checkpoint file. Letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        },
+        "on_error": {
+          "default": "stop",
+          "description": "What happens to a record a sink still fails to write, or a transform fails on, once its attempts are spent: stop stops the pipeline, its checkpoint before the record, until the config changes or fit restarts; skip leaves the record out of that sink, and logs it; dead_letter writes it, with its error, to the dead_letter sink before going on. stop when left out.",
+          "enum": [
+            "stop",
+            "skip",
+            "dead_letter"
+          ],
+          "type": "string"
+        },
+        "queue": {
+          "$ref": "#/$defs/config.SyncQueue",
+          "description": "The bound on records read and not yet acknowledged by every sink: past it the source waits, so a slow sink slows the source rather than growing memory. The defaults when left out."
+        },
+        "retry": {
+          "$ref": "#/$defs/config.SyncRetry",
+          "description": "How a failed write is tried again, with a backoff doubling up to max_backoff, before on_error applies. A source that fails restarts the pipeline from its checkpoint after the same backoff, for as long as it fails. The defaults when left out."
+        },
+        "sinks": {
+          "description": "Where every record is written, at least one: each sink takes every record, in order, in batches of its own, and the checkpoint is the position all of them have acknowledged.",
+          "items": {
+            "$ref": "#/$defs/config.SyncSink"
+          },
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/sync.sources",
+          "description": "Where the records come from, and its params."
+        },
+        "transforms": {
+          "description": "What each record goes through, in order, before the sinks: a transform may change, drop or split a record. None when left out.",
+          "items": {
+            "$ref": "#/$defs/sync.transforms"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "sinks"
+      ],
+      "type": "object"
+    },
+    "config.SyncQueue": {
+      "additionalProperties": false,
+      "properties": {
+        "max_bytes": {
+          "default": 67108864,
+          "description": "The most bytes, as the records' sizes are reckoned, read and not yet acknowledged by every sink. A record larger than all of it waits until the queue is empty, and then goes through alone. 64 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_records": {
+          "default": 10000,
+          "description": "The most records read and not yet acknowledged by every sink. 10000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "config.SyncRetry": {
+      "additionalProperties": false,
+      "properties": {
+        "backoff": {
+          "default": "200ms",
+          "description": "The wait before the first try again, doubled at each after. 200ms when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_attempts": {
+          "default": 5,
+          "description": "How many times a write is tried, the first included, before on_error applies. 5 when left out or 0.",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_backoff": {
+          "default": "30s",
+          "description": "The longest wait between tries. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.SyncSink": {
+      "additionalProperties": false,
+      "properties": {
+        "batch": {
+          "$ref": "#/$defs/config.SyncBatch",
+          "description": "How records are gathered into a write: a batch is written once it holds max_records records or max_bytes bytes, or max_wait after its first record arrived, whichever comes first, and at once when the source has ended. The defaults when left out."
+        },
+        "name": {
+          "description": "The sink's name, unique in its pipeline, which logs and errors call it by. Letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        },
+        "sink": {
+          "$ref": "#/$defs/sync.sinks",
+          "description": "What the records are written to, and its params."
+        }
+      },
+      "required": [
+        "name",
+        "sink"
+      ],
       "type": "object"
     },
     "config.TLS": {
@@ -6653,6 +6832,164 @@
       ],
       "type": "object"
     },
+    "sync.sinks": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "memory"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.memory"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "stdout"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.stdout"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "module": {
+          "description": "The module's name within its namespace.",
+          "enum": [
+            "memory",
+            "stdout"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "description": "The module's params."
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "type": "object"
+    },
+    "sync.sinks.memory": {
+      "additionalProperties": false,
+      "properties": {
+        "max_records": {
+          "default": 100000,
+          "description": "The most records the store keeps; a write past it fails, as a full disk would. 100000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "store": {
+          "default": "default",
+          "description": "The store's name: sinks naming the same store write into it. default when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "sync.sinks.stdout": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "sync.sources": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "generate"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.generate"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "module": {
+          "description": "The module's name within its namespace.",
+          "enum": [
+            "generate"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "description": "The module's params."
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "type": "object"
+    },
+    "sync.sources.generate": {
+      "additionalProperties": false,
+      "properties": {
+        "interval": {
+          "description": "How long to wait after each transaction; none when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "namespace": {
+          "default": "generate.records",
+          "description": "The records' namespace. generate.records when left out.",
+          "type": "string"
+        },
+        "records": {
+          "description": "How many records to make, after which the source ends and the pipeline stops; 0, or left out, makes them without end.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tx_size": {
+          "default": 1,
+          "description": "How many records a transaction holds; 1, or left out, makes each record a transaction of its own, without a transaction ID.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "sync.transforms": {
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "description": "The module's name within its namespace.",
+          "enum": [],
+          "type": "string"
+        },
+        "params": {
+          "description": "The module's params."
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "type": "object"
+    },
     "wasm.Property": {
       "additionalProperties": false,
       "properties": {
@@ -6774,6 +7111,10 @@
     "streaming": {
       "$ref": "#/$defs/config.Streaming",
       "description": "fit's streaming role, beside the gateway on its engine: one media hub where a stream is published once, over RTMP, RTSP, SRT or WHIP, and played over any of them, HTTP-FLV and HLS too, each listener and handler with its media_auth policy. None when left out."
+    },
+    "sync": {
+      "$ref": "#/$defs/config.Sync",
+      "description": "fit's sync role: pipelines that read records from a source (a database's changes, files, a queue) and write them to sinks, each with a checkpoint saved only once every sink has acknowledged the records it covers, kept in state_dir. None when left out: no connections out and no state on disk."
     },
     "telemetry": {
       "$ref": "#/$defs/config.Telemetry",

@@ -1,7 +1,7 @@
 // Package standard imports every role of the apps fit ships with, the
 // LLM feature's, the tunnel's, WebRTC's TURN and media hubs, and the
-// media_auth policies, the streaming role and the media libraries, so
-// that importing it registers them all.
+// media_auth policies, the streaming role, the media libraries and the
+// sync role, so that importing it registers them all.
 package standard
 
 import (
@@ -14,6 +14,7 @@ import (
 	_ "github.com/lesismal/fit/mediaauth"
 	_ "github.com/lesismal/fit/medialib"
 	_ "github.com/lesismal/fit/streaming"
+	_ "github.com/lesismal/fit/sync"
 	_ "github.com/lesismal/fit/tunnel/hub"
 	_ "github.com/lesismal/fit/tunnel/node"
 	_ "github.com/lesismal/fit/tunnel/proxy"
