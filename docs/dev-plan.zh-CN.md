@@ -324,7 +324,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I168 | Elasticsearch 与 OpenSearch 作为目标：按 `_id` 的 `_bulk`、逐条错误、遇 429 退避 | I163 | done |
 | I169 | Elasticsearch 与 OpenSearch 作为源：point in time 快照，之后按游标轮询 | I168 | done |
 | I170 | ClickHouse 作为目标（去重令牌、`ReplacingMergeTree`）与源（按游标轮询） | I163 | todo |
-| I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | todo |
+| I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | done |
 | I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | todo |
 | I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | todo |
 | I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | todo |
@@ -3594,6 +3594,63 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 - **完成标准**：一个重试直到收到应答的客户端在 fit 重启前后不丢数据；队列满时回 503 且不阻塞 worker；目标的重试带同一个
   幂等键。
 - **涉及**：`sync/httpsync`、`handler`、`docs`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前一直有效）：
+
+1. **放在哪里，处理器如何找到源。** 源和目标在包 `sync/httpsync`（`httpsync`）；处理器 `sync_ingest` 在包
+   `handler/syncingest`。处理器指定流水线（`pipeline`），通过进程内的注册表（`httpsync.Lookup`）找到它的源，源在其 `Run`
+   运行期间登记在那里；为此 `fitsync.Run` 增加了 `Pipeline`，即流水线的名字。没有源登记时（流水线不在配置中、失败后正在重启、
+   已停止），处理器回 503。备选：源自己的名字（`endpoint`）由处理器指定，或把处理器放进 `httpsync`。
+2. **在水位线处应答，而不是在检查点处。** 新的可选接口 `fitsync.Acknowledger`（`Acknowledged(pos)`）在水位线移动时、在运行
+   的锁之外被告知其新位置；源对到该位置为止的每个请求回 200。`Confirmer` 要等检查点保存后才应答，最多晚
+   `checkpoint_interval`，而 HTTP 源没有可以续传的东西：所有目标都拿到一个请求的记录时，它们就安全了。备选：`Confirmer`。
+3. **一个请求是一个事务。** 记录多于一条时带 `Tx.ID` `http-<run>-<n>` 及 `First`、`Last`，最后一条记录带位置
+   `{"run": "<随机>", "request": <n>}`，因此水位线不会停在请求中间，SQL 目标可以用自己的一个事务写入它。这个位置像其他位置
+   一样保存在检查点中，重启时被忽略。记录的 `source` 为 `http`；没有命名空间时用 `namespace`（`http`）；没有提交时间时用请求
+   到达的时间。
+4. **`on_error` 处理掉的记录算作已确认。** 被变换或目标判为失败、被跳过或送入 `dead_letter` 的记录，其请求仍回 200：失败的
+   记录如何处理由流水线的策略决定，对所有源都一样。`on_error: stop` 时流水线停止，等待中的请求在它停止时（模块的 `Cleanup`）
+   或在各自的 `timeout` 时回 503。备选：对这样的请求回 422 或 500。
+5. **限额与背压。** 处理器在 worker 上随 `OnBody` 读取请求体，存入受其 `max_body_bytes`（8 MiB，至多 1 GiB；超过回 413）
+   限制的缓冲区，不等待地交给源（`Offer`）；源在流水线的 goroutine 上解码，因此 WASM 编解码器从不在 worker 上运行。源限制它
+   持有的东西：`max_pending_requests`（1024）从 `Offer` 起计数一个请求，直到它最终得到应答，处理器已因超时回了 503 的请求在
+   其记录被确认前仍然计数；`max_pending_bytes`（64 MiB）计数尚未解码的请求体（没有等待者时总能放下一个）。队列满时源停在
+   `Emit`，它的待处理请求被填满，下一个请求立即回 503。备选：只用流水线的 `queue`，再由运行时增加一个不阻塞的 `Emit`。
+6. **请求体的格式。** 没有 `codec` 时，请求体是一串 JSON 值，每个是对象或对象数组，因此一个解析器同时读 JSON（一个对象或
+   一个数组）和 NDJSON；`Content-Type` 为 `application/json`、`application/x-ndjson`、`application/ndjson`、
+   `application/jsonl`、`application/x-jsonlines`、`+json` 类型、`text/plain` 或没有，其他回 415。`form` 与 `json` 编解码器
+   的相同（`plain` 行或完整的 `record`）。有 `codec` 时接受任意 `Content-Type`，`framing` 为 `lines`（每一行，跳过空行，去掉
+   `\r`）或 `body`。请求体在发出任何记录之前完整解码：一个坏值回 400，什么都不写。备选：每种 `Content-Type` 严格对应一种格式。
+7. **至少一次，源不去重。** 因超时回了 503 的请求仍可能被写入，客户端重发就会写两次；记录有键时（`form: "record"` 或 `key`
+   变换）幂等的目标会合并它们。源不保存客户端的 `Idempotency-Key`。备选：保存一段时间内见过的键，对重复的请求回 200 而不写入。
+8. **应答**：JSON，200 时为 `{"records": n}`，其他为 `{"records": 0, "error": "..."}`；其他方法回 405 并带 `Allow: POST`；
+   `Retry-After` 取自 `retry_after`（1s），以整秒计，至少为 1；`Cache-Control: no-store`。空请求体立即回 200，没有记录。
+9. **校验时不做交叉检查。** `fit validate` 不拒绝指定了不存在的流水线、或其源不是 `http` 的 `sync_ingest`：模块的
+   `Provision` 看不到配置的 `sync`。运行时回 503。备选：在配置校验中检查。
+10. **重启与停止。** 源失败后重启的流水线对其上一次运行发出但未被确认的每个请求回 503（那次运行的记录随之丢弃）；因重载或
+    fit 停止而停止的流水线不再接收请求（尚未解码的回 503），让目标写完手中的记录，从而对它们的请求回 200，其余回 503。在作业
+    （`mode: "once"`）中，这个源永不结束。
+11. **目标的重试就是流水线的重试。** 5xx、408、429、超时或连接错误使写入失败，流水线的 `retry` 从失败的请求起重发（之前的
+    请求通过 `BatchError` 确认）；其他非 2xx 的应答，包括 3xx（fib 的客户端不跟随重定向），都是 `Permanent`，立即交给
+    `on_error`。429 不像 `elasticsearch` 目标那样一直等待，也不读 `Retry-After`：它计入 `retry.max_attempts`。备选：像 I168 的
+    决策 8 那样等待 429 过去，并遵循 `Retry-After`。
+12. **幂等键**是对每条记录的位置（先写长度）和请求体做 SHA-256 后的 32 位十六进制数字（128 位），放在 `idempotency_header`
+    （`Idempotency-Key`）中。只用位置区分不了批次，因为大多数记录没有位置（文件源每一千条放一个，HTTP 源放在请求的最后一条）；
+    只用请求体又会把不同位置上相同内容的两个批次当成一个。重发的请求记录和请求体相同，因此键相同；超过 `max_request_bytes`
+    的批次从失败的记录起会以同样方式再拆分，因此失败的请求带着原来的键回来。崩溃后重放时批次分法不同，就得到不同的键：接收方
+    仍然需要幂等的写入。备选：像 I170 的去重令牌那样只用首尾位置。
+13. **目标的形态。** `format` 为 `ndjson`（默认）或 `json`（数组），`form` 为 `plain` 或 `record`，或用 `codec` 加
+    `content_type`；`method` 为 `POST` 或 `PUT`；`headers` 不能设置 `Authorization`、`Content-Type`、`Content-Length`、`Host`
+    或幂等键头；basic 认证（`username`、`password_env`）或 bearer 令牌（`bearer_token_env`），与 I168 一样只取自环境变量；
+    TLS 用 `ca_file`、`cert_file`、`key_file`、`server_name`，不可跳过校验；一个 `url`，没有故障转移；应答最多读 1 MiB，错误
+    中带其前 300 字节；使用角色的引擎，或自己的引擎（`fit sync run`）；是 `ParallelSink`。备选：像 `elasticsearch` 目标那样
+    支持多个 URL 和故障转移。
+14. **测试。** 重启测试在测试进程中提供路由并运行同步，在八个客户端 POST 400 条记录（每条都重发直到收到 200）时停止监听器、
+    配置和同步运行时，再在另一个地址上启动它们：每条记录都在目标中。`memory` 目标的存储在进程中比运行时活得久，代替持久的
+    目标。队列满测试卡住目标，第二个请求立即收到带 `Retry-After` 的 503，同时另一个路由的二十个请求都得到应答。目标的测试让
+    一个请求先遇到 503 再遇到超时，三次发送带同一个键。测试在 macOS 上于竞态检测器下运行；按用户为这一轮设定的范围，没有在
+    Linux 上运行，也没有运行 `./sync/...` 和 `./handler/...` 的全面测试，它们由合并时运行。
+15. **规模**：代码约 1,000 行（含运行时的钩子），测试约 940 行；没有剩余工作，因此没有 I171b。
 
 ### I172 MySQL 客户端：连接、认证与查询
 

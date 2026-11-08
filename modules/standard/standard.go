@@ -10,6 +10,7 @@ import (
 	_ "github.com/lesismal/fit/handler/proxy"
 	_ "github.com/lesismal/fit/handler/respond"
 	_ "github.com/lesismal/fit/handler/static"
+	_ "github.com/lesismal/fit/handler/syncingest"
 	_ "github.com/lesismal/fit/handler/vod"
 	_ "github.com/lesismal/fit/middleware/auth"
 	_ "github.com/lesismal/fit/middleware/breaker"
@@ -23,5 +24,6 @@ import (
 	_ "github.com/lesismal/fit/sync"
 	_ "github.com/lesismal/fit/sync/elasticsearch"
 	_ "github.com/lesismal/fit/sync/file"
+	_ "github.com/lesismal/fit/sync/httpsync"
 	_ "github.com/lesismal/fit/webrtc/media"
 )

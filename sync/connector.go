@@ -53,6 +53,10 @@ type Run struct {
 	// with Tx.Last, and Position is set on the records the source can
 	// resume after.
 	Emit func(*Record) error
+	// Pipeline is the name of the pipeline the source runs in, by which a
+	// source that takes records in from elsewhere, as the http source from
+	// a route's sync_ingest handler, is found.
+	Pipeline string
 }
 
 // Confirmer is a Source told of each checkpoint once it is saved, as a
@@ -60,6 +64,16 @@ type Run struct {
 // has acknowledged it.
 type Confirmer interface {
 	Confirm(p Position)
+}
+
+// Acknowledger is a Source told, as the pipeline goes, of each position up
+// to which every sink has acknowledged every record (one on_error took
+// counting as acknowledged), on a record that ends a transaction: the
+// watermark, before it is saved. The http source answers its clients then.
+// Positions come in order, though a call may come after a later one's;
+// Acknowledged must not block, and must not call Emit.
+type Acknowledger interface {
+	Acknowledged(p Position)
 }
 
 // Sink writes records. It is a module of the namespace sync.sinks.

@@ -84,6 +84,8 @@ type run struct {
 	read, done, failed, markDone, markFailed, startDone int64
 	started                                             time.Time
 	finishing                                           bool
+	// acked is the mark not yet told to an Acknowledger source.
+	acked Position
 }
 
 type sinkRun struct {
@@ -209,6 +211,7 @@ func (r *run) advance() {
 		if e.boundary && e.pos != nil {
 			r.mark, r.dirty = e.pos, true
 			r.markDone, r.markFailed = r.done, r.failed
+			r.acked = e.pos
 		}
 		freed = true
 	}
@@ -225,6 +228,23 @@ func (r *run) ack(items []item) {
 	}
 	r.advance()
 	r.mu.Unlock()
+	r.tellAcked()
+}
+
+// tellAcked tells an Acknowledger source the mark advance last moved to,
+// if it has not been told yet; r.mu is not held.
+func (r *run) tellAcked() {
+	a, ok := r.p.src.(Acknowledger)
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	pos := r.acked
+	r.acked = nil
+	r.mu.Unlock()
+	if pos != nil && !r.killed.Load() {
+		a.Acknowledged(pos)
+	}
 }
 
 // dispatch takes records from the queue, puts them through the transforms
@@ -289,6 +309,7 @@ func (r *run) dispatch() {
 			r.mu.Unlock()
 		}
 		c.done()
+		r.tellAcked()
 		for _, s := range r.sinks {
 			notify(s.wake)
 		}
@@ -548,7 +569,7 @@ func (r *run) do(from Position) (outcome, error) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		run := &Run{From: from, Once: p.cfg.Once(), Emit: r.emit}
+		run := &Run{From: from, Once: p.cfg.Once(), Emit: r.emit, Pipeline: p.cfg.Name}
 		var err error
 		if c, ok := p.src.(Chunker); ok && p.cfg.Once() {
 			err = p.runChunks(r.srcCtx, c, run, p.cfg.Parallel())

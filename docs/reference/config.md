@@ -46,10 +46,10 @@ a config against it and more.
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -3962,6 +3962,7 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 | [`proxy`](#http-handlers-proxy) | A reverse proxy to an upstream |
 | [`respond`](#http-handlers-respond) | A fixed status, fields and body |
 | [`static`](#http-handlers-static) | Files from a directory |
+| [`sync_ingest`](#http-handlers-sync_ingest) | Records posted into a sync pipeline's `http` source, answered once its sinks have them |
 
 <a id="http-handlers-fastcgi"></a>
 
@@ -4876,6 +4877,84 @@ In JSON:
 | `stream` | string |  | The stream's path. When left out, it is the path after prefix a POST is sent to, as live/cam in /whip/live/cam. A session's URL is the path of its POST followed by its ID, which the route must match too. |
 | `prefix` | string |  | The part of the path before the stream's. /whip/ when left out. |
 | `auth` | string |  | The media_auth policy a POST must satisfy, publish on the stream's path: a bearer token, Basic, the token query parameter or the fit_media_token cookie. 401 with a Bearer challenge without credentials, 403 when they do not allow it. A session's URL takes PATCH and DELETE without credentials, its random ID being the capability (RFC 9725). Everyone may publish when left out, as the route's middleware allow. |
+
+<a id="http-handlers-sync_ingest"></a>
+
+### `sync_ingest`
+
+Hands the bodies POSTed to the route to the http source of the sync pipeline it names, and answers each 200 once every sink of the pipeline has acknowledged its records; 503 with Retry-After when the pipeline is not running, its pending requests are full, or the wait passes timeout, so that a client that sends again until answered 200 loses nothing. The route's middleware, authentication and limits, applies as to any handler.
+
+Takes records into a sync pipeline over HTTP: the bodies `POST`ed to the route go to the `http`
+source of the pipeline `pipeline` names, and each request is answered once every sink of the
+pipeline has acknowledged its records, `200` with `{"records": <n>}`. It is answered `503` with
+`Retry-After` (`retry_after`, in whole seconds) when the pipeline is not running (not in the config,
+starting again after a failure, stopped), when the source's pending requests or bytes are full, and
+when its records are not acknowledged within `timeout` (30s); a client that sends a request again
+until it is answered `200` therefore loses nothing, across a restart of fit too, though it may write
+a record twice, which an idempotent sink folds. A body the source cannot read is `400`, and nothing
+of it is written; one larger than `max_body_bytes` (8 MiB) `413`; a `Content-Type` the source does
+not read `415`; a method other than `POST` `405`.
+
+The handler never waits on a fib worker: the body is read as it arrives, handed to the source
+without waiting, and the answer is written later from the pipeline's goroutine or the timeout's.
+The route's middleware applies as to any handler: put an authenticating middleware (`basic_auth`,
+`jwt`, `forward_auth`, `client_cert`) and a `rate_limit` or `body_limit` before it, since anyone who
+reaches the route can write into the pipeline.
+
+The pipeline is set in `sync` as any other, its source `http`, as `{"name": "events", "source":
+{"module": "http", "params": {"namespace": "events"}}, "sinks": [...]}`.
+
+In a .conf file:
+
+```fit
+route {
+	match { path /ingest/events }
+	middleware jwt {
+		jwks_url https://auth.example.com/.well-known/jwks.json
+		audience ingest
+	}
+	handler sync_ingest { pipeline events; timeout 10s }
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /ingest/events
+middleware:
+  - module: jwt
+    params:
+      jwks_url: https://auth.example.com/.well-known/jwks.json
+      audience:
+        - ingest
+handler:
+  module: sync_ingest
+  params:
+    pipeline: events
+    timeout: 10s
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/ingest/events"]},
+  "middleware": [{"module": "jwt", "params": {
+    "jwks_url": "https://auth.example.com/.well-known/jwks.json",
+    "audience": ["ingest"]
+  }}],
+  "handler": {"module": "sync_ingest", "params": {"pipeline": "events", "timeout": "10s"}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `pipeline` | string |  | Required. The sync pipeline whose source, an http source, takes the bodies. While it is not running (not in the config, starting again, or stopped), requests are answered 503. |
+| `timeout` | duration | `"30s"` | How long a request waits for every sink to acknowledge its records before it is answered 503; its records may still be written, and a client sending it again then writes them twice, which an idempotent sink folds. 30s when left out or 0. |
+| `max_body_bytes` | integer, 0 to 1073741824 | `8388608` | The largest body taken; a larger one is answered 413. 8 MiB when left out or 0. |
+| `retry_after` | duration | `"1s"` | The Retry-After a 503 carries, in whole seconds, at least 1. 1s when left out or 0. |
 
 <a id="http-handlers-vod"></a>
 
@@ -6030,6 +6109,7 @@ after.
 | [`elasticsearch`](#sync-sources-elasticsearch) | Elasticsearch and OpenSearch: a snapshot through a point in time, then polled by a cursor field; a job's snapshot in slices |
 | [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
+| [`http`](#sync-sources-http) | Records posted to a `sync_ingest` route, each request answered once every sink has them |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
 
 <a id="sync-sources-elasticsearch"></a>
@@ -6216,6 +6296,106 @@ Makes numbered records of every value type, the same ones each time, in transact
 | `interval` | duration |  | How long to wait after each transaction; none when left out. |
 | `chunk_records` | integer, 0 or more |  | In a job (mode once), split the records into chunks of this many, by ranges of their ids, read job.max_parallel at a time, each record a transaction of its own: for trying out jobs. Needs records; at most 100000 chunks. Not split when left out. |
 
+<a id="sync-sources-http"></a>
+
+### `http`
+
+Takes records posted to a route whose handler is sync_ingest naming the pipeline: a body of JSON (an object, an array of objects, or several of them, as NDJSON) or of a codec's format becomes records, and the request is answered 200 only once every sink has acknowledged them, 503 with Retry-After when the source's pending requests are full or the wait passes the handler's timeout, so a client that retries until answered loses nothing. It has no checkpoint to resume from: what was not answered 200 is the client's to send again.
+
+Takes the records clients post to a route whose handler is [`sync_ingest`](#http-handlers-sync_ingest)
+naming the pipeline. Without `codec` a body is JSON: one object, an array of objects, or several of
+them one after another, as NDJSON, its `Content-Type` `application/json`, `application/x-ndjson`,
+`application/jsonl`, a `+json` type, `text/plain` or none; each object is a row (`form: "plain"`), a
+message record whose `after` holds its members, or a whole record in its canonical JSON
+(`form: "record"`). With `codec` each line of the body, or the whole body (`framing: "body"`), goes
+to the codec, whatever the `Content-Type`. A body is read whole or not at all: one value or line
+the source cannot read answers the request `400` and writes nothing of it. Records without a
+namespace get `namespace` (`http`), and the time the request came as their commit time.
+
+The records of one request are one transaction, and its last record carries the source's position,
+so a request is answered `200` once every sink has acknowledged all of them (a record `on_error`
+skipped or sent to `dead_letter` counts as acknowledged). The source holds at most
+`max_pending_requests` (1024) requests taken and not yet answered, and `max_pending_bytes` (64 MiB)
+of bodies not yet read; a request past either is answered `503` at once. A slow sink fills the
+pipeline's `queue`, which holds the source, which fills its pending requests: backpressure reaches
+the clients as `503`s, and nothing waits on a fib worker.
+
+There is nothing to resume from: the checkpoint holds the position of the last request answered,
+which a restart ignores. A request not answered `200` is the client's to send again, so delivery is
+at least once; give records a key (`key` transform, or `form: "record"`) for an idempotent sink. The
+source never ends, in a job (`mode: "once"`) too.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines metrics-in {
+		source http {
+			codec csv { columns host value }
+			namespace metrics
+			max_pending_requests 256
+		}
+		sinks file { sink file { path /var/log/fit/metrics.log; codec json } }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: metrics-in
+      source:
+        module: http
+        params:
+          codec:
+            module: csv
+            params:
+              columns:
+                - host
+                - value
+          namespace: metrics
+          max_pending_requests: 256
+      sinks:
+        - name: file
+          sink:
+            module: file
+            params:
+              path: /var/log/fit/metrics.log
+              codec:
+                module: json
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "metrics-in",
+        "source": {"module": "http", "params": {"codec": {"module": "csv", "params": {"columns": ["host", "value"]}},
+          "namespace": "metrics", "max_pending_requests": 256}},
+        "sinks": [{"name": "file", "sink": {"module": "file", "params": {"path": "/var/log/fit/metrics.log", "codec": {"module": "json"}}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `codec` | [codec](#sync codecs) |  | What makes records of a body, in place of JSON: each line of it, or the whole body (framing), goes to the codec, whatever the request's Content-Type. JSON when left out: the body is JSON or NDJSON, its Content-Type application/json, application/x-ndjson, application/jsonl, a +json type, text/plain or none. |
+| `framing` | string: `lines`, `body` | `"lines"` | With codec, what the codec is handed: lines, each line of the body (empty lines skipped, a trailing \r dropped), or body, the whole body at once, for a format of several lines per record. lines when left out. |
+| `form` | string: `plain`, `record` | `"plain"` | Without codec, what each JSON object is: plain, a row, made a message record whose after holds its members; record, a whole record in its canonical JSON, with its operation, key and namespace. plain when left out. |
+| `namespace` | string | `"http"` | The namespace of records that come without one. http when left out. |
+| `max_pending_requests` | integer, 0 to 1000000 | `1024` | The most requests taken and not yet answered for good, waiting to be read or for their records' acknowledgement; one past it is answered 503 at once. 1024 when left out or 0. |
+| `max_pending_bytes` | integer, 0 or more | `67108864` | The most bytes of bodies taken and not yet read into records; a body past it is answered 503 at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0. |
+
 <a id="sync-sources-wasm"></a>
 
 ### `wasm`
@@ -6308,6 +6488,7 @@ since what came after the checkpoint is written again after a crash.
 | --- | --- |
 | [`elasticsearch`](#sync-sinks-elasticsearch) | Elasticsearch and OpenSearch, with `_bulk`: documents by `_id` from the key, per-item errors, 429s waited out |
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
+| [`http`](#sync-sinks-http) | Batches posted as NDJSON or a JSON array, with headers, authentication and an idempotency key, retried on 5xx and timeouts |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
 | [`wasm`](#sync-sinks-wasm) | A WebAssembly plugin that writes each batch through fit's HTTP client to the hosts it is allowed |
@@ -6446,6 +6627,130 @@ Writes records as lines to a file through fit's log file sink, by a codec or a t
 | `template` | string |  | A line made of text and placeholders, in place of codec: {name} is the row's field name (after, or before when after is null) as text, and {$namespace}, {$op}, {$key}, {$commit_time} and {$record} (its canonical JSON) are the record's; {{ is a brace. A newline ends each line. |
 | `rotate` | [object](#config-rotate) |  | Rotates and keeps the file as a log file is: by size and time, removing old files by age, count and total size, and compressing them. The file grows without bound when left out. |
 | `time_zone` | string |  | The zone rotate's interval turns in: local (left out), utc, or an IANA name such as Asia/Shanghai. |
+
+<a id="sync-sinks-http"></a>
+
+### `http`
+
+Posts batches of records to an HTTP endpoint, as NDJSON or a JSON array (or a codec's format), through fib's asynchronous HTTP client, with the headers and authentication the config gives and an idempotency key made from the batch's records and their positions, the same each time the batch is sent again. A 5xx, 408, 429, a timeout or a connection's error is tried again by the pipeline's retry; any other answer but a 2xx fails the records for good, which on_error takes.
+
+Posts each batch to `url` through fib's asynchronous HTTP client: as NDJSON (`format: "ndjson"`,
+`application/x-ndjson`), a line per record, or as a JSON array (`format: "json"`,
+`application/json`); each record its row as a plain JSON object (`form: "plain"`), or the whole
+record in its canonical JSON (`form: "record"`), with its operation, key, namespace and position.
+`codec` writes the body in a codec's format instead, sent as `content_type`. A batch larger than
+`max_request_bytes` (8 MiB) goes in several requests, in order; a record larger alone fails for
+good.
+
+Every request carries `headers`, the authentication the config gives (`username` with
+`password_env` for basic authentication, or `bearer_token_env`, read from the environment when the
+pipeline loads) and an idempotency key in `idempotency_header` (`Idempotency-Key`): 32 hex digits of
+a SHA-256 of the request's records' positions and its body. A request sent again carries the same
+key, so a receiver that keeps the keys it has taken can drop a request it already has; the same
+records at other positions, or other records, get another.
+
+Any `2xx` acknowledges the request's records. A `5xx`, `408` or `429`, a timeout (`timeout`, 30s)
+or a connection's error fails the write, and the pipeline's `retry` sends it again with its backoff,
+from the request that failed: those before it are acknowledged. Any other answer, a `3xx` among
+them (redirects are not followed), fails the records for good: `on_error` takes them at once,
+without the retries. TLS is checked against the system's roots, or `ca_file`'s; `cert_file` and
+`key_file` present a client certificate. In a job, a sink has `job.max_parallel` writers, each key
+going to one of them.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines logs-out {
+		source file { paths /var/log/app/*.log; codec json }
+		sinks collector {
+			sink http {
+				url https://collector.example.com/v1/logs
+				bearer_token_env COLLECTOR_TOKEN
+				headers { X-Tenant shop }
+				format json
+			}
+			batch { max_records 500; max_wait 1s }
+		}
+		retry { max_attempts 10; backoff 500ms; max_backoff 30s }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: logs-out
+      source:
+        module: file
+        params:
+          paths:
+            - /var/log/app/*.log
+          codec:
+            module: json
+      sinks:
+        - name: collector
+          sink:
+            module: http
+            params:
+              url: https://collector.example.com/v1/logs
+              bearer_token_env: COLLECTOR_TOKEN
+              headers:
+                X-Tenant: shop
+              format: json
+          batch:
+            max_records: 500
+            max_wait: 1s
+      retry:
+        max_attempts: 10
+        backoff: 500ms
+        max_backoff: 30s
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "logs-out",
+        "source": {"module": "file", "params": {"paths": ["/var/log/app/*.log"], "codec": {"module": "json"}}},
+        "sinks": [{"name": "collector", "sink": {"module": "http", "params": {
+          "url": "https://collector.example.com/v1/logs", "bearer_token_env": "COLLECTOR_TOKEN",
+          "headers": {"X-Tenant": "shop"}, "format": "json"}},
+          "batch": {"max_records": 500, "max_wait": "1s"}}],
+        "retry": {"max_attempts": 10, "backoff": "500ms", "max_backoff": "30s"}
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | string |  | Required. The endpoint batches are sent to, http or https, as https://collector.example.com/ingest. fib's client does not follow redirects: a 3xx fails the records. |
+| `method` | string: `POST`, `PUT` | `"POST"` | The request's method. POST when left out. |
+| `format` | string: `ndjson`, `json` | `"ndjson"` | How a batch is written: ndjson, a line of JSON per record (application/x-ndjson); json, a JSON array of them (application/json). ndjson when left out; codec takes its place. |
+| `form` | string: `plain`, `record` | `"plain"` | What each record's JSON is: plain, its row (after, or before when after is null) as a plain JSON object; record, the whole record in its canonical JSON, with its operation, key, namespace and position. plain when left out. |
+| `codec` | [codec](#sync codecs) |  | A codec that writes the batch's records in place of format and form, the body being what it makes of them, sent with content_type. |
+| `content_type` | string |  | The Content-Type of a codec's body. application/octet-stream when left out; format sets its own. |
+| `headers` | object of string |  | Header fields every request carries, as an X-Tenant. Not Authorization, which username or bearer_token_env set, nor Content-Type or the idempotency header. |
+| `username` | string |  | The user for basic authentication, with password_env. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `bearer_token_env` | string |  | The environment variable holding a token sent as Authorization: Bearer, read when the pipeline loads. Not with username. |
+| `idempotency_header` | string | `"Idempotency-Key"` | The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' positions and its body, the same each time the request is sent again, so a receiver can drop a request it already took. Idempotency-Key when left out. |
+| `ca_file` | string |  | A PEM file of the certificates the endpoint's is checked against, in place of the system's roots. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to an endpoint that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the endpoint's certificate must have, and the TLS server name sent; the URL's host when left out. |
+| `timeout` | duration | `"30s"` | How long one request may take, from connecting to the end of its answer; one that takes longer is tried again. 30s when left out or 0. |
+| `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one request's body; a batch larger is sent in several, in order, and a record larger alone fails for good. 8 MiB when left out or 0. |
 
 <a id="sync-sinks-memory"></a>
 
