@@ -565,7 +565,11 @@ func (s *Hub) applyListeners(want []config.TunnelListener) []error {
 	next := make([]*listener, 0, len(want))
 	for i, lc := range want {
 		if l := have[key(lc, certs[i].fp)]; l != nil && keep[l] {
+			// A kept listener is in s.listeners, which Status reads under
+			// lmu.
+			s.lmu.Lock()
 			l.cfg = lc
+			s.lmu.Unlock()
 			next = append(next, l)
 			continue
 		}

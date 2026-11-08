@@ -56,17 +56,30 @@ exec tail -f /dev/null" >/dev/null
 		{ sleep 1; docker cp "$certs/ca.pem" "$name:/certs/ca.pem" >/dev/null; }
 	docker cp "$certs/server.pem" "$name:/certs/server.pem" >/dev/null
 	i=0
-	until docker exec "$name" mongosh --quiet --port "$p1" --eval 1 >/dev/null 2>&1; do
+	# Every member answers before the set is made: rs.initiate's quorum check
+	# fails on one still starting.
+	for p in $p1 $p2 $p3; do
+		until docker exec "$name" mongosh --quiet --port "$p" --eval 1 >/dev/null 2>&1; do
+			i=$((i + 1))
+			if [ $i -gt 90 ]; then
+				echo "$name did not start (port $p):" >&2
+				docker logs --tail 50 "$name" >&2
+				docker exec "$name" tail -n 30 "/data/db/$p.log" >&2
+				return 1
+			fi
+			sleep 1
+		done
+	done
+	i=0
+	until docker exec "$name" mongosh --quiet --port "$p1" --eval "rs.initiate({_id: '$rs', members: [
+		{_id: 0, host: 'localhost:$p1'}, {_id: 1, host: 'localhost:$p2'}, {_id: 2, host: 'localhost:$p3'}]})" >/dev/null; do
 		i=$((i + 1))
-		if [ $i -gt 90 ]; then
-			echo "$name did not start:" >&2
-			docker logs --tail 50 "$name" >&2
+		if [ $i -gt 10 ]; then
+			echo "$name: the replica set was not made" >&2
 			return 1
 		fi
-		sleep 1
+		sleep 2
 	done
-	docker exec "$name" mongosh --quiet --port "$p1" --eval "rs.initiate({_id: '$rs', members: [
-		{_id: 0, host: 'localhost:$p1'}, {_id: 1, host: 'localhost:$p2'}, {_id: 2, host: 'localhost:$p3'}]})" >/dev/null
 	i=0
 	until docker exec "$name" mongosh --quiet "mongodb://localhost:$p1,localhost:$p2,localhost:$p3/?replicaSet=$rs" \
 		--eval "db.getSiblingDB('admin').createUser({user: 'fit', pwd: '$MONGO_PASSWORD', roles: ['root']})" >/dev/null 2>&1; do
