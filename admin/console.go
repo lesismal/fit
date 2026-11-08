@@ -140,7 +140,7 @@ func StartConsoleWith(engine *fib.Engine, c *config.Console, a *config.Admin, co
 		endpoints = map[string]console.Handler{mcp.Path: cs.mcp.Serve}
 	}
 	rc := &config.RoleConsole{Address: c.Addr(), MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
-		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
+		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, Access: c.Access, At: c.At}
 	cs.c, err = console.Start(engine, console.Options{
 		Config: rc, Cookie: sessionCookie, Pages: workbench.Pages(), Logf: logf, Endpoints: endpoints,
 		// GET /api/node, beside /api/m/admin/node: who this fit is, where a
@@ -169,6 +169,9 @@ func StartConsoleWith(engine *fib.Engine, c *config.Console, a *config.Admin, co
 		// An upload's pieces stream to the library's file pool.
 		StreamBody: uploadPatch,
 		Gate:       x.Gate,
+		// admin.console.access, then the global access, as the running
+		// config has them.
+		Access: &configs.consoleAccess,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("console: %w", err)

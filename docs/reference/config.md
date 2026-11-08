@@ -113,7 +113,7 @@ In JSON:
 | `access_log` | [object](#config-accesslog) |  | Where a line is written for each request, as JSON or, as its format says, text or line; no access log when left out. |
 | `telemetry` | [object](#config-telemetry) |  | OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts. |
 | `limits` | [object](#config-limits) |  | Limits that apply to every listener. |
-| `access` | [object](#config-access) |  | The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every listener, route, service and role that sets no access of its own that decides: a more specific one, set on a listener, route, service or role, decides first, and this one only for an address that one has no say on. Every address is served when left out. |
+| `access` | [object](#config-access) |  | The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every listener, route, service and role, the Admin API and the consoles, that sets no access of its own that decides: a more specific one, set on a listener, route, service, role, admin or a console, decides first, and this one only for an address that one has no say on. Every address is served when left out. |
 | `engine` | [object](#config-engine) |  | How fib, the network engine fit serves and dials on, is set up: its event loops, workers and buffers. fib's own defaults for what is left out, and for all of it when engine is. Read when fit starts: a change takes effect when fit restarts. |
 | `admin` | [object](#config-admin) |  | The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. |
 | `auto_https` | [object](#config-autohttps) |  | HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out. |
@@ -294,7 +294,7 @@ Also at `webrtc.turn.tls.certificates[]`.
 
 ### `listeners[].access`
 
-Also at `routes[].access`, `services[].access`, `access`.
+Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1196,6 +1196,16 @@ takes PROXY headers, decides later instead: a refused HTTP request is answered `
 PROXY header names, never `X-Forwarded-For`'s. A change applies to connections and udp sessions that
 start after it.
 
+The Admin API (`admin.access`), the console (`admin.console.access`) and the roles' pages (the
+`console.access` of `llm.*` and `tunnel.*`) go by the global access too, after their own, and
+decide at accept: a refused connection is closed before anything is read from it. Unlike the rest of
+`admin`, these follow every config applied, without a restart. A global `allow` that leaves out
+`127.0.0.1` therefore shuts local clients out of the Admin API as well; to keep local access
+whatever the global access says, set the API's own `"allow": ["127.0.0.1", "::1"]`, which decides
+first. An Admin API on a Unix socket is never checked: its peers have no address, and setting
+`admin.access` with one is an error. A config applied with an allow list that leaves out the address
+the change came from does not close that connection, but the next one is refused.
+
 A list file has an address or prefix on each line, with blank lines and what follows `#` or `;`
 left out; it is read when the config is applied, and the config applied again when it changes.
 An allow list on a listener that obtains certificates with ACME's HTTP-01 or TLS-ALPN-01 challenges
@@ -1386,6 +1396,13 @@ they are taken, a new connection closes the oldest unauthenticated one of the cl
 most of them, rather than being refused, so that clients that only reconnect cannot keep an admin
 out.
 
+`admin.access` and `admin.console.access` are the client addresses the API and the console serve,
+as [access](#access) lists: each decides first, then the global `access`, which applies to them too;
+a refused connection is closed as soon as it is accepted. Unlike the rest of `admin`, they follow
+every config applied, without a restart. Left out, nothing changes unless the global access says so;
+an `"allow": ["127.0.0.1", "::1"]` of their own keeps local access whatever the global access says.
+An API on a Unix socket is never checked, and takes no `access`.
+
 `admin.store` keeps the config encrypted in a file of its own, the store: the file fit is started
 with then holds `admin`, and the store the rest, which fit runs from and writes on every change.
 When the store does not exist yet, the rest of the file is its first content. `fit store export`
@@ -1492,6 +1509,7 @@ In JSON:
 | `assistant` | [object](#config-assistant) |  | The workbench's assistant, a chat beside the console's pages that reads what fit does and drafts changes for a person to submit, calling the model APIs set here; off when left out, and then nothing is sent anywhere. Needs console. With a store, these settings are the first ones only: once the Settings page saves, the store's are used, keys included. |
 | `cluster` | [object](#config-cluster) |  | Manage other fits from this one, the manager: their addresses and credentials, added on the workbench's Cluster pages, are kept in the store, and each one's state is read every poll_interval. Off when left out, and then nothing is called. Needs store and console. See decision 033. |
 | `cluster_member` | [object](#config-clustermember) |  | Link this fit out to a manager of many fits, which then manages it through the link as it manages others over HTTP: for a fit behind NAT, or with no port open to the manager. The manager's Add by enrollment gives the line to paste here. Off when left out, and then nothing is dialed. Read when fit starts. See decision 033. |
+| `access` | [object](#config-access) |  | The client addresses the Admin API serves, deciding before the global access, which applies to the API too: a connection either refuses is closed as soon as it is accepted. Unlike the other admin settings it follows every config applied, without a restart. Set allow to "127.0.0.1" (and "::1") to keep local access whatever the global access says. A Unix socket's peers have no address and are never checked, and access is an error with one. Every address is served, unless the global access says otherwise, when left out. |
 
 <a id="config-store"></a>
 
@@ -1519,6 +1537,7 @@ In JSON:
 | `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |
 | `max_sessions` | integer, 0 or more | `64` | The most logins kept at once; one more ends the oldest. 64 when left out or 0. |
 | `max_conns` | integer, 0 or more | `32` | The most connections the console keeps open at once, a quarter of them kept for those with a login. When they are taken, a new connection closes the oldest of those without one, of the client holding the most, and is closed as it is accepted only when every one has a login; one past a client's share, a quarter of them, is closed too, but for loopback clients. 32 when left out or 0. |
+| `access` | [object](#config-access) |  | The client addresses the console serves, deciding before the global access, which applies to the console too: a connection either refuses is closed as soon as it is accepted. It follows every config applied, without a restart. Set allow to "127.0.0.1" (and "::1") to keep local access whatever the global access says. Every address is served, unless the global access says otherwise, when left out. |
 
 <a id="config-consoleuser"></a>
 
@@ -2161,6 +2180,7 @@ Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.n
 | `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |
 | `max_sessions` | integer, 0 or more | `64` | The most logins kept at once; one more ends the oldest. 64 when left out or 0. |
 | `max_conns` | integer, 0 or more | `32` | The most connections the pages keep open at once, a quarter of them kept for those with a login. When they are taken, a new connection closes the oldest of those without one, of the client holding the most, and is closed as it is accepted only when every one has a login; one past a client's share, a quarter of them, is closed too, but for loopback clients. 32 when left out or 0. |
+| `access` | [object](#config-access) |  | The client addresses the pages serve, deciding before the global access, which applies to the pages too: a connection either refuses is closed as soon as it is accepted. It follows every config applied, without restarting the pages. Set allow to "127.0.0.1" (and "::1") to keep local access whatever the global access says. Every address is served, unless the global access says otherwise, when left out. |
 
 <a id="config-llmlisten"></a>
 

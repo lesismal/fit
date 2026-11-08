@@ -202,6 +202,7 @@ Both are Admin API endpoints, which the console calls in process:
 | `session_timeout` | `30m` | How long a login lasts without a request. |
 | `session_lifetime` | `12h` | How long a login lasts at most, however busy. |
 | `max_sessions` | 64 | The most logins kept at once; one more ends the oldest. |
+| `access` | | The client addresses the console serves, an [allow and deny list](reference/config.md#access) deciding before the global `access`, which applies to the console too: a refused connection is closed as soon as it is accepted. It follows every config applied, without a restart. `"allow": ["127.0.0.1", "::1"]` keeps local access whatever the global access says. |
 | `max_conns` | 32 | The most connections open at once, a quarter of them kept for those with a login. When they are taken, a new connection closes the oldest of those without one, of the client holding the most of them (the host's own clients counting as one), rather than being refused; it is closed as soon as it is accepted only when every connection has a login, or when its client already holds its share (a quarter of them, an IPv6 client by its /64), but for loopback clients. |
 
 **An address that is not a loopback one needs `cert_file` and `key_file`**, so that passwords never
@@ -981,7 +982,7 @@ The [LLM feature](llm.md)'s and the [tunnel](tunnel.md)'s roles can also have pa
 each set by the role's `console`: the same fields as `admin.console`, but `address` is required, and
 served on the listeners' fib engine, as a role on a machine without `admin.console` needs. Each
 serves the same workbench, with the role's module alone in its menu. Their users, logins, lockouts,
-sessions and the TLS rule work as the console's do, with tables of their own. What a role's pages
+sessions, `access` and the TLS rule work as the console's do, with tables of their own. What a role's pages
 change, on its own console or as a module of `admin.console`'s workbench, is written back into its
 member of the config, applied by the same path as the console's changes, so it shows in the
 Versions page and, with a store, is sealed in the store. The config's own pages edit the same

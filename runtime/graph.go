@@ -73,6 +73,12 @@ type Graph struct {
 	// listeners and upstreams loaded, by path, for a tlsmgr.FileWatcher; nil
 	// when they loaded none.
 	CertFiles map[string][sha256.Size]byte
+	// AdminAccess and ConsoleAccess are the client addresses the Admin API
+	// and admin.console serve: admin.access, or admin.console.access, then
+	// the global access; nil serves everyone. Unlike the rest of admin they
+	// follow every config applied, which sets them on the gates the two
+	// accept through.
+	AdminAccess, ConsoleAccess *access.Policy
 
 	refs      atomic.Int64
 	modules   []any // every provisioned module, in the order provisioned
@@ -394,6 +400,28 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 	for i := range c.Listeners {
 		lc := &c.Listeners[i]
 		if listenerLists[lc.Name], err = access.Compile(lc.Access, files); err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+		}
+	}
+	// The Admin API's and the consoles' own: compiled here for their files
+	// to be checked and watched; the roles compile their consoles' again
+	// when they apply.
+	// A config without admin still has its global access apply to the
+	// Admin API and console fit started with.
+	var adminList, consoleList *access.List
+	if a := c.Admin; a != nil {
+		if adminList, err = access.Compile(a.Access, files); err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+		}
+		if a.Console != nil {
+			if consoleList, err = access.Compile(a.Console.Access, files); err != nil {
+				errs = append(errs, config.AsErrors(err)...)
+			}
+		}
+	}
+	g.AdminAccess, g.ConsoleAccess = access.Chain(adminList, global), access.Chain(consoleList, global)
+	for _, rc := range c.RoleConsoles() {
+		if _, err = access.Compile(rc.Access, files); err != nil {
 			errs = append(errs, config.AsErrors(err)...)
 		}
 	}

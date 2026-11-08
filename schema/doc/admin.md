@@ -26,6 +26,13 @@ they are taken, a new connection closes the oldest unauthenticated one of the cl
 most of them, rather than being refused, so that clients that only reconnect cannot keep an admin
 out.
 
+`admin.access` and `admin.console.access` are the client addresses the API and the console serve,
+as [access](#access) lists: each decides first, then the global `access`, which applies to them too;
+a refused connection is closed as soon as it is accepted. Unlike the rest of `admin`, they follow
+every config applied, without a restart. Left out, nothing changes unless the global access says so;
+an `"allow": ["127.0.0.1", "::1"]` of their own keeps local access whatever the global access says.
+An API on a Unix socket is never checked, and takes no `access`.
+
 `admin.store` keeps the config encrypted in a file of its own, the store: the file fit is started
 with then holds `admin`, and the store the rest, which fit runs from and writes on every change.
 When the store does not exist yet, the rest of the file is its first content. `fit store export`

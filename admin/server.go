@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/listener"
@@ -224,6 +225,10 @@ func Start(a *config.Admin, configs *Configs, report func(Result), warnf func(fo
 		}
 	}
 	s.loopback = network == "tcp" && s.token == nil
+	if network == "tcp" {
+		// Under the limitListener, so that a peer refused takes no slot.
+		ln = &accessListener{Listener: ln, gate: &configs.adminAccess}
+	}
 	s.ln = newLimitListener(ln, login.NewSlots(a.Conns()), unauthTimeout)
 	if certs != nil {
 		// Over the limitListener, so that a connection is counted, and its
@@ -811,6 +816,29 @@ func (l *limitListener) Accept() (net.Conn, error) {
 		lc.timer = time.AfterFunc(l.unauth, lc.expire)
 		lc.mu.Unlock()
 		return lc, nil
+	}
+}
+
+// accessListener closes, as it accepts them, the connections of the peers
+// its gate refuses (admin.access, then the global access), and keeps
+// accepting. A Unix socket's peers have no address, and are not put
+// through one.
+type accessListener struct {
+	net.Listener
+	gate *access.Gate
+}
+
+func (l *accessListener) Accept() (net.Conn, error) {
+	for {
+		c, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		if a, ok := c.RemoteAddr().(*net.TCPAddr); ok && !l.gate.Allows(a.AddrPort()) {
+			_ = c.Close()
+			continue
+		}
+		return c, nil
 	}
 }
 

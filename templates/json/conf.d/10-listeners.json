@@ -146,11 +146,11 @@
         // // here or in allow_files, every address neither holds is refused, unless deny refuses it
         // // first.
         // // list of string.
-        // "allow": ["*.example.com", "10.1.0.0/16"],
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
 
         // // IP addresses and CIDR prefixes refused, whatever allow holds.
         // // list of string.
-        // "deny": ["169.254.169.254"],
+        // "deny": ["203.0.113.0/24"],
 
         // // Files of more allow entries: an address or prefix on each line, with blank lines and what
         // // follows # or ; left out, as the lists published for firewalls are written. Read when the
@@ -178,20 +178,21 @@
   ],
 
   // The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every
-  // listener, route, service and role that sets no access of its own that decides: a more
-  // specific one, set on a listener, route, service or role, decides first, and this one only
-  // for an address that one has no say on. Every address is served when left out.
+  // listener, route, service and role, the Admin API and the consoles, that sets no access of
+  // its own that decides: a more specific one, set on a listener, route, service, role, admin or
+  // a console, decides first, and this one only for an address that one has no say on. Every
+  // address is served when left out.
   // object.
   // "access": {
     // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
     // // here or in allow_files, every address neither holds is refused, unless deny refuses it
     // // first.
     // // list of string.
-    // "allow": ["*.example.com", "10.1.0.0/16"],
+    // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
 
     // // IP addresses and CIDR prefixes refused, whatever allow holds.
     // // list of string.
-    // "deny": ["169.254.169.254"],
+    // "deny": ["203.0.113.0/24"],
 
     // // Files of more allow entries: an address or prefix on each line, with blank lines and what
     // // follows # or ; left out, as the lists published for firewalls are written. Read when the

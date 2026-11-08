@@ -202,6 +202,10 @@
     "config.Admin": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the Admin API serves, deciding before the global access, which applies to the API too: a connection either refuses is closed as soon as it is accepted. Unlike the other admin settings it follows every config applied, without a restart. Set allow to \"127.0.0.1\" (and \"::1\") to keep local access whatever the global access says. A Unix socket's peers have no address and are never checked, and access is an error with one. Every address is served, unless the global access says otherwise, when left out."
+        },
         "address": {
           "default": "127.0.0.1:2019",
           "description": "Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". A host that is not a loopback address or localhost needs token_file, cert_file and key_file, so that only holders of the token reach the API and the token never crosses a network in the clear. 127.0.0.1:2019 when left out.",
@@ -818,6 +822,10 @@
     "config.Console": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the console serves, deciding before the global access, which applies to the console too: a connection either refuses is closed as soon as it is accepted. It follows every config applied, without a restart. Set allow to \"127.0.0.1\" (and \"::1\") to keep local access whatever the global access says. Every address is served, unless the global access says otherwise, when left out."
+        },
         "address": {
           "default": "127.0.0.1:2020",
           "description": "The host and port the console listens on. A host that is not a loopback address needs cert_file and key_file, so that passwords never cross a network in the clear. 127.0.0.1:2020 when left out.",
@@ -2744,6 +2752,10 @@
     "config.RoleConsole": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the pages serve, deciding before the global access, which applies to the pages too: a connection either refuses is closed as soon as it is accepted. It follows every config applied, without restarting the pages. Set allow to \"127.0.0.1\" (and \"::1\") to keep local access whatever the global access says. Every address is served, unless the global access says otherwise, when left out."
+        },
         "address": {
           "description": "The host and port the pages listen on. A host that is not a loopback address needs cert_file and key_file, so that passwords never cross a network in the clear.",
           "type": "string"
@@ -6632,7 +6644,7 @@
   "properties": {
     "access": {
       "$ref": "#/$defs/config.Access",
-      "description": "The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every listener, route, service and role that sets no access of its own that decides: a more specific one, set on a listener, route, service or role, decides first, and this one only for an address that one has no say on. Every address is served when left out."
+      "description": "The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every listener, route, service and role, the Admin API and the consoles, that sets no access of its own that decides: a more specific one, set on a listener, route, service, role, admin or a console, decides first, and this one only for an address that one has no say on. Every address is served when left out."
     },
     "access_log": {
       "$ref": "#/$defs/config.AccessLog",
