@@ -35,7 +35,11 @@ start_mongo() {
 	if docker inspect "$name" >/dev/null 2>&1; then
 		return
 	fi
-	docker run -d --name "$name" -p "127.0.0.1:$p1:$p1" -p "127.0.0.1:$p2:$p2" -p "127.0.0.1:$p3:$p3" \
+	# GLIBC_TUNABLES: MongoDB 8 refuses kernels from 6.19 to 7.0.13, where its
+	# TCMalloc's use of rseq breaks (SERVER-121912), unless glibc is told to
+	# register rseq itself; the CI runners' kernels are such.
+	docker run -d --name "$name" -e GLIBC_TUNABLES=glibc.pthread.rseq=1 \
+		-p "127.0.0.1:$p1:$p1" -p "127.0.0.1:$p2:$p2" -p "127.0.0.1:$p3:$p3" \
 		--entrypoint sh "$image" -c "
 mkdir -p /certs && while [ ! -s /certs/server.pem ]; do sleep 0.2; done &&
 head -c 500 /dev/urandom | base64 > /tmp/kf && chmod 400 /tmp/kf &&
