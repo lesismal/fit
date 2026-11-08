@@ -459,10 +459,14 @@ func TestRolloutRolling(t *testing.T) {
 	if _, err := k.m.StartOp("op", &OpRequest{Op: OpCheck, Members: []string{"m5"}}); err != nil {
 		t.Errorf("the members are still held: %v", err)
 	}
+	// The store is written after the rollout's state changes in memory, so
+	// it is waited for rather than read once.
 	var doc document
-	if err := json.Unmarshal(k.store.Section(Section), &doc); err != nil || len(doc.Rollouts) != 1 || doc.Rollouts[0].State != RolloutDone {
-		t.Fatalf("the store: %v %+v", err, doc.Rollouts)
-	}
+	waitFor(t, "the store to hold the rollout done", func() bool {
+		doc = document{}
+		err := json.Unmarshal(k.store.Section(Section), &doc)
+		return err == nil && len(doc.Rollouts) == 1 && doc.Rollouts[0].State == RolloutDone
+	})
 	for _, x := range doc.Rollouts[0].Members {
 		if x.Config != nil || x.Changes[0].Want != nil {
 			t.Errorf("the store keeps %s's config", x.Node)
