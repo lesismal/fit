@@ -163,6 +163,8 @@ func set(member any) bool {
 		return m != nil
 	case *config.Sync:
 		return m != nil
+	case *config.BitTorrentClient:
+		return m != nil
 	}
 	return true
 }
@@ -252,6 +254,9 @@ func members(c *config.Config) []memberAt {
 	}
 	if c.Sync != nil {
 		ms = append(ms, memberAt{"sync", c.Sync.At})
+	}
+	if b := c.BitTorrent; b != nil && b.Client != nil {
+		ms = append(ms, memberAt{"bittorrent.client", b.Client.At})
 	}
 	return ms
 }
@@ -575,6 +580,8 @@ func (m *Manager) host(id string) *Host {
 			name = config.LoggerWebRTC
 		case id == "sync":
 			name = config.LoggerSync
+		case strings.HasPrefix(id, "bittorrent."):
+			name = config.LoggerBitTorrent
 		}
 		h.Log = m.root.Logger(name).Prefixed(id + ": ")
 		h.Admin = m.root.Logger(config.LoggerAdmin)

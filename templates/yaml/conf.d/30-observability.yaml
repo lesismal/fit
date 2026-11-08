@@ -29,9 +29,9 @@
   # # certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the
   # # access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write
   # # to their stderr), llm and tunnel (their roles), webrtc (the TURN server), sync (its
-  # # pipelines) and engine (fib, the network engine, and whatever else writes to Go's log and
-  # # log/slog). The same as loggers' level, which a logger may not have both of. A change takes
-  # # effect on reload.
+  # # pipelines), bittorrent (its roles) and engine (fib, the network engine, and whatever else
+  # # writes to Go's log and log/slog). The same as loggers' level, which a logger may not have
+  # # both of. A change takes effect on reload.
   # # object of string.
   # levels: {"tls": "debug", "engine": "warn"}
 
