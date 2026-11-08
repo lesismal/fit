@@ -196,6 +196,24 @@ The plan's I167 section lists them all; these change the record above.
    with its result: 0 all written, 3 records failed, 1 stopped or interrupted, 2 used wrongly; a
    source failing past `retry.max_attempts` in a row stops it rather than restarting it for ever.
 
+## Decisions made while building I168 (pending review)
+
+The plan's I168 section lists them all; these change the record above.
+
+1. **Permanent errors.** `fitsync.Permanent(err)` marks an error that trying again cannot cure (a
+   document a mapping refuses); a sink's write failing with one, alone or as a `BatchError`'s, goes
+   to `on_error` at once, without the pipeline's retries.
+2. **A sink may retry within a write.** The `elasticsearch` sink sends items the cluster answered
+   429 or 5xx again itself, with the later writes of the same documents, so a document's last change
+   stays last; its `BatchError` names the first record not written, and the runtime writes the batch
+   again from there, records the cluster had taken after it included, in order, acknowledging each
+   once.
+3. **A 429 is backpressure, not a failure.** It is waited out for as long as it lasts, holding the
+   sink and through the queue the source, and never counts against `retry.max_attempts`, so no
+   record is skipped or dead-lettered because a cluster is busy.
+4. **A sink without the role's engine runs one of its own** for fib's HTTP client, so `fit sync run`
+   reaches HTTP-based sinks.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and

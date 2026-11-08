@@ -66,9 +66,9 @@ func TestValidateSync(t *testing.T) {
 	bad := filepath.Join(dir, "bad.json")
 	_ = os.WriteFile(bad, []byte(`{"sync": {"state_dir": "x", "pipelines": [{"name": "p",
 		"source": {"module": "generate", "params": {"record": 10}},
-		"sinks": [{"name": "out", "sink": {"module": "elasticsearch"}}]}]}}`), 0o644)
+		"sinks": [{"name": "out", "sink": {"module": "nosuchsink"}}]}]}}`), 0o644)
 	code, _, stderr := runFit("validate", "-c", bad)
-	if code != 1 || !strings.Contains(stderr, `record`) || !strings.Contains(stderr, `no module "elasticsearch" in sync.sinks`) {
+	if code != 1 || !strings.Contains(stderr, `record`) || !strings.Contains(stderr, `no module "nosuchsink" in sync.sinks`) {
 		t.Fatalf("%d %q", code, stderr)
 	}
 }

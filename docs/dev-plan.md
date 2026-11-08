@@ -331,7 +331,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | I165b | WASM sync plugins, the rest: the benchmark host's run and a binary record form if it asks; TinyGo and Rust plugins built and run in the tests; examples in fit-examples | I165 | todo |
 | I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | done |
 | I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | done |
-| I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | todo |
+| I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | done |
 | I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | todo |
 | I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | todo |
 | I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | todo |
@@ -4632,6 +4632,87 @@ track can place it); exactly-once into sinks with no transactions.
   converge after replays; a bulk with one bad document fails only that one; backpressure from 429 slows
   the pipeline without losing records.
 - **Touches**: `sync/elasticsearch`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/elasticsearch` (`syncelastic`): the sink and a `Conn` (URLs,
+   credentials, TLS, failover, the cluster's `Info`) that I169's source will share. The connection's
+   params are declared by the sink itself, since fit's params decoder and schema take no embedded
+   structs; the source will declare the same ones. Alternative: a nested `connection` object.
+2. **What is written.** An insert, update or message is the row (`after`, or `before` when `after`
+   is null) as a plain JSON document (`fitsync.AppendPlain`, now exported: numbers bare, decimals as
+   numbers, bytes in base64, times in RFC 3339); a delete is a `delete` by `_id`; DDL is acknowledged
+   and not written. Another shape is the `envelope` transform's to make, and keeping deleted rows as
+   documents is its `deletes: "rewrite"`. Alternative: an option for the document's shape in the sink.
+3. **The `_id`** is the key: a single value's text, a map of one field its value's, a map of several
+   their texts joined by `:`, each with `\` and `:` escaped by `\`; bytes in base64, arrays and maps
+   as plain JSON. An insert or message without a key gets an `_id` from the cluster (not idempotent,
+   documented); an update or delete without one fails for good, and so does an `_id` past 512
+   bytes, checked before sending since the cluster would refuse the whole bulk. Alternative: JSON of
+   the key's values, unambiguous but awkward to look up.
+4. **The index template**: `{namespace}` and dates in `yyyy`, `yy`, `MM`, `dd`, `HH` with `.`, `-`
+   and `_`, as Logstash and Beats write them, from the commit time (the write's time when the source
+   gives none) in `time_zone`, UTC by default; `{{` for a brace; names not lowercased (a refused name
+   fails the record). Alternative: Go layouts, or the namespace lowercased.
+5. **`action: "create"`** treats a 409 as written, so a replay into a data stream converges, at the
+   cost of updates to documents already there; a delete's 404 is written too. **`routing`** names a
+   field of the row (or the key's, for a delete without `before`), and a record without it fails;
+   **`pipeline`** is sent on the bulk's URL.
+6. **A permanent error, a new runtime notion.** `fitsync.Permanent(err)` marks an error that trying
+   again cannot cure; the runtime sends a record failing with one straight to `on_error`, without
+   the pipeline's retries. The sink marks so every item refusal other than 429 and 5xx (a mapping
+   error, a bad index name), and records it cannot make an item of. Before this, a bad document
+   cost each batch `retry.max_attempts` sends with their backoff. Alternative: leave every error to
+   the pipeline's retries.
+7. **What a failed item means for the others.** Items succeed independently. The sink sends items
+   the cluster answered 429 or 5xx again within the same `Write`, alone, with a backoff from 200ms
+   doubling to 30s, taking with each the later items of the same document (index, routing and
+   `_id`) that were in the batch, so a document's last change stays last even though one before it
+   is written again. A 429 is sent again for as long as it lasts (backpressure); a 5xx five times
+   (`DefaultItemAttempts`), then the write fails at it. When the write fails, the `BatchError` names
+   the first record not written: every record before it is written; records after it that the
+   cluster took are sent again by the runtime, which writes the batch again from that record, in
+   order, and acknowledges each once. A permanent refusal before every item to retry ends the write
+   at once. Alternative: return at the first failure without sending anything again, leaving every
+   retry to the pipeline.
+8. **A 429 to the whole bulk** waits with the same backoff for as long as the cluster answers so,
+   holding the sink's goroutine, so the queue fills and the source stops, as the plan asks; only the
+   pipeline's stop ends it. So does a 429 per item. A cluster that answers 429 for good therefore
+   stalls the pipeline rather than failing records, which the lag will show (I189). Alternative:
+   count 429s against `retry.max_attempts`, which would let `on_error: skip` drop records under load.
+9. **Failover**: `urls` in turn, from the one that answered last; a connection's error, a timeout,
+   a 502, 503 or 504 moves on to the next; when all fail the write fails whole and the pipeline's
+   retry takes it. No node sniffing. Alternative: sniff the cluster's nodes, as the official clients
+   can.
+10. **Requests bounded by `max_request_bytes`** (8 MiB): a batch larger is sent in several bulks, in
+    order; a document past it fails for good. The response is read with `filter_path` to the items'
+    status and error, and bounded at 64 MiB.
+11. **OpenSearch's differences**: told by the root endpoint's `version.distribution`, asked at the
+    first write (the root needs the credentials, so it is asked again after a failure). The only one
+    acted on is API keys, which OpenSearch lacks: a root's 401 with an API key says so, and a
+    distribution of `opensearch` refuses one. Elasticsearch 7 and 8 and OpenSearch 1 and 2 take the
+    same `_bulk`. Alternative: a `distribution` param.
+12. **Secrets from the environment only** (`password_env`, `api_key_env`), read when the pipeline
+    loads, as the `mask` transform's `key_env`; `admin.store` waits for the pages (I190) to write
+    them. TLS with `ca_file`, `cert_file` and `key_file`, `server_name`; no way to skip the check.
+13. **The engine.** The sink's client runs on the role's engine (`Options.Engine`), or, when there is
+    none (`fit sync run`, tests), on a fib engine of its own made at the first write and stopped at
+    `Cleanup`, so `fit sync run` can write to Elasticsearch, unlike a WASM connector's HTTP (I167's
+    decision 11). Alternative: refuse to run without an engine.
+14. **`ParallelSink`.** The sink takes writes at once (one client, safe for several goroutines),
+    so a job gives it `job.max_parallel` writers; the runtime's key hash keeps a document's changes
+    on one writer, in order.
+15. **The interop tests** are `test/sync` (package `synctest`), skipped without `FIT_SYNC_ES_URL` and
+    `FIT_SYNC_OS_URL`, and failing instead with `FIT_SYNC_INTEROP=required`; `test/sync/run.sh`
+    starts `docker.elastic.co/elasticsearch/elasticsearch:8.19.3` and
+    `opensearchproject/opensearch:2.19.3`, each a single node with security on (TLS from its own
+    CA, basic authentication) and a write thread pool of one thread and a queue of one, so a job of
+    eight writers gets real 429s (the test checks the cluster's rejected count grew). CI runs it in
+    the job `sync-interop` on every push. Alternative: GitHub service containers, which cannot
+    hand the tests the CA the node generates.
+16. **Size**: about 900 lines of code and 750 of tests (unit tests against a fake cluster, the
+    interop tests and their script), past the plan's 1,500 with the docs; nothing is left, so there
+    is no I168b.
 
 ### I169 Elasticsearch and OpenSearch as a source
 

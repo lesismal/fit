@@ -455,7 +455,7 @@ func (s *sinkRun) write(batch []item, recs []*Record) bool {
 		if r.ctx.Err() != nil {
 			return false
 		}
-		if attempt < cfg.Attempts() {
+		if attempt < cfg.Attempts() && !IsPermanent(err) {
 			r.p.rt.opts.Log.Debugf("pipeline %s: sink %s: attempt %d failed: %v", cfg.Name, s.name, attempt, err)
 			if !r.sleep(cfg.Backoff(attempt)) {
 				return false

@@ -49,7 +49,7 @@ a config against it and more.
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`file`](#sync-sinks-file), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sinks](#sync-sinks): [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -6163,10 +6163,132 @@ since what came after the checkpoint is written again after a crash.
 
 | Module | What it does |
 | --- | --- |
+| [`elasticsearch`](#sync-sinks-elasticsearch) | Elasticsearch and OpenSearch, with `_bulk`: documents by `_id` from the key, per-item errors, 429s waited out |
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
 | [`wasm`](#sync-sinks-wasm) | A WebAssembly plugin that writes each batch through fit's HTTP client to the hosts it is allowed |
+
+<a id="sync-sinks-elasticsearch"></a>
+
+### `elasticsearch`
+
+Writes records to Elasticsearch (7 and 8) or OpenSearch (1 and 2), which it tells apart by the root endpoint, with the _bulk API: inserts and updates as index (or create) of the row as a JSON document, deletes as delete, each by an _id made from the record's key, into the index the namespace or a template with the commit time's date names. Items the cluster refuses for being busy (429) or failing (5xx) are sent again alone with a backoff, a 429 for as long as it lasts, so a busy cluster slows the pipeline rather than losing records; an item refused for good (a mapping error) fails its record, which on_error takes, those before it written.
+
+Writes records to Elasticsearch or OpenSearch with `_bulk`, through fib's asynchronous HTTP client.
+An insert, an update or a message is an `index` (or `create`) of its row, `after`, or `before` when
+`after` is null, as a plain JSON document; a delete is a `delete`; DDL is not written. The `_id` is
+the record's key: a single value's text, or a map's values in order joined by `:`, each with `\` and
+`:` escaped by a `\` (`{"order": 7, "line": 2}` is `7:2`); bytes are base64, arrays and maps plain
+JSON. A record without a key is indexed with an `_id` the cluster makes, which a replay repeats; an
+update or a delete without one fails. Put an `envelope` transform before it for a document of
+another shape; its `deletes: "rewrite"` with `meta`'s `deleted` keeps deleted rows as documents.
+
+`index` is `{namespace}` or a template with the commit time's date, as `logs-{yyyy.MM.dd}`; a
+`route` transform maps namespaces to other names first. The sink tells Elasticsearch from
+OpenSearch by the root endpoint, which it asks at the first write.
+
+What the cluster answers each item decides what follows: written (and a delete of a document that
+is not there, and with `action: "create"` one that is) is acknowledged; a 429 is sent again, with a
+backoff from 200ms to 30s, for as long as the cluster answers so, and a 429 to the whole bulk
+waits the same way, so a busy cluster holds the pipeline and, through its queue, the source; a 5xx
+is sent again five times. An item sent again takes the later items of the same document in the
+batch with it, so a document's last change stays last. Any other refusal, as a mapping error, fails
+its record for good: `on_error` takes it at once, without the pipeline's retries. A write that
+fails says at which record: those before it are written, and the runtime sends the batch again
+from it, so the later records the cluster had already taken are written again, in order, and
+acknowledged once. A connection that fails, or a 502, 503 or 504, moves on to the next of `urls`.
+In a job, a sink has `job.max_parallel` writers, each key going to one of them.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines logs-to-search {
+		source file { paths /var/log/app/*.log; codec json }
+		sinks es {
+			sink elasticsearch {
+				urls https://es1:9200 https://es2:9200
+				ca_file /etc/fit/es-ca.pem
+				username fit
+				password_env ES_PASSWORD
+				index app-logs-{yyyy.MM.dd}
+			}
+			batch { max_records 1000; max_wait 1s }
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: logs-to-search
+      source:
+        module: file
+        params:
+          paths:
+            - /var/log/app/*.log
+          codec:
+            module: json
+      sinks:
+        - name: es
+          sink:
+            module: elasticsearch
+            params:
+              urls:
+                - https://es1:9200
+                - https://es2:9200
+              ca_file: /etc/fit/es-ca.pem
+              username: fit
+              password_env: ES_PASSWORD
+              index: app-logs-{yyyy.MM.dd}
+          batch:
+            max_records: 1000
+            max_wait: 1s
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "logs-to-search",
+        "source": {"module": "file", "params": {"paths": ["/var/log/app/*.log"], "codec": {"module": "json"}}},
+        "sinks": [{"name": "es", "sink": {"module": "elasticsearch", "params": {
+          "urls": ["https://es1:9200", "https://es2:9200"], "ca_file": "/etc/fit/es-ca.pem",
+          "username": "fit", "password_env": "ES_PASSWORD", "index": "app-logs-{yyyy.MM.dd}"}},
+          "batch": {"max_records": 1000, "max_wait": "1s"}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urls` | list of string |  | Required. The cluster's HTTP endpoints, as https://es1:9200, each a node or a load balancer: the one that answered last is used, and the next in turn when it fails to (a connection's error, a timeout, a 502, 503 or 504). fib's client does not follow redirects. |
+| `username` | string |  | The user for basic authentication, with password_env. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `api_key_env` | string |  | The environment variable holding an Elasticsearch API key as its create API key call returns it encoded (base64 of id:key), sent as Authorization: ApiKey, read when the pipeline loads. Not with username. OpenSearch has no API keys: it answers one with 401. |
+| `ca_file` | string |  | A PEM file of the certificates the cluster's is checked against, in place of the system's roots, for a CA of its own (Elasticsearch's http_ca.crt, OpenSearch's root-ca.pem). The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a cluster that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the cluster's certificate must have, and the TLS server name sent; each URL's host when left out. |
+| `timeout` | duration | `"60s"` | How long one request may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `index` | string | `"{namespace}"` | The index a record goes to: text with placeholders, {namespace} the record's namespace and any other a date of the record's commit time (the time it is written when the source gives none) in time_zone, written with yyyy, yy, MM, dd and HH and the separators '.', '-' and '_': logs-{yyyy.MM.dd}; {{ is a brace. Index names are lowercase; one the cluster refuses fails its record. {namespace} when left out. |
+| `time_zone` | string |  | The zone index's dates are in: UTC when left out, local, or an IANA name such as Asia/Shanghai. |
+| `action` | string: `index`, `create` | `"index"` | How inserts and updates are written: index replaces the document of the _id, so a replay converges; create writes it only when there is none, as a data stream needs, and a document already there (409) counts as written, so an update to it is lost. index when left out. |
+| `routing` | string |  | A field of the row (after, or before, or the key's for a delete) whose value routes the document to its shard; a record without it fails. None when left out. |
+| `pipeline` | string |  | The ingest pipeline inserts and updates go through. None when left out, or the index's default. |
+| `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one _bulk request; a batch larger is sent in several, in order, and a document larger fails its record. 8 MiB when left out or 0. |
 
 <a id="sync-sinks-file"></a>
 

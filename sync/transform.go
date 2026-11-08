@@ -156,6 +156,10 @@ func textOf(v Value) string {
 	return ""
 }
 
+// AppendPlain appends v as plain JSON, as appendPlain does: the document a
+// sink of JSON documents writes.
+func AppendPlain(b []byte, v Value) ([]byte, error) { return appendPlain(b, v) }
+
 // appendPlain appends v as plain JSON, as a JSON column holds it: numbers
 // bare, decimals as numbers, bytes in base64, times and dates as strings,
 // maps as objects.

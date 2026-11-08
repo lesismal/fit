@@ -134,6 +134,28 @@ type BatchError struct {
 func (e *BatchError) Error() string { return fmt.Sprintf("record %d of the batch: %v", e.Index, e.Err) }
 func (e *BatchError) Unwrap() error { return e.Err }
 
+// Permanent marks err as one that trying again cannot cure, as a document
+// a search index's mapping refuses: a sink's write failing with it, alone
+// or as a BatchError's Err, goes to on_error at once, without the retries.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &permanentError{err}
+}
+
+// IsPermanent reports whether err, or an error it wraps, was marked with
+// Permanent.
+func IsPermanent(err error) bool {
+	var p *permanentError
+	return errors.As(err, &p)
+}
+
+type permanentError struct{ err error }
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
+
 // Transform changes records on their way from the source to the sinks. It is
 // a module of the namespace sync.transforms.
 type Transform interface {

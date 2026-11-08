@@ -311,6 +311,21 @@ jobs:
           go vet ./...
           go test -race -count=1 ./...
 
+  # Sync's Elasticsearch and OpenSearch sink against the real servers (I168):
+  # test/sync/run.sh starts Elasticsearch 8 and OpenSearch 2 in Docker, with
+  # TLS, authentication and a write pool small enough to answer 429s, and
+  # requires the interop tests to run rather than skip.
+  sync-interop:
+    name: Sync interop (Elasticsearch, OpenSearch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: test/sync/run.sh
+        run: test/sync/run.sh -v
+
   # The container image with the Docker Compose example, and the systemd
   # units, each run as deploy/README.md and the examples' READMEs say (I66).
   packaging:

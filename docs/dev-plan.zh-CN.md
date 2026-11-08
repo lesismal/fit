@@ -321,7 +321,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I165b | 同步 WASM 插件的其余部分：在压测主机上测量，需要时加入记录的二进制形式；测试中构建并运行 TinyGo 和 Rust 插件；fit-examples 中的示例 | I165 | todo |
 | I166 | 文件作为源（跟踪与通配，跟随切割与截断，多行合并）与目标（经 I155 的文件写入器） | I163, I155 | done |
 | I167 | 像 DataX 一样的批处理作业：分块并行快照、按块续传，`fit sync run --once`，调度 | I163 | done |
-| I168 | Elasticsearch 与 OpenSearch 作为目标：按 `_id` 的 `_bulk`、逐条错误、遇 429 退避 | I163 | todo |
+| I168 | Elasticsearch 与 OpenSearch 作为目标：按 `_id` 的 `_bulk`、逐条错误、遇 429 退避 | I163 | done |
 | I169 | Elasticsearch 与 OpenSearch 作为源：point in time 快照，之后按游标轮询 | I168 | todo |
 | I170 | ClickHouse 作为目标（去重令牌、`ReplacingMergeTree`）与源（按游标轮询） | I163 | todo |
 | I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | todo |
@@ -3471,6 +3471,58 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 - **完成标准**：在 Docker 中与 Elasticsearch 8 和 OpenSearch 2 互通：insert、update 和 delete 在重放后收敛；一个 bulk 中有
   一个坏文档时只有它失败；429 带来的背压减慢流水线而不丢记录。
 - **涉及**：`sync/elasticsearch`、`test/sync`、`docs`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前一直有效）：
+
+1. **放在哪里。** 包 `sync/elasticsearch`（`syncelastic`）：目标，以及 I169 的源将共用的 `Conn`（URL、凭据、TLS、故障转移、
+   集群的 `Info`）。连接参数由目标自己声明，因为 fit 的参数解码器和 schema 不接受嵌入的结构体；源将声明同样的参数。备选：
+   一个嵌套的 `connection` 对象。
+2. **写什么。** insert、update 或 message 写成行（`after`，`after` 为 null 时取 `before`）的普通 JSON 文档（`fitsync.AppendPlain`，
+   现已导出：数字原样，decimal 写成数字，bytes 为 base64，时间为 RFC 3339）；delete 是按 `_id` 的 `delete`；DDL 被确认但不写。
+   其他形状交给 `envelope` 变换，把删除的行保留为文档用它的 `deletes: "rewrite"`。备选：在目标中加一个文档形状的选项。
+3. **`_id`** 取自键：单个值取其文本，只有一个字段的 map 取该值的文本，多个字段的 map 把各文本用 `:` 连接，每段中的 `\` 和 `:`
+   用 `\` 转义；bytes 用 base64，数组和 map 用普通 JSON。没有键的 insert 或 message 由集群生成 `_id`（不幂等，文档已说明）；
+   没有键的 update 或 delete 永久失败，超过 512 字节的 `_id` 也永久失败，在发送前检查，因为集群会拒绝整个 bulk。备选：键值的
+   JSON，无歧义但不便查找。
+4. **索引模板**：`{namespace}`，以及用 `yyyy`、`yy`、`MM`、`dd`、`HH` 和 `.`、`-`、`_` 写的日期，与 Logstash 和 Beats 的写法
+   一致，取提交时间（源未给出时取写入时间）在 `time_zone` 中的日期，默认 UTC；`{{` 表示花括号；名称不转小写（被拒绝的名称
+   使记录失败）。备选：Go 的布局，或把命名空间转为小写。
+5. **`action: "create"`** 把 409 视为已写入，使重放到数据流时收敛，代价是对已有文档的更新丢失；delete 的 404 也视为已写入。
+   **`routing`** 指定行中的一个字段（没有 `before` 的 delete 取键中的字段），缺少它的记录失败；**`pipeline`** 放在 bulk 的
+   URL 上发送。
+6. **永久错误，运行时的新概念。** `fitsync.Permanent(err)` 标记重试也无法解决的错误；运行时把因它失败的记录直接交给
+   `on_error`，不经流水线的重试。目标把 429 和 5xx 以外的每种逐条拒绝（mapping 错误、错误的索引名）以及无法生成条目的记录
+   都标记为永久错误。此前一个坏文档会让每个批次以退避发送 `retry.max_attempts` 次。备选：所有错误都交给流水线的重试。
+7. **一条失败对其他条目意味着什么。** 各条目独立成功。集群以 429 或 5xx 回应的条目，目标在同一次 `Write` 中单独重发，退避
+   从 200ms 起倍增到 30s，并带上批次中同一文档（索引、routing 和 `_id`）的后续条目，使文档的最后一次变更仍是最后一次，即使
+   其前面的某次被重写。429 只要持续就一直重发（背压）；5xx 重发五次（`DefaultItemAttempts`），然后写入在它处失败。写入失败时，
+   `BatchError` 指出第一条未写入的记录：它之前的记录都已写入；它之后集群已接受的记录由运行时重发，运行时从该记录起按顺序再写
+   这个批次，每条只确认一次。永久拒绝排在所有待重试条目之前时，写入立即结束。备选：遇到第一个失败即返回、不重发任何条目，
+   把所有重试留给流水线。
+8. **整个 bulk 的 429** 以同样的退避等待，只要集群如此回应就一直等，占住目标的 goroutine，于是队列填满、源停下，正如计划所
+   要求；只有流水线停止才结束它。逐条的 429 也一样。因此一个永远回应 429 的集群会让流水线停滞而不是让记录失败，延迟会显示
+   这一点（I189）。备选：把 429 计入 `retry.max_attempts`，那样 `on_error: skip` 会在负载下丢弃记录。
+9. **故障转移**：依次使用 `urls`，从上次应答的那个开始；连接出错、超时、502、503 或 504 时换下一个；全部失败时整个写入失败，
+   由流水线的重试处理。不做节点嗅探。备选：像官方客户端那样嗅探集群节点。
+10. **请求受 `max_request_bytes` 限制**（8 MiB）：更大的批次按顺序分成多个 bulk 发送；超过它的单个文档永久失败。应答用
+    `filter_path` 只读条目的状态和错误，上限 64 MiB。
+11. **OpenSearch 的差异**：由根端点的 `version.distribution` 识别，在第一次写入时询问（根端点需要凭据，所以失败后会再问）。
+    唯一据此处理的差异是 API 密钥，OpenSearch 没有：带 API 密钥时根端点的 401 会说明这一点，distribution 为 `opensearch` 时
+    拒绝 API 密钥。Elasticsearch 7 和 8、OpenSearch 1 和 2 接受相同的 `_bulk`。备选：一个 `distribution` 参数。
+12. **秘密只来自环境变量**（`password_env`、`api_key_env`），在流水线加载时读取，与 `mask` 变换的 `key_env` 一样；
+    `admin.store` 等页面（I190）能写入时再支持。TLS 用 `ca_file`、`cert_file` 和 `key_file`、`server_name`；无法跳过校验。
+13. **引擎。** 目标的客户端运行在角色的引擎上（`Options.Engine`）；没有引擎时（`fit sync run`、测试），在第一次写入时创建
+    一个自己的 fib 引擎，在 `Cleanup` 时停止，因此 `fit sync run` 可以写入 Elasticsearch，不像 WASM 连接器的 HTTP（I167 的
+    决策 11）。备选：没有引擎时拒绝运行。
+14. **`ParallelSink`。** 目标可以同时接受多个写入（一个客户端，可被多个 goroutine 安全使用），因此作业给它
+    `job.max_parallel` 个写入者；运行时的键哈希让一个文档的变更留在一个写入者上，保持顺序。
+15. **互通测试**在 `test/sync`（包 `synctest`），没有 `FIT_SYNC_ES_URL` 和 `FIT_SYNC_OS_URL` 时跳过，设置
+    `FIT_SYNC_INTEROP=required` 时改为失败；`test/sync/run.sh` 启动 `docker.elastic.co/elasticsearch/elasticsearch:8.19.3` 和
+    `opensearchproject/opensearch:2.19.3`，各为单节点，开启安全（自有 CA 的 TLS、basic 认证），写线程池为一个线程、队列为一，
+    使八个写入者的作业得到真实的 429（测试检查集群的拒绝计数增加了）。CI 在每次推送时于作业 `sync-interop` 中运行它。备选：
+    GitHub 的服务容器，它无法把节点生成的 CA 交给测试。
+16. **规模**：代码约 900 行，测试约 750 行（针对假集群的单元测试、互通测试及其脚本），加上文档超出计划的 1,500 行；没有剩余
+    工作，因此没有 I168b。
 
 ### I169 Elasticsearch 与 OpenSearch 作为源
 
