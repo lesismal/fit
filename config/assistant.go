@@ -253,6 +253,7 @@ type AssistantData struct {
 	SendLogs      bool     `json:"send_logs,omitempty" doc:"Let the tools hand lines of fit's own log to the model, redacted. Off by default."`
 	SendAccessLog bool     `json:"send_access_log,omitempty" doc:"Let the tools hand lines of the access log to the model, redacted. Off by default."`
 	SendSubjects  bool     `json:"send_subjects,omitempty" doc:"Let the media tools hand playback sessions' subjects to the model as they are. Off by default: each subject is replaced by a hash of it, the same for one subject while fit runs, which the propose tools take back."`
+	SendRecords   bool     `json:"send_records,omitempty" doc:"Let the sync tools hand the records of dry runs and dead letters to the model as they are. Off by default: each value of a record's key and rows is replaced by its kind, so that the model sees namespaces, operations, fields and errors, not what the fields hold."`
 	Redact        []string `json:"redact,omitempty" doc:"Regular expressions (Go's syntax) whose matches are replaced in everything the tools hand a model, beside the keys, hashes, tokens and private keys that always are."`
 
 	At Value `json:"-" fit:"self"`

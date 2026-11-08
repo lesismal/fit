@@ -184,7 +184,7 @@ func New(o Options) (*Assistant, error) {
 		chats: chats{users: map[string]*userChats{}, dirty: map[string]bool{}, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}}
 	a.subjectKey = make([]byte, 32)
 	_, _ = rand.Read(a.subjectKey) // crypto/rand.Read never fails
-	tools := slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), mediaTools(), pageTools(), o.Tools)
+	tools := slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), mediaTools(), syncTools(), pageTools(), o.Tools)
 	if o.Cluster != nil {
 		for i, t := range tools {
 			if slices.Contains(memberTools, t.Name) {

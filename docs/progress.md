@@ -6446,6 +6446,36 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I180 section, pending review. The connection params are the
   sink's own until I178's source can share them.
 
+### I190 The workbench's Sync pages, and the assistant's tools for sync — done
+
+- **Pages** (`app/workbench/web/sync/sync.js`, `sync.css`): a **Sync** menu entry. **Pipelines**:
+  each pipeline's state, throughput and lag sparklines from the page's polls, records read and
+  acknowledged, errors and the last one, the queue against its bounds and the dead letters kept, with
+  the draft's pipelines that do not run; **New pipeline**. A pipeline's **Overview** (pause, resume,
+  a new snapshot after a confirm, Test connection, Dry run with the records shown before and after
+  the transforms, the counters, the queue, the source's lag, a job's progress, each sink's counters,
+  the last error with Ask AI), **Edit** (its form made from the schema in the shared draft, with the
+  raw tabs, Test connection and Dry run of the draft before Save and apply), **Checkpoint** (shown,
+  set and reset after confirms) and **Dead letters** (paged, replayed or dropped, picked or all,
+  after confirms); **Sync config** for the whole member. In English and Chinese.
+- **Assistant** (`assistant/tools_sync.go`, `assistant/skills/sync-pipeline.md`): read tools
+  `sync_pipelines`, `sync_test`, `sync_dry_run` and `sync_dead_letters` through the Admin API in
+  process, the first and last taking `member` on a manager; records' values shown as their kinds
+  unless the new `admin.assistant.data.send_records` allows them (a checkbox on the settings page);
+  the skill `sync-pipeline`, run by the pages' Ask AI buttons.
+- **Docs**: the plan's I190 section; `docs/console.md` (both languages); the schema, reference and
+  templates for `send_records`, its Chinese description.
+- **Tests**: `assistant/sync_test.go` against a fake Admin API (every tool, every argument's
+  refusal, the values hidden and sent, answers that are not JSON, no sync role); the built-in
+  skills' run; `app/workbench/sync_test.go` (`TestSyncWords`: both languages, placeholders, states,
+  endpoints) and `TestAskSkills`. `tools_sync.go` 100% covered; `./assistant` and `./app/workbench`
+  under the race detector. The flow checked by hand in a browser, in both languages, on fit running
+  `generate`→`memory` and `generate`→`http` (refused) with `dead_letters`: made, tested, dry-run,
+  saved and watched; paused, resumed, snapshot; the checkpoint set and reset; letters replayed while
+  failing (kept), dropped, then replayed after the sink was changed (written).
+- **Gaps**: the decisions in the plan's I190 section, pending review; secrets written to
+  `admin.store` from the pages wait for the connectors to read store references.
+
 ### I191 Exactly once into transactional sinks — done
 
 - **`checkpoint: "sink"`** on the `mysql` sink (MySQL, MariaDB, TiDB) and the `postgres` sink: the

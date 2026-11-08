@@ -830,6 +830,35 @@ files; `playback-troubleshoot` finds why viewers are refused or stall from the 4
 session caps, the grants, the caches and the file pool, and may propose ending sessions. The media
 pages' **Ask AI** buttons run them (the table above).
 
+### Sync
+
+The **Sync** menu (I190) holds the sync role's pipelines: **Pipelines**, each one's state,
+throughput and lag as sparklines of the page's polls, records read and acknowledged, errors and the
+last one, its queue and the dead letters it keeps (and the draft's pipelines that do not run yet), and
+**New pipeline**; a pipeline's **Overview** with Pause, Resume, New snapshot, Test connection and Dry
+run, its counters, sinks and job, **Edit** (its form made from the schema, in the shared draft, whose
+Test connection and Dry run check the draft before Save and apply), **Checkpoint** (set or reset)
+and **Dead letters** (replayed or dropped); and **Sync config** for the whole `sync` member. Each
+change that skips, replays or loses records asks first.
+
+The assistant reads them with four read tools, which change no pipeline: pausing, resuming, a
+snapshot, the checkpoint and dead letters stay the person's, on the pages.
+
+| Tool | Level | What it does |
+| --- | --- | --- |
+| `sync_pipelines` | `read` | every pipeline's state, last error, counts, throughput, lag and dead letters kept; or one pipeline's whole status with its config as it runs |
+| `sync_test` | `read` | a running pipeline's source and sink connections tested, writing no record |
+| `sync_dry_run` | `read` | a running pipeline's first records (5, at most 20) through its transforms, from its checkpoint or its start, writing nothing |
+| `sync_dead_letters` | `read` | a pipeline's dead letters (20, at most 100, after an ID): error, where it failed, attempts and record |
+
+The records of a dry run and of dead letters are the person's data: each value of their key and rows
+reaches the model as its kind only (`(string)`, `(int)`, a map's fields by name) unless
+`admin.assistant.data.send_records` is set (the Settings page's **Send the records of sync dry runs
+and dead letters as they are**); namespaces, operations, positions and errors always go. On a
+manager, `sync_pipelines` and `sync_dead_letters` take `member`. The skill `sync-pipeline` builds a
+pipeline from a sentence and finds why one stalls, lags, stops or keeps dead letters; a pipeline's
+last error and its dead letters have Ask AI buttons that run it.
+
 ### Across a cluster
 
 On a manager of other fits (`admin.cluster`), the assistant also reads the cluster and proposes

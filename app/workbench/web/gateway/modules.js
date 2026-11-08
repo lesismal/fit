@@ -79,7 +79,7 @@
   // Global 菜单编辑的成员，以及在各自独立页面编辑的成员（features.js 中的功能页面与上面的协议页面）。“其他”页面也不再列出它们。
   var SYS = ['log', 'access_log', 'telemetry', 'metrics', 'pprof', 'limits', 'engine', 'providers'];
   var ELSEWHERE = { listeners: 1, routes: 1, upstreams: 1, services: 1, auto_https: 1, acme: 1, admin: 1,
-    tunnel: 1, llm: 1, webrtc: 1, streaming: 1, media_auth: 1 };
+    tunnel: 1, llm: 1, webrtc: 1, streaming: 1, media_auth: 1, sync: 1 };
   var SYS_ICONS = { log: 'log', access_log: 'book', telemetry: 'activity', metrics: 'activity', pprof: 'zap', limits: 'shield', engine: 'cpu',
     providers: 'plug', other: 'cube' };
 
@@ -111,9 +111,9 @@
         case 'services': return '#/gw.l4/services';
         case 'auto_https': case 'acme': return '#/gw.tls/' + sec;
         case 'admin': return null;
-        // The feature members' pages are registered by features.js; nothing here claims them, or the "other" page,
+        // The feature members' pages are registered by features.js (sync's by sync/sync.js); nothing here claims them, or the "other" page,
         // which no longer edits them. / 功能成员的页面由 features.js 注册；此处不认领它们，也不再指向“其他”页面。
-        case 'tunnel': case 'llm': case 'webrtc': case 'streaming': case 'media_auth': return null;
+        case 'tunnel': case 'llm': case 'webrtc': case 'streaming': case 'media_auth': case 'sync': return null;
       }
       return SYS.indexOf(sec) >= 0 ? '#/sys.config/' + sec : '#/sys.config/other';
     });

@@ -382,7 +382,7 @@ var builtinFiles embed.FS
 // builtinOrder is the built-in skills' order.
 var builtinOrder = []string{"explain", "route-builder", "reverse-proxy", "tls-acme", "rate-limit-auth", "cache-tuning", "diagnose",
 	"drift-explain", "log-analysis", "security-review", "migrate", "media-setup", "llm-mesh-setup", "tunnel-setup",
-	"vod-setup", "channel-scheduler", "library-health", "playback-troubleshoot", "fleet-health", "rollout-planner", "cluster-drift"}
+	"vod-setup", "channel-scheduler", "library-health", "playback-troubleshoot", "fleet-health", "rollout-planner", "cluster-drift", "sync-pipeline"}
 
 // builtinSkills reads the built-in skills, in builtinOrder; one that does
 // not parse, or is not in the order, is an error of the build.

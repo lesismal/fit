@@ -4552,6 +4552,25 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **与计划的不同**：PostgreSQL 到 PostgreSQL、MySQL 到 PostgreSQL 的流水线等 I178 和 I174 的源（I192 的矩阵）；混合负载由测试自己的源产生。
 - **缺口**：计划 I180 一节中的决策，待审查。连接参数暂为目标自己的，等 I178 的源完成后可共用。
 
+### I190 workbench 的 Sync 页面，以及助手的同步工具 — 已完成
+
+- **页面**（`app/workbench/web/sync/sync.js`、`sync.css`）：菜单项 **数据同步**。**管道**：各管道的状态、来自页面轮询的吞吐与
+  延迟迷你走势图、已读取与已确认的记录、错误数与最近的错误、队列相对上限的占用与保留的死信，以及草稿中未运行的管道；
+  **新建管道**。单个管道的**概览**（暂停、恢复、确认后重新快照、测试连接、显示转换前后记录的试运行、计数、队列、源端延迟、作业
+  进度、各 sink 的计数、带“问 AI”的最近错误）、**编辑**（共享草稿中由 schema 生成的表单，带原始文本标签页，保存并应用前可对
+  草稿测试连接与试运行）、**检查点**（显示，确认后设置与重置）与**死信**（分页，选中或全部，确认后重放或丢弃）；**同步配置**
+  编辑整个成员。中英文。
+- **助手**（`assistant/tools_sync.go`、`assistant/skills/sync-pipeline.md`）：只读工具 `sync_pipelines`、`sync_test`、
+  `sync_dry_run` 与 `sync_dead_letters`，经进程内的 Admin API；首尾两个在管理端接受 `member`；记录的值只显示其类型，除非新设置
+  `admin.assistant.data.send_records` 允许（设置页中的复选框）；技能 `sync-pipeline`，由页面的“问 AI”按钮运行。
+- **文档**：计划的 I190 一节；`docs/console.md`（两种语言）；`send_records` 的 schema、参考与模板及其中文描述。
+- **测试**：`assistant/sync_test.go` 针对假 Admin API（每个工具、每个参数的拒绝、值的隐藏与发送、非 JSON 的应答、没有 sync
+  角色）；内置技能的运行；`app/workbench/sync_test.go`（`TestSyncWords`：两种语言、占位符、状态、接口）与 `TestAskSkills`。
+  `tools_sync.go` 覆盖率 100%；`./assistant` 与 `./app/workbench` 在竞态检测下运行。整个流程在浏览器中以两种语言手工检查，针对
+  运行 `generate`→`memory` 与 `generate`→`http`（连接被拒）加 `dead_letters` 的 fit：创建、测试、试运行、保存与观察；暂停、
+  恢复、快照；设置与重置检查点；失败时重放死信（保留）、丢弃，换掉 sink 后再重放（写入）。
+- **缺口**：计划 I190 一节中的决策，待审查；从页面把密钥写入 `admin.store` 需等连接器能读取 store 引用。
+
 ### I191 写入事务型目标时恰好一次 — 已完成
 
 - **`checkpoint: "sink"`**，用于 `mysql` 目标（MySQL、MariaDB、TiDB）和 `postgres` 目标：管道的位置与记录在同一事务中写入

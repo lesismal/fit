@@ -518,7 +518,7 @@ func TestToolsEndpoint(t *testing.T) {
 	if status != 200 || json.Unmarshal([]byte(body), &b) != nil {
 		t.Fatalf("%d %s", status, body)
 	}
-	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools())+len(mediaTools())+len(pageTools())+1 || b.Tools[0].Group != GroupConfig {
+	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools())+len(mediaTools())+len(syncTools())+len(pageTools())+1 || b.Tools[0].Group != GroupConfig {
 		t.Fatalf("%+v", b)
 	}
 	byName := map[string]toolView{}

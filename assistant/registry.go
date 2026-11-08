@@ -30,6 +30,8 @@ const (
 	GroupRuntime = "runtime"
 	GroupRoles   = "roles"
 	GroupMedia   = "media"
+	// GroupSync (tools_sync.go) is the sync role's tools.
+	GroupSync = "sync"
 	// GroupCluster (tools_cluster.go) is the cluster tools'.
 	GroupLogs    = "logs"
 	GroupPage    = "page"
@@ -182,7 +184,7 @@ func (r *Registry) Tools() []*Tool {
 	return out
 }
 
-var groupOrder = []string{GroupConfig, GroupRuntime, GroupRoles, GroupMedia, GroupCluster, GroupLogs, GroupPage, GroupChange, GroupConvert, GroupAgent}
+var groupOrder = []string{GroupConfig, GroupRuntime, GroupRoles, GroupMedia, GroupSync, GroupCluster, GroupLogs, GroupPage, GroupChange, GroupConvert, GroupAgent}
 
 func groupRank(g string) int {
 	if i := slices.Index(groupOrder, g); i >= 0 {
