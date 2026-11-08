@@ -23,8 +23,19 @@ A reload changes `limits`, `access`, `save_interval` and `console` in place, kee
 connected (but those over a lowered connection limit, and those the access now refuses); a change
 of `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers` or `disk_queue_bytes` makes
 a new client, the torrents saved from the old one and added to the new one without a check. A new
-`data_dir` starts from that directory's state, as a restart would. See
-[decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
+`data_dir` starts from that directory's state, as a restart would.
+
+`publish` entries publish directories: each file of `dir` (mode `per_file`), or the whole directory
+(mode `whole_dir`), is built into a hybrid torrent, with `web_seed` (the URL of a static route of `dir`)
+as its web seed, `announce` as its trackers and `private` if set, on `max_hashing` goroutines of the
+entry's own, and seeded in place, through storage that never writes. The `bt_publish` handler serves
+an index of them, their .torrent files and their magnet links. An entry walks `dir` every
+`check_interval` (10s): a file added gets a torrent once it has not changed for a `check_interval`,
+and a file changed or removed stops its torrent, a changed one getting a new one. Names starting
+with a dot and symbolic links are left out, and `files`, `exclude`, `max_files` and
+`max_total_bytes` bound what is published. The torrents are kept in `data_dir/publish/<name>/`, so
+that a restart takes those whose files kept their size, times and inode without building or checking
+them again. See [decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
 
 ```json
 {
@@ -41,9 +52,18 @@ a new client, the torrents saved from the old one and added to the new one witho
         "seed_ratio": 2,
         "max_torrents": 500
       },
-      "access": {"deny": ["10.0.0.0/8"]}
+      "access": {"deny": ["10.0.0.0/8"]},
+      "publish": [{
+        "name": "releases",
+        "dir": "/srv/releases",
+        "web_seed": "https://example.com/releases/",
+        "files": ["*.iso", "*.tar.gz"]
+      }]
     }
   },
-  "routes": [{"handler": {"module": "respond", "params": {"body": "fit"}}}]
+  "routes": [
+    {"match": {"path": ["/releases/*"]}, "handler": {"module": "static", "params": {"root": "/srv/releases", "strip_prefix": "/releases"}}},
+    {"match": {"path": ["/torrents/*"]}, "handler": {"module": "bt_publish"}}
+  ]
 }
 ```

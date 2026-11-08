@@ -45,9 +45,9 @@ a config against it and more.
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
-- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits)
+- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits), [`bittorrent.client.publish[]`](#config-bittorrentpublish)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
@@ -3861,8 +3861,19 @@ A reload changes `limits`, `access`, `save_interval` and `console` in place, kee
 connected (but those over a lowered connection limit, and those the access now refuses); a change
 of `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers` or `disk_queue_bytes` makes
 a new client, the torrents saved from the old one and added to the new one without a check. A new
-`data_dir` starts from that directory's state, as a restart would. See
-[decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
+`data_dir` starts from that directory's state, as a restart would.
+
+`publish` entries publish directories: each file of `dir` (mode `per_file`), or the whole directory
+(mode `whole_dir`), is built into a hybrid torrent, with `web_seed` (the URL of a static route of `dir`)
+as its web seed, `announce` as its trackers and `private` if set, on `max_hashing` goroutines of the
+entry's own, and seeded in place, through storage that never writes. The `bt_publish` handler serves
+an index of them, their .torrent files and their magnet links. An entry walks `dir` every
+`check_interval` (10s): a file added gets a torrent once it has not changed for a `check_interval`,
+and a file changed or removed stops its torrent, a changed one getting a new one. Names starting
+with a dot and symbolic links are left out, and `files`, `exclude`, `max_files` and
+`max_total_bytes` bound what is published. The torrents are kept in `data_dir/publish/<name>/`, so
+that a restart takes those whose files kept their size, times and inode without building or checking
+them again. See [decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
 
 In a .conf file:
 
@@ -3882,10 +3893,20 @@ bittorrent {
 			max_torrents 500
 		}
 		access { deny 10.0.0.0/8 }
+		publish releases {
+			dir /srv/releases
+			web_seed https://example.com/releases/
+			files *.iso *.tar.gz
+		}
 	}
 }
 
-route { handler respond { body fit } }
+route {
+	match { path /releases/* }
+	handler static { root /srv/releases; strip_prefix /releases }
+}
+
+route { match { path /torrents/* }; handler bt_publish }
 ```
 
 In YAML:
@@ -3908,11 +3929,27 @@ bittorrent:
     access:
       deny:
         - 10.0.0.0/8
+    publish:
+      - name: releases
+        dir: /srv/releases
+        web_seed: https://example.com/releases/
+        files:
+          - '*.iso'
+          - '*.tar.gz'
 routes:
-  - handler:
-      module: respond
+  - match:
+      path:
+        - /releases/*
+    handler:
+      module: static
       params:
-        body: fit
+        root: /srv/releases
+        strip_prefix: /releases
+  - match:
+      path:
+        - /torrents/*
+    handler:
+      module: bt_publish
 ```
 
 In JSON:
@@ -3932,10 +3969,19 @@ In JSON:
         "seed_ratio": 2,
         "max_torrents": 500
       },
-      "access": {"deny": ["10.0.0.0/8"]}
+      "access": {"deny": ["10.0.0.0/8"]},
+      "publish": [{
+        "name": "releases",
+        "dir": "/srv/releases",
+        "web_seed": "https://example.com/releases/",
+        "files": ["*.iso", "*.tar.gz"]
+      }]
     }
   },
-  "routes": [{"handler": {"module": "respond", "params": {"body": "fit"}}}]
+  "routes": [
+    {"match": {"path": ["/releases/*"]}, "handler": {"module": "static", "params": {"root": "/srv/releases", "strip_prefix": "/releases"}}},
+    {"match": {"path": ["/torrents/*"]}, "handler": {"module": "bt_publish"}}
+  ]
 }
 ```
 
@@ -3967,6 +4013,7 @@ In JSON:
 | `limits` | [object](#config-bittorrentlimits) |  | The client's rates and connection, seeding and torrent limits. A change applies in place, keeping the peers connected, but those over a lowered connection limit. The defaults when left out. |
 | `access` | [object](#config-access) |  | The peer addresses the client deals with, deciding before the global access: a peer it refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and are not asked about. A change applies at once, closing the connected peers it now refuses. Every address when left out, unless the global access says otherwise. |
 | `console` | [object](#config-roleconsole) |  | The client's web pages; none when left out. |
+| `publish` | list of [object](#config-bittorrentpublish) |  | Directories the client publishes: each built into hybrid torrents, a torrent of each file or one of the whole directory, on goroutines of its own, and seeded where the files are, the .torrent files and magnet links served by the bt_publish handler. Each follows the disk: a file added gets a torrent, and one changed or removed stops its torrent, a changed one getting a new torrent. The torrents are kept in data_dir/publish/<name>/, so that a restart neither builds nor checks a file that did not change. None when left out. |
 
 <a id="config-bittorrentlimits"></a>
 
@@ -3983,6 +4030,26 @@ In JSON:
 | `seed_ratio` | number, 0 or more |  | Pause a torrent once it has uploaded this many times its size since it was added or fit started. Seeds for ever when left out or 0. |
 | `seed_time` | duration |  | Pause a torrent once it has seeded this long since it was added or fit started. Seeds for ever when left out. |
 | `max_torrents` | integer, 0 to 100000 | `1000` | The most torrents the client holds, running or paused; one more is refused. Lowering it removes none. 1000 when left out or 0. |
+
+<a id="config-bittorrentpublish"></a>
+
+### `bittorrent.client.publish[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The entry's name, which the bt_publish handler and the state in data_dir know it by. Letters, digits, '_', '.' and '-'. |
+| `dir` | string |  | Required. The directory published. Its files are seeded where they are, never written to, moved or deleted: a torrent whose file changes is replaced by a new one. Files and directories whose names start with '.' and symbolic links are left out. |
+| `mode` | string: `per_file`, `whole_dir` | `"per_file"` | per_file makes a single-file torrent of each file below dir; whole_dir makes one torrent of the whole directory, named as its last element, which any change of a file below it replaces. per_file when left out. |
+| `web_seed` | string |  | The http or https URL at which dir is served, as by a static route whose root is dir, put in every torrent as its web seed (BEP 19): a file's own URL in mode per_file, and in mode whole_dir the URL's parent, so the URL's last element must be dir's last element then. None when left out. |
+| `announce` | list of string |  | Tracker URLs, http, https or udp, put in every torrent, each a tier of its own, tried in order: as fit's own bt_tracker route. None when left out: peers find the torrents by the DHT, unless private. |
+| `private` | boolean |  | Mark the torrents private (BEP 27): clients find peers only through the trackers of announce, not the DHT or peer exchange. A change makes new torrents, of other info hashes. |
+| `piece_length` | integer, 0 to 67108864 |  | The torrents' piece length, a power of two from 16 KiB to 64 MiB. Picked for each torrent's size when left out or 0: the smallest of at least 16 KiB that makes fewer than 2048 pieces, up to 16 MiB. A change makes new torrents. |
+| `files` | list of string |  | The files published, by pattern: a pattern without '/' matches a file's name, as *.iso, and one with '/' its path under dir, as releases/**/*.tar.gz, where * matches within a name and ** any run of directories. Every file when left out. |
+| `exclude` | list of string |  | Files and directories left out, by pattern, as files writes them, as *.part or **/tmp/**; a directory left out is not walked. None when left out. |
+| `check_interval` | duration | `"10s"` | How often dir is walked again for files added, changed or removed, as static files follow the disk. A file is told by its size, modification and status change times and inode; one new or changed is built into a torrent once it has not changed for a check_interval, so that a file still being copied is not hashed; a file removed or changed stops its torrent at once. 10s when left out or 0. |
+| `max_files` | integer, 0 to 100000 | `1000` | The most files published: in mode per_file the first by path are, the rest are left out and reported; in mode whole_dir a directory with more is not published, and is reported. 1000 when left out or 0. |
+| `max_total_bytes` | integer, 0 or more | `1099511627776` | The most bytes published, the files' sizes together: past it, in mode per_file, the files after are left out, and in mode whole_dir the directory is not published; either is reported. 1 TiB when left out or 0. |
+| `max_hashing` | integer, 0 to 16 | `1` | How many torrents are built at once, each reading and hashing its files on a goroutine of the entry's own, never on a fib worker. 1 when left out or 0. |
 
 <a id="providers"></a>
 
@@ -4153,6 +4220,62 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 | [`respond`](#http-handlers-respond) | A fixed status, fields and body |
 | [`static`](#http-handlers-static) | Files from a directory |
 | [`sync_ingest`](#http-handlers-sync_ingest) | Records posted into a sync pipeline's `http` source, answered once its sinks have them |
+
+<a id="http-handlers-bt_publish"></a>
+
+### `bt_publish`
+
+Serves what the BitTorrent client publishes: at a path ending in / or index.json an index of its publish entries and their torrents in JSON, at <id>.torrent a torrent's .torrent file and at <id>.magnet its magnet link; 503 while no bittorrent.client runs.
+
+Serves what the `bittorrent.client` role publishes, its `publish` entries: at a path ending in `/`
+or in `index.json`, an index in JSON of the entries (`publish` names them; every entry when left
+out) and their torrents, each with its path under the entry's `dir`, its info hashes (v1 and v2:
+the torrents are hybrid), its magnet link, its state in the client (`seeding`, `checking`, or
+`stopped` while no client runs it), and `torrent_url` and `magnet_url`, relative to the index; at
+`<id>.torrent`, a torrent's .torrent file (`application/x-bittorrent`, as an attachment named after
+the torrent); at `<id>.magnet`, its magnet link as plain text. The index also says what each
+entry left out and why (`problems`): files past its bounds, a build that failed, a duplicate.
+
+It answers `503` while no `bittorrent.client` runs, `404` for a torrent not published, or not of the
+entries it names, and `405` for a method other than `GET` and `HEAD`. It reads a snapshot of the
+role's entries, swapped as they change, and takes no lock of the role's: nothing waits on a fib
+worker. A torrent's ID is its v1 info hash in hex; a file changed on disk gets a new torrent, of a
+new ID, and the old ID is answered `404` from then on.
+
+The route's middleware applies as to any handler: a `basic_auth` or `jwt` before it keeps a private
+entry's .torrent files, which carry its trackers' URLs, to those who may have them.
+
+In a .conf file:
+
+```fit
+route { match { path /torrents/* }; handler bt_publish { publish releases } }
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /torrents/*
+handler:
+  module: bt_publish
+  params:
+    publish:
+      - releases
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/torrents/*"]},
+  "handler": {"module": "bt_publish", "params": {"publish": ["releases"]}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `publish` | list of string |  | The publish entries of the bittorrent.client served, by name; a name the client has not is listed in the index with its error. Every entry when left out. |
 
 <a id="http-handlers-fastcgi"></a>
 

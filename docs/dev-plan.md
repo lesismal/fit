@@ -369,7 +369,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I199 | `alt_speed` schedules, per-torrent limits, the role's `access`, `.p2p` and `.dat` blocklists in `access` for every module | I197 | todo |
 | I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | todo |
 | I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | todo |
-| I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | todo |
+| I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | done |
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | todo |
 | I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | todo |
 | I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | todo |
@@ -6583,6 +6583,98 @@ takes a short lock, so the queue drains, but a bound belongs in fib (a fib reque
 - **Done when**: a client downloads a published file from fit's seed alone and from the web seed
   alone; a changed file gets a new torrent and the old one stops.
 - **Touches**: `bittorrent`, `handler`.
+- **Done** 2026-11-09: `bittorrent.client.publish` entries (`config/bittorrent_publish.go`: `name`,
+  `dir`, `mode` `per_file`|`whole_dir`, `web_seed`, `announce`, `private`, `piece_length`, `files`,
+  `exclude`, `check_interval`, `max_files`, `max_total_bytes`, `max_hashing`, with their checks);
+  the role's publisher (`bittorrent/publish.go`, `publish_walk.go`): a walker goroutine and
+  `max_hashing` builder goroutines per entry, hybrid torrents by fib's `metainfo.Builder`, seeded in
+  place through read-only storage, kept in `data_dir/publish/<name>/` and restored by file stamp;
+  the role's code touched only by six hook lines (`role.go`: the field, `New`, `Apply`,
+  `restoreAll`, `closeClient`, `Stop`). The handler `bt_publish` (`handler/btpublish`, in
+  `modules/standard`): the JSON index, `<id>.torrent`, `<id>.magnet`, `503` without a client.
+  Schema, reference, templates, `schema-zh.js`, the module's chapter, a publishing section in
+  [BitTorrent](bittorrent.md) in both languages. Tests: each file of a directory downloaded by a
+  fib client from the role's seed alone, a `whole_dir` torrent downloaded (dotfiles and symbolic
+  links left out) and replaced when a file is added, a file downloaded from fit's own `static` route
+  as the web seed alone with the publishing role stopped, a restart that builds nothing and reads no
+  data (storage reads counted), a reload of bounds that builds nothing, an entry removed (torrents
+  stopped, state gone, files kept), a changed file getting a new torrent while the old one leaves
+  the client and is no longer served, a removed and an added file, `max_files`, `max_total_bytes`,
+  `files`/`exclude`, empty files, a `whole_dir` entry past its bounds, a duplicate file, a missing
+  directory, a failed build not retried until the file changes, web seed URLs of both modes,
+  trackers and the private flag, read-only storage, the routes (index, .torrent, magnet, HEAD,
+  404, 405, named entries), and the config's checks.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **Where the entries are: `bittorrent.client.publish`**, not a top-level `bittorrent.publish`.
+   Why: publishing runs on the client and keeps its state in its `data_dir`, so nesting makes the
+   dependency structural and the role's member stays one struct (no shared-code change). The
+   handler answers `503` while no client runs. Alternatives: `bittorrent.publish` read by the client
+   role (its member type changes); a role of its own looking the client up.
+2. **Names**: `mode` is `per_file` (default) or `whole_dir`; the include patterns are **`files`**,
+   as a media library's, because `include` is a directive of fit's .conf format. Alternatives:
+   `each`/`whole`; `match`.
+3. **Published torrents are the publisher's, not the role's list**: not in `torrents.json` or
+   `List`, not counted by `max_torrents`, seeding for ever whatever the seed limits say
+   (`TorrentLimits` −1). Why: their life follows the config and the disk, not the API.
+   Alternatives: records in `torrents.json` tagged with their entry, under `max_torrents`.
+4. **State and its key**: per entry `data_dir/publish/<name>/` with `index.json` (each torrent's
+   files and their fib `filewatch.Stamp`: size, modification and status change times, inode,
+   device) and `<id>.torrent`/`<id>.resume`; the index is kept only under the same build key
+   (`dir`, `mode`, `web_seed`, `announce`, `private`, `piece_length`). The index is written at the
+   walk after a change and when the client closes or the role stops, not after every build (that
+   would rewrite it once per file, quadratic for many); a crash in between builds those again.
+   Resume data is saved once a torrent has every piece. Alternatives: size and modification time
+   only, as fib's resume data (misses a replacement of the same size and time); writing the index
+   after every build.
+5. **Settling**: a new or changed file is built once its stamp has held for a `check_interval`
+   (its status change time is that old, or the walk before saw it the same), so that a file being
+   copied is not hashed again and again. Alternatives: build at once; a `settle` option of its own.
+6. **Walks, no watch**: the disk is followed by walking `dir` every `check_interval` (10s), not by
+   fib's `filewatch` watch, since a walk must stat every file anyway to compare stamps and builds
+   wait to settle. Alternative: on Linux, a watch that brings the next walk forward.
+7. **Read-only storage**: writes are refused (empty ones, creating an empty file, are a no-op), so
+   a piece that fails its check is never downloaded over a published file; such a torrent stays,
+   its state showing it, until its file changes. Alternative: remove a torrent whose check fails.
+8. **What is left out**: names starting with a dot, symbolic links (never followed: a link could
+   publish what lies outside `dir`), names fib's storage would write differently, and in
+   `per_file` empty files. Alternative: `follow_symlinks` within `dir`, as a media library's.
+9. **Bounds**: `max_files` 1000 (≤100000), `max_total_bytes` 1 TiB, `max_hashing` 1 (≤16) per
+   entry, at most 64 entries, a walk at most 10×`max_files`+10000 entries; past a bound `per_file`
+   publishes the first files by path, `whole_dir` publishes nothing; every problem reported, at most
+   20. No pool shared by the entries. Alternative: one hashing pool for the role.
+10. **Walk errors**: a `dir` that cannot be read leaves the torrents as they are; a walk that could
+    not read part of `dir` stops no torrent (and `whole_dir` is not rebuilt from it). Alternative:
+    stop the torrents of files not seen.
+11. **Failures and duplicates**: a build that fails is remembered with its files' stamps and not
+    tried again until they change; a torrent of an info hash the client already has (the same file
+    twice, two entries, a torrent added by hand) is listed with its error and seeded once.
+12. **`bt_publish`**: requests told apart by their last path element (`/` or `index.json`,
+    `<id>.torrent`, `<id>.magnet` as text), the index's URLs relative to it, `.torrent` files held
+    in memory in the entries' snapshot (bounded by `max_files` × fib's metainfo bound), no lock of
+    the role's on a worker (`ClientRunning` is an atomic). Alternatives: a `strip_prefix` param; the
+    magnet link as a redirect; .torrent files read from disk on a pool.
+13. **Torrents' fields**: trackers each a tier of their own, `created by` `fit`, the creation date
+    the build's; the web seed of `whole_dir` is the URL's parent, so its last element must be the
+    directory's name (checked in the config).
+14. **An entry renamed or removed** drops its state (a renamed one builds again under its new
+    name); a change of only its bounds or `check_interval` restarts it from its state, building
+    nothing.
+
+Open from it (fib, reported, not worked around):
+
+- **A torrent built is checked again when first added**: fib has no way to add a torrent as
+  complete, so a newly built torrent is hashed twice (by the Builder, then by the client's initial
+  check); restarts are not, through resume data. A fib request: `AddOptions.Seed` (trust the storage
+  as complete, as libtorrent's seed mode) or resume data from a Builder's result.
+- **`metainfo.Builder` holds every 16 KiB block's v2 leaf hash of a file until the file ends**,
+  1/512 of its size (a 1 TiB file takes 2 GiB while hashed, per `max_hashing`); a fib request to
+  fold leaves into piece roots as it goes.
+- **`metainfo.Builder` cannot be cancelled**: fit stops a build through the reads of the `fs.FS` it
+  gives it; a `Builder.BuildContext` would be cleaner.
+- Not run: Windows (name sanitizing), Linux CI, libtorrent or anacrolix fetching from fit's static
+  web seed; the Admin API and pages for publishing are I203/I204's.
 
 ### I203 Admin API, events, `fit bt`, metrics
 

@@ -613,6 +613,19 @@ routes:
         # string.
         body: "hello from fit\n"
   # -
+    # # A route whose handler is bt_publish, with every one of its params.
+    # name: "bt_publish-example"
+    # handler:
+      # # Serves what the BitTorrent client publishes: at a path ending in / or index.json an index of
+      # # its publish entries and their torrents in JSON, at <id>.torrent a torrent's .torrent file
+      # # and at <id>.magnet its magnet link; 503 while no bittorrent.client runs.
+      # module: "bt_publish"
+      # params:
+        # # The publish entries of the bittorrent.client served, by name; a name the client has not is
+        # # listed in the index with its error. Every entry when left out.
+        # # list of string.
+        # publish: []
+  # -
     # # A route whose handler is fastcgi, with every one of its params.
     # name: "fastcgi-example"
     # handler:

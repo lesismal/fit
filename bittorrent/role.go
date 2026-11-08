@@ -96,6 +96,9 @@ type Role struct {
 	// wrap, for tests, wraps the storage of every torrent.
 	wrap func(fibbt.StorageOpener) fibbt.StorageOpener
 
+	// pub is the publish entries (publish.go), guarded by mu.
+	pub *publisher
+
 	// mu orders Apply, Stop, the API and the saver, and guards what
 	// follows.
 	mu        sync.Mutex
@@ -128,6 +131,7 @@ func New(h *app.Host) *Role {
 		r.key = h.Engine
 	}
 	r.console = roleconsole.New(h, ID, r.routes)
+	r.pub = newPublisher(r)
 	return r
 }
 
@@ -190,6 +194,7 @@ func (r *Role) Apply(member any) error {
 	r.client.Refilter()
 	r.cfg = cfg
 	r.interval = cfg.Save()
+	r.pub.apply(cfg.Publish)
 	if r.saverStop == nil {
 		r.saverStop, r.saverDone = make(chan struct{}), make(chan struct{})
 		go r.saveLoop(r.saverStop, r.saverDone)
@@ -365,6 +370,7 @@ func (r *Role) restoreAll() {
 			}
 		}
 	}
+	r.pub.attachAll()
 }
 
 // restore adds rec to the client, with its resume data. r.mu is held.
@@ -393,6 +399,7 @@ func (r *Role) closeClient() {
 	}
 	_ = r.client.Close()
 	r.client = nil
+	r.pub.detachAll()
 	r.saveLocked(true)
 	for _, rec := range r.recs {
 		rec.t = nil
@@ -413,6 +420,7 @@ func (r *Role) Stop(ctx context.Context) {
 		close(stop)
 		<-done
 	}
+	r.pub.stopAll()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.closeClient()

@@ -768,6 +768,19 @@ routes:
         # string.
         body: "hello from fit\n"
   # -
+    # # A route whose handler is bt_publish, with every one of its params.
+    # name: "bt_publish-example"
+    # handler:
+      # # Serves what the BitTorrent client publishes: at a path ending in / or index.json an index of
+      # # its publish entries and their torrents in JSON, at <id>.torrent a torrent's .torrent file
+      # # and at <id>.magnet its magnet link; 503 while no bittorrent.client runs.
+      # module: "bt_publish"
+      # params:
+        # # The publish entries of the bittorrent.client served, by name; a name the client has not is
+        # # listed in the index with its error. Every entry when left out.
+        # # list of string.
+        # publish: []
+  # -
     # # A route whose handler is fastcgi, with every one of its params.
     # name: "fastcgi-example"
     # handler:
@@ -10061,6 +10074,92 @@ upstreams:
         # # Files of more deny entries, written as allow_files.
         # # list of string.
         # deny_files: []
+
+    # # Directories the client publishes: each built into hybrid torrents, a torrent of each file or
+    # # one of the whole directory, on goroutines of its own, and seeded where the files are, the
+    # # .torrent files and magnet links served by the bt_publish handler. Each follows the disk: a
+    # # file added gets a torrent, and one changed or removed stops its torrent, a changed one
+    # # getting a new torrent. The torrents are kept in data_dir/publish/<name>/, so that a restart
+    # # neither builds nor checks a file that did not change. None when left out.
+    # # list of object.
+    # publish:
+      # -
+        # # The entry's name, which the bt_publish handler and the state in data_dir know it by.
+        # # Letters, digits, '_', '.' and '-'.
+        # # string; required.
+        # name: ""
+
+        # # The directory published. Its files are seeded where they are, never written to, moved or
+        # # deleted: a torrent whose file changes is replaced by a new one. Files and directories whose
+        # # names start with '.' and symbolic links are left out.
+        # # string; required.
+        # dir: ""
+
+        # # per_file makes a single-file torrent of each file below dir; whole_dir makes one torrent of
+        # # the whole directory, named as its last element, which any change of a file below it
+        # # replaces. per_file when left out.
+        # # one of: per_file, whole_dir; default "per_file".
+        # mode: "per_file"
+
+        # # The http or https URL at which dir is served, as by a static route whose root is dir, put in
+        # # every torrent as its web seed (BEP 19): a file's own URL in mode per_file, and in mode
+        # # whole_dir the URL's parent, so the URL's last element must be dir's last element then. None
+        # # when left out.
+        # # string.
+        # web_seed: ""
+
+        # # Tracker URLs, http, https or udp, put in every torrent, each a tier of its own, tried in
+        # # order: as fit's own bt_tracker route. None when left out: peers find the torrents by the
+        # # DHT, unless private.
+        # # list of string.
+        # announce: []
+
+        # # Mark the torrents private (BEP 27): clients find peers only through the trackers of
+        # # announce, not the DHT or peer exchange. A change makes new torrents, of other info hashes.
+        # # boolean.
+        # private: true
+
+        # # The torrents' piece length, a power of two from 16 KiB to 64 MiB. Picked for each torrent's
+        # # size when left out or 0: the smallest of at least 16 KiB that makes fewer than 2048 pieces,
+        # # up to 16 MiB. A change makes new torrents.
+        # # integer, 0 to 67108864.
+        # piece_length: 0
+
+        # # The files published, by pattern: a pattern without '/' matches a file's name, as *.iso, and
+        # # one with '/' its path under dir, as releases/**/*.tar.gz, where * matches within a name and
+        # # ** any run of directories. Every file when left out.
+        # # list of string.
+        # files: []
+
+        # # Files and directories left out, by pattern, as files writes them, as *.part or **/tmp/**; a
+        # # directory left out is not walked. None when left out.
+        # # list of string.
+        # exclude: []
+
+        # # How often dir is walked again for files added, changed or removed, as static files follow
+        # # the disk. A file is told by its size, modification and status change times and inode; one
+        # # new or changed is built into a torrent once it has not changed for a check_interval, so that
+        # # a file still being copied is not hashed; a file removed or changed stops its torrent at
+        # # once. 10s when left out or 0.
+        # # duration, as "1.5s" or "2m"; default "10s".
+        # check_interval: "10s"
+
+        # # The most files published: in mode per_file the first by path are, the rest are left out and
+        # # reported; in mode whole_dir a directory with more is not published, and is reported. 1000
+        # # when left out or 0.
+        # # integer, 0 to 100000; default 1000.
+        # max_files: 1000
+
+        # # The most bytes published, the files' sizes together: past it, in mode per_file, the files
+        # # after are left out, and in mode whole_dir the directory is not published; either is
+        # # reported. 1 TiB when left out or 0.
+        # # integer, 0 or more; default 1099511627776.
+        # max_total_bytes: 1099511627776
+
+        # # How many torrents are built at once, each reading and hashing its files on a goroutine of
+        # # the entry's own, never on a fib worker. 1 when left out or 0.
+        # # integer, 0 to 16; default 1.
+        # max_hashing: 1
 
 # Sources of routes, upstreams, services and listeners other than this file and the Admin API,
 # merged into the config: what this config writes wins over every provider, and a provider
