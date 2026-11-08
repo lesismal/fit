@@ -359,7 +359,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I199 | `alt_speed` 调度、单任务限制、角色的 `access`、`access` 读 `.p2p` 和 `.dat` 黑名单（所有模块可用） | I197 | todo |
 | I200 | `bt_stream`：经 HTTP Range 边下边播，允许按磁力链临时添加 | I197 | done |
 | I201 | `bittorrent.tracker` 角色：HTTP 的 `bt_tracker`、UDP、私有 passkey、白名单、统计 | I196 | todo |
-| I202 | 把目录发布成带 web seed 的 hybrid 种子，跟随磁盘变化 | I197 | todo |
+| I202 | 把目录发布成带 web seed 的 hybrid 种子，跟随磁盘变化 | I197 | done |
 | I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | todo |
 | I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | todo |
 | I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | todo |
@@ -4829,6 +4829,67 @@ I198/I203 的添加路径。fib 的 `Reader.Close` 会等待进行中的 `Read`�
   fit 的静态文件；磁盘变化时重新生成，与静态文件跟随磁盘的方式相同；哈希在有界 pool 上。
 - **完成标准**：客户端只从 fit 的做种、或只从 web seed 都能下载发布的文件；文件变化后生成新种子，旧种子停止。
 - **涉及**：`bittorrent`、`handler`。
+- **完成** 2026-11-09：`bittorrent.client.publish` 条目（`config/bittorrent_publish.go`：`name`、`dir`、`mode`
+  `per_file`|`whole_dir`、`web_seed`、`announce`、`private`、`piece_length`、`files`、`exclude`、`check_interval`、`max_files`、
+  `max_total_bytes`、`max_hashing`，及其检查）；角色的发布器（`bittorrent/publish.go`、`publish_walk.go`）：每个条目一个遍历
+  goroutine 和 `max_hashing` 个生成 goroutine，用 fib 的 `metainfo.Builder` 生成 hybrid 种子，经只读存储在原处做种，保存在
+  `data_dir/publish/<name>/` 并按文件标记恢复；角色代码只加了六行钩子（`role.go`：字段、`New`、`Apply`、`restoreAll`、
+  `closeClient`、`Stop`）。处理器 `bt_publish`（`handler/btpublish`，在 `modules/standard` 中）：JSON 索引、`<id>.torrent`、
+  `<id>.magnet`，没有客户端时 `503`。schema、参考、模板、`schema-zh.js`、模块的章节，中英文 [BitTorrent](bittorrent.zh-CN.md)
+  中的发布一节。测试：目录中每个文件由 fib 客户端只从角色的做种下载；`whole_dir` 种子被下载（点文件和符号链接不发布），
+  新增文件时被取代；停止发布角色后，只从 fit 自己的 `static` 路由作为 web seed 下载文件；重启不生成任何种子、不读取数据
+  （统计存储读取次数）；只改上限的 reload 不生成种子；移除条目（种子停止、状态删除、文件保留）；改变的文件得到新种子，
+  旧种子离开客户端且不再提供；删除和新增文件；`max_files`、`max_total_bytes`、`files`/`exclude`、空文件、超过上限的
+  `whole_dir` 条目、重复文件、不存在的目录、生成失败后在文件改变前不重试；两种模式的 web seed URL、tracker 和私有标记；
+  只读存储；路由（索引、.torrent、磁力链接、HEAD、404、405、指定条目）；配置检查。
+
+**待审查的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **条目放在 `bittorrent.client.publish`**，而不是顶层的 `bittorrent.publish`。原因：发布运行在客户端上，状态保存在其
+   `data_dir` 中，嵌套使依赖关系体现在结构上，角色的成员仍是一个结构体（不改共享代码）。没有客户端运行时处理器返回
+   `503`。备选：由客户端角色读取 `bittorrent.publish`（其成员类型要变）；一个查找客户端的独立角色。
+2. **命名**：`mode` 为 `per_file`（默认）或 `whole_dir`；包含模式叫 **`files`**，与媒体库相同，因为 `include` 是 fit
+   .conf 格式的指令。备选：`each`/`whole`；`match`。
+3. **发布的种子属于发布器，不在角色的列表中**：不在 `torrents.json` 或 `List` 中，不计入 `max_torrents`，不受做种限制
+   一直做种（`TorrentLimits` 为 −1）。原因：它们的生命周期跟随配置和磁盘，而不是 API。备选：作为带条目标记的记录
+   放进 `torrents.json`，受 `max_torrents` 限制。
+4. **状态及其键**：每个条目在 `data_dir/publish/<name>/` 中保存 `index.json`（每个种子的文件及其 fib `filewatch.Stamp`：
+   大小、修改时间、状态改变时间、inode、设备）和 `<id>.torrent`/`<id>.resume`；只有生成键（`dir`、`mode`、`web_seed`、
+   `announce`、`private`、`piece_length`）相同时才使用该索引。索引在变化后的下一次遍历、客户端关闭或角色停止时写入，
+   而不是每次生成后写入（那样每个文件重写一次，文件多时是平方级）；两者之间崩溃会重新生成这些种子。续传数据在种子拥有
+   全部分片后保存一次。备选：只用大小和修改时间，与 fib 的续传数据相同（会漏掉大小和时间都相同的替换）；每次生成后写索引。
+5. **稳定**：新增或改变的文件在其标记保持一个 `check_interval` 后才生成种子（状态改变时间已经这么久，或上一次遍历看到的
+   相同），以免对正在复制的文件反复哈希。备选：立即生成；单独的 `settle` 选项。
+6. **遍历而不监视**：跟随磁盘的方式是每隔 `check_interval`（10s）遍历 `dir`，不用 fib 的 `filewatch` 监视，因为遍历本来
+   就要 stat 每个文件以比较标记，而生成要等文件稳定。备选：Linux 上用监视提前下一次遍历。
+7. **只读存储**：拒绝写入（空写入即创建空文件，为空操作），因此校验失败的分片绝不会被下载并覆盖发布的文件；这样的种子
+   保留（状态会显示），直到文件改变。备选：移除校验失败的种子。
+8. **不发布的内容**：名称以点开头的、符号链接（从不跟随：链接可能发布 `dir` 之外的内容）、fib 存储会改写的名称，以及
+   `per_file` 模式下的空文件。备选：与媒体库一样提供 `dir` 内的 `follow_symlinks`。
+9. **上限**：每个条目 `max_files` 1000（≤100000）、`max_total_bytes` 1 TiB、`max_hashing` 1（≤16），最多 64 个条目，一次
+   遍历最多 10×`max_files`+10000 个条目；超过上限时 `per_file` 按路径发布前面的文件，`whole_dir` 什么也不发布；每个问题都
+   报告，最多 20 条。条目之间不共享 pool。备选：角色共用一个哈希 pool。
+10. **遍历错误**：无法读取的 `dir` 让种子保持原样；未能读取 `dir` 一部分的遍历不停止任何种子（`whole_dir` 也不据此重新
+    生成）。备选：停止未见到的文件的种子。
+11. **失败与重复**：生成失败连同其文件的标记被记住，在标记改变前不再重试；客户端已有其 info hash 的种子（同一文件两份、
+    两个条目、手动添加的种子）连同错误一起列出，只做种一次。
+12. **`bt_publish`**：按路径的最后一段区分请求（`/` 或 `index.json`、`<id>.torrent`、文本形式的 `<id>.magnet`），索引中的
+    URL 相对于索引，`.torrent` 文件保存在条目快照的内存中（上限为 `max_files` × fib 的 metainfo 上限），在 worker 上不取
+    角色的锁（`ClientRunning` 是原子量）。备选：`strip_prefix` 参数；磁力链接用重定向；在 pool 上从磁盘读取 .torrent。
+13. **种子的字段**：每个 tracker 自成一层，`created by` 为 `fit`，创建日期为生成时间；`whole_dir` 的 web seed 是 URL 的
+    上一级，因此其最后一段必须是目录名（配置检查）。
+14. **改名或移除的条目**删除其状态（改名的条目以新名称重新生成）；只改上限或 `check_interval` 时从其状态重启，不生成任何种子。
+
+遗留（fib，已报告，未绕过）：
+
+- **生成的种子第一次添加时会再校验一次**：fib 不能以"已完整"的方式添加种子，所以新生成的种子被哈希两次（Builder 一次，
+  客户端的初始校验一次）；重启时借助续传数据不会。fib 请求：`AddOptions.Seed`（像 libtorrent 的 seed mode 那样信任存储
+  已完整），或由 Builder 的结果得到续传数据。
+- **`metainfo.Builder` 在文件结束前保留其每个 16 KiB 块的 v2 叶子哈希**，即文件大小的 1/512（1 TiB 的文件在哈希时占
+  2 GiB，乘以 `max_hashing`）；fib 请求：边读边把叶子折叠成分片根。
+- **`metainfo.Builder` 不能取消**：fit 经由传给它的 `fs.FS` 的读取来停止生成；`Builder.BuildContext` 会更干净。
+- 未运行：Windows（名称处理）、Linux CI、libtorrent 或 anacrolix 从 fit 的静态 web seed 下载；发布的 Admin API 和页面属于
+  I203/I204。
 
 ### I203 Admin API、事件、`fit bt`、指标
 

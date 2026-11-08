@@ -59,6 +59,9 @@ type BitTorrentClient struct {
 	Access         *Access           `json:"access,omitempty" doc:"The peer addresses the client deals with, deciding before the global access: a peer it refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and are not asked about. A change applies at once, closing the connected peers it now refuses. Every address when left out, unless the global access says otherwise."`
 	Console        *RoleConsole      `json:"console,omitempty" doc:"The client's web pages; none when left out."`
 
+	// Publish is I202's, in bittorrent_publish.go.
+	Publish []BitTorrentPublish `json:"publish,omitempty" doc:"Directories the client publishes: each built into hybrid torrents, a torrent of each file or one of the whole directory, on goroutines of its own, and seeded where the files are, the .torrent files and magnet links served by the bt_publish handler. Each follows the disk: a file added gets a torrent, and one changed or removed stops its torrent, a changed one getting a new torrent. The torrents are kept in data_dir/publish/<name>/, so that a restart neither builds nor checks a file that did not change. None when left out."`
+
 	At Value `json:"-" fit:"self"`
 }
 
@@ -140,4 +143,5 @@ func (c *Config) checkBitTorrent(add func(Value, string, ...any)) {
 	}
 	b.Access.check(add)
 	checkRoleConsole(b.Console, add)
+	checkBitTorrentPublish(b, add)
 }

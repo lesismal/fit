@@ -6,8 +6,8 @@ fit 在网关旁运行一个 BitTorrent 客户端：`bittorrent.client` 角色�
 下载和做种，并在重启后保留种子（[决定 037](decisions/037-bittorrent.zh-CN.md)）。它就是 fib 的客户端
 （[fib 的 BitTorrent 文档](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)）：v1、v2 和混合种子，磁力链接，
 TCP 和 uTP，MSE 加密，DHT，对端交换，本地服务发现，HTTP 和 UDP tracker，以及 web seed。本页讲这个角色：配置、状态保存
-在哪里、重载改变什么、它的上限，以及边下载边播放种子文件的 `bt_stream` 处理器。按 URL 和 `watch_dir` 添加种子、分类与
-排队、时间表、tracker、发布、Admin API 和页面，随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
+在哪里、重载改变什么、发布目录、它的上限，以及边下载边播放种子文件的 `bt_stream` 处理器。按 URL 和 `watch_dir` 添加种子、
+分类与排队、时间表、tracker、Admin API 和页面，随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
 
 默认关闭：不写 `bittorrent.client` 时，fit 不打开 BitTorrent 端口，也不保存状态。
 
@@ -77,6 +77,80 @@ metainfo 拒绝含 `..`、`.`、空或含 `/` 的路径段，其文件存储把�
 | `save_interval`、`console`、`download_dir` | 就地生效 |
 | `listen`、`encryption`、`dht`、`pex`、`utp`、`lsd`、`disk_workers`、`disk_queue_bytes` | 新建客户端：关闭旧客户端、保存每个种子的续传数据，再把种子无需校验地加入新客户端。新客户端无法创建（端口被占）时，重新创建旧客户端，重载报告错误 |
 | `data_dir` | 像重启一样，在新目录的状态上新建客户端；旧目录保留已保存的内容 |
+
+## 发布
+
+`publish` 条目把目录发布成种子（I202）。每个条目用 fib 的 `metainfo.Builder` 为其 `dir` 生成 hybrid 种子：每个文件一个
+单文件种子（`per_file` 模式，默认），或整个目录一个种子、以目录的最后一段命名（`whole_dir` 模式），并在文件所在处做种：
+种子的存储在原处读取文件、拒绝一切写入，因此校验失败的分片绝不会被下载并覆盖发布的文件，移除种子也绝不删除其文件。
+发布的种子一直做种，不受 `limits.seed_ratio` 和 `seed_time` 影响；它们不在角色的种子列表（`List`）中，也不计入
+`max_torrents`，由 `bt_publish` 处理器提供。
+
+```fit
+bittorrent {
+	client {
+		listen :6881
+		data_dir /var/lib/fit/bittorrent
+		publish {
+			name releases
+			dir /srv/releases
+			web_seed https://example.com/releases/
+			announce https://example.com/announce
+			files *.iso *.tar.gz
+		}
+	}
+}
+
+route {
+	match { path /releases/* }
+	handler static { root /srv/releases; strip_prefix /releases }
+}
+
+route { match { path /torrents/* }; handler bt_publish }
+```
+
+- **`web_seed`** 是提供 `dir` 的 URL（如上面 fit 自己的 `static` 路由），作为 web seed（BEP 19）写入每个种子：`per_file`
+  模式下是文件自己的 URL（`https://example.com/releases/sub/a.iso`），`whole_dir` 模式下是该 URL 的上一级，因为客户端请求
+  `<url>/<name>/<path>`，而种子以目录命名；URL 不以目录名结尾的 `whole_dir` 条目会被配置检查拒绝。这样客户端可以从 fit 的
+  做种、从 web seed、或两者一起下载发布的文件。
+- **`announce`** 是 tracker URL（http、https、udp），每个自成一层，例如 fit 自己的 `bt_tracker` 路由；**`private`** 把种子
+  标为私有（BEP 27）。没有 tracker 时，peer 经 DHT 找到这些种子。
+- **`piece_length`** 是 16 KiB 到 64 MiB 之间的 2 的幂，或按每个种子的大小选取（少于 2048 个分片，最大 16 MiB）。
+- **`files`** 和 **`exclude`** 是模式，与媒体库的相同：不含 `/` 匹配名称，含 `/` 匹配在 `dir` 下的路径，`**` 匹配任意层
+  目录。名称以点开头的文件和符号链接总是不发布，后者是因为链接可能发布 `dir` 之外的内容；客户端存储会改写的名称（Windows
+  上的 `<>:"\|?*`）以及 `per_file` 模式下的空文件也不发布。
+
+**跟随磁盘。** 每个条目在自己的 goroutine 上每隔 `check_interval`（10s）遍历一次 `dir`。文件以大小、修改时间、状态改变时间
+和 inode 识别，与静态文件相同，因此被另一个大小和时间都相同的文件替换也能发现。新增或改变的文件在一个 `check_interval`
+内不再变化后才生成种子（其状态改变时间已经这么久，或上一次遍历看到的相同），以免对仍在复制的文件做哈希；哈希在条目的
+`max_hashing`（1）个 goroutine 之一上进行，从不在 fib worker 上，且只有在哈希之后文件的标记仍未改变时才保留结果。改变或
+删除的文件立即停止其种子，改变的文件在稳定后得到 info hash 不同的新种子；`whole_dir` 模式下任何变化都会取代种子。生成
+失败的文件（无法读取）会被报告，在文件改变前不再重试。无法读取的目录会被报告，其种子保持原样；目录中无法读取的部分下的
+种子也一样。
+
+**状态。** 种子保存在 `data_dir/publish/<name>/` 中：`index.json`（每个种子的文件及其标记）、`<id>.torrent`，以及做种后保存
+一次的续传数据 `<id>.resume`。重启时从这里取回文件标记未变的种子及其续传数据，既不重新生成也不重新校验；只改变条目的上限
+或 `check_interval` 的 reload 也一样。改变 `dir`、`mode`、`web_seed`、`announce`、`private` 或 `piece_length` 会重新生成种子
+（种子的字节变了）；从配置中移除的条目会停止其种子并删除其状态，从不删除其文件。第一次生成的种子在加入客户端时仍会被校验
+一次，因为 fib 还不能以"已完整"的方式添加种子（见开发计划中 I202 的遗留项）。
+
+**`bt_publish` 处理器** 在以 `/` 或 `index.json` 结尾的路径上返回 JSON 索引：每个条目（`publish` 指定提供哪些，不设置时为
+全部）的种子，各带路径、名称、大小、info hash、磁力链接、状态（`seeding`、`checking`，没有客户端运行时为 `stopped`）以及
+相对于索引的 `torrent_url` 和 `magnet_url`，等待生成的文件数（`pending`），以及未发布的内容和原因（`problems`，最多 20 条）。
+`<id>.torrent` 是 .torrent 文件，`<id>.magnet` 是文本形式的磁力链接，ID 是十六进制的 v1 info hash。没有 `bittorrent.client`
+运行时它返回 `503`，因此在没有客户端的配置中保留这条路由也是安全的。它读取条目的快照，不取角色的任何锁。
+
+| 上限 | 默认值 |
+| --- | --- |
+| `publish`，条目数 | 最多 64 |
+| `max_files`，一个条目发布的文件数 | 1000（最多 100000） |
+| `max_total_bytes`，这些文件的大小之和 | 1 TiB |
+| `max_hashing`，每个条目同时生成的种子数 | 1（最多 16） |
+| 一次遍历 | 10 × `max_files` + 10000 个条目 |
+| `index.json` | 64 MiB |
+
+超过 `max_files` 或 `max_total_bytes` 时，`per_file` 模式按路径发布前面的文件并报告其余的；`whole_dir` 模式什么也不发布并
+报告。两个条目共有的文件（或一个文件与手动添加的种子相同）只做种一次；第二个连同错误一起列出。
 
 ## 上限
 
