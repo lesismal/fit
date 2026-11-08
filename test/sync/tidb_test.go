@@ -44,22 +44,30 @@ const cdcPGSum = `SELECT count(*)::text || ':' || coalesce(md5(string_agg(concat
 	coalesce(to_char(at,'YYYY-MM-DD HH24:MI:SS.US'),'~'), coalesce(to_char(d,'YYYY-MM-DD'),'~'), coalesce(j::text,'~'),
 	coalesce(upper(encode(b,'hex')),'~'), coalesce(e,'~'), coalesce(f::text,'~')), ',' ORDER BY id)), '') FROM %s.t`
 
-func tidbSum(t *testing.T, c *mysqlwire.Conn) string {
+func tidbSum(ctx context.Context, t *testing.T, tc *tidbConn) string {
 	t.Helper()
-	rows, err := c.Query(hangGuard(t), cdcTiDBSum)
+	var sum string
+	err := tc.do(ctx, "the checksum", func(ctx context.Context, c *mysqlwire.Conn) error {
+		rows, err := c.Query(ctx, cdcTiDBSum)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		if !rows.Next() {
+			return fmt.Errorf("no row: %w", rows.Err())
+		}
+		v := rows.Values()
+		s := ""
+		if b, ok := v[1].([]byte); ok {
+			s = string(b)
+		}
+		sum = fmt.Sprintf("%v:%s", v[0], s)
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	if !rows.Next() {
-		t.Fatal(rows.Err())
-	}
-	v := rows.Values()
-	sum := ""
-	if b, ok := v[1].([]byte); ok {
-		sum = string(b)
-	}
-	return fmt.Sprintf("%v:%s", v[0], sum)
+	return sum
 }
 
 // TestTiDBThroughTiCDCToPostgres syncs a TiDB table into PostgreSQL through
@@ -78,20 +86,28 @@ func TestTiDBThroughTiCDCToPostgres(t *testing.T) {
 			t.Logf("seed %d", seed)
 			rnd := rand.New(rand.NewPCG(seed, 5))
 			name := "fit_cdc_" + strings.ReplaceAll(proto, "-", "_")
-			c, err := mysqlwire.Dial(hangGuard(t), mysqlwire.Config{Addr: addr, User: "root"})
-			if err != nil {
-				t.Fatal(err)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute) // a hang guard
+			defer cancel()
+			// TiDB under load (CI runs every server of run.sh at once)
+			// may refuse a DDL until its schema loads, or time out on
+			// TiKV: statements are tried again (tidb_conn_test.go), and
+			// written so that running one again changes nothing.
+			c := &tidbConn{cfg: mysqlwire.Config{Addr: addr, User: "root"},
+				setup: []string{"SET time_zone = '+00:00'", "SET SESSION group_concat_max_len = 1073741824"}}
+			t.Cleanup(c.Close)
+			for _, q := range []string{"DROP DATABASE IF EXISTS " + name, "CREATE DATABASE IF NOT EXISTS " + name + " CHARACTER SET utf8mb4",
+				"CREATE TABLE IF NOT EXISTS " + name + ".t " + cdcColumns} {
+				if err := c.exec(ctx, q); err != nil {
+					t.Fatal(err)
+				}
 			}
-			t.Cleanup(func() { c.Close() })
-			mysqlDB(t, c, name)
-			mustExec(t, c, "SET time_zone = '+00:00'")
-			mustExec(t, c, "SET SESSION group_concat_max_len = 1073741824")
-			mustExec(t, c, "CREATE TABLE t "+cdcColumns)
-			ins := "INSERT INTO t VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-			ver := map[int64]int64{}
+			c.setup = append(c.setup, "USE "+name)
+			c.Close()
+			ins := "REPLACE INTO t VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 			for i := range int64(300) {
-				mustExec(t, c, ins, cdcRow(i, 0)...)
-				ver[i] = 0
+				if err := c.exec(ctx, ins, cdcRow(i, 0)...); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			kc := kafkaClient(t, kafkawire.Config{Brokers: brokers})
@@ -105,17 +121,28 @@ func TestTiDBThroughTiCDCToPostgres(t *testing.T) {
 				id = id[len(id)-120:]
 			}
 			id = strings.Trim(id, "-")
-			cdc := func(args ...string) {
-				out, err := exec.Command("docker", append([]string{"exec", container, "/cdc", "cli", "changefeed"}, append(args, "--server=http://127.0.0.1:8300")...)...).CombinedOutput()
-				if err != nil {
-					t.Fatalf("cdc %v: %v: %s", args, err, out)
-				}
+			// The changefeed starts before the snapshot is taken, and is
+			// running before the load.
+			if _, err := cdcCLI(ctx, container, func(out string) bool { return strings.Contains(out, "already exists") },
+				"create", "--changefeed-id="+id, "--sink-uri="+uri); err != nil {
+				t.Fatal(err)
 			}
-			// The changefeed starts before the snapshot is taken.
-			cdc("create", "--changefeed-id="+id, "--sink-uri="+uri)
 			t.Cleanup(func() {
 				exec.Command("docker", "exec", container, "/cdc", "cli", "changefeed", "remove", "--changefeed-id="+id, "--server=http://127.0.0.1:8300").Run()
 			})
+			for deadline := time.Now().Add(tidbRetryFor); ; {
+				out, err := cdcCLI(ctx, container, nil, "query", "-s", "--changefeed-id="+id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(out, `"state": "normal"`) {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("the changefeed is not normal: %s", out)
+				}
+				time.Sleep(time.Second)
+			}
 
 			p := pg.connect(t, nil)
 			pgExec(t, p, "DROP SCHEMA IF EXISTS "+name+" CASCADE")
@@ -134,41 +161,37 @@ func TestTiDBThroughTiCDCToPostgres(t *testing.T) {
 			var stop atomic.Bool
 			loadDone := make(chan error, 1)
 			go func() {
-				lc, err := mysqlwire.Dial(context.Background(), mysqlwire.Config{Addr: addr, User: "root", Database: name})
-				if err != nil {
-					loadDone <- err
-					return
-				}
+				lc := &tidbConn{cfg: c.cfg, setup: c.setup}
 				defer lc.Close()
 				lr := rand.New(rand.NewPCG(seed, 6))
 				next := int64(300)
 				for n := 0; n < 600 && !stop.Load(); n++ {
-					ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 					var err error
 					switch k := lr.IntN(10); {
 					case k < 3:
-						_, err = lc.Exec(ctx, ins, cdcRow(next, 0)...)
+						err = lc.exec(ctx, ins, cdcRow(next, 0)...)
 						next++
 					case k < 7:
 						i := lr.Int64N(next)
 						v := int64(n + 1)
 						r := cdcRow(i, v)
-						_, err = lc.Exec(ctx, "UPDATE t SET v = ?, n = ?, at = ?, d = ?, j = ?, b = ?, e = ?, f = ? WHERE id = ?", append(r[1:], i)...)
+						err = lc.exec(ctx, "UPDATE t SET v = ?, n = ?, at = ?, d = ?, j = ?, b = ?, e = ?, f = ? WHERE id = ?", append(r[1:], i)...)
 					case k < 9:
-						_, err = lc.Exec(ctx, "DELETE FROM t WHERE id = ?", lr.Int64N(next))
+						err = lc.exec(ctx, "DELETE FROM t WHERE id = ?", lr.Int64N(next))
 					default:
-						// A key changed, in a transaction with an insert.
-						i := lr.Int64N(next)
-						if _, err = lc.Exec(ctx, "BEGIN"); err == nil {
-							if _, err = lc.Exec(ctx, "UPDATE t SET id = ? WHERE id = ?", next+100000, i); err == nil {
-								if _, err = lc.Exec(ctx, ins, cdcRow(next, 1)...); err == nil {
-									_, err = lc.Exec(ctx, "COMMIT")
-								}
-							}
-						}
+						// A key changed, in a transaction with an insert;
+						// run again whole, it changes nothing more.
+						i, moved := lr.Int64N(next), next+100000
+						row := cdcRow(next, 1)
+						err = lc.tx(ctx, func(ctx context.Context, c *mysqlwire.Conn) error {
+							_, err := c.Exec(ctx, "UPDATE t SET id = ? WHERE id = ?", moved, i)
+							return err
+						}, func(ctx context.Context, c *mysqlwire.Conn) error {
+							_, err := c.Exec(ctx, ins, row...)
+							return err
+						})
 						next++
 					}
-					cancel()
 					if err != nil {
 						loadDone <- err
 						return
@@ -196,7 +219,7 @@ func TestTiDBThroughTiCDCToPostgres(t *testing.T) {
 				}
 				var seen atomic.Int32
 				start(func(_ string, p fitsync.Point) bool { return p == at && seen.Add(1) == nth })
-				deadline := time.Now().Add(10 * time.Second)
+				deadline := time.Now().Add(30 * time.Second)
 				for redisState(rt) != "killed" && time.Now().Before(deadline) {
 					if st := redisState(rt); st == "stopped" {
 						t.Fatalf("the pipeline stopped: %+v", rt.Status())
@@ -217,11 +240,11 @@ func TestTiDBThroughTiCDCToPostgres(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-			case <-time.After(5 * time.Minute): // a hang guard
+			case <-time.After(15 * time.Minute): // a hang guard
 				stop.Store(true)
 				t.Fatal("the load did not end")
 			}
-			want := tidbSum(t, c)
+			want := tidbSum(ctx, t, c)
 			var got string
 			deadline := time.Now().Add(4 * time.Minute) // a hang guard
 			for {
