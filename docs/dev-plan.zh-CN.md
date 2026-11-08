@@ -339,7 +339,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | done |
 | I183b | 源与目标共用一套 MongoDB 连接参数 | I182, I183 | done |
 | I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | done |
-| I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | todo |
+| I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | done |
 | I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | done |
 | I187 | S3 及兼容存储作为目标（滚动的对象）与源（按键顺序的对象） | I163 | done |
 | I188 | Admin API 与 `fit sync`：状态、暂停、恢复、检查点、连接测试、试运行 | I163 | done |
@@ -4312,6 +4312,52 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
 - **完成标准**：与 Kafka 和 Redpanda 互通；Kafka 到 Kafka 的复制在杀进程前后保持按键顺序；Docker 中带 TiCDC 的 TiDB 集群同步到
   PostgreSQL，结束时校验和相同。
 - **涉及**：`sync/kafka`、`sync/tidb`、`test/sync`、`docs`。
+
+**待审的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **位置。** 包 `sync/kafka`（`synckafka`）：源与目标 `kafka`，以及编解码器 `raw`、`canal_json`、`debezium` 和
+   `ticdc_simple`；它们是 Kafka 上的变更格式，但作为 `sync.codecs` 的模块也可读文件、HTTP 请求体和 S3 对象。包 `sync/tidb`
+   （`synctidb`）：源 `tidb`。`syncmysql` 导出 `ConnParams` 与 `WireConfig`（两行），使 tidb 源的连接沿用 mysql 连接器的参数和
+   检查。备选：编解码器放进 `sync/cdc` 包。
+2. **offset 只存在检查点中，不提交到消费组。** 计划中“可选地提交到消费组以便观察”未实现（I184 的客户端没有消费组 API）；源改为报告
+   延迟：每次拉取后调用 `Run.ReportLag`，单位 `offsets`（I189 的 `LagOffsets`），即各分区高水位减下一个 offset 之和。offset 包含
+   控制批次和压缩留下的空洞，因此只是大约落后的记录数。备选：向参数中指定的消费组 `OffsetCommit`。
+3. **位置** 为 `{"offsets": {topic: {partition: 下一个 offset}}}`，包含所有分区，设在每条消息的最后一条记录上。一条消息变成的
+   多条记录是一个事务（编解码器给的 ID、TiCDC 的提交 TS 或 `topic/partition@offset`），检查点不会落在一条消息内部。不产生记录的
+   消息（TiCDC 每秒一次的 watermark、bootstrap）本身不推进检查点：由下一条记录的位置覆盖；长时间无数据后重启会重读这些
+   watermark。备选：由运行时不经目标直接确认的“位置占位”记录。
+4. **每个源一个编解码器**，而非计划中的每个 topic 一个：一种格式一条流水线。两侧默认 `raw`，Kafka 到 Kafka 的复制逐字节相同；
+   值为 null 的消息是对其键的删除（`tombstones: "delete"`，Debezium 删除后的墓碑用 `skip`），目标把带键的删除写成墓碑
+   （`deletes: "tombstone"`，或 `encode`）。编解码器也可以解码键（新增 `KeyDecoder`）：`debezium` 把 Debezium 的键事件读成键的
+   各列。编解码器拒绝的值成为一条含该值与错误的 message 记录，与文件源的行相同。
+5. **键与分区。** 记录的键为字符串、字节、decimal 或 JSON 时按其文本发出，否则写成普通 JSON（`{"id":1}`），并按 Java 客户端的
+   murmur2 对这些字节选分区；一个批次中无键的记录发往同一分区，下一批次发往下一个分区。分区数一分钟后重新读取。
+6. **目标是至少一次，不是幂等生产者**（I184 的决定 5 不变）：Kafka 到 Kafka 的互通测试在 12 次杀进程中把 3,000 条消息复制成
+   3,076 条，每个键首次出现的副本保持顺序。备选：幂等生产者（`InitProducerId` 与序号），它也只在一个生产者会话内去重。
+7. **批次。** 每个分区的消息按不超过 `max_batch_bytes`（1 MiB，压缩前）的记录批次发送，各分区的第一批在一次 produce 中，第二批在
+   下一次；某分区被拒绝即在该处停止，`BatchError` 指向批次中最早未写入的记录。多条消息的批次遇到 `MESSAGE_TOO_LARGE` 时逐条
+   重发；单条消息则该记录永久失败（`Permanent`）。默认 `acks: "all"`、`compression: "lz4"`；只有设置 `create_topics` 才创建 topic。
+8. **从哪里开始读。** 没有检查点时从 `start`（`earliest`）开始；检查点中没有的分区或之后新增的分区（每分钟检查一次）从最早处开始。
+   被保留策略删除的 offset 使流水线停止（`offset_reset: "error"`），而不是静默跳过。默认只读已提交的消息（`read_uncommitted` 可改）。
+   作业在每个分区开始时的末尾处停止。
+9. **tidb 源** 以嵌套的 `kafka` 接收 kafka 源的参数，编解码器由 `protocol` 决定（`canal-json`，需 `enable-tidb-extension=true` 以带
+   提交 TS；或 `simple`）。快照在为此开启的事务的 `@@tidb_current_ts` 上用 `tidb_snapshot` 读取，按主键分页（`page_rows`），每行的
+   位置为表及其键；提交 TS 不大于该 TS 的变更被丢弃。changefeed 必须早于快照创建，快照必须在 `tidb_gc_life_time` 内读完；二者都
+   不检查。只保留 `tables` 的变更；不设 `tables` 时不做快照。备选：经 TiCDC 的 API 从快照 TS 启动 changefeed，这需要 TiCDC 的地址与
+   权限。
+10. **值。** TiCDC 的 canal-json 把 ENUM 和 SET 写成数字、二进制列写成 ISO-8859-1 文本；`canal_json` 把二进制读回字节，ENUM 和 SET
+    保留为数字文本，tidb 源再按启动时读到的表结构换成标签，与其快照一致。BIT 为 uint，TIME 为文本，DATETIME 与 TIMESTAMP 为
+    `time_zone`（UTC）中的时间，bool 编码为 tinyint `1`/`0`。simple 协议按其 bootstrap 与 DDL 消息中的表结构定型；在此之前的行
+    （源在两次 bootstrap 之间启动）保持文本且无键，除非 tidb 源已从 `information_schema` 预置表结构。TiCDC 的 Debezium 把二进制
+    列写成 base64 字符串且没有表明类型（仍为字符串），decimal 写成 double（float）；`debezium` 编解码器在有 schema 时解码 Kafka
+    Connect 的 `Decimal` 和 Debezium 的时间类型，写出时不带 schema。
+11. **互通。** `test/sync/tidb.sh` 在 `kafka.sh` 的网络上启动 PD、TiKV、TiDB 和 TiCDC v8.5.3（TiDB 在 `TIDB_CDC_PORT`，29690），
+    `run.sh` 在 Kafka 之后启动它，CI 的 `sync-interop` 因此会运行这些测试：在 Kafka 与 Redpanda 上把 3,000 条带键消息从一个 topic
+    复制到另一个，随机位置杀进程；`generate` 的记录以 `json`、`canal_json` 和 `debezium` 经目标写入再经源读回；TiDB 经两种协议同步
+    到 PostgreSQL 17：先快照 300 行，再写入 600 次混合负载（插入、更新、删除、事务中改键），随机位置杀进程，最终校验和相同。
+    在 Docker 中运行 TiCDC 可行；其消息保存在 `sync/kafka/testdata` 中，供编解码器的单元测试使用。
+12. **规模**：约 2,300 行代码（编解码器 1,040 行），1,600 行针对模拟集群和模拟 TiDB 的单元测试（不用容器时分别覆盖 97.5% 和 96.7%
+    的语句），520 行互通测试；无 I185b。
 
 ### I186 Redis 作为源与目标
 

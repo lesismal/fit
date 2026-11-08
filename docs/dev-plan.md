@@ -349,7 +349,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | done |
 | I183b | One set of MongoDB connection params for the source and the sink | I182, I183 | done |
 | I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | done |
-| I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
+| I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | done |
 | I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | done |
 | I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | done |
 | I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | done |
@@ -5899,6 +5899,83 @@ review:
 - **Done when**: interop with Kafka and Redpanda; Kafka-to-Kafka copies keep per-key order across a
   kill; a TiDB cluster with TiCDC in Docker syncs into PostgreSQL and ends equal by checksum.
 - **Touches**: `sync/kafka`, `sync/tidb`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/kafka` (`synckafka`): the source and sink `kafka`, and the
+   codecs `raw`, `canal_json`, `debezium` and `ticdc_simple`, which are Kafka's change formats but,
+   as modules of `sync.codecs`, also read files, HTTP bodies and S3 objects. Package `sync/tidb`
+   (`synctidb`): the source `tidb`. `syncmysql` exports `ConnParams` and `WireConfig` (two lines) so
+   that the tidb source's connection takes the mysql connectors' params and checks. Alternative: a
+   package `sync/cdc` for the codecs.
+2. **Offsets in the checkpoint alone; no group commit.** The plan's optional commit to a consumer
+   group for visibility is not built (the I184 client has no group APIs); the source reports its
+   lag instead, `Run.ReportLag` in `offsets` (I189's `LagOffsets`): the sum over its partitions of
+   the high watermark less the next offset, after each fetch. Offsets count control batches and
+   compacted gaps, so it is about the records behind, not exactly. Alternative: `OffsetCommit` to a
+   group named in the params.
+3. **The position** is `{"offsets": {topic: {partition: next offset}}}`, every partition's, set on
+   the last record of each message. The records one message becomes are a transaction (the codec's
+   ID, TiCDC's commit TS, or `topic/partition@offset`), so a checkpoint never falls inside a
+   message. A message that becomes no record (TiCDC's watermark every second, its bootstraps) does
+   not move the checkpoint by itself: the next record's position covers it, and after a long quiet
+   time a restart reads those watermarks again. Alternative: a positional no-op record the runtime
+   would acknowledge without the sinks.
+4. **One codec per source**, not one per topic as the plan has it: a pipeline per format. `raw`
+   both ways by default, so a Kafka-to-Kafka copy is byte for byte; a null value is a delete of the
+   message's key (`tombstones: "delete"`, `skip` for Debezium's tombstones after its deletes), and
+   the sink writes a keyed delete as a tombstone (`deletes: "tombstone"`, or `encode`). A codec may
+   decode keys too (`KeyDecoder`, new): `debezium` reads Debezium's key events into the key's
+   columns. A value a codec refuses is a message record of the value and the error, as the file
+   source's lines.
+5. **Keys and partitions.** A record's key goes out as its text when it is a string, bytes,
+   decimal or JSON, as plain JSON otherwise (`{"id":1}`), and to the partition the Java client's
+   murmur2 gives those bytes; keyless records of a batch go to one partition, the next batch's to
+   the next. Partition counts are read again after a minute.
+6. **The sink is at least once, not idempotent** (I184's decision 5 stands): the Kafka-to-Kafka
+   interop copied 3,000 messages as 3,076 across 12 kills, each key's first copies in order.
+   Alternative: the idempotent producer (`InitProducerId` and sequences), which only dedups within
+   one producer session anyway.
+7. **Batches.** Each partition's messages go in record batches of at most `max_batch_bytes`
+   (1 MiB, before compression), the partitions' first batches in one produce, their second in the
+   next; a partition refused stops there and the `BatchError` names the batch's earliest record not
+   written. `MESSAGE_TOO_LARGE` of a batch of several sends them one at a time; of one message it
+   fails that record for good (`Permanent`). Defaults: `acks: "all"`, `compression: "lz4"`; topics
+   are created only with `create_topics`.
+8. **Where reading starts.** Without a checkpoint, at `start` (`earliest`); a partition the
+   checkpoint lacks, or one added later (looked for each minute), at its earliest. An offset
+   retention removed stops the pipeline (`offset_reset: "error"`) rather than skipping silently.
+   Committed messages only by default (`read_uncommitted` to change). A job stops at each
+   partition's end as it was when it started.
+9. **The tidb source** takes the kafka source's params nested (`kafka`), its codec picked by
+   `protocol` (`canal-json`, needing `enable-tidb-extension=true` for the commit TS, or `simple`).
+   The snapshot reads at `@@tidb_current_ts` of a transaction begun for it, with `tidb_snapshot`, in
+   keyset pages by primary key (`page_rows`), each row's position the table and its key; changes
+   committed at or before that TS are dropped. The changefeed must predate the snapshot and the
+   snapshot must end within `tidb_gc_life_time`; neither is checked. Only `tables`' changes are
+   kept; without `tables` there is no snapshot. Alternative: start the changefeed from the
+   snapshot's TS through TiCDC's API, which needs TiCDC's address and rights.
+10. **Values.** TiCDC's canal-json writes ENUM and SET as their numbers and binary columns as
+    ISO-8859-1 text; `canal_json` reads binary back to bytes and keeps ENUM and SET as text of the
+    number, and the tidb source turns them into labels from the schema it reads at start, as its
+    snapshot has them. BIT is a uint, TIME text, DATETIME and TIMESTAMP times in `time_zone` (UTC),
+    a bool encodes as tinyint `1`/`0`. The simple protocol is typed by the schema of its bootstrap
+    and DDL messages; a row before any (a source started between bootstraps) stays text without a
+    key, unless the tidb source seeded the schema from `information_schema`. TiCDC's Debezium
+    writes binary columns as base64 strings without a type that says so (they stay strings) and
+    decimals as doubles (floats); the `debezium` codec decodes Kafka Connect's `Decimal` and
+    Debezium's time types when a schema has them, and writes events without a schema.
+11. **Interop.** `test/sync/tidb.sh` starts PD, TiKV, TiDB and TiCDC v8.5.3 on `kafka.sh`'s network
+    (TiDB on `TIDB_CDC_PORT`, 29690) and `run.sh` starts it after Kafka, so CI's `sync-interop` runs
+    the tests: a Kafka-to-Kafka copy of 3,000 keyed messages killed at random points, on Kafka and
+    Redpanda; `generate`'s records through the sink and back through the source in `json`,
+    `canal_json` and `debezium`; and TiDB into PostgreSQL 17 through each protocol, a snapshot of
+    300 rows then 600 mixed writes (inserts, updates, deletes, key changes in transactions), killed
+    at random points, ending equal by checksum. TiCDC in Docker was feasible; its messages are kept
+    in `sync/kafka/testdata` for the codecs' unit tests.
+12. **Size**: about 2,300 lines of code (the codecs 1,040), 1,600 of unit tests against a fake
+    cluster and a fake TiDB (97.5% and 96.7% of statements without containers), 520 of interop; no
+    I185b.
 
 ### I186 Redis as a source and a sink
 

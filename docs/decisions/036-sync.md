@@ -359,6 +359,19 @@ The plan's I184 section lists them all; these change the record above.
 3. **The Kafka client is at least once**: not idempotent, so a produce retried after a lost answer
    may write its records twice, which sinks downstream of a Kafka source already tolerate.
 
+## Decisions made while building I185 (pending review)
+
+The plan's I185 section lists them all; these change the record above.
+
+1. **A source whose server could keep its readers' positions keeps them in the checkpoint
+   alone.** The kafka source commits no offsets to a consumer group, for visibility or otherwise;
+   it reports its lag in offsets instead (I189's `ReportLag`).
+2. **A codec may decode keys** (`synckafka.KeyDecoder`), as Debezium's key events hold the row's
+   key; a message's several records are one transaction, so the checkpoint never falls inside a
+   message.
+3. **A source that reads TiDB's changes from Kafka takes TiDB's snapshot at a TSO first**, and
+   drops the changes committed at or before it; the changefeed must predate the snapshot.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and

@@ -48,10 +48,10 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
-- [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
+- [Sync codecs](#sync-codecs): [`canal_json`](#sync-codecs-canal_json), [`csv`](#sync-codecs-csv), [`debezium`](#sync-codecs-debezium), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`raw`](#sync-codecs-raw), [`ticdc_simple`](#sync-codecs-ticdc_simple), [`wasm`](#sync-codecs-wasm)
 
 ## The config
 
@@ -6147,9 +6147,11 @@ after.
 | [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
 | [`http`](#sync-sources-http) | Records posted to a `sync_ingest` route, each request answered once every sink has them |
+| [`kafka`](#sync-sources-kafka) | Kafka and Redpanda topics, every partition, from offsets kept in the checkpoint (no consumer group), each message through a codec |
 | [`postgres`](#sync-sources-postgres) | PostgreSQL 13 to 17 through logical replication: a slot and a publication read with `pgoutput`, the LSN confirmed to the slot only once every sink has it |
 | [`redis`](#sync-sources-redis) | Redis and Valkey streams read with `XREAD` from the last entry IDs read, no consumer group |
 | [`s3`](#sync-sources-s3) | S3 and compatibles: the objects under a prefix in key order, read as lines in ranges, gunzipped by their `.gz`, resumed inside an object |
+| [`tidb`](#sync-sources-tidb) | TiDB: a snapshot at one timestamp over MySQL's protocol, then a TiCDC changefeed's changes from Kafka (canal-json or the simple protocol) after it |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
 
 <a id="sync-sources-clickhouse"></a>
@@ -6549,6 +6551,137 @@ In JSON:
 | `namespace` | string | `"http"` | The namespace of records that come without one. http when left out. |
 | `max_pending_requests` | integer, 0 to 1000000 | `1024` | The most requests taken and not yet answered for good, waiting to be read or for their records' acknowledgement; one past it is answered 503 at once. 1024 when left out or 0. |
 | `max_pending_bytes` | integer, 0 or more | `67108864` | The most bytes of bodies taken and not yet read into records; a body past it is answered 503 at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0. |
+
+<a id="sync-sources-kafka"></a>
+
+### `kafka`
+
+Also at `kafka`.
+
+Reads Kafka or Redpanda topics, every partition of each, from the offsets in the pipeline's checkpoint: no consumer group is joined or committed, so the checkpoint is the only cursor, saved with the rest once every sink has the records. Each message goes through a codec (raw when none is named; json, canal_json, debezium, ticdc_simple or any other) into records, whose key is the message's key unless the codec sets one, and whose namespace is the topic unless the codec or namespace sets one. In a job (mode once) it reads up to each partition's end as it was when the job started.
+
+Reads Kafka (3.x and later) and Redpanda topics through fit's own client of Kafka's protocol, on
+connections of the pipeline's own, never on a fib worker. Every partition of each of `topics` is
+read from the offset in the pipeline's checkpoint: no consumer group is joined, and no offset is
+committed to the brokers, so the checkpoint, saved once every sink has the records, is the only
+cursor, and a restart, a crash or `kill -9` reads on from it (at least once: what came after the
+last checkpoint is read again). A partition the checkpoint does not hold starts at `start`
+(`earliest` by default) when the pipeline has none, at its earliest otherwise; partitions added to
+a topic are found within a minute. A checkpoint's offset that retention has deleted stops the
+pipeline (`offset_reset: "error"`) unless `offset_reset` says to go on from the earliest or latest.
+
+Each message goes through `codec` into records, `raw` when none is named (the value as bytes in
+`after.value`); `json`, `canal_json` (Canal's and TiCDC's canal-json), `debezium` (Debezium's and
+TiCDC's), `ticdc_simple` (TiCDC's simple protocol) or a WASM codec read the formats. A record's key
+is the message's (Debezium's key events decoded) unless the codec gives one, its namespace the topic
+unless the codec or `namespace` does, and its commit time the message's timestamp unless the codec
+has one. Several records of one message are a transaction, so the checkpoint never falls inside a
+message. A message with a null value is a delete of its key (`tombstones: "delete"`), or nothing
+(`"skip"`). A value the codec refuses becomes a message record holding the `value` and the `error`.
+Only committed messages are read, unless `read_uncommitted`. The source reports how many offsets it
+is behind its partitions' high watermarks as its lag.
+
+In a job (`mode: "once"`) the source stops at each partition's end as it was when it started.
+**Test connection** reads the topics' metadata. TLS, when `tls` is set, is required and verified;
+SASL PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512 authenticate.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-from-kafka {
+		source kafka {
+			brokers kafka-1:9093 kafka-2:9093
+			topics shop.orders
+			tls true
+			ca_file /etc/fit/kafka-ca.pem
+			sasl SCRAM-SHA-512
+			username fit
+			password_env KAFKA_PASSWORD
+			codec debezium
+			tombstones skip
+		}
+		sinks search { sink elasticsearch { urls https://es:9200 } }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-from-kafka
+      source:
+        module: kafka
+        params:
+          brokers:
+            - kafka-1:9093
+            - kafka-2:9093
+          topics:
+            - shop.orders
+          tls: true
+          ca_file: /etc/fit/kafka-ca.pem
+          sasl: SCRAM-SHA-512
+          username: fit
+          password_env: KAFKA_PASSWORD
+          codec:
+            module: debezium
+          tombstones: skip
+      sinks:
+        - name: search
+          sink:
+            module: elasticsearch
+            params:
+              urls:
+                - https://es:9200
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-from-kafka",
+        "source": {"module": "kafka", "params": {
+          "brokers": ["kafka-1:9093", "kafka-2:9093"], "topics": ["shop.orders"],
+          "tls": true, "ca_file": "/etc/fit/kafka-ca.pem",
+          "sasl": "SCRAM-SHA-512", "username": "fit", "password_env": "KAFKA_PASSWORD",
+          "codec": {"module": "debezium"}, "tombstones": "skip"}},
+        "sinks": [{"name": "search", "sink": {"module": "elasticsearch", "params": {"urls": ["https://es:9200"]}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `brokers` | list of string |  | Required. The bootstrap brokers, host:port each; the others are found from them. |
+| `client_id` | string | `"fit-sync"` | The client ID the brokers see, in their logs and quotas. fit-sync when left out. |
+| `tls` | boolean |  | Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the brokers' certificates must have; each broker's host when left out. |
+| `sasl` | string: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512` |  | The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out. |
+| `username` | string |  | The SASL user. |
+| `password_env` | string |  | The environment variable holding the SASL password, read when the pipeline loads. |
+| `timeout` | duration | `"30s"` | How long connecting, each answer beyond the fetch's wait, and the retries of a leader that moved may take. 30s when left out or 0. |
+| `topics` | list of string |  | Required. The topics read, every partition of each; partitions added to them are found within a minute and read from their start. |
+| `codec` | [codec](#sync codecs) |  | What makes records of a message's value: raw when left out, a message record holding it as after's value. |
+| `namespace` | string |  | The records' namespace. The codec's (canal_json's db.table, say), or the topic, when left out. |
+| `start` | string: `earliest`, `latest` | `"earliest"` | Where a partition the checkpoint does not hold starts, when the pipeline has no checkpoint: earliest, the oldest message kept; latest, after the newest, reading only what comes after. A partition found later, or missing from a checkpoint, starts at its earliest. earliest when left out. |
+| `offset_reset` | string: `error`, `earliest`, `latest` | `"error"` | What happens when the checkpoint's offset of a partition is no longer in its log, its messages deleted by retention before they were read: error, the pipeline fails and says so, for a person to decide; earliest or latest, it goes on from there, the messages between lost. error when left out. |
+| `tombstones` | string: `delete`, `skip` | `"delete"` | What a message with a null value is: delete, a delete record of the message's key, as a compacted topic means it; skip, nothing, as after a Debezium delete event. delete when left out. |
+| `read_uncommitted` | boolean |  | Read transactional producers' messages before they commit, and those of aborted transactions; otherwise only committed ones, up to the last stable offset. |
+| `max_wait` | duration | `"500ms"` | How long a broker holds a fetch waiting for messages. 500ms when left out or 0. |
+| `partition_max_bytes` | integer, 0 or more | `1048576` | The most bytes a fetch reads of a partition, though a partition's first batch comes whole. 1048576 when left out or 0. |
 
 <a id="sync-sources-mongo"></a>
 
@@ -7067,6 +7200,135 @@ In JSON:
 | `range_bytes` | integer, 0 to 67108864 | `8388608` | How many bytes of an object one request reads; an object is read in such ranges, so it never needs to be held whole. 8 MiB when left out or 0. |
 | `max_line_bytes` | integer, 0 to 67108864 | `1048576` | The longest line, in bytes: a longer one is cut there, its rest skipped, and counted. 1 MiB when left out or 0. |
 
+<a id="sync-sources-tidb"></a>
+
+### `tidb`
+
+Reads TiDB: first a snapshot of tables over MySQL's protocol, all at one TiDB timestamp (tidb_snapshot), in pages by primary key, then the changes a TiCDC changefeed writes to Kafka in canal-json or the simple protocol, read by the kafka source from offsets in the checkpoint, those committed at or before the snapshot's timestamp left out. The changefeed must have started at or before the snapshot, and the topic must keep its messages since. Records carry their commit TS as their transaction and commit time.
+
+Reads TiDB: a snapshot of `tables` over MySQL's protocol, then the changes a TiCDC changefeed writes
+to Kafka after it, so that a pipeline starts with every row and goes on with every change. TiDB as a
+sink is the `mysql` sink.
+
+When the pipeline has no checkpoint (`snapshot: "initial"`), the source takes TiDB's current
+timestamp (TSO) and reads each table at it (`tidb_snapshot`), in pages of `page_rows` by primary key,
+each row an insert whose position is the table and its key, so that a snapshot interrupted reads on
+after its last key. Then the kafka source (`kafka`, its params as the `kafka` source's, without
+`codec`) reads the changefeed's topic from its `start`, or from the checkpoint's offsets, and the
+changes committed at or before the snapshot's timestamp are left out. The changefeed must exist
+before the snapshot is taken (its start-ts at or before it) and the topic must keep its messages
+since; the snapshot must finish within TiDB's GC life time (`tidb_gc_life_time`), or it fails and
+starts again.
+
+`protocol` is the changefeed's: `canal-json`, created with `enable-tidb-extension=true` so that each
+row carries its commit TS, or `simple`. A change's transaction is its commit TS and its commit time
+the TS's physical time; its key the primary key (canal-json's `pkNames`, the simple protocol's
+schema). The tables' schemas are read when the source starts: canal-json's ENUM and SET numbers
+become their labels, as the snapshot reads them, and the simple protocol's rows decode before the
+changefeed's next bootstrap message. Only the changes of `tables` are kept, every table's when it is
+left out (with no snapshot). Values: integers, decimals, floats, strings, bytes, dates, DATETIME and
+TIMESTAMP as times (in UTC, and `time_zone` for the changefeed's), TIME as text, JSON, BIT as a uint.
+
+**Test connection** logs in to TiDB with `SELECT 1` and reads the Kafka topics' metadata.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines tidb-to-pg {
+		source tidb {
+			address tidb:4000
+			username fit_sync
+			password_env TIDB_PASSWORD
+			tables shop.orders shop.order_items
+			protocol canal-json
+			kafka { brokers kafka-1:9092; topics ticdc-shop }
+		}
+		sinks pg {
+			sink postgres {
+				address pg:5432
+				user fit
+				password_env PG_PASSWORD
+				database replica
+			}
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: tidb-to-pg
+      source:
+        module: tidb
+        params:
+          address: tidb:4000
+          username: fit_sync
+          password_env: TIDB_PASSWORD
+          tables:
+            - shop.orders
+            - shop.order_items
+          protocol: canal-json
+          kafka:
+            brokers:
+              - kafka-1:9092
+            topics:
+              - ticdc-shop
+      sinks:
+        - name: pg
+          sink:
+            module: postgres
+            params:
+              address: pg:5432
+              user: fit
+              password_env: PG_PASSWORD
+              database: replica
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "tidb-to-pg",
+        "source": {"module": "tidb", "params": {
+          "address": "tidb:4000", "username": "fit_sync", "password_env": "TIDB_PASSWORD",
+          "tables": ["shop.orders", "shop.order_items"], "protocol": "canal-json",
+          "kafka": {"brokers": ["kafka-1:9092"], "topics": ["ticdc-shop"]}}},
+        "sinks": [{"name": "pg", "sink": {"module": "postgres", "params": {
+          "address": "pg:5432", "user": "fit", "password_env": "PG_PASSWORD", "database": "replica"}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:4000"` | TiDB's MySQL host and port, for the snapshot and the tables' schemas. 127.0.0.1:4000 when left out. |
+| `username` | string |  | The user to log in as; it needs SELECT on the tables. root when left out. |
+| `password_env` | string |  | The environment variable holding the password, read when the pipeline loads; none when left out. |
+| `tls` | boolean |  | Connect over TLS, required and verified against the system's roots or ca_file's. |
+| `ca_file` | string |  | A PEM file of the certificates TiDB's is checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name TiDB's certificate must have; address's host when left out. |
+| `timeout` | duration | `"60s"` | How long connecting and each statement of the snapshot may take. 60s when left out or 0. |
+| `tables` | list of string |  | The tables, as db.table, the snapshot reads and the changes are kept of; each needs a primary key. Every table the changefeed writes, with no snapshot, when left out. |
+| `snapshot` | string: `initial`, `never` | `"initial"` | What a pipeline without a checkpoint does first: initial, read tables at a timestamp, then the changes after it; never, only the changes, from the kafka source's start. initial when left out; it needs tables. |
+| `page_rows` | integer, 0 to 100000 | `1000` | The rows one SELECT of the snapshot reads. 1000 when left out or 0. |
+| `protocol` | string: `canal-json`, `simple` | `"canal-json"` | The changefeed's protocol: canal-json (with enable-tidb-extension=true, for the commit TS) or simple. canal-json when left out. |
+| `time_zone` | string | `"UTC"` | The changefeed's time-zone, in which it writes DATETIME values (and canal-json TIMESTAMP ones). UTC when left out. |
+| `kafka` | [object](#sync-sources-kafka) |  | Required. Where the changefeed writes: the kafka source's params (brokers, topics, TLS, SASL, start), without codec, which protocol picks. |
+
 <a id="sync-sources-wasm"></a>
 
 ### `wasm`
@@ -7161,6 +7423,7 @@ since what came after the checkpoint is written again after a crash.
 | [`elasticsearch`](#sync-sinks-elasticsearch) | Elasticsearch and OpenSearch, with `_bulk`: documents by `_id` from the key, per-item errors, 429s waited out |
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`http`](#sync-sinks-http) | Batches posted as NDJSON or a JSON array, with headers, authentication and an idempotency key, retried on 5xx and timeouts |
+| [`kafka`](#sync-sinks-kafka) | Kafka and Redpanda: a message per record, keyed by its key to the partition Java's partitioner gives, the value by a codec, deletes as tombstones, batched and compressed, acknowledged by all in-sync replicas |
 | [`mysql`](#sync-sinks-mysql) | MySQL, MariaDB and TiDB: upserts (`INSERT ... ON DUPLICATE KEY UPDATE`) and deletes by key, multi-row statements per table, each source transaction as one of the server's |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`postgres`](#sync-sinks-postgres) | PostgreSQL: upserts with `INSERT ... ON CONFLICT DO UPDATE` and deletes by key, batched per table, large runs copied with `COPY` and merged, each batch or each source transaction in one transaction |
@@ -7561,6 +7824,155 @@ In JSON:
 | `server_name` | string |  | The name the endpoint's certificate must have, and the TLS server name sent; the URL's host when left out. |
 | `timeout` | duration | `"30s"` | How long one request may take, from connecting to the end of its answer; one that takes longer is tried again. 30s when left out or 0. |
 | `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one request's body; a batch larger is sent in several, in order, and a record larger alone fails for good. 8 MiB when left out or 0. |
+
+<a id="sync-sinks-kafka"></a>
+
+### `kafka`
+
+Produces records to Kafka or Redpanda: each a message of the topic its namespace names (or topic's template), its key the record's key (a string or bytes as they are, any other key as plain JSON), its value what the codec makes of it (raw when none is named), and a delete a tombstone; a key goes to the partition the Java client's partitioner gives it, so a key's messages stay in order in one partition. A batch's messages go out together, a record batch per partition, compressed, acknowledged by every in-sync replica by default. Delivery is at least once: a batch written again after a crash, or a produce whose answer was lost, writes its messages again.
+
+Produces records to Kafka (3.x and later) and Redpanda through fit's own client of Kafka's
+protocol, on connections of the sink's own, never on a fib worker. A record goes to the topic
+`topic` names, `{namespace}` by default (a `route` transform can map namespaces to topics first);
+with `create_topics`, a topic that does not exist is created when a record first goes to it.
+
+The message's key is the record's key: a string or bytes as they are, any other key (a map of
+columns) as plain JSON, `{"id":1}`; its value is what `codec` makes of the record, `raw` by default
+(after's `value` field as it is, so a Kafka-to-Kafka copy is byte for byte, or the record's
+canonical JSON when it has none), and a delete with a key is a tombstone, a null value
+(`deletes: "tombstone"`), which a compacted topic takes as the key gone. A keyed message goes to the
+partition the Java client's partitioner (murmur2) gives its key, so a key's messages stay in order in
+one partition and land where Java producers would put them; messages without a key go to one
+partition per batch, round the partitions batch by batch. Its timestamp is the record's commit time.
+
+A batch's messages are sent together, a record batch per partition of at most `max_batch_bytes`,
+compressed (`lz4` by default; `none`, `gzip`, `snappy`, `zstd`), acknowledged by every in-sync replica
+(`acks: "all"`). Leaders that move are followed. A partition the brokers refuse fails the batch from
+its first record not written, which the pipeline's `retry` writes again; a message too large for the
+topic fails its record for good, and `on_error` takes it. Delivery is at least once: the producer is
+not idempotent, so a batch written again after a crash, or a produce whose answer was lost, writes
+its messages again. **Test connection** reads the cluster's metadata, and the topic's when `topic` is
+fixed and none is to be created.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-kafka {
+		source postgres {
+			address db:5432
+			user repl
+			password_env PG_PASSWORD
+			slot fit
+			publication fit_pub
+			database shop
+		}
+		sinks kafka {
+			sink kafka {
+				brokers kafka-1:9093
+				tls true
+				sasl SCRAM-SHA-512
+				username fit
+				password_env KAFKA_PASSWORD
+				topic cdc.{namespace}
+				codec debezium
+				compression zstd
+				create_topics { partitions 6; replication_factor 3 }
+			}
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-to-kafka
+      source:
+        module: postgres
+        params:
+          address: db:5432
+          user: repl
+          password_env: PG_PASSWORD
+          slot: fit
+          publication: fit_pub
+          database: shop
+      sinks:
+        - name: kafka
+          sink:
+            module: kafka
+            params:
+              brokers:
+                - kafka-1:9093
+              tls: true
+              sasl: SCRAM-SHA-512
+              username: fit
+              password_env: KAFKA_PASSWORD
+              topic: cdc.{namespace}
+              codec:
+                module: debezium
+              compression: zstd
+              create_topics:
+                partitions: 6
+                replication_factor: 3
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-to-kafka",
+        "source": {"module": "postgres", "params": {"address": "db:5432", "user": "repl", "password_env": "PG_PASSWORD",
+          "slot": "fit", "publication": "fit_pub", "database": "shop"}},
+        "sinks": [{"name": "kafka", "sink": {"module": "kafka", "params": {
+          "brokers": ["kafka-1:9093"], "tls": true, "sasl": "SCRAM-SHA-512", "username": "fit", "password_env": "KAFKA_PASSWORD",
+          "topic": "cdc.{namespace}", "codec": {"module": "debezium"}, "compression": "zstd",
+          "create_topics": {"partitions": 6, "replication_factor": 3}}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `brokers` | list of string |  | Required. The bootstrap brokers, host:port each; the others are found from them. |
+| `client_id` | string | `"fit-sync"` | The client ID the brokers see, in their logs and quotas. fit-sync when left out. |
+| `tls` | boolean |  | Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the brokers' certificates must have; each broker's host when left out. |
+| `sasl` | string: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512` |  | The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out. |
+| `username` | string |  | The SASL user. |
+| `password_env` | string |  | The environment variable holding the SASL password, read when the pipeline loads. |
+| `timeout` | duration | `"30s"` | How long connecting, each answer, and the retries of a leader that moved may take. 30s when left out or 0. |
+| `topic` | string | `"{namespace}"` | The topic a record goes to: text with {namespace}, the record's namespace (a route transform can map namespaces to topics first). A record whose topic is not a name Kafka takes fails. {namespace} when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes a message's value of a record: raw when left out, after's value field as it is, or the record's canonical JSON when it has none; json for the row as plain JSON (form plain) or the whole record (form record); canal_json or debezium for those formats. |
+| `deletes` | string: `tombstone`, `encode` | `"tombstone"` | What a delete with a key is: tombstone, a message of the key with a null value, which a compacted topic takes as the key gone and the source kafka reads back as a delete; encode, a message of what the codec makes of it. tombstone when left out. |
+| `acks` | string: `all`, `leader`, `none` | `"all"` | Who acknowledges a batch: all, every in-sync replica (min.insync.replicas of them at least); leader, the partition's leader alone, so a leader lost before its followers copy the batch loses it; none, no one, the batch counted as written once sent. all when left out. |
+| `compression` | string: `none`, `gzip`, `snappy`, `lz4`, `zstd` | `"lz4"` | How record batches are compressed. zstd needs Kafka 2.1 or later. lz4 when left out. |
+| `compression_level` | integer, 0 to 22 |  | The codec's level: gzip 1 to 9, zstd 1 to 22; the codec's default when left out or 0. |
+| `max_batch_bytes` | integer, 0 or more | `1048576` | The most bytes, keys and values before compression, of one record batch to a partition; a sink batch with more for a partition sends several, in order. Keep it below the topic's max.message.bytes. 1048576 when left out or 0. |
+| `create_topics` | [object](#synckafka-topiccreate) |  | Create a topic that does not exist when a record first goes to it, with these settings; a record for a missing topic fails when left out. |
+
+<a id="synckafka-topiccreate"></a>
+
+### `create_topics` in `kafka`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `partitions` | integer, 0 or more |  | The topic's partitions; the brokers' num.partitions when left out or 0. |
+| `replication_factor` | integer, 0 or more |  | The copies of each partition; the brokers' default.replication.factor when left out or 0. |
+| `configs` | object of string |  | The topic's configs, as cleanup.policy compact or retention.ms. |
 
 <a id="sync-sinks-memory"></a>
 
@@ -8630,10 +9042,24 @@ gives it one. A line a codec refuses still becomes a record: `after` holds the `
 
 | Module | What it does |
 | --- | --- |
+| [`canal_json`](#sync-codecs-canal_json) | Canal's JSON, as Canal and TiCDC write it: row changes of db.table typed by `mysqlType`, keyed by `pkNames`, with TiCDC's commit TS; written too |
 | [`csv`](#sync-codecs-csv) | A row of comma-separated values, named by `columns`, read and written |
+| [`debezium`](#sync-codecs-debezium) | Debezium's change events, typed by their schema when they have one, keyed by Debezium's key events; written without a schema |
 | [`json`](#sync-codecs-json) | A JSON object as a row (`plain`), or a whole record in its canonical JSON (`record`) |
 | [`line`](#sync-codecs-line) | A line as a message record's `after.line`, and back |
+| [`raw`](#sync-codecs-raw) | A message's bytes as they are, in `after.value`, and back, for a byte-for-byte copy |
+| [`ticdc_simple`](#sync-codecs-ticdc_simple) | TiCDC's simple protocol: schemas kept from its bootstrap and DDL messages type the rows and give their keys; decoded only |
 | [`wasm`](#sync-codecs-wasm) | A WebAssembly plugin's `fit_sync_decode` and `fit_sync_encode`, for a format of your own |
+
+<a id="sync-codecs-canal_json"></a>
+
+### `canal_json`
+
+Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded, a record is a message of one row in the same form.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `time_zone` | string | `"UTC"` | The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the server's for Canal. UTC when left out. |
 
 <a id="sync-codecs-csv"></a>
 
@@ -8645,6 +9071,14 @@ A line is a row of comma-separated values, quoted as RFC 4180 has them: a messag
 | --- | --- | --- | --- |
 | `columns` | list of string |  | The columns' names, in order. Read, a row's values are named by them, and those past them c<n>, counting from 1; written, a record's fields of these names are written, a missing one empty. Left out, they are c1, c2 and so on read, and every field of the row written. |
 | `comma` | string | `","` | The separator, one character other than a quote or a line break. A comma when left out. |
+
+<a id="sync-codecs-debezium"></a>
+
+### `debezium`
+
+Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's key event, is the record's key. Encoded, a record is an event without a schema.
+
+It has no fields: `{}` turns it on.
 
 <a id="sync-codecs-json"></a>
 
@@ -8665,6 +9099,26 @@ A line is a message record whose after holds the line as a string, in the field 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `field` | string | `"line"` | The field of after that holds the line. line when left out. |
+
+<a id="sync-codecs-raw"></a>
+
+### `raw`
+
+A message's value as it is: a message record whose after holds it, as bytes, in the field field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON when it has none, so a Kafka topic copied through raw is copied byte for byte.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `field` | string | `"value"` | The field of after that holds the value. value when left out. |
+
+<a id="sync-codecs-ticdc_simple"></a>
+
+### `ticdc_simple`
+
+TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages, kept, types each row's values (binary columns from base64, ENUM and SET as their labels, TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source started after its bootstrap) keeps its values as text and has no key, until the next bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only decodes.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `time_zone` | string | `"UTC"` | The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry their own. UTC when left out. |
 
 <a id="sync-codecs-wasm"></a>
 

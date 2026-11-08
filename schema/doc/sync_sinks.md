@@ -8,6 +8,7 @@ since what came after the checkpoint is written again after a crash.
 | [`elasticsearch`](#sync-sinks-elasticsearch) | Elasticsearch and OpenSearch, with `_bulk`: documents by `_id` from the key, per-item errors, 429s waited out |
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`http`](#sync-sinks-http) | Batches posted as NDJSON or a JSON array, with headers, authentication and an idempotency key, retried on 5xx and timeouts |
+| [`kafka`](#sync-sinks-kafka) | Kafka and Redpanda: a message per record, keyed by its key to the partition Java's partitioner gives, the value by a codec, deletes as tombstones, batched and compressed, acknowledged by all in-sync replicas |
 | [`mysql`](#sync-sinks-mysql) | MySQL, MariaDB and TiDB: upserts (`INSERT ... ON DUPLICATE KEY UPDATE`) and deletes by key, multi-row statements per table, each source transaction as one of the server's |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`postgres`](#sync-sinks-postgres) | PostgreSQL: upserts with `INSERT ... ON CONFLICT DO UPDATE` and deletes by key, batched per table, large runs copied with `COPY` and merged, each batch or each source transaction in one transaction |

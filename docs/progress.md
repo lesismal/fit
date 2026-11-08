@@ -5810,6 +5810,37 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   pending review.
 
 
+### I185 Kafka as a source and a sink; TiDB through TiCDC — done
+
+- **Package `sync/kafka`** (`synckafka`), on I184's client: the source `kafka`, every partition of
+  its topics read from offsets in the checkpoint (no consumer group), each message through a codec,
+  a message's records one transaction, tombstones as deletes, partitions added found each minute,
+  `offset_reset`, read committed by default, a job stopping at the ends it started with, its lag in
+  offsets reported after each fetch (I189); the sink `kafka`, keyed messages to the partition the
+  Java client's murmur2 gives, topics from the namespace (`create_topics` to make them), values by a
+  codec, deletes as tombstones, record batches per partition bounded by `max_batch_bytes`,
+  compressed (`lz4`), `acks: "all"`, a message too large found and failed alone. Codecs: `raw`,
+  `canal_json` (Canal's and TiCDC's canal-json, read and written), `debezium` (with or without the
+  schema envelope, Kafka Connect's and Debezium's types, key events through the new `KeyDecoder`;
+  written without a schema) and `ticdc_simple` (typed by the schemas of its bootstrap and DDL
+  messages; decoded only). Both connectors are `Tester`s.
+- **Package `sync/tidb`** (`synctidb`): the source `tidb`, a snapshot of `tables` at one TSO with
+  `tidb_snapshot` in keyset pages, then the changefeed's changes through a nested kafka source, those
+  committed at or before the snapshot dropped; schemas read at start label canal-json's ENUM and SET
+  numbers and seed the simple codec. `syncmysql` exports `ConnParams` and `WireConfig` for it.
+- **Interop** (`test/sync/kafka_sync_test.go`, `tidb_test.go`, `tidb.sh`, `run.sh`): PD, TiKV, TiDB
+  and TiCDC v8.5.3 on Kafka's network; a Kafka-to-Kafka copy across random kills keeps each key's
+  order on Kafka 3.9 and Redpanda (3,000 messages, 3,076 written across 12 kills); `generate`'s
+  records through the sink and back through the source in `json`, `canal_json` and `debezium`; TiDB
+  into PostgreSQL 17 through canal-json and the simple protocol, a snapshot then a mixed load, killed
+  at random points, equal by checksum.
+- **Tests**: unit tests on a fake cluster and a fake TiDB, and the codecs against TiCDC's recorded
+  messages (`sync/kafka/testdata`): 97.5% (`sync/kafka`) and 96.7% (`sync/tidb`) of statements
+  without containers; under the race detector; staticcheck clean.
+- **Differs from the plan**: no group commit for visibility, lag reported instead; one codec per
+  source rather than per topic.
+- **Gaps**: the decisions in the plan's I185 section, pending review.
+
 ### I189 Metrics, logs and dead letters — done
 
 - **Runtime** (`sync/metrics.go`, `sync/deadletters.go`, small additions to `connector.go`,

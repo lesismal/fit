@@ -4132,6 +4132,27 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I185 Kafka 作为源与目标；经 TiCDC 的 TiDB — 已完成
+
+- **包 `sync/kafka`**（`synckafka`），基于 I184 的客户端：源 `kafka`，从检查点中的 offset 读取各 topic 的所有分区（不用消费组），
+  每条消息经编解码器变成记录，一条消息的记录为一个事务，墓碑为删除，每分钟发现新增分区，`offset_reset`，默认只读已提交消息，作业
+  在开始时的末尾处停止，每次拉取后按 offset 报告延迟（I189）；目标 `kafka`，带键消息按 Java 客户端的 murmur2 选分区，topic 取自
+  命名空间（`create_topics` 可创建），值由编解码器生成，删除写成墓碑，每分区的记录批次受 `max_batch_bytes` 限制、压缩（`lz4`）、
+  `acks: "all"`，过大的消息被找出并单独失败。编解码器：`raw`、`canal_json`（Canal 与 TiCDC 的 canal-json，可读可写）、`debezium`
+  （带或不带 schema 外壳，Kafka Connect 与 Debezium 的类型，经新增的 `KeyDecoder` 读取键事件；写出不带 schema）和 `ticdc_simple`
+  （按 bootstrap 与 DDL 消息中的表结构定型；只解码）。两个连接器都实现 `Tester`。
+- **包 `sync/tidb`**（`synctidb`）：源 `tidb`，在一个 TSO 上用 `tidb_snapshot` 按主键分页读取 `tables` 的快照，再经嵌套的 kafka 源读取
+  changefeed 的变更，丢弃提交 TS 不晚于快照的变更；启动时读取表结构，把 canal-json 的 ENUM 与 SET 数字换成标签，并预置 simple 编解码器。
+  `syncmysql` 为此导出 `ConnParams` 与 `WireConfig`。
+- **互通**（`test/sync/kafka_sync_test.go`、`tidb_test.go`、`tidb.sh`、`run.sh`）：在 Kafka 的网络上运行 PD、TiKV、TiDB 与 TiCDC
+  v8.5.3；Kafka 到 Kafka 的复制在随机杀进程后仍保持每个键的顺序，Kafka 3.9 与 Redpanda 均通过（3,000 条消息，12 次杀进程中写出
+  3,076 条）；`generate` 的记录以 `json`、`canal_json` 与 `debezium` 经目标写入再经源读回；TiDB 经 canal-json 与 simple 协议同步到
+  PostgreSQL 17，先快照后混合负载，随机位置杀进程，最终校验和相同。
+- **测试**：针对模拟集群与模拟 TiDB 的单元测试，编解码器用录下的 TiCDC 消息（`sync/kafka/testdata`）测试：不用容器时
+  `sync/kafka` 覆盖 97.5%、`sync/tidb` 覆盖 96.7% 的语句；通过竞态检测；staticcheck 无告警。
+- **与计划的不同**：不提交到消费组，改为报告延迟；每个源一个编解码器，而非每个 topic 一个。
+- **遗留**：计划 I185 一节中的决定，待审。
+
 ### I189 指标、日志与死信 — 已完成
 
 - **运行时**（`sync/metrics.go`、`sync/deadletters.go`，以及对 `connector.go`、`control.go`、`runtime.go`、`pipeline.go`、

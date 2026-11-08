@@ -6981,6 +6981,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "canal_json"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.codecs.canal_json"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "csv"
               }
             }
@@ -6989,6 +7005,22 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/sync.codecs.csv"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "debezium"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.codecs.debezium"
               }
             }
           }
@@ -7029,6 +7061,38 @@
           "if": {
             "properties": {
               "module": {
+                "const": "raw"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.codecs.raw"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "ticdc_simple"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.codecs.ticdc_simple"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "wasm"
               }
             }
@@ -7046,9 +7110,13 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "canal_json",
             "csv",
+            "debezium",
             "json",
             "line",
+            "raw",
+            "ticdc_simple",
             "wasm"
           ],
           "type": "string"
@@ -7060,6 +7128,17 @@
       "required": [
         "module"
       ],
+      "type": "object"
+    },
+    "sync.codecs.canal_json": {
+      "additionalProperties": false,
+      "properties": {
+        "time_zone": {
+          "default": "UTC",
+          "description": "The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the server's for Canal. UTC when left out.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "sync.codecs.csv": {
@@ -7078,6 +7157,11 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.codecs.debezium": {
+      "additionalProperties": false,
+      "properties": {},
       "type": "object"
     },
     "sync.codecs.json": {
@@ -7101,6 +7185,28 @@
         "field": {
           "default": "line",
           "description": "The field of after that holds the line. line when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "sync.codecs.raw": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "default": "value",
+          "description": "The field of after that holds the value. value when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "sync.codecs.ticdc_simple": {
+      "additionalProperties": false,
+      "properties": {
+        "time_zone": {
+          "default": "UTC",
+          "description": "The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry their own. UTC when left out.",
           "type": "string"
         }
       },
@@ -7220,6 +7326,22 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/sync.sinks.http"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "kafka"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.kafka"
               }
             }
           }
@@ -7362,6 +7484,7 @@
             "elasticsearch",
             "file",
             "http",
+            "kafka",
             "memory",
             "mongo",
             "mysql",
@@ -7717,6 +7840,126 @@
       },
       "required": [
         "url"
+      ],
+      "type": "object"
+    },
+    "sync.sinks.kafka": {
+      "additionalProperties": false,
+      "properties": {
+        "acks": {
+          "default": "all",
+          "description": "Who acknowledges a batch: all, every in-sync replica (min.insync.replicas of them at least); leader, the partition's leader alone, so a leader lost before its followers copy the batch loses it; none, no one, the batch counted as written once sent. all when left out.",
+          "enum": [
+            "all",
+            "leader",
+            "none"
+          ],
+          "type": "string"
+        },
+        "brokers": {
+          "description": "The bootstrap brokers, host:port each; the others are found from them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file.",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "fit-sync",
+          "description": "The client ID the brokers see, in their logs and quotas. fit-sync when left out.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a message's value of a record: raw when left out, after's value field as it is, or the record's canonical JSON when it has none; json for the row as plain JSON (form plain) or the whole record (form record); canal_json or debezium for those formats."
+        },
+        "compression": {
+          "default": "lz4",
+          "description": "How record batches are compressed. zstd needs Kafka 2.1 or later. lz4 when left out.",
+          "enum": [
+            "none",
+            "gzip",
+            "snappy",
+            "lz4",
+            "zstd"
+          ],
+          "type": "string"
+        },
+        "compression_level": {
+          "description": "The codec's level: gzip 1 to 9, zstd 1 to 22; the codec's default when left out or 0.",
+          "maximum": 22,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "create_topics": {
+          "$ref": "#/$defs/synckafka.TopicCreate",
+          "description": "Create a topic that does not exist when a record first goes to it, with these settings; a record for a missing topic fails when left out."
+        },
+        "deletes": {
+          "default": "tombstone",
+          "description": "What a delete with a key is: tombstone, a message of the key with a null value, which a compacted topic takes as the key gone and the source kafka reads back as a delete; encode, a message of what the codec makes of it. tombstone when left out.",
+          "enum": [
+            "tombstone",
+            "encode"
+          ],
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_batch_bytes": {
+          "default": 1048576,
+          "description": "The most bytes, keys and values before compression, of one record batch to a partition; a sink batch with more for a partition sends several, in order. Keep it below the topic's max.message.bytes. 1048576 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding the SASL password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "sasl": {
+          "description": "The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out.",
+          "enum": [
+            "PLAIN",
+            "SCRAM-SHA-256",
+            "SCRAM-SHA-512"
+          ],
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the brokers' certificates must have; each broker's host when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting, each answer, and the retries of a leader that moved may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "topic": {
+          "default": "{namespace}",
+          "description": "The topic a record goes to: text with {namespace}, the record's namespace (a route transform can map namespaces to topics first). A record whose topic is not a name Kafka takes fails. {namespace} when left out.",
+          "type": "string"
+        },
+        "username": {
+          "description": "The SASL user.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "brokers"
       ],
       "type": "object"
     },
@@ -8400,6 +8643,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "kafka"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.kafka"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "mongo"
               }
             }
@@ -8464,6 +8723,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "tidb"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.tidb"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "wasm"
               }
             }
@@ -8486,10 +8761,12 @@
             "file",
             "generate",
             "http",
+            "kafka",
             "mongo",
             "postgres",
             "redis",
             "s3",
+            "tidb",
             "wasm"
           ],
           "type": "string"
@@ -8872,6 +9149,130 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.sources.kafka": {
+      "additionalProperties": false,
+      "properties": {
+        "brokers": {
+          "description": "The bootstrap brokers, host:port each; the others are found from them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file.",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "fit-sync",
+          "description": "The client ID the brokers see, in their logs and quotas. fit-sync when left out.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a message's value: raw when left out, a message record holding it as after's value."
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_wait": {
+          "default": "500ms",
+          "description": "How long a broker holds a fetch waiting for messages. 500ms when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "The records' namespace. The codec's (canal_json's db.table, say), or the topic, when left out.",
+          "type": "string"
+        },
+        "offset_reset": {
+          "default": "error",
+          "description": "What happens when the checkpoint's offset of a partition is no longer in its log, its messages deleted by retention before they were read: error, the pipeline fails and says so, for a person to decide; earliest or latest, it goes on from there, the messages between lost. error when left out.",
+          "enum": [
+            "error",
+            "earliest",
+            "latest"
+          ],
+          "type": "string"
+        },
+        "partition_max_bytes": {
+          "default": 1048576,
+          "description": "The most bytes a fetch reads of a partition, though a partition's first batch comes whole. 1048576 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding the SASL password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "read_uncommitted": {
+          "description": "Read transactional producers' messages before they commit, and those of aborted transactions; otherwise only committed ones, up to the last stable offset.",
+          "type": "boolean"
+        },
+        "sasl": {
+          "description": "The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out.",
+          "enum": [
+            "PLAIN",
+            "SCRAM-SHA-256",
+            "SCRAM-SHA-512"
+          ],
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the brokers' certificates must have; each broker's host when left out.",
+          "type": "string"
+        },
+        "start": {
+          "default": "earliest",
+          "description": "Where a partition the checkpoint does not hold starts, when the pipeline has no checkpoint: earliest, the oldest message kept; latest, after the newest, reading only what comes after. A partition found later, or missing from a checkpoint, starts at its earliest. earliest when left out.",
+          "enum": [
+            "earliest",
+            "latest"
+          ],
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting, each answer beyond the fetch's wait, and the retries of a leader that moved may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "tombstones": {
+          "default": "delete",
+          "description": "What a message with a null value is: delete, a delete record of the message's key, as a compacted topic means it; skip, nothing, as after a Debezium delete event. delete when left out.",
+          "enum": [
+            "delete",
+            "skip"
+          ],
+          "type": "string"
+        },
+        "topics": {
+          "description": "The topics read, every partition of each; partitions added to them are found within a minute and read from their start.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "The SASL user.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "brokers",
+        "topics"
+      ],
       "type": "object"
     },
     "sync.sources.mongo": {
@@ -9321,6 +9722,95 @@
       },
       "required": [
         "bucket"
+      ],
+      "type": "object"
+    },
+    "sync.sources.tidb": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:4000",
+          "description": "TiDB's MySQL host and port, for the snapshot and the tables' schemas. 127.0.0.1:4000 when left out.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates TiDB's is checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it; needs tls and key_file.",
+          "type": "string"
+        },
+        "kafka": {
+          "$ref": "#/$defs/synckafka.Source",
+          "description": "Where the changefeed writes: the kafka source's params (brokers, topics, TLS, SASL, start), without codec, which protocol picks."
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "page_rows": {
+          "default": 1000,
+          "description": "The rows one SELECT of the snapshot reads. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password, read when the pipeline loads; none when left out.",
+          "type": "string"
+        },
+        "protocol": {
+          "default": "canal-json",
+          "description": "The changefeed's protocol: canal-json (with enable-tidb-extension=true, for the commit TS) or simple. canal-json when left out.",
+          "enum": [
+            "canal-json",
+            "simple"
+          ],
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name TiDB's certificate must have; address's host when left out.",
+          "type": "string"
+        },
+        "snapshot": {
+          "default": "initial",
+          "description": "What a pipeline without a checkpoint does first: initial, read tables at a timestamp, then the changes after it; never, only the changes, from the kafka source's start. initial when left out; it needs tables.",
+          "enum": [
+            "initial",
+            "never"
+          ],
+          "type": "string"
+        },
+        "tables": {
+          "description": "The tables, as db.table, the snapshot reads and the changes are kept of; each needs a primary key. Every table the changefeed writes, with no snapshot, when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "time_zone": {
+          "default": "UTC",
+          "description": "The changefeed's time-zone, in which it writes DATETIME values (and canal-json TIMESTAMP ones). UTC when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long connecting and each statement of the snapshot may take. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, required and verified against the system's roots or ca_file's.",
+          "type": "boolean"
+        },
+        "username": {
+          "description": "The user to log in as; it needs SELECT on the tables. root when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kafka"
       ],
       "type": "object"
     },
@@ -9835,6 +10325,153 @@
       "required": [
         "start"
       ],
+      "type": "object"
+    },
+    "synckafka.Source": {
+      "additionalProperties": false,
+      "properties": {
+        "brokers": {
+          "description": "The bootstrap brokers, host:port each; the others are found from them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file.",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "fit-sync",
+          "description": "The client ID the brokers see, in their logs and quotas. fit-sync when left out.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a message's value: raw when left out, a message record holding it as after's value."
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_wait": {
+          "default": "500ms",
+          "description": "How long a broker holds a fetch waiting for messages. 500ms when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "The records' namespace. The codec's (canal_json's db.table, say), or the topic, when left out.",
+          "type": "string"
+        },
+        "offset_reset": {
+          "default": "error",
+          "description": "What happens when the checkpoint's offset of a partition is no longer in its log, its messages deleted by retention before they were read: error, the pipeline fails and says so, for a person to decide; earliest or latest, it goes on from there, the messages between lost. error when left out.",
+          "enum": [
+            "error",
+            "earliest",
+            "latest"
+          ],
+          "type": "string"
+        },
+        "partition_max_bytes": {
+          "default": 1048576,
+          "description": "The most bytes a fetch reads of a partition, though a partition's first batch comes whole. 1048576 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding the SASL password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "read_uncommitted": {
+          "description": "Read transactional producers' messages before they commit, and those of aborted transactions; otherwise only committed ones, up to the last stable offset.",
+          "type": "boolean"
+        },
+        "sasl": {
+          "description": "The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out.",
+          "enum": [
+            "PLAIN",
+            "SCRAM-SHA-256",
+            "SCRAM-SHA-512"
+          ],
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the brokers' certificates must have; each broker's host when left out.",
+          "type": "string"
+        },
+        "start": {
+          "default": "earliest",
+          "description": "Where a partition the checkpoint does not hold starts, when the pipeline has no checkpoint: earliest, the oldest message kept; latest, after the newest, reading only what comes after. A partition found later, or missing from a checkpoint, starts at its earliest. earliest when left out.",
+          "enum": [
+            "earliest",
+            "latest"
+          ],
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting, each answer beyond the fetch's wait, and the retries of a leader that moved may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "tombstones": {
+          "default": "delete",
+          "description": "What a message with a null value is: delete, a delete record of the message's key, as a compacted topic means it; skip, nothing, as after a Debezium delete event. delete when left out.",
+          "enum": [
+            "delete",
+            "skip"
+          ],
+          "type": "string"
+        },
+        "topics": {
+          "description": "The topics read, every partition of each; partitions added to them are found within a minute and read from their start.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "The SASL user.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "brokers",
+        "topics"
+      ],
+      "type": "object"
+    },
+    "synckafka.TopicCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "configs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The topic's configs, as cleanup.policy compact or retention.ms.",
+          "type": "object"
+        },
+        "partitions": {
+          "description": "The topic's partitions; the brokers' num.partitions when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "replication_factor": {
+          "description": "The copies of each partition; the brokers' default.replication.factor when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "wasm.Property": {
