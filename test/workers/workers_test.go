@@ -216,6 +216,12 @@ var notCovered = map[string]string{
 	// handler/vod's TestNoWorkerBlocks holds the pool up and checks that
 	// ServeHTTP returns at once and the answer comes once the pool goes on.
 	"vod": "handler/vod's TestNoWorkerBlocks",
+	// It needs a running sync pipeline with an http source: the body is
+	// offered to the source without waiting and answered from the
+	// pipeline's goroutine or the timeout's timer. handler/syncingest's
+	// TestFullQueueAnswers503 holds the sink and checks that other routes
+	// are still answered.
+	"sync_ingest": "handler/syncingest's TestFullQueueAnswers503",
 }
 
 // handlerOf compiles a config of c's route and returns its handler.
