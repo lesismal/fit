@@ -331,7 +331,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | todo |
 | I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | todo |
 | I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | done |
-| I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | todo |
+| I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | done |
 | I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
 | I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | todo |
 | I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | done |
@@ -3883,6 +3883,64 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 - **完成标准**：与每个版本互通：多表变更、大事务、truncate、服务端重启；slot 的 `confirmed_flush_lsn` 从不超过目标已有的
   位置；`kill -9` fit 不丢任何事务。
 - **涉及**：`sync/postgres`、`test/sync`、`docs`。
+
+**待审阅的决定**（实现时做出，2026-11-08；在用户裁定前有效）：
+
+1. **位置。** 包 `sync/postgres`，与其他连接器一样命名为 `syncpostgres`，源在 `source*.go` 中，与 I180 的目标同包；注册
+   `sync.sources.postgres`。备选：每个方向一个包。
+2. **一条复制连接做全部事情。** 源以 `replication=database` 连接，在其上用简单查询协议执行目录查询（`SHOW wal_level`、
+   `pg_publication`、`pg_publication_tables`、`pg_class`、`pg_replication_slots`）和 `CREATE PUBLICATION`，然后执行
+   `CREATE_REPLICATION_SLOT` 和 `START_REPLICATION`；一次运行就是管道 goroutine 上的一条连接，任何错误后重新建立。
+   备选：再开一条普通连接用于目录查询和 slot 延迟。
+3. **`create`** 把不存在的 publication 建成 `FOR TABLE` `tables`（不用需要超级用户的 `FOR ALL TABLES`），把不存在的 slot
+   建成不带快照的；两者此后都不修改也不删除，因此移除的管道的 slot 由运维者删除（文档已说明）。不设 `create` 时两者都必须
+   已存在；已有的 publication 必须包含 `tables` 列出的每张表。备选：管道离开配置时删除 slot，或修改 publication 以匹配
+   `tables`。
+4. **启动时检查副本标识**：publication 发布 update 或 delete 时，`REPLICA IDENTITY NOTHING` 的表、或默认标识而没有主键的表
+   视为错误（于是管道像任何源错误一样重启并说明原因）。只发布 insert 的 publication 不需要键。备选：只告警，记录不带键。
+5. **键**取主键（从目录读取）；用 `REPLICA IDENTITY USING INDEX` 或没有主键时取标识的列（`FULL` 且无主键时为全部列）。键改变的
+   update 变成旧键的 delete 加新行的 insert，都在原事务中，使按键写入的目标不会两者都保留。备选：`before` 带旧键的 update，
+   交给目标处理。
+6. **未改变的 TOAST 值**（pgoutput 的 `u`）不放入 `after`，`REPLICA IDENTITY FULL` 时从 `before` 取；只更新给定字段的目标会
+   保留旧值。备选：用查询读取（与之后的写入有竞争）或让记录失败。
+7. **truncate** 变成每张表一条 `ddl` 记录，`after` 为 `{"statement": "TRUNCATE schema.table [RESTART IDENTITY]
+   [CASCADE]", "truncate": true}`，只报告不执行，与决定 036 对 DDL 的处理一致。备选：目标会执行的专门操作。
+8. **按类型 OID 解析 pgoutput 的文本值**：会话在启动时设置 `DateStyle ISO`、`TimeZone UTC`、`extra_float_digits 3`、
+   `bytea_output hex` 和 `IntervalStyle postgres`，因此格式已知。整数和 `oid` 为 int，浮点为 float（含 `NaN`、`Infinity`），
+   `numeric` 为 decimal，`bytea` 为 bytes，`json`/`jsonb` 为 JSON，`date` 为 date，`timestamp` 为 UTC 时间，`timestamptz`
+   为带服务器偏移的时间，这些类型的数组（含边界、嵌套、引号）为数组；`uuid` 以及其他类型（`time`、`interval`、`inet`、
+   枚举、范围、复合类型）、公元前日期、9999 年以后的年份和无穷值为服务器的文本，与 I177 的二进制值一致。不使用 pgoutput 的
+   `binary` 选项（14+）。备选：服务器支持时用二进制。
+9. **事务**：记录的 `Tx.ID` 是事务 xid 的十进制；源扣住一条记录，以便给最后一条标上 `Last`；只有最后一条带位置
+   `{"lsn": "X/Y"}`，即提交的结束 LSN，`START_REPLICATION` 从它恢复。提交在检查点之前的事务（slot 起点更早）被跳过。
+   没有本管道记录的事务不产生任何记录。
+10. **告诉 slot 的位置**：write、flush、apply 都是最后保存的检查点，在每次 `Confirm` 时、每个 `status_interval`（10s）
+    （无论是否变化，作为防止 `wal_sender_timeout` 的心跳）以及服务器要求时立即发送。**当交出的每个事务都已在检查点中时**，
+    告诉 slot 的是此前没有任何欠账的最新位置：没有记录的事务的结束位置、事务之外 keepalive 的位置；这样冷清的表不会让繁忙的
+    未发布表的 WAL 一直保留。这会告诉 slot 一个比检查点文件更靠后的位置，之所以安全是因为二者之间没有属于本管道的内容；
+    手工回拨的检查点不能早于 slot 的 `confirmed_flush_lsn`，文档已说明。备选：只告诉检查点，slot 保留 WAL 直到下一次
+    发布的变更（Debezium 不开心跳时的默认做法）。
+11. **流式传输**（`streaming: "auto"`）：PostgreSQL 14 起用协议 2 并开启 `streaming on`，13 用协议 1（`off` 保持协议 1）。
+    流式事务的消息保存在 `spool_dir`（默认系统临时目录）下各自的文件中，直到其 stream commit，再作为一个事务读回；stream
+    abort 删除该文件，子事务的 abort 按 xid 丢弃其变更；一次运行结束时删除留下的文件。其大小只受服务器上事务本身的限制。
+    不使用协议 3 和 4（两阶段、并行应用）。备选：关闭流式传输，由服务器溢写大事务并在提交时发送。
+12. **slot 的延迟**是服务器 WAL 末端（来自 `XLogData` 和 keepalive）与上次告诉 slot 的位置之间的 WAL；超过 `lag_warning`
+    （1 GiB）时记录一条警告，回落时记录一条 info；`Source.Lag` 留给 I189 的指标。备选：在第二条连接上查询
+    `pg_replication_slots`。
+13. **作业**（`mode: "once"`）读到启动时服务器的 WAL 末端（`IDENTIFY_SYSTEM`）为止，每次状态更新都请求 keepalive；有了
+    I179 后它将是快照的模式。
+14. **`Test`** 连接并检查 `wal_level`、publication、其各表的标识和 slot，不创建任何东西。
+15. **留给 I179 的接缝**：`prepare` 返回它创建的 slot（`setup.slot`，带一致点），创建时用 `SnapshotNothing`，I179 在此改为
+    请求导出快照；`Run` 中留有在 `START_REPLICATION` 之前执行快照的位置；位置是一个结构体，I179 在其中加入进度。
+16. **互通测试**（`test/sync/postgres_source_test.go`，`test/sync/postgres.sh` 启动的 PostgreSQL 13 到 17）：一个事务中跨两张表
+    的变更、键的改变、未改变的 TOAST 值、`REPLICA IDENTITY FULL`、truncate、带回滚 savepoint 的 30,000 行事务（在测试服务器
+    上用 `ALTER SYSTEM` 把 `logical_decoding_work_mem` 设为 64kB，使其在 14+ 上流式传输，由
+    `pg_stat_replication_slots.stream_txns` 验证，在 13 上溢写）；在任何检查点之前 `confirmed_flush_lsn` 不动，每个检查点时
+    恰好等于它；从检查点重启；写入未发布的表使 slot 前进；终止 walsender，并在有 `FIT_SYNC_PG_PREFIX`（现由 `postgres.sh`
+    导出）时用 `docker restart` 重启服务器，不丢任何东西；以及在写入 300 个事务的同时，把写往内存目标的管道在随机位置像
+    `kill -9` 那样杀掉，最终每一行都在。备选：测试自己的容器用于重启。
+17. **规模**：约 1,360 行代码、970 行单元测试（伪造的复制连接，无容器时覆盖包内 98.6% 的语句）和 510 行互通测试；没有剩余
+    工作，没有 I178b。
 
 ### I179 PostgreSQL 快照
 

@@ -9,6 +9,7 @@ after.
 | [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
 | [`http`](#sync-sources-http) | Records posted to a `sync_ingest` route, each request answered once every sink has them |
+| [`postgres`](#sync-sources-postgres) | PostgreSQL 13 to 17 through logical replication: a slot and a publication read with `pgoutput`, the LSN confirmed to the slot only once every sink has it |
 | [`redis`](#sync-sources-redis) | Redis and Valkey streams read with `XREAD` from the last entry IDs read, no consumer group |
 | [`s3`](#sync-sources-s3) | S3 and compatibles: the objects under a prefix in key order, read as lines in ranges, gunzipped by their `.gz`, resumed inside an object |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |

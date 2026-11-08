@@ -5881,6 +5881,40 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   `time`, `interval` and other types without a Go match come as text; pgoutput's messages and
   text values are I178's. Not run on Linux or under the whole suite by this item (left to the
   merge).
+### I178 PostgreSQL as a source — done
+
+- **Source `postgres`** (`sync/postgres`, package `syncpostgres`, `source*.go`): one replication
+  connection (`replication=database`) checks `wal_level`, the publication and its tables' replica
+  identities and primary keys, the slot (plugin `pgoutput`, this database), creating a missing
+  publication `FOR TABLE` the `tables` and a missing slot with `create`; then `START_REPLICATION`
+  with `pgoutput`, protocol 2 and streaming from PostgreSQL 14, protocol 1 on 13. Relation, begin,
+  commit, insert, update, delete and truncate messages become records a transaction at a time
+  (`Tx.ID` the xid, the position `{"lsn": ...}` on the last record, the commit's end), values typed
+  from pgoutput's text by type OID, keyed by the primary key or the replica identity; an update
+  changing the key is a delete and an insert; unchanged TOASTed values left out; a truncate a `ddl`
+  record. Streamed transactions are kept in a file under `spool_dir` until they commit, aborted
+  subtransactions dropped. The slot is told only saved checkpoints (`Confirm`), every
+  `status_interval` and at once when asked, and, while every transaction handed on is confirmed,
+  the latest position before which nothing is owed; its lag is logged past `lag_warning`. A job
+  stops at the WAL end at its start; `Test` checks without creating. Seam left for I179's snapshot.
+- **Tests**: unit tests against a fake replication connection (every message, streams with
+  subtransaction and whole aborts, the statuses sent, the catalog's refusals, malformed messages,
+  text values of every type and arrays), 98.6% of statements without containers, under the race
+  detector. Interop (`test/sync/postgres_source_test.go`) with PostgreSQL 13 to 17: changes across
+  tables, a changed key, an unchanged TOASTed value, `REPLICA IDENTITY FULL`, a truncate, a
+  30,000-row transaction with a savepoint rolled back, streamed on 14+ (checked by
+  `stream_txns`); `confirmed_flush_lsn` unmoved before a checkpoint and exactly at it; a restart
+  from a checkpoint; the walsender terminated and the server restarted (`docker restart`, with
+  `FIT_SYNC_PG_PREFIX`, now exported by `postgres.sh`); a pipeline killed at random points while
+  300 transactions are written, ending with every row; all six times in a row, and twice under the
+  race detector. Not run on Linux nor in the full suite (the merge's).
+- **Differs from the plan**: streamed transactions are spooled to disk in fit (the plan did not say
+  where they wait); the slot may be told positions past the checkpoint when nothing is owed before
+  them (decision 036's I178 note). About 1,360 lines of code, 970 of unit tests and 510 of
+  interop; no I178b.
+- **Gaps**: the decisions in the plan's I178 section, pending review. No snapshot (I179); no
+  `binary` pgoutput, no protocol 3 or 4 (two-phase, parallel apply); a streamed transaction's spool
+  has no bound of its own; the slot is never dropped by fit.
 ### I181 A MongoDB client: BSON and OP_MSG — done
 
 - **BSON** (`sync/mongo/wire`, package `mongowire`): `Raw` documents read in place (`Validate`,

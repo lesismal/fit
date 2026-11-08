@@ -6560,6 +6560,114 @@ upstreams:
           # # integer, 0 or more; default 67108864.
           # max_pending_bytes: 67108864
 
+        # # Or postgres, with every one of its params:
+        # # Follows PostgreSQL's changes (13 to 17, wal_level logical) through logical replication: a
+        # # slot and a publication, created when missing with create, read with pgoutput, large
+        # # transactions streamed and kept on disk until they commit. Inserts, updates, deletes and
+        # # truncates become records of db.table namespaces (schema.table), typed by the columns' types,
+        # # keyed by the primary key or the replica identity, whole transactions at a time. Its position
+        # # is the LSN at a transaction's end, confirmed to the slot only once every sink has it and the
+        # # checkpoint is saved, so the server keeps the WAL until then; the slot's lag is logged past
+        # # lag_warning.
+        # module: "postgres"
+        # params:
+          # # The server's host and port, the port 5432 when only a host is given. 127.0.0.1:5432 when
+          # # left out.
+          # # string; default "127.0.0.1:5432".
+          # address: "127.0.0.1:5432"
+
+          # # The user to connect as: one with the REPLICATION attribute (or a superuser), allowed to read
+          # # the published tables, and, with create, to create the publication.
+          # # string; required.
+          # user: ""
+
+          # # The environment variable holding the password, read when the pipeline loads; none when left
+          # # out.
+          # # string.
+          # password_env: ""
+
+          # # The database whose changes are read: a slot belongs to one database.
+          # # string; required.
+          # database: ""
+
+          # # TLS to the server: verify-full, the certificate and the host name checked against the
+          # # system's roots or ca_file's; verify-ca, the certificate alone; require, TLS unchecked;
+          # # disable, none. There is no prefer: a silent fall back to plain text is not offered.
+          # # verify-full when left out.
+          # # one of: disable, require, verify-ca, verify-full; default "verify-full".
+          # sslmode: "verify-full"
+
+          # # A PEM file of the certificates the server's is checked against, in place of the system's
+          # # roots.
+          # # string.
+          # ca_file: "/etc/fit/ca.pem"
+
+          # # A PEM file of a client certificate, presented to a server that asks for one; needs key_file.
+          # # string.
+          # cert_file: "/etc/fit/example.com.pem"
+
+          # # The PEM file of cert_file's private key.
+          # # string.
+          # key_file: "/etc/fit/example.com.key"
+
+          # # The name the server's certificate must have, and the TLS server name sent; address's host
+          # # when left out.
+          # # string.
+          # server_name: ""
+
+          # # SCRAM-SHA-256's channel binding to the TLS connection: prefer, when TLS is used and the
+          # # server offers it; require, fail without it; disable. prefer when left out.
+          # # one of: prefer, require, disable; default "prefer".
+          # channel_binding: "prefer"
+
+          # # How long connecting, TLS and authentication may take. 10s when left out or 0.
+          # # duration, as "1.5s" or "2m"; default "10s".
+          # connect_timeout: "10s"
+
+          # # The publication read: the tables whose changes come, and which operations. With create, made
+          # # FOR TABLE tables when it does not exist; it is never changed.
+          # # string; required.
+          # publication: ""
+
+          # # The logical replication slot read, of plugin pgoutput: lowercase letters, digits and
+          # # underscores. With create, made when it does not exist; it is never dropped: drop it
+          # # (pg_drop_replication_slot) when the pipeline is gone, or the server keeps its WAL for good.
+          # # string; required.
+          # slot: ""
+
+          # # The tables, schema.table or table (in public), the publication is made for with create; with
+          # # a publication that exists, each must be in it. Required with create.
+          # # list of string.
+          # tables: []
+
+          # # Create the publication and the slot when they do not exist, rather than fail. The slot is
+          # # made with no snapshot: changes come from its creation on.
+          # # boolean.
+          # create: true
+
+          # # Large transactions streamed by the server while they run (PostgreSQL 14 and later), kept in
+          # # files under spool_dir until they commit, rather than spilled by the server and sent at their
+          # # commit: auto, on servers that have it; off. auto when left out.
+          # # one of: auto, off; default "auto".
+          # streaming: "auto"
+
+          # # The directory streamed transactions are kept in until they commit or abort, a file each,
+          # # removed then. The system's temporary directory when left out.
+          # # string.
+          # spool_dir: ""
+
+          # # How often the source tells the server the position the sinks have, also when it has not
+          # # moved, which keeps the connection alive (below the server's wal_sender_timeout). 10s when
+          # # left out or 0.
+          # # duration, as "1.5s" or "2m"; default "10s".
+          # status_interval: "10s"
+
+          # # The slot's lag, in bytes of WAL between the server's end and the position confirmed, past
+          # # which a warning is logged: the WAL the server keeps for the pipeline. 1 GiB when left out or
+          # # 0.
+          # # integer, 0 or more; default 1073741824.
+          # lag_warning: 1073741824
+
         # # Or redis, with every one of its params:
         # # Reads Redis or Valkey streams with XREAD, from the entry IDs of the checkpoint, each entry a
         # # record: a message of its fields, or the record the sink redis wrote with form record. Its

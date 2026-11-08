@@ -7,6 +7,7 @@
 #   FIT_SYNC_PG         13=127.0.0.1:29513,14=127.0.0.1:29514,...
 #   FIT_SYNC_PG_CA_DIR  a directory with each server's CA as <version>.pem
 #   FIT_SYNC_PG_USER, FIT_SYNC_PG_PASSWORD
+#   FIT_SYNC_PG_PREFIX  the containers' prefix, for a test that restarts a server
 #
 # test/sync/run.sh sources it; alone it starts the servers and prints the
 # exports:
@@ -70,7 +71,7 @@ pg_env() {
 	for v in $PG_VERSIONS; do
 		addrs="$addrs${addrs:+,}$v=127.0.0.1:$((PG_PORT + v))"
 	done
-	echo "FIT_SYNC_PG=$addrs FIT_SYNC_PG_CA_DIR=$PG_CA_DIR FIT_SYNC_PG_USER=fit FIT_SYNC_PG_PASSWORD=$PG_PASSWORD"
+	echo "FIT_SYNC_PG=$addrs FIT_SYNC_PG_CA_DIR=$PG_CA_DIR FIT_SYNC_PG_USER=fit FIT_SYNC_PG_PASSWORD=$PG_PASSWORD FIT_SYNC_PG_PREFIX=$PG_PREFIX"
 }
 
 pg_names() {

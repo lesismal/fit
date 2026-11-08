@@ -1146,5 +1146,22 @@ window.FitSchemaZh = {
 "The objects read are those whose keys begin with it, as logs/2026/; every object of the bucket when left out. Keys ending in / (folders' markers) are skipped.": "读取键以它开头的对象，如 logs/2026/；不设置时读取存储桶中的所有对象。以 / 结尾的键（文件夹标记）被跳过。",
 "How long to wait, once every object listed is read, before listing again for keys past the last. 30s when left out or 0.": "列出的对象全部读完后，等待多久再次列出最后一个键之后的键。不设置或为 0 时为 30s。",
 "How many bytes of an object one request reads; an object is read in such ranges, so it never needs to be held whole. 8 MiB when left out or 0.": "一个请求读取对象的字节数；对象按这样的范围分段读取，因此无需整个保存在内存中。不设置或为 0 时为 8 MiB。",
-"The records' namespace. The object's key when left out.": "记录的命名空间。不设置时为对象的键。"
+"The records' namespace. The object's key when left out.": "记录的命名空间。不设置时为对象的键。",
+"The server's host and port, the port 5432 when only a host is given. 127.0.0.1:5432 when left out.": "服务器的主机和端口，只给主机时端口为 5432。不设置时为 127.0.0.1:5432。",
+"The user to connect as: one with the REPLICATION attribute (or a superuser), allowed to read the published tables, and, with create, to create the publication.": "连接所用的用户：须有 REPLICATION 属性（或为超级用户），能读取发布的表，设置 create 时还要能创建发布。",
+"The environment variable holding the password, read when the pipeline loads; none when left out.": "存放密码的环境变量，在管道加载时读取；不设置时不用密码。",
+"The database whose changes are read: a slot belongs to one database.": "读取其变更的数据库：一个槽属于一个数据库。",
+"TLS to the server: verify-full, the certificate and the host name checked against the system's roots or ca_file's; verify-ca, the certificate alone; require, TLS unchecked; disable, none. There is no prefer: a silent fall back to plain text is not offered. verify-full when left out.": "到服务器的 TLS：verify-full，按系统根证书或 ca_file 的证书校验证书和主机名；verify-ca，只校验证书；require，用 TLS 但不校验；disable，不用 TLS。没有 prefer：不提供悄悄退回明文的做法。不设置时为 verify-full。",
+"A PEM file of the certificates the server's is checked against, in place of the system's roots.": "一个 PEM 文件，存放用来校验服务器证书的证书，代替系统根证书。",
+"A PEM file of a client certificate, presented to a server that asks for one; needs key_file.": "一个存放客户端证书的 PEM 文件，在服务器要求时出示；需要 key_file。",
+"SCRAM-SHA-256's channel binding to the TLS connection: prefer, when TLS is used and the server offers it; require, fail without it; disable. prefer when left out.": "SCRAM-SHA-256 与 TLS 连接的通道绑定：prefer，在用 TLS 且服务器提供时使用；require，没有则失败；disable，不用。不设置时为 prefer。",
+"How long connecting, TLS and authentication may take. 10s when left out or 0.": "连接、TLS 握手和认证最多可用的时间。不设置或为 0 时为 10s。",
+"The publication read: the tables whose changes come, and which operations. With create, made FOR TABLE tables when it does not exist; it is never changed.": "读取的发布：决定哪些表的变更、哪些操作会传来。设置 create 时，不存在则以 FOR TABLE tables 创建；之后从不修改它。",
+"The logical replication slot read, of plugin pgoutput: lowercase letters, digits and underscores. With create, made when it does not exist; it is never dropped: drop it (pg_drop_replication_slot) when the pipeline is gone, or the server keeps its WAL for good.": "读取的逻辑复制槽，插件为 pgoutput：由小写字母、数字和下划线组成。设置 create 时，不存在则创建；从不删除它：管道不再使用时请删除它（pg_drop_replication_slot），否则服务器会一直保留它的 WAL。",
+"The tables, schema.table or table (in public), the publication is made for with create; with a publication that exists, each must be in it. Required with create.": "设置 create 时创建发布所针对的表，写作 schema.table 或 table（在 public 中）；发布已存在时，每张表都必须在其中。设置 create 时必填。",
+"Create the publication and the slot when they do not exist, rather than fail. The slot is made with no snapshot: changes come from its creation on.": "发布和槽不存在时创建它们，而不是失败。槽创建时不带快照：变更从它创建之时起传来。",
+"Large transactions streamed by the server while they run (PostgreSQL 14 and later), kept in files under spool_dir until they commit, rather than spilled by the server and sent at their commit: auto, on servers that have it; off. auto when left out.": "大事务在运行时就由服务器以流的方式发来（PostgreSQL 14 及以后），在提交前保存在 spool_dir 下的文件中，而不是由服务器溢写到磁盘、提交时才发送：auto，在支持的服务器上使用；off，不用。不设置时为 auto。",
+"The directory streamed transactions are kept in until they commit or abort, a file each, removed then. The system's temporary directory when left out.": "流式事务在提交或中止前保存所在的目录，每个事务一个文件，届时删除。不设置时为系统的临时目录。",
+"How often the source tells the server the position the sinks have, also when it has not moved, which keeps the connection alive (below the server's wal_sender_timeout). 10s when left out or 0.": "源把各输出端已有的位置告诉服务器的间隔，位置没变时也照样发送，以保持连接（须低于服务器的 wal_sender_timeout）。不设置或为 0 时为 10s。",
+"The slot's lag, in bytes of WAL between the server's end and the position confirmed, past which a warning is logged: the WAL the server keeps for the pipeline. 1 GiB when left out or 0.": "槽的滞后，即服务器 WAL 末端与已确认位置之间的字节数，超过它时记录一条警告：这是服务器为该管道保留的 WAL。不设置或为 0 时为 1 GiB。"
 };

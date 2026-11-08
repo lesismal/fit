@@ -48,7 +48,7 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
@@ -6128,6 +6128,7 @@ after.
 | [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
 | [`http`](#sync-sources-http) | Records posted to a `sync_ingest` route, each request answered once every sink has them |
+| [`postgres`](#sync-sources-postgres) | PostgreSQL 13 to 17 through logical replication: a slot and a publication read with `pgoutput`, the LSN confirmed to the slot only once every sink has it |
 | [`redis`](#sync-sources-redis) | Redis and Valkey streams read with `XREAD` from the last entry IDs read, no consumer group |
 | [`s3`](#sync-sources-s3) | S3 and compatibles: the objects under a prefix in key order, read as lines in ranges, gunzipped by their `.gz`, resumed inside an object |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
@@ -6529,6 +6530,149 @@ In JSON:
 | `namespace` | string | `"http"` | The namespace of records that come without one. http when left out. |
 | `max_pending_requests` | integer, 0 to 1000000 | `1024` | The most requests taken and not yet answered for good, waiting to be read or for their records' acknowledgement; one past it is answered 503 at once. 1024 when left out or 0. |
 | `max_pending_bytes` | integer, 0 or more | `67108864` | The most bytes of bodies taken and not yet read into records; a body past it is answered 503 at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0. |
+
+<a id="sync-sources-postgres"></a>
+
+### `postgres`
+
+Follows PostgreSQL's changes (13 to 17, wal_level logical) through logical replication: a slot and a publication, created when missing with create, read with pgoutput, large transactions streamed and kept on disk until they commit. Inserts, updates, deletes and truncates become records of db.table namespaces (schema.table), typed by the columns' types, keyed by the primary key or the replica identity, whole transactions at a time. Its position is the LSN at a transaction's end, confirmed to the slot only once every sink has it and the checkpoint is saved, so the server keeps the WAL until then; the slot's lag is logged past lag_warning.
+
+Follows a PostgreSQL database (13 to 17, `wal_level = logical`) as a logical replica: a
+`publication` names the tables and operations, a `slot` keeps the server's WAL until the source has
+confirmed it, and the stream is read with the built-in `pgoutput` plugin (protocol 1 on 13, 2 with
+streaming from 14). With `create`, a missing publication is made `FOR TABLE` the `tables`, and a
+missing slot is made with no snapshot, so changes come from its creation on; neither is changed or
+dropped later. Without `create`, both must exist: the slot of plugin `pgoutput` on `database`.
+
+Each insert, update and delete becomes a record of namespace `schema.table`; a truncate becomes a
+`ddl` record of each table whose `after` holds the `statement` and `truncate: true`. Values are typed
+by the columns' types: integers and `oid` as ints, `float4` and `float8` as floats, `numeric` as a
+decimal, `bool`, `bytea` as bytes, `json` and `jsonb` as JSON, `date` as a date, `timestamp` (UTC)
+and `timestamptz` as times, arrays of those as arrays; every other type (`time`, `interval`, `uuid`,
+`inet`, enums, ranges, ...) as the server's text. The key is the table's primary key, or, with
+`REPLICA IDENTITY USING INDEX` or without a primary key, the replica identity's columns. An update
+whose key changed comes as a delete of the old key and an insert of the new row. `before` holds the
+old row with `REPLICA IDENTITY FULL`, the old key's columns when the key changed, and nothing
+otherwise; a TOASTed value an update did not change is not sent by the server and is left out of
+`after` (taken from `before` with `REPLICA IDENTITY FULL`). A table of a publication that publishes
+updates or deletes must have a primary key or a replica identity, or the source refuses to start.
+
+Records come a transaction at a time, in commit order, with the transaction's ID (its xid), and
+the commit time. The position is the LSN at the end of a transaction's commit,
+`{"lsn": "16/B374D848"}`: the slot is told it, as its `confirmed_flush_lsn`, only once every sink
+has acknowledged the transaction and the checkpoint is saved, so a crash or `kill -9` replays from
+the checkpoint and loses nothing. While every transaction read is confirmed, the slot is told the
+server's latest position too, so that writes to tables not published do not hold the WAL. A
+checkpoint older than the slot's `confirmed_flush_lsn` starts at the slot's position: the server
+no longer has what is before it. Large transactions streamed by the server (PostgreSQL 14 and later,
+`streaming: "auto"`) are kept in a file under `spool_dir` until they commit, and only then become
+records; an aborted one, or an aborted subtransaction's changes, never do.
+
+`status_interval` (10s) is how often the server is told the position, which also keeps the
+connection alive. The slot's lag, the WAL between the server's end and the position confirmed, is
+logged as a warning past `lag_warning` (1 GiB): a stopped or slow pipeline makes the server keep
+WAL. Drop the slot (`SELECT pg_drop_replication_slot('...')`) when a pipeline is removed for good.
+
+The connection uses TLS with `sslmode` `verify-full` by default (`verify-ca`, `require`,
+`disable`; no `prefer`), checked against the system's roots or `ca_file`; `cert_file` and
+`key_file` for a client certificate; SCRAM-SHA-256 with channel binding when the server offers it
+(`channel_binding`); MD5 and cleartext passwords are refused. The user needs the `REPLICATION`
+attribute, `SELECT` on the tables, and, with `create`, the right to create the publication.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-out {
+		source postgres {
+			address db.internal:5432
+			user repl
+			password_env PG_REPL_PASSWORD
+			database shop
+			ca_file /etc/fit/pg-ca.pem
+			publication fit_orders
+			slot fit_orders
+			create true
+			tables public.orders public.order_items
+		}
+		sinks search { sink elasticsearch { urls https://es:9200 } }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-out
+      source:
+        module: postgres
+        params:
+          address: db.internal:5432
+          user: repl
+          password_env: PG_REPL_PASSWORD
+          database: shop
+          ca_file: /etc/fit/pg-ca.pem
+          publication: fit_orders
+          slot: fit_orders
+          create: true
+          tables:
+            - public.orders
+            - public.order_items
+      sinks:
+        - name: search
+          sink:
+            module: elasticsearch
+            params:
+              urls:
+                - https://es:9200
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-out",
+        "source": {"module": "postgres", "params": {
+          "address": "db.internal:5432", "user": "repl", "password_env": "PG_REPL_PASSWORD",
+          "database": "shop", "ca_file": "/etc/fit/pg-ca.pem",
+          "publication": "fit_orders", "slot": "fit_orders", "create": true,
+          "tables": ["public.orders", "public.order_items"]}},
+        "sinks": [{"name": "search", "sink": {"module": "elasticsearch", "params": {"urls": ["https://es:9200"]}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:5432"` | The server's host and port, the port 5432 when only a host is given. 127.0.0.1:5432 when left out. |
+| `user` | string |  | Required. The user to connect as: one with the REPLICATION attribute (or a superuser), allowed to read the published tables, and, with create, to create the publication. |
+| `password_env` | string |  | The environment variable holding the password, read when the pipeline loads; none when left out. |
+| `database` | string |  | Required. The database whose changes are read: a slot belongs to one database. |
+| `sslmode` | string: `disable`, `require`, `verify-ca`, `verify-full` | `"verify-full"` | TLS to the server: verify-full, the certificate and the host name checked against the system's roots or ca_file's; verify-ca, the certificate alone; require, TLS unchecked; disable, none. There is no prefer: a silent fall back to plain text is not offered. verify-full when left out. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots. |
+| `cert_file` | string |  | A PEM file of a client certificate, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; address's host when left out. |
+| `channel_binding` | string: `prefer`, `require`, `disable` | `"prefer"` | SCRAM-SHA-256's channel binding to the TLS connection: prefer, when TLS is used and the server offers it; require, fail without it; disable. prefer when left out. |
+| `connect_timeout` | duration | `"10s"` | How long connecting, TLS and authentication may take. 10s when left out or 0. |
+| `publication` | string |  | Required. The publication read: the tables whose changes come, and which operations. With create, made FOR TABLE tables when it does not exist; it is never changed. |
+| `slot` | string |  | Required. The logical replication slot read, of plugin pgoutput: lowercase letters, digits and underscores. With create, made when it does not exist; it is never dropped: drop it (pg_drop_replication_slot) when the pipeline is gone, or the server keeps its WAL for good. |
+| `tables` | list of string |  | The tables, schema.table or table (in public), the publication is made for with create; with a publication that exists, each must be in it. Required with create. |
+| `create` | boolean |  | Create the publication and the slot when they do not exist, rather than fail. The slot is made with no snapshot: changes come from its creation on. |
+| `streaming` | string: `auto`, `off` | `"auto"` | Large transactions streamed by the server while they run (PostgreSQL 14 and later), kept in files under spool_dir until they commit, rather than spilled by the server and sent at their commit: auto, on servers that have it; off. auto when left out. |
+| `spool_dir` | string |  | The directory streamed transactions are kept in until they commit or abort, a file each, removed then. The system's temporary directory when left out. |
+| `status_interval` | duration | `"10s"` | How often the source tells the server the position the sinks have, also when it has not moved, which keeps the connection alive (below the server's wal_sender_timeout). 10s when left out or 0. |
+| `lag_warning` | integer, 0 or more | `1073741824` | The slot's lag, in bytes of WAL between the server's end and the position confirmed, past which a warning is logged: the WAL the server keeps for the pipeline. 1 GiB when left out or 0. |
 
 <a id="sync-sources-redis"></a>
 

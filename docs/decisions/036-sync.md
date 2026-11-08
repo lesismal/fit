@@ -296,6 +296,18 @@ The plan's I177 section lists them all; these change the record above.
    `crypto/tls`'s view of the server's certificate. fib stays the way out for HTTP-based systems.
 2. **No `sslmode` that falls back silently**: `disable`, `require`, `verify-ca`, `verify-full` (the
    default); channel binding `prefer` by default.
+## Decisions made while building I178 (pending review)
+
+The plan's I178 section lists them all; this changes the record above.
+
+1. **A slot may be told more than the checkpoint, where nothing is owed.** "A source whose server
+   keeps data for its readers is told the position only once every sink has it" stands; besides
+   it, while every transaction the PostgreSQL source handed on is in the saved checkpoint, the slot
+   is told the latest position before which the server sent nothing for the pipeline (the end of a
+   transaction with no published change, a keepalive's position outside a transaction), so that
+   writes to tables not published do not make the server keep WAL until the next published change.
+   The checkpoint file keeps the last position with records; resuming from it is the same, since
+   nothing lies between.
 ## Decisions made while building I181 (pending review)
 
 The plan's I181 section lists them all; these change the record above.

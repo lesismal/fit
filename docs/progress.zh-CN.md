@@ -4181,6 +4181,27 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   没有 I177b。
 - **不足**：计划 I177 一节中的决策，待审查。没有 SASLprep；没有二进制 COPY；`time`、`interval` 等没有对应 Go 类型的值为文本；
   pgoutput 的消息和文本值属于 I178。本项没有在 Linux 上或整套测试中运行（留给合并时）。
+### I178 PostgreSQL 作为源 — 已完成
+
+- **源 `postgres`**（`sync/postgres`，包 `syncpostgres`，`source*.go`）：一条复制连接（`replication=database`）检查
+  `wal_level`、publication 及其各表的副本标识和主键、slot（插件 `pgoutput`、本数据库），设置 `create` 时把不存在的
+  publication 建成 `FOR TABLE` `tables`，并创建不存在的 slot；然后以 `pgoutput` 执行 `START_REPLICATION`，PostgreSQL 14 起
+  用协议 2 并流式传输，13 用协议 1。relation、begin、commit、insert、update、delete 和 truncate 消息按事务变成记录
+  （`Tx.ID` 为 xid，位置 `{"lsn": ...}` 在最后一条记录上，即提交的结束位置），值按类型 OID 从 pgoutput 的文本得到类型，
+  键为主键或副本标识；改变键的 update 变成 delete 加 insert；未改变的 TOAST 值不放入；truncate 为 `ddl` 记录。流式事务在
+  提交前保存在 `spool_dir` 下的文件中，回滚的子事务被丢弃。只把已保存的检查点告诉 slot（`Confirm`），每个
+  `status_interval` 以及服务器要求时立即发送；在交出的事务都已确认时，告诉它此前没有欠账的最新位置；延迟超过
+  `lag_warning` 时记录。作业读到启动时的 WAL 末端为止；`Test` 只检查不创建。为 I179 的快照留了接缝。
+- **测试**：针对伪造复制连接的单元测试（每种消息、含子事务与整体中止的流、发出的状态、目录检查的拒绝、畸形消息、各类型及
+  数组的文本值），不用容器覆盖 98.6% 的语句，在竞态检测下运行。互通测试（`test/sync/postgres_source_test.go`）针对
+  PostgreSQL 13 到 17：跨表变更、改变的键、未改变的 TOAST 值、`REPLICA IDENTITY FULL`、truncate、带回滚 savepoint 的
+  30,000 行事务，在 14+ 上流式传输（由 `stream_txns` 验证）；检查点之前 `confirmed_flush_lsn` 不动，检查点时恰好等于它；
+  从检查点重启；终止 walsender 并重启服务器（`docker restart`，需 `FIT_SYNC_PG_PREFIX`，现由 `postgres.sh` 导出）；写入
+  300 个事务时在随机位置杀掉管道，最终每一行都在；连续六次通过，竞态检测下两次。没有在 Linux 上或整套测试中运行（留给合并时）。
+- **与计划的差异**：流式事务由 fit 存到磁盘（计划没有说它们在哪里等待）；没有欠账时，可能告诉 slot 比检查点更靠后的位置
+  （决定 036 中 I178 的说明）。代码约 1,360 行，单元测试约 970 行，互通测试约 510 行；没有 I178b。
+- **不足**：计划 I178 一节中的决定，待审阅。没有快照（I179）；不用 `binary` 的 pgoutput，不用协议 3 或 4（两阶段、并行应用）；
+  流式事务的暂存文件没有自己的上限；fit 从不删除 slot。
 ### I181 MongoDB 客户端：BSON 与 OP_MSG — 已完成
 
 - **BSON**（`sync/mongo/wire`，包 `mongowire`）：`Raw` 文档原地读取（`Validate`、`Each`、`Lookup`、带类型的访问器），嵌套
