@@ -45,6 +45,7 @@ a config against it and more.
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
+- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
@@ -132,6 +133,7 @@ In JSON:
 | `streaming` | [object](#config-streaming) |  | fit's streaming role, beside the gateway on its engine: one media hub where a stream is published once, over RTMP, RTSP, SRT or WHIP, and played over any of them, HTTP-FLV and HLS too, each listener and handler with its media_auth policy. None when left out. |
 | `media_library` | list of [object](#config-medialibrary) |  | Named libraries of media files: directories scanned into a catalog of items, each a title with its renditions, audio, subtitles and poster, probed off fib's workers on a bounded file pool of the library's own, and read by the Admin API's /media/library. None when left out: no files are scanned or served. |
 | `sync` | [object](#config-sync) |  | fit's sync role: pipelines that read records from a source (a database's changes, files, a queue) and write them to sinks, each with a checkpoint saved only once every sink has acknowledged the records it covers, kept in state_dir. None when left out: no connections out and no state on disk. |
+| `bittorrent` | [object](#config-bittorrent) |  | fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on disk. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -300,7 +302,7 @@ Also at `webrtc.turn.tls.certificates[]`.
 
 ### `listeners[].access`
 
-Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`, `llm.hub.access`, `llm.node.access`, `llm.proxy.access`, `tunnel.hub.access`, `tunnel.proxy.access`, `webrtc.turn.access`, `webrtc.media.access`, `webrtc.proxy.access`, `streaming.access`.
+Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`, `llm.hub.access`, `llm.node.access`, `llm.proxy.access`, `tunnel.hub.access`, `tunnel.proxy.access`, `webrtc.turn.access`, `webrtc.media.access`, `webrtc.proxy.access`, `streaming.access`, `bittorrent.client.access`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -871,7 +873,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `level` | string: `debug`, `info`, `warn`, `error` | `"info"` | The least level written, of every logger levels and loggers do not set one for: debug, info, warn or error. info when left out. A change takes effect on reload. |
-| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server), sync (its pipelines) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
+| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server), sync (its pipelines), bittorrent (its roles) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
 | `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart. |
 | `format` | string: `line`, `text`, `json` | `"line"` | How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart. |
 | `time_zone` | string |  | The zone the time of every line is written in, and the zone a file's interval is rotated at: local (the default), utc, or an IANA zone name such as Asia/Shanghai. So 24h turns at local midnight by default, and at UTC midnight with utc. The zone database is embedded, so an IANA name works in a container without zoneinfo. A change takes effect on reload. |
@@ -2185,7 +2187,7 @@ In JSON:
 
 ### `llm.hub.console`
 
-Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.node.console`, `tunnel.proxy.console`.
+Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.node.console`, `tunnel.proxy.console`, `bittorrent.client.console`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -3829,6 +3831,158 @@ Also at `sync.pipelines[].dead_letter`.
 | `max_parallel` | integer, 0 to 256 | `4` | How many chunks of the source's snapshot are read at once, and how many writers each sink that can take writes at once (the memory sink, the database sinks) has, a record's key always going to the same writer, so that one key is never written out of order. A source that cannot split its snapshot is read whole, and a sink that cannot take writes at once has one writer. 4 when left out or 0. |
 | `schedule` | string |  | When the job starts again, in cron's five fields (minute, hour, day of the month, month, day of the week, as 0 3 * * * for 03:00 every day) or a descriptor (@hourly, @daily, @weekly, @monthly, @yearly), in time_zone. A run never overlaps one still going: times passing while a job runs are skipped. A job interrupted, by a crash or a restart, goes on at once; one finished waits for the next time. Without a schedule a job runs once, when its pipeline starts, and not again once finished. |
 | `time_zone` | string | `"UTC"` | The IANA time zone the schedule is in, as Asia/Shanghai, or Local for the host's. UTC when left out. Times a daylight saving change skips do not run; times it repeats run once. |
+
+<a id="bittorrent"></a>
+
+## BitTorrent
+
+fit's BitTorrent roles. `bittorrent.client` is a BitTorrent client that downloads and seeds on
+fit's own fib engine, beside the gateway: one port, `listen`, for TCP and UDP, which uTP, the DHT
+and UDP trackers share; v1, v2 and hybrid torrents from magnet links and .torrent files; MSE
+encryption (`prefer` by default), the DHT, peer exchange and uTP on by default, local service
+discovery off. The role is off unless the config sets it. Storage is read and written, and pieces
+are hashed, on the client's bounded disk pool (`disk_workers`, `disk_queue_bytes`), never on a fib
+worker; past `disk_queue_bytes` of received blocks waiting, the peers sending them are not read
+from until half is written.
+
+The torrents are kept in files under `data_dir`: `torrents.json`, the list (each torrent's source,
+directory, file priorities, and whether it is paused or sequential), `torrents/<id>.torrent`, its
+.torrent file (a magnet link's once its info has arrived), and `resume/<id>.resume`, its resume
+data, each written to a temporary file, synced and renamed. Changes to the list are saved at once,
+resume data at most every `save_interval` when pieces were verified, and everything when the role
+stops; a restart adds every torrent back with its resume data, so that what is on disk is not
+hashed again, unless a file's size or modification time changed. A state file that does not read,
+of a later version or larger than its bound keeps the role from starting, with the file named in
+the error, rather than being overwritten; a torrent whose own files do not read stays listed, with
+its error, until it is removed. Downloads go below `download_dir` (`<data_dir>/downloads` when left
+out), each torrent's paths made safe for the system, none leading out of it.
+
+A reload changes `limits`, `access`, `save_interval` and `console` in place, keeping the peers
+connected (but those over a lowered connection limit, and those the access now refuses); a change
+of `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers` or `disk_queue_bytes` makes
+a new client, the torrents saved from the old one and added to the new one without a check. A new
+`data_dir` starts from that directory's state, as a restart would. See
+[decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
+
+In a .conf file:
+
+```fit
+listener web :8080
+
+bittorrent {
+	client {
+		listen :6881
+		data_dir /var/lib/fit/bittorrent
+		download_dir /srv/downloads
+		encryption prefer
+		limits {
+			upload_rate 1048576
+			max_conns 200
+			seed_ratio 2
+			max_torrents 500
+		}
+		access { deny 10.0.0.0/8 }
+	}
+}
+
+route { handler respond { body fit } }
+```
+
+In YAML:
+
+```yaml
+listeners:
+  - name: web
+    address: :8080
+bittorrent:
+  client:
+    listen: :6881
+    data_dir: /var/lib/fit/bittorrent
+    download_dir: /srv/downloads
+    encryption: prefer
+    limits:
+      upload_rate: 1048576
+      max_conns: 200
+      seed_ratio: 2
+      max_torrents: 500
+    access:
+      deny:
+        - 10.0.0.0/8
+routes:
+  - handler:
+      module: respond
+      params:
+        body: fit
+```
+
+In JSON:
+
+```json
+{
+  "listeners": [{"name": "web", "address": ":8080"}],
+  "bittorrent": {
+    "client": {
+      "listen": ":6881",
+      "data_dir": "/var/lib/fit/bittorrent",
+      "download_dir": "/srv/downloads",
+      "encryption": "prefer",
+      "limits": {
+        "upload_rate": 1048576,
+        "max_conns": 200,
+        "seed_ratio": 2,
+        "max_torrents": 500
+      },
+      "access": {"deny": ["10.0.0.0/8"]}
+    }
+  },
+  "routes": [{"handler": {"module": "respond", "params": {"body": "fit"}}}]
+}
+```
+
+<a id="config-bittorrent"></a>
+
+### `bittorrent`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `client` | [object](#config-bittorrentclient) |  | Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP trackers), downloading and seeding torrents kept in data_dir across restarts. None when left out. |
+
+<a id="config-bittorrentclient"></a>
+
+### `bittorrent.client`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | Required. The host and port peers reach the client at, the same port for TCP and UDP (uTP, the DHT and UDP trackers share it), as in ":6881". Port 0 picks one free for both. A change makes a new client: the torrents are saved, the client closed, and the torrents added to the new one, resuming without a check. |
+| `data_dir` | string |  | Required. The directory the client's state is kept in: torrents.json, the list of torrents with their sources, directories, file priorities and whether they are paused; torrents/, their .torrent files; and resume/, their resume data, so that a restart resumes without hashing what is on disk again. Each file is written to a temporary file, synced and renamed into place. Made when missing. A state file that does not read, or is larger than its bound, keeps the role from starting, rather than being overwritten. A change makes a new client, which starts from the state in the new directory, as a restart would; the old directory is left as it was saved. |
+| `download_dir` | string |  | The directory torrents added from now on download into, each torrent's files below it, their names made safe for the system; no path of a torrent leads out of it. A torrent keeps the directory it was added with when this changes. <data_dir>/downloads when left out. |
+| `encryption` | string: `allow`, `prefer`, `require` | `"prefer"` | How peer connections use Message Stream Encryption: prefer dials with it and again in plaintext when a peer refuses, accepting both; allow dials in plaintext first, accepting both; require dials and accepts only encrypted connections. prefer when left out. A change makes a new client. |
+| `dht` | boolean | `true` | Find peers through the mainline DHT (BEP 5), bootstrapping from the public routers. On when left out. A change makes a new client. |
+| `pex` | boolean | `true` | Exchange peers with connected peers (BEP 11). On when left out. A change makes a new client. |
+| `utp` | boolean | `true` | Speak uTP (BEP 29) beside TCP: peers are dialed over uTP first, then TCP. On when left out. A change makes a new client. |
+| `lsd` | boolean |  | Find peers on the local network by local service discovery (BEP 14, IPv4 multicast). Off by default. A change makes a new client. |
+| `disk_workers` | integer, 0 to 64 |  | How many goroutines read and write the torrents' files and hash their pieces, which never happens on a fib worker. The number of CPUs, at most 8, when left out or 0. A change makes a new client. |
+| `disk_queue_bytes` | integer, 0 or more | `67108864` | The most bytes of received blocks waiting to be written: past it the client stops reading from the peers that sent them until half has been written, so that a slow disk slows the peers rather than growing memory. 64 MiB when left out or 0. A change makes a new client. |
+| `save_interval` | duration | `"5s"` | How often, at most, the state is saved when something changed: a piece verified, a torrent added, removed, paused or its metadata received. It is saved when the role stops too, and changes to the list of torrents are saved at once. 5s when left out. |
+| `limits` | [object](#config-bittorrentlimits) |  | The client's rates and connection, seeding and torrent limits. A change applies in place, keeping the peers connected, but those over a lowered connection limit. The defaults when left out. |
+| `access` | [object](#config-access) |  | The peer addresses the client deals with, deciding before the global access: a peer it refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and are not asked about. A change applies at once, closing the connected peers it now refuses. Every address when left out, unless the global access says otherwise. |
+| `console` | [object](#config-roleconsole) |  | The client's web pages; none when left out. |
+
+<a id="config-bittorrentlimits"></a>
+
+### `bittorrent.client.limits`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `upload_rate` | integer, 0 or more |  | The most bytes per second uploaded, payload of all torrents together. Unlimited when left out or 0. |
+| `download_rate` | integer, 0 or more |  | The most bytes per second downloaded, payload of all torrents together. Unlimited when left out or 0. |
+| `max_conns` | integer, 0 or more | `200` | The most peer connections of the client at once. 200 when left out or 0. |
+| `max_conns_per_torrent` | integer, 0 or more | `50` | The most peer connections of one torrent at once. 50 when left out or 0. |
+| `max_half_open` | integer, 0 or more | `32` | The most dials to peers in flight at once. 32 when left out or 0. |
+| `upload_slots` | integer, 0 or more | `4` | How many peers a torrent uploads to at once, beside one optimistic unchoke. 4 when left out or 0. |
+| `seed_ratio` | number, 0 or more |  | Pause a torrent once it has uploaded this many times its size since it was added or fit started. Seeds for ever when left out or 0. |
+| `seed_time` | duration |  | Pause a torrent once it has seeded this long since it was added or fit started. Seeds for ever when left out. |
+| `max_torrents` | integer, 0 to 100000 | `1000` | The most torrents the client holds, running or paused; one more is refused. Lowering it removes none. 1000 when left out or 0. |
 
 <a id="providers"></a>
 

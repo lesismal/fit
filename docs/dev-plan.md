@@ -364,7 +364,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 | **BitTorrent** | | | |
 | I196 | fib A75–A79 for the BitTorrent client: storage and hashing off fib's workers, fast resume, limits that change at run time, refusing peers by address, the client on the caller's engine | — | done |
-| I197 | The `bittorrent.client` role: config, the client on the shared engine, the state file in `data_dir`, restore and reload (decision 037) | I196 | todo |
+| I197 | The `bittorrent.client` role: config, the client on the shared engine, the state file in `data_dir`, restore and reload (decision 037) | I196 | done |
 | I198 | Adding torrents (magnet, file, URL, `watch_dir`), categories with a media library rescan, queueing, disk checks | I197 | todo |
 | I199 | `alt_speed` schedules, per-torrent limits, the role's `access`, `.p2p` and `.dat` blocklists in `access` for every module | I197 | todo |
 | I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | todo |
@@ -6469,6 +6469,70 @@ hash requests as a seed until it is wired in and tested.
   keeps peers; a `listen` change keeps torrents; slow-peer, cut-connection and disk-error tests;
   docs in both languages.
 - **Touches**: `bittorrent`, `app`, `config`, `schema`, `docs`.
+- **Done** 2026-11-09: package `bittorrent` (`role.go`, `state.go`, `api.go`), the role registered in
+  `app/standard`; config `bittorrent.client` (`config/bittorrent.go`) with its checks, its port in
+  the address clash check (TCP and UDP), the `bittorrent` logger; schema, reference, templates,
+  `schema-zh.js`; [BitTorrent](bittorrent.md) in both languages. The role consoles' code moved from
+  `tunnel/internal/common` to `app/roleconsole`, which the tunnel's roles and this one share. Tests:
+  the role through the app Manager, a download between two roles on loopback, a restart that has
+  every piece again with no read of the data (storage reads counted), a magnet link's .torrent saved
+  and restored from, a reload of limits keeping the peer and the client, a `listen` change keeping
+  the torrents (and a taken port bringing the old client back), a `data_dir` change, a cut seeder
+  replaced by another mid-download over a rate-limited (slow) link, access closing a connected peer,
+  a storage write error, a state directory that cannot be written, bad and oversized state files,
+  broken torrents kept listed, the API's refusals (bounds, bad input, a name leading out of
+  `download_dir`), the console's routes.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **The state is three kinds of files, not one**: `torrents.json` (the list), `torrents/<id>.torrent`
+   and `resume/<id>.resume`, each written to a temporary file, synced and renamed. Why: .torrent
+   files reach MiBs (v2 piece layers, many files) and resume data grows with pieces and files, so one
+   file would rewrite every torrent's bytes at each save; per-torrent files rewrite only what
+   changed. Alternatives: one bencoded or JSON file with everything; an embedded database.
+2. **A state file that does not read keeps the role from starting** (`ErrState`, the file in the
+   error; the rest of the config runs): JSON that does not parse, a later version, more than
+   100000 torrents, an ID twice or malformed, a relative directory, or past 64 MiB. Why: starting
+   empty would overwrite the list at the next save and lose every torrent. Alternative: rename the
+   bad file aside (`torrents.json.bad-<time>`) and start empty.
+3. **A torrent whose own files do not read stays listed** with its error (state `error`), saved,
+   until removed, while the others run; resume data that does not read is dropped and that torrent
+   checked in full. Alternative: drop such torrents with a log line.
+4. **`listen` and `data_dir` are required; `download_dir` defaults to `<data_dir>/downloads`.** Why:
+   a BitTorrent port is opened only where the config says; fib's `:6881` default is not taken
+   implicitly. Alternatives: `listen` defaulting to `:6881`; `download_dir` required.
+5. **`disk_queue_bytes`, not `disk_queue`**, after fit's `*_bytes` names; **`save_interval`**
+   (default 5s) is exposed. Changes to the list (add, remove, pause, resume, priorities,
+   sequential) are saved at once, in the API call; resume data by the saver when `ResumeGen` moved.
+6. **What makes a new client**: `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers`,
+   `disk_queue_bytes` (all read only by fib's `NewClient`), and `data_dir`. **A new `data_dir`
+   starts from that directory's state**, as a restart would, and the old one keeps what was saved.
+   Alternatives: carry the torrents over into the new directory; refuse the change.
+7. **A new client that cannot be made** (its port taken) **brings the old one back** on the old
+   config and the same torrents, and the reload reports the error; between the two the client is
+   down briefly. Alternative: probe the new port before closing the old client (the same port
+   cannot be probed while the old one holds it).
+8. **A torrent's ID** is its v1 info hash in hex, or its v2 hash truncated to 20 bytes, what fib's
+   `Client.Torrent` looks up.
+9. **A torrent paused by its seed limit is saved as paused**, so that a restart, where fib's upload
+   counters start again from zero, does not seed it again. Seed ratio and time count from when it
+   was added or fit started (fib's counters are not persisted). Alternative: keep upload and
+   download totals in the state (for I203's statistics).
+10. **Storage errors** (fib's `EventError`, which leaves the torrent running) are kept in the
+    torrent's status until a piece passes its check or it changes state, and logged once each;
+    `ErrResumeData` is only logged.
+11. **`max_torrents`** defaults to 1000 (at most 100000); lowering it removes none and refuses
+    adds; a state listing more than it is restored whole.
+12. **The role console's code moved to `app/roleconsole`**, shared with the tunnel's roles, rather
+    than copied; the console serves a read-only `GET /api/torrents` and `/api/torrents/<id>` until
+    I203/I204.
+13. **The role's `access` (A78) is in I197**, as the brief asked: the gate is set on every Apply and
+    `Client.Refilter` runs after it; I199 keeps the `.p2p`/`.dat` list formats.
+14. **Not configurable**: the peer ID prefix (fib's `-FB0001-`), trackers on or off, dials per
+    second, the DHT routers (public ones), preallocation.
+
+Open from it: fib's client queues events for `OnEvent` in a slice with no bound; fit's handler only
+takes a short lock, so the queue drains, but a bound belongs in fib (a fib request when it matters).
 
 ### I198 Adding torrents, categories and queueing
 

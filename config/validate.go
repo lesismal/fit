@@ -267,6 +267,7 @@ func (c *Config) Validate() Errors {
 	c.checkChannels(add)
 	c.checkMediaLibrary(add)
 	c.checkSync(add)
+	c.checkBitTorrent(add)
 	c.checkBinds(add)
 
 	if a := c.ACME; a != nil {
