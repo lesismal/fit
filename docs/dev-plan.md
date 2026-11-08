@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I196.
+Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -360,6 +360,20 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | I194 | Sync's documentation and examples | I190 | todo |
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
+| **BitTorrent** | | | |
+| I196 | fib A75–A79 for the BitTorrent client: storage and hashing off fib's workers, fast resume, limits that change at run time, refusing peers by address, the client on the caller's engine | — | done |
+| I197 | The `bittorrent.client` role: config, the client on the shared engine, the state file in `data_dir`, restore and reload (decision 037) | I196 | todo |
+| I198 | Adding torrents (magnet, file, URL, `watch_dir`), categories with a media library rescan, queueing, disk checks | I197 | todo |
+| I199 | `alt_speed` schedules, per-torrent limits, the role's `access`, `.p2p` and `.dat` blocklists in `access` for every module | I197 | todo |
+| I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | todo |
+| I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | todo |
+| I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | todo |
+| I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | todo |
+| I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | todo |
+| I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | todo |
+| I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
+| I207 | (second phase) A tracker store the cluster shares | I201 | todo |
+| I208 | (second phase) RSS auto-download | I198 | todo |
 
 ## M0, foundations
 
@@ -5271,3 +5285,173 @@ Made while planning; each stands until the user rules on it, and I163 writes the
 10. **Order:** core, transforms, WASM and files first (I163–I167), then the HTTP-based systems
     (I168–I171, cheap with fib's client), then the databases (I172–I183), then Kafka, Redis and S3,
     then operations. Agreed, or databases first?
+
+## BitTorrent: downloading and seeding, a tracker, publishing
+
+Planned 2026-11-08, [decision 037](decisions/037-bittorrent.md). fit gains BitTorrent on fib's
+`bittorrent` packages: a client role that downloads and seeds, a handler that plays a torrent's file
+while it downloads, a tracker role, and publishing a directory as torrents. fib's client first needs
+A75–A79 (I196): its disk I/O and hashing run on a fib worker today. The first phase is I196–I205;
+the second phase (I206–I208) is the cluster, a tracker store the cluster shares, and RSS. I198–I202
+can run in parallel once I197 is done, one worktree agent each.
+
+Principles, in the order they bind:
+
+- **Nothing blocks a worker** (rule 1): storage, hashing, `Reader` reads, building torrents and the
+  state file all run on bounded pools; a full pool holds the peer's reads.
+- **Bounded everything** (rule 11): torrents, connections (all, a torrent's, half-open), metadata
+  and .torrent sizes, URL downloads, a `watch_dir` scan, the event queue, `bt_stream` streams and
+  torrents added on the fly, and the disk a download may take.
+- **State in `data_dir`, restarts without hashing again** (A76); a reload changes limits in place
+  (A77) and makes a new client only when `listen` or the DHT and uTP switches change.
+- **One port on fit's shared engine** (A79), under the config's `access` (A78) and `limits`.
+
+### I196 fib A75–A79 for the BitTorrent client
+
+- **Why**: fib's client writes blocks, reads upload data and hashes pieces on the fib worker that
+  read the peer's message; it re-hashes everything at every start; its limits are fixed at
+  `NewClient`; it cannot refuse peers by address; it always makes an engine of its own.
+- **Do**: in fib, A75 (storage and hashing on a bounded pool, `HoldReads` while it is full), A76
+  (`Torrent.ResumeData`, `AddOptions.Resume`), A77 (`Client.SetLimits`, `Torrent.SetLimits`), A78
+  (`Config.Filter`, `Client.Refilter`), A79 (the client on the caller's engine); docs and decisions
+  pending review in fib's `docs/bittorrent*.md`; fit moves to the commit.
+- **Done when**: a test shows a slow storage never stalls another connection of the engine; a
+  restart with resume data completes without reading for a check; limits change without dropping
+  peers; a refused address cannot connect over TCP or uTP and is never dialed; two clients share an
+  engine and closing one leaves the other; fib's CI, race and Linux runs pass.
+- **Touches**: fib `bittorrent`, `bittorrent/peer`, `bittorrent/utp`, `bittorrent/dht`, maybe
+  `core`; fit `go.mod`, `docs/fib-api-requests*.md`.
+- **Done** 2026-11-08 at fib `1f1d2e7` (A75–A79 as built in
+  [fib-api-requests](fib-api-requests.md#a75-the-bittorrent-client-never-touches-storage-or-hashes-pieces-on-a-worker));
+  fit is on it. Four worktree agents, one per request (A78 and A79 together), merged by the main
+  session; merging A75 with A76 needed the resume plan and `ResumeData` to hold the storage through
+  A75's guard, and `TestResumeRejected` raced on Linux (fixed in the test). Verified: `go test
+  -race ./...` of fib on macOS, `./bittorrent/...` and `./core` on Linux (golang:1.27.3), vet for
+  FreeBSD and Windows.
+
+**Decisions pending review** (made while building it, 2026-11-08; the details, with alternatives, are in
+fib's [docs/bittorrent.md](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md#decisions-pending-review)):
+
+1. **A75**: one disk pool and one FIFO queue per client; `DiskWorkers` min(GOMAXPROCS, 8); only
+   received blocks count against the 64 MiB bound, which is soft (a block is never refused on a
+   worker; held connections resume at half); a write that finds its storage closed is dropped;
+   closing waits only for I/O under way; the initial check, web seed writes, `Reader` reads and the
+   `StorageOpener` stay off the pool (the opener runs on a worker when a magnet's info arrives).
+2. **A76**: the caller stores the blob; size and mtime are trusted; pieces not in the blob and
+   unfinished pieces are downloaded again; unusable data is an `EventError` wrapping
+   `ErrResumeData`; `ResumeGen` is the "save now" signal; `ResumeData` errs during a check.
+3. **A77**: a separate `Limits` type; zero keeps `Config`'s meaning; in `TorrentLimits` zero
+   inherits and negative is no limit; download tokens are spent at request time and not refunded on
+   cancel (about 1.5x overshoot for a couple of seconds); peers are closed least useful first.
+4. **A78**: one `netip.AddrPort` predicate; the UDP binding is not filtered (UDP trackers share
+   it), uTP and the DHT filter instead; `Refilter` is separate from setting a policy, so one fit
+   change can refilter many clients.
+5. **A79**: `Config.SharedEngine` rather than a second constructor; the engine must be running.
+
+Open from it: fib's docs say the client computes v2 piece layers after a hybrid magnet download,
+but `Torrent.computeLayers` is never called; a hybrid torrent from a magnet link cannot answer v2
+hash requests as a seed until it is wired in and tested.
+
+### I197 The `bittorrent.client` role
+
+- **Why**: the core every other item builds on.
+- **Do**: package `bittorrent` (fit's), the role `bittorrent.client` in the registry; config
+  (`listen`, `data_dir`, `download_dir`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `limits`,
+  `access`, `console`) with the defaults of decision 037; the client on the shared engine; the state
+  file (torrents, categories, priorities, .torrent files, resume data; temporary file, fsync,
+  rename, at most every few seconds and at stop); restore at start; reload in place; schema,
+  reference, `schema-zh.js`.
+- **Done when**: a torrent added survives a restart and resumes without a check; a reload of limits
+  keeps peers; a `listen` change keeps torrents; slow-peer, cut-connection and disk-error tests;
+  docs in both languages.
+- **Touches**: `bittorrent`, `app`, `config`, `schema`, `docs`.
+
+### I198 Adding torrents, categories and queueing
+
+- **Do**: magnet links, .torrent uploads, .torrent URLs (fit's HTTP client, size bound), a
+  `watch_dir` (.torrent and .magnet files, moved aside once added); categories with a directory,
+  rates, seed limits and an optional `media_library` rescanned on completion; `max_active_downloads`
+  and `max_active_seeds` with a queue; free space checked before and while downloading (medialib's
+  diskfree), pausing with an error when short; paths kept inside the category's directory.
+- **Done when**: each way of adding is tested, including bad and oversized input; a completed
+  download into a library's root appears in its catalog; the queue starts the next torrent when one
+  finishes.
+- **Touches**: `bittorrent`, `medialib`.
+
+### I199 Schedules, per-torrent limits and blocklists
+
+- **Do**: `alt_speed` with weekly schedules; per-category and per-torrent limits (A77); `access` on
+  the role through A78 with `Client.Refilter` after a policy change; `access`'s list files read
+  eMule `.p2p` and `.dat` as well, told apart by content, for every module.
+- **Done when**: a schedule switching rates is tested with a fake clock; a deny list closes a
+  connected peer; `.p2p` and `.dat` files parse (ranges, comments, levels, bad lines) in `access`'s
+  tests.
+- **Touches**: `bittorrent`, `access`, `config`, `docs`.
+
+### I200 `bt_stream`: playing a file while it downloads
+
+- **Do**: a route handler serving a torrent's file by info hash and file index or path, with ranges;
+  the ranges asked for are read through fib's `Reader` on a bounded pool, so they download first;
+  `max_streams`, read timeouts, readahead bound; `media_auth`; adding by magnet link on the fly,
+  bounded in number and disk, expiring after their last stream.
+- **Done when**: a browser-style range request of a file still downloading is answered once its
+  pieces arrive; slow readers, cut connections and a full stream bound are tested.
+- **Touches**: `bittorrent`, `handler`, `mediaauth`.
+
+### I201 The `bittorrent.tracker` role
+
+- **Do**: `bt_tracker` (HTTP announce and scrape) and the role's UDP `listen` on fib's
+  `tracker.Server`; public or private (passkeys from `media_auth`), an allow-list of info hashes
+  (inline or files, watched); statistics.
+- **Done when**: libtorrent and anacrolix announce to it over HTTP and UDP; a private tracker refuses
+  unknown passkeys and info hashes; bounds tested.
+- **Touches**: `bittorrent`, `handler`, `mediaauth`.
+
+### I202 Publishing a directory as torrents
+
+- **Do**: `publish` blocks: a directory built into hybrid torrents (each file, or the directory
+  whole) and seeded; `.torrent` and magnet links through a route; web seeds at fit's static files;
+  rebuilt when the disk changes, as static files follow it; hashing on a bounded pool.
+- **Done when**: a client downloads a published file from fit's seed alone and from the web seed
+  alone; a changed file gets a new torrent and the old one stops.
+- **Touches**: `bittorrent`, `handler`.
+
+### I203 Admin API, events, `fit bt`, metrics
+
+- **Do**: `/bittorrent/torrents` (list, add, upload, pause, resume, remove, recheck, priorities,
+  limits), its files, peers and trackers, `/bittorrent/tracker/stats`, an SSE stream of events;
+  `fit bt add|ls|info|pause|resume|rm|limit`; metrics by category and state; events in fit's log.
+- **Touches**: `bittorrent`, `admin`, `cli`, `observe`.
+
+### I204 The workbench's BitTorrent pages
+
+- **Do**: torrents (rate, progress, ETA, ratio), a torrent's files, peers, trackers and pieces, the
+  add dialog, the tracker's page, publishing's page; schema descriptions in `schema-zh.js`; the AI
+  assistant's functions (list, add, pause) under its approval rules.
+- **Touches**: `app/workbench`, `assistant`.
+
+### I205 Interop, failure tests, benchmarks and docs
+
+- **Do**: fit's client and tracker against libtorrent and anacrolix in containers (fib's interop
+  way); disk full, restarts and reloads under load; throughput and CPU on the benchmark host only;
+  `docs/bittorrent*.md`, the reference, an example in fit-examples.
+- **Touches**: `test`, `bench`, `docs`, fit-examples.
+
+### I206 (second phase) The cluster and BitTorrent distribution
+
+- **Do**: the cluster's view of its members' torrents and rates; spreading a large file (an LLM
+  node's model, a release) to a group of members over a private torrent with direct peers, beside
+  rollouts.
+- **Touches**: `cluster`, `bittorrent`, `app/workbench`.
+
+### I207 (second phase) A tracker store the cluster shares
+
+- **Do**: a `tracker.Store` on fit's shared storage (redis, etcd), so trackers on several members
+  answer as one.
+- **Touches**: `bittorrent`, fit's shared storage.
+
+### I208 (second phase) RSS auto-download
+
+- **Do**: feeds polled on a schedule, rules (patterns, categories, size bounds, episode
+  deduplication) adding torrents; bounded feeds, items and history.
+- **Touches**: `bittorrent`.
