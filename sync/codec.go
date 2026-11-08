@@ -97,6 +97,22 @@ func (c *JSONCodec) Decode(data []byte, emit func(*Record)) error {
 	return nil
 }
 
+// ParsePlain reads one plain JSON value, as a search index's document, by the
+// json codec's rules: objects keep their members' order, a number without a
+// fraction or exponent is an int, or a uint past int64, any other a float, or
+// a decimal past float64.
+func ParsePlain(data []byte) (Value, error) {
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	v, err := plainValue(d)
+	if err == nil {
+		if _, end := d.Token(); end != io.EOF {
+			err = errors.New("more than one JSON value")
+		}
+	}
+	return v, err
+}
+
 // plainValue reads a plain JSON value, keeping objects' members in order.
 func plainValue(d *json.Decoder) (Value, error) {
 	tok, err := d.Token()

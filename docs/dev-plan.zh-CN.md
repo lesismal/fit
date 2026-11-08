@@ -322,7 +322,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I166 | 文件作为源（跟踪与通配，跟随切割与截断，多行合并）与目标（经 I155 的文件写入器） | I163, I155 | done |
 | I167 | 像 DataX 一样的批处理作业：分块并行快照、按块续传，`fit sync run --once`，调度 | I163 | done |
 | I168 | Elasticsearch 与 OpenSearch 作为目标：按 `_id` 的 `_bulk`、逐条错误、遇 429 退避 | I163 | done |
-| I169 | Elasticsearch 与 OpenSearch 作为源：point in time 快照，之后按游标轮询 | I168 | todo |
+| I169 | Elasticsearch 与 OpenSearch 作为源：point in time 快照，之后按游标轮询 | I168 | done |
 | I170 | ClickHouse 作为目标（去重令牌、`ReplacingMergeTree`）与源（按游标轮询） | I163 | todo |
 | I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | todo |
 | I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | todo |
@@ -3531,6 +3531,51 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   这一点，并建议使用软删除字段。
 - **完成标准**：一百万个文档的快照完整且有序；轮询能拿到快照期间写入的更新，包括游标值相同的多条；重启后无缺口地继续。
 - **涉及**：`sync/elasticsearch`、`test/sync`、`docs`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前一直有效）：
+
+1. **记录是什么。** 源 `elasticsearch` 与目标同包，声明同样的连接参数并共用 `Conn`。记录的命名空间是文档自己的索引
+   （`_index`，不是模式），键是 map `{"_id": "<id>"}`：目标的 `DocID` 会把它还原成同一个 `_id`，SQL 目标把它当作名为 `_id`
+   的列；`after` 是按 `json` 编解码器的规则读出的 `_source`（`fitsync.ParsePlain`，现已导出）：没有小数部分的数字为 int，超出
+   int64 为 uint，否则为 float，超出 float64 为 decimal；日期保持字符串。备选：用 `DocID` 的逆运算把 `_id` 解成键的各字段，
+   这会把并非 fit 生成的 `_id` 拆错；或按映射给值定类型。
+2. **操作。** 快照记录是 insert（没有 Debezium 的 `r` 那样的 `read` 操作）；轮询到的文档 `_version` 为 1 时是 insert，否则是
+   update。日期游标的值是轮询记录的提交时间；快照记录没有。备选：为快照读取加一种新操作或标记。
+3. **快照**经 point in time 用 `search_after` 读取：Elasticsearch 按 `_shard_doc`，OpenSearch 按 `_id`，因为 OpenSearch 没有
+   `_shard_doc`（"No mapping found for [_shard_doc]"），且在 `/_search/point_in_time` 打开时间点、应答 `pit_id`。没有时间点的
+   集群被拒绝（Elasticsearch 7.12 之前、OpenSearch 2.4 之前）；流不回退到 scroll。OpenSearch 拒绝为不匹配任何索引的模式打开
+   时间点，源在 `_count` 为 0 时把它当作空。备选：对旧集群用 scroll。
+4. **流的快照中断后从头开始。** 快照记录除最后一条外不带位置，最后一条记下轮询从哪里开始（没有游标时为 `done`）：新时间点
+   的排序值与旧的不同，且源停止时会关闭它的时间点。`snapshot: "cursor"` 改为按游标读取已有文档，可续读，适合大到不宜重读的
+   索引。备选：把时间点的 id 放进位置，重启后试用，但这只在 `keep_alive` 之内、且源没有关闭它时才有效。
+5. **轮询不按 `_id` 排序。** Elasticsearch 8 拒绝按 `_id` 排序（"Fielddata access on the _id field is disallowed"），所以轮询
+   只按游标排序，取 `gte` 最后值，并排除在该值已读过的 `_id`（`must_not` `ids`），每页都是一次新的搜索。位置是
+   `{"cursor": <最后的排序值>, "ids": [...], "past": bool}`，放在每页最后一条记录上；同一值超过 1,000 个 `_id` 时，该值其余的
+   文档立即经时间点读完（`past`，之后用 `gt`）。备选：要求开启 `indices.id_field_data.enabled`，或在参数中给一个唯一的决胜字段。
+6. **迟到的写入不补读。** 没有重叠窗口：轮询越过检查点之后，游标值写成不高于检查点的文档会被漏掉，文档已说明。对 date 或
+   date_nanos 游标，轮询落后集群自己的 `now` `delay`（2s，按整秒）（查询中的日期运算，与 fit 的时钟无关），以覆盖刷新间隔；
+   数字和 keyword 没有延迟。备选：重读检查点以下的一个窗口，按 `_id` 和 `_version` 去掉已读的，代价是窗口占用的内存。
+7. **轮询从哪里开始**：游标的最大值（在 `delay` 之内），在快照打开时间点之前查询，所以快照期间的改动在快照之后被轮询到；
+   该值上的文档会再读一次（幂等的目标会合并）。`snapshot: "none"` 不读快照，直接从那里开始。游标的类型取自
+   `_mapping/field`，各索引须是同一类型（date、date_nanos、数字、keyword），在还没有索引映射它时会再次查询；date_nanos 的值以
+   带六位小数的 epoch 毫秒发送。
+8. **删除**：`deleted_field`，一个顶层字段，其值（不为 null 或 false）把文档变成对其 `_id` 的删除，文档作为 `before`，快照和
+   轮询都如此。备选：交给变换，但目前没有变换能由字段生成删除。
+9. **作业的分块**：只在没有游标时分块（有游标的作业像流一样读，下一次作业只读改动），按 `_count` 每 `chunk_documents`
+   （100,000）个文档一块，最多 1,024 块（`index.max_slices_per_scroll`）。每块是 `_id` 哈希的一个切片，经 scroll 而非时间点读取：
+   Elasticsearch 拒绝按 `_id` 切分时间点（单分片索引上报 "cannot slice on [_id] when using [point-in-time]"），而它默认的切片是
+   Lucene 文档编号的区间，换一个时间点就不同，续跑的作业会读到别的文档。中断的块从头重读（块内没有位置）；每块是其 scroll
+   打开时的样子，而不是整个作业的同一时刻。备选：按游标区间分块，这需要游标的百分位数。
+10. **边界。** 每页 `page_size`（1,000，最多 10,000）个文档，应答超过 `max_page_bytes`（8 MiB）时减半，低于其四分之一时再加倍；
+    超过客户端 64 MiB 上限的应答以一半数量重新请求（scroll 的下一页不能改大小：它失败，之后的搜索减半）。429 像目标那样等过去；
+    超时或有分片失败的应答使本次运行失败，从检查点重新开始，而不是留下缺口。时间点和 scroll 在结束或失败时关闭，各有 10s
+    的超时；流最多打开一个，作业最多 `job.max_parallel` 个，`keep_alive` 为 5m。
+11. **没有 `query` 参数**：读取索引中的每个文档；不需要的由 `filter` 变换丢弃。备选：在参数中给一个查询，用于快照和轮询。
+12. **互通测试**读取 `FIT_SYNC_SOURCE_DOCS` 个文档（默认 100,000，CI 中如此）：批量载入后整体读取的快照，每个一次（OpenSearch 的
+    按 `_id` 顺序）；一个流，在其快照期间有 125 个文档被改、5 个被写成同一时间，以每页 50 个轮询，每个读到一次，之后从检查点
+    重启，只读到检查点之后写入的四个（其中三个在同一值）；一个作业经目标把 20,000 个文档分七个切片、每次四个复制到另一个
+    索引。不留下打开的时间点或 scroll。
+13. **规模**：约 710 行代码和 1,230 行测试（带假集群的单元测试、互通测试），超过计划的 1,500 行；没有剩余工作，所以没有 I169b。
 
 ### I170 ClickHouse 作为目标与源
 

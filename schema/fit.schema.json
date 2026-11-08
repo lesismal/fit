@@ -7379,6 +7379,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "elasticsearch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.elasticsearch"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "file"
               }
             }
@@ -7428,6 +7444,7 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "elasticsearch",
             "file",
             "generate",
             "wasm"
@@ -7440,6 +7457,116 @@
       },
       "required": [
         "module"
+      ],
+      "type": "object"
+    },
+    "sync.sources.elasticsearch": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "description": "The environment variable holding an Elasticsearch API key as its create API key call returns it encoded (base64 of id:key), sent as Authorization: ApiKey, read when the pipeline loads. Not with username. OpenSearch has no API keys.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the cluster's is checked against, in place of the system's roots. The check cannot be turned off.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to a cluster that asks for one; needs key_file.",
+          "type": "string"
+        },
+        "chunk_documents": {
+          "default": 100000,
+          "description": "In a job (mode once) without a cursor, the documents a chunk is reckoned to hold: the snapshot is split into as many slices of the _id as the count of documents needs, at most 1024, read job.max_parallel at a time, each through a scroll of its own. 100000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cursor": {
+          "description": "A field every document written or changed gets a later value of (an update time, a sequence number), of type date, date_nanos, a number or keyword: after the snapshot, documents whose cursor reaches past the last value read are polled for, ordered by it. Documents without the field are read by the snapshot only. None when left out: the snapshot is read and the source ends.",
+          "type": "string"
+        },
+        "delay": {
+          "default": "2s",
+          "description": "For a date or date_nanos cursor, how far behind the cluster's clock polls stay: documents whose cursor is later than now less delay are read only once it has passed, so that a document written with a time but searchable only after the index refreshes (1s by default) is not passed over. Date math counts whole seconds: a fraction is rounded up. 0 reads up to now. 2s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "deleted_field": {
+          "description": "A top-level field marking a document deleted: a document with it set, to anything but null or false, is read as a delete of its _id, with the document as before. Deletes themselves are not seen by the source. None when left out.",
+          "type": "string"
+        },
+        "index": {
+          "description": "The indices read: a name, an alias, a pattern such as logs-*, or several joined by commas; a record's namespace is the index its document is in.",
+          "type": "string"
+        },
+        "keep_alive": {
+          "default": "5m",
+          "description": "How long the cluster keeps a point in time, or a job's scroll, between two searches of it. A snapshot stalled longer than this (its sinks held by the queue) finds it gone and starts again. 5m when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_page_bytes": {
+          "default": 8388608,
+          "description": "The most bytes a search's answer should hold: past them, the next searches ask for half as many documents, and twice as many again, up to page_size, once answers are under a quarter of it. An answer past 64 MiB is refused and asked again for half. 8 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "page_size": {
+          "default": 1000,
+          "description": "The most documents one search returns. 1000 when left out or 0.",
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "poll_interval": {
+          "default": "5s",
+          "description": "How long to wait to poll again once a poll has read everything there was. 5s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the cluster's certificate must have, and the TLS server name sent; each URL's host when left out.",
+          "type": "string"
+        },
+        "snapshot": {
+          "default": "pit",
+          "description": "How the documents there are at the start are read: pit, every document, through a point in time, then the cursor from its value then; cursor, only those with the cursor, in its order, from its lowest value, resumed where a restart left off; none, no snapshot, the cursor from its value now. cursor and none need cursor. pit when left out.",
+          "enum": [
+            "pit",
+            "cursor",
+            "none"
+          ],
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long one request may take, from connecting to the end of its answer. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "urls": {
+          "description": "The cluster's HTTP endpoints, as https://es1:9200, each a node or a load balancer: the one that answered last is used, and the next in turn when it fails to (a connection's error, a timeout, a 502, 503 or 504).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "The user for basic authentication, with password_env.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "urls",
+        "index"
       ],
       "type": "object"
     },

@@ -6302,6 +6302,124 @@
         // // Where the records come from, and its params.
         // // module; required.
         // "source": {
+          // // Reads the documents of an index pattern from Elasticsearch (7.12 and later) or OpenSearch
+          // // (2.4 and later): a snapshot through a point in time and search_after, then, when cursor
+          // // names a field (an update time, a sequence), the documents whose cursor has moved on, polled
+          // // every poll_interval; the checkpoint is the cursor's last value and the _ids read at it. A
+          // // record's namespace is the document's index, its key {"_id": ...} and its after the _source.
+          // // Deletes are not seen: a soft-delete field, deleted_field, turns a document into a delete. In
+          // // a job without a cursor, the snapshot is split into slices of the _id, read job.max_parallel
+          // // at a time.
+          // "module": "elasticsearch",
+          // "params": {
+            // // The cluster's HTTP endpoints, as https://es1:9200, each a node or a load balancer: the one
+            // // that answered last is used, and the next in turn when it fails to (a connection's error, a
+            // // timeout, a 502, 503 or 504).
+            // // list of string; required.
+            // "urls": [],
+
+            // // The user for basic authentication, with password_env.
+            // // string.
+            // "username": "fit",
+
+            // // The environment variable holding username's password, read when the pipeline loads.
+            // // string.
+            // "password_env": "",
+
+            // // The environment variable holding an Elasticsearch API key as its create API key call returns
+            // // it encoded (base64 of id:key), sent as Authorization: ApiKey, read when the pipeline loads.
+            // // Not with username. OpenSearch has no API keys.
+            // // string.
+            // "api_key_env": "",
+
+            // // A PEM file of the certificates the cluster's is checked against, in place of the system's
+            // // roots. The check cannot be turned off.
+            // // string.
+            // "ca_file": "/etc/fit/ca.pem",
+
+            // // A PEM file of a client certificate, and the chain after it, presented to a cluster that asks
+            // // for one; needs key_file.
+            // // string.
+            // "cert_file": "/etc/fit/example.com.pem",
+
+            // // The PEM file of cert_file's private key.
+            // // string.
+            // "key_file": "/etc/fit/example.com.key",
+
+            // // The name the cluster's certificate must have, and the TLS server name sent; each URL's host
+            // // when left out.
+            // // string.
+            // "server_name": "",
+
+            // // How long one request may take, from connecting to the end of its answer. 60s when left out
+            // // or 0.
+            // // duration, as "1.5s" or "2m"; default "60s".
+            // "timeout": "60s",
+
+            // // The indices read: a name, an alias, a pattern such as logs-*, or several joined by commas; a
+            // // record's namespace is the index its document is in.
+            // // string; required.
+            // "index": "",
+
+            // // A field every document written or changed gets a later value of (an update time, a sequence
+            // // number), of type date, date_nanos, a number or keyword: after the snapshot, documents whose
+            // // cursor reaches past the last value read are polled for, ordered by it. Documents without the
+            // // field are read by the snapshot only. None when left out: the snapshot is read and the source
+            // // ends.
+            // // string.
+            // "cursor": "",
+
+            // // How the documents there are at the start are read: pit, every document, through a point in
+            // // time, then the cursor from its value then; cursor, only those with the cursor, in its order,
+            // // from its lowest value, resumed where a restart left off; none, no snapshot, the cursor from
+            // // its value now. cursor and none need cursor. pit when left out.
+            // // one of: pit, cursor, none; default "pit".
+            // "snapshot": "pit",
+
+            // // A top-level field marking a document deleted: a document with it set, to anything but null
+            // // or false, is read as a delete of its _id, with the document as before. Deletes themselves
+            // // are not seen by the source. None when left out.
+            // // string.
+            // "deleted_field": "",
+
+            // // How long to wait to poll again once a poll has read everything there was. 5s when left out
+            // // or 0.
+            // // duration, as "1.5s" or "2m"; default "5s".
+            // "poll_interval": "5s",
+
+            // // For a date or date_nanos cursor, how far behind the cluster's clock polls stay: documents
+            // // whose cursor is later than now less delay are read only once it has passed, so that a
+            // // document written with a time but searchable only after the index refreshes (1s by default)
+            // // is not passed over. Date math counts whole seconds: a fraction is rounded up. 0 reads up to
+            // // now. 2s when left out.
+            // // duration, as "1.5s" or "2m"; default "2s".
+            // "delay": "2s",
+
+            // // The most documents one search returns. 1000 when left out or 0.
+            // // integer, 0 to 10000; default 1000.
+            // "page_size": 1000,
+
+            // // The most bytes a search's answer should hold: past them, the next searches ask for half as
+            // // many documents, and twice as many again, up to page_size, once answers are under a quarter
+            // // of it. An answer past 64 MiB is refused and asked again for half. 8 MiB when left out or 0.
+            // // integer, 0 or more; default 8388608.
+            // "max_page_bytes": 8388608,
+
+            // // How long the cluster keeps a point in time, or a job's scroll, between two searches of it. A
+            // // snapshot stalled longer than this (its sinks held by the queue) finds it gone and starts
+            // // again. 5m when left out or 0.
+            // // duration, as "1.5s" or "2m"; default "5m".
+            // "keep_alive": "5m",
+
+            // // In a job (mode once) without a cursor, the documents a chunk is reckoned to hold: the
+            // // snapshot is split into as many slices of the _id as the count of documents needs, at most
+            // // 1024, read job.max_parallel at a time, each through a scroll of its own. 100000 when left
+            // // out or 0.
+            // // integer, 0 or more; default 100000.
+            // "chunk_documents": 100000,
+          // },
+
+          // // Or file, with every one of its params:
           // // Tails files as Filebeat does: the paths' globs are scanned again each scan_interval, each
           // // file known by its device, inode and a fingerprint of its head, so a renamed file is
           // // followed, a truncated one read again from its start, a copy taken before a truncation read
