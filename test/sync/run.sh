@@ -9,7 +9,11 @@
 #
 # The tests read FIT_SYNC_ES_URL, FIT_SYNC_ES_CA, FIT_SYNC_ES_PASSWORD and
 # FIT_SYNC_OS_URL, FIT_SYNC_OS_CA, FIT_SYNC_OS_PASSWORD; without them they
-# skip, unless FIT_SYNC_INTEROP=required, which this script sets.
+# skip, unless FIT_SYNC_INTEROP=required, which this script sets. The
+# source's snapshot test reads FIT_SYNC_SOURCE_DOCS documents, 100,000 when
+# unset (CI); the plan's million is
+#
+#   FIT_SYNC_SOURCE_DOCS=1000000 test/sync/run.sh -run SourceSnapshot -v
 set -eu
 cd "$(dirname "$0")/../.."
 

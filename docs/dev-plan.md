@@ -332,7 +332,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | done |
 | I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | done |
 | I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | done |
-| I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | todo |
+| I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | done |
 | I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | todo |
 | I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | todo |
 | I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | todo |
@@ -4723,6 +4723,82 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: a snapshot of a million documents is complete and in order; polling picks up updates
   written during it, including several with the same cursor value; a restart resumes without gaps.
 - **Touches**: `sync/elasticsearch`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **What a record is.** The source is `elasticsearch` in the sink's package, declaring the same
+   connection params and sharing `Conn`. A record's namespace is the document's own index (`_index`,
+   not the pattern), its key the map `{"_id": "<id>"}`, which the sink's `DocID` turns back into the
+   same `_id` and a SQL sink takes as a column named `_id`, and its `after` the `_source` read by the
+   `json` codec's rules (`fitsync.ParsePlain`, now exported): a number without a fraction an int, a
+   uint past int64, otherwise a float, or a decimal past float64; dates stay strings. Alternative:
+   decoding the `_id` with the inverse of `DocID` into the key's fields, which would split `_id`s fit
+   did not make; or typing values by the mapping.
+2. **Operations.** Snapshot records are inserts (there is no `read` op as Debezium's `r`); polled
+   documents are inserts when their `_version` is 1 and updates otherwise. A date cursor's value is
+   the commit time of polled records; snapshot records have none. Alternative: a new op, or a mark,
+   for snapshot reads.
+3. **The snapshot** reads through a point in time with `search_after`, on `_shard_doc` in
+   Elasticsearch and on `_id` in OpenSearch, which has no `_shard_doc` ("No mapping found for
+   [_shard_doc]") and opens points in time at `/_search/point_in_time`, answering `pit_id`. Clusters
+   without points in time are refused (Elasticsearch before 7.12, OpenSearch before 2.4); there is
+   no scroll fallback for a stream. OpenSearch refuses a point in time of a pattern matching no
+   index, which the source reads as empty once `_count` says so. Alternative: scroll for older
+   clusters.
+4. **A stream's snapshot interrupted starts over.** Its records carry no position but the last,
+   which holds where polling starts (or `done` without a cursor): a new point in time's sort values
+   are not the old one's, and the source closes its point in time when it stops. `snapshot:
+   "cursor"` reads the existing documents by the cursor instead, resumable, for an index too large
+   to read again. Alternative: keep the point in time's id in the position and try it after a
+   restart, which works only within `keep_alive` and only when the source did not close it.
+5. **Polling without sorting on `_id`.** Elasticsearch 8 refuses to sort on `_id` ("Fielddata
+   access on the _id field is disallowed"), so polls sort by the cursor alone, `gte` the last value
+   with the `_id`s already read at it excluded (`must_not` `ids`), each page a fresh search. The
+   position is `{"cursor": <the last sort value>, "ids": [...], "past": bool}`, on each page's last
+   record; past 1,000 `_id`s at one value, the rest of that value is read at once through a point in
+   time (`past`, then `gt`). Alternative: require `indices.id_field_data.enabled`, or a unique
+   tiebreak field in the params.
+6. **Late writes are not caught.** There is no overlap window: a document whose cursor is written at
+   or below the checkpoint after polling passed it is missed, as the docs say. For a date or
+   date_nanos cursor, polls stay `delay` (2s, in whole seconds) behind the cluster's own `now` (date
+   math in the query, so fit's clock does not matter), covering the refresh interval; numbers and
+   keywords have no delay. Alternative: re-read a window below the checkpoint and drop what was read
+   by `_id` and `_version`, at the memory of the window.
+7. **Where polling starts**: the cursor's highest value (within `delay`), asked before the snapshot
+   opens its point in time, so what changes during the snapshot is polled after it; documents at
+   that value are read again (an idempotent sink folds them). `snapshot: "none"` starts there
+   without a snapshot. The cursor's type comes from `_mapping/field`, one type across the indices
+   (date, date_nanos, numbers, keyword), asked again while no index maps it; date_nanos values are
+   sent as epoch milliseconds with a six-digit fraction.
+8. **Deletes**: `deleted_field`, a top-level field whose value (not null or false) turns a document
+   into a delete of its `_id`, with the document as `before`, in snapshots and polls. Alternative:
+   leave it to a transform, which today cannot make a delete from a field.
+9. **Chunks for jobs**: only without a cursor (a cursor's job reads as a stream does, so the next
+   job reads only what changed), one per `chunk_documents` (100,000) documents by `_count`, at most
+   1,024 (`index.max_slices_per_scroll`). Each is a slice of the `_id`'s hash read through a scroll,
+   not a point in time: Elasticsearch refuses to slice a point in time by `_id` ("cannot slice on
+   [_id] when using [point-in-time]" on a one-shard index), and its default slices, ranges of
+   Lucene's document numbers, are not the same in another point in time, so a resumed job would
+   read other documents. A chunk interrupted is read again from its start (no position within it);
+   each chunk is as its scroll found it, not the whole job at one time. Alternative: chunks by
+   ranges of a cursor, which need its percentiles.
+10. **Bounds.** Pages of `page_size` (1,000, at most 10,000) documents, halved while answers pass
+    `max_page_bytes` (8 MiB) and doubled back under a quarter of it; an answer past the client's
+    64 MiB is asked again for half (a scroll's next page cannot change size: it fails, and the
+    searches after are halved). A 429 is waited out as the sink does; an answer that timed out or
+    failed on a shard fails the run, which restarts from the checkpoint, rather than leave a gap.
+    Points in time and scrolls are closed when they end or fail, with a 10s timeout of their own;
+    at most one is open for a stream, `job.max_parallel` for a job, `keep_alive` 5m.
+11. **No `query` param**: every document of the indices is read; a `filter` transform drops what is
+    not wanted. Alternative: a query in the params, applied to snapshots and polls.
+12. **The interop tests** read `FIT_SYNC_SOURCE_DOCS` documents (100,000 by default, in CI): a
+    snapshot bulk loaded and read whole, each once (OpenSearch's in `_id` order); a stream whose
+    snapshot has 125 documents changed and 5 written at one time during it, polled in pages of 50,
+    each read once, then a restart from the checkpoint reading only the four written after it (three
+    at the same value); a job copying 20,000 documents to another index in seven slices, four at
+    once, through the sink. No point in time or scroll is left open.
+13. **Size**: about 710 lines of code and 1,230 of tests (unit tests with a fake cluster, the
+    interop tests), past the plan's 1,500; nothing is left, so there is no I169b.
 
 ### I170 ClickHouse as a sink and a source
 

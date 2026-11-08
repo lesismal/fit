@@ -214,6 +214,22 @@ The plan's I168 section lists them all; these change the record above.
 4. **A sink without the role's engine runs one of its own** for fib's HTTP client, so `fit sync run`
    reaches HTTP-based sinks.
 
+## Decisions made while building I169 (pending review)
+
+The plan's I169 section lists them all; these change the record above.
+
+1. **Elasticsearch as a source** (planning decision 6): a snapshot through a point in time, then
+   polls by a cursor field, sorted by the cursor alone (Elasticsearch 8 does not sort on `_id`), the
+   `_id`s already read at the last value excluded; the position is that value and those `_id`s. A
+   stream's snapshot interrupted starts over; documents written below the checkpoint after it passed
+   are missed, and date cursors stay `delay` behind the cluster's clock. Deletes are not seen, but a
+   soft-delete field (`deleted_field`) turns a document into a delete.
+2. **A job's chunks are slices of the `_id` read through scrolls**, not points in time, whose slices
+   are not the same in another point in time; a chunk interrupted is read again whole. A job with a
+   cursor is not split, so its next run reads only what changed.
+3. **`fitsync.ParsePlain`** reads a plain JSON document by the `json` codec's rules, for sources
+   whose servers hold JSON.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and

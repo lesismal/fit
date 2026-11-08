@@ -48,7 +48,7 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
+- [Sync sources](#sync-sources): [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
@@ -6027,9 +6027,152 @@ after.
 
 | Module | What it does |
 | --- | --- |
+| [`elasticsearch`](#sync-sources-elasticsearch) | Elasticsearch and OpenSearch: a snapshot through a point in time, then polled by a cursor field; a job's snapshot in slices |
 | [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
+
+<a id="sync-sources-elasticsearch"></a>
+
+### `elasticsearch`
+
+Reads the documents of an index pattern from Elasticsearch (7.12 and later) or OpenSearch (2.4 and later): a snapshot through a point in time and search_after, then, when cursor names a field (an update time, a sequence), the documents whose cursor has moved on, polled every poll_interval; the checkpoint is the cursor's last value and the _ids read at it. A record's namespace is the document's index, its key {"_id": ...} and its after the _source. Deletes are not seen: a soft-delete field, deleted_field, turns a document into a delete. In a job without a cursor, the snapshot is split into slices of the _id, read job.max_parallel at a time.
+
+Reads the documents of `index` (a name, an alias, a pattern such as `logs-*`, or several joined by
+commas) from Elasticsearch 7.12 and later or OpenSearch 2.4 and later, through fib's asynchronous
+HTTP client, with the sink's connection params (`urls` with failover, credentials, TLS). A
+record's namespace is the document's index, its key `{"_id": "..."}` (which the `elasticsearch`
+sink turns back into the same `_id`), and its `after` the `_source` as typed values, numbers as the
+`json` codec reads them: without a fraction an int (a uint past int64), otherwise a float.
+
+**The snapshot** (`snapshot: "pit"`, the default) reads every document through a point in time,
+in pages of `search_after` on `_shard_doc` (on `_id` in OpenSearch, which has no `_shard_doc`), as
+inserts. A snapshot interrupted, by a restart or a point in time gone (one outlives `keep_alive`
+between two pages when the sinks hold the queue that long), starts again from its beginning: a
+new point in time's sort values are not the old one's.
+
+**Polling.** With `cursor`, a field every document written or changed gets a later value of (an
+update time, a sequence number; a date, date_nanos, a number or keyword), the source then polls
+every `poll_interval` for documents whose cursor reaches past the last value read, ordered by it,
+as inserts (a document's first version) or updates. The checkpoint is the cursor's last value and
+the `_id`s read at it, so documents sharing a value, across pages or written after a restart, are
+read once each; past 1,000 at one value, the rest of it is read at once through a point in time.
+Polling starts from the cursor's highest value before the snapshot, so what changes during the
+snapshot is read after it. `snapshot: "cursor"` reads the existing documents by the cursor instead,
+from its lowest value, resumed where a restart left off (but documents without the field are not
+read); `snapshot: "none"` starts at the cursor's value now.
+
+What polling cannot see: **deletes**, and a document whose cursor is written at or below the last
+value read once the source has read past it (a write that lands late, or a clock behind). For a
+date cursor, polls stay `delay` (2s) behind the cluster's clock, so that a document becomes
+searchable (after the index refreshes, 1s by default) before polling passes its time. Keep deleted
+documents with a soft-delete field and name it in `deleted_field`: a document with it set, to
+anything but null or false, is read as a delete of its `_id`.
+
+**Jobs.** In a job (`mode: "once"`) without a cursor, the snapshot is split into slices of the
+`_id`'s hash, one per `chunk_documents` documents (at most 1,024), read `job.max_parallel` at a
+time, each through a sliced scroll of its own (Elasticsearch does not slice a point in time by the
+`_id`, and its other slices are not the same in another point in time), so a job interrupted reads
+again only the slices under way, from their start. Each slice is read as the cluster has it when
+its scroll opens. A job with a cursor is not split: it reads as a stream does, up to now, and the
+next job reads only what changed since.
+
+Pages hold at most `page_size` documents, and fewer while answers run past `max_page_bytes`; an
+answer past 64 MiB is asked again for half as many. A search the cluster answers 429 is sent again
+for as long as it does; one that fails on a shard fails the run, which the pipeline restarts from
+its checkpoint, rather than leaving a gap. Points in time and scrolls are closed when they end or
+fail; at most one is open for a stream, `job.max_parallel` for a job.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-file {
+		source elasticsearch {
+			urls https://es1:9200 https://es2:9200
+			ca_file /etc/fit/es-ca.pem
+			username fit
+			password_env ES_PASSWORD
+			index orders-*
+			cursor updated_at
+			deleted_field deleted
+		}
+		sinks out { sink file { path /var/lib/fit/orders.jsonl; codec json } }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-to-file
+      source:
+        module: elasticsearch
+        params:
+          urls:
+            - https://es1:9200
+            - https://es2:9200
+          ca_file: /etc/fit/es-ca.pem
+          username: fit
+          password_env: ES_PASSWORD
+          index: orders-*
+          cursor: updated_at
+          deleted_field: deleted
+      sinks:
+        - name: out
+          sink:
+            module: file
+            params:
+              path: /var/lib/fit/orders.jsonl
+              codec:
+                module: json
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-to-file",
+        "source": {"module": "elasticsearch", "params": {
+          "urls": ["https://es1:9200", "https://es2:9200"], "ca_file": "/etc/fit/es-ca.pem",
+          "username": "fit", "password_env": "ES_PASSWORD",
+          "index": "orders-*", "cursor": "updated_at", "deleted_field": "deleted"}},
+        "sinks": [{"name": "out", "sink": {"module": "file", "params": {"path": "/var/lib/fit/orders.jsonl", "codec": {"module": "json"}}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urls` | list of string |  | Required. The cluster's HTTP endpoints, as https://es1:9200, each a node or a load balancer: the one that answered last is used, and the next in turn when it fails to (a connection's error, a timeout, a 502, 503 or 504). |
+| `username` | string |  | The user for basic authentication, with password_env. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `api_key_env` | string |  | The environment variable holding an Elasticsearch API key as its create API key call returns it encoded (base64 of id:key), sent as Authorization: ApiKey, read when the pipeline loads. Not with username. OpenSearch has no API keys. |
+| `ca_file` | string |  | A PEM file of the certificates the cluster's is checked against, in place of the system's roots. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a cluster that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the cluster's certificate must have, and the TLS server name sent; each URL's host when left out. |
+| `timeout` | duration | `"60s"` | How long one request may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `index` | string |  | Required. The indices read: a name, an alias, a pattern such as logs-*, or several joined by commas; a record's namespace is the index its document is in. |
+| `cursor` | string |  | A field every document written or changed gets a later value of (an update time, a sequence number), of type date, date_nanos, a number or keyword: after the snapshot, documents whose cursor reaches past the last value read are polled for, ordered by it. Documents without the field are read by the snapshot only. None when left out: the snapshot is read and the source ends. |
+| `snapshot` | string: `pit`, `cursor`, `none` | `"pit"` | How the documents there are at the start are read: pit, every document, through a point in time, then the cursor from its value then; cursor, only those with the cursor, in its order, from its lowest value, resumed where a restart left off; none, no snapshot, the cursor from its value now. cursor and none need cursor. pit when left out. |
+| `deleted_field` | string |  | A top-level field marking a document deleted: a document with it set, to anything but null or false, is read as a delete of its _id, with the document as before. Deletes themselves are not seen by the source. None when left out. |
+| `poll_interval` | duration | `"5s"` | How long to wait to poll again once a poll has read everything there was. 5s when left out or 0. |
+| `delay` | duration | `"2s"` | For a date or date_nanos cursor, how far behind the cluster's clock polls stay: documents whose cursor is later than now less delay are read only once it has passed, so that a document written with a time but searchable only after the index refreshes (1s by default) is not passed over. Date math counts whole seconds: a fraction is rounded up. 0 reads up to now. 2s when left out. |
+| `page_size` | integer, 0 to 10000 | `1000` | The most documents one search returns. 1000 when left out or 0. |
+| `max_page_bytes` | integer, 0 or more | `8388608` | The most bytes a search's answer should hold: past them, the next searches ask for half as many documents, and twice as many again, up to page_size, once answers are under a quarter of it. An answer past 64 MiB is refused and asked again for half. 8 MiB when left out or 0. |
+| `keep_alive` | duration | `"5m"` | How long the cluster keeps a point in time, or a job's scroll, between two searches of it. A snapshot stalled longer than this (its sinks held by the queue) finds it gone and starts again. 5m when left out or 0. |
+| `chunk_documents` | integer, 0 or more | `100000` | In a job (mode once) without a cursor, the documents a chunk is reckoned to hold: the snapshot is split into as many slices of the _id as the count of documents needs, at most 1024, read job.max_parallel at a time, each through a scroll of its own. 100000 when left out or 0. |
 
 <a id="sync-sources-file"></a>
 
