@@ -226,10 +226,21 @@ func TestTenThousandFiles(t *testing.T) {
 	for i := range n - 10 {
 		os.Remove(filepath.Join(dir, fmt.Sprintf("f%05d.log", i)))
 	}
-	write(t, filepath.Join(dir, "f09999.log"), "more\n")
-	c2 := once(t, s, c.last)
-	if err := json.Unmarshal(c2.last, &pos); err != nil || len(pos.Files) != 10 || len(c2.recs) != 1 {
-		t.Fatalf("%d files in the position, %d records: %v", len(pos.Files), len(c2.recs), err)
+	// A file a scan misses is forgotten once missing for close_after, as
+	// it may only have been renamed while the directory was listed.
+	s = load(t, fitsync.Sources, "file", `{"paths": [`+jsonString(filepath.Join(dir, "*.log"))+`], "close_after": "1ms"}`).(*Source)
+	last := c.last
+	for i := range 2 {
+		write(t, filepath.Join(dir, "f09999.log"), "more\n")
+		c2 := once(t, s, last)
+		if err := json.Unmarshal(c2.last, &pos); err != nil || len(c2.recs) != 1 {
+			t.Fatalf("%d records: %v", len(c2.recs), err)
+		}
+		if want := []int{n, 10}[i]; len(pos.Files) != want {
+			t.Fatalf("run %d: %d files in the position, want %d", i, len(pos.Files), want)
+		}
+		last = c2.last
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -292,5 +303,32 @@ func TestPartialLineAndDeletion(t *testing.T) {
 	}
 	if got := c.lines(); got[3] != "" || got[4] != "more" || got[5] != "after delete" {
 		t.Fatalf("%q", got)
+	}
+}
+
+// TestSameSizeNewContents replaces a closed file's contents with others of
+// the same size, as a new file taking a freed inode does on Linux: the new
+// contents are read whole, under a key of their own.
+func TestSameSizeNewContents(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.log")
+	write(t, path, "line 1\n")
+	s := load(t, fitsync.Sources, "file", `{"paths": [`+jsonString(path)+`], "scan_interval": "10ms", "poll_interval": "2ms", "close_after": "30ms"}`).(*Source)
+	c, stop := stream(s, nil)
+	defer stop()
+	waitLines(t, c, 1)
+	time.Sleep(150 * time.Millisecond) // closed by now
+	if err := os.WriteFile(path, []byte("LINE 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitLines(t, c, 2)
+	if got := c.lines(); got[1] != "LINE 2" {
+		t.Fatalf("%q", got)
+	}
+	c.mu.Lock()
+	k0, k1 := c.recs[0].Key, c.recs[1].Key
+	c.mu.Unlock()
+	if k0.Equal(k1) {
+		t.Fatalf("both contents have the key %v", k0)
 	}
 }

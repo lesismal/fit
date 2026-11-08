@@ -159,7 +159,7 @@ The plan's I166 section lists them all; these change the record above.
 2. **A file source's position** is every file's device and inode (on Windows the volume's serial
    number and file index), a fingerprint of its head, its offset and its records' key, and the heads
    of files truncated lately, so that a copy taken before a truncation is read on from where its
-   original was. Files gone and closed are forgotten, so it stays bounded. The source sets a
+   original was. Files closed and missed by scans for `close_after` are forgotten, so it stays bounded. The source sets a
    position only between lines, every pass or 1,000 records, rather than on every record.
 3. **Records read from files have keys**: the file's device, inode and a hash of its first line,
    and the offset, so that a line read again after a crash has the key it had and an idempotent

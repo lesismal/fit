@@ -5,6 +5,7 @@ package syncfile
 import (
 	"os"
 	"syscall"
+	"time"
 )
 
 // Windows has no device and inode: a file is known by its volume's serial
@@ -12,14 +13,20 @@ import (
 // takes an open handle. A file is opened sharing read, write and delete, so
 // that the writer may still rename or remove it while it is read.
 
-// statID returns the identity and size of the regular file at path.
-func statID(path string) (fileID, int64, error) {
+// statID returns the identity, size and modification time of the regular
+// file at path.
+func statID(path string) (fileID, int64, time.Time, error) {
 	f, err := openRead(path)
 	if err != nil {
-		return fileID{}, 0, err
+		return fileID{}, 0, time.Time{}, err
 	}
 	defer f.Close()
-	return fileIDOf(f)
+	var d syscall.ByHandleFileInformation
+	if err := syscall.GetFileInformationByHandle(syscall.Handle(f.Fd()), &d); err != nil {
+		return fileID{}, 0, time.Time{}, err
+	}
+	id, size, err := fileIDOf(f)
+	return id, size, time.Unix(0, d.LastWriteTime.Nanoseconds()), err
 }
 
 // fileIDOf returns the identity and size of an open file.

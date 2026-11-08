@@ -162,10 +162,14 @@ type tracked struct {
 
 	f      *os.File
 	size   int64
+	mod    time.Time // the modification time a scan last saw
 	active time.Time
 	idle   bool
 	gone   bool
-	forget bool
+	// missing is when scans began to miss the file, closed; zero while
+	// they find it.
+	missing time.Time
+	forget  bool
 	// copyOf is the file this one is a copy of, held until that file is
 	// truncated, or close_after passes.
 	copyOf    *tracked
@@ -296,39 +300,50 @@ func (t *tail) scan(now time.Time) {
 		path string
 		id   fileID
 		size int64
+		mod  time.Time
 	}
 	var news []found
 	seen := map[fileID]bool{}
 	for _, pat := range t.s.Paths {
 		matches, _ := filepath.Glob(pat)
 		for _, p := range matches {
-			id, size, err := statID(p)
+			id, size, mod, err := statID(p)
 			if err != nil || seen[id] {
 				continue
 			}
 			seen[id] = true
 			f := t.files[id]
 			if f == nil {
-				news = append(news, found{p, id, size})
+				news = append(news, found{p, id, size, mod})
 				continue
 			}
-			f.path, f.gone = p, false
+			// A file moved, grown or written since is looked at again: its
+			// inode may have been freed and taken by a new file of any size.
+			changed := p != f.path || size != f.size || !mod.Equal(f.mod)
+			f.path, f.gone, f.mod = p, false, mod
 			if f.f == nil { // an open file is checked as it is read
-				if size < f.read || size != f.size && !t.headMatches(f, nil, p) {
-					t.reset(f, now)
-				}
 				f.size = size
+				if size < f.read || changed && !t.headMatches(f, nil, p) {
+					t.renew(f, now)
+				}
 			}
 		}
 	}
 	closeAfter := dur(t.s.CloseAfter, DefaultCloseAfter)
 	for _, f := range t.list {
+		// A file a scan misses may only have been renamed between the
+		// directory's listing and its stat, so it is forgotten only once
+		// it has been missing for close_after; one held open is gone, and
+		// read to its end.
 		switch {
 		case seen[f.id]:
-		case f.f == nil:
-			f.forget = true
-		default:
+			f.missing = time.Time{}
+		case f.f != nil:
 			f.gone = true
+		case f.missing.IsZero():
+			f.missing = now
+		case now.Sub(f.missing) >= closeAfter:
+			f.forget = true
 		}
 		if x := f.copyOf; x != nil {
 			if g, ok := t.ghostOf(f.head); ok {
@@ -339,7 +354,6 @@ func (t *tail) scan(now time.Time) {
 			}
 		}
 	}
-	want := t.s.fpBytes()
 	for _, n := range news {
 		if len(t.list) >= orInt(t.s.MaxFiles, DefaultMaxFiles) {
 			if !t.full {
@@ -348,28 +362,8 @@ func (t *tail) scan(now time.Time) {
 			}
 			break
 		}
-		f := &tracked{id: n.id, path: n.path, size: n.size, active: now}
-		var head []byte
-		if n.size > 0 {
-			if fh, err := openRead(n.path); err == nil {
-				if b, ok := t.head(fh, int(min(int64(want), n.size))); ok {
-					head = b
-					f.fp, f.fpLen = hash(b), len(b)
-				}
-				fh.Close()
-			}
-		}
-		if g, ok := t.ghostOf(head); ok {
-			f.off, f.read = min(g.off, n.size), min(g.off, n.size)
-			f.key = g.key
-		} else {
-			for _, x := range t.list {
-				if !x.forget && x.copyOf == nil && headIs(head, x.fp, x.fpLen) {
-					f.copyOf, f.copySince, f.head = x, now, append([]byte(nil), head...)
-					break
-				}
-			}
-		}
+		f := &tracked{id: n.id, path: n.path, size: n.size, mod: n.mod, active: now}
+		t.match(f, now)
 		t.files[n.id] = f
 		t.list = append(t.list, f)
 	}
@@ -386,6 +380,46 @@ func (t *tail) scan(now time.Time) {
 // headIs reports whether head starts with the fpLen bytes whose hash is fp.
 func headIs(head []byte, fp uint64, fpLen int) bool {
 	return fpLen > 0 && fpLen <= len(head) && hash(head[:fpLen]) == fp
+}
+
+// renew takes f, a closed file whose inode now holds other contents, as a
+// file found anew: it was truncated while closed, or its inode was freed
+// and taken by a new file, as Linux does at once, a copy among them. Its
+// old contents' head is kept for their copy, and the new contents are
+// matched as any new file's.
+func (t *tail) renew(f *tracked, now time.Time) {
+	t.reset(f, now)
+	f.copyOf, f.head = nil, nil
+	t.match(f, now)
+}
+
+// match fingerprints f, a file found anew, and goes on from where its
+// original was when its head is a truncated file's, or holds it while it
+// is a copy of a file not yet truncated.
+func (t *tail) match(f *tracked, now time.Time) {
+	var head []byte
+	if f.size > 0 {
+		if fh, err := openRead(f.path); err == nil {
+			if id, _, err := fileIDOf(fh); err == nil && id == f.id {
+				if b, ok := t.head(fh, int(min(int64(t.s.fpBytes()), f.size))); ok {
+					head = b
+					f.fp, f.fpLen = hash(b), len(b)
+				}
+			}
+			fh.Close()
+		}
+	}
+	if g, ok := t.ghostOf(head); ok {
+		f.off, f.read = min(g.off, f.size), min(g.off, f.size)
+		f.key = g.key
+		return
+	}
+	for _, x := range t.list {
+		if x != f && !x.forget && x.copyOf == nil && headIs(head, x.fp, x.fpLen) {
+			f.copyOf, f.copySince, f.head = x, now, append([]byte(nil), head...)
+			return
+		}
+	}
 }
 
 // ghostOf takes the ghost head starts as.
@@ -467,6 +501,12 @@ func (t *tail) openFile(f *tracked, now time.Time) bool {
 		fh.Close()
 		return false
 	}
+	if !t.headMatches(f, fh, "") {
+		// Not the contents it had: its inode was taken by a new file.
+		fh.Close()
+		t.renew(f, now)
+		return false
+	}
 	f.f, f.active, f.idle = fh, now, false
 	t.opened = append(t.opened, f)
 	if n := int64(len(t.opened)); n > t.s.peak.Load() {
@@ -476,7 +516,7 @@ func (t *tail) openFile(f *tracked, now time.Time) bool {
 }
 
 // closeFile closes f; what it held of an event is read again when it is
-// opened again, and a file gone is forgotten.
+// opened again. A file gone is forgotten once scans miss it for close_after.
 func (t *tail) closeFile(f *tracked) {
 	if f.f == nil {
 		return
@@ -492,9 +532,6 @@ func (t *tail) closeFile(f *tracked) {
 	}
 	if f.lines > 0 {
 		f.read, f.event, f.lines, f.cut, f.skip = f.off, nil, 0, false, false
-	}
-	if f.gone {
-		f.forget = true
 	}
 }
 
@@ -525,6 +562,13 @@ func (t *tail) readFile(f *tracked, now time.Time) (int, error) {
 	total, stalled := 0, false
 	for f.read < f.size && total < readBudget {
 		n, err := f.f.ReadAt(t.buf[:min(int64(len(t.buf)), f.size-f.read)], f.read)
+		if n > 0 && !t.headMatches(f, f.f, "") {
+			// Truncated, and maybe written again, since its size was
+			// taken: what was read may be the new contents at the old
+			// offset, so it is not used, and the file starts again.
+			t.reset(f, now)
+			return total + 1, nil
+		}
 		if n == 0 {
 			if err != nil && err != io.EOF {
 				t.log.Warnf("sync file: read %s: %v", f.path, err)
@@ -564,6 +608,10 @@ func (t *tail) readFile(f *tracked, now time.Time) (int, error) {
 // event held as complete: the file has ended, or stopped growing.
 func (t *tail) final(f *tracked) error {
 	n, _ := f.f.ReadAt(t.buf[:min(int64(len(t.buf)), max(f.size-f.read, 0))], f.read)
+	if n > 0 && !t.headMatches(f, f.f, "") {
+		t.reset(f, time.Now()) // truncated since: as in readFile
+		return nil
+	}
 	_, err := t.lines(f, t.buf[:n], true)
 	return err
 }
@@ -571,18 +619,24 @@ func (t *tail) final(f *tracked) error {
 // keyOf returns the file's part of its records' keys: its device, inode
 // and a hash of its first line (up to fingerprint_bytes), which tells the
 // file's contents before and after a truncation apart, and is the same
-// when the file is read again after a crash.
-func (t *tail) keyOf(f *tracked) string {
+// when the file is read again after a crash. The first line is taken from
+// data, the unit at start, when it is the file's first, so that the key
+// and the records come from the same read; from the file otherwise.
+func (t *tail) keyOf(f *tracked, data []byte, start int64) string {
 	if f.key == "" {
-		var first []byte
-		if f.f != nil {
-			b := t.hbuf[:min(int64(len(t.hbuf)), f.size)]
-			n, _ := f.f.ReadAt(b, 0)
-			first = b[:n]
-			if i := bytes.IndexByte(first, '\n'); i >= 0 {
-				first = first[:i]
+		first := data
+		if start != 0 {
+			first = nil
+			if f.f != nil {
+				b := t.hbuf[:min(int64(len(t.hbuf)), max(f.size, 0))]
+				n, _ := f.f.ReadAt(b, 0)
+				first = b[:n]
 			}
 		}
+		if i := bytes.IndexByte(first, '\n'); i >= 0 {
+			first = first[:i]
+		}
+		first = bytes.TrimSuffix(first[:min(len(first), t.s.fpBytes())], []byte{'\r'})
 		f.key = fmt.Sprintf("%d:%d:%x", f.id.dev, f.id.ino, hash(first))
 	}
 	return f.key
@@ -699,7 +753,7 @@ func (t *tail) unit(f *tracked, data []byte, start int64) error {
 			fitsync.Field{Name: "line", Value: fitsync.String(string(data))},
 			fitsync.Field{Name: "error", Value: fitsync.String(err.Error())})}}
 	}
-	key := t.keyOf(f)
+	key := t.keyOf(f, data, start)
 	for i, r := range recs {
 		r.Source, r.Namespace, r.Position, r.Tx = "file", f.path, nil, fitsync.Tx{}
 		if r.Key.IsNull() {
@@ -772,6 +826,8 @@ type posFile struct {
 	Off   int64  `json:"off"`
 	Skip  bool   `json:"skip,omitempty"`
 	Key   string `json:"key,omitempty"`
+	// Missing is when scans began to miss the file, in Unix nanoseconds.
+	Missing int64 `json:"missing,omitempty"`
 }
 
 // position returns every file's identity and offset; files not read yet,
@@ -784,6 +840,9 @@ func (t *tail) position() (fitsync.Position, error) {
 		}
 		p.Files = append(p.Files, posFile{Dev: f.id.dev, Ino: f.id.ino, FP: strconv.FormatUint(f.fp, 16),
 			FPLen: f.fpLen, Path: f.path, Off: f.off, Skip: f.skip && f.lines == 0, Key: f.key})
+		if !f.missing.IsZero() {
+			p.Files[len(p.Files)-1].Missing = f.missing.UnixNano()
+		}
 	}
 	for _, g := range t.ghosts {
 		p.Ghosts = append(p.Ghosts, posGhost{FP: strconv.FormatUint(g.fp, 16), FPLen: g.fpLen, Off: g.off, Key: g.key})
@@ -813,6 +872,9 @@ func (t *tail) restore(from fitsync.Position) error {
 			continue
 		}
 		f := &tracked{id: id, fp: fp, fpLen: pf.FPLen, path: pf.Path, off: pf.Off, read: pf.Off, skip: pf.Skip, size: -1, key: pf.Key}
+		if pf.Missing != 0 {
+			f.missing = time.Unix(0, pf.Missing)
+		}
 		t.files[id] = f
 		t.list = append(t.list, f)
 	}

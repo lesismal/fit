@@ -253,6 +253,13 @@ func TestTailAcrossRotationsAndCrashes(t *testing.T) {
 	for !delivered(total - 1) {
 		if time.Now().After(deadline) {
 			d.mu.Lock()
+			for _, r := range s.Records() {
+				v, _ := r.After.Get("line")
+				n, _ := strconv.Atoi(strings.TrimPrefix(fitsync.TextOf(v), "line "))
+				if n >= d.upTo-3 && n <= d.upTo+3 {
+					t.Logf("got %d at %s@%d ns %s", n, fitsync.TextOf(must(r.Key.Get("file"))), must(r.Key.Get("offset")).AsInt(), r.Namespace)
+				}
+			}
 			t.Fatalf("lines up to %d delivered of %d (%d ops)", d.upTo, total, w.ops)
 		}
 		time.Sleep(5 * time.Millisecond)

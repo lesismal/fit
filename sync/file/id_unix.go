@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"syscall"
+	"time"
 )
 
 // identify returns a file's device and inode, and its size.
@@ -17,16 +18,18 @@ func identify(fi os.FileInfo) (fileID, int64, error) {
 	return fileID{uint64(st.Dev), uint64(st.Ino)}, fi.Size(), nil //nolint:unconvert // Dev is int32 on darwin
 }
 
-// statID returns the identity and size of the regular file at path.
-func statID(path string) (fileID, int64, error) {
+// statID returns the identity, size and modification time of the regular
+// file at path.
+func statID(path string) (fileID, int64, time.Time, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
-		return fileID{}, 0, err
+		return fileID{}, 0, time.Time{}, err
 	}
 	if !fi.Mode().IsRegular() {
-		return fileID{}, 0, errNotRegular
+		return fileID{}, 0, time.Time{}, errNotRegular
 	}
-	return identify(fi)
+	id, size, err := identify(fi)
+	return id, size, fi.ModTime(), err
 }
 
 // fileIDOf returns the identity and size of an open file.

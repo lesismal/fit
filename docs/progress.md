@@ -5838,7 +5838,8 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Tests**: numbered lines written while the file is rotated by rename and by copy and truncation
   and rotated files are deleted, the pipeline killed at random points by the crash hook, then run
   to the end: every line arrives, and none under two keys unless past the checkpoint its run saved
-  (40 runs in a row under the race detector); ten thousand files read with `max_open_files` 64,
+  (100 runs in a row on Linux in Docker and 40 on macOS, under the race detector; the Linux runs
+  found inode reuse and stat-to-read races, fixed as the plan's decision 15 says); ten thousand files read with `max_open_files` 64,
   never more open, and the checkpoint forgetting deleted ones; resumption, truncation and a replaced
   inode; cut lines and events counted; multiline with `max_lines` and a resume mid-event; a partial
   line held until it ends or `close_after`, and a file deleted while open finished; codecs both

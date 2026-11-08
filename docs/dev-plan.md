@@ -4438,8 +4438,8 @@ track can place it); exactly-once into sinks with no transactions.
    out. Alternative: a `format` enum per connector.
 2. **The checkpoint** is every file's device, inode, fingerprint (hash and length), path, offset,
    a skip flag and its records' key part, and the heads of files truncated lately (below), as JSON.
-   Files not read yet, and copies held, are left out; a file a scan no longer finds is forgotten
-   once it is closed, so the checkpoint holds at most the files the globs match (`max_files`,
+   Files not read yet, and copies held, are left out; a closed file scans no longer find is
+   forgotten once they have missed it for `close_after` (decision 15), so the checkpoint holds at most the files the globs match (`max_files`,
    100000). A position costs the whole list, so the source sets one only between lines, on the
    last record of each pass over the files or of every 1,000 records (it holds one record back to
    put it on), not on every record. Alternative: a position on every record, or a state file of the
@@ -4504,6 +4504,21 @@ track can place it); exactly-once into sinks with no transactions.
     Linux; the tests ran on macOS only.
 14. **Size**: about 1,500 lines of code and 920 of tests (the ten-thousand-file and crash tests
     included), past the plan's 1,500; nothing is left, so there is no I166b.
+15. **Linux reuses inodes at once, and files change between a stat and a read** (found on Linux,
+    where the crash test failed 7 runs in 40, after passing on macOS's APFS): four rules follow.
+    A closed file whose inode now holds other contents (truncated while closed, or freed and taken
+    by a new file, a copy among them) is taken as a file found anew: its old head kept for a copy,
+    its new contents matched against the heads kept and the files known. It is checked when a scan
+    finds it moved, resized or with another modification time (fixed-width lines make a new file of
+    the same size common), and whenever it is opened again. A closed file a scan misses is
+    forgotten only once missing for `close_after` (`missing` in the checkpoint), since a rename
+    between the directory's listing and its stat hides a file for one scan, and forgetting it at
+    once lost its copy's match. Each read is checked against the file's head after it is made: a
+    truncation between taking the size and reading discards the read and starts the file again,
+    so new contents are never taken at the old offset. And the key's first line comes from the same
+    read as the unit's records when the unit is the file's first. Verified: the crash test 100 runs
+    in a row on Linux (Docker, 4 CPUs, under the race detector), and 500 in a row at 4 and at 6
+    CPUs; 40 on macOS. Alternative: forget at once, and check heads only on a size change.
 
 ### I167 Batch jobs, as DataX runs them
 
