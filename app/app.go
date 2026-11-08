@@ -555,6 +555,10 @@ func (m *Manager) WriteMetrics(w observe.MetricWriter) {
 	}
 }
 
+// Host returns the Host m gives the role id, for a role made by hand, as
+// tests make one, that goes by m's global access as m's roles do.
+func (m *Manager) Host(id string) *Host { return m.host(id) }
+
 func (m *Manager) host(id string) *Host {
 	h := &Host{ID: id, Engine: m.engine, Upstream: m.upstream, m: m}
 	if m.root != nil {

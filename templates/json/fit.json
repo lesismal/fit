@@ -5145,6 +5145,34 @@
         // ],
       // },
 
+      // // The client addresses the server serves on listen, listen_tcp and listen_tls, deciding before
+      // // the global access: a connection it refuses is closed as soon as it is accepted, and the
+      // // datagrams of a UDP client it refuses are dropped. Peers are not clients: allowed_peers and
+      // // denied_peers decide those. A change applies to the next client, without starting a new
+      // // server; the allocations held are kept.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
       // // The realm of the credentials, sent in every challenge: clients derive their key from their
       // // name, the realm and their password. A change starts a new server, ending the allocations of
       // // the old one when they share an address and draining it otherwise.
@@ -5289,6 +5317,33 @@
       // // list of string.
       // "public_ips": [],
 
+      // // The peer addresses the port serves, deciding before the global access: the datagrams of an
+      // // address it refuses are dropped, so its ICE checks go unanswered. A change applies to the
+      // // next new address, without starting the media server again; the sessions and addresses served
+      // // are kept.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
       // // STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of
       // // ICE; fit's side needs none, as it is an ICE lite agent on its own address.
       // // list of object.
@@ -5382,6 +5437,32 @@
       // // own: a server behind a 1:1 NAT. Applies to the next answer.
       // // list of string.
       // "public_ips": [],
+
+      // // The peer addresses the port relays, deciding before the global access: the datagrams of an
+      // // address it refuses are dropped. A change applies to the next new address, without ending a
+      // // session or relay; the addresses relayed are kept.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
 
       // // The most sessions proxied at once; one more offer is answered 503 before it reaches a media
       // // server. 4096 when left out or 0.
@@ -5849,6 +5930,33 @@
       // // or 0.
       // // integer, 0 to 65536; default 32768.
       // "max_offer_bytes": 32768,
+    // },
+
+    // // The client addresses the rtmp, rtsp, srt and webrtc listeners serve, deciding before the
+    // // global access: a connection it refuses is closed as soon as it is accepted, and the
+    // // datagrams of an srt caller or webrtc peer it refuses are dropped. A change applies to the
+    // // next connection and peer, without starting a listener again; those connected are kept.
+    // // object.
+    // "access": {
+      // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+      // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+      // // first.
+      // // list of string.
+      // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+      // // IP addresses and CIDR prefixes refused, whatever allow holds.
+      // // list of string.
+      // "deny": ["203.0.113.0/24"],
+
+      // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+      // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+      // // config is applied, and applied again when one changes; each at most 64 MiB.
+      // // list of string.
+      // "allow_files": [],
+
+      // // Files of more deny entries, written as allow_files.
+      // // list of string.
+      // "deny_files": [],
     // },
 
     // // Channels: items of a media_library played into the hub as live streams, in order, shuffled,

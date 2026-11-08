@@ -108,6 +108,13 @@ WebRTC 服务之所以运行 TURN，正是为了封锁 UDP 的网络，以及只
 列出的端口，如同一地址上的 `webrtc.media` 写作 `10.0.0.5:8189`。它绝不中继到这些地址的其他端口，包括 fit 自己的 listener，
 不论 `allowed_peers` 中的前缀怎么写。检查能看到每个数据报的端口：permission 只针对地址，它放行的数据报逐个按端口检查。
 
+### 客户端地址
+
+`webrtc.turn.access` 是该服务器的 [access](reference/config.md#access)：允许和拒绝的客户端地址列表，作用于 `listen`、
+`listen_tcp` 和 `listen_tls`，先于全局的 `access` 决定。被拒绝的客户端的 TCP 或 TLS 连接在接受时立即关闭，其 UDP 数据报
+被丢弃、不作应答。对端不是客户端：由上面的对端规则决定。重载时它或全局 access 的变化作用于之后的客户端，不会启动新的
+服务器；已有的 allocation 继续。它的列表文件会被监视，变化时重新应用配置。
+
 ### 上限
 
 | 字段 | 默认值 | 限制 |
@@ -453,6 +460,13 @@ Link: <turn:turn.example.com:3478>; rel="ice-server"; username="1767225600:fit-5
 
 fit 的 TURN 服务器像对待任何对端一样中继到媒体端口：端口在它自己的 `relay_ip` 上时，`allowed_peers` 要带端口列出它，如 `10.0.0.5:8189`。
 
+### 对端地址
+
+`webrtc.media.access` 是该端口的 [access](reference/config.md#access)：允许和拒绝的对端地址列表，先于全局的 `access`
+决定。被拒绝地址的数据报在到达 PeerConnection 之前就被丢弃，因此其 ICE 检查得不到应答，会话在 `connect_timeout` 时结束；
+`whip` 和 `whep` 路由按它们自己的 `access` 判定，对端须两者都通过。重载时它或全局 access 的变化作用于之后的新地址，端口和
+会话都保留。它的列表文件会被监视，变化时重新应用配置。
+
 ### 上限
 
 | 字段 | 默认值 | 限制 |
@@ -695,6 +709,12 @@ fit 在任何媒体服务器看到 offer 之前，按其路径的最后一段检
 一个会话最多中继对端的 8 个地址：对端每个发起检查的候选一个，迁移后还会更多。一个会话最多保留 4 个 ufrag，含 ICE
 重启产生的。中继在其 socket 打开期间最多暂存 8 个数据报，打开最多等 5 秒，否则关闭中继。fit 的 `limits.max_conns`
 既不计对端的 UDP 地址，也不计通往媒体服务器的 socket：两者都由 `max_relays` 限制。
+
+### 对端地址
+
+`webrtc.proxy.access` 是该端口的 [access](reference/config.md#access)：允许和拒绝的对端地址列表，先于全局的 `access`
+决定。被拒绝地址的数据报在任何处理之前就被丢弃。重载时它或全局 access 的变化作用于之后的新地址，端口、会话和正在中继的
+地址都保留。它的列表文件会被监视，变化时重新应用配置。
 
 ### ICE 重启、consent 与迁移的对端
 

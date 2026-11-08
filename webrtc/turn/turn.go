@@ -16,6 +16,14 @@
 // starts a new server: beside the old one, which drains for the listeners'
 // drain timeout while its allocations run out, or, when the two share an
 // address, after the old one has closed.
+//
+// The member's access decides which client addresses the server serves,
+// asked by fib as it accepts a TCP or TLS connection or meets a new UDP
+// client (fib.Binding.Filter), before a Connection is made: the policy, the
+// member's list and then the global one, is set again by every Apply,
+// whether or not the server starts again, and a server draining goes by it
+// too. The clients already served are not asked again; peers, which the
+// relayed sockets reach, are the peer rules'.
 package turn
 
 import (
@@ -38,6 +46,7 @@ import (
 	fibturn "github.com/lesismal/fib/webrtc/turn"
 	"github.com/lesismal/fib/webrtc/turn/turnserver"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/bindcheck"
@@ -62,6 +71,9 @@ func init() {
 			return c.WebRTC.TURN
 		},
 		New: func(h *app.Host) (app.Role, error) { return New(h), nil },
+		// The access's list files, read when the role applies; the
+		// certificates are watched by runtime.Compile.
+		CertFiles: func(c *config.Config) []string { return c.WebRTC.TURN.Access.Files() },
 	})
 }
 
@@ -76,6 +88,9 @@ type Server struct {
 	rules   atomic.Pointer[rules]
 	certs   atomic.Pointer[tlsmgr.Static]
 	limiter limiter
+	// access is the policy the listening bindings' Filter asks, every
+	// server's, set by every Apply.
+	access access.Gate
 
 	// mu guards cur, draining and stopped, and orders Apply and Stop.
 	mu       sync.Mutex
@@ -182,6 +197,10 @@ func (s *Server) Apply(member any) error {
 	if err != nil {
 		return err
 	}
+	policy, err := s.host.Access(cfg.Access)
+	if err != nil {
+		return fmt.Errorf("access: %w", err)
+	}
 	var certs *tlsmgr.Static
 	if cfg.TLS != nil {
 		if certs, err = tlsmgr.LoadStatic(cfg.TLS.Config()); err != nil {
@@ -195,6 +214,7 @@ func (s *Server) Apply(member any) error {
 	}
 	key := staticKey(cfg)
 	if s.cur != nil && s.cur.key == key {
+		s.access.Set(policy)
 		s.rules.Store(r)
 		s.certs.Store(certs)
 		s.cur.core.SetLimits(limits(cfg))
@@ -220,13 +240,15 @@ func (s *Server) Apply(member any) error {
 	if err := checkFree(cfg, old); err != nil {
 		return err
 	}
-	prevRules, prevCerts := s.rules.Load(), s.certs.Load()
+	prevRules, prevCerts, prevAccess := s.rules.Load(), s.certs.Load(), s.access.Policy()
 	s.rules.Store(r)
 	s.certs.Store(certs)
+	s.access.Set(policy)
 	restore := func() {
 		if prevRules != nil {
 			s.rules.Store(prevRules)
 			s.certs.Store(prevCerts)
+			s.access.Set(prevAccess)
 		}
 	}
 	if old != nil && old.sharesAddr(cfg) {
@@ -335,7 +357,7 @@ func (s *Server) start(cfg *config.TURNServer, key string, auth fibturn.AuthFunc
 		s.closeRunning(r)
 		return nil, err
 	}
-	i, err := s.engine.AddBinding(fib.Binding{Network: "udp", Addrs: slices.Clone(cfg.Listen), Handler: srv})
+	i, err := s.engine.AddBinding(fib.Binding{Network: "udp", Addrs: slices.Clone(cfg.Listen), Handler: srv, Filter: s.access.Allows})
 	if err != nil {
 		return fail(fmt.Errorf("listen on %s: %w", strings.Join(cfg.Listen, ", "), err))
 	}
@@ -345,7 +367,7 @@ func (s *Server) start(cfg *config.TURNServer, key string, auth fibturn.AuthFunc
 	}
 	srv.Start(s.engine, i)
 	if len(cfg.ListenTCP) > 0 {
-		i, err := s.engine.AddBinding(fib.Binding{Network: "tcp", Addrs: slices.Clone(cfg.ListenTCP), Handler: srv.StreamHandler(), MultipathTCP: cfg.MPTCP})
+		i, err := s.engine.AddBinding(fib.Binding{Network: "tcp", Addrs: slices.Clone(cfg.ListenTCP), Handler: srv.StreamHandler(), MultipathTCP: cfg.MPTCP, Filter: s.access.Allows})
 		if err != nil {
 			return fail(fmt.Errorf("listen_tcp on %s: %w", strings.Join(cfg.ListenTCP, ", "), err))
 		}
@@ -356,7 +378,7 @@ func (s *Server) start(cfg *config.TURNServer, key string, auth fibturn.AuthFunc
 	}
 	if len(cfg.ListenTLS) > 0 {
 		h := fibtls.NewServer(tlsmgr.StreamConfig(s.getCertificate), srv.StreamHandler())
-		i, err := s.engine.AddBinding(fib.Binding{Network: "tcp", Addrs: slices.Clone(cfg.ListenTLS), Handler: h, MultipathTCP: cfg.MPTCP})
+		i, err := s.engine.AddBinding(fib.Binding{Network: "tcp", Addrs: slices.Clone(cfg.ListenTLS), Handler: h, MultipathTCP: cfg.MPTCP, Filter: s.access.Allows})
 		if err != nil {
 			return fail(fmt.Errorf("listen_tls on %s: %w", strings.Join(cfg.ListenTLS, ", "), err))
 		}

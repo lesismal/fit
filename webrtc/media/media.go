@@ -14,6 +14,13 @@
 // viewers a stream, a publisher's bitrate, the offer's size, and the time a
 // session may take to connect and its peer may be silent.
 //
+// The member's access decides which peer addresses the Mux serves, asked
+// by fib as a new address's first datagram arrives (MuxConfig.Filter),
+// before a Connection is made: its policy, the member's list and then the
+// global one, is set again by every Apply, which keeps the Mux when listen
+// and public_ips are the same; the addresses already served are not asked
+// again.
+//
 // Sessions belong to the role, not to the routes: a reload that keeps the
 // role's listen and public_ips keeps them, and applies the rest of its
 // settings to what comes next; one that changes those, or leaves the role
@@ -42,6 +49,7 @@ import (
 	fibtls "github.com/lesismal/fib/tls"
 	"github.com/lesismal/fib/webrtc"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/bindcheck"
@@ -64,6 +72,8 @@ func init() {
 			return c.WebRTC
 		},
 		New: func(h *app.Host) (app.Role, error) { return New(h) },
+		// The access's list files, read when the role applies.
+		CertFiles: func(c *config.Config) []string { return c.WebRTC.Media.Access.Files() },
 	})
 }
 
@@ -114,8 +124,12 @@ func Lookup(engine *fib.Engine) *Server {
 type Server struct {
 	engine *fib.Engine
 	key    *fib.Engine
+	host   *app.Host
 	log    *logs.Logger
 	cert   stdtls.Certificate
+
+	// access is the policy the Mux's Filter asks, set by every Apply.
+	access access.Gate
 
 	set atomic.Pointer[settings]
 
@@ -164,7 +178,7 @@ func New(h *app.Host) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{engine: h.Engine, key: h.Upstream, log: h.Log, cert: cert,
+	return &Server{engine: h.Engine, key: h.Upstream, host: h, log: h.Log, cert: cert,
 		sessions: map[string]*session{}, streams: map[string]*stream{}}, nil
 }
 
@@ -205,6 +219,10 @@ func (s *Server) Apply(member any) error {
 	}
 	cfg := w.Media
 	st := newSettings(w)
+	policy, err := s.host.Access(cfg.Access)
+	if err != nil {
+		return fmt.Errorf("access: %w", err)
+	}
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 	s.mu.Lock()
@@ -214,6 +232,10 @@ func (s *Server) Apply(member any) error {
 	}
 	key := staticKey(cfg)
 	old := s.cur
+	// Before a new Mux starts, which goes by it from its first peer; one
+	// that cannot start has the policy as it was put back.
+	prevAccess := s.access.Policy()
+	s.access.Set(policy)
 	if old != nil && old.key == key {
 		s.set.Store(st)
 		old.cfg = cfg
@@ -223,6 +245,7 @@ func (s *Server) Apply(member any) error {
 	s.mu.Unlock()
 	if old == nil || old.cfg.Listen != cfg.Listen {
 		if err := checkFree(cfg.Listen); err != nil {
+			s.access.Set(prevAccess)
 			return err
 		}
 	}
@@ -239,6 +262,7 @@ func (s *Server) Apply(member any) error {
 		closeMux(s.log, old)
 		next, err := s.start(cfg, key)
 		if err != nil {
+			s.access.Set(prevAccess)
 			again, err2 := s.start(old.cfg, old.key)
 			if err2 != nil {
 				s.log.Errorf("the media server as it was could not start again either: %v", err2)
@@ -255,6 +279,7 @@ func (s *Server) Apply(member any) error {
 	} else {
 		next, err := s.start(cfg, key)
 		if err != nil {
+			s.access.Set(prevAccess)
 			return err
 		}
 		s.mu.Lock()
@@ -300,7 +325,7 @@ func (s *Server) Stop(context.Context) {
 }
 
 func (s *Server) start(cfg *config.WebRTCMedia, key string) (*running, error) {
-	mc := webrtc.MuxConfig{Addr: cfg.Listen}
+	mc := webrtc.MuxConfig{Addr: cfg.Listen, Filter: s.access.Allows}
 	for _, p := range cfg.PublicIPs {
 		a, err := netip.ParseAddr(p)
 		if err != nil {

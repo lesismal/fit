@@ -57,6 +57,7 @@ var MediaCodecs = []string{"opus", "VP8", "VP9", "H264", "AV1"}
 type WebRTCMedia struct {
 	Listen             string      `json:"listen" fit:"required" doc:"The UDP address every peer's media reaches fit at, one port all PeerConnections share, as in \":8189\". A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change starts the media server again, ending its sessions."`
 	PublicIPs          []string    `json:"public_ips,omitempty" doc:"The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT, or a load balancer that forwards the port unchanged. A change starts the media server again."`
+	Access             *Access     `json:"access,omitempty" doc:"The peer addresses the port serves, deciding before the global access: the datagrams of an address it refuses are dropped, so its ICE checks go unanswered. A change applies to the next new address, without starting the media server again; the sessions and addresses served are kept."`
 	ICEServers         []ICEServer `json:"ice_servers,omitempty" doc:"STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's side needs none, as it is an ICE lite agent on its own address."`
 	TURNURLs           []string    `json:"turn_urls,omitempty" doc:"URLs of fit's own TURN server, webrtc.turn, as peers reach it, as in \"turn:turn.example.com:3478\": each answer's Link headers carry them with time-limited credentials made from webrtc.turn's secret, which must be set."`
 	TURNCredentialTTL  Duration    `json:"turn_credential_ttl,omitempty" default:"\"1h\"" doc:"How long the TURN credentials an answer carries are good for. 1h when left out."`
@@ -86,6 +87,7 @@ const (
 type WebRTCProxy struct {
 	Listen         string   `json:"listen" fit:"required" doc:"The UDP address peers reach the media servers behind fit at, one port for them all, as in \":8190\": the proxied answers name it as their only candidate. A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change ends every relay and session."`
 	PublicIPs      []string `json:"public_ips,omitempty" doc:"The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT. Applies to the next answer."`
+	Access         *Access  `json:"access,omitempty" doc:"The peer addresses the port relays, deciding before the global access: the datagrams of an address it refuses are dropped. A change applies to the next new address, without ending a session or relay; the addresses relayed are kept."`
 	MaxSessions    int      `json:"max_sessions,omitempty" min:"0" default:"4096" doc:"The most sessions proxied at once; one more offer is answered 503 before it reaches a media server. 4096 when left out or 0."`
 	MaxRelays      int      `json:"max_relays,omitempty" min:"0" default:"4096" doc:"The most peer addresses relayed at once, each with a UDP socket of its own toward its media server; past it, a new address's STUN request is dropped. A session relays at most 8 of its peer's addresses. 4096 when left out or 0."`
 	SessionTimeout Duration `json:"session_timeout,omitempty" default:"\"30s\"" doc:"How long a session is kept with nothing relayed for it: from its answer until its peer's first request, and after its last relay ends. Its ufrags are forgotten then, and its URL answers 404. 30s when left out."`
@@ -191,6 +193,7 @@ type TURNServer struct {
 	ListenTLS             []string   `json:"listen_tls,omitempty" doc:"TLS addresses clients reach the server at, as in \":5349\" or \":443\", with tls's certificates, for clients that only TLS gets through for: turns:host:5349?transport=tcp. As listen_tcp otherwise."`
 	MPTCP                 bool       `json:"mptcp,omitempty" doc:"Listen listen_tcp and listen_tls with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; listen's UDP sockets have none. A change of it starts a new server and drains the old one."`
 	TLS                   *TURNTLS   `json:"tls,omitempty" doc:"The certificates of listen_tls, from files, as a listener's tls.certificates has them, and watched as theirs are: a change applies to the next handshake."`
+	Access                *Access    `json:"access,omitempty" doc:"The client addresses the server serves on listen, listen_tcp and listen_tls, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams of a UDP client it refuses are dropped. Peers are not clients: allowed_peers and denied_peers decide those. A change applies to the next client, without starting a new server; the allocations held are kept."`
 	Realm                 string     `json:"realm" fit:"required" doc:"The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts a new server, ending the allocations of the old one when they share an address and draining it otherwise."`
 	Users                 []TURNUser `json:"users,omitempty" doc:"The users with fixed credentials. With secret, or alone; at least one of the two."`
 	Secret                string     `json:"secret,omitempty" doc:"The shared secret of time-limited credentials, as coturn's static-auth-secret (use-auth-secret) has it: a username \"<expiry in Unix seconds>:<anything>\" whose password is the base64 of HMAC-SHA1(secret, username), valid until the expiry. A web service that knows the secret hands them out."`
@@ -313,6 +316,7 @@ func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
 		return
 	}
 	t := c.WebRTC.TURN
+	t.Access.check(add)
 	if len(t.Listen) == 0 {
 		add(t.At.Field("listen"), "at least one address is needed")
 	}
@@ -415,6 +419,7 @@ func (c *Config) checkProxy(add func(Value, string, ...any)) {
 		add(p.At.Field("listen"), "%s", msg)
 	}
 	checkPublicIPs(p.At.Field("public_ips"), p.PublicIPs, add)
+	p.Access.check(add)
 	if p.RelayIP != "" {
 		a, err := netip.ParseAddr(p.RelayIP)
 		switch {
@@ -454,6 +459,7 @@ func (c *Config) checkMedia(add func(Value, string, ...any)) {
 		add(m.At.Field("listen"), "%s", msg)
 	}
 	checkPublicIPs(m.At.Field("public_ips"), m.PublicIPs, add)
+	m.Access.check(add)
 	checkICEServers(m.At.Field("ice_servers"), m.ICEServers, add)
 	for i, u := range m.TURNURLs {
 		if !iceURL(u) || !strings.HasPrefix(strings.ToLower(u), "turn") {

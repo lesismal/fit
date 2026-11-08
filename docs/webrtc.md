@@ -125,6 +125,16 @@ covers them, and on a port `allowed_peers` names with them, as `10.0.0.5:8189` f
 among them, whatever the prefixes in `allowed_peers` say. The check sees each datagram's port: a
 permission is for an address alone, and the datagrams it lets through are checked port by port.
 
+### Client addresses
+
+`webrtc.turn.access` is the server's [access](reference/config.md#access): allow and deny lists of
+the client addresses it serves on `listen`, `listen_tcp` and `listen_tls`, deciding before the
+global `access`. A refused client's TCP or TLS connection is closed as soon as it is accepted, and
+its UDP datagrams are dropped unanswered. Peers are not clients: the peer rules above decide
+those. A reload applies a change of it, or of the global access, to the next client without
+starting a new server; the allocations held go on. Its list files are watched, and a change
+applies the config again.
+
 ### Limits
 
 | Field | Default | Bounds |
@@ -523,6 +533,16 @@ Link: <turn:turn.example.com:3478>; rel="ice-server"; username="1767225600:fit-5
 fit's TURN server relays to the media port as to any peer: when the port is on its own `relay_ip`,
 `allowed_peers` lists it with its port, as `10.0.0.5:8189`.
 
+### Peer addresses
+
+`webrtc.media.access` is the port's [access](reference/config.md#access): allow and deny lists of
+the peer addresses it serves, deciding before the global `access`. The datagrams of a refused
+address are dropped before they reach a PeerConnection, so its ICE checks go unanswered and its
+session ends at `connect_timeout`; the `whip` and `whep` routes go by their own `access`, so a peer
+must pass both. A reload applies a change of it, or of the global access, to the next new address,
+keeping the port and its sessions. Its list files are watched, and a change applies the config
+again.
+
 ### Limits
 
 | Field | Default | Bounds |
@@ -821,6 +841,14 @@ and more after it moves. A session keeps at most 4 ufrags, its ICE restarts' amo
 holds up to 8 datagrams while its socket opens, which may take 5 seconds before the relay is
 closed. fit's `limits.max_conns` counts neither the peers' UDP addresses nor the sockets toward the
 media servers: `max_relays` bounds both.
+
+### Peer addresses
+
+`webrtc.proxy.access` is the port's [access](reference/config.md#access): allow and deny lists of
+the peer addresses it relays, deciding before the global `access`. The datagrams of a refused
+address are dropped before anything else looks at them. A reload applies a change of it, or of
+the global access, to the next new address, keeping the port, its sessions and the addresses
+relayed. Its list files are watched, and a change applies the config again.
 
 ### ICE restarts, consent and a peer that moves
 

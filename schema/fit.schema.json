@@ -3377,6 +3377,10 @@
     "config.Streaming": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the rtmp, rtsp, srt and webrtc listeners serve, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams of an srt caller or webrtc peer it refuses are dropped. A change applies to the next connection and peer, without starting a listener again; those connected are kept."
+        },
         "channels": {
           "description": "Channels: items of a media_library played into the hub as live streams, in order, shuffled, looped or on a schedule, paced by their timestamps, which run on from one item to the next; every egress plays them under its auth. A reload changes a channel in place, from its next item. At most 256. None when left out.",
           "items": {
@@ -3459,6 +3463,10 @@
     "config.TURNServer": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the server serves on listen, listen_tcp and listen_tls, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams of a UDP client it refuses are dropped. Peers are not clients: allowed_peers and denied_peers decide those. A change applies to the next client, without starting a new server; the allocations held are kept."
+        },
         "allowed_peers": {
           "description": "The addresses and prefixes, as in \"10.1.0.0/16\", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in. An address with a port, as in \"10.0.0.5:8189\", allows that port alone, which is how a peer on relay_ip itself, such as webrtc.media, is reached.",
           "items": {
@@ -4485,6 +4493,10 @@
     "config.WebRTCMedia": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The peer addresses the port serves, deciding before the global access: the datagrams of an address it refuses are dropped, so its ICE checks go unanswered. A change applies to the next new address, without starting the media server again; the sessions and addresses served are kept."
+        },
         "codecs": {
           "default": [
             "opus",
@@ -4587,6 +4599,10 @@
     "config.WebRTCProxy": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The peer addresses the port relays, deciding before the global access: the datagrams of an address it refuses are dropped. A change applies to the next new address, without ending a session or relay; the addresses relayed are kept."
+        },
         "idle_timeout": {
           "default": "30s",
           "description": "How long a relayed peer address may send nothing before its relay is closed, whatever its media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open. 30s when left out.",

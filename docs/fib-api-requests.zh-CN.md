@@ -78,6 +78,7 @@
 | A70 | TURN 中继不共用端口范围内的同一端口 | 已完成，fib `856ad5b` | 11 | I162 |
 | A72 | 分片的各轨道从其关键帧开始 | 已完成，fib `e4e10c0` | 11 | I134、I136 |
 | A73 | 绑定在 accept 时按地址拒绝对端 | 已完成，fib `8de0a75` | 11、12 | I163 |
+| A74 | `webrtc.MuxConfig.Filter`：在对端的第一个数据报就拒绝它的 Mux | 已完成，fib `f957983` | 11 | I163 |
 
 ## 证据
 
@@ -1842,3 +1843,26 @@ SO_REUSEPORT 监听的引擎占着的端口被跳过，中继关闭后端口回�
 已打开的连接与已知的 UDP 对端不再复查。Filter 为 nil 时只多一次判空。
 
 **fit 如何使用。** 每个 listener 与每个角色的绑定都把 `Filter` 设为一个 `access.Gate`，应用配置时替换其策略；见 I163。
+
+## A74：在对端的第一个数据报就拒绝它的 Mux
+
+**状态。** 2026-11-08 由各角色的客户端地址 access 提出。已在 fib 的 `f957983` 完成（基于 `8de0a75` 的 `Binding.Filter`），由 fit
+的会话按[规则 15](rules.zh-CN.md#七fib-满足不了时) 实现；fit 移到该提交。
+
+**问题。** fit 在 fib 接受对端之处、用 `fib.Binding.Filter` 在建立 Connection 之前判定角色的 access：`streaming` 角色的 RTMP、
+RTSP 和 SRT 监听器、`webrtc.turn` 和 `webrtc.proxy` 的端口都如此。`webrtc.NewMux` 按 `MuxConfig` 自己添加其 UDP 绑定，而
+`MuxConfig` 没有可传入的过滤器，于是 `streaming.webrtc` 和 `webrtc.media` 监听的端口应答所有地址的 STUN。
+
+**依据。** `webrtc/mux.go`：`engine.AddBinding(fib.Binding{Network: network, Addr: addr, Handler: muxHandler{m}})`，除地址外不带
+配置的其他内容。
+
+**建议的 API。** `MuxConfig.Filter func(peer netip.AddrPort) bool`，作为绑定的 `Filter` 传入，含义与 `Binding.Filter` 相同：对每个新
+对端询问一次，被拒绝的对端的数据报在建立 Connection 之前丢弃。
+
+**fit 的使用方式。** `streaming` 和 `webrtc.media` 在其 `MuxConfig` 中设置 `Filter: gate.Allows`，该 gate 像其他角色的一样由每次
+Apply 设置，`webrtc.media` 也有自己的 `access`。
+
+**实际实现。** 与建议相同：`MuxConfig.Filter` 作为 Mux 绑定的 `Filter` 传入；Mux 自己用 `Engine.OpenUDPPeer` 打开的地址不经询问。
+fib 有自己的测试覆盖它。`streaming` 的 WebRTC 端口和 `webrtc.media` 传入各自的 gate，`webrtc.media` 也有了 `access`
+（`TestMediaAccess`，以及 `streaming` 的 `TestAccess` 中的 WebRTC 端口）。
+

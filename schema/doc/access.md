@@ -23,6 +23,11 @@ takes PROXY headers, decides later instead: a refused HTTP request is answered `
 PROXY header names, never `X-Forwarded-For`'s. A change applies to connections and udp sessions that
 start after it.
 
+The roles that listen on sockets of their own decide at accept too: `streaming` on its RTMP, RTSP
+and SRT listeners and its WebRTC port, `webrtc.turn` on all three of its, and `webrtc.media` and
+`webrtc.proxy` on their ports. A reload sets their policy again, the global access with it, without
+starting a listener again.
+
 The roles that listen, `tunnel.hub`, `tunnel.proxy`, `llm.hub`, `llm.node` and `llm.proxy`, each
 take an `access` of their own for every socket the role listens on (a hub's listeners and
 `console_socket`, a proxy's `forwards` and `web_proxies`, an LLM role's `listen` and a proxy's

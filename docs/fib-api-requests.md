@@ -80,6 +80,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A70 | TURN relays that never share a port of the range | done, fib `856ad5b` | 11 | I162 |
 | A72 | A segment's tracks begin at its keyframe | done, fib `e4e10c0` | 11 | I134, I136 |
 | A73 | A binding refuses peers by address at accept | done, fib `8de0a75` | 11, 12 | I163 |
+| A74 | `webrtc.MuxConfig.Filter`: a Mux that refuses peers at their first datagram | done, fib `f957983` | 11 | I163 |
 
 ## Evidence
 
@@ -2439,3 +2440,30 @@ asked; open connections and known UDP peers are not checked again. A nil Filter 
 
 **How fit uses it.** Every listener's bindings, and every role's, set `Filter` to an `access.Gate`,
 which a config applied swaps; see I163.
+
+## A74: A Mux that refuses peers at their first datagram
+
+**Status.** Requested on 2026-11-08, from the client-address access of the roles. Done in fib at
+`f957983`, on `8de0a75` (`Binding.Filter`), made by fit's session per
+[rule 15](rules.md#7-when-fib-falls-short); fit moves to that commit.
+
+**Problem.** fit decides a role's access where fib accepts a peer, with `fib.Binding.Filter`, before
+a Connection is made: the `streaming` role's RTMP, RTSP and SRT listeners, `webrtc.turn`'s and
+`webrtc.proxy`'s port do. `webrtc.NewMux` adds its UDP binding itself, from `MuxConfig`, which has no
+filter to pass, so the port `streaming.webrtc` and `webrtc.media` listen on answers STUN from every
+address.
+
+**Evidence.** `webrtc/mux.go`: `engine.AddBinding(fib.Binding{Network: network, Addr: addr,
+Handler: muxHandler{m}})`, with nothing of the config's beyond the address.
+
+**Suggested API.** `MuxConfig.Filter func(peer netip.AddrPort) bool`, passed as the binding's
+`Filter`, with `Binding.Filter`'s meaning: asked about each new peer, a refused one's datagrams
+dropped before a Connection is made.
+
+**How fit uses it.** `streaming` and `webrtc.media` set `Filter: gate.Allows` in their `MuxConfig`,
+the gate set by every Apply as the other roles' are, and `webrtc.media` takes an `access` of its own.
+
+**As built.** As suggested: `MuxConfig.Filter`, passed as the Mux binding's `Filter`; addresses the
+Mux opens itself with `Engine.OpenUDPPeer` are not asked. fib covers it with a test of its own.
+`streaming`'s WebRTC port and `webrtc.media` pass their gates, and `webrtc.media` has an `access`
+(`TestMediaAccess`, and the WebRTC port in `streaming`'s `TestAccess`).
