@@ -242,3 +242,26 @@ func BenchmarkAllows(b *testing.B) {
 		})
 	}
 }
+
+// Check and Files, what a role's app.Info.Check and CertFiles run on its
+// own access.
+func TestCheckAndFiles(t *testing.T) {
+	if Check(nil) != nil || Files(nil) != nil {
+		t.Fatal("a nil access")
+	}
+	if err := Check(&config.Access{Deny: []string{"10.0.0.0/8"}}); err != nil {
+		t.Fatal(err)
+	}
+	a := &config.Access{AllowFiles: []string{filepath.Join(t.TempDir(), "none")}, DenyFiles: []string{"d"}}
+	if err := Check(a); err == nil {
+		t.Fatal("checked a file that does not exist")
+	}
+	if f := Files(a); len(f) != 2 || f[0] != a.AllowFiles[0] || f[1] != "d" {
+		t.Fatal(f)
+	}
+	// Files gives a list of its own.
+	Files(a)[0] = "x"
+	if a.AllowFiles[0] == "x" {
+		t.Fatal("Files shares the member's slice")
+	}
+}

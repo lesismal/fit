@@ -113,7 +113,7 @@ func (c *Proxy) startProxy(pc *config.TunnelWebProxy) *webProxy {
 	}
 	i, err := -1, bindcheck.Free("tcp", pc.Listen)
 	if err == nil {
-		i, err = c.h.Engine.AddBinding(fib.Binding{Addr: pc.Listen, Handler: p})
+		i, err = c.h.Engine.AddBinding(fib.Binding{Addr: pc.Listen, Handler: p, Filter: c.gate.Allows})
 	}
 	if err != nil {
 		p.err = err.Error()

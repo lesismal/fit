@@ -1489,6 +1489,10 @@
     "config.LLMHub": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the hub's listen takes links from, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the links that open from then on, without listening anew; those already open stay. Its console's pages take console.access."
+        },
         "console": {
           "$ref": "#/$defs/config.RoleConsole",
           "description": "The hub's web pages; none when left out."
@@ -1683,6 +1687,10 @@
     "config.LLMNode": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the node's listen takes links from, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the links that open from then on, without listening anew; those already open stay. Its console's pages take console.access."
+        },
         "console": {
           "$ref": "#/$defs/config.RoleConsole",
           "description": "The node's web pages; none when left out."
@@ -1858,6 +1866,10 @@
     "config.LLMProxy": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the proxy's listen takes links from and its api serves, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the connections that open from then on, without listening anew; those already open stay. Its console's pages take console.access."
+        },
         "api": {
           "$ref": "#/$defs/config.LLMProxyAPI",
           "description": "The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."
@@ -3792,6 +3804,10 @@
     "config.TunnelHub": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the hub's listeners and its console_socket take, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams a quic listener gets from an address it refuses are dropped. A change applies to the connections that open from then on, without listening anew; those already open stay. Its console's pages take console.access."
+        },
         "allow_proxy_services": {
           "description": "Let registered proxies set nodes' services through the hub, as a proxy's pages do; a node takes them only with its allow_hub_services. Every proxy that has the password could then do it. Off when left out: only the hub's own pages ask nodes to change their services.",
           "type": "boolean"
@@ -4021,6 +4037,10 @@
     "config.TunnelProxy": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the proxy's forwards and web_proxies take, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the connections that open from then on, without listening anew; those already open stay. Its console's pages take console.access."
+        },
         "console": {
           "$ref": "#/$defs/config.RoleConsole",
           "description": "The proxy's web pages; none when left out."

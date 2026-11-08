@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/llm/internal/mesh"
@@ -28,7 +29,8 @@ func init() {
 			return c.LLM.Hub
 		},
 		New:       func(h *app.Host) (app.Role, error) { return New(h), nil },
-		CertFiles: func(c *config.Config) []string { return role.ListenCertFiles(c.LLM.Hub.Listen) },
+		Check:     func(c *config.Config) error { return access.Check(c.LLM.Hub.Access) },
+		CertFiles: func(c *config.Config) []string { return role.ListenCertFiles(c.LLM.Hub.Listen, c.LLM.Hub.Access) },
 	})
 }
 
@@ -67,6 +69,9 @@ func (r *Role) Apply(member any) error {
 	m, ok := member.(*config.LLMHub)
 	if !ok || m == nil {
 		return errors.New("llm.hub: no member")
+	}
+	if err := r.ApplyAccess(m.Access); err != nil {
+		return err
 	}
 	r.hub.setMaxNodes(m.Nodes())
 	return r.Base.Apply(role.Common{ID: m.ID, Name: m.Name, Console: m.Console, Listen: m.Listen, Tokens: m.Tokens, Peers: m.Peers, Limits: m.Limits})

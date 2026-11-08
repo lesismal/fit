@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/llm/internal/mesh"
@@ -33,7 +34,8 @@ func init() {
 			return c.LLM.Proxy
 		},
 		New:       func(h *app.Host) (app.Role, error) { return New(h), nil },
-		CertFiles: func(c *config.Config) []string { return role.ListenCertFiles(c.LLM.Proxy.Listen) },
+		Check:     func(c *config.Config) error { return access.Check(c.LLM.Proxy.Access) },
+		CertFiles: func(c *config.Config) []string { return role.ListenCertFiles(c.LLM.Proxy.Listen, c.LLM.Proxy.Access) },
 	})
 }
 
@@ -145,6 +147,9 @@ func (c *Proxy) Apply(member any) error {
 	m, ok := member.(*config.LLMProxy)
 	if !ok || m == nil {
 		return errors.New("llm.proxy: no member")
+	}
+	if err := c.ApplyAccess(m.Access); err != nil {
+		return err
 	}
 	c.keys.set(m.APIKeys)
 	if err := c.applyAPI(m.API); err != nil {

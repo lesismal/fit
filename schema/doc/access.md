@@ -23,6 +23,12 @@ takes PROXY headers, decides later instead: a refused HTTP request is answered `
 PROXY header names, never `X-Forwarded-For`'s. A change applies to connections and udp sessions that
 start after it.
 
+The roles that listen, `tunnel.hub`, `tunnel.proxy`, `llm.hub`, `llm.node` and `llm.proxy`, each
+take an `access` of their own for every socket the role listens on (a hub's listeners and
+`console_socket`, a proxy's `forwards` and `web_proxies`, an LLM role's `listen` and a proxy's
+`api`), refusing at accept; it and the global one are set again each time the config is applied,
+without listening anew.
+
 The Admin API (`admin.access`), the console (`admin.console.access`) and the roles' pages (the
 `console.access` of `llm.*` and `tunnel.*`) go by the global access too, after their own, and
 decide at accept: a refused connection is closed before anything is read from it. Unlike the rest of

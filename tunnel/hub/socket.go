@@ -72,7 +72,7 @@ func (s *Hub) applySocket(cfg *config.TunnelConsoleSocket) error {
 	}
 	h := &socketHandler{s: s, conns: map[*fib.Connection]*proxy{}, unauth: map[netip.Addr]int{}}
 	h.max.Store(int64(cfg.Conns()))
-	i, err := s.h.Engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: ws.NewServer(h, "")})
+	i, err := s.h.Engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: ws.NewServer(h, ""), Filter: s.gate.Allows})
 	if err != nil {
 		return err
 	}

@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -97,6 +98,11 @@ type ListenOptions struct {
 	QUIC QUIC
 	// Log says what goes wrong.
 	Log *logs.Logger
+	// Filter, when not nil, is asked of every connection a TCP listener
+	// accepts, and of every new peer address a quic listener hears from,
+	// before it costs anything: false closes the connection, or drops the
+	// datagram. It is the binding's fib.Binding.Filter.
+	Filter func(netip.AddrPort) bool
 }
 
 // QUIC is how QUIC connections behave; zero values take the defaults.
@@ -371,12 +377,13 @@ type FibListener struct {
 }
 
 // ListenFib adds a binding to engine on addr, served by handler, whose URL
-// format makes of the host:port it can be dialed on.
-func ListenFib(engine *fib.Engine, addr string, handler fib.Handler, format func(hostport string) string) (*FibListener, error) {
+// format makes of the host:port it can be dialed on; filter, when not nil,
+// is the binding's Filter (see ListenOptions.Filter).
+func ListenFib(engine *fib.Engine, addr string, handler fib.Handler, filter func(netip.AddrPort) bool, format func(hostport string) string) (*FibListener, error) {
 	if err := bindcheck.Free("tcp", addr); err != nil {
 		return nil, err
 	}
-	i, err := engine.AddBinding(fib.Binding{Addr: addr, Handler: handler})
+	i, err := engine.AddBinding(fib.Binding{Addr: addr, Handler: handler, Filter: filter})
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +428,7 @@ func (tcpTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration,
 	})
 }
 
-func (tcpTransport) Listen(engine *fib.Engine, addr string, _ ListenOptions, open OpenFunc) (Listener, error) {
+func (tcpTransport) Listen(engine *fib.Engine, addr string, o ListenOptions, open OpenFunc) (Listener, error) {
 	addr = strings.TrimPrefix(addr, "tcp://")
-	return ListenFib(engine, addr, FibHandler(open), func(hostport string) string { return hostport })
+	return ListenFib(engine, addr, FibHandler(open), o.Filter, func(hostport string) string { return hostport })
 }

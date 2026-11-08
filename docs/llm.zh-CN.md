@@ -40,6 +40,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | `name` | string | 主机名 | 角色向对端显示的名称：最长 64 个字符，不含控制字符，首尾无空白。 |
 | `console` | object | 无 | 角色的 Web 页面。见[页面](#页面)。 |
 | `listen` | object | 无 | 角色接受对端连接的地方。 |
+| `access` | object | 无：由全局 `access` 决定 | `{allow, deny, allow_files, deny_files}`：`listen` 以及 proxy 的 `api` 接受哪些客户端地址的连接，先于全局 [`access`](reference/config.md#access) 决定；被拒绝的连接在接受时即关闭。每次应用都会重新设置，无论成员是否变化，都不重新监听；已打开的链路保留。它的文件像证书文件一样被监视。角色的页面由 `console.access` 控制。 |
 | `tokens` | array | 无 | 角色的监听签发的令牌，对端用它连接：`{id, name, hash, created_at, expires_at, note, members}`，最多 1,024 个。由页面、Admin API 和 `fit token` 生成，不要手写。见[令牌](#令牌)。 |
 | `peers` | array | 无 | 角色拨号并保持连接的对端；最多 64 个。 |
 | `limits` | object | 默认值 | 角色连接的上限。 |
@@ -417,7 +418,8 @@ GPU 机器：
 
 ### 传输与认证
 
-设置了 `listen` 的角色在监听引擎上 `listen.address` 处加一个绑定。它只升级 `/ws`；其他路径一律以 403 拒绝。对端设置了
+设置了 `listen` 的角色在监听引擎上 `listen.address` 处加一个绑定，角色的 `access`（其次是全局的）拒绝的地址发来的
+连接在接受时即关闭。它只升级 `/ws`；其他路径一律以 403 拒绝。对端设置了
 `pin` 或 `ca_file` 时，拨号方连接 `wss://<address>/ws`，否则连接 `ws://<address>/ws`（只有回环地址允许）；整个拨号
 （含 TLS 与认证）限时 10 秒。
 

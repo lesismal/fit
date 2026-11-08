@@ -30,6 +30,7 @@ import (
 
 	"github.com/lesismal/fib"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/bindcheck"
@@ -53,7 +54,9 @@ func init() {
 			}
 			return c.Tunnel.Proxy
 		},
-		New: func(h *app.Host) (app.Role, error) { return New(h), nil },
+		New:       func(h *app.Host) (app.Role, error) { return New(h), nil },
+		Check:     func(c *config.Config) error { return access.Check(c.Tunnel.Proxy.Access) },
+		CertFiles: func(c *config.Config) []string { return access.Files(c.Tunnel.Proxy.Access) },
 	})
 }
 
@@ -73,6 +76,10 @@ type Proxy struct {
 	limit *tunnel.Limit
 
 	cfg atomic.Pointer[config.TunnelProxy]
+	// gate is the access the forwards and web proxies take connections
+	// by: the member's own, then the global one. Each Apply sets it; the
+	// bindings' Filter asks it.
+	gate access.Gate
 
 	// amu is held for a whole Apply or Stop, and guards what they change.
 	amu     sync.Mutex
@@ -116,6 +123,15 @@ func (c *Proxy) Apply(member any) error {
 	if c.stopped {
 		return app.ErrStopped
 	}
+	// Set on every Apply, kept listeners or not, for the global access
+	// may have changed when the member has not; a list that does not
+	// compile fails the Apply before anything changes. Only connections
+	// accepted from now on are checked.
+	policy, err := c.h.Access(cfg.Access)
+	if err != nil {
+		return fmt.Errorf("access: %w", err)
+	}
+	c.gate.Set(policy)
 	var errs []error
 	if err := c.console.Apply(cfg.Console); err != nil {
 		errs = append(errs, fmt.Errorf("console: %w", err))
@@ -443,7 +459,7 @@ func (c *Proxy) listen(fc *config.TunnelForward) *forward {
 	}
 	i, err := -1, bindcheck.Free("tcp", fc.Listen)
 	if err == nil {
-		i, err = c.h.Engine.AddBinding(fib.Binding{Addr: fc.Listen, Handler: handler})
+		i, err = c.h.Engine.AddBinding(fib.Binding{Addr: fc.Listen, Handler: handler, Filter: c.gate.Allows})
 	}
 	if err != nil {
 		f.err = err.Error()

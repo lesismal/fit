@@ -181,7 +181,7 @@ func (tlsTransport) Listen(engine *fib.Engine, addr string, o ListenOptions, ope
 	}
 	hostport := strings.TrimPrefix(addr, "tls://")
 	h := fibtls.NewServer(ServerTLSConfig(*o.Cert, TLSALPN), FibHandler(open))
-	return ListenFib(engine, hostport, h, func(hp string) string { return "tls://" + hp })
+	return ListenFib(engine, hostport, h, o.Filter, func(hp string) string { return "tls://" + hp })
 }
 
 // handshakeWait is the handler of a dial over TLS until, and around, the

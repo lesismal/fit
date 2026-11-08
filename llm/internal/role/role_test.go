@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -263,13 +264,21 @@ func TestSelfSignedKeptBesideConfig(t *testing.T) {
 }
 
 func TestListenCertFiles(t *testing.T) {
-	if f := ListenCertFiles(nil); f != nil {
+	if f := ListenCertFiles(nil, nil); f != nil {
 		t.Fatal(f)
 	}
-	if f := ListenCertFiles(&config.LLMListen{SelfSigned: true}); f != nil {
+	if f := ListenCertFiles(&config.LLMListen{SelfSigned: true}, &config.Access{Allow: []string{"10.0.0.0/8"}}); f != nil {
 		t.Fatal(f)
 	}
-	if f := ListenCertFiles(&config.LLMListen{CertFile: "c", KeyFile: "k"}); len(f) != 2 || f[0] != "c" || f[1] != "k" {
+	if f := ListenCertFiles(&config.LLMListen{CertFile: "c", KeyFile: "k"}, nil); len(f) != 2 || f[0] != "c" || f[1] != "k" {
+		t.Fatal(f)
+	}
+	// The access's list files are watched too, with or without a listener.
+	a := &config.Access{AllowFiles: []string{"a"}, DenyFiles: []string{"d"}}
+	if f := ListenCertFiles(nil, a); !slices.Equal(f, []string{"a", "d"}) {
+		t.Fatal(f)
+	}
+	if f := ListenCertFiles(&config.LLMListen{CertFile: "c", KeyFile: "k"}, a); !slices.Equal(f, []string{"a", "d", "c", "k"}) {
 		t.Fatal(f)
 	}
 }

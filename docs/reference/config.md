@@ -294,7 +294,7 @@ Also at `webrtc.turn.tls.certificates[]`.
 
 ### `listeners[].access`
 
-Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`.
+Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`, `llm.hub.access`, `llm.node.access`, `llm.proxy.access`, `tunnel.hub.access`, `tunnel.proxy.access`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1195,6 +1195,12 @@ takes PROXY headers, decides later instead: a refused HTTP request is answered `
 `tcp` connection closed once its service is known. The address is the connection's, or the one its
 PROXY header names, never `X-Forwarded-For`'s. A change applies to connections and udp sessions that
 start after it.
+
+The roles that listen, `tunnel.hub`, `tunnel.proxy`, `llm.hub`, `llm.node` and `llm.proxy`, each
+take an `access` of their own for every socket the role listens on (a hub's listeners and
+`console_socket`, a proxy's `forwards` and `web_proxies`, an LLM role's `listen` and a proxy's
+`api`), refusing at accept; it and the global one are set again each time the config is applied,
+without listening anew.
 
 The Admin API (`admin.access`), the console (`admin.console.access`) and the roles' pages (the
 `console.access` of `llm.*` and `tunnel.*`) go by the global access too, after their own, and
@@ -2158,6 +2164,7 @@ In JSON:
 | `name` | string |  | The name the hub shows its peers; the host's name when left out. Its pages change it. |
 | `console` | [object](#config-roleconsole) |  | The hub's web pages; none when left out. |
 | `listen` | [object](#config-llmlisten) |  | Where the hub takes links from nodes and proxies; none when left out. Its pages change it. |
+| `access` | [object](#config-access) |  | The client addresses the hub's listen takes links from, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the links that open from then on, without listening anew; those already open stay. Its console's pages take console.access. |
 | `tokens` | list of [object](#config-linktoken) |  | The tokens the hub's listener issued, which nodes and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand. |
 | `peers` | list of [object](#config-llmpeer) |  | The nodes and proxies the hub dials. Its pages change them. |
 | `limits` | [object](#config-llmlimits) |  | Bounds on the hub's links; the defaults when left out. |
@@ -2259,6 +2266,7 @@ Also at `llm.node.limits`, `llm.proxy.limits`.
 | `description` | string |  | A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it. |
 | `console` | [object](#config-roleconsole) |  | The node's web pages; none when left out. |
 | `listen` | [object](#config-llmlisten) |  | Where the node takes links from hubs and proxies; none when left out. Its pages change it. |
+| `access` | [object](#config-access) |  | The client addresses the node's listen takes links from, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the links that open from then on, without listening anew; those already open stay. Its console's pages take console.access. |
 | `tokens` | list of [object](#config-linktoken) |  | The tokens the node's listener issued, which hubs and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand. |
 | `peers` | list of [object](#config-llmpeer) |  | The hubs and proxies the node dials. Its pages change them. |
 | `limits` | [object](#config-llmlimits) |  | Bounds on the node's links; the defaults when left out. |
@@ -2321,6 +2329,7 @@ Also at `llm.node.limits`, `llm.proxy.limits`.
 | `peers` | list of [object](#config-llmpeer) |  | The hubs and nodes the proxy dials. Its pages change them. |
 | `limits` | [object](#config-llmlimits) |  | Bounds on the proxy's links; the defaults when left out. |
 | `api` | [object](#config-llmproxyapi) |  | The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out. |
+| `access` | [object](#config-access) |  | The client addresses the proxy's listen takes links from and its api serves, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the connections that open from then on, without listening anew; those already open stay. Its console's pages take console.access. |
 | `api_keys` | list of [object](#config-llmproxykey) |  | The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them. |
 
 <a id="config-llmproxyapi"></a>
@@ -2499,6 +2508,7 @@ In JSON:
 | `tokens` | list of [object](#config-linktoken) |  | The tokens the hub issued, which nodes and proxies register with in place of the password: each its own credential, kept as a hash, with an optional expiry. The hub's pages, its Admin API module and fit token make, list, change and revoke them; not written by hand. |
 | `body_password` | string |  | When set, the body of every frame on the links is encrypted with AES-256-GCM, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. A link registered with a token derives its keys from the token and this, by HKDF; one with the password, from the password's PBKDF2. It applies to the links that open after it changes. |
 | `listeners` | list of [object](#config-tunnellistener) |  | Where nodes and proxies link to the hub, each over its protocol. A tcp or ws listener on an address that is not a loopback one needs body_password: use tls, wss or quic there. None when left out: the console's pages add them. |
+| `access` | [object](#config-access) |  | The client addresses the hub's listeners and its console_socket take, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams a quic listener gets from an address it refuses are dropped. A change applies to the connections that open from then on, without listening anew; those already open stay. Its console's pages take console.access. |
 | `console_socket` | [object](#config-tunnelconsolesocket) |  | An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out. |
 | `quic` | [object](#config-tunnelhubquic) |  | The hub's certificate, which its tls, wss and quic listeners present unless they have cert_file, and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a listener needs one and none is set. |
 | `register_timeout` | duration | `"10s"` | How long a link may take to register once it is open; it is closed past it. 10s when left out. |
@@ -2617,6 +2627,7 @@ Also at `tunnel.proxy.hubs[]`.
 | `hubs` | list of [object](#config-tunneluplink) |  | The hubs the proxy links to and registers with. None when left out: the console's pages add them. |
 | `forwards` | list of [object](#config-tunnelforward) |  | Local addresses whose connections are tunneled to a node's service. |
 | `web_proxies` | list of [object](#config-tunnelwebproxy) |  | Local addresses that serve a hub's console pages through its encrypted console_socket. |
+| `access` | [object](#config-access) |  | The client addresses the proxy's forwards and web_proxies take, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the connections that open from then on, without listening anew; those already open stay. Its console's pages take console.access. |
 | `open_timeout` | duration | `"20s"` | How long the opening of a tunnel may take, through the hub to the node and on to the service. 20s when left out. |
 | `idle_timeout` | duration | `"2h"` | How long a tunnel may carry nothing either way before it is closed. 2h when left out. |
 | `max_tunnels` | integer, 0 or more | `4096` | The most tunnels open at once, over every forward; a connection past it is closed as soon as it is accepted. 4096 when left out or 0. |

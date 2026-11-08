@@ -119,7 +119,7 @@ func startAPI(c *Proxy, cfg *config.LLMProxyAPI) (*apiServer, error) {
 	if err := bindcheck.Free("tcp", cfg.Address); err != nil {
 		return nil, fmt.Errorf("api: %w", err)
 	}
-	i, err := s.engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: s.limit})
+	i, err := s.engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: s.limit, Filter: c.Allows})
 	if err != nil {
 		return nil, fmt.Errorf("api: %w", err)
 	}

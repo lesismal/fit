@@ -175,6 +175,33 @@
         // "key": "",
       // },
 
+      // // The client addresses the hub's listen takes links from, deciding before the global access: a
+      // // connection it refuses is closed as soon as it is accepted. A change applies to the links
+      // // that open from then on, without listening anew; those already open stay. Its console's pages
+      // // take console.access.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
       // // The tokens the hub's listener issued, which nodes and proxies link with in place of a
       // // password: each its own credential, of no role, kept as a hash, with an optional expiry. The
       // // pages, the Admin API module and fit token make, list, change and revoke them; not written by
@@ -463,6 +490,33 @@
         // // The PEM private key of cert.
         // // string.
         // "key": "",
+      // },
+
+      // // The client addresses the node's listen takes links from, deciding before the global access:
+      // // a connection it refuses is closed as soon as it is accepted. A change applies to the links
+      // // that open from then on, without listening anew; those already open stay. Its console's pages
+      // // take console.access.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
       // },
 
       // // The tokens the node's listener issued, which hubs and proxies link with in place of a
@@ -1030,6 +1084,33 @@
         // "timeout": "30m",
       // },
 
+      // // The client addresses the proxy's listen takes links from and its api serves, deciding before
+      // // the global access: a connection it refuses is closed as soon as it is accepted. A change
+      // // applies to the connections that open from then on, without listening anew; those already
+      // // open stay. Its console's pages take console.access.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
       // // The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete
       // // them.
       // // list of object.
@@ -1159,6 +1240,34 @@
           // "key_file": "/etc/fit/example.com.key",
         // },
       // ],
+
+      // // The client addresses the hub's listeners and its console_socket take, deciding before the
+      // // global access: a connection it refuses is closed as soon as it is accepted, and the
+      // // datagrams a quic listener gets from an address it refuses are dropped. A change applies to
+      // // the connections that open from then on, without listening anew; those already open stay. Its
+      // // console's pages take console.access.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
 
       // // An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies
       // // that cannot reach them otherwise. Needs console. None when left out.
@@ -1736,6 +1845,33 @@
           // "max_conns": 32,
         // },
       // ],
+
+      // // The client addresses the proxy's forwards and web_proxies take, deciding before the global
+      // // access: a connection it refuses is closed as soon as it is accepted. A change applies to the
+      // // connections that open from then on, without listening anew; those already open stay. Its
+      // // console's pages take console.access.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
 
       // // How long the opening of a tunnel may take, through the hub to the node and on to the
       // // service. 20s when left out.

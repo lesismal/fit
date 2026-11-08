@@ -150,6 +150,7 @@ type LLMHub struct {
 	Name     string       `json:"name,omitempty" doc:"The name the hub shows its peers; the host's name when left out. Its pages change it."`
 	Console  *RoleConsole `json:"console,omitempty" doc:"The hub's web pages; none when left out."`
 	Listen   *LLMListen   `json:"listen,omitempty" doc:"Where the hub takes links from nodes and proxies; none when left out. Its pages change it."`
+	Access   *Access      `json:"access,omitempty" doc:"The client addresses the hub's listen takes links from, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the links that open from then on, without listening anew; those already open stay. Its console's pages take console.access."`
 	Tokens   []LinkToken  `json:"tokens,omitempty" doc:"The tokens the hub's listener issued, which nodes and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand."`
 	Peers    []LLMPeer    `json:"peers,omitempty" doc:"The nodes and proxies the hub dials. Its pages change them."`
 	Limits   *LLMLimits   `json:"limits,omitempty" doc:"Bounds on the hub's links; the defaults when left out."`
@@ -175,6 +176,7 @@ type LLMNode struct {
 	Description string           `json:"description,omitempty" doc:"A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it."`
 	Console     *RoleConsole     `json:"console,omitempty" doc:"The node's web pages; none when left out."`
 	Listen      *LLMListen       `json:"listen,omitempty" doc:"Where the node takes links from hubs and proxies; none when left out. Its pages change it."`
+	Access      *Access          `json:"access,omitempty" doc:"The client addresses the node's listen takes links from, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the links that open from then on, without listening anew; those already open stay. Its console's pages take console.access."`
 	Tokens      []LinkToken      `json:"tokens,omitempty" doc:"The tokens the node's listener issued, which hubs and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand."`
 	Peers       []LLMPeer        `json:"peers,omitempty" doc:"The hubs and proxies the node dials. Its pages change them."`
 	Limits      *LLMLimits       `json:"limits,omitempty" doc:"Bounds on the node's links; the defaults when left out."`
@@ -287,6 +289,7 @@ type LLMProxy struct {
 	Peers   []LLMPeer     `json:"peers,omitempty" doc:"The hubs and nodes the proxy dials. Its pages change them."`
 	Limits  *LLMLimits    `json:"limits,omitempty" doc:"Bounds on the proxy's links; the defaults when left out."`
 	API     *LLMProxyAPI  `json:"api,omitempty" doc:"The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."`
+	Access  *Access       `json:"access,omitempty" doc:"The client addresses the proxy's listen takes links from and its api serves, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the connections that open from then on, without listening anew; those already open stay. Its console's pages take console.access."`
 	APIKeys []LLMProxyKey `json:"api_keys,omitempty" doc:"The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them."`
 
 	At Value `json:"-" fit:"self"`
@@ -358,18 +361,21 @@ func (c *Config) checkLLM(add func(Value, string, ...any)) {
 		checkRoleConsole(h.Console, add)
 		checkLLMMesh("hub", h.At, h.ID, h.Name, h.Listen, h.Peers, h.Limits, add)
 		checkLinkTokens(h.Tokens, h.At.Field("tokens"), add)
+		h.Access.check(add)
 	}
 	if n := r.Node; n != nil {
 		checkRoleConsole(n.Console, add)
 		checkLLMMesh("node", n.At, n.ID, n.Name, n.Listen, n.Peers, n.Limits, add)
 		checkLinkTokens(n.Tokens, n.At.Field("tokens"), add)
 		checkLLMNode(n, add)
+		n.Access.check(add)
 	}
 	if cl := r.Proxy; cl != nil {
 		checkRoleConsole(cl.Console, add)
 		checkLLMMesh("proxy", cl.At, cl.ID, cl.Name, cl.Listen, cl.Peers, cl.Limits, add)
 		checkLinkTokens(cl.Tokens, cl.At.Field("tokens"), add)
 		checkLLMProxy(cl, add)
+		cl.Access.check(add)
 	}
 }
 
