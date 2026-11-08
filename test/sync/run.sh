@@ -2,16 +2,19 @@
 # Runs sync's interop tests against real servers in Docker: Elasticsearch 8
 # and OpenSearch 2, each a single node with security on (TLS with a CA of its
 # own, basic authentication) and a write thread pool of one thread and a
-# queue of one, so that parallel bulks get 429s; and ClickHouse, with a user
-# and password, over HTTP; and MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and
-# 11, through test/sync/mysql.sh, which says what they read. The containers
-# are removed at the end; KEEP=1 keeps them, and a second run reuses them.
+# queue of one, so that parallel bulks get 429s; ClickHouse, with a user
+# and password, over HTTP; MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and 11
+# (test/sync/mysql.sh, which says what they read); and PostgreSQL 13 to 17
+# with TLS, SCRAM and logical replication (test/sync/postgres.sh). The
+# containers are removed at the end; KEEP=1 keeps them, and a second run
+# reuses them.
 #
 #   test/sync/run.sh [go test flags...]
 #
 # The tests read FIT_SYNC_ES_URL, FIT_SYNC_ES_CA, FIT_SYNC_ES_PASSWORD and
 # FIT_SYNC_OS_URL, FIT_SYNC_OS_CA, FIT_SYNC_OS_PASSWORD, and FIT_SYNC_CH_URL,
-# FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD; without them they
+# FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD, and FIT_SYNC_PG, FIT_SYNC_PG_CA_DIR,
+# FIT_SYNC_PG_USER, FIT_SYNC_PG_PASSWORD; without them they
 # skip, unless FIT_SYNC_INTEROP=required, which this script sets. The
 # source's snapshot test reads FIT_SYNC_SOURCE_DOCS documents, 100,000 when
 # unset (CI); the plan's million is
@@ -28,6 +31,8 @@ CH_IMAGE=${CH_IMAGE:-clickhouse/clickhouse-server:25.8}
 CH_PORT=${CH_PORT:-29202}
 PASSWORD='Fit-sync-1nterop!'
 CERTS=$(mktemp -d)
+. test/sync/postgres.sh
+PG_CA_DIR=$CERTS
 
 . test/sync/mysql.sh
 
@@ -35,7 +40,7 @@ cleanup() {
 	mysql_cleanup
 	rm -rf "$CERTS"
 	if [ "${KEEP:-}" != 1 ]; then
-		docker rm -f fit-sync-es fit-sync-os fit-sync-ch >/dev/null 2>&1 || true
+		docker rm -f fit-sync-es fit-sync-os fit-sync-ch $(pg_names) >/dev/null 2>&1 || true
 	fi
 }
 trap cleanup EXIT
@@ -92,8 +97,10 @@ until curl -fsS -u "fit:$PASSWORD" "http://localhost:$CH_PORT/?query=SELECT%201"
 done
 mysql_start
 
+pg_start
+
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \
 	FIT_SYNC_OS_URL="https://localhost:$OS_PORT" FIT_SYNC_OS_CA="$CERTS/os-ca.pem" FIT_SYNC_OS_PASSWORD="$PASSWORD" \
 	FIT_SYNC_CH_URL="http://localhost:$CH_PORT" FIT_SYNC_CH_USER=fit FIT_SYNC_CH_PASSWORD="$PASSWORD" \
-	go test -race -count=1 "$@" ./test/sync
+	env $(pg_env) go test -race -count=1 "$@" ./test/sync

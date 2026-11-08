@@ -194,6 +194,13 @@ ClickHouse、Kafka、另一个数据库或 S3。每种基础设施都应既能�
    goroutine 上按顺序读应答，TLS 用 `crypto/tls`，每次等待受超时限制，每次调用受其 context 限制；基于 HTTP 的系统仍用 fib
    的异步客户端。
 2. **配置了到数据库的 TLS 就必须使用，没有 preferred**，并且校验证书；不提供 TLS 的服务端被拒绝，而不是改用明文。
+## 实现 I177 时做出的决定（待审阅）
+
+计划的 I177 一节列出了全部决定；以下几条改变了上面的记录。
+
+1. **数据库的 wire 客户端是阻塞连接**，基于 `net.Conn` 与 `crypto/tls`，每个在自己的 goroutine 上，而不是 fib 的异步连接：
+   一问一答，COPY 和复制流需要阻塞写的背压，通道绑定需要 `crypto/tls` 看到的服务端证书。基于 HTTP 的系统仍经 fib 出去。
+2. **没有静默降级的 `sslmode`**：`disable`、`require`、`verify-ca`、`verify-full`（默认）；通道绑定默认 `prefer`。
 
 ## 规划决定（2026-11-08，待审阅）
 

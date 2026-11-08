@@ -5851,6 +5851,37 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   `parsec` are not supported; MySQL 5.7's TLS needs the `TLS_RSA_*` suites named in the caller's
   `tls.Config`; no statement cache, compression or `COM_STMT_SEND_LONG_DATA`; the replica's
   commands are I174's.
+### I177 A PostgreSQL client: connections, authentication and queries — done
+
+- **Package `sync/postgres/wire`** (`pgwire`), a blocking client on `net.Conn` and `crypto/tls`
+  with no driver: startup with `SSLRequest` and `sslmode` (`verify-full` by default, no silent
+  fall back), SCRAM-SHA-256 and SCRAM-SHA-256-PLUS (`tls-server-end-point`, `prefer` by default),
+  MD5 and cleartext refused unless allowed; the simple protocol (`SimpleQuery`, several statements,
+  rows as text) and the extended one (`Query`, `Prepare`, `Exec`, rows streamed and decoded from
+  binary for the common types and their arrays, text for the rest); `COPY FROM STDIN` (`CopyIn`,
+  `WriteRow`, `CopyFrom`, `Abort`) and `COPY TO STDOUT` (`CopyTo`); the replication connection's
+  `IDENTIFY_SYSTEM`, `CREATE_REPLICATION_SLOT` (with an exported snapshot), `DROP_REPLICATION_SLOT`,
+  `START_REPLICATION` with its stream (`ReceiveReplication`, `SendStandbyStatus`,
+  `EndReplication`), and `LSN`. A context's end sends a `CancelRequest` and closes the connection;
+  server errors are `*Error` with the SQLSTATE and leave it usable.
+- **Tests**: unit tests against a scripted backend in the process (TLS, SCRAM's server side, the
+  RFC 7677 vector, cancel requests, malformed and cut messages, a server closing mid-result),
+  96.9% of statements without containers, under the race detector. Interop
+  (`test/sync/postgres_test.go`, `test/sync/postgres.sh`, sourced by `test/sync/run.sh`) with
+  PostgreSQL 13, 14, 15, 16 and 17 in Docker: TLS in every `sslmode`, wrong names and roots
+  refused, SCRAM with and without channel binding and a wrong password; every common type
+  through the extended protocol, NULLs, a 1 MB value, a named statement, errors and transaction
+  states; `COPY` of a million rows checked by count and sums, `COPY TO`, an aborted and a refused
+  copy; a slot exporting a snapshot read in by another connection, the `pgoutput` stream from the
+  slot's consistent point, and a standby status update moving `confirmed_flush_lsn` exactly; a
+  query cancelled on the server when its context ends.
+- **Differs from the plan**: `CopyTo` added for I179's and I180's checksums. About 2,600 lines of
+  code, 2,000 of unit tests and 500 of interop; no I177b.
+- **Gaps**: the decisions in the plan's I177 section, pending review. No SASLprep; no binary COPY;
+  `time`, `interval` and other types without a Go match come as text; pgoutput's messages and
+  text values are I178's. Not run on Linux or under the whole suite by this item (left to the
+  merge).
+
 ### I169 Elasticsearch and OpenSearch as a source — done
 
 - **Source `elasticsearch`** (`sync/elasticsearch/source.go`, beside the sink, sharing `Conn` and

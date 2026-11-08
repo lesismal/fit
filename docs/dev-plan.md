@@ -340,7 +340,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | todo |
 | I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | todo |
 | I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | todo |
-| I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | todo |
+| I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | done |
 | I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | todo |
 | I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | todo |
 | I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | todo |
@@ -5159,6 +5159,84 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: interop with each version in Docker: every common type through the extended
   protocol, `COPY` of a million rows, SCRAM with and without channel binding.
 - **Touches**: `sync/postgres/wire`, `test/sync`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/postgres/wire`, named `pgwire`, so that it does not clash with
+   `sync/mysql/wire` where both are imported. Alternative: the name `wire`.
+2. **A blocking connection on `net.Conn` and `crypto/tls`, not fib.** A `Conn` is meant for one
+   goroutine of its own, as decision 036 has database connections (few, long, off fib's workers):
+   the protocol is a request and its answer, COPY and the replication stream want the backpressure
+   a blocking write gives, and channel binding needs the server's certificate from `crypto/tls`.
+   `SendStandbyStatus` alone may run beside a goroutine waiting in `ReceiveReplication`.
+   Alternative: fib's asynchronous connection with callbacks.
+3. **`sslmode`**: `disable`, `require`, `verify-ca` and `verify-full`, the default; no `prefer` or
+   `allow`, whose silent fall back to plain text decision 036 rules out. TLS is asked for with
+   `SSLRequest`; PostgreSQL 17's direct TLS (`sslnegotiation=direct`) is not used. `Config.TLS`
+   carries the roots, client certificates and server name; the connectors will build it from
+   `ca_file` and the like. Alternative: `prefer` as libpq's default.
+4. **Channel binding** (`tls-server-end-point`) is `prefer` by default: SCRAM-SHA-256-PLUS whenever
+   TLS is used and the server offers it, `y,,` when TLS is used and it does not (so a stripped
+   offer is caught by the server), `n,,` without TLS. `require` fails unless the server
+   authenticated with -PLUS, also when it asked for no password at all. A certificate signed with
+   Ed25519 has no hash for it: unbound under `prefer`, an error under `require`. Alternative:
+   `require` by default over TLS.
+5. **SCRAM without SASLprep**: the password is used as its bytes, as PostgreSQL does with a password
+   SASLprep refuses; ASCII passwords are the same either way, and a non-ASCII one whose
+   normalisation changes it fails to authenticate. A server asking for more than 4,194,304
+   iterations is refused. Alternative: SASLprep (RFC 4013) in fit.
+6. **MD5 and cleartext passwords are refused** unless `AllowMD5` or `AllowCleartext` is set;
+   Kerberos, GSSAPI and SSPI are not supported.
+7. **A context that ends breaks the connection.** A `CancelRequest` is sent on a connection of its
+   own (best effort, plain TCP) and the connection is closed with the context's error; the caller
+   makes a new one, since the protocol cannot be resumed at an arbitrary point. There is no timeout
+   per call of the wire's own: callers bound calls with their contexts; `ConnectTimeout` (10s)
+   bounds the connect when the context has no deadline. Server errors (`*Error`, with SQLSTATE and
+   the fields) leave it usable. Alternative: wait for the cancelled query's error and keep the
+   connection.
+8. **The extended protocol takes two round trips per `Query`**: Parse and Describe, then Bind and
+   Execute, so the parameters' types are known and the results asked in binary for the types
+   decoded here, in text for the others. `Prepare` names a statement, run with one round trip
+   each time. Parameters go as text, except `[]byte` for a `bytea` parameter, which goes in binary.
+   Alternative: binary parameters, or a statement cache.
+9. **Values.** Integers and `oid` as `int64`, `float4`/`float8` as `float64`, `numeric` as
+   `Numeric` (its exact decimal text, `NaN` and the infinities included), `json`/`jsonb` as `JSON`,
+   `uuid` as its string, `bytea` as `[]byte`, `date` as midnight UTC, `timestamp` as its wall clock
+   in UTC, `timestamptz` as UTC, the infinities of dates and timestamps as the strings
+   `infinity`/`-infinity`, arrays of those as `[]any` (nested for more dimensions); every other type
+   (`time`, `timetz`, `interval`, `money`, `inet`, enums, ranges, composites) as the server's text.
+   Parameters: Go's numbers, bools, strings, `time.Time` written by the parameter's type (the wall
+   clock in its location for `timestamp`, with the offset for `timestamptz`; years 1 to 9999),
+   `time.Duration` as an interval, `Numeric`, `JSON`, pointers, and slices as array literals.
+   Alternative: a type of fit's own for time and interval.
+10. **Bounds**: one message from the server at most `MaxMessageBytes` (64 MiB); `SimpleQuery`
+    keeps a result's rows up to the same in all and is meant for commands and small answers;
+    `Query` streams rows. Alternative: no bound beyond the server's 1 GB.
+11. **COPY**: `CopyIn` gathers 64 KiB per CopyData; `WriteRow` and `AppendCopyRow` write COPY's
+    text format; a server error during the data is seen at `Close`; `Abort` sends CopyFail.
+    `CopyTo` (COPY TO STDOUT) is there too, beyond the plan, for checksums in I179's and I180's
+    tests. Binary COPY is not. Alternative: watch for the server's error while writing.
+12. **Replication commands**: `IDENTIFY_SYSTEM`; `CREATE_REPLICATION_SLOT` for logical slots only,
+    with the new syntax from 15 and the old one before, and its snapshot action (`export`, `use`,
+    `nothing`); `DROP_REPLICATION_SLOT [WAIT]`; `START_REPLICATION ... LOGICAL` with the plugin's
+    options quoted; the stream read as `XLogData` and `Keepalive`; standby status updates;
+    `EndReplication`. Not here: physical replication, `BASE_BACKUP`, `TIMELINE_HISTORY`,
+    `READ_REPLICATION_SLOT`, `ALTER_REPLICATION_SLOT`, and decoding `pgoutput`'s messages, which is
+    I178's (pgoutput sends values as text, so I178 also turns text into values by type OID).
+13. **Interop.** `test/sync/postgres.sh` starts `postgres:13`…`17-bookworm` (`fit-sync-pg13`…, ports
+    29513–29517) with TLS from a CA made in the container by its `openssl` and copied out, SCRAM
+    for a user `fit`, `wal_level=logical`; `test/sync/run.sh` sources it, and CI's `sync-interop`
+    job runs the tests (`test/sync/postgres_test.go`, reading `FIT_SYNC_PG`, `FIT_SYNC_PG_CA_DIR`,
+    `FIT_SYNC_PG_USER`, `FIT_SYNC_PG_PASSWORD`, skipping without them). PostgreSQL 13's initdb
+    stores the superuser's password as MD5 unless given `--auth-host=scram-sha-256`, which the
+    script sets. MD5's refusal is tried against the fake server only. Alternative: a pg_hba line
+    for an MD5 user.
+14. **Unit tests against a scripted backend in the process** (TLS with a certificate made in the
+    test, SCRAM's server side, cancel requests counted), as `sync/elasticsearch`'s fake cluster:
+    96.9% of the package's statements without containers. Alternative: replayed captures.
+15. **Size**: about 2,600 lines of code with comments, 2,000 of unit tests and 500 of interop, over
+    the plan's size for a client, since the replication commands and COPY TO came with it; nothing
+    is left, so there is no I177b.
 
 ### I178 PostgreSQL as a source
 

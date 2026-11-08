@@ -270,6 +270,16 @@ The plan's I172 section lists them all; these change the record above.
    on fib's asynchronous client.
 2. **TLS to a database is required when configured, never preferred**, and verified; a server that
    does not offer it is refused rather than spoken to in plain text.
+## Decisions made while building I177 (pending review)
+
+The plan's I177 section lists them all; these change the record above.
+
+1. **Database wire clients are blocking connections** on `net.Conn` and `crypto/tls`, each on a
+   goroutine of its own, not fib's asynchronous connections: request and answer, COPY and the
+   replication stream want a blocking write's backpressure, and channel binding needs
+   `crypto/tls`'s view of the server's certificate. fib stays the way out for HTTP-based systems.
+2. **No `sslmode` that falls back silently**: `disable`, `require`, `verify-ca`, `verify-full` (the
+   default); channel binding `prefer` by default.
 
 ## Planning decisions (2026-11-08, pending review)
 
