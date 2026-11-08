@@ -32,8 +32,8 @@ import (
 
 	"github.com/lesismal/fib"
 
-	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/access"
+	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/logs"
