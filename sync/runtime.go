@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lesismal/fib"
+
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
@@ -28,7 +30,11 @@ func init() {
 			return c.Sync
 		},
 		New: func(h *app.Host) (app.Role, error) {
-			return &role{rt: NewRuntime(Options{Log: h.Log, StopTimeout: h.DrainTimeout()})}, nil
+			engine := h.Upstream
+			if engine == nil {
+				engine = h.Engine
+			}
+			return &role{rt: NewRuntime(Options{Log: h.Log, StopTimeout: h.DrainTimeout(), Engine: engine})}, nil
 		},
 		Check: func(c *config.Config) error { return Check(c.Sync) },
 	})
@@ -55,7 +61,7 @@ func Check(s *config.Sync) error {
 	}
 	var errs config.Errors
 	for i := range s.Pipelines {
-		m, err := load(&s.Pipelines[i])
+		m, err := load(&s.Pipelines[i], nil)
 		if err != nil {
 			errs = append(errs, config.AsErrors(err)...)
 			continue
@@ -79,6 +85,9 @@ type Options struct {
 	// the pipeline there, as kill -9 would: it writes and saves nothing
 	// more, its checkpoint included, and is not restarted.
 	Crash func(pipeline string, at Point) bool
+	// Engine is the fib engine modules dial their own connections through,
+	// as a WASM connector's HTTP client does; nil gives them none.
+	Engine *fib.Engine
 }
 
 // Runtime runs pipelines, and moves them to each config applied.
@@ -118,11 +127,11 @@ func (m *modules) cleanup() {
 }
 
 // load loads a pipeline's modules.
-func load(p *config.SyncPipeline) (*modules, error) {
+func load(p *config.SyncPipeline, env *module.Env) (*modules, error) {
 	m := &modules{}
 	var errs config.Errors
 	get := func(ns string, ref config.ModuleRef) any {
-		v, err := module.Load(ns, ref, nil)
+		v, err := module.Load(ns, ref, env)
 		if err != nil {
 			errs = append(errs, config.AsErrors(err)...)
 			return nil
@@ -205,7 +214,7 @@ func (rt *Runtime) Apply(s *config.Sync) error {
 		if p := rt.pipes[name]; p != nil && key(dir, w) == p.key {
 			continue
 		}
-		m, err := load(w)
+		m, err := load(w, &module.Env{Engine: rt.opts.Engine})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("pipeline %s: %w", name, err))
 			continue

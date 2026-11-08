@@ -327,7 +327,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | **Sync** | | | |
 | I163 | Decision 036; `sync`: the record model, pipelines (source, transforms, sinks, `stream` or `once`), a bounded queue, batches, acknowledgements to a watermark that never splits a transaction, the checkpoint file, retries and `on_error` | I04 | done |
 | I164 | Built-in transforms: `filter`, `route`, `fields`, `key`, `cast`, `mask`, `envelope` | I163 | done |
-| I165 | WASM plugins for sync: transforms, codecs, and source and sink connectors on fit's HTTP client and timers; the guest SDKs | I163 | todo |
+| I165 | WASM plugins for sync: transforms, codecs, and source and sink connectors on fit's HTTP client and timers; the guest SDKs | I163 | done |
+| I165b | WASM sync plugins, the rest: the benchmark host's run and a binary record form if it asks; TinyGo and Rust plugins built and run in the tests; examples in fit-examples | I165 | todo |
 | I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | todo |
 | I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | todo |
 | I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | todo |
@@ -4333,6 +4334,84 @@ track can place it); exactly-once into sinks with no transactions.
   the batch and leaves the checkpoint where it was; a pool of instances keeps a pipeline's throughput
   within 20% of a built-in transform doing the same work, measured on the benchmark host.
 - **Touches**: `plugin/wasm`, `plugin/wasm/guest`, `sync`, `docs`, fit-examples.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **A batch interface beside the per-record one** (I163's decision 7). `BatchTransform` adds
+   `ApplyBatch(in, emit(i, o), fail(i, err)) error` to `Transform`; the dispatcher puts the records
+   it holds through the transforms one transform at a time (`sync/stages.go`), a batch transform in
+   one call, and still takes failures in the source's order, so `on_error` and the checkpoint
+   behave as before. Alternative: per record only, a WASM call for each record.
+2. **What fails is a call, not the dispatcher's whole batch.** The `wasm` transform splits the
+   records into calls of `batch_records` (256) and runs them on up to `instances` (the CPUs, at most
+   4) at once, handing on what they make in order; a call that fails, traps, runs past `timeout` or
+   asks for more than `max_memory_bytes` fails each of its records, which `on_error` takes; a plugin
+   may fail one record with `fail(i)`. Alternative: fail everything the dispatcher held.
+3. **The ABI's shape.** Each export takes its input's length, and the plugin pulls the input with
+   `input(buf, len)`, as the request ABI's getters write into the plugin's buffers; results go out
+   through `record_emit(index, json)` (indexes never go back), `fail(index, msg)`, `output(bytes)`
+   and `checkpoint(json)`; an export returns 0, 1 (a poll caught up) or 2 (failed). A plugin's config
+   and log are the request ABI's own `request_get(5)` and `log`, which answer in a sync call too.
+   Alternative: the host writing into memory the plugin allocates through an exported `malloc`.
+4. **What is shared with the request plugins, and what is not.** The compiled plugin, its runtime,
+   the memory bound, the compilation cache and the host modules are shared (`loadPlugin`, which no
+   longer checks for `fit_on_request`: the middleware does); the pool is the sync modules' own, idle
+   instances in a channel that a pipeline's goroutines wait on, made when first needed and again
+   after a failed call, each call bounded by a deadline on its context, rather than the request
+   pool's queue and watchdog. A Go plugin exports every sync call, since package `guest` declares
+   them all; one it registered nothing for fails the call. Alternative: one pool type for both.
+5. **HTTP and sleep are a connector's alone.** A transform's or a codec's plugin calling
+   `http_request` or `sleep` fails its call. `allow_hosts` entries are a host (any port),
+   `host:port` or `*.domain`; none allows nothing. Requests go through fib's asynchronous client on
+   the role's engine (`Options.Engine`, the upstream engine), the plugin's call waiting on the
+   pipeline's goroutine within its `timeout` (30s for connectors); bodies are text in the request's
+   JSON, a response's up to `max_response_bytes` (4 MiB). Alternative: base64 bodies for binary
+   data; URL prefixes rather than hosts.
+6. **A poll is a unit.** The source clears the transactions and positions the plugin's records
+   carry and sets the poll's next checkpoint on its last record, so the checkpoint never falls
+   inside a poll; a poll that moves the checkpoint with no records moves only the one in memory, and
+   is polled again after a restart. A failed poll restarts the pipeline from its checkpoint (I163's
+   decision 8). Alternative: positions the plugin sets on each record.
+7. **A sink's plugin names the record that failed** with `fail(i)`; the earliest it names is the
+   `BatchError`'s index, those before it written.
+8. **Codecs are a namespace now**, `sync.codecs`, with the interface `Codec` (`Decode(data, emit)`,
+   `Encode(b, recs)`) and the module `wasm` (each of its two exports optional, one required); no
+   source or sink takes one until I166, so the tests prove it by reading a file of a line format
+   of the plugin's own and writing it back. The reference has a part *Sync codecs*. Alternative:
+   leave the interface to I166.
+9. **Go rather than TinyGo in the tests.** The tests build Go `wasip1` plugins when they run, as
+   the request plugins' tests do; TinyGo is not on the machine, so the plan's TinyGo transform is a
+   Go one, and a TinyGo build is left to I165b. The guest SDK reads a batch and writes records by
+   hand rather than with `encoding/json`, whose reflection is slow in WebAssembly (the benchmark
+   below went from 160 µs a record to 46.5 µs), which also spares TinyGo's reflection.
+10. **The Rust crate** (`plugin/wasm/guest/rust`, `fit-guest`, no dependencies) wraps the imports
+    and splits a batch into its records; its unit test runs on the host, but no plugin built from it
+    for `wasm32-wasip1` has run, since the machine lacks the target: untested as a plugin, left to
+    I165b with the examples, which go to fit-examples.
+11. **The benchmark misses 20% by far**, locally: `BenchmarkSyncTransform` on an Apple M4 Pro (not
+    the benchmark host), the built-in `route` 81 ns a record; the `wasm` transform doing the same in
+    a Go plugin 46.5 µs a record on one instance and 12.6 µs on four. JSON in and out of a Go plugin
+    dominates; planning decision 8's binary form is therefore asked for, with the benchmark host's
+    run, in I165b. Alternative: hold I165 until the binary form is in.
+12. **The templates list every module of a single reference.** A pipeline's `source` and a sink's
+    `sink` were written with their namespace's first module only; now the others follow it
+    commented out with all their params, so the templates name every field, `allow_hosts` too. A
+    module chapter outside handlers and middleware is `schema/doc/modules/<namespace>_<name>.md`
+    (`sync_transforms_wasm.md`), since `wasm` names modules of several namespaces.
+13. **Size**: about 2,000 lines of code (the guest SDK's 640 and the Rust crate's 180 included) and
+    860 of tests, past the plan's 1,500; what was built is not split out, and I165b takes what is
+    left.
+
+### I165b WASM sync plugins, the rest
+
+- **Do**: run `BenchmarkSyncTransform` and a pipeline through a `wasm` transform on the benchmark
+  host; if a pool still misses 20% of the built-in, add the binary record form planning decision 8
+  allows (and a host decoder that allocates less); build and run a TinyGo transform and a Rust
+  plugin in the tests (and in CI); examples of a transform, a codec, a source and a sink in
+  fit-examples.
+- **Done when**: the benchmark host's numbers are recorded and the 20% holds, or the gap is
+  explained and accepted; TinyGo and Rust plugins pass the same tests as the Go one.
+- **Touches**: `plugin/wasm`, `plugin/wasm/guest`, `sync`, fit-examples.
 
 ### I166 Files as a source and a sink
 

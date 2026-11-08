@@ -20,6 +20,7 @@ var namespaces = []struct{ ns, title, kind, file string }{
 	{"sync.sources", "Sync sources", "source", "sync_sources.md"},
 	{"sync.sinks", "Sync sinks", "sink", "sync_sinks.md"},
 	{"sync.transforms", "Sync transforms", "transform", "sync_transforms.md"},
+	{"sync.codecs", "Sync codecs", "codec", "sync_codecs.md"},
 }
 
 // Reference returns the config reference, as Markdown: every field of the
@@ -73,9 +74,17 @@ func Reference() ([]byte, error) {
 			s := r.walk(reflect.TypeOf(info.New()).Elem(), "", strings.ReplaceAll(info.ID, ".", "-"))
 			s.title = "`" + info.Name() + "`"
 			s.doc = info.Doc
-			if m, err := readChapter("modules/" + info.Name() + ".md"); err == nil {
+			// A handler's or a middleware's chapter is modules/<name>.md;
+			// another namespace's, modules/<namespace>_<name>.md, as
+			// modules/sync_transforms_wasm.md, so that names may repeat.
+			http := n.ns == module.Handlers || n.ns == module.Middlewares
+			file := "modules/" + info.Name() + ".md"
+			if !http {
+				file = "modules/" + strings.ReplaceAll(n.ns, ".", "_") + "_" + info.Name() + ".md"
+			}
+			if m, err := readChapter(file); err == nil {
 				s.chapter = m
-			} else if _, standard := standardModules[info.Name()]; standard {
+			} else if _, standard := standardModules[info.Name()]; standard && http {
 				return nil, err
 			}
 			r.module = ""

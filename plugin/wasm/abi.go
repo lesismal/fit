@@ -70,6 +70,9 @@ func instantiateHost(ctx context.Context, rt wazero.Runtime) error {
 	if _, err := b.Instantiate(ctx); err != nil {
 		return err
 	}
+	if err := instantiateSyncHost(ctx, rt); err != nil {
+		return err
+	}
 	return instantiateProxyWasmHost(ctx, rt)
 }
 
@@ -158,6 +161,15 @@ func headerDel(ctx context.Context, mod api.Module, stack []uint64) {
 }
 
 func requestGet(ctx context.Context, mod api.Module, stack []uint64) {
+	if sc := syncOf(ctx); sc != nil {
+		// A sync plugin has its config, and no request.
+		v := int32(-1)
+		if api.DecodeU32(stack[0]) == fieldConfig {
+			v = write(mod, api.DecodeU32(stack[1]), api.DecodeU32(stack[2]), sc.p.opts.config)
+		}
+		stack[0] = api.EncodeI32(v)
+		return
+	}
 	cl := callOf(ctx)
 	r := cl.c.Request
 	var v string
@@ -203,12 +215,20 @@ var pluginLog = logs.Named(config.LoggerPlugin)
 // logMessage writes a plugin's line at its level, as Go's log/slog numbers
 // them: -4 debug, 0 info, 4 warn and 8 error.
 func logMessage(ctx context.Context, mod api.Module, stack []uint64) {
-	cl := callOf(ctx)
+	sc := syncOf(ctx)
+	var cl *call
+	if sc == nil {
+		cl = callOf(ctx)
+	}
 	level := slog.Level(int32(api.DecodeU32(stack[0])))
 	if !pluginLog.Enabled(level) {
 		return
 	}
 	msg := readField(mod, api.DecodeU32(stack[1]), api.DecodeU32(stack[2]))
+	if sc != nil {
+		syncLog(sc, level, msg)
+		return
+	}
 	if cl.m.pool.logs.Add(1) <= maxLogs {
 		pluginLog.Logf(level, "wasm plugin %s: %s", cl.m.Path, msg)
 	}

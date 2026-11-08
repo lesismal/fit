@@ -1,6 +1,6 @@
 A pipeline's `transforms` change records on their way from the source to the sinks, in order: a
 transform may change a record, drop it or split it into several. Each is one of these, named by
-`module`, with its `params`; WASM transforms come in I165. A transform reads a row's fields by
+`module`, with its `params`; `wasm` runs a plugin of your own. A transform reads a row's fields by
 name at its top level; the row is `after`, or `before` when `after` is null, as for a delete. A
 chain copies a record once, at the first transform that changes it, and the source's record stays
 as it was read, for a dead letter. A record a transform fails on goes as `on_error` says.
@@ -19,6 +19,7 @@ config is checked.
 | [`cast`](#sync-transforms-cast) | Changes fields' types, by defined conversions |
 | [`mask`](#sync-transforms-mask) | Replaces fields by a keyed HMAC-SHA256, a SHA-256, or null |
 | [`envelope`](#sync-transforms-envelope) | Makes a document of a change: flat with metadata, a before/after pair, or Debezium's envelope |
+| [`wasm`](#sync-transforms-wasm) | A WebAssembly plugin over each batch: drops, changes, splits and routes records as it likes |
 
 For example, tables of `shop` to indices named after the table, with a string document ID, a
 masked name, and a deleted flag for a sink that keeps deleted rows:

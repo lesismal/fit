@@ -6054,6 +6054,52 @@ upstreams:
           # # duration, as "1.5s" or "2m".
           # interval: "10s"
 
+        # # Or wasm, with every one of its params:
+        # # Runs a WebAssembly plugin that exports fit_sync_poll: given its checkpoint, it returns
+        # # records and the next checkpoint, reading through fit's HTTP client from the hosts
+        # # allow_hosts names, with no sockets of its own. A poll's records are saved as a whole: the
+        # # checkpoint moves past the last of them only.
+        # module: "wasm"
+        # params:
+          # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_poll; package
+          # # plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build
+          # # -buildmode=c-shared.
+          # # string; required.
+          # path: "/etc/fit/plugins/filter.wasm"
+
+          # # A string the plugin reads, for settings of its own.
+          # # string.
+          # config: "{}"
+
+          # # The hosts the plugin's HTTP requests may go to: a host name or address, any port; host:port;
+          # # or *.example.com for its subdomains. A request to any other fails the poll. None when left
+          # # out.
+          # # list of string.
+          # allow_hosts: []
+
+          # # How long to wait before polling again once the plugin has caught up, or returned nothing. 1s
+          # # when left out.
+          # # duration, as "1.5s" or "2m"; default "1s".
+          # poll_interval: "1s"
+
+          # # How long a poll may run, its HTTP requests and sleeps included; past it the poll fails, and
+          # # the pipeline starts again from its checkpoint. 30s when left out.
+          # # duration, as "1.5s" or "2m"; default "30s".
+          # timeout: "30s"
+
+          # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+          # # integer, 0 or more; default 134217728.
+          # max_memory_bytes: 134217728
+
+          # # The most bytes of records a poll may hand back. 16 MiB when left out or 0.
+          # # integer, 0 or more; default 16777216.
+          # max_output_bytes: 16777216
+
+          # # The largest HTTP response body the plugin may be given; a larger one fails its request. 4
+          # # MiB when left out or 0.
+          # # integer, 0 or more; default 4194304.
+          # max_response_bytes: 4194304
+
       # # What each record goes through, in order, before the sinks: a transform may change, drop or
       # # split a record. None when left out.
       # # list of module.
@@ -6262,6 +6308,47 @@ upstreams:
             # # it is, drop drops it. keep when left out.
             # # one of: keep, drop; default "keep".
             # unmatched: "keep"
+        # -
+          # # Runs a WebAssembly plugin that exports fit_sync_transform over the records, a batch at a
+          # # time: it emits zero or more records for each, so it drops, changes, splits and routes them.
+          # # The records cross as canonical JSON; a call that fails, traps, or runs past its time or
+          # # memory fails its batch, which on_error then takes.
+          # module: "wasm"
+          # params:
+            # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_transform; package
+            # # plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build
+            # # -buildmode=c-shared.
+            # # string; required.
+            # path: "/etc/fit/plugins/filter.wasm"
+
+            # # A string the plugin reads, for settings of its own.
+            # # string.
+            # config: "{}"
+
+            # # How many instances of the plugin may run a batch's parts at once, each with its own memory,
+            # # made as they are needed: the CPUs fit has, at most 4, when left out or 0.
+            # # integer, 0 to 16.
+            # instances: 0
+
+            # # The most records one call takes; the records the pipeline holds are split into calls of this
+            # # many, run on the instances at once. 256 when left out or 0.
+            # # integer, 0 to 100000; default 256.
+            # batch_records: 256
+
+            # # How long a call may run; past it the call is stopped, its instance made again, and its
+            # # records fail, as on_error says. 1s when left out.
+            # # duration, as "1.5s" or "2m"; default "1s".
+            # timeout: "1s"
+
+            # # The most memory an instance may have; a call that asks for more fails its records. 128 MiB
+            # # when left out or 0.
+            # # integer, 0 or more; default 134217728.
+            # max_memory_bytes: 134217728
+
+            # # The most bytes of records a call may hand back; past it the call fails. 16 MiB when left out
+            # # or 0.
+            # # integer, 0 or more; default 16777216.
+            # max_output_bytes: 16777216
 
       # # Where every record is written, at least one: each sink takes every record, in order, in
       # # batches of its own, and the checkpoint is the position all of them have acknowledged.
@@ -6288,6 +6375,48 @@ upstreams:
               # # left out or 0.
               # # integer, 0 or more; default 100000.
               # max_records: 100000
+
+            # # Or stdout, with every one of its params:
+            # # Writes each record to fit's standard output as a line of its canonical JSON: for trials and
+            # # for watching a pipeline.
+            # module: "stdout"
+            # params:
+
+            # # Or wasm, with every one of its params:
+            # # Runs a WebAssembly plugin that exports fit_sync_write over each batch, writing it through
+            # # fit's HTTP client to the hosts allow_hosts names, with no sockets of its own; it may name
+            # # the record that failed, those before it written.
+            # module: "wasm"
+            # params:
+              # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_write; package
+              # # plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build
+              # # -buildmode=c-shared.
+              # # string; required.
+              # path: "/etc/fit/plugins/filter.wasm"
+
+              # # A string the plugin reads, for settings of its own.
+              # # string.
+              # config: "{}"
+
+              # # The hosts the plugin's HTTP requests may go to: a host name or address, any port; host:port;
+              # # or *.example.com for its subdomains. A request to any other fails the write. None when left
+              # # out.
+              # # list of string.
+              # allow_hosts: []
+
+              # # How long a write may run, its HTTP requests and sleeps included; past it the write fails,
+              # # and is tried again as retry says. 30s when left out.
+              # # duration, as "1.5s" or "2m"; default "30s".
+              # timeout: "30s"
+
+              # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+              # # integer, 0 or more; default 134217728.
+              # max_memory_bytes: 134217728
+
+              # # The largest HTTP response body the plugin may be given; a larger one fails its request. 4
+              # # MiB when left out or 0.
+              # # integer, 0 or more; default 4194304.
+              # max_response_bytes: 4194304
 
           # # How records are gathered into a write: a batch is written once it holds max_records records
           # # or max_bytes bytes, or max_wait after its first record arrived, whichever comes first, and
@@ -6347,6 +6476,48 @@ upstreams:
             # # left out or 0.
             # # integer, 0 or more; default 100000.
             # max_records: 100000
+
+          # # Or stdout, with every one of its params:
+          # # Writes each record to fit's standard output as a line of its canonical JSON: for trials and
+          # # for watching a pipeline.
+          # module: "stdout"
+          # params:
+
+          # # Or wasm, with every one of its params:
+          # # Runs a WebAssembly plugin that exports fit_sync_write over each batch, writing it through
+          # # fit's HTTP client to the hosts allow_hosts names, with no sockets of its own; it may name
+          # # the record that failed, those before it written.
+          # module: "wasm"
+          # params:
+            # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_write; package
+            # # plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build
+            # # -buildmode=c-shared.
+            # # string; required.
+            # path: "/etc/fit/plugins/filter.wasm"
+
+            # # A string the plugin reads, for settings of its own.
+            # # string.
+            # config: "{}"
+
+            # # The hosts the plugin's HTTP requests may go to: a host name or address, any port; host:port;
+            # # or *.example.com for its subdomains. A request to any other fails the write. None when left
+            # # out.
+            # # list of string.
+            # allow_hosts: []
+
+            # # How long a write may run, its HTTP requests and sleeps included; past it the write fails,
+            # # and is tried again as retry says. 30s when left out.
+            # # duration, as "1.5s" or "2m"; default "30s".
+            # timeout: "30s"
+
+            # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+            # # integer, 0 or more; default 134217728.
+            # max_memory_bytes: 134217728
+
+            # # The largest HTTP response body the plugin may be given; a larger one fails its request. 4
+            # # MiB when left out or 0.
+            # # integer, 0 or more; default 4194304.
+            # max_response_bytes: 4194304
 
         # # How records are gathered into a write: a batch is written once it holds max_records records
         # # or max_bytes bytes, or max_wait after its first record arrived, whichever comes first, and

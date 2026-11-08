@@ -248,8 +248,18 @@ func elemStruct(t reflect.Type) bool {
 func (t *templater) moduleField(n *tnode, f config.Field, path string) *tnode {
 	n.isObject = true
 	if f.Module != module.Handlers {
-		if infos := module.Namespace(f.Module); len(infos) > 0 {
+		infos := module.Namespace(f.Module)
+		if len(infos) > 0 {
 			n.children = t.moduleRef(f.Module, infos[0].Name(), path)
+		}
+		// The others follow it commented out, each with all its params.
+		for _, info := range infos[min(len(infos), 1):] {
+			alt := t.moduleRef(f.Module, info.Name(), path)
+			for _, c := range alt {
+				c.active = false
+			}
+			alt[0].doc = append([]string{"Or " + info.Name() + ", with every one of its params:"}, alt[0].doc...)
+			n.children = append(n.children, alt...)
 		}
 		return n
 	}

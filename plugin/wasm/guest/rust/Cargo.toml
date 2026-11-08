@@ -1,0 +1,12 @@
+[package]
+name = "fit-guest"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The Rust side of fit's WASM plugin ABI: the sync calls (transforms, codecs, connectors), the plugin's config and its log."
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

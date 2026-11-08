@@ -93,5 +93,32 @@ type Transform interface {
 	Apply(r *Record, emit func(*Record)) error
 }
 
+// BatchTransform is a Transform that takes the records several at a time,
+// as a WASM plugin does, to spare a call for each. The dispatcher hands it
+// all the records it holds at once, rather than one by one to Apply.
+type BatchTransform interface {
+	Transform
+	// ApplyBatch hands emit(i, o) what in[i] becomes, as Apply would, in
+	// order: i never goes back. fail(i, err) fails in[i], dropping what it
+	// became. An error fails every record of in. It is called on one
+	// goroutine and must return within a bound of its own.
+	ApplyBatch(in []*Record, emit func(i int, o *Record), fail func(i int, err error)) error
+}
+
+// Codec turns bytes into records and records into bytes, for the sources
+// that read bytes (file lines, Kafka messages, HTTP bodies, S3 objects) and
+// the sinks that write them. It is a module of the namespace sync.codecs.
+type Codec interface {
+	// Decode hands emit the records data holds: a line, a message or a
+	// body, as the source reads them; zero or more. The records are the
+	// caller's, without positions: the source sets them.
+	Decode(data []byte, emit func(*Record)) error
+	// Encode appends recs, encoded, to b.
+	Encode(b []byte, recs []*Record) ([]byte, error)
+}
+
+// Codecs is the namespace of codecs.
+const Codecs = "sync.codecs"
+
 // errStopped is Emit's error once the pipeline stops.
 var errStopped = errors.New("sync: the pipeline is stopping")

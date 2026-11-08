@@ -127,6 +127,27 @@ only: the record, the pipeline, the queue, acknowledgements and the checkpoint.
     pipeline there as `kill -9` would: nothing more is saved, the checkpoint's temporary file left
     behind. Later connectors' tests use the same hook.
 
+## Decisions made while building I165 (pending review)
+
+The plan's I165 section lists them all; these change the record above.
+
+1. **Transforms may take a batch.** `BatchTransform` adds `ApplyBatch(in, emit(i, o), fail(i, err))`
+   beside `Apply`; the dispatcher runs the transforms one at a time over the records it holds, and
+   takes failures in the source's order, as before.
+2. **The WASM ABI for sync** is the host module `fit_sync` beside fit's: exports
+   `fit_sync_transform`, `fit_sync_decode`, `fit_sync_encode`, `fit_sync_poll` and
+   `fit_sync_write`, each given its input's length, which the plugin reads with `input`; results
+   through `record_emit`, `fail`, `output` and `checkpoint`; records as their canonical JSON; config
+   and log as for request plugins. A call that fails, traps or runs past its time or memory fails
+   its records, which `on_error` takes; the checkpoint does not pass them.
+3. **Connector plugins reach the outside only through `http_request`**, on fib's asynchronous
+   client, to the hosts their `allow_hosts` names, and `sleep`; transforms and codecs get neither.
+   A poll's records are a unit: the checkpoint the poll returns goes on its last record.
+4. **Codecs** are modules of `sync.codecs`, implementing `Codec`; the sources and sinks that read
+   and write bytes take one, from I166.
+5. **JSON is slow in a Go plugin**: locally, 46.5 µs a record against the built-in's 81 ns, so the
+   binary form of planning decision 8 is asked for, with the benchmark host's run (I165b).
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and

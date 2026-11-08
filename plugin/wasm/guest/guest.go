@@ -2,7 +2,9 @@
 
 // Package guest is the Go side of fit's WASM plugin ABI (see package
 // plugin/wasm): a plugin registers what runs for each request with
-// OnRequest, in an init function, and is built as a WASI reactor:
+// OnRequest, or for sync's calls with OnTransform, OnDecode, OnEncode,
+// OnPoll or OnWrite (see sync.go), in an init function, and is built as a
+// WASI reactor:
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
 //

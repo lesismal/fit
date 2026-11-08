@@ -6933,6 +6933,22 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "wasm"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.wasm"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -6940,7 +6956,8 @@
           "description": "The module's name within its namespace.",
           "enum": [
             "memory",
-            "stdout"
+            "stdout",
+            "wasm"
           ],
           "type": "string"
         },
@@ -6975,6 +6992,48 @@
       "properties": {},
       "type": "object"
     },
+    "sync.sinks.wasm": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_hosts": {
+          "description": "The hosts the plugin's HTTP requests may go to: a host name or address, any port; host:port; or *.example.com for its subdomains. A request to any other fails the write. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config": {
+          "description": "A string the plugin reads, for settings of its own.",
+          "type": "string"
+        },
+        "max_memory_bytes": {
+          "default": 134217728,
+          "description": "The most memory the plugin's instance may have. 128 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_response_bytes": {
+          "default": 4194304,
+          "description": "The largest HTTP response body the plugin may be given; a larger one fails its request. 4 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_write; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long a write may run, its HTTP requests and sleeps included; past it the write fails, and is tried again as retry says. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
     "sync.sources": {
       "additionalProperties": false,
       "allOf": [
@@ -6993,13 +7052,30 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "wasm"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.wasm"
+              }
+            }
+          }
         }
       ],
       "properties": {
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
-            "generate"
+            "generate",
+            "wasm"
           ],
           "type": "string"
         },
@@ -7038,6 +7114,60 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "sync.sources.wasm": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_hosts": {
+          "description": "The hosts the plugin's HTTP requests may go to: a host name or address, any port; host:port; or *.example.com for its subdomains. A request to any other fails the poll. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config": {
+          "description": "A string the plugin reads, for settings of its own.",
+          "type": "string"
+        },
+        "max_memory_bytes": {
+          "default": 134217728,
+          "description": "The most memory the plugin's instance may have. 128 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_output_bytes": {
+          "default": 16777216,
+          "description": "The most bytes of records a poll may hand back. 16 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_response_bytes": {
+          "default": 4194304,
+          "description": "The largest HTTP response body the plugin may be given; a larger one fails its request. 4 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_poll; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared.",
+          "type": "string"
+        },
+        "poll_interval": {
+          "default": "1s",
+          "description": "How long to wait before polling again once the plugin has caught up, or returned nothing. 1s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long a poll may run, its HTTP requests and sleeps included; past it the poll fails, and the pipeline starts again from its checkpoint. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
       "type": "object"
     },
     "sync.transforms": {
@@ -7154,6 +7284,22 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "wasm"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.transforms.wasm"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -7166,7 +7312,8 @@
             "filter",
             "key",
             "mask",
-            "route"
+            "route",
+            "wasm"
           ],
           "type": "string"
         },
@@ -7412,6 +7559,54 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.transforms.wasm": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_records": {
+          "default": 256,
+          "description": "The most records one call takes; the records the pipeline holds are split into calls of this many, run on the instances at once. 256 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "config": {
+          "description": "A string the plugin reads, for settings of its own.",
+          "type": "string"
+        },
+        "instances": {
+          "description": "How many instances of the plugin may run a batch's parts at once, each with its own memory, made as they are needed: the CPUs fit has, at most 4, when left out or 0.",
+          "maximum": 16,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_memory_bytes": {
+          "default": 134217728,
+          "description": "The most memory an instance may have; a call that asks for more fails its records. 128 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_output_bytes": {
+          "default": 16777216,
+          "description": "The most bytes of records a call may hand back; past it the call fails. 16 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_transform; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "1s",
+          "description": "How long a call may run; past it the call is stopped, its instance made again, and its records fail, as on_error says. 1s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
       "type": "object"
     },
     "wasm.Property": {

@@ -48,9 +48,10 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`generate`](#sync-sources-generate)
-- [Sync sinks](#sync-sinks): [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout)
-- [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route)
+- [Sync sources](#sync-sources): [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
+- [Sync codecs](#sync-codecs): [`wasm`](#sync-codecs-wasm)
 
 ## The config
 
@@ -6006,6 +6007,7 @@ after.
 | Module | What it does |
 | --- | --- |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
+| [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
 
 <a id="sync-sources-generate"></a>
 
@@ -6020,6 +6022,86 @@ Makes numbered records of every value type, the same ones each time, in transact
 | `namespace` | string | `"generate.records"` | The records' namespace. generate.records when left out. |
 | `interval` | duration |  | How long to wait after each transaction; none when left out. |
 
+<a id="sync-sources-wasm"></a>
+
+### `wasm`
+
+Runs a WebAssembly plugin that exports fit_sync_poll: given its checkpoint, it returns records and the next checkpoint, reading through fit's HTTP client from the hosts allow_hosts names, with no sockets of its own. A poll's records are saved as a whole: the checkpoint moves past the last of them only.
+
+Runs a WebAssembly plugin that exports `fit_sync_poll`: given the checkpoint, empty at the start,
+it emits records and sets the next checkpoint, JSON of its own, and says whether it has caught
+up. Its only way out is the host module's `http_request`, on fit's asynchronous HTTP client, to
+the hosts `allow_hosts` names, and `sleep`; it has no sockets. A request to any other host fails
+the poll, as a trap or a poll past `timeout` does, and the pipeline starts again from its
+checkpoint. A poll's records go out as a whole: their transactions and positions are cleared, and
+the last carries the poll's checkpoint, so the checkpoint never falls inside a poll. Once the
+plugin has caught up, the source waits `poll_interval`, or ends in mode `once`.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines tickets {
+		source wasm {
+			path /etc/fit/plugins/tickets.wasm
+			config "{\"url\": \"https://api.example.com/tickets\"}"
+			allow_hosts api.example.com
+		}
+		sinks out { sink stdout }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: tickets
+      source:
+        module: wasm
+        params:
+          path: /etc/fit/plugins/tickets.wasm
+          config: '{"url": "https://api.example.com/tickets"}'
+          allow_hosts:
+            - api.example.com
+      sinks:
+        - name: out
+          sink:
+            module: stdout
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "tickets",
+        "source": {"module": "wasm", "params": {"path": "/etc/fit/plugins/tickets.wasm",
+          "config": "{\"url\": \"https://api.example.com/tickets\"}", "allow_hosts": ["api.example.com"]}},
+        "sinks": [{"name": "out", "sink": {"module": "stdout"}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | string |  | Required. The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_poll; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared. |
+| `config` | string |  | A string the plugin reads, for settings of its own. |
+| `allow_hosts` | list of string |  | The hosts the plugin's HTTP requests may go to: a host name or address, any port; host:port; or *.example.com for its subdomains. A request to any other fails the poll. None when left out. |
+| `poll_interval` | duration | `"1s"` | How long to wait before polling again once the plugin has caught up, or returned nothing. 1s when left out. |
+| `timeout` | duration | `"30s"` | How long a poll may run, its HTTP requests and sleeps included; past it the poll fails, and the pipeline starts again from its checkpoint. 30s when left out. |
+| `max_memory_bytes` | integer, 0 or more | `134217728` | The most memory the plugin's instance may have. 128 MiB when left out or 0. |
+| `max_output_bytes` | integer, 0 or more | `16777216` | The most bytes of records a poll may hand back. 16 MiB when left out or 0. |
+| `max_response_bytes` | integer, 0 or more | `4194304` | The largest HTTP response body the plugin may be given; a larger one fails its request. 4 MiB when left out or 0. |
+
 <a id="sync-sinks"></a>
 
 ## Sync sinks
@@ -6032,6 +6114,7 @@ since what came after the checkpoint is written again after a crash.
 | --- | --- |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
+| [`wasm`](#sync-sinks-wasm) | A WebAssembly plugin that writes each batch through fit's HTTP client to the hosts it is allowed |
 
 <a id="sync-sinks-memory"></a>
 
@@ -6052,13 +6135,28 @@ Writes each record to fit's standard output as a line of its canonical JSON: for
 
 It has no fields: `{}` turns it on.
 
+<a id="sync-sinks-wasm"></a>
+
+### `wasm`
+
+Runs a WebAssembly plugin that exports fit_sync_write over each batch, writing it through fit's HTTP client to the hosts allow_hosts names, with no sockets of its own; it may name the record that failed, those before it written.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | string |  | Required. The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_write; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared. |
+| `config` | string |  | A string the plugin reads, for settings of its own. |
+| `allow_hosts` | list of string |  | The hosts the plugin's HTTP requests may go to: a host name or address, any port; host:port; or *.example.com for its subdomains. A request to any other fails the write. None when left out. |
+| `timeout` | duration | `"30s"` | How long a write may run, its HTTP requests and sleeps included; past it the write fails, and is tried again as retry says. 30s when left out. |
+| `max_memory_bytes` | integer, 0 or more | `134217728` | The most memory the plugin's instance may have. 128 MiB when left out or 0. |
+| `max_response_bytes` | integer, 0 or more | `4194304` | The largest HTTP response body the plugin may be given; a larger one fails its request. 4 MiB when left out or 0. |
+
 <a id="sync-transforms"></a>
 
 ## Sync transforms
 
 A pipeline's `transforms` change records on their way from the source to the sinks, in order: a
 transform may change a record, drop it or split it into several. Each is one of these, named by
-`module`, with its `params`; WASM transforms come in I165. A transform reads a row's fields by
+`module`, with its `params`; `wasm` runs a plugin of your own. A transform reads a row's fields by
 name at its top level; the row is `after`, or `before` when `after` is null, as for a delete. A
 chain copies a record once, at the first transform that changes it, and the source's record stays
 as it was read, for a dead letter. A record a transform fails on goes as `on_error` says.
@@ -6077,6 +6175,7 @@ config is checked.
 | [`cast`](#sync-transforms-cast) | Changes fields' types, by defined conversions |
 | [`mask`](#sync-transforms-mask) | Replaces fields by a keyed HMAC-SHA256, a SHA-256, or null |
 | [`envelope`](#sync-transforms-envelope) | Makes a document of a change: flat with metadata, a before/after pair, or Debezium's envelope |
+| [`wasm`](#sync-transforms-wasm) | A WebAssembly plugin over each batch: drops, changes, splits and routes records as it likes |
 
 For example, tables of `shop` to indices named after the table, with a string document ID, a
 masked name, and a deleted flag for a sink that keeps deleted rows:
@@ -6281,3 +6380,118 @@ Renames records' namespaces, by an exact map and then by glob rules with templat
 | --- | --- | --- | --- |
 | `match` | string |  | Required. A glob the namespace must match, as path.Match takes it: shop.*. |
 | `to` | string |  | Required. The new namespace, a template: {namespace} is the old one, {first} its part before the first '.', {rest} its part after the first '.', {last} its part after the last '.'. shop.orders to {first}-{rest} is shop-orders; to {last} it is orders. |
+
+<a id="sync-transforms-wasm"></a>
+
+### `wasm`
+
+Runs a WebAssembly plugin that exports fit_sync_transform over the records, a batch at a time: it emits zero or more records for each, so it drops, changes, splits and routes them. The records cross as canonical JSON; a call that fails, traps, or runs past its time or memory fails its batch, which on_error then takes.
+
+Runs a WebAssembly plugin, a WASI reactor, over the records: the plugin exports
+`fit_sync_transform`, reads the batch as its records' canonical JSON, and emits zero or more
+records for each through the host module `fit_sync`, so it drops, changes, splits and routes them.
+The records the pipeline holds are split into calls of `batch_records`, run on up to `instances`
+instances at once, each with its own memory, and what they make goes on in order. A call that
+fails, traps, runs past `timeout`, or asks for more than `max_memory_bytes`, fails every record of
+its call, which `on_error` then takes, and its instance is made again; a plugin may fail a single
+record too. A transform plugin makes no HTTP requests and does not sleep: only a source's and a
+sink's may. Package `plugin/wasm/guest` is the Go side of the calls (`OnTransform`, `Emit`,
+`Fail`, `Row`), `plugin/wasm/guest/rust` the Rust one; [decision 036](../decisions/036-sync.md)
+describes the ABI.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders {
+		source generate { namespace shop.orders }
+		transforms wasm {
+			path /etc/fit/plugins/orders.wasm
+			config "{\"drop_tests\": true}"
+			timeout 500ms
+		}
+		sinks out { sink stdout }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders
+      source:
+        module: generate
+        params:
+          namespace: shop.orders
+      transforms:
+        - module: wasm
+          params:
+            path: /etc/fit/plugins/orders.wasm
+            config: '{"drop_tests": true}'
+            timeout: 500ms
+      sinks:
+        - name: out
+          sink:
+            module: stdout
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders",
+        "source": {"module": "generate", "params": {"namespace": "shop.orders"}},
+        "transforms": [
+          {"module": "wasm", "params": {"path": "/etc/fit/plugins/orders.wasm", "config": "{\"drop_tests\": true}", "timeout": "500ms"}}
+        ],
+        "sinks": [{"name": "out", "sink": {"module": "stdout"}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | string |  | Required. The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_transform; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared. |
+| `config` | string |  | A string the plugin reads, for settings of its own. |
+| `instances` | integer, 0 to 16 |  | How many instances of the plugin may run a batch's parts at once, each with its own memory, made as they are needed: the CPUs fit has, at most 4, when left out or 0. |
+| `batch_records` | integer, 0 to 100000 | `256` | The most records one call takes; the records the pipeline holds are split into calls of this many, run on the instances at once. 256 when left out or 0. |
+| `timeout` | duration | `"1s"` | How long a call may run; past it the call is stopped, its instance made again, and its records fail, as on_error says. 1s when left out. |
+| `max_memory_bytes` | integer, 0 or more | `134217728` | The most memory an instance may have; a call that asks for more fails its records. 128 MiB when left out or 0. |
+| `max_output_bytes` | integer, 0 or more | `16777216` | The most bytes of records a call may hand back; past it the call fails. 16 MiB when left out or 0. |
+
+<a id="sync-codecs"></a>
+
+## Sync codecs
+
+A codec turns the bytes a source reads (a file's lines, a Kafka message, an HTTP body, an S3
+object) into records, and records into the bytes a sink writes. The sources and sinks that read
+and write bytes (files from I166, then Kafka, HTTP and S3) take one, named by `module`, with its
+`params`; none does yet. A record a codec makes has no position: the source gives it one.
+
+| Module | What it does |
+| --- | --- |
+| [`wasm`](#sync-codecs-wasm) | A WebAssembly plugin's `fit_sync_decode` and `fit_sync_encode`, for a format of your own |
+
+<a id="sync-codecs-wasm"></a>
+
+### `wasm`
+
+Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a body) into records, and fit_sync_encode, turning records into bytes, for the sources and sinks that read and write bytes.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | string |  | Required. The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode, fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared. |
+| `config` | string |  | A string the plugin reads, for settings of its own. |
+| `timeout` | duration | `"1s"` | How long a call may run; past it the call is stopped and fails. 1s when left out. |
+| `max_memory_bytes` | integer, 0 or more | `134217728` | The most memory the plugin's instance may have. 128 MiB when left out or 0. |
+| `max_output_bytes` | integer, 0 or more | `16777216` | The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or 0. |

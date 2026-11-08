@@ -195,10 +195,7 @@ func (r *run) ack(items []item) {
 // the queue is empty, or the run stops.
 func (r *run) dispatch() {
 	cfg := r.p.cfg
-	var outs, next []*Record
-	var seq uint64
-	// emit is made once, not for each record and transform.
-	emit := func(o *Record) { o.seq = seq; next = append(next, o) }
+	c := newStages(r.p.transforms)
 	for {
 		r.mu.Lock()
 		for len(r.queue) == 0 && !r.srcDone {
@@ -221,28 +218,21 @@ func (r *run) dispatch() {
 			return
 		}
 		r.mu.Unlock()
-		for _, rec := range batch {
-			seq = rec.seq
-			outs = append(outs[:0], rec)
-			for i, t := range r.p.transforms {
-				next = next[:0]
-				var err error
-				for _, in := range outs {
-					if err = t.Apply(in, emit); err != nil {
-						break
-					}
+		c.run(batch)
+		k := 0
+		for i, rec := range batch {
+			start := k
+			for k < len(c.outs) && c.outs[k].src == i {
+				k++
+			}
+			outs := c.outs[start:k]
+			if err := c.errs[i]; err != nil {
+				t := c.where[i]
+				if !r.failed(rec, err, fmt.Sprintf("transform %d (%s)", t, cfg.Transforms[t].Module), 1) {
+					c.done()
+					return
 				}
-				if err != nil {
-					where := fmt.Sprintf("transform %d (%s)", i, cfg.Transforms[i].Module)
-					if !r.failed(rec, err, where, 1) {
-						return
-					}
-					next = next[:0]
-				}
-				outs, next = next, outs
-				if len(outs) == 0 {
-					break
-				}
+				outs = nil
 			}
 			r.mu.Lock()
 			r.pending[rec.seq-r.base].left = len(outs) * len(r.sinks)
@@ -251,15 +241,15 @@ func (r *run) dispatch() {
 					s.first = time.Now()
 				}
 				for _, o := range outs {
-					n := o.Size()
-					s.queue = append(s.queue, item{o, n})
+					n := o.rec.Size()
+					s.queue = append(s.queue, item{o.rec, n})
 					s.bytes += int64(n)
 				}
 			}
 			r.advance()
 			r.mu.Unlock()
-			clear(outs)
 		}
+		c.done()
 		for _, s := range r.sinks {
 			notify(s.wake)
 		}

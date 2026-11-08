@@ -192,6 +192,34 @@ func (r *Record) AppendJSON(b []byte) ([]byte, error) {
 // MarshalJSON returns r's canonical JSON.
 func (r *Record) MarshalJSON() ([]byte, error) { return r.AppendJSON(nil) }
 
+// AppendBatchJSON appends recs to b as a JSON array of their canonical
+// JSON, as WASM plugins read a batch.
+func AppendBatchJSON(b []byte, recs []*Record) ([]byte, error) {
+	b = append(b, '[')
+	for i, r := range recs {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		var err error
+		if b, err = r.AppendJSON(b); err != nil {
+			return b, fmt.Errorf("record %d: %w", i, err)
+		}
+	}
+	return append(b, ']'), nil
+}
+
+// ParseRecord returns the record data holds in its canonical JSON, made
+// anew: a transform may emit it as a record it made with Clone, and change
+// it in place.
+func ParseRecord(data []byte) (*Record, error) {
+	r := new(Record)
+	if err := r.UnmarshalJSON(data); err != nil {
+		return nil, err
+	}
+	r.made = true
+	return r, nil
+}
+
 // UnmarshalJSON reads r from its canonical JSON.
 func (r *Record) UnmarshalJSON(data []byte) error {
 	d := newDecoder(data)

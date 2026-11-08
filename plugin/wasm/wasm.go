@@ -44,12 +44,21 @@
 // it, and its body and trailer streamed through the plugin, on the pool
 // all the same (decision 023). Filters written for Envoy that act on
 // requests and responses run unchanged.
+//
+// # Sync plugins
+//
+// The package also makes sync's wasm transform, codec, source and sink
+// (syncmodules.go), whose plugins export fit_sync_transform,
+// fit_sync_decode, fit_sync_encode, fit_sync_poll or fit_sync_write and
+// import the host module fit_sync, as sync.go describes. They share the
+// compiled plugins, the runtimes and their memory bound with the request
+// plugins, and run on pools of instances of their own, called from a
+// pipeline's goroutines, each call bounded in time.
 package wasm
 
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	stdhttp "net/http"
 	"os"
@@ -130,6 +139,10 @@ func (m *WASM) Provision(ctx *module.Context) error {
 	}
 	if m.plugin, err = loadPlugin(code, m.MaxMemoryBytes); err != nil {
 		return ctx.Errorf("path", "%v", err)
+	}
+	if !m.plugin.exports(exportOnRequest) && !m.plugin.proxyWasm {
+		m.plugin.close()
+		return ctx.Errorf("path", "the plugin exports neither %s nor Proxy-Wasm's ABI version", exportOnRequest)
 	}
 	m.graph = ctx.Graph()
 	if m.pool, err = newPool(m); err != nil {
@@ -221,14 +234,15 @@ func loadPlugin(code []byte, maxMemory int64) (*plugin, error) {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("compiling the plugin: %w", err)
 	}
-	pw := isProxyWasm(mod)
-	if _, ok := mod.ExportedFunctions()[exportOnRequest]; !ok && !pw {
-		_ = rt.Close(ctx)
-		return nil, errors.New("the plugin exports neither " + exportOnRequest + " nor Proxy-Wasm's ABI version")
-	}
-	p := &plugin{key: key.sum, maxPages: pages, runtime: rt, compiled: mod, proxyWasm: pw, refs: 1}
+	p := &plugin{key: key.sum, maxPages: pages, runtime: rt, compiled: mod, proxyWasm: isProxyWasm(mod), refs: 1}
 	plugins.m[key] = p
 	return p, nil
+}
+
+// exports reports whether the plugin exports the function name.
+func (p *plugin) exports(name string) bool {
+	_, ok := p.compiled.ExportedFunctions()[name]
+	return ok
 }
 
 // close gives back a hold loadPlugin took; the runtime goes with the last.
