@@ -50,7 +50,7 @@ a config against it and more.
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`generate`](#sync-sources-generate)
 - [Sync sinks](#sync-sinks): [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout)
-- [Sync transforms](#sync-transforms)
+- [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route)
 
 ## The config
 
@@ -6057,5 +6057,227 @@ It has no fields: `{}` turns it on.
 ## Sync transforms
 
 A pipeline's `transforms` change records on their way from the source to the sinks, in order: a
-transform may change a record, drop it or split it into several. fit has no transforms yet; filters,
-routes, fields, keys, casts, masks and envelopes come in I164, and WASM transforms in I165.
+transform may change a record, drop it or split it into several. Each is one of these, named by
+`module`, with its `params`; WASM transforms come in I165. A transform reads a row's fields by
+name at its top level; the row is `after`, or `before` when `after` is null, as for a delete. A
+chain copies a record once, at the first transform that changes it, and the source's record stays
+as it was read, for a dead letter. A record a transform fails on goes as `on_error` says.
+
+A delete keeps its key: `fields` and `envelope` never touch the key (but for `fields`' renames,
+which rename its fields too), `mask` blanks no key field, `key` keeps a delete's key when its row
+lacks the fields, and a `key` built from a field an earlier transform removes is refused when the
+config is checked.
+
+| Module | What it does |
+| --- | --- |
+| [`filter`](#sync-transforms-filter) | Keeps or drops records by namespace globs, operation and fields' values |
+| [`route`](#sync-transforms-route) | Renames namespaces, by an exact map and glob rules with templates |
+| [`fields`](#sync-transforms-fields) | Unnests, nests, renames, drops, keeps and sets fields of the rows |
+| [`key`](#sync-transforms-key) | Builds the key from fields: a map, a single value or joined text |
+| [`cast`](#sync-transforms-cast) | Changes fields' types, by defined conversions |
+| [`mask`](#sync-transforms-mask) | Replaces fields by a keyed HMAC-SHA256, a SHA-256, or null |
+| [`envelope`](#sync-transforms-envelope) | Makes a document of a change: flat with metadata, a before/after pair, or Debezium's envelope |
+
+For example, tables of `shop` to indices named after the table, with a string document ID, a
+masked name, and a deleted flag for a sink that keeps deleted rows:
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines shop {
+		source generate { namespace shop.orders }
+		transforms filter { namespaces shop.*; exclude_namespaces shop.tmp_* }
+		transforms route { rules { match shop.*; to shop-{rest} } }
+		transforms key { fields id; format join }
+		transforms mask { fields name; key_env SYNC_MASK_KEY }
+		transforms envelope { meta { deleted __deleted }; deletes rewrite }
+		sinks out { sink stdout }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: shop
+      source:
+        module: generate
+        params:
+          namespace: shop.orders
+      transforms:
+        - module: filter
+          params:
+            namespaces:
+              - shop.*
+            exclude_namespaces:
+              - shop.tmp_*
+        - module: route
+          params:
+            rules:
+              - match: shop.*
+                to: shop-{rest}
+        - module: key
+          params:
+            fields:
+              - id
+            format: join
+        - module: mask
+          params:
+            fields:
+              - name
+            key_env: SYNC_MASK_KEY
+        - module: envelope
+          params:
+            meta:
+              deleted: __deleted
+            deletes: rewrite
+      sinks:
+        - name: out
+          sink:
+            module: stdout
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "shop",
+        "source": {"module": "generate", "params": {"namespace": "shop.orders"}},
+        "transforms": [
+          {"module": "filter", "params": {"namespaces": ["shop.*"], "exclude_namespaces": ["shop.tmp_*"]}},
+          {"module": "route", "params": {"rules": [{"match": "shop.*", "to": "shop-{rest}"}]}},
+          {"module": "key", "params": {"fields": ["id"], "format": "join"}},
+          {"module": "mask", "params": {"fields": ["name"], "key_env": "SYNC_MASK_KEY"}},
+          {"module": "envelope", "params": {"meta": {"deleted": "__deleted"}, "deletes": "rewrite"}}
+        ],
+        "sinks": [{"name": "out", "sink": {"module": "stdout"}}]
+      }
+    ]
+  }
+}
+```
+
+<a id="sync-transforms-cast"></a>
+
+### `cast`
+
+Changes fields' types, in the rows before and after and in the key, by defined conversions; a value that cannot be converted fails the record.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `fields` | object of string |  | Required. The fields cast, each to a type: string, int, uint, float, decimal, bool, bytes, time, date or json. Null stays null, and a value of the type already stays as it is. Numbers convert among themselves when the value fits exactly (1.5 is no int); strings parse as the type writes them (an int in decimal, a bool as true or false, a time in RFC 3339, a date as 2006-01-02, json as a document); a time takes an int or uint as Unix seconds, and a date; a date takes a time, its day in the time's own offset; json takes any value, as plain JSON; bytes take a string, decimal or json's text, and give a string their text when it is UTF-8. Anything else fails the record. |
+
+<a id="sync-transforms-envelope"></a>
+
+### `envelope`
+
+Turns inserts, updates and deletes into one document in after, for sinks that write a document: the row with metadata fields, the before and after pair, or Debezium's envelope. The key stays as it is.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `shape` | string: `flat`, `pair`, `debezium` | `"flat"` | flat makes the document the row (after, or before for a delete, or the key's fields when a delete has no before) with the meta fields added; pair makes it {"before": ..., "after": ...} with the meta fields; debezium makes it Debezium's envelope: before, after, source (name, namespace, db and table split at the namespace's first '.', ts_ms), op (c, u or d), ts_ms (the commit time in milliseconds, null when unknown) and transaction ({"id"}, or null). flat when left out. |
+| `meta` | object of string |  | Metadata fields added to a flat or pair document, each named: the key one of op (insert, update or delete), namespace, source, commit_time (a time, null when unknown), tx_id (null when none) and deleted (true for a delete), the value the field's name: {"op": "__op", "deleted": "__deleted"}. None when left out; not with debezium. |
+| `deletes` | string: `keep`, `drop`, `rewrite` | `"keep"` | What becomes of a delete: keep keeps it a delete, its document in after, so a sink still deletes by its key; drop drops it; rewrite makes it an update, so a sink upserts the document, which with flat needs meta's deleted to say it was removed. keep when left out. |
+
+<a id="sync-transforms-fields"></a>
+
+### `fields`
+
+Changes the fields of the rows before and after: lifts nested maps' fields up, moves fields into a nested map, renames, drops, keeps only some, and sets constants, in that order. Renames apply to the key's fields too; nothing else touches the key, so a delete keeps it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `unnest` | list of string |  | Maps whose fields are lifted up to the row's top level, the map itself removed: unnest meta turns {"meta": {"a": 1}} into {"a": 1}. A lifted field whose name the row already has fails the record; a null or missing map is left out. |
+| `nest` | list of [object](#fitsync-fieldsnest) |  | Fields moved into a nested map, after unnest. |
+| `rename` | object of string |  | Fields renamed, the old name to the new, after nest; a new name the row already has fails the record. The key's fields are renamed too, so the key names the sink's columns. |
+| `drop` | list of string |  | Fields removed, after rename, by their new names. Not with keep. |
+| `keep` | list of string |  | The only fields kept, after rename, by their new names; the others are removed. Not with drop. |
+| `set` | object of any |  | Fields set to a constant, last, added at the end of the row when it has none of that name: a value in the canonical JSON form, "eu" for a string, {"int": 5} for an int, true, null. |
+
+<a id="fitsync-fieldsnest"></a>
+
+### `nest[]` in `fields`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `into` | string |  | Required. The nested map's name: made at the end of the row when the row has none, added to when it is a map. |
+| `fields` | list of string |  | Required. The fields moved, those the row has, in the row's order. |
+
+<a id="sync-transforms-filter"></a>
+
+### `filter`
+
+Keeps, or with action drop drops, the records that match all of its conditions: their namespace (globs), their operation, and their fields' values.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `namespaces` | list of string |  | Globs a record's namespace must match one of, as path.Match takes them: shop.* matches every table of shop. Any namespace when left out. |
+| `exclude_namespaces` | list of string |  | Globs a record's namespace must match none of. |
+| `ops` | list of string: `insert`, `update`, `delete`, `ddl`, `message` |  | The operations a record must be one of. Any operation when left out. |
+| `where` | list of [object](#fitsync-filtercondition) |  | Conditions on the row's fields, all of which a record must meet. The row is after, or before when after is null, as for a delete. |
+| `action` | string: `keep`, `drop` | `"keep"` | keep keeps the records that match every condition and drops the others; drop drops those that match and keeps the others. keep when left out. |
+
+<a id="fitsync-filtercondition"></a>
+
+### `where[]` in `filter`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `field` | string |  | Required. The field's name, at the top level of the row. |
+| `equals` | string |  | The text the field's value must have: a string as it is, a number in decimal ("42", "1.5"), a bool as "true" or "false", a time in RFC 3339, a date as 2006-01-02. A missing or null field never equals. |
+| `in` | list of string |  | Texts, as equals takes them, the field's value must have one of. |
+| `present` | boolean |  | true: the field must be there and not null; false: it must be missing or null. |
+
+<a id="sync-transforms-key"></a>
+
+### `key`
+
+Builds records' keys from fields of the row: a map of them, a single value, or their text joined. A delete whose row lacks them keeps the key it has.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `fields` | list of string |  | Required. The fields the key is built from, at the top level of the row: after, or before for a delete. A record whose row lacks one, or has it null, fails, except a delete, which keeps the key it has; a key transform after a transform that removes one of them is refused. |
+| `format` | string: `map`, `value`, `join` | `"map"` | map makes the key a map of the fields, in the order given; value makes it the one field's value, with a single field; join makes it a string of the fields' texts joined by separator, as a document ID. map when left out. |
+| `separator` | string | `":"` | What join puts between the fields' texts. : when left out. |
+
+<a id="sync-transforms-mask"></a>
+
+### `mask`
+
+Replaces fields' values in the rows before and after by a keyed HMAC-SHA256 or a SHA-256 of them, in hex, or by null. A hash applies to the key's fields too, so the key stays unique and matches the row.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `fields` | list of string |  | Required. The fields masked, at the top level of the rows before and after, and of the key for a hash. |
+| `with` | string: `hmac_sha256`, `sha256`, `null` | `"hmac_sha256"` | hmac_sha256 replaces a value by the hex of its HMAC-SHA256 under the key key_env names, which cannot be reversed without the key; sha256 by the hex of its SHA-256, which anyone can reverse for a value from a small set (a phone number, an ID) by trying them all; null replaces it by null, which leaves the key as it is, since a key of nulls would no longer tell rows apart. A value is hashed as its text, so an int 5 and a string "5" hash the same; null stays null. The hashes keep the key unique and equal to the row's field. hmac_sha256 when left out. |
+| `key_env` | string |  | An environment variable holding the HMAC key, read when the pipeline starts: needed with hmac_sha256, and only with it. Changing the key changes every hash, so a sink keyed by them sees new rows. |
+
+<a id="sync-transforms-route"></a>
+
+### `route`
+
+Renames records' namespaces, by an exact map and then by glob rules with templates, as tables to indices or topics.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `map` | object of string |  | Namespaces renamed exactly, the old to the new: {"shop.orders": "orders"}. Tried before rules. |
+| `rules` | list of [object](#fitsync-routerule) |  | Rules tried in order for a namespace map does not name; the first whose match it matches renames it. |
+| `unmatched` | string: `keep`, `drop` | `"keep"` | What becomes of a record whose namespace neither map nor a rule names: keep passes it on as it is, drop drops it. keep when left out. |
+
+<a id="fitsync-routerule"></a>
+
+### `rules[]` in `route`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `match` | string |  | Required. A glob the namespace must match, as path.Match takes it: shop.*. |
+| `to` | string |  | Required. The new namespace, a template: {namespace} is the old one, {first} its part before the first '.', {rest} its part after the first '.', {last} its part after the last '.'. shop.orders to {first}-{rest} is shop-orders; to {last} it is orders. |

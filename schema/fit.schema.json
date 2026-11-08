@@ -4839,6 +4839,73 @@
       ],
       "type": "object"
     },
+    "fitsync.FieldsNest": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "description": "The fields moved, those the row has, in the row's order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "into": {
+          "description": "The nested map's name: made at the end of the row when the row has none, added to when it is a map.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "into",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "fitsync.FilterCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "equals": {
+          "description": "The text the field's value must have: a string as it is, a number in decimal (\"42\", \"1.5\"), a bool as \"true\" or \"false\", a time in RFC 3339, a date as 2006-01-02. A missing or null field never equals.",
+          "type": "string"
+        },
+        "field": {
+          "description": "The field's name, at the top level of the row.",
+          "type": "string"
+        },
+        "in": {
+          "description": "Texts, as equals takes them, the field's value must have one of.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "present": {
+          "description": "true: the field must be there and not null; false: it must be missing or null.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
+    "fitsync.RouteRule": {
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "description": "A glob the namespace must match, as path.Match takes it: shop.*.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The new namespace, a template: {namespace} is the old one, {first} its part before the first '.', {rest} its part after the first '.', {last} its part after the last '.'. shop.orders to {first}-{rest} is shop-orders; to {last} it is orders.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match",
+        "to"
+      ],
+      "type": "object"
+    },
     "headers.Ops": {
       "additionalProperties": false,
       "properties": {
@@ -6975,10 +7042,132 @@
     },
     "sync.transforms": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "cast"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.transforms.cast"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "envelope"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.transforms.envelope"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "fields"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.transforms.fields"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "filter"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.transforms.filter"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "key"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.transforms.key"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "mask"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.transforms.mask"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "route"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.transforms.route"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "module": {
           "description": "The module's name within its namespace.",
-          "enum": [],
+          "enum": [
+            "cast",
+            "envelope",
+            "fields",
+            "filter",
+            "key",
+            "mask",
+            "route"
+          ],
           "type": "string"
         },
         "params": {
@@ -6988,6 +7177,241 @@
       "required": [
         "module"
       ],
+      "type": "object"
+    },
+    "sync.transforms.cast": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The fields cast, each to a type: string, int, uint, float, decimal, bool, bytes, time, date or json. Null stays null, and a value of the type already stays as it is. Numbers convert among themselves when the value fits exactly (1.5 is no int); strings parse as the type writes them (an int in decimal, a bool as true or false, a time in RFC 3339, a date as 2006-01-02, json as a document); a time takes an int or uint as Unix seconds, and a date; a date takes a time, its day in the time's own offset; json takes any value, as plain JSON; bytes take a string, decimal or json's text, and give a string their text when it is UTF-8. Anything else fails the record.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "type": "object"
+    },
+    "sync.transforms.envelope": {
+      "additionalProperties": false,
+      "properties": {
+        "deletes": {
+          "default": "keep",
+          "description": "What becomes of a delete: keep keeps it a delete, its document in after, so a sink still deletes by its key; drop drops it; rewrite makes it an update, so a sink upserts the document, which with flat needs meta's deleted to say it was removed. keep when left out.",
+          "enum": [
+            "keep",
+            "drop",
+            "rewrite"
+          ],
+          "type": "string"
+        },
+        "meta": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Metadata fields added to a flat or pair document, each named: the key one of op (insert, update or delete), namespace, source, commit_time (a time, null when unknown), tx_id (null when none) and deleted (true for a delete), the value the field's name: {\"op\": \"__op\", \"deleted\": \"__deleted\"}. None when left out; not with debezium.",
+          "type": "object"
+        },
+        "shape": {
+          "default": "flat",
+          "description": "flat makes the document the row (after, or before for a delete, or the key's fields when a delete has no before) with the meta fields added; pair makes it {\"before\": ..., \"after\": ...} with the meta fields; debezium makes it Debezium's envelope: before, after, source (name, namespace, db and table split at the namespace's first '.', ts_ms), op (c, u or d), ts_ms (the commit time in milliseconds, null when unknown) and transaction ({\"id\"}, or null). flat when left out.",
+          "enum": [
+            "flat",
+            "pair",
+            "debezium"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "sync.transforms.fields": {
+      "additionalProperties": false,
+      "properties": {
+        "drop": {
+          "description": "Fields removed, after rename, by their new names. Not with keep.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "keep": {
+          "description": "The only fields kept, after rename, by their new names; the others are removed. Not with drop.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "nest": {
+          "description": "Fields moved into a nested map, after unnest.",
+          "items": {
+            "$ref": "#/$defs/fitsync.FieldsNest"
+          },
+          "type": "array"
+        },
+        "rename": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Fields renamed, the old name to the new, after nest; a new name the row already has fails the record. The key's fields are renamed too, so the key names the sink's columns.",
+          "type": "object"
+        },
+        "set": {
+          "additionalProperties": {},
+          "description": "Fields set to a constant, last, added at the end of the row when it has none of that name: a value in the canonical JSON form, \"eu\" for a string, {\"int\": 5} for an int, true, null.",
+          "type": "object"
+        },
+        "unnest": {
+          "description": "Maps whose fields are lifted up to the row's top level, the map itself removed: unnest meta turns {\"meta\": {\"a\": 1}} into {\"a\": 1}. A lifted field whose name the row already has fails the record; a null or missing map is left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "sync.transforms.filter": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "default": "keep",
+          "description": "keep keeps the records that match every condition and drops the others; drop drops those that match and keeps the others. keep when left out.",
+          "enum": [
+            "keep",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "exclude_namespaces": {
+          "description": "Globs a record's namespace must match none of.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "namespaces": {
+          "description": "Globs a record's namespace must match one of, as path.Match takes them: shop.* matches every table of shop. Any namespace when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ops": {
+          "description": "The operations a record must be one of. Any operation when left out.",
+          "items": {
+            "enum": [
+              "insert",
+              "update",
+              "delete",
+              "ddl",
+              "message"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "where": {
+          "description": "Conditions on the row's fields, all of which a record must meet. The row is after, or before when after is null, as for a delete.",
+          "items": {
+            "$ref": "#/$defs/fitsync.FilterCondition"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "sync.transforms.key": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "description": "The fields the key is built from, at the top level of the row: after, or before for a delete. A record whose row lacks one, or has it null, fails, except a delete, which keeps the key it has; a key transform after a transform that removes one of them is refused.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "format": {
+          "default": "map",
+          "description": "map makes the key a map of the fields, in the order given; value makes it the one field's value, with a single field; join makes it a string of the fields' texts joined by separator, as a document ID. map when left out.",
+          "enum": [
+            "map",
+            "value",
+            "join"
+          ],
+          "type": "string"
+        },
+        "separator": {
+          "default": ":",
+          "description": "What join puts between the fields' texts. : when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "type": "object"
+    },
+    "sync.transforms.mask": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "description": "The fields masked, at the top level of the rows before and after, and of the key for a hash.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key_env": {
+          "description": "An environment variable holding the HMAC key, read when the pipeline starts: needed with hmac_sha256, and only with it. Changing the key changes every hash, so a sink keyed by them sees new rows.",
+          "type": "string"
+        },
+        "with": {
+          "default": "hmac_sha256",
+          "description": "hmac_sha256 replaces a value by the hex of its HMAC-SHA256 under the key key_env names, which cannot be reversed without the key; sha256 by the hex of its SHA-256, which anyone can reverse for a value from a small set (a phone number, an ID) by trying them all; null replaces it by null, which leaves the key as it is, since a key of nulls would no longer tell rows apart. A value is hashed as its text, so an int 5 and a string \"5\" hash the same; null stays null. The hashes keep the key unique and equal to the row's field. hmac_sha256 when left out.",
+          "enum": [
+            "hmac_sha256",
+            "sha256",
+            "null"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "type": "object"
+    },
+    "sync.transforms.route": {
+      "additionalProperties": false,
+      "properties": {
+        "map": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Namespaces renamed exactly, the old to the new: {\"shop.orders\": \"orders\"}. Tried before rules.",
+          "type": "object"
+        },
+        "rules": {
+          "description": "Rules tried in order for a namespace map does not name; the first whose match it matches renames it.",
+          "items": {
+            "$ref": "#/$defs/fitsync.RouteRule"
+          },
+          "type": "array"
+        },
+        "unmatched": {
+          "default": "keep",
+          "description": "What becomes of a record whose namespace neither map nor a rule names: keep passes it on as it is, drop drops it. keep when left out.",
+          "enum": [
+            "keep",
+            "drop"
+          ],
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "wasm.Property": {

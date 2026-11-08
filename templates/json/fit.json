@@ -6331,6 +6331,230 @@
         // // split a record. None when left out.
         // // list of module.
         // "transforms": [
+          // {
+            // // Changes fields' types, in the rows before and after and in the key, by defined conversions;
+            // // a value that cannot be converted fails the record.
+            // "module": "cast",
+            // "params": {
+              // // The fields cast, each to a type: string, int, uint, float, decimal, bool, bytes, time, date
+              // // or json. Null stays null, and a value of the type already stays as it is. Numbers convert
+              // // among themselves when the value fits exactly (1.5 is no int); strings parse as the type
+              // // writes them (an int in decimal, a bool as true or false, a time in RFC 3339, a date as
+              // // 2006-01-02, json as a document); a time takes an int or uint as Unix seconds, and a date; a
+              // // date takes a time, its day in the time's own offset; json takes any value, as plain JSON;
+              // // bytes take a string, decimal or json's text, and give a string their text when it is UTF-8.
+              // // Anything else fails the record.
+              // // object of string; required.
+              // "fields": {},
+            // },
+          // },
+          // {
+            // // Turns inserts, updates and deletes into one document in after, for sinks that write a
+            // // document: the row with metadata fields, the before and after pair, or Debezium's envelope.
+            // // The key stays as it is.
+            // "module": "envelope",
+            // "params": {
+              // // flat makes the document the row (after, or before for a delete, or the key's fields when a
+              // // delete has no before) with the meta fields added; pair makes it {"before": ..., "after":
+              // // ...} with the meta fields; debezium makes it Debezium's envelope: before, after, source
+              // // (name, namespace, db and table split at the namespace's first '.', ts_ms), op (c, u or d),
+              // // ts_ms (the commit time in milliseconds, null when unknown) and transaction ({"id"}, or
+              // // null). flat when left out.
+              // // one of: flat, pair, debezium; default "flat".
+              // "shape": "flat",
+
+              // // Metadata fields added to a flat or pair document, each named: the key one of op (insert,
+              // // update or delete), namespace, source, commit_time (a time, null when unknown), tx_id (null
+              // // when none) and deleted (true for a delete), the value the field's name: {"op": "__op",
+              // // "deleted": "__deleted"}. None when left out; not with debezium.
+              // // object of string.
+              // "meta": {},
+
+              // // What becomes of a delete: keep keeps it a delete, its document in after, so a sink still
+              // // deletes by its key; drop drops it; rewrite makes it an update, so a sink upserts the
+              // // document, which with flat needs meta's deleted to say it was removed. keep when left out.
+              // // one of: keep, drop, rewrite; default "keep".
+              // "deletes": "keep",
+            // },
+          // },
+          // {
+            // // Changes the fields of the rows before and after: lifts nested maps' fields up, moves fields
+            // // into a nested map, renames, drops, keeps only some, and sets constants, in that order.
+            // // Renames apply to the key's fields too; nothing else touches the key, so a delete keeps it.
+            // "module": "fields",
+            // "params": {
+              // // Maps whose fields are lifted up to the row's top level, the map itself removed: unnest meta
+              // // turns {"meta": {"a": 1}} into {"a": 1}. A lifted field whose name the row already has fails
+              // // the record; a null or missing map is left out.
+              // // list of string.
+              // "unnest": [],
+
+              // // Fields moved into a nested map, after unnest.
+              // // list of object.
+              // "nest": [
+                // {
+                  // // The nested map's name: made at the end of the row when the row has none, added to when it is
+                  // // a map.
+                  // // string; required.
+                  // "into": "",
+
+                  // // The fields moved, those the row has, in the row's order.
+                  // // list of string; required.
+                  // "fields": [],
+                // },
+              // ],
+
+              // // Fields renamed, the old name to the new, after nest; a new name the row already has fails
+              // // the record. The key's fields are renamed too, so the key names the sink's columns.
+              // // object of string.
+              // "rename": {},
+
+              // // Fields removed, after rename, by their new names. Not with keep.
+              // // list of string.
+              // "drop": [],
+
+              // // The only fields kept, after rename, by their new names; the others are removed. Not with
+              // // drop.
+              // // list of string.
+              // "keep": [],
+
+              // // Fields set to a constant, last, added at the end of the row when it has none of that name: a
+              // // value in the canonical JSON form, "eu" for a string, {"int": 5} for an int, true, null.
+              // // object of any.
+              // "set": {"X-Env": "prod"},
+            // },
+          // },
+          // {
+            // // Keeps, or with action drop drops, the records that match all of its conditions: their
+            // // namespace (globs), their operation, and their fields' values.
+            // "module": "filter",
+            // "params": {
+              // // Globs a record's namespace must match one of, as path.Match takes them: shop.* matches every
+              // // table of shop. Any namespace when left out.
+              // // list of string.
+              // "namespaces": ["default"],
+
+              // // Globs a record's namespace must match none of.
+              // // list of string.
+              // "exclude_namespaces": [],
+
+              // // The operations a record must be one of. Any operation when left out.
+              // // list of: insert, update, delete, ddl, message.
+              // "ops": ["insert","update","delete","ddl","message"],
+
+              // // Conditions on the row's fields, all of which a record must meet. The row is after, or before
+              // // when after is null, as for a delete.
+              // // list of object.
+              // "where": [
+                // {
+                  // // The field's name, at the top level of the row.
+                  // // string; required.
+                  // "field": "",
+
+                  // // The text the field's value must have: a string as it is, a number in decimal ("42", "1.5"),
+                  // // a bool as "true" or "false", a time in RFC 3339, a date as 2006-01-02. A missing or null
+                  // // field never equals.
+                  // // string.
+                  // "equals": "",
+
+                  // // Texts, as equals takes them, the field's value must have one of.
+                  // // list of string.
+                  // "in": [],
+
+                  // // true: the field must be there and not null; false: it must be missing or null.
+                  // // boolean.
+                  // "present": true,
+                // },
+              // ],
+
+              // // keep keeps the records that match every condition and drops the others; drop drops those
+              // // that match and keeps the others. keep when left out.
+              // // one of: keep, drop; default "keep".
+              // "action": "keep",
+            // },
+          // },
+          // {
+            // // Builds records' keys from fields of the row: a map of them, a single value, or their text
+            // // joined. A delete whose row lacks them keeps the key it has.
+            // "module": "key",
+            // "params": {
+              // // The fields the key is built from, at the top level of the row: after, or before for a
+              // // delete. A record whose row lacks one, or has it null, fails, except a delete, which keeps
+              // // the key it has; a key transform after a transform that removes one of them is refused.
+              // // list of string; required.
+              // "fields": [],
+
+              // // map makes the key a map of the fields, in the order given; value makes it the one field's
+              // // value, with a single field; join makes it a string of the fields' texts joined by separator,
+              // // as a document ID. map when left out.
+              // // one of: map, value, join; default "map".
+              // "format": "map",
+
+              // // What join puts between the fields' texts. : when left out.
+              // // string; default ":".
+              // "separator": ":",
+            // },
+          // },
+          // {
+            // // Replaces fields' values in the rows before and after by a keyed HMAC-SHA256 or a SHA-256 of
+            // // them, in hex, or by null. A hash applies to the key's fields too, so the key stays unique
+            // // and matches the row.
+            // "module": "mask",
+            // "params": {
+              // // The fields masked, at the top level of the rows before and after, and of the key for a hash.
+              // // list of string; required.
+              // "fields": [],
+
+              // // hmac_sha256 replaces a value by the hex of its HMAC-SHA256 under the key key_env names,
+              // // which cannot be reversed without the key; sha256 by the hex of its SHA-256, which anyone can
+              // // reverse for a value from a small set (a phone number, an ID) by trying them all; null
+              // // replaces it by null, which leaves the key as it is, since a key of nulls would no longer
+              // // tell rows apart. A value is hashed as its text, so an int 5 and a string "5" hash the same;
+              // // null stays null. The hashes keep the key unique and equal to the row's field. hmac_sha256
+              // // when left out.
+              // // one of: hmac_sha256, sha256, null; default "hmac_sha256".
+              // "with": "hmac_sha256",
+
+              // // An environment variable holding the HMAC key, read when the pipeline starts: needed with
+              // // hmac_sha256, and only with it. Changing the key changes every hash, so a sink keyed by them
+              // // sees new rows.
+              // // string.
+              // "key_env": "",
+            // },
+          // },
+          // {
+            // // Renames records' namespaces, by an exact map and then by glob rules with templates, as
+            // // tables to indices or topics.
+            // "module": "route",
+            // "params": {
+              // // Namespaces renamed exactly, the old to the new: {"shop.orders": "orders"}. Tried before
+              // // rules.
+              // // object of string.
+              // "map": {},
+
+              // // Rules tried in order for a namespace map does not name; the first whose match it matches
+              // // renames it.
+              // // list of object.
+              // "rules": [
+                // {
+                  // // A glob the namespace must match, as path.Match takes it: shop.*.
+                  // // string; required.
+                  // "match": "",
+
+                  // // The new namespace, a template: {namespace} is the old one, {first} its part before the first
+                  // // '.', {rest} its part after the first '.', {last} its part after the last '.'. shop.orders to
+                  // // {first}-{rest} is shop-orders; to {last} it is orders.
+                  // // string; required.
+                  // "to": "https://{host}{uri}",
+                // },
+              // ],
+
+              // // What becomes of a record whose namespace neither map nor a rule names: keep passes it on as
+              // // it is, drop drops it. keep when left out.
+              // // one of: keep, drop; default "keep".
+              // "unmatched": "keep",
+            // },
+          // },
         // ],
 
         // // Where every record is written, at least one: each sink takes every record, in order, in

@@ -143,6 +143,9 @@ func load(p *config.SyncPipeline) (*modules, error) {
 			m.transforms = append(m.transforms, t)
 		}
 	}
+	if len(errs) == 0 {
+		errs = append(errs, checkChain(p.Transforms, m.transforms)...)
+	}
 	sink := func(s *config.SyncSink) Sink {
 		v := get(Sinks, s.Sink)
 		if v == nil {

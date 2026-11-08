@@ -41,7 +41,7 @@ fit 实际接受的配置脱节；每一章的说明和示例来自 `schema/doc`
 | [Middleware](config.md#middleware) | 路由的中间件，每个模块一节，含用途、示例和参数表 | [`basic_auth`](config.md#http-middleware-basic_auth)、[`body_limit`](config.md#http-middleware-body_limit)、[`cache`](config.md#http-middleware-cache)、[`circuit_breaker`](config.md#http-middleware-circuit_breaker)、[`client_cert`](config.md#http-middleware-client_cert)、[`compress`](config.md#http-middleware-compress)、[`concurrency_limit`](config.md#http-middleware-concurrency_limit)、[`forward_auth`](config.md#http-middleware-forward_auth)、[`headers`](config.md#http-middleware-headers)、[`jwt`](config.md#http-middleware-jwt)、[`rate_limit`](config.md#http-middleware-rate_limit)、[`redirect`](config.md#http-middleware-redirect)、[`rewrite`](config.md#http-middleware-rewrite)、[`wasm`](config.md#http-middleware-wasm) |
 | [Sync sources](config.md#sync-sources) | 同步流水线的源模块，每个模块一节；目前只有供试用和测试的 `generate` | [`generate`](config.md#sync-sources-generate) |
 | [Sync sinks](config.md#sync-sinks) | 同步流水线的目标模块，每个模块一节；目前只有供测试和试用的 `memory` 与 `stdout` | [`memory`](config.md#sync-sinks-memory)、[`stdout`](config.md#sync-sinks-stdout) |
-| [Sync transforms](config.md#sync-transforms) | 同步流水线的变换模块；内置变换在 I164 加入，WASM 变换在 I165 | — |
+| [Sync transforms](config.md#sync-transforms) | 同步流水线的变换模块，每个模块一节，按顺序串联：按命名空间、操作和字段值过滤，改命名空间，改字段，构造键，转换类型，掩码，套信封；WASM 变换在 I165 | [`filter`](config.md#sync-transforms-filter)、[`route`](config.md#sync-transforms-route)、[`fields`](config.md#sync-transforms-fields)、[`key`](config.md#sync-transforms-key)、[`cast`](config.md#sync-transforms-cast)、[`mask`](config.md#sync-transforms-mask)、[`envelope`](config.md#sync-transforms-envelope) |
 
 ## 处理器和中间件
 
