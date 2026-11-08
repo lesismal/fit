@@ -343,7 +343,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | done |
 | I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | todo |
 | I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | todo |
-| I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | todo |
+| I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | done |
 | I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | done |
 | I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | done |
 | I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | done |
@@ -5334,6 +5334,64 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: PostgreSQL-to-PostgreSQL and MySQL-to-PostgreSQL pipelines end equal by checksum
   under a mixed load, across replays and a kill.
 - **Touches**: `sync/postgres`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/postgres/sink` (`syncpgsink`), not `sync/postgres`, which
+   I178's source takes (built at the same time); the connection's params (`address`, `user`,
+   `password_env`, `database`, `sslmode`, `ca_file`, `cert_file`, `key_file`, `server_name`,
+   `channel_binding`, `timeout`) are the sink's own, flat, as I168's and I186's, and may be shared
+   with the source once both are in. `user` is required; MD5 and cleartext passwords are not offered.
+   Alternative: one package with the source.
+2. **Connections**: a small pool of blocking `pgwire` connections, one per writer (a stream has one,
+   a job `job.max_parallel`, as `ParallelSink`), each on the pipeline's goroutine; one that broke,
+   or is left in a transaction, is closed. `Test` (I188's `Tester`) connects and runs `SELECT 1`.
+3. **Statements.** Upserts are `INSERT ... VALUES (...),(...) ON CONFLICT (key) DO UPDATE SET` every
+   other column of the row `= EXCLUDED.col` (`DO NOTHING` for a row of the key alone); deletes
+   `DELETE ... WHERE key IN (...)` (a row of columns for a key of several). A statement is a run of
+   consecutive records of one table, operation and set of columns, at most `max_statement_rows`
+   (1000) rows and 65535 parameters, a key held once in it (an upsert's last row, so the server's
+   "cannot affect row a second time" is not met; one met anyway, as `1.0` and `1.00`, writes the run
+   one row at a time). Parameters go as text, typed by the server from the columns. Alternative:
+   prepared statements of fixed sizes.
+4. **COPY for snapshots by size, not by kind**: a run of `copy_min_rows` (100) upserts or more is
+   copied into `CREATE TEMPORARY TABLE ... ON COMMIT DROP AS SELECT cols FROM t WITH NO DATA`, then
+   merged with one `INSERT ... SELECT ... ON CONFLICT`; `copy: "always"` or `"never"` override. A
+   snapshot's records are inserts like others, so the size of a run is what tells. Alternative: COPY
+   only in jobs.
+5. **Type mapping**: values as the text PostgreSQL reads (the table in the docs): times with their
+   own offset (so a `timestamp` column takes the wall clock, a `timestamptz` the instant), dates as
+   `YYYY-MM-DD`, bytes as bytea's hex text (`\x..`) also in statements, so a row is the same copied
+   or inserted, arrays as array literals, maps as JSON; a NUL in a string fails the record.
+   Alternative: binary parameters by the column's type.
+6. **The table** is `table` (`{namespace}`) split at its first dot into schema and table, so a
+   MySQL source's `db.table` is a schema and a table; not made by the sink. The key's columns are
+   the key's fields or `key_columns` (from the key or the row); an upsert's row gets the key's
+   columns it lacks.
+7. **Transactions.** `batch` (default): each batch one transaction. `source`: each source
+   transaction one; an open transaction's records are held in the sink across batches, acknowledged
+   (the checkpoint cannot pass them, since it never falls inside a transaction) and written with its
+   last record; a held transaction whose next record is another's, or its own first again (a
+   replay), is dropped. Alternative: a transaction left open across writes, which a lost connection
+   would lose after its records were acknowledged.
+8. **Errors.** SQLSTATE classes 22 and 23 are permanent; every other error (a table or column
+   missing, `42P10` with no unique index, a lost connection, `40001`) rolls the batch back and is
+   retried. On a permanent error the batch is written again one record at a time after savepoints
+   to find the record: with `batch`, the records before it are committed and it fails; with `source`,
+   its whole source transaction is left out (the records after it acknowledged unwritten), and a
+   held record's refusal fails the batch's first record, the error naming the transaction.
+   Alternative: in `source`, write the transaction without the refused record.
+9. **DDL is acknowledged and not applied** (decision 036). Alternative: `ddl: "stop"`.
+10. **Interop.** `test/sync/postgres_sink_test.go` against `test/sync/postgres.sh`'s servers (run here
+    against 13 and 17, TLS with SCRAM): generate's every type inserted and copied, equal by checksum
+    and read back by the mapping; a refused value and a missing table; a mixed load of upserts and
+    deletes of 37 two-column keys in transactions of three, through pipelines killed at every crash
+    point, with each transactions mode, ending equal by checksum to the load applied in order. The
+    plan's PostgreSQL-to-PostgreSQL and MySQL-to-PostgreSQL pipelines need I178's and I174's sources,
+    neither built yet: they are I192's matrix. Alternative: wait for the sources.
+11. **Size**: about 900 lines of code and 1,400 of tests (98.8% of the package from unit tests
+    against an in-process fake server that runs the sink's statements); nothing is left, so there is
+    no I180b.
 
 ### I181 A MongoDB client: BSON and OP_MSG
 

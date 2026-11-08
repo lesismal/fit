@@ -49,7 +49,7 @@ a config against it and more.
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -6985,6 +6985,7 @@ since what came after the checkpoint is written again after a crash.
 | [`http`](#sync-sinks-http) | Batches posted as NDJSON or a JSON array, with headers, authentication and an idempotency key, retried on 5xx and timeouts |
 | [`mysql`](#sync-sinks-mysql) | MySQL, MariaDB and TiDB: upserts (`INSERT ... ON DUPLICATE KEY UPDATE`) and deletes by key, multi-row statements per table, each source transaction as one of the server's |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
+| [`postgres`](#sync-sinks-postgres) | PostgreSQL: upserts with `INSERT ... ON CONFLICT DO UPDATE` and deletes by key, batched per table, large runs copied with `COPY` and merged, each batch or each source transaction in one transaction |
 | [`redis`](#sync-sinks-redis) | Redis and Valkey, pipelined: stream entries with `XADD` (IDs from the keys for an exact copy), or a key per record with `SET`, `HSET` and `DEL`, with a TTL |
 | [`s3`](#sync-sinks-s3) | S3 and compatibles (MinIO, SeaweedFS, Ceph, R2): each batch as objects of lines, named by its first record so a batch written again is the same object, gzipped if asked |
 | [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
@@ -7650,6 +7651,143 @@ In JSON:
 | `transactions` | string: `source`, `batch` | `"source"` | How records are grouped in the server's transactions: source, each source transaction as one, and the records without one (a snapshot's) of a batch together; batch, a batch's records up to the last that ends a source transaction in one, several source transactions together, and those after it, a part of one source transaction, in one held open into the next batch. Either way a source transaction is never committed in part, unless it is larger than max_transaction_bytes. source when left out. |
 | `ddl` | string: `report`, `stop` | `"report"` | What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes it, which with on_error stop stops the pipeline before it, for a person to change the table. report when left out. |
 | `max_transaction_bytes` | integer, 0 or more |  | The most bytes of values one of the server's transactions holds: past it, a transaction is committed at the next record that ends a source transaction, and a source transaction larger than this alone is committed in parts, with a warning. Against TiDB, whose transactions are bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and MariaDB. |
+
+<a id="sync-sinks-postgres"></a>
+
+### `postgres`
+
+Writes records to PostgreSQL 13 and later: inserts and updates as INSERT ... ON CONFLICT (key) DO UPDATE, deletes as DELETE by key, each run of a batch's records for one table and one set of columns a multi-row statement, a run of many upserts copied (COPY) into a temporary table and merged; each batch in one transaction, or, with transactions source, each source transaction in one. Writing the same records again leaves the same rows. A record the server refuses for good fails, and on_error takes it.
+
+Writes records to PostgreSQL 13 and later, over fit's own client of PostgreSQL's protocol (TLS with
+`sslmode`, SCRAM-SHA-256 with channel binding), on connections of its own, never on fib's workers.
+Inserts, updates and messages are upserts by key, `INSERT ... ON CONFLICT (key) DO UPDATE SET` the
+row's other columns (`DO NOTHING` for a row of the key alone); deletes are `DELETE ... WHERE key IN
+(...)`. Each run of a batch's records for one table, one operation and one set of columns is one
+statement of at most `max_statement_rows` (1000) rows, a key held once in it (an upsert's last row).
+A run of `copy_min_rows` (100) upserts or more, as a snapshot's, is copied instead: `COPY` into a
+temporary table of the row's columns, dropped at the end of the transaction, then one `INSERT ...
+SELECT ... ON CONFLICT` from it (`copy: "always"` or `"never"` choose). Writing the same records
+again, after a crash, leaves the same rows. DDL is not written, and tables are not made: each must
+have a primary key or unique index on the key's columns.
+
+The table is `table` (`{namespace}`), split at its first dot into the schema and the table, so that
+a MySQL source's `shop.orders` is the table `orders` of the schema `shop`. The key's columns are the
+record's key's fields, or `key_columns`, their values taken from the key or the row; an upsert's row
+gets the key's columns it lacks.
+
+With `transactions: "batch"` (the default) each batch is one transaction. With `transactions:
+"source"`, each of the source's transactions is one: a transaction's records are held across batches
+until its last arrives (they are acknowledged, and the checkpoint cannot pass them), so a reader never
+sees part of one. A record the server refuses for good (SQLSTATE class 22, a value the column cannot
+read, or 23, a constraint) fails, and `on_error` takes it: with `batch` the rows before it are
+written, found one at a time after savepoints; with `source` its whole transaction is left out, and
+for a held record the batch's first record is the one failed. Every other error, a table or column
+missing, a lost connection, a serialization failure, rolls the batch back and is tried again.
+
+Values become the text PostgreSQL reads for the column, whose type the server gives:
+
+| Record value | Written as | Columns it suits |
+| --- | --- | --- |
+| null | `NULL` | any |
+| bool | `t` or `f` | `boolean` |
+| int, uint | decimal digits | `smallint`, `integer`, `bigint`, `numeric` |
+| float | its shortest text, `NaN`, `Infinity`, `-Infinity` | `real`, `double precision`, `numeric` |
+| decimal | its text | `numeric` |
+| string | as it is; a NUL byte fails the record | `text`, `varchar`, enums, `uuid`, `inet`, ... |
+| bytes | `\x` and hex | `bytea` |
+| time | its wall clock to the microsecond and its offset | `timestamptz` (the instant), `timestamp` (the wall clock) |
+| date | `YYYY-MM-DD` | `date` |
+| JSON | its text | `json`, `jsonb` |
+| array | an array literal of its elements | arrays, as `text[]` |
+| map | a JSON object | `json`, `jsonb` |
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-pg {
+		source generate { namespace shop.orders; tx_size 10 }
+		sinks pg {
+			batch { max_records 1000 }
+			sink postgres {
+				address pg.internal:5432
+				user sync
+				password_env PG_PASSWORD
+				database shop
+				ca_file /etc/fit/pg-ca.pem
+				transactions source
+			}
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-to-pg
+      source:
+        module: generate
+        params:
+          namespace: shop.orders
+          tx_size: 10
+      sinks:
+        - name: pg
+          batch:
+            max_records: 1000
+          sink:
+            module: postgres
+            params:
+              address: pg.internal:5432
+              user: sync
+              password_env: PG_PASSWORD
+              database: shop
+              ca_file: /etc/fit/pg-ca.pem
+              transactions: source
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-to-pg",
+        "source": {"module": "generate", "params": {"namespace": "shop.orders", "tx_size": 10}},
+        "sinks": [{"name": "pg", "batch": {"max_records": 1000}, "sink": {"module": "postgres", "params": {
+          "address": "pg.internal:5432", "user": "sync", "password_env": "PG_PASSWORD", "database": "shop",
+          "ca_file": "/etc/fit/pg-ca.pem", "transactions": "source"}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:5432"` | The server's host and port. 127.0.0.1:5432 when left out. |
+| `user` | string |  | Required. The user to connect as, which needs INSERT, UPDATE and DELETE on the tables written, and TEMPORARY on the database for COPY. |
+| `password_env` | string |  | The environment variable holding user's password, read when the pipeline loads; none when left out. SCRAM-SHA-256 is used; MD5 and cleartext passwords are refused. |
+| `database` | string |  | The database; the user's name when left out, as the server has it. |
+| `sslmode` | string: `disable`, `require`, `verify-ca`, `verify-full` | `"verify-full"` | TLS: verify-full, the server's certificate and its name checked; verify-ca, the certificate only; require, TLS without a check; disable, none. There is no prefer: a connection does not fall back to plain text. verify-full when left out. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; address's host when left out. |
+| `channel_binding` | string: `prefer`, `require`, `disable` | `"prefer"` | SCRAM's channel binding to the TLS connection: prefer, when the server offers it; require, refusing a server that does not authenticate with it; disable. prefer when left out. |
+| `timeout` | duration | `"60s"` | How long connecting and writing one batch may take; a write that takes longer breaks its connection and is tried again. 60s when left out or 0. |
+| `table` | string | `"{namespace}"` | The table a record goes to: text with {namespace}, the record's namespace; split at its first dot into the schema and the table (shop.orders is the table orders of the schema shop), a name without a dot found by the search_path. The table is not made: it must have a primary key or unique index on the key's columns. {namespace} when left out. |
+| `key_columns` | list of string |  | The columns of the key the upserts conflict on and the deletes delete by, their values taken from the record's key, or from its row. The record's key's fields when left out, so that the key must then be a map of columns. |
+| `transactions` | string: `batch`, `source` | `"batch"` | What a transaction of the sink's holds: batch, each batch written; source, each of the source's transactions, its records held across batches until its last arrives, so that a reader never sees part of one. A transaction with a record the server refuses for good is then not written at all; on_error takes the record refused, or the first of the batch for one held. batch when left out. |
+| `copy` | string: `auto`, `always`, `never` | `"auto"` | When a run of upserts is copied: COPY into a temporary table, then one INSERT ... SELECT ... ON CONFLICT DO UPDATE from it, faster for many rows, as a snapshot's: auto, a run of copy_min_rows or more; always; never. auto when left out. |
+| `copy_min_rows` | integer, 0 or more | `100` | With copy auto, the fewest rows of a run that is copied. 100 when left out or 0. |
+| `max_statement_rows` | integer, 0 to 65535 | `1000` | The most rows of one INSERT or DELETE (and fewer when its parameters would pass PostgreSQL's 65535); a longer run is written in several. 1000 when left out or 0. |
 
 <a id="sync-sinks-redis"></a>
 

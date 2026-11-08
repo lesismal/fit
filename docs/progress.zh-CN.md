@@ -4439,6 +4439,26 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **不足**：计划 I170 一节中的决策，待审查。没有针对 ClickHouse 试 TLS；之后写入、游标值已被越过的行会漏掉（没有延迟窗口）；
   `snapshot: "never"` 在第一个检查点之前重启会再查一次。本项没有在 Linux 上运行，也没有在整个测试集的竞态检测下运行（留给合并时）。
 
+### I180 PostgreSQL 作为目标 — 已完成
+
+- **目标 `postgres`**（`sync/postgres/sink`，包 `syncpgsink`，基于 I177 的 `pgwire`）：upsert 为多行
+  `INSERT ... ON CONFLICT (key) DO UPDATE`（只有键列的行为 `DO NOTHING`），删除为 `DELETE ... WHERE key IN (...)`，同一表、操作和
+  列集合的一串记录一条语句，每个键一次，最多 `max_statement_rows` 行和 65535 个参数；`copy_min_rows` 行及以上的 upsert 先
+  `COPY` 到 `ON COMMIT DROP` 临时表再合并（`copy` 为 `auto`、`always`、`never`）；`table`（`{namespace}`，分为模式和表）、
+  `key_columns`；`transactions` 为 `batch` 或 `source`（源事务的记录跨批次暂存、整个写入）；SQLSTATE 22 和 23 为永久错误，
+  在保存点后逐条找出，其余重试；阻塞连接池，每个写入者一个（`ParallelSink`）；I188 的 `Test`。TLS 与 `sslmode`、带通道绑定的
+  SCRAM 同 wire。在 `modules/standard` 中注册。
+- **文档**：schema 和参考（章节 `sync_sinks_postgres.md` 含类型映射，目标的表），模板，`schema-zh.js` 中的中文描述，
+  `docs/configuration*.md` 的 `sync` 行。
+- **测试**：进程内运行目标语句的假 PostgreSQL（按键的表、事务、保存点、临时表、COPY）：被拒绝的参数、语句及其分组、
+  `key_columns` 与标量键、被拒绝的记录、永久的、重试的以及在查找各步失败的服务器错误、COPY 及其各步、源事务的暂存、重试、
+  重放与拒绝，以及 generate 的记录经过在每个崩溃点被杀的流水线（两种模式）（覆盖率 98.8%）。`test/sync/postgres_sink_test.go`
+  针对 `test/sync/postgres.sh` 的 PostgreSQL 13 和 17（TLS、SCRAM）：所有类型插入和复制，校验和相同并可读回；被拒绝的值与
+  不存在的表；事务中的混合负载经过在每个崩溃点被杀的流水线，两种模式结束时校验和都等于按序应用的结果。在 macOS 上于竞态检测下
+  运行，使用为此创建并已删除的 `fit-i180-pg*` 容器。
+- **与计划的不同**：PostgreSQL 到 PostgreSQL、MySQL 到 PostgreSQL 的流水线等 I178 和 I174 的源（I192 的矩阵）；混合负载由测试自己的源产生。
+- **缺口**：计划 I180 一节中的决策，待审查。连接参数暂为目标自己的，等 I178 的源完成后可共用。
+
 ### I186 Redis 作为源与目标 — 已完成
 
 - **客户端**（`sync/redis/wire`，包 `wire`）：经 TCP 或 TLS 的 RESP2 与 RESP3；带 `AUTH` 与 `SETNAME` 的 `HELLO 3`，服务器

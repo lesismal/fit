@@ -6279,6 +6279,37 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   `snapshot: "never"` asks again on a restart before its first checkpoint. Not run on Linux or under
   the whole suite's race detector by this item (left to the merge).
 
+### I180 PostgreSQL as a sink — done
+
+- **Sink `postgres`** (`sync/postgres/sink`, package `syncpgsink`, on I177's `pgwire`): upserts as
+  multi-row `INSERT ... ON CONFLICT (key) DO UPDATE` (`DO NOTHING` for a key-only row) and deletes as
+  `DELETE ... WHERE key IN (...)`, a statement per run of one table, operation and set of columns,
+  each key once, at most `max_statement_rows` and 65535 parameters; runs of `copy_min_rows` upserts
+  copied (`COPY`) into an `ON COMMIT DROP` temporary table and merged (`copy` `auto`, `always`,
+  `never`); `table` (`{namespace}`, split into schema and table), `key_columns`; `transactions`
+  `batch` or `source` (a source transaction's records held across batches and written whole);
+  SQLSTATE 22 and 23 permanent, found one record at a time after savepoints, everything else
+  retried; a pool of blocking connections, one per writer (`ParallelSink`); `Test` for I188. TLS
+  with `sslmode` and SCRAM with channel binding as the wire has them. Registered in
+  `modules/standard`.
+- **Docs**: the schema and reference (chapter `sync_sinks_postgres.md` with the type mapping, the
+  sinks' table), the templates, the Chinese descriptions in `schema-zh.js`, `docs/configuration*.md`'s
+  `sync` row.
+- **Tests**: against an in-process fake PostgreSQL that runs the sink's statements (tables by key,
+  transactions, savepoints, temporary tables, COPY): params refused, statements and their grouping,
+  keys from `key_columns` and scalars, records refused, server errors permanent, retried, or failing
+  at each step of the search, COPY and its steps, source transactions held, retried, replayed and
+  refused, and generate's records through a pipeline killed at every crash point in both modes
+  (coverage 98.8%). `test/sync/postgres_sink_test.go` against PostgreSQL 13 and 17 from
+  `test/sync/postgres.sh` (TLS, SCRAM): every type inserted and copied, equal by checksum and read
+  back; a refused value and a missing table; a mixed load in transactions through pipelines killed at
+  every crash point, each mode ending equal by checksum to the load applied in order. Run under the
+  race detector on macOS, against `fit-i180-pg*` containers made for the run and removed.
+- **Differs from the plan**: the PostgreSQL-to-PostgreSQL and MySQL-to-PostgreSQL pipelines wait for
+  I178's and I174's sources (I192's matrix); the mixed load is a source of the test's own.
+- **Gaps**: the decisions in the plan's I180 section, pending review. The connection params are the
+  sink's own until I178's source can share them.
+
 ### I186 Redis as a source and a sink — done
 
 - **Client** (`sync/redis/wire`, package `wire`): RESP2 and RESP3 over TCP or TLS; `HELLO 3` with
