@@ -229,6 +229,22 @@ The plan's I169 section lists them all; these change the record above.
    cursor is not split, so its next run reads only what changed.
 3. **`fitsync.ParsePlain`** reads a plain JSON document by the `json` codec's rules, for sources
    whose servers hold JSON.
+## Decisions made while building I187 (pending review)
+
+The plan's I187 section lists them all; these change the record above.
+
+1. **SigV4 is fit's own** (`syncs3.Signer`), as the principles have it: nothing in fit or fib spoke
+   S3 to reuse. Credentials are an access key and a secret named by an environment variable, read
+   once; AWS's default credential chain is not read.
+2. **A sink that writes files of batches writes one per batch.** The `s3` sink puts each batch as an
+   object (several past `max_object_bytes`) and keeps nothing across batches, so objects roll by
+   the sink's `batch` limits; holding lines across batches would acknowledge records not yet
+   stored.
+3. **An object is named by its first record** (its commit time and a hash of its position), so a
+   batch written again is the same object with the same bytes; a replay cut into other batches
+   writes other objects, at least once as every sink.
+4. **A source of objects reads keys in order and resumes inside one**: its position is the key and
+   the offset past the line; keys must grow, as the sink's do.
 ## Decisions made while building I171 (pending review)
 
 The plan's I171 section lists them all; these change the record above.

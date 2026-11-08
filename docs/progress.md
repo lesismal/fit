@@ -5859,6 +5859,54 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I169 section, pending review. Deletes are seen only through
   `deleted_field`; a document written below the checkpoint after polling passed it is missed; a
   stream's snapshot interrupted starts over; no `query` param.
+### I187 S3 and compatibles as a source and a sink — done
+
+- **SigV4 and the connection** (`sync/s3/sigv4.go`, `client.go`, package `syncs3`): `Signer`, AWS
+  Signature Version 4 with the whole body's SHA-256, written in fit (no S3 or SigV4 code existed in
+  fit or fib to reuse); `Conn` with `endpoint` (AWS's of `region` when left out), `bucket`,
+  `addressing` (`virtual` for AWS, `path` otherwise), `access_key_id` with `secret_access_key_env`
+  and `session_token_env`, `ca_file`, `server_name`, `timeout`; `PUT`, ranged `GET` with `If-Match`,
+  `ListObjectsV2`, S3's error code and message (`Error`), over fib's asynchronous HTTP client on the
+  role's engine or one of its own.
+- **Sink `s3`** (`sync/s3/sink.go`): each batch as objects of lines by a codec (`line` by default),
+  split past `max_object_bytes` (64 MiB) and at each namespace when the key names it, gzipped with
+  `gzip`, each put whole; named by `key`, a template of the first record's commit time in UTC and
+  `{position}`, a hash of its position, so a batch written again is the same object with the same
+  bytes. Rolled by the sink's `batch`. A failure past the first object is a `BatchError`; a record
+  the codec fails on, or a key past 1024 bytes, is permanent. A `ParallelSink`.
+- **Source `s3`** (`sync/s3/source.go`): the objects under `prefix` in key order from `start_after`
+  or the checkpoint's key, listed again every `poll_interval` (30s) in a stream; each read in ranges
+  of `range_bytes` (8 MiB) while its ETag holds, `.gz` gunzipped (`decompress`), as lines through a
+  codec, cut at `max_line_bytes`; records keyed by the object and offset, committed at its last
+  modification, positioned at the key and the offset past the line, `end` on its last line; an
+  object gone is skipped, one changed fails the run.
+- **Docs**: the schema and reference (chapters `sync_sinks_s3.md` and `sync_sources_s3.md`, the
+  sources' and sinks' tables), the templates, the Chinese descriptions in `schema-zh.js`,
+  `docs/configuration*.md`, decision 036; CI's `sync-interop` job runs the S3 tests through
+  `test/sync/run.sh`.
+- **Tests**: AWS's four published SigV4 examples; against an in-process bucket that checks every
+  signature: a batch written twice making the same objects and bytes, split by size and namespace,
+  a failure at the second object (`BatchError`) and its resend, an encoding failure, a key too long,
+  the clock when there is no commit time, TLS with a CA file and a session token, server errors,
+  a refused connection, a context ended; the source in ranges of 3 bytes over plain, gzipped, empty
+  and folder objects, resumed after every record, `start_after`, a line cut, polling (an object
+  added before the last key not seen), objects gone, changed and answered whole, a range past the
+  end, listings failed or truncated without a token, a server ignoring `start-after`, a codec making
+  several records of a line or none, decoding failures, `Emit` and context ending. 97.9% covered
+  without containers; staticcheck clean. Interop (`test/sync/s3_test.go`, `run.sh` now starting
+  `pgsty/minio:RELEASE.2026-08-04T00-00-00Z` and `chrislusf/seaweedfs:4.50`), each against MinIO and
+  SeaweedFS under the race detector: 500 records in five batches written twice, plain and gzipped,
+  the same keys and bytes, in key order the stream in order; 6,010 lines in three objects (one
+  gzipped) read in 64 KiB ranges and resumed at three points inside objects and after 4,000 records;
+  2,000 records written gzipped and read back; a 4 MB object (a body fib's client streams) written
+  and read back in 1 MiB ranges.
+- **Differs from the plan**: objects roll by the sink's batch, one object per batch, not by size
+  and time across batches (decision 5 of the plan's section); MinIO from a community build, since
+  MinIO's images are no longer pulled. About 1,300 lines of code and 1,350 of tests; no I187b.
+- **Gaps**: the decisions in the plan's I187 section, pending review. No multipart upload, no AWS
+  credential chain or renewal, no key filter besides the prefix; an object added under an earlier
+  key, or written over, is not read. Not run on Linux or under the whole suite's race detector by
+  this item (left to the merge).
 ### I171 HTTP as a source and a sink — done
 
 - **Source `http`** (`sync/httpsync/source.go`, package `httpsync`): takes the bodies a route's

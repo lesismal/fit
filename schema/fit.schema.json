@@ -7228,6 +7228,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "s3"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.s3"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "stdout"
               }
             }
@@ -7266,6 +7282,7 @@
             "file",
             "http",
             "memory",
+            "s3",
             "stdout",
             "wasm"
           ],
@@ -7604,6 +7621,82 @@
       },
       "type": "object"
     },
+    "sync.sinks.s3": {
+      "additionalProperties": false,
+      "properties": {
+        "access_key_id": {
+          "description": "The access key's ID, sent in each request's signature; with secret_access_key_env. Requests are not signed when both are left out, for a public bucket.",
+          "type": "string"
+        },
+        "addressing": {
+          "description": "How the bucket is named in a request: path, as https://endpoint/bucket/key, which every compatible takes; virtual, as https://bucket.endpoint/key, as AWS prefers. virtual when endpoint is left out (AWS), path otherwise.",
+          "enum": [
+            "path",
+            "virtual"
+          ],
+          "type": "string"
+        },
+        "bucket": {
+          "description": "The bucket. It is not made: it is the user's.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. The check cannot be turned off.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a line of a record: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated values."
+        },
+        "endpoint": {
+          "description": "The server, as https://minio.internal:9000 or https://s3.eu-west-1.amazonaws.com, with no path: an S3 compatible's address, or AWS's endpoint of region. https://s3.<region>.amazonaws.com when left out.",
+          "type": "string"
+        },
+        "gzip": {
+          "description": "Gzip each object, its key ending in .gz through {ext}, with Content-Type application/gzip. false when left out.",
+          "type": "boolean"
+        },
+        "key": {
+          "default": "{namespace}/{date}/{timestamp}-{position}{ext}",
+          "description": "The objects' keys: text with placeholders, of the object's first record: {namespace} (a leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when it has none), {position}, 20 hex digits from its position, and {ext}, the codec's extension (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have {position}, so that two objects do not have one name. {namespace}/{date}/{timestamp}-{position}{ext} when left out.",
+          "type": "string"
+        },
+        "max_object_bytes": {
+          "default": 67108864,
+          "description": "The most bytes of lines (before gzip) in one object: a batch larger is written as several, in order. A record larger is an object of its own. 64 MiB when left out or 0.",
+          "maximum": 5368709120,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "region": {
+          "default": "us-east-1",
+          "description": "The region requests are signed for: the bucket's on AWS, and what the server is set to elsewhere (MinIO's and most compatibles' us-east-1, R2's auto). us-east-1 when left out.",
+          "type": "string"
+        },
+        "secret_access_key_env": {
+          "description": "The environment variable holding access_key_id's secret, read when the pipeline loads.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; the endpoint's host when left out.",
+          "type": "string"
+        },
+        "session_token_env": {
+          "description": "The environment variable holding a session token, for temporary credentials, sent as x-amz-security-token; none when left out. Temporary credentials are read once: they are not renewed while the pipeline runs.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long one request may take, from connecting to the end of its answer. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bucket"
+      ],
+      "type": "object"
+    },
     "sync.sinks.stdout": {
       "additionalProperties": false,
       "properties": {},
@@ -7738,6 +7831,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "s3"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.s3"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "wasm"
               }
             }
@@ -7760,6 +7869,7 @@
             "file",
             "generate",
             "http",
+            "s3",
             "wasm"
           ],
           "type": "string"
@@ -8142,6 +8252,108 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.sources.s3": {
+      "additionalProperties": false,
+      "properties": {
+        "access_key_id": {
+          "description": "The access key's ID, sent in each request's signature; with secret_access_key_env. Requests are not signed when both are left out, for a public bucket.",
+          "type": "string"
+        },
+        "addressing": {
+          "description": "How the bucket is named in a request: path, as https://endpoint/bucket/key, which every compatible takes; virtual, as https://bucket.endpoint/key, as AWS prefers. virtual when endpoint is left out (AWS), path otherwise.",
+          "enum": [
+            "path",
+            "virtual"
+          ],
+          "type": "string"
+        },
+        "bucket": {
+          "description": "The bucket. It is not made: it is the user's.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. The check cannot be turned off.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a line: line when left out, a message record holding it as after's line; json reads it as JSON, csv as comma-separated values. A line the codec fails on is a message record of the line and the error."
+        },
+        "decompress": {
+          "default": "auto",
+          "description": "Which objects are gunzipped: auto, those whose keys end in .gz; gzip, every one; none, none. A gzipped object resumed after a restart is read again from its start, its lines up to the offset skipped. auto when left out.",
+          "enum": [
+            "auto",
+            "gzip",
+            "none"
+          ],
+          "type": "string"
+        },
+        "endpoint": {
+          "description": "The server, as https://minio.internal:9000 or https://s3.eu-west-1.amazonaws.com, with no path: an S3 compatible's address, or AWS's endpoint of region. https://s3.<region>.amazonaws.com when left out.",
+          "type": "string"
+        },
+        "max_line_bytes": {
+          "default": 1048576,
+          "description": "The longest line, in bytes: a longer one is cut there, its rest skipped, and counted. 1 MiB when left out or 0.",
+          "maximum": 67108864,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "namespace": {
+          "description": "The records' namespace. The object's key when left out.",
+          "type": "string"
+        },
+        "poll_interval": {
+          "default": "30s",
+          "description": "How long to wait, once every object listed is read, before listing again for keys past the last. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "prefix": {
+          "description": "The objects read are those whose keys begin with it, as logs/2026/; every object of the bucket when left out. Keys ending in / (folders' markers) are skipped.",
+          "type": "string"
+        },
+        "range_bytes": {
+          "default": 8388608,
+          "description": "How many bytes of an object one request reads; an object is read in such ranges, so it never needs to be held whole. 8 MiB when left out or 0.",
+          "maximum": 67108864,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "region": {
+          "default": "us-east-1",
+          "description": "The region requests are signed for: the bucket's on AWS, and what the server is set to elsewhere (MinIO's and most compatibles' us-east-1, R2's auto). us-east-1 when left out.",
+          "type": "string"
+        },
+        "secret_access_key_env": {
+          "description": "The environment variable holding access_key_id's secret, read when the pipeline loads.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; the endpoint's host when left out.",
+          "type": "string"
+        },
+        "session_token_env": {
+          "description": "The environment variable holding a session token, for temporary credentials, sent as x-amz-security-token; none when left out. Temporary credentials are read once: they are not renewed while the pipeline runs.",
+          "type": "string"
+        },
+        "start_after": {
+          "description": "Where a pipeline without a checkpoint starts: the objects whose keys come after it. The first object under prefix when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long one request may take, from connecting to the end of its answer. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bucket"
+      ],
       "type": "object"
     },
     "sync.sources.wasm": {

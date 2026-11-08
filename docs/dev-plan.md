@@ -350,7 +350,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | todo |
 | I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
 | I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | todo |
-| I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | todo |
+| I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | done |
 | I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | todo |
 | I189 | Metrics, logs and dead letters, replayed from the Admin API | I188 | todo |
 | I190 | The workbench's Sync pages, and the assistant's tools for sync | I188, I189, I123 | todo |
@@ -5185,6 +5185,83 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: interop with MinIO in Docker; an object written twice in a replay has the same name
   and content; the source resumes inside an object.
 - **Touches**: `sync/s3`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives, and SigV4 written here.** Package `sync/s3` (`syncs3`): the sink, the source,
+   a `Conn` of their own (the role's engine or one of its own, as I168's) and `Signer`, AWS
+   Signature Version 4, checked against AWS's four published examples. Nothing in fit or fib signed
+   SigV4 or spoke S3 (the media library and backups write to disk), so there was nothing to reuse;
+   `Signer` is exported for whatever speaks S3 next. Alternative: an `internal/sigv4` package now.
+2. **Credentials.** `access_key_id` in the config, its secret named by `secret_access_key_env`, and
+   `session_token_env` for temporary credentials; requests are not signed when neither is set (a
+   public bucket). They are read once when the pipeline loads: no instance profile, web identity or
+   `~/.aws` files, and temporary credentials are not renewed. Alternative: AWS's default chain.
+3. **Addressing.** `addressing` is `virtual` (the bucket in the host) when `endpoint` is left out,
+   which is AWS, and `path` otherwise, which every compatible takes; a bucket with a dot is refused
+   with `virtual` over HTTPS, since no certificate covers it. Bucket names are checked (3 to 63 of
+   lower-case letters, digits, `.`, `-`, `_`). Alternative: `path` everywhere.
+4. **What is signed.** The whole body's SHA-256 (no `UNSIGNED-PAYLOAD`, no chunked signing): the
+   object is in memory anyway, and the server then refuses a body that did not arrive whole. The
+   signed headers are `host`, `content-type`, `content-md5` and `x-amz-*`; requests go over HTTP/1.1
+   (ALPN), as S3 speaks no HTTP/2. Alternative: unsigned payloads, to spare the hash.
+5. **An object is a batch.** The sink puts each batch it is given as one object, or several in
+   order past `max_object_bytes` (64 MiB, at most 5 GiB, one `PUT`'s limit); so objects roll by the
+   sink's `batch` (`max_records`, `max_bytes`, `max_wait`), which the docs tell users to raise, with
+   the `queue`. It keeps nothing across batches: acknowledging records not yet in an object breaks
+   the checkpoint's rule, and multipart parts are not objects until completed, so no multipart
+   upload. Alternative: the sink holding lines across batches and acknowledging them once their
+   object is put, which the runtime cannot express (a `Write` that waits holds the pipeline).
+6. **Names.** `key` is a template (`{namespace}/{date}/{timestamp}-{position}{ext}` by default)
+   of the object's first record: its commit time in UTC (the time of the write when it has none,
+   which a replay does not repeat) and `{position}`, 20 hex digits of a SHA-256 of its namespace and
+   position, or of the nearest position before it and how far (`+n`), after it (`-n`), or, with no
+   position in the batch, of the object's lines. `{position}` is required. A batch written again
+   makes the same names and bytes (gzip's header has no time or name), written over; a replay cut
+   into other batches makes other names, so records between the checkpoint and a crash can be in
+   two objects: at least once, as every sink. A leading `/` of a namespace and of a key is dropped;
+   a key past 1024 bytes fails its record for good. Alternative: Kafka Connect's objects aligned
+   on offsets, which needs numeric positions.
+7. **Namespaces.** When `key` names the namespace, a new object starts at each change of it, in
+   order; interleaved namespaces make small objects. Alternative: grouping a batch by namespace,
+   which reorders records across namespaces.
+8. **Lines.** `codec` as the `file` sink's (`line` by default, `json`, `csv`, a WASM codec), `{ext}`
+   `.txt`, `.jsonl` or `.csv` by the codec's name and `.gz` with `gzip`, `Content-Type` to match
+   (`application/gzip` gzipped, no `Content-Encoding`, so the object downloads as it is). No
+   `template` as the `file` sink has. Alternative: `json` by default.
+9. **Errors.** A failed `PUT`, of any status (a missing bucket, denied access, 5xx), is retried by
+   the pipeline; a record the codec cannot encode, or a key too long, fails for good, the objects
+   before it written. A failure past a batch's first object is a `BatchError` at the object's first
+   record. Alternative: 403 and 404 as permanent.
+10. **The source lists by key.** `ListObjectsV2` under `prefix` from the last key (`start-after`,
+    or `start_after` at first), in pages of 1,000; keys ending in `/` are skipped. Keys must grow:
+    an object added under a key before the last is not seen, and one written over after it was read
+    is not read again (the `s3` sink's names grow with time). A stream lists again every
+    `poll_interval` (30s); a job ends after one listing. No suffix or glob filter. Alternative:
+    remembering every key seen, which grows without bound, or S3's event notifications.
+11. **Reading.** An object is read in ranges of `range_bytes` (8 MiB, at most 64 MiB), each with
+    `If-Match` on the listing's ETag: an object changed while being read fails the run, and the
+    pipeline starts again from its checkpoint; one gone (404) is skipped with a warning; a range at
+    the end (416) is the end. Objects whose keys end in `.gz` are gunzipped (`decompress`), and one
+    resumed is read again from its start, the lines before the offset skipped. Lines as the `file`
+    source's: a `\r` before the newline dropped, a last line without a newline read,
+    `max_line_bytes` (1 MiB) cut, a line the codec fails on a message record with the error.
+    Alternative: whole objects, one `GET` each, bounded by the client's answer limit.
+12. **Records and positions.** The namespace is the object's key (or `namespace`), the key
+    `{object, offset}` (and `n` for a codec's second record of a line), the commit time the
+    object's last modification. Each line's last record has the position `{"key", "offset"}` past
+    the line, and an object's last line `"end": true`, so a restart goes on inside the object or
+    after it. The source is not a `Chunker`: a job reads the objects in order. Alternative: chunks
+    of objects for jobs.
+13. **Interop.** `test/sync/run.sh` also starts MinIO and SeaweedFS's S3 gateway (`fit-sync-minio`
+    on 29215, `fit-sync-seaweed` on 29216, each with an access key; `FIT_SYNC_MINIO_*`,
+    `FIT_SYNC_SEAWEED_*`). MinIO's own images are no longer pulled from Docker Hub or Quay (pull
+    access denied), so the script runs `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, a community
+    build of it, and `chrislusf/seaweedfs:4.50`. Over HTTP only; TLS is tried against an `httptest`
+    server in the unit tests. Alternative: Garage, or MinIO built from source.
+14. **`ParallelSink`**: a job's writers each put objects of their own names.
+15. **Size**: about 1,300 lines of code and 1,350 of tests (97.9% covered without containers);
+    nothing is left, so there is no I187b.
 
 ### I188 The Admin API and `fit sync`
 

@@ -3560,6 +3560,172 @@
           # # integer, 0 or more; default 67108864.
           # max_pending_bytes: 67108864
 
+        # # Or s3, with every one of its params:
+        # # Reads the objects under a prefix of an S3 or compatible bucket in key order, each as lines
+        # # through a codec, gunzipping those whose key ends in .gz, in ranges of range_bytes; then, in
+        # # a stream, lists again every poll_interval for keys past the last. Its position is the
+        # # object's key and the offset past the line, so a restart resumes inside an object. Keys must
+        # # grow as objects are added, as the s3 sink's do: an object added under a key before the last
+        # # read is not seen, and an object is read once.
+        # module: "s3"
+        # params:
+          # # The server, as https://minio.internal:9000 or https://s3.eu-west-1.amazonaws.com, with no
+          # # path: an S3 compatible's address, or AWS's endpoint of region.
+          # # https://s3.<region>.amazonaws.com when left out.
+          # # string.
+          # endpoint: "http://127.0.0.1:8500"
+
+          # # The region requests are signed for: the bucket's on AWS, and what the server is set to
+          # # elsewhere (MinIO's and most compatibles' us-east-1, R2's auto). us-east-1 when left out.
+          # # string; default "us-east-1".
+          # region: "us-east-1"
+
+          # # The bucket. It is not made: it is the user's.
+          # # string; required.
+          # bucket: ""
+
+          # # How the bucket is named in a request: path, as https://endpoint/bucket/key, which every
+          # # compatible takes; virtual, as https://bucket.endpoint/key, as AWS prefers. virtual when
+          # # endpoint is left out (AWS), path otherwise.
+          # # one of: path, virtual.
+          # addressing: "path"
+
+          # # The access key's ID, sent in each request's signature; with secret_access_key_env. Requests
+          # # are not signed when both are left out, for a public bucket.
+          # # string.
+          # access_key_id: ""
+
+          # # The environment variable holding access_key_id's secret, read when the pipeline loads.
+          # # string.
+          # secret_access_key_env: ""
+
+          # # The environment variable holding a session token, for temporary credentials, sent as
+          # # x-amz-security-token; none when left out. Temporary credentials are read once: they are not
+          # # renewed while the pipeline runs.
+          # # string.
+          # session_token_env: ""
+
+          # # A PEM file of the certificates the server's is checked against, in place of the system's
+          # # roots, for a CA of its own. The check cannot be turned off.
+          # # string.
+          # ca_file: "/etc/fit/ca.pem"
+
+          # # The name the server's certificate must have, and the TLS server name sent; the endpoint's
+          # # host when left out.
+          # # string.
+          # server_name: ""
+
+          # # How long one request may take, from connecting to the end of its answer. 60s when left out
+          # # or 0.
+          # # duration, as "1.5s" or "2m"; default "60s".
+          # timeout: "60s"
+
+          # # The objects read are those whose keys begin with it, as logs/2026/; every object of the
+          # # bucket when left out. Keys ending in / (folders' markers) are skipped.
+          # # string.
+          # prefix: ""
+
+          # # Where a pipeline without a checkpoint starts: the objects whose keys come after it. The
+          # # first object under prefix when left out.
+          # # string.
+          # start_after: ""
+
+          # # What makes records of a line: line when left out, a message record holding it as after's
+          # # line; json reads it as JSON, csv as comma-separated values. A line the codec fails on is a
+          # # message record of the line and the error.
+          # # module.
+          # codec:
+            # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+            # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+            # # (or before's) fields, those columns names or all of them, as text.
+            # module: "csv"
+            # params:
+              # # The columns' names, in order. Read, a row's values are named by them, and those past them
+              # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+              # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+              # # list of string.
+              # columns: []
+
+              # # The separator, one character other than a quote or a line break. A comma when left out.
+              # # string; default ",".
+              # comma: ","
+
+            # # Or json, with every one of its params:
+            # # A line is a JSON object: with form plain, a message record whose after holds its members,
+            # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+            # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+            # # null) as plain JSON or the whole record in its canonical form.
+            # module: "json"
+            # params:
+              # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+              # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+              # # when left out.
+              # # one of: plain, record; default "plain".
+              # form: "plain"
+
+            # # Or line, with every one of its params:
+            # # A line is a message record whose after holds the line as a string, in the field field names
+            # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+            # module: "line"
+            # params:
+              # # The field of after that holds the line. line when left out.
+              # # string; default "line".
+              # field: "line"
+
+            # # Or wasm, with every one of its params:
+            # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+            # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+            # # sinks that read and write bytes.
+            # module: "wasm"
+            # params:
+              # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+              # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+              # # GOARCH=wasm go build -buildmode=c-shared.
+              # # string; required.
+              # path: "/etc/fit/plugins/filter.wasm"
+
+              # # A string the plugin reads, for settings of its own.
+              # # string.
+              # config: "{}"
+
+              # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+              # # duration, as "1.5s" or "2m"; default "1s".
+              # timeout: "1s"
+
+              # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+              # # integer, 0 or more; default 134217728.
+              # max_memory_bytes: 134217728
+
+              # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+              # # 0.
+              # # integer, 0 or more; default 16777216.
+              # max_output_bytes: 16777216
+
+          # # Which objects are gunzipped: auto, those whose keys end in .gz; gzip, every one; none, none.
+          # # A gzipped object resumed after a restart is read again from its start, its lines up to the
+          # # offset skipped. auto when left out.
+          # # one of: auto, gzip, none; default "auto".
+          # decompress: "auto"
+
+          # # The records' namespace. The object's key when left out.
+          # # string.
+          # namespace: ""
+
+          # # How long to wait, once every object listed is read, before listing again for keys past the
+          # # last. 30s when left out or 0.
+          # # duration, as "1.5s" or "2m"; default "30s".
+          # poll_interval: "30s"
+
+          # # How many bytes of an object one request reads; an object is read in such ranges, so it never
+          # # needs to be held whole. 8 MiB when left out or 0.
+          # # integer, 0 to 67108864; default 8388608.
+          # range_bytes: 8388608
+
+          # # The longest line, in bytes: a longer one is cut there, its rest skipped, and counted. 1 MiB
+          # # when left out or 0.
+          # # integer, 0 to 67108864; default 1048576.
+          # max_line_bytes: 1048576
+
         # # Or wasm, with every one of its params:
         # # Runs a WebAssembly plugin that exports fit_sync_poll: given its checkpoint, it returns
         # # records and the next checkpoint, reading through fit's HTTP client from the hosts
@@ -4360,6 +4526,158 @@
               # # integer, 0 or more; default 100000.
               # max_records: 100000
 
+            # # Or s3, with every one of its params:
+            # # Writes each batch as objects of lines to S3 or a compatible (MinIO, SeaweedFS, Ceph, R2), by
+            # # a codec, gzipped when gzip says, each object put whole, so it is seen only once complete. An
+            # # object is named by the key template from its first record's commit time and position: a
+            # # batch written again after a crash, cut the same way, is the same object with the same
+            # # content, written over. Objects roll by the sink's batch (max_bytes, max_wait) and
+            # # max_object_bytes. Requests are signed with AWS Signature Version 4 and sent through fib's
+            # # asynchronous HTTP client.
+            # module: "s3"
+            # params:
+              # # The server, as https://minio.internal:9000 or https://s3.eu-west-1.amazonaws.com, with no
+              # # path: an S3 compatible's address, or AWS's endpoint of region.
+              # # https://s3.<region>.amazonaws.com when left out.
+              # # string.
+              # endpoint: "http://127.0.0.1:8500"
+
+              # # The region requests are signed for: the bucket's on AWS, and what the server is set to
+              # # elsewhere (MinIO's and most compatibles' us-east-1, R2's auto). us-east-1 when left out.
+              # # string; default "us-east-1".
+              # region: "us-east-1"
+
+              # # The bucket. It is not made: it is the user's.
+              # # string; required.
+              # bucket: ""
+
+              # # How the bucket is named in a request: path, as https://endpoint/bucket/key, which every
+              # # compatible takes; virtual, as https://bucket.endpoint/key, as AWS prefers. virtual when
+              # # endpoint is left out (AWS), path otherwise.
+              # # one of: path, virtual.
+              # addressing: "path"
+
+              # # The access key's ID, sent in each request's signature; with secret_access_key_env. Requests
+              # # are not signed when both are left out, for a public bucket.
+              # # string.
+              # access_key_id: ""
+
+              # # The environment variable holding access_key_id's secret, read when the pipeline loads.
+              # # string.
+              # secret_access_key_env: ""
+
+              # # The environment variable holding a session token, for temporary credentials, sent as
+              # # x-amz-security-token; none when left out. Temporary credentials are read once: they are not
+              # # renewed while the pipeline runs.
+              # # string.
+              # session_token_env: ""
+
+              # # A PEM file of the certificates the server's is checked against, in place of the system's
+              # # roots, for a CA of its own. The check cannot be turned off.
+              # # string.
+              # ca_file: "/etc/fit/ca.pem"
+
+              # # The name the server's certificate must have, and the TLS server name sent; the endpoint's
+              # # host when left out.
+              # # string.
+              # server_name: ""
+
+              # # How long one request may take, from connecting to the end of its answer. 60s when left out
+              # # or 0.
+              # # duration, as "1.5s" or "2m"; default "60s".
+              # timeout: "60s"
+
+              # # The objects' keys: text with placeholders, of the object's first record: {namespace} (a
+              # # leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as
+              # # 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when
+              # # it has none), {position}, 20 hex digits from its position, and {ext}, the codec's extension
+              # # (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have
+              # # {position}, so that two objects do not have one name.
+              # # {namespace}/{date}/{timestamp}-{position}{ext} when left out.
+              # # string; default "{namespace}/{date}/{timestamp}-{position}{ext}".
+              # key: "{namespace}/{date}/{timestamp}-{position}{ext}"
+
+              # # What makes a line of a record: line when left out, which writes after's line field, or the
+              # # record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated
+              # # values.
+              # # module.
+              # codec:
+                # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+                # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+                # # (or before's) fields, those columns names or all of them, as text.
+                # module: "csv"
+                # params:
+                  # # The columns' names, in order. Read, a row's values are named by them, and those past them
+                  # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                  # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                  # # list of string.
+                  # columns: []
+
+                  # # The separator, one character other than a quote or a line break. A comma when left out.
+                  # # string; default ",".
+                  # comma: ","
+
+                # # Or json, with every one of its params:
+                # # A line is a JSON object: with form plain, a message record whose after holds its members,
+                # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+                # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+                # # null) as plain JSON or the whole record in its canonical form.
+                # module: "json"
+                # params:
+                  # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                  # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                  # # when left out.
+                  # # one of: plain, record; default "plain".
+                  # form: "plain"
+
+                # # Or line, with every one of its params:
+                # # A line is a message record whose after holds the line as a string, in the field field names
+                # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+                # module: "line"
+                # params:
+                  # # The field of after that holds the line. line when left out.
+                  # # string; default "line".
+                  # field: "line"
+
+                # # Or wasm, with every one of its params:
+                # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+                # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+                # # sinks that read and write bytes.
+                # module: "wasm"
+                # params:
+                  # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                  # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                  # # GOARCH=wasm go build -buildmode=c-shared.
+                  # # string; required.
+                  # path: "/etc/fit/plugins/filter.wasm"
+
+                  # # A string the plugin reads, for settings of its own.
+                  # # string.
+                  # config: "{}"
+
+                  # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+                  # # duration, as "1.5s" or "2m"; default "1s".
+                  # timeout: "1s"
+
+                  # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                  # # integer, 0 or more; default 134217728.
+                  # max_memory_bytes: 134217728
+
+                  # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                  # # 0.
+                  # # integer, 0 or more; default 16777216.
+                  # max_output_bytes: 16777216
+
+              # # Gzip each object, its key ending in .gz through {ext}, with Content-Type application/gzip.
+              # # false when left out.
+              # # boolean.
+              # gzip: true
+
+              # # The most bytes of lines (before gzip) in one object: a batch larger is written as several,
+              # # in order. A record larger is an object of its own. 64 MiB when left out or 0.
+              # # integer, 0 to 5368709120; default 67108864.
+              # max_object_bytes: 67108864
+
             # # Or stdout, with every one of its params:
             # # Writes each record to fit's standard output as a line of its canonical JSON: for trials and
             # # for watching a pipeline.
@@ -4938,6 +5256,158 @@
             # # left out or 0.
             # # integer, 0 or more; default 100000.
             # max_records: 100000
+
+          # # Or s3, with every one of its params:
+          # # Writes each batch as objects of lines to S3 or a compatible (MinIO, SeaweedFS, Ceph, R2), by
+          # # a codec, gzipped when gzip says, each object put whole, so it is seen only once complete. An
+          # # object is named by the key template from its first record's commit time and position: a
+          # # batch written again after a crash, cut the same way, is the same object with the same
+          # # content, written over. Objects roll by the sink's batch (max_bytes, max_wait) and
+          # # max_object_bytes. Requests are signed with AWS Signature Version 4 and sent through fib's
+          # # asynchronous HTTP client.
+          # module: "s3"
+          # params:
+            # # The server, as https://minio.internal:9000 or https://s3.eu-west-1.amazonaws.com, with no
+            # # path: an S3 compatible's address, or AWS's endpoint of region.
+            # # https://s3.<region>.amazonaws.com when left out.
+            # # string.
+            # endpoint: "http://127.0.0.1:8500"
+
+            # # The region requests are signed for: the bucket's on AWS, and what the server is set to
+            # # elsewhere (MinIO's and most compatibles' us-east-1, R2's auto). us-east-1 when left out.
+            # # string; default "us-east-1".
+            # region: "us-east-1"
+
+            # # The bucket. It is not made: it is the user's.
+            # # string; required.
+            # bucket: ""
+
+            # # How the bucket is named in a request: path, as https://endpoint/bucket/key, which every
+            # # compatible takes; virtual, as https://bucket.endpoint/key, as AWS prefers. virtual when
+            # # endpoint is left out (AWS), path otherwise.
+            # # one of: path, virtual.
+            # addressing: "path"
+
+            # # The access key's ID, sent in each request's signature; with secret_access_key_env. Requests
+            # # are not signed when both are left out, for a public bucket.
+            # # string.
+            # access_key_id: ""
+
+            # # The environment variable holding access_key_id's secret, read when the pipeline loads.
+            # # string.
+            # secret_access_key_env: ""
+
+            # # The environment variable holding a session token, for temporary credentials, sent as
+            # # x-amz-security-token; none when left out. Temporary credentials are read once: they are not
+            # # renewed while the pipeline runs.
+            # # string.
+            # session_token_env: ""
+
+            # # A PEM file of the certificates the server's is checked against, in place of the system's
+            # # roots, for a CA of its own. The check cannot be turned off.
+            # # string.
+            # ca_file: "/etc/fit/ca.pem"
+
+            # # The name the server's certificate must have, and the TLS server name sent; the endpoint's
+            # # host when left out.
+            # # string.
+            # server_name: ""
+
+            # # How long one request may take, from connecting to the end of its answer. 60s when left out
+            # # or 0.
+            # # duration, as "1.5s" or "2m"; default "60s".
+            # timeout: "60s"
+
+            # # The objects' keys: text with placeholders, of the object's first record: {namespace} (a
+            # # leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as
+            # # 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when
+            # # it has none), {position}, 20 hex digits from its position, and {ext}, the codec's extension
+            # # (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have
+            # # {position}, so that two objects do not have one name.
+            # # {namespace}/{date}/{timestamp}-{position}{ext} when left out.
+            # # string; default "{namespace}/{date}/{timestamp}-{position}{ext}".
+            # key: "{namespace}/{date}/{timestamp}-{position}{ext}"
+
+            # # What makes a line of a record: line when left out, which writes after's line field, or the
+            # # record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated
+            # # values.
+            # # module.
+            # codec:
+              # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+              # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+              # # (or before's) fields, those columns names or all of them, as text.
+              # module: "csv"
+              # params:
+                # # The columns' names, in order. Read, a row's values are named by them, and those past them
+                # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                # # list of string.
+                # columns: []
+
+                # # The separator, one character other than a quote or a line break. A comma when left out.
+                # # string; default ",".
+                # comma: ","
+
+              # # Or json, with every one of its params:
+              # # A line is a JSON object: with form plain, a message record whose after holds its members,
+              # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+              # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+              # # null) as plain JSON or the whole record in its canonical form.
+              # module: "json"
+              # params:
+                # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                # # when left out.
+                # # one of: plain, record; default "plain".
+                # form: "plain"
+
+              # # Or line, with every one of its params:
+              # # A line is a message record whose after holds the line as a string, in the field field names
+              # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+              # module: "line"
+              # params:
+                # # The field of after that holds the line. line when left out.
+                # # string; default "line".
+                # field: "line"
+
+              # # Or wasm, with every one of its params:
+              # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+              # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+              # # sinks that read and write bytes.
+              # module: "wasm"
+              # params:
+                # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                # # GOARCH=wasm go build -buildmode=c-shared.
+                # # string; required.
+                # path: "/etc/fit/plugins/filter.wasm"
+
+                # # A string the plugin reads, for settings of its own.
+                # # string.
+                # config: "{}"
+
+                # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+                # # duration, as "1.5s" or "2m"; default "1s".
+                # timeout: "1s"
+
+                # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                # # integer, 0 or more; default 134217728.
+                # max_memory_bytes: 134217728
+
+                # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                # # 0.
+                # # integer, 0 or more; default 16777216.
+                # max_output_bytes: 16777216
+
+            # # Gzip each object, its key ending in .gz through {ext}, with Content-Type application/gzip.
+            # # false when left out.
+            # # boolean.
+            # gzip: true
+
+            # # The most bytes of lines (before gzip) in one object: a batch larger is written as several,
+            # # in order. A record larger is an object of its own. 64 MiB when left out or 0.
+            # # integer, 0 to 5368709120; default 67108864.
+            # max_object_bytes: 67108864
 
           # # Or stdout, with every one of its params:
           # # Writes each record to fit's standard output as a line of its canonical JSON: for trials and

@@ -48,8 +48,8 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -6111,6 +6111,7 @@ after.
 | [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
 | [`http`](#sync-sources-http) | Records posted to a `sync_ingest` route, each request answered once every sink has them |
+| [`s3`](#sync-sources-s3) | S3 and compatibles: the objects under a prefix in key order, read as lines in ranges, gunzipped by their `.gz`, resumed inside an object |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
 
 <a id="sync-sources-clickhouse"></a>
@@ -6511,6 +6512,121 @@ In JSON:
 | `max_pending_requests` | integer, 0 to 1000000 | `1024` | The most requests taken and not yet answered for good, waiting to be read or for their records' acknowledgement; one past it is answered 503 at once. 1024 when left out or 0. |
 | `max_pending_bytes` | integer, 0 or more | `67108864` | The most bytes of bodies taken and not yet read into records; a body past it is answered 503 at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0. |
 
+<a id="sync-sources-s3"></a>
+
+### `s3`
+
+Reads the objects under a prefix of an S3 or compatible bucket in key order, each as lines through a codec, gunzipping those whose key ends in .gz, in ranges of range_bytes; then, in a stream, lists again every poll_interval for keys past the last. Its position is the object's key and the offset past the line, so a restart resumes inside an object. Keys must grow as objects are added, as the s3 sink's do: an object added under a key before the last read is not seen, and an object is read once.
+
+Reads the objects of an S3 or compatible bucket whose keys begin with `prefix`, in key order, as
+lines, through fib's asynchronous HTTP client, each request signed with AWS Signature Version 4.
+Objects are listed with `ListObjectsV2` from the last key read (`start-after`), and each is read in
+ranges of `range_bytes`, so none is held whole, each only while the
+object's ETag is the one the listing gave. Keys ending in `.gz` are gunzipped (`decompress`). Each
+line goes through `codec` (`line` when left out): a line the codec fails on is a message record of
+the line and the error, and a line longer than `max_line_bytes` is cut there.
+
+A record's namespace is the object's key (or `namespace`), its key the object and the line's offset,
+and its commit time the object's last modification. Its position is the object's key and the offset
+past the line, so a restart resumes inside the object, right after the last line checkpointed; a
+gzipped object is read again from its start and the lines before the offset skipped. The last
+line's position says the object is read to its end, and a restart goes on with the keys after it.
+
+Once every object listed is read, a stream lists again every `poll_interval` for keys past the
+last; a job (`mode: "once"`) ends. So keys must grow as objects are added, as the `s3` sink's do
+with a date and a timestamp in them: an object added under a key before the last read is not seen,
+and an object written over after it was read is not read again. An object gone between its listing
+and its reading is skipped with a warning; one changed while it is being read stops the run, which
+the pipeline starts again from its checkpoint.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines archive-to-search {
+		source s3 {
+			endpoint https://minio.internal:9000
+			bucket logs
+			prefix app/2026/
+			access_key_id fit-reader
+			secret_access_key_env S3_SECRET
+			codec json
+		}
+		sinks es { sink elasticsearch { urls https://es:9200; index app-logs } }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: archive-to-search
+      source:
+        module: s3
+        params:
+          endpoint: https://minio.internal:9000
+          bucket: logs
+          prefix: app/2026/
+          access_key_id: fit-reader
+          secret_access_key_env: S3_SECRET
+          codec:
+            module: json
+      sinks:
+        - name: es
+          sink:
+            module: elasticsearch
+            params:
+              urls:
+                - https://es:9200
+              index: app-logs
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "archive-to-search",
+        "source": {"module": "s3", "params": {
+          "endpoint": "https://minio.internal:9000", "bucket": "logs", "prefix": "app/2026/",
+          "access_key_id": "fit-reader", "secret_access_key_env": "S3_SECRET",
+          "codec": {"module": "json"}}},
+        "sinks": [{"name": "es", "sink": {"module": "elasticsearch", "params": {
+          "urls": ["https://es:9200"], "index": "app-logs"}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `endpoint` | string |  | The server, as https://minio.internal:9000 or https://s3.eu-west-1.amazonaws.com, with no path: an S3 compatible's address, or AWS's endpoint of region. https://s3.<region>.amazonaws.com when left out. |
+| `region` | string | `"us-east-1"` | The region requests are signed for: the bucket's on AWS, and what the server is set to elsewhere (MinIO's and most compatibles' us-east-1, R2's auto). us-east-1 when left out. |
+| `bucket` | string |  | Required. The bucket. It is not made: it is the user's. |
+| `addressing` | string: `path`, `virtual` |  | How the bucket is named in a request: path, as https://endpoint/bucket/key, which every compatible takes; virtual, as https://bucket.endpoint/key, as AWS prefers. virtual when endpoint is left out (AWS), path otherwise. |
+| `access_key_id` | string |  | The access key's ID, sent in each request's signature; with secret_access_key_env. Requests are not signed when both are left out, for a public bucket. |
+| `secret_access_key_env` | string |  | The environment variable holding access_key_id's secret, read when the pipeline loads. |
+| `session_token_env` | string |  | The environment variable holding a session token, for temporary credentials, sent as x-amz-security-token; none when left out. Temporary credentials are read once: they are not renewed while the pipeline runs. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; the endpoint's host when left out. |
+| `timeout` | duration | `"60s"` | How long one request may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `prefix` | string |  | The objects read are those whose keys begin with it, as logs/2026/; every object of the bucket when left out. Keys ending in / (folders' markers) are skipped. |
+| `start_after` | string |  | Where a pipeline without a checkpoint starts: the objects whose keys come after it. The first object under prefix when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes records of a line: line when left out, a message record holding it as after's line; json reads it as JSON, csv as comma-separated values. A line the codec fails on is a message record of the line and the error. |
+| `decompress` | string: `auto`, `gzip`, `none` | `"auto"` | Which objects are gunzipped: auto, those whose keys end in .gz; gzip, every one; none, none. A gzipped object resumed after a restart is read again from its start, its lines up to the offset skipped. auto when left out. |
+| `namespace` | string |  | The records' namespace. The object's key when left out. |
+| `poll_interval` | duration | `"30s"` | How long to wait, once every object listed is read, before listing again for keys past the last. 30s when left out or 0. |
+| `range_bytes` | integer, 0 to 67108864 | `8388608` | How many bytes of an object one request reads; an object is read in such ranges, so it never needs to be held whole. 8 MiB when left out or 0. |
+| `max_line_bytes` | integer, 0 to 67108864 | `1048576` | The longest line, in bytes: a longer one is cut there, its rest skipped, and counted. 1 MiB when left out or 0. |
+
 <a id="sync-sources-wasm"></a>
 
 ### `wasm`
@@ -6606,6 +6722,7 @@ since what came after the checkpoint is written again after a crash.
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`http`](#sync-sinks-http) | Batches posted as NDJSON or a JSON array, with headers, authentication and an idempotency key, retried on 5xx and timeouts |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
+| [`s3`](#sync-sinks-s3) | S3 and compatibles (MinIO, SeaweedFS, Ceph, R2): each batch as objects of lines, named by its first record so a batch written again is the same object, gzipped if asked |
 | [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
 | [`wasm`](#sync-sinks-wasm) | A WebAssembly plugin that writes each batch through fit's HTTP client to the hosts it is allowed |
 
@@ -6999,6 +7116,142 @@ Keeps the records written in memory, in a store named by store, up to max_record
 | --- | --- | --- | --- |
 | `store` | string | `"default"` | The store's name: sinks naming the same store write into it. default when left out. |
 | `max_records` | integer, 0 or more | `100000` | The most records the store keeps; a write past it fails, as a full disk would. 100000 when left out or 0. |
+
+<a id="sync-sinks-s3"></a>
+
+### `s3`
+
+Writes each batch as objects of lines to S3 or a compatible (MinIO, SeaweedFS, Ceph, R2), by a codec, gzipped when gzip says, each object put whole, so it is seen only once complete. An object is named by the key template from its first record's commit time and position: a batch written again after a crash, cut the same way, is the same object with the same content, written over. Objects roll by the sink's batch (max_bytes, max_wait) and max_object_bytes. Requests are signed with AWS Signature Version 4 and sent through fib's asynchronous HTTP client.
+
+Writes records to S3 or a compatible (MinIO, SeaweedFS, Ceph, Cloudflare R2 and the like) as
+objects of lines, through fib's asynchronous HTTP client, each request signed with AWS Signature
+Version 4. Each batch the sink is given becomes one object, or several in order when its lines pass
+`max_object_bytes`, or when its records' namespaces change and `key` names the namespace. An object
+is put whole, in one `PUT`, so readers see it only once complete; its SHA-256 goes in the signature,
+so the server stores it only if every byte arrived. A line is made by `codec` (`line` when left out,
+`json`, `csv` or a WebAssembly codec), and with `gzip` the object is gzipped.
+
+An object's key comes from the `key` template and its first record: `{namespace}`, the date and
+time parts of its commit time in UTC (`{date}`, `{yyyy}`, `{mm}`, `{dd}`, `{hh}`, `{timestamp}`),
+`{position}` (20 hex digits of a SHA-256 of its namespace and position) and `{ext}`. A batch written
+again, after a failed write or a crash before the checkpoint, is the same records with the same
+positions, so it makes the same keys and the same bytes and is written over itself. A replay cut
+into other batches (the batch's `max_wait` may close it at another record) writes objects of other
+names, so records between the checkpoint and the crash can be in two objects: at least once, as
+every sink. A record without a commit time is named by the time of the write, which a replay does
+not repeat.
+
+Objects roll by the sink's `batch`: an object holds at most `batch.max_records` records and
+`batch.max_bytes` bytes, and waits at most `batch.max_wait`. S3 bills each request, so give the sink
+larger batches than the defaults, and a `queue` large enough to hold them:
+
+
+Without `endpoint` the sink writes to AWS, at `https://s3.<region>.amazonaws.com`, naming the bucket
+in the host (`addressing: "virtual"`); with one, in the path, which every compatible takes. Requests
+are signed for `region`. Credentials are an access key's ID and its secret in an environment
+variable, and a session token for temporary ones; neither is renewed while the pipeline runs, and
+instance profiles are not read. The bucket is not made. A failed write, of any status, is retried by
+the pipeline; a record the codec cannot encode, or whose key is longer than 1024 bytes, fails for
+good and goes to `on_error`, the objects before it written. In a job, the sink has
+`job.max_parallel` writers.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines logs-to-s3 {
+		source file { paths /var/log/app/*.log }
+		queue { max_records 200000; max_bytes 256MiB }
+		sinks archive {
+			sink s3 {
+				endpoint https://minio.internal:9000
+				bucket logs
+				access_key_id fit-writer
+				secret_access_key_env S3_SECRET
+				codec json
+				gzip true
+				key app/{yyyy}/{mm}/{dd}/{timestamp}-{position}{ext}
+			}
+			batch { max_records 100000; max_bytes 128MiB; max_wait 5m }
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: logs-to-s3
+      source:
+        module: file
+        params:
+          paths:
+            - /var/log/app/*.log
+      queue:
+        max_records: 200000
+        max_bytes: 268435456
+      sinks:
+        - name: archive
+          sink:
+            module: s3
+            params:
+              endpoint: https://minio.internal:9000
+              bucket: logs
+              access_key_id: fit-writer
+              secret_access_key_env: S3_SECRET
+              codec:
+                module: json
+              gzip: true
+              key: app/{yyyy}/{mm}/{dd}/{timestamp}-{position}{ext}
+          batch:
+            max_records: 100000
+            max_bytes: 134217728
+            max_wait: 5m
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "logs-to-s3",
+        "source": {"module": "file", "params": {"paths": ["/var/log/app/*.log"]}},
+        "queue": {"max_records": 200000, "max_bytes": 268435456},
+        "sinks": [{"name": "archive", "sink": {"module": "s3", "params": {
+          "endpoint": "https://minio.internal:9000", "bucket": "logs",
+          "access_key_id": "fit-writer", "secret_access_key_env": "S3_SECRET",
+          "codec": {"module": "json"}, "gzip": true,
+          "key": "app/{yyyy}/{mm}/{dd}/{timestamp}-{position}{ext}"}},
+          "batch": {"max_records": 100000, "max_bytes": 134217728, "max_wait": "5m"}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `endpoint` | string |  | The server, as https://minio.internal:9000 or https://s3.eu-west-1.amazonaws.com, with no path: an S3 compatible's address, or AWS's endpoint of region. https://s3.<region>.amazonaws.com when left out. |
+| `region` | string | `"us-east-1"` | The region requests are signed for: the bucket's on AWS, and what the server is set to elsewhere (MinIO's and most compatibles' us-east-1, R2's auto). us-east-1 when left out. |
+| `bucket` | string |  | Required. The bucket. It is not made: it is the user's. |
+| `addressing` | string: `path`, `virtual` |  | How the bucket is named in a request: path, as https://endpoint/bucket/key, which every compatible takes; virtual, as https://bucket.endpoint/key, as AWS prefers. virtual when endpoint is left out (AWS), path otherwise. |
+| `access_key_id` | string |  | The access key's ID, sent in each request's signature; with secret_access_key_env. Requests are not signed when both are left out, for a public bucket. |
+| `secret_access_key_env` | string |  | The environment variable holding access_key_id's secret, read when the pipeline loads. |
+| `session_token_env` | string |  | The environment variable holding a session token, for temporary credentials, sent as x-amz-security-token; none when left out. Temporary credentials are read once: they are not renewed while the pipeline runs. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; the endpoint's host when left out. |
+| `timeout` | duration | `"60s"` | How long one request may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `key` | string | `"{namespace}/{date}/{timestamp}-{position}{ext}"` | The objects' keys: text with placeholders, of the object's first record: {namespace} (a leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when it has none), {position}, 20 hex digits from its position, and {ext}, the codec's extension (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have {position}, so that two objects do not have one name. {namespace}/{date}/{timestamp}-{position}{ext} when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes a line of a record: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated values. |
+| `gzip` | boolean |  | Gzip each object, its key ending in .gz through {ext}, with Content-Type application/gzip. false when left out. |
+| `max_object_bytes` | integer, 0 to 5368709120 | `67108864` | The most bytes of lines (before gzip) in one object: a batch larger is written as several, in order. A record larger is an object of its own. 64 MiB when left out or 0. |
 
 <a id="sync-sinks-stdout"></a>
 

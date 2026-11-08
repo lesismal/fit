@@ -3,14 +3,17 @@
 # and OpenSearch 2, each a single node with security on (TLS with a CA of its
 # own, basic authentication) and a write thread pool of one thread and a
 # queue of one, so that parallel bulks get 429s; and ClickHouse, with a user
-# and password, over HTTP. The containers are removed
+# and password, over HTTP; and MinIO and SeaweedFS's S3 gateway, each with
+# an access key of its own. The containers are removed
 # at the end; KEEP=1 keeps them, and a second run reuses them.
 #
 #   test/sync/run.sh [go test flags...]
 #
 # The tests read FIT_SYNC_ES_URL, FIT_SYNC_ES_CA, FIT_SYNC_ES_PASSWORD and
 # FIT_SYNC_OS_URL, FIT_SYNC_OS_CA, FIT_SYNC_OS_PASSWORD, and FIT_SYNC_CH_URL,
-# FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD; without them they
+# FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD, and FIT_SYNC_MINIO_URL,
+# FIT_SYNC_MINIO_ACCESS_KEY, FIT_SYNC_MINIO_SECRET_KEY and the same of
+# FIT_SYNC_SEAWEED_; without them they
 # skip, unless FIT_SYNC_INTEROP=required, which this script sets. The
 # source's snapshot test reads FIT_SYNC_SOURCE_DOCS documents, 100,000 when
 # unset (CI); the plan's million is
@@ -25,13 +28,17 @@ ES_PORT=${ES_PORT:-29200}
 OS_PORT=${OS_PORT:-29201}
 CH_IMAGE=${CH_IMAGE:-clickhouse/clickhouse-server:25.8}
 CH_PORT=${CH_PORT:-29202}
+MINIO_IMAGE=${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}
+MINIO_PORT=${MINIO_PORT:-29215}
+SEAWEED_IMAGE=${SEAWEED_IMAGE:-chrislusf/seaweedfs:4.50}
+SEAWEED_PORT=${SEAWEED_PORT:-29216}
 PASSWORD='Fit-sync-1nterop!'
 CERTS=$(mktemp -d)
 
 cleanup() {
 	rm -rf "$CERTS"
 	if [ "${KEEP:-}" != 1 ]; then
-		docker rm -f fit-sync-es fit-sync-os fit-sync-ch >/dev/null 2>&1 || true
+		docker rm -f fit-sync-es fit-sync-os fit-sync-ch fit-sync-minio fit-sync-seaweed >/dev/null 2>&1 || true
 	fi
 }
 trap cleanup EXIT
@@ -57,6 +64,20 @@ if ! docker inspect fit-sync-ch >/dev/null 2>&1; then
 	docker run -d --name fit-sync-ch -p "127.0.0.1:$CH_PORT:8123" \
 		-e CLICKHOUSE_USER=fit -e CLICKHOUSE_PASSWORD="$PASSWORD" \
 		--ulimit nofile=262144:262144 "$CH_IMAGE" >/dev/null
+fi
+
+if ! docker inspect fit-sync-minio >/dev/null 2>&1; then
+	docker run -d --name fit-sync-minio -p "127.0.0.1:$MINIO_PORT:9000" \
+		-e MINIO_ROOT_USER=fitminio -e MINIO_ROOT_PASSWORD="$PASSWORD" \
+		"$MINIO_IMAGE" server /data >/dev/null
+fi
+# SeaweedFS reads its S3 identities from a file, copied in before it starts.
+if ! docker inspect fit-sync-seaweed >/dev/null 2>&1; then
+	printf '{"identities":[{"name":"fit","credentials":[{"accessKey":"fitseaweed","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' "$PASSWORD" >"$CERTS/s3.json"
+	docker create --name fit-sync-seaweed -p "127.0.0.1:$SEAWEED_PORT:8333" \
+		"$SEAWEED_IMAGE" server -s3 -s3.config=/etc/fit-s3.json -dir=/data >/dev/null
+	docker cp "$CERTS/s3.json" fit-sync-seaweed:/etc/fit-s3.json
+	docker start fit-sync-seaweed >/dev/null
 fi
 
 # wait_for name user url ca: until the cluster answers its root.
@@ -87,8 +108,27 @@ until curl -fsS -u "fit:$PASSWORD" "http://localhost:$CH_PORT/?query=SELECT%201"
 	sleep 1
 done
 
+# until_up name url: until url answers at all (an S3 server answers 403 to
+# a request with no signature).
+until_up() {
+	i=0
+	until curl -sS -o /dev/null "$2" 2>/dev/null; do
+		i=$((i + 1))
+		if [ $i -gt 120 ]; then
+			echo "$1 did not start:" >&2
+			docker logs --tail 50 "$1" >&2
+			exit 1
+		fi
+		sleep 1
+	done
+}
+until_up fit-sync-minio "http://localhost:$MINIO_PORT/minio/health/ready"
+until_up fit-sync-seaweed "http://localhost:$SEAWEED_PORT/"
+
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \
 	FIT_SYNC_OS_URL="https://localhost:$OS_PORT" FIT_SYNC_OS_CA="$CERTS/os-ca.pem" FIT_SYNC_OS_PASSWORD="$PASSWORD" \
 	FIT_SYNC_CH_URL="http://localhost:$CH_PORT" FIT_SYNC_CH_USER=fit FIT_SYNC_CH_PASSWORD="$PASSWORD" \
+	FIT_SYNC_MINIO_URL="http://localhost:$MINIO_PORT" FIT_SYNC_MINIO_ACCESS_KEY=fitminio FIT_SYNC_MINIO_SECRET_KEY="$PASSWORD" \
+	FIT_SYNC_SEAWEED_URL="http://localhost:$SEAWEED_PORT" FIT_SYNC_SEAWEED_ACCESS_KEY=fitseaweed FIT_SYNC_SEAWEED_SECRET_KEY="$PASSWORD" \
 	go test -race -count=1 "$@" ./test/sync

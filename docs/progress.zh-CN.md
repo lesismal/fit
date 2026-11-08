@@ -4164,6 +4164,36 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   规模，没有剩余工作，因此没有 I169b。
 - **缺口**：计划 I169 小节中的决定，待审查。删除只能经 `deleted_field` 看到；轮询越过检查点之后才以低于它的值写入的文档会被
   漏掉；流的快照中断后从头开始；没有 `query` 参数。
+### I187 S3 及兼容存储作为源与目标 — 已完成
+
+- **SigV4 与连接**（`sync/s3/sigv4.go`、`client.go`，包 `syncs3`）：`Signer`，对整个请求体做 SHA-256 的 AWS 签名第 4 版，在 fit
+  中实现（fit 和 fib 中原本没有可复用的 S3 或 SigV4 代码）；`Conn` 带 `endpoint`（不设置时为 AWS 在 `region` 的端点）、
+  `bucket`、`addressing`（AWS 为 `virtual`，其他为 `path`）、`access_key_id` 及 `secret_access_key_env` 和
+  `session_token_env`、`ca_file`、`server_name`、`timeout`；`PUT`、带 `If-Match` 的分段 `GET`、`ListObjectsV2`、S3 的错误码
+  和消息（`Error`），经 fib 的异步 HTTP 客户端，使用角色的引擎或自己的引擎。
+- **目标 `s3`**（`sync/s3/sink.go`）：每个批次经编解码器（默认 `line`）写成由行组成的对象，超过 `max_object_bytes`（64 MiB）
+  时、以及键含命名空间而命名空间变化时拆分，`gzip` 时压缩，每个对象整体写入；名称由 `key` 生成，它是取自第一条记录 UTC 提交
+  时间和 `{position}`（其位置的哈希）的模板，因此同一批次再写一次就是同一个对象、同样的字节。按目标的 `batch` 滚动。第一个对象
+  之后的失败报告为 `BatchError`；编解码器失败的记录、或超过 1024 字节的键，为永久错误。是 `ParallelSink`。
+- **源 `s3`**（`sync/s3/source.go`）：`prefix` 下的对象按键的顺序，从 `start_after` 或检查点的键开始，流模式下每隔
+  `poll_interval`（30s）重新列出；每个对象在 ETag 不变的前提下按 `range_bytes`（8 MiB）分段读取，`.gz` 解压（`decompress`），
+  经编解码器按行生成记录，超过 `max_line_bytes` 截断；记录的键为对象和偏移，提交时间为其最后修改时间，位置为键和该行之后的偏移，
+  最后一行带 `end`；已删除的对象被跳过，被修改的对象使本次运行失败。
+- **文档**：schema 和参考（`sync_sinks_s3.md` 和 `sync_sources_s3.md` 两章，源和目标的表格）、模板、`schema-zh.js` 中的中文
+  说明、`docs/configuration*.md`、决定 036；CI 的 `sync-interop` 任务经 `test/sync/run.sh` 运行 S3 测试。
+- **测试**：AWS 公布的四个 SigV4 示例；针对一个校验每个签名的进程内存储桶：写两次的批次得到相同的对象和字节，按大小和命名空间拆分，
+  第二个对象失败（`BatchError`）及其重发，编码失败，键过长，没有提交时间时用时钟，带 CA 文件的 TLS 和会话令牌，服务器错误，连接
+  被拒绝，上下文结束；源以 3 字节为一段读取普通、gzip、空和文件夹对象，在每条记录之后续读，`start_after`，截断的行，轮询（在最后
+  一个键之前新增的对象不会被看到），对象被删除、被修改和整体应答，超出末尾的分段，列出失败或被截断却没有令牌，忽略 `start-after`
+  的服务器，从一行生成多条或零条记录的编解码器，解码失败，`Emit` 和上下文结束。不启动容器时覆盖率 97.9%；staticcheck 无问题。
+  互通测试（`test/sync/s3_test.go`，`run.sh` 现在还会启动 `pgsty/minio:RELEASE.2026-08-04T00-00-00Z` 和
+  `chrislusf/seaweedfs:4.50`），在竞态检测下分别针对 MinIO 和 SeaweedFS：500 条记录分五批写两次，普通和 gzip，键和字节都相同，
+  按键的顺序即流的顺序；三个对象（一个为 gzip）中的 6,010 行以 64 KiB 分段读取，并在对象内部三处及 4,000 条之后续读；2,000 条
+  记录以 gzip 写入后读回；一个 4 MB 的对象（fib 客户端以流方式发送的请求体）写入后以 1 MiB 分段读回。
+- **与计划的差异**：对象按目标的批次滚动，每个批次一个对象，而不是跨批次按大小和时间滚动（计划该节的决策 5）；MinIO 使用社区构建，
+  因为其官方镜像已无法拉取。代码约 1,300 行，测试约 1,350 行；没有 I187b。
+- **不足**：计划 I187 一节中的决策，待审查。没有分段上传，没有 AWS 凭证链和续期，除前缀外没有键过滤；在较早的键下新增或被覆盖
+  的对象不会被读取。本项没有在 Linux 上运行，也没有在整个测试集的竞态检测下运行（留给合并时）。
 ### I171 HTTP 作为源与目标 — 已完成
 
 - **源 `http`**（`sync/httpsync/source.go`，包 `httpsync`）：接收路由的 `sync_ingest` 交来的请求体（`Offer`，从不等待），
