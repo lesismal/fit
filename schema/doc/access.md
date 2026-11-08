@@ -23,6 +23,16 @@ takes PROXY headers, decides later instead: a refused HTTP request is answered `
 PROXY header names, never `X-Forwarded-For`'s. A change applies to connections and udp sessions that
 start after it.
 
+The Admin API (`admin.access`), the console (`admin.console.access`) and the roles' pages (the
+`console.access` of `llm.*` and `tunnel.*`) go by the global access too, after their own, and
+decide at accept: a refused connection is closed before anything is read from it. Unlike the rest of
+`admin`, these follow every config applied, without a restart. A global `allow` that leaves out
+`127.0.0.1` therefore shuts local clients out of the Admin API as well; to keep local access
+whatever the global access says, set the API's own `"allow": ["127.0.0.1", "::1"]`, which decides
+first. An Admin API on a Unix socket is never checked: its peers have no address, and setting
+`admin.access` with one is an error. A config applied with an allow list that leaves out the address
+the change came from does not close that connection, but the next one is refused.
+
 A list file has an address or prefix on each line, with blank lines and what follows `#` or `;`
 left out; it is read when the config is applied, and the config applied again when it changes.
 An allow list on a listener that obtains certificates with ACME's HTTP-01 or TLS-ALPN-01 challenges

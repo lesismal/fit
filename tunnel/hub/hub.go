@@ -262,7 +262,7 @@ func New(h *app.Host) *Hub {
 		peers: map[*link.Link]*Peer{}, byName: map[string]*Peer{},
 		byID: map[uint32]*Peer{}, routes: map[uint64]*Route{}, since: time.Now(), epoch: rand.Uint64() | 1}
 	s.router = s.newRouter()
-	s.console = common.NewConsole(h.Engine, "tunnel.hub", h.Log, s.api)
+	s.console = common.NewConsole(h, "tunnel.hub", s.api)
 	s.tokens = &linktoken.Registry{OnBind: s.bind}
 	s.manage = &linktoken.Manager{Role: ID, Reg: s.tokens, Edit: s.editTokens, Log: h.Admin}
 	return s

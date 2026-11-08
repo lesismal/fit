@@ -49,6 +49,7 @@ type RoleConsole struct {
 	SessionLifetime Duration      `json:"session_lifetime,omitempty" default:"\"12h\"" doc:"How long a login lasts at most, however busy. 12h when left out."`
 	MaxSessions     int           `json:"max_sessions,omitempty" min:"0" default:"64" doc:"The most logins kept at once; one more ends the oldest. 64 when left out or 0."`
 	MaxConns        int           `json:"max_conns,omitempty" min:"0" default:"32" doc:"The most connections the pages keep open at once, a quarter of them kept for those with a login. When they are taken, a new connection closes the oldest of those without one, of the client holding the most, and is closed as it is accepted only when every one has a login; one past a client's share, a quarter of them, is closed too, but for loopback clients. 32 when left out or 0."`
+	Access          *Access       `json:"access,omitempty" doc:"The client addresses the pages serve, deciding before the global access, which applies to the pages too: a connection either refuses is closed as soon as it is accepted. It follows every config applied, without restarting the pages. Set allow to \"127.0.0.1\" (and \"::1\") to keep local access whatever the global access says. Every address is served, unless the global access says otherwise, when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -56,7 +57,7 @@ type RoleConsole struct {
 // Console returns c as an admin.console, for what the two share.
 func (c *RoleConsole) Console() *Console {
 	return &Console{Address: c.Address, MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
-		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
+		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, Access: c.Access, At: c.At}
 }
 
 // checkRoleConsole checks a role's console as admin.console is checked.
@@ -64,4 +65,38 @@ func checkRoleConsole(c *RoleConsole, add func(Value, string, ...any)) {
 	if c != nil {
 		checkConsole(c.Console(), add)
 	}
+}
+
+// RoleConsoles returns the roles' pages c sets: those of the llm and the
+// tunnel roles.
+func (c *Config) RoleConsoles() []*RoleConsole {
+	var out []*RoleConsole
+	add := func(rc *RoleConsole) {
+		if rc != nil {
+			out = append(out, rc)
+		}
+	}
+	if l := c.LLM; l != nil {
+		if l.Hub != nil {
+			add(l.Hub.Console)
+		}
+		if l.Node != nil {
+			add(l.Node.Console)
+		}
+		if l.Proxy != nil {
+			add(l.Proxy.Console)
+		}
+	}
+	if t := c.Tunnel; t != nil {
+		if t.Hub != nil {
+			add(t.Hub.Console)
+		}
+		if t.Node != nil {
+			add(t.Node.Console)
+		}
+		if t.Proxy != nil {
+			add(t.Proxy.Console)
+		}
+	}
+	return out
 }

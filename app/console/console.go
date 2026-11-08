@@ -39,6 +39,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 	fibtls "github.com/lesismal/fib/tls"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/login"
@@ -151,6 +152,12 @@ type Options struct {
 	// manager of other fits bounds by it what each user changes of the
 	// manager itself (cluster's ConsoleGate).
 	Gate func(user, method, path, query string) string
+	// Access, when not nil, is asked about every connection as it is
+	// accepted, by fib's Binding.Filter: one it refuses is closed before
+	// anything is read from it. Its owner sets its policy as each config is
+	// applied (config.RoleConsole's access, then the global one), so that a
+	// change takes effect without the console starting anew.
+	Access *access.Gate
 }
 
 // MaxStreamedBody bounds a body StreamBody picks, whatever its handler's
@@ -340,7 +347,11 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	var err error
-	if c.index, err = engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: c.limit, MultipathTCP: cfg.MPTCP}); err != nil {
+	b := fib.Binding{Addr: cfg.Address, Handler: c.limit, MultipathTCP: cfg.MPTCP}
+	if o.Access != nil {
+		b.Filter = o.Access.Allows
+	}
+	if c.index, err = engine.AddBinding(b); err != nil {
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	if addrs, err := engine.BindingAddrs(c.index); err == nil && len(addrs) > 0 {

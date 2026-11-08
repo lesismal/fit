@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/admin/store"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
@@ -92,6 +93,12 @@ type Configs struct {
 
 	// apps runs the agent's and the tunnel's roles, or is nil; under mu.
 	apps *app.Manager
+
+	// adminAccess and consoleAccess are the client addresses the Admin API
+	// and the console serve, as the running graph says (runtime.Graph's
+	// AdminAccess and ConsoleAccess): set by every config applied, though
+	// the rest of admin is read only when fit starts.
+	adminAccess, consoleAccess access.Gate
 
 	// sealer is the store, when there is one, whose key seals and opens
 	// the fitstore files exported and imported.
@@ -182,6 +189,7 @@ func NewConfigs(rt *runtime.Runtime, server *listener.Server, env runtime.Env, f
 	var version uint64
 	if g := rt.Current(); g != nil {
 		version = g.Version
+		cs.setAccess(g)
 		g.Release()
 	}
 	m, err := provider.Merge(data, source, nil)
@@ -494,12 +502,19 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 		deprecated = config.AsErrors(m.Errors(ws))
 	}
 	// The runtime's sampling for the block and mutex profiles follows the
-	// config.
+	// config, and so do who the Admin API and the console serve.
 	applyProfiling(c.Pprof)
+	cs.setAccess(g)
 	// What the check compares the runtime with is this config, not the one
 	// it replaced.
 	cs.currentCfg = c
 	return Result{Version: g.Version, Source: source, Added: added, Removed: removed, Warnings: warnings, Deprecated: deprecated}, c, m, nil
+}
+
+// setAccess has the Admin API and the console serve whom g says.
+func (cs *Configs) setAccess(g *runtime.Graph) {
+	cs.adminAccess.Set(g.AdminAccess)
+	cs.consoleAccess.Set(g.ConsoleAccess)
 }
 
 // load merges parts into data, the base config, whose source is

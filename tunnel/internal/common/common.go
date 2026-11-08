@@ -16,6 +16,7 @@ import (
 
 	"github.com/lesismal/fib"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/app/workbench"
@@ -25,6 +26,7 @@ import (
 
 // Console is a role's console, moved from config to config.
 type Console struct {
+	host   *app.Host
 	engine *fib.Engine
 	cookie string
 	log    *logs.Logger
@@ -33,13 +35,16 @@ type Console struct {
 
 	cfg *config.RoleConsole
 	c   *console.Console
+	// gate is the client addresses the console serves, which every config
+	// applied sets, whether or not the console starts anew.
+	gate access.Gate
 }
 
-// NewConsole returns the console of the role id, as tunnel.hub, not
-// started: Apply starts it. routes adds the role's API, to its console and
-// to its module, which any console may show.
-func NewConsole(engine *fib.Engine, id string, log *logs.Logger, routes func(*console.API)) *Console {
-	return &Console{engine: engine, cookie: "fit_" + strings.ReplaceAll(id, ".", "_"), log: log, routes: routes,
+// NewConsole returns the console of the role id, as tunnel.hub, on h's
+// engine, logging to h's log, not started: Apply starts it. routes adds the
+// role's API, to its console and to its module, which any console may show.
+func NewConsole(h *app.Host, id string, routes func(*console.API)) *Console {
+	return &Console{host: h, engine: h.Engine, cookie: "fit_" + strings.ReplaceAll(id, ".", "_"), log: h.Log, routes: routes,
 		module: &console.Module{ID: id, Routes: routes}}
 }
 
@@ -49,14 +54,23 @@ func (c *Console) Module() *console.Module { return c.module }
 // options are the console's options for cfg.
 func (c *Console) options(cfg *config.RoleConsole) console.Options {
 	return console.Options{Config: cfg, Cookie: c.cookie, Pages: workbench.Pages(), Log: c.log, Routes: c.routes,
-		Modules: func() []*console.Module { return []*console.Module{c.module} }}
+		Modules: func() []*console.Module { return []*console.Module{c.module} }, Access: &c.gate}
 }
 
 // Apply moves the console to cfg, which may be nil for none: it is started
-// anew when cfg differs from what it runs, and left as it is otherwise. A
-// console that does not start leaves the one before running, and returns
-// why.
+// anew when cfg differs from what it runs, but for its access, and left as
+// it is otherwise. A console that does not start leaves the one before
+// running, and returns why. Its access, cfg's then the global one, is set
+// every time, before the console starts; one that does not compile leaves
+// the policy before in force, and is returned.
 func (c *Console) Apply(cfg *config.RoleConsole) error {
+	if cfg != nil {
+		p, err := c.host.Access(cfg.Access)
+		if err != nil {
+			return err
+		}
+		c.gate.Set(p)
+	}
 	if sameConsole(c.cfg, cfg) {
 		c.cfg = cfg
 		return nil
@@ -93,6 +107,8 @@ func sameConsole(a, b *config.RoleConsole) bool {
 	x, y := *a, *b
 	x.At, y.At = config.Value{}, config.Value{}
 	x.Users, y.Users = nil, nil
+	// The access is set on the running console's gate.
+	x.Access, y.Access = nil, nil
 	if len(a.Users) != len(b.Users) {
 		return false
 	}

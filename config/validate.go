@@ -246,6 +246,10 @@ func (c *Config) Validate() Errors {
 
 	if a := c.Admin; a != nil {
 		checkAdminAddress(a, add)
+		a.Access.check(add)
+		if network, _ := a.Network(); network == "unix" && a.Access != nil {
+			add(a.Access.At, "the Admin API listens on a Unix socket, whose peers have no address to check: leave access out")
+		}
 		if a.NodeID != "" && !nodeIDPattern.MatchString(a.NodeID) {
 			add(a.At.Field("node_id"), "%q is not a node ID: 1 to 64 letters, digits, '.', '_' and '-', starting with a letter or digit", a.NodeID)
 		}
@@ -706,6 +710,7 @@ func checkConsole(c *Console, add func(Value, string, ...any)) {
 	if (c.CertFile == "") != (c.KeyFile == "") {
 		add(c.At, "cert_file and key_file go together")
 	}
+	c.Access.check(add)
 	if len(c.Users) == 0 {
 		add(c.At.Field("users"), "list at least one user")
 	}

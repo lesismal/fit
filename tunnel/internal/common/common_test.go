@@ -21,7 +21,7 @@ import (
 )
 
 func TestModule(t *testing.T) {
-	c := NewConsole(tunneltest.Engine(t), "tunnel.hub", discardLog(t), nil)
+	c := NewConsole(&app.Host{Engine: tunneltest.Engine(t), Log: discardLog(t)}, "tunnel.hub", nil)
 	if m := c.Module(); m == nil || m.ID != "tunnel.hub" || c.cookie != "fit_tunnel_hub" {
 		t.Fatalf("module %+v, cookie %q", m, c.cookie)
 	}
@@ -50,7 +50,7 @@ func discardLog(t *testing.T) *logs.Logger {
 }
 
 func TestConsoleApply(t *testing.T) {
-	c := NewConsole(tunneltest.Engine(t), "tunnel.test", discardLog(t), nil)
+	c := NewConsole(&app.Host{Engine: tunneltest.Engine(t), Log: discardLog(t)}, "tunnel.test", nil)
 	defer c.Stop(context.Background())
 	if c.Addr() != "" || c.URL() != "" {
 		t.Fatal("an address before Apply")
@@ -227,7 +227,7 @@ func TestEdit(t *testing.T) {
 		api.Handle("GET", "/api/ok", OK)
 		api.Handle("GET", "/api/fail", func(r *console.Request) { Fail(r, 409, "taken") })
 	}
-	c := NewConsole(tunneltest.Engine(t), "tunnel.test", nil, routes)
+	c := NewConsole(&app.Host{Engine: tunneltest.Engine(t)}, "tunnel.test", routes)
 	defer c.Stop(context.Background())
 	if err := c.Apply(&config.RoleConsole{Address: "127.0.0.1:0", Users: []config.ConsoleUser{{Username: "admin", PasswordHash: hash(t, "pw")}}}); err != nil {
 		t.Fatal(err)

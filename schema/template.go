@@ -375,12 +375,30 @@ func wrap(text string) []string {
 
 // scalarExample is a scalar field's value in the template: an example of
 // its own, its default, or one its type and bounds allow.
+// accessExample is the example of an access's allow or deny at path: the
+// Admin API's and the consoles' allow keep local access.
+func accessExample(path string) (string, bool) {
+	at := func(name string) bool { return path == "access."+name || strings.HasSuffix(path, ".access."+name) }
+	switch {
+	case at("allow") && (strings.HasPrefix(path, "admin.") || strings.Contains(path, "console.")):
+		return `["127.0.0.1", "::1", "10.0.0.0/8"]`, true
+	case at("allow"):
+		return `["10.0.0.0/8", "192.168.0.0/16"]`, true
+	case at("deny"):
+		return `["203.0.113.0/24"]`, true
+	}
+	return "", false
+}
+
 func scalarExample(f config.Field, path string, typ reflect.Type) string {
 	if v, ok := templateExamples[path]; ok {
 		return v
 	}
 	if f.Default != "" {
 		return f.Default
+	}
+	if v, ok := accessExample(path); ok {
+		return v
 	}
 	if v, ok := templateExamples[f.Name]; ok {
 		return v

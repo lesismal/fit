@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/app/workbench"
@@ -81,7 +82,10 @@ type Base struct {
 	id, name   string
 	console    *console.Console
 	consoleKey []byte
-	lim        *config.LLMLimits
+	// consoleGate is the client addresses the pages serve, which every
+	// config applied sets, whether or not the pages start anew.
+	consoleGate access.Gate
+	lim         *config.LLMLimits
 	// generated is the self-signed certificate and key made for the
 	// listener, until the config has them.
 	generated [2]string
@@ -226,11 +230,20 @@ func (b *Base) Apply(c Common) error {
 	return b.applyConsole(c.Console)
 }
 
-// applyConsole starts, changes or stops the pages.
+// applyConsole starts, changes or stops the pages. Their access, cfg's then
+// the global one, is set on every config applied, and does not start them
+// anew; one that does not compile leaves the policy before in force.
 func (b *Base) applyConsole(cfg *config.RoleConsole) error {
 	var key []byte
 	if cfg != nil {
-		key, _ = json.Marshal(cfg)
+		p, err := b.H.Access(cfg.Access)
+		if err != nil {
+			return fmt.Errorf("console: %w", err)
+		}
+		b.consoleGate.Set(p)
+		keyed := *cfg
+		keyed.Access = nil
+		key, _ = json.Marshal(&keyed)
 	}
 	b.mu.Lock()
 	same := bytes.Equal(key, b.consoleKey) && (cfg == nil) == (b.console == nil)
@@ -250,6 +263,7 @@ func (b *Base) applyConsole(cfg *config.RoleConsole) error {
 		c, err = console.Start(b.H.Engine, console.Options{
 			Config: cfg, Cookie: "fit_llm_" + b.Role, Pages: workbench.Pages(), Log: b.Log,
 			Routes: b.routes, Modules: func() []*console.Module { return []*console.Module{b.module} },
+			Access: &b.consoleGate,
 		})
 		if err != nil {
 			b.mu.Lock()

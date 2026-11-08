@@ -77,7 +77,7 @@ type Node struct {
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Node {
 	n := &Node{h: h, log: h.Log, limit: tunnel.NewLimit(config.DefaultTunnelTunnels), serviceRTT: map[string]*latency.Meter{}, quit: make(chan struct{})}
-	n.console = common.NewConsole(h.Engine, "tunnel.node", h.Log, n.api)
+	n.console = common.NewConsole(h, "tunnel.node", n.api)
 	return n
 }
 
