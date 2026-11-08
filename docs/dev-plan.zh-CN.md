@@ -335,7 +335,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
 | I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | todo |
 | I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | done |
-| I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | todo |
+| I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | done |
 | I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | todo |
 | I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | done |
 | I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | todo |
@@ -3961,6 +3961,48 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   超出 oplog 时报错并说明需要快照。
 - **完成标准**：与副本集互通：insert、update、replace 和 delete，故障切换，fit 重启；`kill -9` 前后不丢数据。
 - **涉及**：`sync/mongo`、`test/sync`、`docs`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前一直有效）：
+
+1. **连接参数，与目标共用。** 包 `sync/mongo`（`syncmongo`）；其 `conn.go` 放 I183 的目标共用的部分：`ConnParams`、
+   `NewClient` 和 `Ping`，对应参数 `uri`、`password_env` 和 `timeout`，每个连接器以相同的名字和说明各自声明。`uri` 是
+   `mongowire.ParseURI` 读取的 `mongodb://` 连接串（主机、`replicaSet`、`authSource`、`tls`、`tlsCAFile`、
+   `tlsCertificateKeyFile`、超时）：MongoDB 用户熟悉它，TLS 也不需要 fit 自己的参数。备选：像其他连接器那样用 `hosts`、
+   `username`、`ca_file` 等参数。
+2. **`uri` 中不放密码。** 用户写在 `uri` 里，密码只放在 `password_env`；`uri` 带密码会被拒绝，有用户却没有 `password_env`
+   也会被拒绝。备选：接受 `uri` 中的密码。
+3. **键是 `{"_id": ...}`**，快照和变更流都一样，而不是事件的整个 `documentKey`（分片集合的 documentKey 还含分片键），使同一
+   文档的快照记录和变更记录键相同。备选：原样用 `documentKey`。
+4. **位置用记录的规范 JSON。** 检查点是 `{"token": <resume token>}`；快照期间是
+   `{"start": <流的起始 token>, "ns": "db.coll", "id": <最后的 _id>}`；作业的块是 `{"id": ...}`；token 和 `_id` 都是规范
+   JSON（`{"map": {"_data": "82..."}}`、`{"int": 5}`），使每种 BSON 类型都能原样还原。备选：只存 token 的 `_data`，`_id`
+   用扩展 JSON。
+5. **快照的交接。** 流的起点是快照前打开（随即关闭）的一个 change stream 的 post-batch resume token；随后快照按集合名的顺序
+   逐个读取集合，按 `_id` 用 `find` 的 `min` 和 `max` 走 `_id` 索引（`hint`）：`$gt` 过滤只在同一 BSON 类型内比较，多种类型的
+   `_id` 会被漏掉；读关注 `majority`，读到的不会被回滚。快照的最后一条记录带起始 token，在它之后重启就读变更流。备选：用应答
+   的 `operationTime` 做 `startAtOperationTime`。
+6. **没有文档的更新被跳过**：`updateLookup` 时文档之后已被删除的（删除随后到来）；`whenAvailable` 时没有后像的。备选：`after`
+   为 null 的更新，或以 `updateDescription` 作为行。
+7. **事务。** 带 `lsid` 和 `txnNumber` 的变更属于事务 `<会话 ID 的十六进制>:<编号>`；第一条立即标记，最后一条要等下一条变更
+   属于别的事务、或一次取变更的请求空手而回（等 `max_await`，1s）才知道：在此之前该记录被扣住。备选：每条变更自成一个事务，
+   检查点于是可以落在事务内部（MongoDB 能从那里恢复）。
+8. **流覆盖什么。** 一个集合：该集合的流；多个：数据库的流，加 `ns.coll` 上的 `$match`（保留 `invalidate` 和
+   `dropDatabase`）；不设 `database`：整个部署的流（`allChangesForCluster`），其快照为除 `admin`、`config`、`local` 外的所有
+   数据库，除视图、时间序列和 `system.` 集合外的所有集合。`drop`、`rename` 和 `dropDatabase` 为 `ddl` 记录（`after`：
+   `operationType`、`ns`、`to`）；不请求扩展事件。备选：每个数据库各开一个流。
+9. **游标原地恢复。** 因连接断开、故障切换（不再是主节点）、游标被服务器超时回收（目标卡住队列期间）或带
+   `ResumableChangeStreamError` 标签的错误而中断的游标，从最后读到的 token 或 `_id` 重新打开，连续最多五次（100 ms 起翻倍），
+   之后错误交给管道，由其从检查点重启。备选：所有错误都交给管道重启。
+10. **新快照由用户发起。** oplog 已不含的 token（代码 286、280、260）或 invalidate 报错并说明需要新快照（管道的快照控制，或
+    重置其检查点）；源不自行开始快照。备选：立即开始新快照并告警。
+11. **第一条记录前没有检查点。** 尚未读到任何记录的管道没有可保存的位置：`snapshot: "never"` 时在第一条变更前重启会再次从
+    “现在”开始，空快照会以新的起点再读一遍。备选：一条无行记录携带 post-batch token，而记录模型没有这种记录。
+12. **作业。** 作业的快照按每个集合的 `count` 切分，每块 `chunk_documents`（100,000）个，边界取自每块四个 `_id` 的有序
+    `$sample`；`snapshot: "never"` 时作业不切分，从检查点读变更流直到一次请求空手而回。备选：`splitVector`（需要同步用户
+    少有的权限）或 `$bucketAuto`（扫描整个集合）。
+13. **互通测试**（`test/sync/mongo_source_test.go`，用 `test/sync/mongo.sh` 的 MongoDB 6、7、8 副本集）：经 TLS 先快照、再读
+    每种变更和一个事务，从某个位置重启，drop 与 invalidate；流进行中让主节点降级；集合不断变化时在随机位置杀掉
+    （`Options.Crash`）并复制到 memory 目标，最终一致；作业的块。
 
 ### I183 MongoDB 作为目标
 

@@ -4205,6 +4205,27 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   SCRAM-SHA-256 以外的认证；客户端证书没有对真实服务器试过。`ci.yml` 中 `sync-interop` CI 作业的注释还没有提到 MongoDB。
   本项没有在 Linux 上或在整个套件的竞态检测器下运行（留给合并时）。
 
+### I182 MongoDB 作为源 — 已完成
+
+- **源 `mongo`**（`sync/mongo`，包 `syncmongo`，基于 I181 的 `mongowire`）：先取 change stream 的 token，再按 `_id` 对集合
+  （`database`、`collections`，或所有数据库的集合）做快照，用 `find` 配合 `_id` 索引的 `min` 和 `max`，读关注 `majority`，使
+  两者重叠；随后从 resume token 读 change stream（集合的、带 `$match` 的数据库的，或整个部署的），带 `fullDocument`
+  （`updateLookup`、`whenAvailable`、`required`），可选 `fullDocumentBeforeChange`。insert、update、replace 和 delete 为各自
+  类型的记录，drop 和 rename 为 `ddl`，事务的变更带事务 ID 和首尾边界，提交时间取自 wall time。检查点是 token，快照期间是
+  起始 token、集合和最后的 `_id`。因故障切换、连接断开或游标超时而中断的游标从最后的 token 或 `_id` 重新打开；oplog 已不含的
+  token 或 invalidate 报错并说明需要新快照。作业的快照按抽样得到的 `_id` 区间切块（`Chunker`）；`Test` 检查连接以及部署是否
+  支持 change stream。
+- **与目标共用**：`sync/mongo/conn.go`（`ConnParams`、`NewClient`、`Ping`：不含密码的 `uri`、`password_env`、`timeout`），
+  供 I183 的目标使用。
+- **测试**：针对进程内假服务器（OP_MSG、游标、change stream、`$sample`）的单元测试：快照后读每种变更、事务、位置、从每种
+  检查点恢复、作业、整个部署与多个集合的流、中断后的恢复与重试耗尽、每个命令的错误、`Test`；不启动容器时覆盖率 99.3%。互通
+  （`test/sync/mongo_source_test.go`，`test/sync/mongo.sh` 的 MongoDB 6.0、7.0 和 8.0 副本集）：经 TLS 的快照、每种变更和一个
+  事务，从某个位置重启，drop 与 invalidate；主节点降级前后的 300 次插入；一个变更 3,000 次的集合在随机杀掉的情况下复制到
+  memory 目标，最终一致；作业的每个块各读一次。在竞态检测器下运行。
+- **与计划的差异**：没有遗漏；没有 I182b。
+- **缺口**：计划 I182 小节中的决定，待审查。尚未读到记录的管道没有检查点（决定 11）。不会自行重新快照；没有对分片集群试过。
+  本项没有在 Linux 上或在整个套件下运行（留给合并时）。
+
 ### I184 Kafka 客户端 — 已完成
 
 - **包 `sync/kafka/wire`**（`kafkawire`）：由引导 broker 构造的 `Client`，提供 `Metadata`、`Partitions`、`Produce`（acks 为

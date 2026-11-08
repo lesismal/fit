@@ -5918,6 +5918,37 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   `ci.yml` does not yet name MongoDB. Not run on Linux or under the whole suite's race detector by
   this item (left to the merge).
 
+### I182 MongoDB as a source — done
+
+- **The source `mongo`** (`sync/mongo`, package `syncmongo`, on I181's `mongowire`): a snapshot of
+  the collections (`database`, `collections`, or every database's) by `_id`, through `find` with
+  the `_id` index's `min` and `max`, read concern `majority`, after the change stream's token is
+  taken, so that the two overlap; then the change stream (a collection's, a database's with a
+  `$match`, or the deployment's) with `fullDocument` (`updateLookup`, `whenAvailable`, `required`)
+  and optionally `fullDocumentBeforeChange`, from the resume token. Inserts, updates, replaces and
+  deletes as records of their kind, drops and renames as `ddl`, a transaction's changes with its ID
+  and boundaries, the commit time from the wall time. The checkpoint is the token, or, during the
+  snapshot, the start token, collection and last `_id`. Cursors cut by a failover, a lost
+  connection or a cursor timed out are opened again from the last token or `_id`; a token the oplog
+  no longer holds or an invalidate is an error saying a new snapshot is needed. A job's snapshot is
+  split into `_id` ranges from a sample (`Chunker`); `Test` checks the connection and that the
+  deployment has change streams.
+- **Shared with the sink**: `sync/mongo/conn.go` (`ConnParams`, `NewClient`, `Ping`: `uri` without
+  a password, `password_env`, `timeout`), which I183's sink uses.
+- **Tests**: unit tests against an in-process fake (OP_MSG, cursors, change streams, `$sample`):
+  the snapshot then each kind of change, transactions, positions, resumes from each kind of
+  checkpoint, jobs, the deployment's and several collections' streams, cuts resumed and retries
+  spent, errors of every command, `Test`; coverage 99.3% with no containers. Interop
+  (`test/sync/mongo_source_test.go`, MongoDB 6.0, 7.0 and 8.0 replica sets from
+  `test/sync/mongo.sh`): the snapshot and every kind of change and a transaction over TLS, a
+  restart from a position, a drop and an invalidate; 300 inserts across the primary stepped down;
+  a collection changed 3,000 times copied into the memory sink across random kills, converging; a
+  job's chunks each read once. Under the race detector.
+- **Differs from the plan**: nothing left out; no I182b.
+- **Gaps**: the decisions in the plan's I182 section, pending review. A pipeline that has read no
+  record has no checkpoint (decision 11). No re-snapshot on its own; not tried against a sharded
+  cluster. Not run on Linux or under the whole suite by this item (left to the merge).
+
 ### I184 A Kafka client — done
 
 - **Package `sync/kafka/wire`** (`kafkawire`): a `Client` of bootstrap brokers with `Metadata`,

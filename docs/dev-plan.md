@@ -345,7 +345,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | todo |
 | I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | todo |
 | I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | done |
-| I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | todo |
+| I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | done |
 | I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | todo |
 | I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | done |
 | I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
@@ -5362,6 +5362,70 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: interop with a replica set: inserts, updates, replaces and deletes, a failover, a
   restart of fit; nothing lost across `kill -9`.
 - **Touches**: `sync/mongo`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **The connection's params, shared with the sink.** Package `sync/mongo` (`syncmongo`); its
+   `conn.go` holds what I183's sink shares: `ConnParams`, `NewClient` and `Ping`, for the params
+   `uri`, `password_env` and `timeout`, which each connector declares as its own with the same
+   names and docs. `uri` is a `mongodb://` connection string as `mongowire.ParseURI` reads it
+   (hosts, `replicaSet`, `authSource`, `tls`, `tlsCAFile`, `tlsCertificateKeyFile`, timeouts):
+   MongoDB's users know it, and TLS needs no params of fit's own. Alternative: `hosts`,
+   `username`, `ca_file` and the like, as the other connectors have.
+2. **No password in `uri`.** The user is in `uri`, its password only in `password_env`; a password
+   in `uri` is refused, as is a user without `password_env`. Alternative: a password in `uri` taken.
+3. **The key is `{"_id": ...}`**, in the snapshot and the stream alike, not the event's whole
+   `documentKey` (which holds a sharded collection's shard key too), so that a snapshot's record and
+   a change's of one document have one key. Alternative: `documentKey` as it is.
+4. **Positions in the record's canonical JSON.** The checkpoint is `{"token": <the resume token>}`;
+   during the snapshot `{"start": <the stream's start token>, "ns": "db.coll", "id": <the last _id>}`;
+   a job's chunk `{"id": ...}`; tokens and `_id`s in canonical JSON (`{"map": {"_data": "82..."}}`,
+   `{"int": 5}`), so that every BSON type comes back as it was. Alternative: the token's `_data`
+   alone, and `_id`s as extended JSON.
+5. **The snapshot's hand-over.** The stream's start is the post-batch resume token of a change
+   stream opened (and closed at once) before the snapshot; the snapshot then reads each collection,
+   in the order of their names, by `_id` with `find`'s `min` and `max` on the `_id` index (`hint`):
+   a `$gt` filter compares only within one BSON type, so `_id`s of several types would be passed
+   over; read concern `majority`, so that nothing read is rolled back. The snapshot's last record
+   carries the start token, so that a restart after it reads the stream. Alternative:
+   `startAtOperationTime` from the answer's `operationTime`.
+6. **An update without its document is passed over**: with `updateLookup`, one whose document was
+   deleted since (its delete follows); with `whenAvailable`, one without a post-image. Alternative:
+   an update with a null `after`, or its `updateDescription` as the row.
+7. **Transactions.** A change with `lsid` and `txnNumber` is of the transaction
+   `<the session's ID in hex>:<the number>`; its first record is marked at once, its last once the
+   next change is of another, or a request for changes comes back empty (after `max_await`, 1s): the
+   record is held until then. Alternative: each change a transaction of its own, the checkpoint then
+   free to fall inside one (MongoDB can resume there).
+8. **What the stream covers.** One collection: that collection's stream; several: the database's,
+   with a `$match` on `ns.coll` (keeping `invalidate` and `dropDatabase`); no `database`: the
+   deployment's (`allChangesForCluster`), its snapshot every database but `admin`, `config` and
+   `local`, every collection but views, time series and `system.` ones. `drop`, `rename` and
+   `dropDatabase` are `ddl` records (`after`: `operationType`, `ns`, `to`); no expanded events are
+   asked for. Alternative: every database's stream of its own.
+9. **Cursors resumed in place.** A cursor cut by a lost connection, a failover (not primary), a
+   cursor the server timed out (while the sinks held the queue) or an error labelled
+   `ResumableChangeStreamError` is opened again from the last token or `_id` read, up to five times
+   in a row (100 ms, doubling), before the error is the pipeline's, which restarts it from its
+   checkpoint. Alternative: every error to the pipeline's restart.
+10. **A new snapshot is the user's.** A token the oplog no longer holds (codes 286, 280, 260) or an
+    invalidate is an error saying a new snapshot is needed (the pipeline's snapshot control, or a
+    reset of its checkpoint); the source does not start one by itself. Alternative: a new snapshot
+    at once, with a warning.
+11. **No checkpoint before the first record.** A pipeline that has read nothing yet has no
+    position to save: with `snapshot: "never"` a restart before the first change starts from now
+    again, and an empty snapshot is read again with a new start. Alternative: a record with no row
+    carrying the post-batch token, which the record model does not have.
+12. **Jobs.** A job's snapshot is split by each collection's `count`, `chunk_documents` (100,000) a
+    chunk, at bounds from a sorted `$sample` of four `_id`s per chunk; with `snapshot: "never"` a job
+    is not split and reads the stream from its checkpoint until a request for changes comes back
+    empty. Alternative: `splitVector` (it needs privileges a sync user rarely has) or `$bucketAuto`
+    (a scan of the whole collection).
+13. **The interop tests** (`test/sync/mongo_source_test.go`, on `test/sync/mongo.sh`'s replica sets of
+    MongoDB 6, 7 and 8): the snapshot then every kind of change and a transaction over TLS, a restart
+    from a position, a drop and an invalidate; the primary stepped down mid-stream; a copy into the
+    memory sink across random kills (`Options.Crash`) while the collection changes, converging; a
+    job's chunks.
 
 ### I183 MongoDB as a sink
 
