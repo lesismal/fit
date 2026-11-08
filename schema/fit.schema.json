@@ -7972,6 +7972,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "mongo"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.mongo"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "redis"
               }
             }
@@ -8026,6 +8042,7 @@
             "file",
             "generate",
             "http",
+            "mongo",
             "redis",
             "s3",
             "wasm"
@@ -8410,6 +8427,88 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.sources.mongo": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_size": {
+          "default": 1000,
+          "description": "The most documents, or changes, one batch of a cursor holds. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "chunk_documents": {
+          "default": 100000,
+          "description": "In a job (mode once), the documents a chunk of the snapshot is reckoned to hold: each collection is split into as many ranges of _id as its count needs, from a sample of _ids, read job.max_parallel at a time. 100000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "collections": {
+          "description": "The collections of database read. Every collection of it (not views, time series or system collections) when left out; needs database.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "database": {
+          "description": "The database read. Every database but admin, config and local when left out.",
+          "type": "string"
+        },
+        "full_document": {
+          "default": "updateLookup",
+          "description": "What an update's after is: updateLookup, the document as it is when the change is read (an update of a document deleted since is passed over: its delete follows); whenAvailable or required, its post-image, which the collection must record (changeStreamPreAndPostImages), passed over or an error when there is none. updateLookup when left out.",
+          "enum": [
+            "updateLookup",
+            "whenAvailable",
+            "required"
+          ],
+          "type": "string"
+        },
+        "full_document_before_change": {
+          "default": "off",
+          "description": "Whether updates and deletes carry the document as it was, their before: off, no; whenAvailable or required, its pre-image, which the collection must record (changeStreamPreAndPostImages), left out or an error when there is none. off when left out.",
+          "enum": [
+            "off",
+            "whenAvailable",
+            "required"
+          ],
+          "type": "string"
+        },
+        "max_await": {
+          "default": "1s",
+          "description": "How long the server holds a request for changes while there are none, below timeout; also how long the last record of a transaction may wait to be known as its last. 1s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password of uri's user, read when the pipeline loads; no authentication when left out.",
+          "type": "string"
+        },
+        "snapshot": {
+          "default": "initial",
+          "description": "Where a pipeline without a checkpoint starts: initial, every document there is, then the changes from just before it read them; never, the changes from now. initial when left out.",
+          "enum": [
+            "initial",
+            "never"
+          ],
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long one command may take, from sending it to the end of its answer. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "uri": {
+          "description": "The connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; no password (password_env holds it), and no mongodb+srv. The primary is found from the hosts and found again after a failover.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri"
+      ],
       "type": "object"
     },
     "sync.sources.redis": {

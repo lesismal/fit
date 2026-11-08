@@ -6850,6 +6850,78 @@
             // "max_pending_bytes": 67108864,
           // },
 
+          // // Or mongo, with every one of its params:
+          // // Reads MongoDB (6.0 and later, a replica set or a sharded cluster): a snapshot of the
+          // // collections by _id, then their change stream with fullDocument, from the stream's start
+          // // taken before the snapshot, so that the two overlap. The checkpoint is the change stream's
+          // // resume token. A record's namespace is db.collection, its key {"_id": ...}, its after the
+          // // document; the records of a transaction carry its boundaries. A token the oplog no longer
+          // // holds, or an invalidated stream, is an error saying a new snapshot is needed. In a job (mode
+          // // once) the snapshot is split into ranges of _id, read job.max_parallel at a time.
+          // "module": "mongo",
+          // "params": {
+            // // The connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the
+            // // MongoDB drivers take it, with the options replicaSet, authSource, authMechanism
+            // // (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS,
+            // // serverSelectionTimeoutMS, maxPoolSize and appName; no password (password_env holds it), and
+            // // no mongodb+srv. The primary is found from the hosts and found again after a failover.
+            // // string; required.
+            // "uri": "/verify",
+
+            // // The environment variable holding the password of uri's user, read when the pipeline loads;
+            // // no authentication when left out.
+            // // string.
+            // "password_env": "",
+
+            // // How long one command may take, from sending it to the end of its answer. 60s when left out
+            // // or 0.
+            // // duration, as "1.5s" or "2m"; default "60s".
+            // "timeout": "60s",
+
+            // // The database read. Every database but admin, config and local when left out.
+            // // string.
+            // "database": "",
+
+            // // The collections of database read. Every collection of it (not views, time series or system
+            // // collections) when left out; needs database.
+            // // list of string.
+            // "collections": [],
+
+            // // What an update's after is: updateLookup, the document as it is when the change is read (an
+            // // update of a document deleted since is passed over: its delete follows); whenAvailable or
+            // // required, its post-image, which the collection must record (changeStreamPreAndPostImages),
+            // // passed over or an error when there is none. updateLookup when left out.
+            // // one of: updateLookup, whenAvailable, required; default "updateLookup".
+            // "full_document": "updateLookup",
+
+            // // Whether updates and deletes carry the document as it was, their before: off, no;
+            // // whenAvailable or required, its pre-image, which the collection must record
+            // // (changeStreamPreAndPostImages), left out or an error when there is none. off when left out.
+            // // one of: off, whenAvailable, required; default "off".
+            // "full_document_before_change": "off",
+
+            // // Where a pipeline without a checkpoint starts: initial, every document there is, then the
+            // // changes from just before it read them; never, the changes from now. initial when left out.
+            // // one of: initial, never; default "initial".
+            // "snapshot": "initial",
+
+            // // The most documents, or changes, one batch of a cursor holds. 1000 when left out or 0.
+            // // integer, 0 to 100000; default 1000.
+            // "batch_size": 1000,
+
+            // // How long the server holds a request for changes while there are none, below timeout; also
+            // // how long the last record of a transaction may wait to be known as its last. 1s when left out
+            // // or 0.
+            // // duration, as "1.5s" or "2m"; default "1s".
+            // "max_await": "1s",
+
+            // // In a job (mode once), the documents a chunk of the snapshot is reckoned to hold: each
+            // // collection is split into as many ranges of _id as its count needs, from a sample of _ids,
+            // // read job.max_parallel at a time. 100000 when left out or 0.
+            // // integer, 0 or more; default 100000.
+            // "chunk_documents": 100000,
+          // },
+
           // // Or redis, with every one of its params:
           // // Reads Redis or Valkey streams with XREAD, from the entry IDs of the checkpoint, each entry a
           // // record: a message of its fields, or the record the sink redis wrote with form record. Its

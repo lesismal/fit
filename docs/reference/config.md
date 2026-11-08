@@ -48,7 +48,7 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
@@ -6529,6 +6529,138 @@ In JSON:
 | `namespace` | string | `"http"` | The namespace of records that come without one. http when left out. |
 | `max_pending_requests` | integer, 0 to 1000000 | `1024` | The most requests taken and not yet answered for good, waiting to be read or for their records' acknowledgement; one past it is answered 503 at once. 1024 when left out or 0. |
 | `max_pending_bytes` | integer, 0 or more | `67108864` | The most bytes of bodies taken and not yet read into records; a body past it is answered 503 at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0. |
+
+<a id="sync-sources-mongo"></a>
+
+### `mongo`
+
+Reads MongoDB (6.0 and later, a replica set or a sharded cluster): a snapshot of the collections by _id, then their change stream with fullDocument, from the stream's start taken before the snapshot, so that the two overlap. The checkpoint is the change stream's resume token. A record's namespace is db.collection, its key {"_id": ...}, its after the document; the records of a transaction carry its boundaries. A token the oplog no longer holds, or an invalidated stream, is an error saying a new snapshot is needed. In a job (mode once) the snapshot is split into ranges of _id, read job.max_parallel at a time.
+
+Reads MongoDB 6.0 and later, a replica set or a sharded cluster (through a `mongos`), as a
+snapshot of the collections by `_id`, then their change stream from the resume token. It speaks
+MongoDB's wire protocol itself (OP_MSG, SCRAM-SHA-256, TLS), to the primary it finds from the hosts
+of `uri` and finds again after a failover, on connections of the pipeline's own goroutine, never
+a fib worker. What it reads: every collection of `database`, or `collections` of it, or, with
+neither, every database's but `admin`, `config` and `local` (views, time series and `system.`
+collections left out).
+
+A record's namespace is `db.collection`, its key `{"_id": ...}`, its `after` the document. Types a
+record value has no kind for keep their BSON type as MongoDB's extended JSON names it, as
+`{"$oid": "..."}`, so that the `mongo` sink writes them back as they were; int32s read as ints.
+
+**The snapshot** (`snapshot: "initial"`, the default) first takes the change stream's token as of
+now, then reads each collection in `_id` order (`find` with the `_id` index's bounds, read concern
+`majority`), as inserts, in batches of `batch_size`. What changes while it reads is read again from
+the stream, which starts at that token: the two overlap, and the sinks' upserts converge. The
+checkpoint during the snapshot is the token, the collection and the last `_id` read, so a restart
+goes on after it; the snapshot's last record carries the token itself. `snapshot: "never"` starts
+with the changes from now.
+
+**The change stream** has `fullDocument: updateLookup` by default: an update's `after` is the
+document as it is when the change is read (an update of a document deleted since is passed over:
+its delete follows). `full_document: "whenAvailable"` or `"required"` takes its post-image instead,
+and `full_document_before_change` (`whenAvailable` or `required`) adds the pre-image as `before`
+to updates and deletes; both need the collection to record them (`changeStreamPreAndPostImages`).
+Inserts, updates, replaces (an `update`) and deletes are records of their kind; a collection
+dropped or renamed, or a database dropped, is a `ddl` record whose `after` holds `operationType`,
+`ns` and, for a rename, `to`. The changes of a transaction carry its ID (the session's and the
+transaction's number) with its first and last marked, the last known once the next change, or a
+wait of `max_await` with none, shows it: the checkpoint never falls inside a transaction. The
+commit time is the change's wall time.
+
+The checkpoint is the change stream's resume token, `{"token": ...}`. A cursor cut by a failover,
+a lost connection or a cursor the server timed out is opened again from the last token, up to five
+times in a row, then the pipeline restarts from its checkpoint. **A new snapshot is needed** when
+the stream cannot resume: a token the oplog no longer holds (the pipeline stopped longer than the
+oplog's window), or a stream invalidated (its single collection dropped or renamed, its database
+dropped); the error says so, and the pipeline's **New snapshot** (or a reset of its checkpoint)
+starts it again.
+
+**Jobs.** In a job (`mode: "once"`) the snapshot is split into ranges of `_id`, one per
+`chunk_documents` documents of each collection, bounded by a sorted sample of its `_id`s, read
+`job.max_parallel` at a time, each resumed after its last `_id`. With `snapshot: "never"`, a job
+reads the change stream from its checkpoint until it is caught up.
+
+The connection: `uri` is a `mongodb://` connection string with the hosts, `replicaSet`,
+`authSource`, `tls=true` and `tlsCAFile` (the server's certificate is always checked),
+`tlsCertificateKeyFile` and the timeouts; the user is in `uri`, its password in the environment
+variable `password_env` (a password in `uri` is refused). `timeout` bounds each command.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines shop-to-search {
+		source mongo {
+			uri mongodb://sync@db1:27017,db2:27017,db3:27017/?replicaSet=rs0&tls=true&tlsCAFile=/etc/fit/mongo-ca.pem
+			password_env MONGO_SYNC_PASSWORD
+			database shop
+			collections orders customers
+		}
+		sinks search { sink elasticsearch { urls https://es:9200; index shop } }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: shop-to-search
+      source:
+        module: mongo
+        params:
+          uri: mongodb://sync@db1:27017,db2:27017,db3:27017/?replicaSet=rs0&tls=true&tlsCAFile=/etc/fit/mongo-ca.pem
+          password_env: MONGO_SYNC_PASSWORD
+          database: shop
+          collections:
+            - orders
+            - customers
+      sinks:
+        - name: search
+          sink:
+            module: elasticsearch
+            params:
+              urls:
+                - https://es:9200
+              index: shop
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "shop-to-search",
+        "source": {"module": "mongo", "params": {
+          "uri": "mongodb://sync@db1:27017,db2:27017,db3:27017/?replicaSet=rs0&tls=true&tlsCAFile=/etc/fit/mongo-ca.pem",
+          "password_env": "MONGO_SYNC_PASSWORD", "database": "shop", "collections": ["orders", "customers"]}},
+        "sinks": [{"name": "search", "sink": {"module": "elasticsearch", "params": {"urls": ["https://es:9200"], "index": "shop"}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `uri` | string |  | Required. The connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; no password (password_env holds it), and no mongodb+srv. The primary is found from the hosts and found again after a failover. |
+| `password_env` | string |  | The environment variable holding the password of uri's user, read when the pipeline loads; no authentication when left out. |
+| `timeout` | duration | `"60s"` | How long one command may take, from sending it to the end of its answer. 60s when left out or 0. |
+| `database` | string |  | The database read. Every database but admin, config and local when left out. |
+| `collections` | list of string |  | The collections of database read. Every collection of it (not views, time series or system collections) when left out; needs database. |
+| `full_document` | string: `updateLookup`, `whenAvailable`, `required` | `"updateLookup"` | What an update's after is: updateLookup, the document as it is when the change is read (an update of a document deleted since is passed over: its delete follows); whenAvailable or required, its post-image, which the collection must record (changeStreamPreAndPostImages), passed over or an error when there is none. updateLookup when left out. |
+| `full_document_before_change` | string: `off`, `whenAvailable`, `required` | `"off"` | Whether updates and deletes carry the document as it was, their before: off, no; whenAvailable or required, its pre-image, which the collection must record (changeStreamPreAndPostImages), left out or an error when there is none. off when left out. |
+| `snapshot` | string: `initial`, `never` | `"initial"` | Where a pipeline without a checkpoint starts: initial, every document there is, then the changes from just before it read them; never, the changes from now. initial when left out. |
+| `batch_size` | integer, 0 to 100000 | `1000` | The most documents, or changes, one batch of a cursor holds. 1000 when left out or 0. |
+| `max_await` | duration | `"1s"` | How long the server holds a request for changes while there are none, below timeout; also how long the last record of a transaction may wait to be known as its last. 1s when left out or 0. |
+| `chunk_documents` | integer, 0 or more | `100000` | In a job (mode once), the documents a chunk of the snapshot is reckoned to hold: each collection is split into as many ranges of _id as its count needs, from a sample of _ids, read job.max_parallel at a time. 100000 when left out or 0. |
 
 <a id="sync-sources-redis"></a>
 
