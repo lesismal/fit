@@ -8,6 +8,7 @@
 package syncmysql
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -128,6 +129,9 @@ func tlsSuites() []uint16 {
 type db interface {
 	Exec(ctx context.Context, query string, args ...any) (mysqlwire.Result, error)
 	InsertRows(ctx context.Context, head string, rows [][]any, tail string) (mysqlwire.Result, error)
+	// QueryRow returns the first row of query's result, its values copied,
+	// nil when there is none.
+	QueryRow(ctx context.Context, query string, args ...any) ([]any, error)
 	ServerVersion() string
 	Err() error
 	Close() error
@@ -139,5 +143,28 @@ func dialWire(ctx context.Context, cfg mysqlwire.Config) (db, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c, nil
+	return wireConn{c}, nil
+}
+
+// wireConn is the client's connection as a db.
+type wireConn struct{ *mysqlwire.Conn }
+
+func (c wireConn) QueryRow(ctx context.Context, query string, args ...any) ([]any, error) {
+	rows, err := c.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	var out []any
+	if rows.Next() {
+		for _, v := range rows.Values() {
+			if b, ok := v.([]byte); ok {
+				v = bytes.Clone(b)
+			}
+			out = append(out, v)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

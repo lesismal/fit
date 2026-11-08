@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
@@ -29,6 +30,8 @@ const (
 	DefaultTiDBTransactionBytes = 16 << 20
 	// maxDeleteKeys bounds the keys of one DELETE.
 	maxDeleteKeys = 1000
+	// DefaultCheckpointTable is checkpoint_table when left out.
+	DefaultCheckpointTable = "_fit_sync_checkpoints"
 )
 
 // Sink is the sink mysql.
@@ -48,6 +51,8 @@ type Sink struct {
 	Table               string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, with a primary or unique key on the record's key columns, which the upserts rely on. {namespace} when left out."`
 	Transactions        string          `json:"transactions,omitempty" enum:"source,batch" default:"\"source\"" doc:"How records are grouped in the server's transactions: source, each source transaction as one, and the records without one (a snapshot's) of a batch together; batch, a batch's records up to the last that ends a source transaction in one, several source transactions together, and those after it, a part of one source transaction, in one held open into the next batch. Either way a source transaction is never committed in part, unless it is larger than max_transaction_bytes. source when left out."`
 	DDL                 string          `json:"ddl,omitempty" enum:"report,stop" default:"\"report\"" doc:"What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes it, which with on_error stop stops the pipeline before it, for a person to change the table. report when left out."`
+	Checkpoint          string          `json:"checkpoint,omitempty" enum:"file,sink" default:"\"file\"" doc:"Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash between a commit and the file's next checkpoint writes the records after it again (to the same rows); sink, also in checkpoint_table, written in the same transaction as the records it covers and read back when the pipeline starts, in preference to the file, so that no record is written twice: exactly once, while every sink of the pipeline keeps it. file when left out."`
+	CheckpointTable     string          `json:"checkpoint_table,omitempty" default:"\"_fit_sync_checkpoints\"" doc:"With checkpoint sink, the table the checkpoint is kept in, a row a pipeline, made when missing (which needs CREATE on it); db.table names the database too, database's otherwise. _fit_sync_checkpoints when left out."`
 	MaxTransactionBytes int64           `json:"max_transaction_bytes,omitempty" min:"0" doc:"The most bytes of values one of the server's transactions holds: past it, a transaction is committed at the next record that ends a source transaction, and a source transaction larger than this alone is committed in parts, with a warning. Against TiDB, whose transactions are bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and MariaDB."`
 
 	cfg   mysqlwire.Config
@@ -56,6 +61,11 @@ type Sink struct {
 	batch bool
 	stop  bool
 	log   *logs.Logger
+
+	// ckTable is checkpoint_table, quoted; pipeline and lineage are what
+	// each commit writes in it, once ReadCheckpoint has set them.
+	ckTable           string
+	pipeline, lineage string
 
 	conn  db
 	tidb  bool
@@ -85,6 +95,9 @@ type txState struct {
 	cur      string
 	curBytes int64
 	curEnded bool
+	// pos is the position of the last record written that ends a source
+	// transaction, which the commit writes as the checkpoint.
+	pos fitsync.Position
 }
 
 // op is a statement's part: a row upserted or a key deleted.
@@ -110,6 +123,8 @@ type item struct {
 	unit string
 	// ends says the record ends its source transaction, or has none.
 	ends bool
+	// pos is the record's position when it ends one.
+	pos fitsync.Position
 }
 
 // Provision checks the params and reads the password and TLS files; nothing
@@ -141,6 +156,16 @@ func (s *Sink) Provision(ctx *module.Context) error {
 	}
 	s.batch = s.Transactions == "batch"
 	s.stop = s.DDL == "stop"
+	if s.KeepsCheckpoint() {
+		ck := s.CheckpointTable
+		if ck == "" {
+			ck = DefaultCheckpointTable
+		}
+		if !strings.Contains(ck, ".") && s.Database == "" {
+			errs = append(errs, ctx.Params.Field("checkpoint_table").Errorf("%s names no database, and database is not set", ck))
+		}
+		s.ckTable = quoteName(ck)
+	}
 	s.log = logs.Named(config.LoggerSync)
 	if len(errs) == 0 {
 		return nil
@@ -156,6 +181,48 @@ func (s *Sink) Cleanup() {
 		s.conn.Close()
 		s.conn = nil
 	}
+}
+
+// KeepsCheckpoint reports whether checkpoint is sink.
+func (s *Sink) KeepsCheckpoint() bool { return s.Checkpoint == "sink" }
+
+// ReadCheckpoint makes checkpoint_table when missing and reads the
+// pipeline's row; each commit from then on writes the position of its last
+// record that ends a source transaction there, with lineage. What the
+// sink held from an earlier run, a source transaction open, is dropped:
+// the run starts before it.
+func (s *Sink) ReadCheckpoint(ctx context.Context, pipeline, lineage string) (fitsync.Position, string, error) {
+	if !s.KeepsCheckpoint() {
+		return nil, "", nil
+	}
+	s.Cleanup()
+	s.tx, s.acked = txState{}, txState{}
+	if err := s.connect(ctx); err != nil {
+		return nil, "", err
+	}
+	if _, err := s.conn.Exec(ctx, "CREATE TABLE IF NOT EXISTS "+s.ckTable+" (`pipeline` VARCHAR(191) NOT NULL PRIMARY KEY, "+
+		"`lineage` VARCHAR(64) NOT NULL, `position` LONGTEXT NOT NULL, `updated` DATETIME(6) NOT NULL)"); err != nil {
+		s.Cleanup()
+		return nil, "", err
+	}
+	row, err := s.conn.QueryRow(ctx, "SELECT `lineage`, `position` FROM "+s.ckTable+" WHERE `pipeline` = ?", pipeline)
+	if err != nil {
+		s.Cleanup()
+		return nil, "", err
+	}
+	s.pipeline, s.lineage = pipeline, lineage
+	if len(row) < 2 {
+		return nil, "", nil
+	}
+	return fitsync.Position(text(row[1])), text(row[0]), nil
+}
+
+// text is a column's value as text.
+func text(v any) string {
+	if b, ok := v.([]byte); ok {
+		return string(b)
+	}
+	return fmt.Sprint(v)
 }
 
 // Test connects and logs in on a connection of its own, and closes it.
@@ -184,6 +251,9 @@ func (s *Sink) tableOf(r *fitsync.Record) string {
 // build makes r's item, the record at index i of its batch.
 func (s *Sink) build(i int, r *fitsync.Record) item {
 	it := item{unit: r.Tx.ID, ends: r.Tx.ID == "" || r.Tx.Last}
+	if it.ends {
+		it.pos = r.Position
+	}
 	switch r.Op {
 	case fitsync.OpDDL:
 		what, _ := fitsync.AppendPlain(nil, r.After)
@@ -377,10 +447,24 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 		}
 	}
 	var g []*op
+	// refuse commits what is before record i, the checkpoint at the last
+	// of them that ends a source transaction, not at those after it whose
+	// statements were not run yet.
+	startPos := s.tx.pos
+	refuse := func(i int, err error) error {
+		s.tx.pos = startPos
+		for j := i - 1; j >= 0; j-- {
+			if items[j].pos != nil {
+				s.tx.pos = items[j].pos
+				break
+			}
+		}
+		return s.refuse(ctx, i, err)
+	}
 	fail := func(err error) error {
 		var br *badRecord
 		if errors.As(err, &br) {
-			return s.refuse(ctx, br.rec, br.err)
+			return refuse(br.rec, br.err)
 		}
 		s.reset()
 		return err
@@ -396,7 +480,7 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 			if err := flush(); err != nil {
 				return fail(err)
 			}
-			return s.refuse(ctx, i, it.err)
+			return refuse(i, it.err)
 		}
 		if !s.batch && s.tx.open && it.unit != s.tx.unit {
 			if err := flush(); err != nil {
@@ -425,6 +509,9 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 			g = append(g, o)
 			s.tx.bytes += o.size
 			s.tx.curBytes += o.size
+		}
+		if it.pos != nil {
+			s.tx.pos = it.pos
 		}
 		if !s.tx.open {
 			continue
@@ -540,6 +627,13 @@ func (s *Sink) reset() {
 }
 
 func (s *Sink) commit(ctx context.Context) error {
+	if s.pipeline != "" && s.tx.pos != nil {
+		row := [][]any{{s.pipeline, s.lineage, string(s.tx.pos), time.Now().UTC()}}
+		if _, err := s.conn.InsertRows(ctx, "INSERT INTO "+s.ckTable+" (`pipeline`,`lineage`,`position`,`updated`) VALUES", row,
+			"ON DUPLICATE KEY UPDATE `lineage`=VALUES(`lineage`),`position`=VALUES(`position`),`updated`=VALUES(`updated`)"); err != nil {
+			return err
+		}
+	}
 	if _, err := s.conn.Exec(ctx, "COMMIT"); err != nil {
 		return err
 	}

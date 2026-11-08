@@ -181,6 +181,11 @@ func (c *fakeConn) Exec(ctx context.Context, q string, args ...any) (mysqlwire.R
 		}
 		c.work = nil
 	case strings.HasPrefix(q, "SET ") || q == "SELECT 1":
+	case strings.HasPrefix(q, "CREATE TABLE IF NOT EXISTS "):
+		table := strings.ReplaceAll(strings.Fields(q)[5], "`", "")
+		if _, ok := c.db.keys[table]; !ok {
+			c.db.keys[table] = []string{"pipeline"}
+		}
 	default:
 		m := deleteRE.FindStringSubmatch(q)
 		if m == nil {
@@ -206,6 +211,28 @@ func (c *fakeConn) Exec(ctx context.Context, q string, args ...any) (mysqlwire.R
 		return mysqlwire.Result{AffectedRows: n}, nil
 	}
 	return mysqlwire.Result{}, nil
+}
+
+var selectRE = regexp.MustCompile("^SELECT `lineage`, `position` FROM (.+) WHERE `pipeline` = \\?$")
+
+// QueryRow answers the checkpoint's SELECT from the committed rows, or the
+// transaction's.
+func (c *fakeConn) QueryRow(ctx context.Context, q string, args ...any) ([]any, error) {
+	c.db.mu.Lock()
+	defer c.db.mu.Unlock()
+	if err := c.begin(q, args); err != nil {
+		return nil, err
+	}
+	m := selectRE.FindStringSubmatch(q)
+	if m == nil {
+		return nil, &mysqlwire.Error{Code: 1064, State: "42000", Message: "fake: " + q}
+	}
+	tabs, _ := c.tables()
+	row := tabs[strings.ReplaceAll(m[1], "`", "")][fmt.Sprint(args[0])]
+	if row == nil {
+		return nil, nil
+	}
+	return []any{[]byte(row["lineage"].(string)), row["position"]}, nil
 }
 
 // InsertRows upserts rows; a value "BAD" fails the statement whole, as a
@@ -358,6 +385,19 @@ func serveFake(nc net.Conn, version string) {
 		p, alive := read()
 		if !alive || len(p) == 0 || p[0] == 1 { // COM_QUIT
 			return
+		}
+		if p[0] == 3 && string(p[1:]) == "SELECT 'row'" {
+			// A result set of one text column and one row.
+			lenenc := func(b []byte, v string) []byte { return append(append(b, byte(len(v))), v...) }
+			col := lenenc(lenenc(lenenc(lenenc(lenenc(lenenc(nil, "def"), ""), ""), ""), "c"), "")
+			col = append(col, 0x0c, 45, 0, 64, 0, 0, 0, 0xfd, 0, 0, 0, 0, 0)
+			eof := []byte{0xfe, 0, 0, 2, 0}
+			write(1, []byte{1})
+			write(2, col)
+			write(3, eof)
+			write(4, lenenc(nil, "row"))
+			write(5, eof)
+			continue
 		}
 		write(1, ok)
 	}

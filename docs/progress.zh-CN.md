@@ -4552,6 +4552,24 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **与计划的不同**：PostgreSQL 到 PostgreSQL、MySQL 到 PostgreSQL 的流水线等 I178 和 I174 的源（I192 的矩阵）；混合负载由测试自己的源产生。
 - **缺口**：计划 I180 一节中的决策，待审查。连接参数暂为目标自己的，等 I178 的源完成后可共用。
 
+### I191 写入事务型目标时恰好一次 — 已完成
+
+- **`checkpoint: "sink"`**，用于 `mysql` 目标（MySQL、MariaDB、TiDB）和 `postgres` 目标：管道的位置与记录在同一事务中写入
+  `checkpoint_table`（`_fit_sync_checkpoints`，不存在时创建），即每次提交中最后一条结束源事务的记录的位置；启动时经
+  `fitsync.CheckpointSink`（`sync/sinkcheckpoint.go`）读回、优先于文件，条件是管道的每个目标都保存同一个、与文件同谱系的
+  位置；文件照常保存，其余情况由它服务。检查点文件增加 `lineage`，在重置、手工设置位置和新作业时更换，以免这些操作被目标中
+  较旧的行撤销。PostgreSQL 的需要 `transactions: "source"`，设置它时这是默认。
+- **文档**：schema 和参考（两个目标的章节、新参数），模板，`schema-zh.js` 中的中文描述。
+- **测试**：运行时对一个与记录一起保存检查点的测试目标，在流和作业中于随机位置被杀（每条记录一次），重置、手工设置位置和文件
+  丢失时的谱系，混合目标时用文件，读取时的错误与停止；每个目标对其假服务器（行在提交中、暂存的事务不写、新运行丢弃暂存内容、
+  被拒绝的记录、每条语句失败）。`test/sync/exactly_once_test.go` 针对 `test/sync/mysql.sh` 的 MySQL 5.7、8.0、8.4 和 MariaDB
+  10.11、11 以及 `test/sync/postgres.sh` 的 PostgreSQL 13 到 17：3000 条插入经过在随机位置被杀十二次的流水线，触发器统计每次写行：
+  `checkpoint: "sink"` 时没有记录写两次也没有丢失，`checkpoint: "file"` 时有 16 到 588 条写了两次；`TestMySQLSinkAcrossKills`
+  增加使用它的模式，也在 TiDB v8.5.3 上运行。无容器覆盖率：`sync` 94.5%（与之前相同），`sync/mysql` 98.6%，
+  `sync/postgres/sink` 99.0%。单元测试在 macOS 上于竞态检测下运行；互通测试使用为此创建并已删除的 `fit-i191-*` 容器。
+- **缺口**：计划 I191 一节中的决策，待审查：只有每个目标都保存检查点时才恰好一次；分块读取的作业只用文件；分几部分提交的源事务
+  仍可能写两次。
+
 ### I186 Redis 作为源与目标 — 已完成
 
 - **客户端**（`sync/redis/wire`，包 `wire`）：经 TCP 或 TLS 的 RESP2 与 RESP3；带 `AUTH` 与 `SETNAME` 的 `HELLO 3`，服务器

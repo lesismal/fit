@@ -25,6 +25,8 @@ func init() {
 const (
 	DefaultCopyMinRows      = 100
 	DefaultMaxStatementRows = 1000
+	// DefaultCheckpointTable is checkpoint_table when left out.
+	DefaultCheckpointTable = "_fit_sync_checkpoints"
 	// maxParams is the most parameters a statement may have.
 	maxParams = 65535
 )
@@ -44,7 +46,9 @@ type Sink struct {
 	Timeout          config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long connecting and writing one batch may take; a write that takes longer breaks its connection and is tried again. 60s when left out or 0."`
 	Table            string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace}, the record's namespace; split at its first dot into the schema and the table (shop.orders is the table orders of the schema shop), a name without a dot found by the search_path. The table is not made: it must have a primary key or unique index on the key's columns. {namespace} when left out."`
 	KeyColumns       []string        `json:"key_columns,omitempty" doc:"The columns of the key the upserts conflict on and the deletes delete by, their values taken from the record's key, or from its row. The record's key's fields when left out, so that the key must then be a map of columns."`
-	Transactions     string          `json:"transactions,omitempty" enum:"batch,source" default:"\"batch\"" doc:"What a transaction of the sink's holds: batch, each batch written; source, each of the source's transactions, its records held across batches until its last arrives, so that a reader never sees part of one. A transaction with a record the server refuses for good is then not written at all; on_error takes the record refused, or the first of the batch for one held. batch when left out."`
+	Transactions     string          `json:"transactions,omitempty" enum:"batch,source" default:"\"batch\"" doc:"What a transaction of the sink's holds: batch, each batch written; source, each of the source's transactions, its records held across batches until its last arrives, so that a reader never sees part of one. A transaction with a record the server refuses for good is then not written at all; on_error takes the record refused, or the first of the batch for one held. batch when left out, source with checkpoint sink, which batch cannot go with."`
+	Checkpoint       string          `json:"checkpoint,omitempty" enum:"file,sink" default:"\"file\"" doc:"Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash between a commit and the file's next checkpoint writes the records after it again (to the same rows); sink, also in checkpoint_table, written in the same transaction as the records it covers and read back when the pipeline starts, in preference to the file, so that no record is written twice: exactly once, while every sink of the pipeline keeps it. Needs transactions source. file when left out."`
+	CheckpointTable  string          `json:"checkpoint_table,omitempty" default:"\"_fit_sync_checkpoints\"" doc:"With checkpoint sink, the table the checkpoint is kept in, a row a pipeline, made when missing (which needs CREATE on its schema); schema.table names the schema too, found by the search_path otherwise. _fit_sync_checkpoints when left out."`
 	Copy             string          `json:"copy,omitempty" enum:"auto,always,never" default:"\"auto\"" doc:"When a run of upserts is copied: COPY into a temporary table, then one INSERT ... SELECT ... ON CONFLICT DO UPDATE from it, faster for many rows, as a snapshot's: auto, a run of copy_min_rows or more; always; never. auto when left out."`
 	CopyMinRows      int             `json:"copy_min_rows,omitempty" min:"0" default:"100" doc:"With copy auto, the fewest rows of a run that is copied. 100 when left out or 0."`
 	MaxStatementRows int             `json:"max_statement_rows,omitempty" min:"0" max:"65535" default:"1000" doc:"The most rows of one INSERT or DELETE (and fewer when its parameters would pass PostgreSQL's 65535); a longer run is written in several. 1000 when left out or 0."`
@@ -64,6 +68,11 @@ type Sink struct {
 	drop string
 
 	copies atomic.Uint64
+
+	// ckTable is checkpoint_table, quoted; pipeline and lineage are what
+	// each commit writes in it, once ReadCheckpoint has set them.
+	ckTable           string
+	pipeline, lineage string
 }
 
 type tablePart struct {
@@ -103,6 +112,17 @@ func (s *Sink) Provision(ctx *module.Context) error {
 		seen[k] = true
 	}
 	s.source = s.Transactions == "source"
+	if s.KeepsCheckpoint() {
+		if s.Transactions == "batch" {
+			errs = append(errs, ctx.Params.Field("transactions").Errorf("batch cannot go with checkpoint sink: a batch's transaction may end inside a source transaction"))
+		}
+		s.source = true
+		ck := s.CheckpointTable
+		if ck == "" {
+			ck = DefaultCheckpointTable
+		}
+		s.ckTable = QuoteTable(ck)
+	}
 	if len(errs) == 0 {
 		return nil
 	}
@@ -117,6 +137,63 @@ func (s *Sink) ParallelWrites() {}
 
 // Cleanup closes the connections.
 func (s *Sink) Cleanup() { s.pool.close() }
+
+// KeepsCheckpoint reports whether checkpoint is sink.
+func (s *Sink) KeepsCheckpoint() bool { return s.Checkpoint == "sink" }
+
+// ReadCheckpoint makes checkpoint_table when missing and reads the
+// pipeline's row; each commit from then on writes the position of its last
+// record that ends a source transaction there, with lineage. A source
+// transaction held from an earlier run is dropped: the run starts before
+// it.
+func (s *Sink) ReadCheckpoint(ctx context.Context, pipeline, lineage string) (fitsync.Position, string, error) {
+	if !s.KeepsCheckpoint() {
+		return nil, "", nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.held, s.drop = nil, ""
+	ctx, cancel := context.WithTimeout(ctx, s.timeout())
+	defer cancel()
+	c, err := s.pool.get(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer s.pool.put(c)
+	if err := s.exec(ctx, c, "CREATE TABLE IF NOT EXISTS "+s.ckTable+` ("pipeline" text PRIMARY KEY, "lineage" text NOT NULL, "position" text NOT NULL, "updated" timestamptz NOT NULL)`); err != nil {
+		return nil, "", err
+	}
+	res, err := c.SimpleQuery(ctx, `SELECT "lineage", "position" FROM `+s.ckTable+` WHERE "pipeline" = `+pgwire.QuoteLiteral(pipeline))
+	if err != nil {
+		return nil, "", err
+	}
+	s.pipeline, s.lineage = pipeline, lineage
+	if len(res) == 0 || len(res[0].Rows) == 0 || len(res[0].Rows[0]) < 2 {
+		return nil, "", nil
+	}
+	r := res[0].Rows[0]
+	return fitsync.Position(r[1]), string(r[0]), nil
+}
+
+// keep writes, in the transaction open, the position of the last of items
+// that ends a source transaction as the pipeline's checkpoint.
+func (s *Sink) keep(ctx context.Context, c *pgwire.Conn, items []item) error {
+	if s.pipeline == "" {
+		return nil
+	}
+	var pos fitsync.Position
+	for i := len(items) - 1; i >= 0 && pos == nil; i-- {
+		if boundary(items[i]) {
+			pos = items[i].rec.Position
+		}
+	}
+	if pos == nil {
+		return nil
+	}
+	_, err := c.Exec(ctx, "INSERT INTO "+s.ckTable+` ("pipeline","lineage","position","updated") VALUES ($1,$2,$3,$4) ON CONFLICT ("pipeline") DO UPDATE SET "lineage" = EXCLUDED."lineage", "position" = EXCLUDED."position", "updated" = EXCLUDED."updated"`,
+		s.pipeline, s.lineage, string(pos), time.Now().UTC().Format("2006-01-02 15:04:05.999999Z07:00"))
+	return err
+}
 
 // Test connects, authenticates and runs SELECT 1.
 func (s *Sink) Test(ctx context.Context) error {
@@ -431,6 +508,10 @@ func (s *Sink) commit(ctx context.Context, c *pgwire.Conn, items []item, whole b
 		}
 		return s.oneByOne(ctx, c, items, whole)
 	}
+	if err := s.keep(ctx, c, items); err != nil {
+		s.rollback(ctx, c)
+		return -1, err
+	}
 	return -1, s.exec(ctx, c, "COMMIT")
 }
 
@@ -442,12 +523,14 @@ func (s *Sink) oneByOne(ctx context.Context, c *pgwire.Conn, items []item, whole
 	if err := s.exec(ctx, c, "BEGIN"); err != nil {
 		return -1, err
 	}
+	saved := 0
 	for i := range items {
 		if !whole || i == 0 || items[i].rec.Tx.ID == "" || items[i].rec.Tx.First || items[i].rec.Tx.ID != items[i-1].rec.Tx.ID {
 			if err := s.exec(ctx, c, "SAVEPOINT fit_sync"); err != nil {
 				s.rollback(ctx, c)
 				return -1, err
 			}
+			saved = i
 		}
 		err := s.run(ctx, c, items[i:i+1])
 		if err == nil {
@@ -461,12 +544,20 @@ func (s *Sink) oneByOne(ctx context.Context, c *pgwire.Conn, items []item, whole
 			s.rollback(ctx, c)
 			return -1, e
 		}
+		if e := s.keep(ctx, c, items[:saved]); e != nil {
+			s.rollback(ctx, c)
+			return -1, e
+		}
 		if e := s.exec(ctx, c, "COMMIT"); e != nil {
 			return -1, e
 		}
 		return i, err
 	}
 	// Together they failed, one at a time they did not: written.
+	if err := s.keep(ctx, c, items); err != nil {
+		s.rollback(ctx, c)
+		return -1, err
+	}
 	return -1, s.exec(ctx, c, "COMMIT")
 }
 
