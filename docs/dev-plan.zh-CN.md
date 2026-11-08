@@ -351,7 +351,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
 | **BitTorrent** | | | |
-| I196 | fib 为 BitTorrent 客户端补 A75–A79：存储与哈希不上 fib worker、快速续传、运行时可改的限制、按地址拒绝 peer、客户端跑在调用者的引擎上 | — | doing |
+| I196 | fib 为 BitTorrent 客户端补 A75–A79：存储与哈希不上 fib worker、快速续传、运行时可改的限制、按地址拒绝 peer、客户端跑在调用者的引擎上 | — | done |
 | I197 | `bittorrent.client` 角色：配置、跑在共享引擎上、`data_dir` 下的状态文件、恢复与 reload（决定 037） | I196 | todo |
 | I198 | 添加任务（磁力链、文件、URL、`watch_dir`）、分类与媒体库重扫、排队、磁盘检查 | I197 | todo |
 | I199 | `alt_speed` 调度、单任务限制、角色的 `access`、`access` 读 `.p2p` 和 `.dat` 黑名单（所有模块可用） | I197 | todo |
@@ -3955,6 +3955,27 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   TCP 或 uTP 连入，也不会被拨号；两个客户端共用一个引擎，关掉一个另一个不受影响；fib 的 CI、race 与 Linux 测试通过。
 - **涉及**：fib 的 `bittorrent`、`bittorrent/peer`、`bittorrent/utp`、`bittorrent/dht`，可能还有 `core`；fit 的 `go.mod`、
   `docs/fib-api-requests*.md`。
+- **完成**于 2026-11-08，fib `1f1d2e7`（A75–A79 的实现见 [fib-api-requests](fib-api-requests.zh-CN.md)）；fit 已在其上。四个 worktree
+  子代理各做一项（A78 与 A79 一起），由主会话合并；合并 A75 与 A76 时，续传计划和 `ResumeData` 改为经 A75 的保护访问存储；
+  `TestResumeRejected` 在 Linux 上有竞态（已在测试中修复）。验证：macOS 上 fib 的 `go test -race ./...`，Linux（golang:1.27.3）上
+  `./bittorrent/...` 与 `./core`，FreeBSD 与 Windows 的 vet。
+
+**待审阅的决定**（实现时做出，2026-11-08；详情与备选见 fib 的
+[docs/bittorrent.zh-CN.md](https://github.com/lesismal/fib/blob/main/docs/bittorrent.zh-CN.md)）：
+
+1. **A75**：每个客户端一个磁盘 pool、一个 FIFO 队列；`DiskWorkers` 为 min(GOMAXPROCS, 8)；只有收到的块计入 64 MiB 上限，
+   且是软上限（worker 上从不拒块，暂停的连接在降到一半时恢复）；发现存储已关闭的写入被丢弃；关闭只等正在进行的 I/O；
+   初始校验、web seed 写入、`Reader` 读取和 `StorageOpener` 不在 pool 上（opener 在磁力链 info 到达时在 worker 上调用）。
+2. **A76**：调用者保存续传数据；信任大小和 mtime；数据中没有的 piece 和未完成的 piece 重新下载；无法使用的数据报告为包装
+   `ErrResumeData` 的 `EventError`；`ResumeGen` 是"该保存了"的信号；校验期间 `ResumeData` 返回错误。
+3. **A77**：独立的 `Limits` 类型；零值保持 `Config` 中的含义；`TorrentLimits` 中零值继承、负值不限；下载令牌在请求时扣除，
+   取消不退还（几秒内约 1.5 倍超出）；最没用的 peer 先关。
+4. **A78**：一个 `netip.AddrPort` 谓词；UDP 绑定不过滤（UDP tracker 共用），改由 uTP 和 DHT 过滤；`Refilter` 与设置策略分开，
+   fit 一次变更可以重新过滤多个客户端。
+5. **A79**：用 `Config.SharedEngine` 而不是第二个构造函数；引擎必须已在运行。
+
+遗留：fib 文档说客户端在 hybrid 磁力链下载后计算 v2 piece layer，但 `Torrent.computeLayers` 从未被调用；在接上并测试之前，
+磁力链得到的 hybrid 任务做种时无法应答 v2 的 hash 请求。
 
 ### I197 `bittorrent.client` 角色
 

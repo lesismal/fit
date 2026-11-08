@@ -81,11 +81,11 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A72 | A segment's tracks begin at its keyframe | done, fib `e4e10c0` | 11 | I134, I136 |
 | A73 | A binding refuses peers by address at accept | done, fib `8de0a75` | 11, 12 | I195 |
 | A74 | `webrtc.MuxConfig.Filter`: a Mux that refuses peers at their first datagram | done, fib `f957983` | 11 | I195 |
-| A75 | The BitTorrent client's storage and hashing off fib's workers | doing | 1, 8, 11 | I196 |
-| A76 | BitTorrent fast-resume data | doing | — | I196, I197 |
-| A77 | BitTorrent limits that change at run time, and per torrent | doing | 11 | I196, I199 |
-| A78 | `bittorrent.Config.Filter`: refusing peers by address | doing | 11 | I196, I199 |
-| A79 | The BitTorrent client on the caller's engine | doing | 11 | I196, I197 |
+| A75 | The BitTorrent client's storage and hashing off fib's workers | done, fib `1f1d2e7` | 1, 8, 11 | I196 |
+| A76 | BitTorrent fast-resume data | done, fib `1f1d2e7` | — | I196, I197 |
+| A77 | BitTorrent limits that change at run time, and per torrent | done, fib `1f1d2e7` | 11 | I196, I199 |
+| A78 | `bittorrent.Config.Filter`: refusing peers by address | done, fib `1f1d2e7` | 11 | I196, I199 |
+| A79 | The BitTorrent client on the caller's engine | done, fib `1f1d2e7` | 11 | I196, I197 |
 
 ## Evidence
 
@@ -2475,8 +2475,9 @@ Mux opens itself with `Engine.OpenUDPPeer` are not asked. fib covers it with a t
 
 ## A75: The BitTorrent client never touches storage or hashes pieces on a worker
 
-**Status.** Requested on 2026-11-08, from I196 ([decision 037](decisions/037-bittorrent.md)); being
-made in fib by fit's session per [rule 15](rules.md#7-when-fib-falls-short).
+**Status.** Requested on 2026-11-08, from I196 ([decision 037](decisions/037-bittorrent.md)); done
+in fib at `1f1d2e7`, made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is
+on `1f1d2e7`.
 
 **Problem.** `bittorrent/peer.Server.OnData` runs on a fib worker and calls the client's
 `OnMessage`, which writes each block to storage (`writeData`), hashes a whole piece once it is in
@@ -2490,9 +2491,11 @@ it.
 
 **How fit uses it.** Through the client; it also lets fit size the pool from the role's config.
 
+**As built.** `Config.DiskWorkers` (GOMAXPROCS, at most 8) and `Config.DiskQueueBytes` (64 MiB): one FIFO pool of the client's runs block writes, piece checks, upload reads (one job per peer, 16 blocks a job), BEP 52 hash answers and layer checks; past the byte bound the senders' reads are held through `peer.Conn.HoldReads` until half is written. `Stop`, `Remove` and `Close` wait only for I/O under way. `TestStorageOffWorkers` fails if storage is called with `fib/core` or the uTP reader on the stack. Still not on the pool: the initial check (a goroutine per torrent), web seed writes (their fetch goroutine), `Reader` reads (the caller's goroutine) and the `StorageOpener` (on a worker when a magnet's info arrives, so fit's opener must not block).
+
 ## A76: Fast-resume data
 
-**Status.** Requested on 2026-11-08, from I196; being made in fib by fit's session.
+**Status.** Requested on 2026-11-08, from I196; done in fib at `1f1d2e7`, made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on `1f1d2e7`.
 
 **Problem.** A torrent added with data in storage is hash-checked whole, so every restart of a
 server seeding terabytes reads them all again.
@@ -2504,9 +2507,11 @@ check, the rest checked; a blob that is invalid or for another torrent falls bac
 **How fit uses it.** The `bittorrent.client` role keeps each torrent's resume data in its state file
 under `data_dir` and passes it back at start (I197).
 
+**As built.** `Torrent.ResumeData`, `Torrent.ResumeGen` (save when it moves, and after `Stop` or `Close`), `AddOptions.Resume`, and the `StatStorage` interface, which both built-in storages implement. Size and mtime are trusted, as in libtorrent; pieces the blob does not list, and unfinished pieces, are downloaded again; unusable data is an `EventError` wrapping `ErrResumeData` and a full check.
+
 ## A77: Limits that change at run time, and limits per torrent
 
-**Status.** Requested on 2026-11-08, from I196; being made in fib by fit's session.
+**Status.** Requested on 2026-11-08, from I196; done in fib at `1f1d2e7`, made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on `1f1d2e7`.
 
 **Problem.** `bittorrent.Config`'s rates, connection bounds, upload slots and seed limits are read
 once by `NewClient`; nothing limits one torrent. fit reloads its config live and switches rates by
@@ -2519,9 +2524,11 @@ peers.
 **How fit uses it.** A reload, a schedule's switch and the Admin API set them without dropping peers
 (I197, I199, I203).
 
+**As built.** `Limits`, `Client.SetLimits` and `Client.Limits`; `TorrentLimits`, `Torrent.SetLimits`, `Torrent.Limits` and `AddOptions.Limits`, zero inheriting and negative meaning no limit for the torrent. The download rate is spent when a block is requested, so it holds requests back; lowered connection bounds close the least useful peers at once.
+
 ## A78: Refusing BitTorrent peers by address
 
-**Status.** Requested on 2026-11-08, from I196; being made in fib by fit's session.
+**Status.** Requested on 2026-11-08, from I196; done in fib at `1f1d2e7`, made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on `1f1d2e7`.
 
 **Problem.** fit's `access` lists (I195), and the `.p2p` and `.dat` blocklists I199 adds, have no
 way into the client: its TCP binding, uTP, the DHT and the peers it dials from trackers, PEX, LSD
@@ -2534,10 +2541,12 @@ connections it now refuses.
 **How fit uses it.** `Filter: gate.Allows`, and `Refilter` after a config applied changes the
 policy (I199).
 
+**As built.** `Config.Filter`, applied to the TCP binding, uTP SYNs (`utp.Config.Accept`), the DHT (a new `dht.Config.Filter`), every peer source and each dial and handshake; `Client.Refilter` closes open and handshaking connections now refused. The UDP binding itself is not filtered, since UDP trackers share it.
+
 ## A79: The BitTorrent client on the caller's engine
 
 **Status.** Requested on 2026-11-08, from I196 (the user chose fit's shared engine for the role);
-being made in fib by fit's session.
+done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 **Problem.** `bittorrent.NewClient` always makes and runs an engine of its own from
 `Config.Engine`.
@@ -2546,3 +2555,5 @@ being made in fib by fit's session.
 `Close`, removes only its own bindings and connections.
 
 **How fit uses it.** The `bittorrent.client` role runs on fit's engine, under its `limits` (I197).
+
+**As built.** `Config.SharedEngine`: the client adds its TCP and UDP bindings to the caller's running engine, builds its HTTP client on it, and on `Close` removes its bindings (`ShutdownBinding`) and closes the connections it dialed, leaving the engine running. No core change was needed.

@@ -361,7 +361,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 | **BitTorrent** | | | |
-| I196 | fib A75–A79 for the BitTorrent client: storage and hashing off fib's workers, fast resume, limits that change at run time, refusing peers by address, the client on the caller's engine | — | doing |
+| I196 | fib A75–A79 for the BitTorrent client: storage and hashing off fib's workers, fast resume, limits that change at run time, refusing peers by address, the client on the caller's engine | — | done |
 | I197 | The `bittorrent.client` role: config, the client on the shared engine, the state file in `data_dir`, restore and reload (decision 037) | I196 | todo |
 | I198 | Adding torrents (magnet, file, URL, `watch_dir`), categories with a media library rescan, queueing, disk checks | I197 | todo |
 | I199 | `alt_speed` schedules, per-torrent limits, the role's `access`, `.p2p` and `.dat` blocklists in `access` for every module | I197 | todo |
@@ -5321,6 +5321,36 @@ Principles, in the order they bind:
   engine and closing one leaves the other; fib's CI, race and Linux runs pass.
 - **Touches**: fib `bittorrent`, `bittorrent/peer`, `bittorrent/utp`, `bittorrent/dht`, maybe
   `core`; fit `go.mod`, `docs/fib-api-requests*.md`.
+- **Done** 2026-11-08 at fib `1f1d2e7` (A75–A79 as built in
+  [fib-api-requests](fib-api-requests.md#a75-the-bittorrent-client-never-touches-storage-or-hashes-pieces-on-a-worker));
+  fit is on it. Four worktree agents, one per request (A78 and A79 together), merged by the main
+  session; merging A75 with A76 needed the resume plan and `ResumeData` to hold the storage through
+  A75's guard, and `TestResumeRejected` raced on Linux (fixed in the test). Verified: `go test
+  -race ./...` of fib on macOS, `./bittorrent/...` and `./core` on Linux (golang:1.27.3), vet for
+  FreeBSD and Windows.
+
+**Decisions pending review** (made while building it, 2026-11-08; the details, with alternatives, are in
+fib's [docs/bittorrent.md](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md#decisions-pending-review)):
+
+1. **A75**: one disk pool and one FIFO queue per client; `DiskWorkers` min(GOMAXPROCS, 8); only
+   received blocks count against the 64 MiB bound, which is soft (a block is never refused on a
+   worker; held connections resume at half); a write that finds its storage closed is dropped;
+   closing waits only for I/O under way; the initial check, web seed writes, `Reader` reads and the
+   `StorageOpener` stay off the pool (the opener runs on a worker when a magnet's info arrives).
+2. **A76**: the caller stores the blob; size and mtime are trusted; pieces not in the blob and
+   unfinished pieces are downloaded again; unusable data is an `EventError` wrapping
+   `ErrResumeData`; `ResumeGen` is the "save now" signal; `ResumeData` errs during a check.
+3. **A77**: a separate `Limits` type; zero keeps `Config`'s meaning; in `TorrentLimits` zero
+   inherits and negative is no limit; download tokens are spent at request time and not refunded on
+   cancel (about 1.5x overshoot for a couple of seconds); peers are closed least useful first.
+4. **A78**: one `netip.AddrPort` predicate; the UDP binding is not filtered (UDP trackers share
+   it), uTP and the DHT filter instead; `Refilter` is separate from setting a policy, so one fit
+   change can refilter many clients.
+5. **A79**: `Config.SharedEngine` rather than a second constructor; the engine must be running.
+
+Open from it: fib's docs say the client computes v2 piece layers after a hybrid magnet download,
+but `Torrent.computeLayers` is never called; a hybrid torrent from a magnet link cannot answer v2
+hash requests as a seed until it is wired in and tested.
 
 ### I197 The `bittorrent.client` role
 
