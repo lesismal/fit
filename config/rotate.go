@@ -171,3 +171,14 @@ func checkRotate(r *Rotate, at Value, add func(Value, string, ...any)) {
 		}
 	}
 }
+
+// CheckRotate reports what is wrong with r's rotation settings, at at, as
+// a module that writes a rotated file of its own checks its rotate.
+func CheckRotate(r *Rotate, at Value) error {
+	var errs Errors
+	checkRotate(r, at, func(v Value, format string, args ...any) { errs = append(errs, v.Errorf(format, args...)) })
+	if len(errs) == 0 {
+		return nil
+	}
+	return errs
+}

@@ -1,11 +1,14 @@
 package logs
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lesismal/fit/config"
 )
@@ -82,5 +85,39 @@ func TestCloseError(t *testing.T) {
 	_ = f.file.Close()
 	if err := r.Close(); err == nil {
 		t.Error("closing a closed file reported nothing")
+	}
+}
+
+// TestWriteSync checks a write that waits for the disk: it is in the file
+// on return, after what was queued, and refused once the file is closed or
+// its context ends.
+func TestWriteSync(t *testing.T) {
+	fs := NewFiles()
+	path := filepath.Join(t.TempDir(), "out.log")
+	f, err := fs.Open(path, nil, func() *time.Location { return time.UTC })
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Write([]byte("queued\n"))
+	if err := f.WriteSync(context.Background(), [][]byte{[]byte("a\n"), []byte("b\n")}); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "queued\na\nb\n" {
+		t.Fatalf("%q", data)
+	}
+	if err := f.WriteSync(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := f.WriteSync(ctx, [][]byte{[]byte("c\n")}); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	fs.Release(f)
+	if err := f.WriteSync(context.Background(), [][]byte{[]byte("d\n")}); !errors.Is(err, ErrClosed) {
+		t.Fatal(err)
+	}
+	if DefaultFiles() == nil {
+		t.Fatal("no default files")
 	}
 }

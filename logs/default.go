@@ -39,3 +39,18 @@ func Named(name string) *Logger {
 	}
 	return &Logger{name: name, dflt: true}
 }
+
+// shared is the set of files DefaultFiles returns before there is a log.
+var shared = NewFiles()
+
+// DefaultFiles returns the process's log files, those of the log SetDefault
+// set last, so that a module writing a file of its own, as sync's file sink
+// does, shares their rules: one sink per path, one rotate per file, and the
+// workbench's list. Before there is a log, as in tests, it is a set of its
+// own.
+func DefaultFiles() *Files {
+	if r := std.Load(); r != nil && r.files != nil {
+		return r.files
+	}
+	return shared
+}

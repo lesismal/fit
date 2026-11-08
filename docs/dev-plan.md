@@ -329,7 +329,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | I164 | Built-in transforms: `filter`, `route`, `fields`, `key`, `cast`, `mask`, `envelope` | I163 | done |
 | I165 | WASM plugins for sync: transforms, codecs, and source and sink connectors on fit's HTTP client and timers; the guest SDKs | I163 | done |
 | I165b | WASM sync plugins, the rest: the benchmark host's run and a binary record form if it asks; TinyGo and Rust plugins built and run in the tests; examples in fit-examples | I165 | todo |
-| I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | todo |
+| I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | done |
 | I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | todo |
 | I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | todo |
 | I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | todo |
@@ -4428,6 +4428,82 @@ track can place it); exactly-once into sinks with no transactions.
   stay within the open-file limit; a line past the limit is cut and counted; the sink rotates as the
   log does.
 - **Touches**: `sync/file`, `logs`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** The source and the sink are package `sync/file` (`syncfile`); the codecs
+   `line`, `json` and `csv` are modules of `sync.codecs` in `fitsync` itself (`sync/codec.go`), so
+   that Kafka, HTTP and S3 take them too. A module's `codec` is a module reference inside its
+   params, loaded with the module's own config by the new `module.Context.Load`; `line` when left
+   out. Alternative: a `format` enum per connector.
+2. **The checkpoint** is every file's device, inode, fingerprint (hash and length), path, offset,
+   a skip flag and its records' key part, and the heads of files truncated lately (below), as JSON.
+   Files not read yet, and copies held, are left out; a file a scan no longer finds is forgotten
+   once it is closed, so the checkpoint holds at most the files the globs match (`max_files`,
+   100000). A position costs the whole list, so the source sets one only between lines, on the
+   last record of each pass over the files or of every 1,000 records (it holds one record back to
+   put it on), not on every record. Alternative: a position on every record, or a state file of the
+   source's own.
+3. **A file's identity** is its device and inode and a fingerprint of its first
+   `fingerprint_bytes` (1024), taken as the file grows to it; a known inode whose head no longer
+   matches, or whose size fell below the offset, is read again from 0. **Windows** has no inode:
+   the volume's serial number and the file index from `GetFileInformationByHandle`, files opened
+   sharing read, write and delete so the writer may still rename or remove them; a scan opens each
+   matched file briefly to learn it. A system with neither (not one fit ships for) uses a hash of
+   the path, so a rename is a new file there. Alternative on Windows: path and fingerprint only.
+4. **Copy and truncation is followed, not only truncation.** A truncated file's head, offset and
+   key are kept for `close_after` (also in the checkpoint); a new file whose head matches one is
+   its copy and is read on from that offset under the original's key. A new file whose head
+   matches a file not yet truncated is held until it is, then the same; if `close_after` passes
+   first, it was a backup and is read whole (repeats rather than losses). Without this, copytruncate
+   loses the original's unread tail or reads the copy again. A copy found while it is shorter than
+   the original's fingerprint is a new file. Alternative: ignore copies, as Filebeat's inode mode.
+5. **Records' keys.** A record its codec gave no key gets `{"file", "offset"}` (and `n` for a
+   line's second record on): the file is `<device>:<inode>:<hash of its first line>`, a copy taking
+   its original's, so a line read again after a crash has the key it had and an idempotent sink
+   folds it. The first line, not a count of truncations, tells a file's contents before and after
+   a truncation apart, since a count differs on a replay after two truncations. Caveat: an inode's
+   successive contents with the same first line share keys. Alternative: no key; a count.
+6. **"Loses and repeats no line"** is tested as: every line arrives, and no line arrives under two
+   keys unless the earlier came past the checkpoint its run saved (killed or stopped); repeats under
+   one key are at-least-once's, which an idempotent sink folds. A copy found after a crash cannot
+   know what its original's run wrote unsaved, so that one case may repeat under a second key.
+7. **A line the codec refuses** becomes a message record whose `after` holds `line` and `error`,
+   rather than being dropped, or failing the source, which would restart at the same line for ever.
+   Alternative: skip and count it; `on_error`.
+8. **Partial lines cost no memory**: the source reads from the last whole line's end each pass,
+   so a partial line is read again rather than kept; a multiline event is kept (up to
+   `max_line_bytes`, per open file), its start being the checkpoint's offset. `close_after` (1m) is
+   both how long a partial last line or event waits and when an idle file is closed; a partial line
+   growing counts as activity. In `once`, a file's last partial line is taken as it is.
+9. **Long lines** are cut at `max_line_bytes` (1 MiB), the rest skipped (the skip survives a
+   restart), counted (`Source.LinesCut`) and logged for the first and every thousandth; an event
+   over it is cut too. The count is not a metric yet (I188, I189).
+10. **Open files.** `max_open_files` (256): past it an idle file (read to its end) is closed to
+    open another, a deleted one first, its partial last line taken first since it cannot be opened
+    again; a closed file is opened again when a scan finds it grown. A file deleted or renamed out
+    of the globs while open is read to its end, and closed once `close_after` passes without growth.
+    A file renamed out of the globs while closed with lines unread is lost to the source, as with
+    Filebeat. `poll_interval` (250ms) is the wait once every open file is read to its end.
+11. **The sink writes through the process's log files** (`logs.DefaultFiles`, a new
+    `logs.File.WriteSync`): a batch is acknowledged once its lines are written and the file synced
+    on the sink's writer goroutine, in writes of about 64 KiB of whole lines so rotation falls
+    between lines; `WriteSync` waits for the disk, which is fine on sync's own goroutines. The file
+    opens at the first write, so `fit validate` opens none, and closes at the pipeline's stop. One
+    sink per path: another file sink, or fit's log or access log, on the path is refused at the first
+    write (the sink then retries), not when the config is checked. `rotate` and `time_zone` are the
+    logs' own. Lines come from a codec, or from `template` (`{field}`, `{$namespace}`, `{$op}`,
+    `{$key}`, `{$commit_time}`, `{$record}`, `{{`). A record a codec cannot encode is the batch's
+    failed record, those before it written. Alternative: a writer of the sink's own; refusing the
+    shared path in `fit validate`.
+12. **`json` decoding**: an integer is an int, or a uint past int64; a number with a fraction or
+    exponent a float; one past a float's range a decimal; members keep their order. `csv` reads a
+    row's values as strings, named by `columns` and `c<n>` past them.
+13. **Windows' tests**: the test that renames, truncates and deletes files held open skips on
+    Windows, whose rules for that differ; the others run there. Vet passes for Windows, FreeBSD and
+    Linux; the tests ran on macOS only.
+14. **Size**: about 1,500 lines of code and 920 of tests (the ten-thousand-file and crash tests
+    included), past the plan's 1,500; nothing is left, so there is no I166b.
 
 ### I167 Batch jobs, as DataX runs them
 

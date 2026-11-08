@@ -6302,6 +6302,147 @@
         // // Where the records come from, and its params.
         // // module; required.
         // "source": {
+          // // Tails files as Filebeat does: the paths' globs are scanned again each scan_interval, each
+          // // file known by its device, inode and a fingerprint of its head, so a renamed file is
+          // // followed, a truncated one read again from its start, a copy taken before a truncation read
+          // // on from where the original was, and a deleted one finished first. Each line, or each
+          // // multiline event, goes through the codec into records; the checkpoint holds every file's
+          // // identity and offset.
+          // "module": "file",
+          // "params": {
+            // // The files to read: paths or globs (*, ? and [...] within one path element), matched again
+            // // each scan_interval, so new files are found.
+            // // list of string; required.
+            // "paths": [],
+
+            // // How often the globs are matched again, to find new, renamed, truncated and deleted files.
+            // // 10s when left out.
+            // // duration, as "1.5s" or "2m"; default "10s".
+            // "scan_interval": "10s",
+
+            // // How long the source waits, once every open file is read to its end, before reading them
+            // // again. 250ms when left out.
+            // // duration, as "1.5s" or "2m"; default "250ms".
+            // "poll_interval": "250ms",
+
+            // // How long a file may go without growing before its partial last line (or multiline event) is
+            // // taken as it is, and the file closed; a closed file is opened again when a scan finds it
+            // // grown. 1m when left out.
+            // // duration, as "1.5s" or "2m"; default "1m".
+            // "close_after": "1m",
+
+            // // The longest line, or multiline event, in bytes: a longer one is cut there, its rest skipped,
+            // // and counted. 1 MiB when left out or 0.
+            // // integer, 0 to 67108864; default 1048576.
+            // "max_line_bytes": 1048576,
+
+            // // Joins lines into events: a line matching start begins an event, and the lines after it, up
+            // // to the next, belong to it, as a stack trace does. Each line is a record of its own when left
+            // // out.
+            // // object.
+            // "multiline": {
+              // // A regular expression (RE2) a line beginning an event matches.
+              // // string; required.
+              // "start": "",
+
+              // // The most lines of an event: the line past it begins another. 500 when left out or 0.
+              // // integer, 0 to 100000; default 500.
+              // "max_lines": 500,
+            // },
+
+            // // The most files open at once: past it, a file read to its end is closed to open another. 256
+            // // when left out or 0.
+            // // integer, 0 to 65536; default 256.
+            // "max_open_files": 256,
+
+            // // The most files known at once, each in the checkpoint; files found past it are not read, and
+            // // a warning says so. 100000 when left out or 0.
+            // // integer, 0 to 10000000; default 100000.
+            // "max_files": 100000,
+
+            // // How many bytes of a file's head its fingerprint covers: a file whose device and inode are
+            // // known but whose head differs is a new one, and a new file whose head matches a file just
+            // // truncated is its copy, read on from where the original was. 1024 when left out or 0.
+            // // integer, 0 to 65536; default 1024.
+            // "fingerprint_bytes": 1024,
+
+            // // What makes records of a line or an event: line when left out, a message record holding it as
+            // // after's line.
+            // // module.
+            // "codec": {
+              // // A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+              // // whose after holds the values as strings, named by columns. Encoded, a record is its after's
+              // // (or before's) fields, those columns names or all of them, as text.
+              // "module": "csv",
+              // "params": {
+                // // The columns' names, in order. Read, a row's values are named by them, and those past them
+                // // c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                // // empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                // // list of string.
+                // "columns": [],
+
+                // // The separator, one character other than a quote or a line break. A comma when left out.
+                // // string; default ",".
+                // "comma": ",",
+              // },
+
+              // // Or json, with every one of its params:
+              // // A line is a JSON object: with form plain, a message record whose after holds its members,
+              // // numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+              // // in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+              // // null) as plain JSON or the whole record in its canonical form.
+              // "module": "json",
+              // "params": {
+                // // plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                // // in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                // // when left out.
+                // // one of: plain, record; default "plain".
+                // "form": "plain",
+              // },
+
+              // // Or line, with every one of its params:
+              // // A line is a message record whose after holds the line as a string, in the field field names
+              // // (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+              // "module": "line",
+              // "params": {
+                // // The field of after that holds the line. line when left out.
+                // // string; default "line".
+                // "field": "line",
+              // },
+
+              // // Or wasm, with every one of its params:
+              // // Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+              // // body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+              // // sinks that read and write bytes.
+              // "module": "wasm",
+              // "params": {
+                // // The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                // // fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                // // GOARCH=wasm go build -buildmode=c-shared.
+                // // string; required.
+                // "path": "/etc/fit/plugins/filter.wasm",
+
+                // // A string the plugin reads, for settings of its own.
+                // // string.
+                // "config": "{}",
+
+                // // How long a call may run; past it the call is stopped and fails. 1s when left out.
+                // // duration, as "1.5s" or "2m"; default "1s".
+                // "timeout": "1s",
+
+                // // The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                // // integer, 0 or more; default 134217728.
+                // "max_memory_bytes": 134217728,
+
+                // // The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                // // 0.
+                // // integer, 0 or more; default 16777216.
+                // "max_output_bytes": 16777216,
+              // },
+            // },
+          // },
+
+          // // Or generate, with every one of its params:
           // // Makes numbered records of every value type, the same ones each time, in transactions of
           // // tx_size: for trying out sinks and transforms, and for tests. Its position is the count of
           // // records made; it ends after records.
@@ -6660,6 +6801,140 @@
             // // What the records are written to, and its params.
             // // module; required.
             // "sink": {
+              // // Writes records as lines to a file through fit's log file sink, by a codec or a template,
+              // // rotated, kept and compressed as rotate says, as the logs are; a batch is acknowledged once
+              // // it is in the file and synced.
+              // "module": "file",
+              // "params": {
+                // // The file the lines are written to, appended to when it is there. One sink writes a path:
+                // // neither another file sink nor fit's log or access log may write it.
+                // // string; required.
+                // "path": "/etc/fit/plugins/filter.wasm",
+
+                // // What makes a line of a record: line when left out, which writes after's line field, or the
+                // // record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated
+                // // values.
+                // // module.
+                // "codec": {
+                  // // A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+                  // // whose after holds the values as strings, named by columns. Encoded, a record is its after's
+                  // // (or before's) fields, those columns names or all of them, as text.
+                  // "module": "csv",
+                  // "params": {
+                    // // The columns' names, in order. Read, a row's values are named by them, and those past them
+                    // // c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                    // // empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                    // // list of string.
+                    // "columns": [],
+
+                    // // The separator, one character other than a quote or a line break. A comma when left out.
+                    // // string; default ",".
+                    // "comma": ",",
+                  // },
+
+                  // // Or json, with every one of its params:
+                  // // A line is a JSON object: with form plain, a message record whose after holds its members,
+                  // // numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+                  // // in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+                  // // null) as plain JSON or the whole record in its canonical form.
+                  // "module": "json",
+                  // "params": {
+                    // // plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                    // // in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                    // // when left out.
+                    // // one of: plain, record; default "plain".
+                    // "form": "plain",
+                  // },
+
+                  // // Or line, with every one of its params:
+                  // // A line is a message record whose after holds the line as a string, in the field field names
+                  // // (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+                  // "module": "line",
+                  // "params": {
+                    // // The field of after that holds the line. line when left out.
+                    // // string; default "line".
+                    // "field": "line",
+                  // },
+
+                  // // Or wasm, with every one of its params:
+                  // // Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+                  // // body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+                  // // sinks that read and write bytes.
+                  // "module": "wasm",
+                  // "params": {
+                    // // The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                    // // fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                    // // GOARCH=wasm go build -buildmode=c-shared.
+                    // // string; required.
+                    // "path": "/etc/fit/plugins/filter.wasm",
+
+                    // // A string the plugin reads, for settings of its own.
+                    // // string.
+                    // "config": "{}",
+
+                    // // How long a call may run; past it the call is stopped and fails. 1s when left out.
+                    // // duration, as "1.5s" or "2m"; default "1s".
+                    // "timeout": "1s",
+
+                    // // The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                    // // integer, 0 or more; default 134217728.
+                    // "max_memory_bytes": 134217728,
+
+                    // // The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                    // // 0.
+                    // // integer, 0 or more; default 16777216.
+                    // "max_output_bytes": 16777216,
+                  // },
+                // },
+
+                // // A line made of text and placeholders, in place of codec: {name} is the row's field name
+                // // (after, or before when after is null) as text, and {$namespace}, {$op}, {$key},
+                // // {$commit_time} and {$record} (its canonical JSON) are the record's; {{ is a brace. A newline
+                // // ends each line.
+                // // string.
+                // "template": "",
+
+                // // Rotates and keeps the file as a log file is: by size and time, removing old files by age,
+                // // count and total size, and compressing them. The file grows without bound when left out.
+                // // object.
+                // "rotate": {
+                  // // How large a file may grow before it is rotated: a write that would take it past this starts
+                  // // a new file. 1 GiB when left out; 0 does not rotate by size.
+                  // // integer, 0 or more; default 1073741824.
+                  // "max_bytes": 1073741824,
+
+                  // // How long a file is written before it is rotated, at the next period boundary of the log's
+                  // // time_zone: 24h turns at midnight, 1h on the hour; a fraction of a second, or a period over
+                  // // 24h that is not a whole number of days, is refused. Off when left out.
+                  // // duration, as "1.5s" or "2m".
+                  // "interval": "10s",
+
+                  // // How long a rotated file is kept after it was last written: 720h (30 days) when left out; 0
+                  // // keeps it until a count or size limit removes it.
+                  // // duration, as "1.5s" or "2m"; default "720h".
+                  // "max_age": "720h",
+
+                  // // The most rotated files kept, newest first; 0 or left out has no count limit.
+                  // // integer, 0 or more.
+                  // "max_files": 0,
+
+                  // // The most the rotated files may total, the oldest removed until they fit. 1 GiB when left
+                  // // out; 0 does not limit the total.
+                  // // integer, 0 or more; default 1073741824.
+                  // "max_total_bytes": 1073741824,
+
+                  // // Gzip a file when it is rotated. On when left out.
+                  // // boolean; default true.
+                  // "compress": true,
+                // },
+
+                // // The zone rotate's interval turns in: local (left out), utc, or an IANA name such as
+                // // Asia/Shanghai.
+                // // string.
+                // "time_zone": "",
+              // },
+
+              // // Or memory, with every one of its params:
               // // Keeps the records written in memory, in a store named by store, up to max_records: for tests
               // // and trials; the records are gone when fit stops.
               // "module": "memory",
@@ -6768,6 +7043,140 @@
           // // What the records are written to, and its params.
           // // module; required.
           // "sink": {
+            // // Writes records as lines to a file through fit's log file sink, by a codec or a template,
+            // // rotated, kept and compressed as rotate says, as the logs are; a batch is acknowledged once
+            // // it is in the file and synced.
+            // "module": "file",
+            // "params": {
+              // // The file the lines are written to, appended to when it is there. One sink writes a path:
+              // // neither another file sink nor fit's log or access log may write it.
+              // // string; required.
+              // "path": "/etc/fit/plugins/filter.wasm",
+
+              // // What makes a line of a record: line when left out, which writes after's line field, or the
+              // // record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated
+              // // values.
+              // // module.
+              // "codec": {
+                // // A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+                // // whose after holds the values as strings, named by columns. Encoded, a record is its after's
+                // // (or before's) fields, those columns names or all of them, as text.
+                // "module": "csv",
+                // "params": {
+                  // // The columns' names, in order. Read, a row's values are named by them, and those past them
+                  // // c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                  // // empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                  // // list of string.
+                  // "columns": [],
+
+                  // // The separator, one character other than a quote or a line break. A comma when left out.
+                  // // string; default ",".
+                  // "comma": ",",
+                // },
+
+                // // Or json, with every one of its params:
+                // // A line is a JSON object: with form plain, a message record whose after holds its members,
+                // // numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+                // // in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+                // // null) as plain JSON or the whole record in its canonical form.
+                // "module": "json",
+                // "params": {
+                  // // plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                  // // in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                  // // when left out.
+                  // // one of: plain, record; default "plain".
+                  // "form": "plain",
+                // },
+
+                // // Or line, with every one of its params:
+                // // A line is a message record whose after holds the line as a string, in the field field names
+                // // (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+                // "module": "line",
+                // "params": {
+                  // // The field of after that holds the line. line when left out.
+                  // // string; default "line".
+                  // "field": "line",
+                // },
+
+                // // Or wasm, with every one of its params:
+                // // Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+                // // body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+                // // sinks that read and write bytes.
+                // "module": "wasm",
+                // "params": {
+                  // // The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                  // // fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                  // // GOARCH=wasm go build -buildmode=c-shared.
+                  // // string; required.
+                  // "path": "/etc/fit/plugins/filter.wasm",
+
+                  // // A string the plugin reads, for settings of its own.
+                  // // string.
+                  // "config": "{}",
+
+                  // // How long a call may run; past it the call is stopped and fails. 1s when left out.
+                  // // duration, as "1.5s" or "2m"; default "1s".
+                  // "timeout": "1s",
+
+                  // // The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                  // // integer, 0 or more; default 134217728.
+                  // "max_memory_bytes": 134217728,
+
+                  // // The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                  // // 0.
+                  // // integer, 0 or more; default 16777216.
+                  // "max_output_bytes": 16777216,
+                // },
+              // },
+
+              // // A line made of text and placeholders, in place of codec: {name} is the row's field name
+              // // (after, or before when after is null) as text, and {$namespace}, {$op}, {$key},
+              // // {$commit_time} and {$record} (its canonical JSON) are the record's; {{ is a brace. A newline
+              // // ends each line.
+              // // string.
+              // "template": "",
+
+              // // Rotates and keeps the file as a log file is: by size and time, removing old files by age,
+              // // count and total size, and compressing them. The file grows without bound when left out.
+              // // object.
+              // "rotate": {
+                // // How large a file may grow before it is rotated: a write that would take it past this starts
+                // // a new file. 1 GiB when left out; 0 does not rotate by size.
+                // // integer, 0 or more; default 1073741824.
+                // "max_bytes": 1073741824,
+
+                // // How long a file is written before it is rotated, at the next period boundary of the log's
+                // // time_zone: 24h turns at midnight, 1h on the hour; a fraction of a second, or a period over
+                // // 24h that is not a whole number of days, is refused. Off when left out.
+                // // duration, as "1.5s" or "2m".
+                // "interval": "10s",
+
+                // // How long a rotated file is kept after it was last written: 720h (30 days) when left out; 0
+                // // keeps it until a count or size limit removes it.
+                // // duration, as "1.5s" or "2m"; default "720h".
+                // "max_age": "720h",
+
+                // // The most rotated files kept, newest first; 0 or left out has no count limit.
+                // // integer, 0 or more.
+                // "max_files": 0,
+
+                // // The most the rotated files may total, the oldest removed until they fit. 1 GiB when left
+                // // out; 0 does not limit the total.
+                // // integer, 0 or more; default 1073741824.
+                // "max_total_bytes": 1073741824,
+
+                // // Gzip a file when it is rotated. On when left out.
+                // // boolean; default true.
+                // "compress": true,
+              // },
+
+              // // The zone rotate's interval turns in: local (left out), utc, or an IANA name such as
+              // // Asia/Shanghai.
+              // // string.
+              // "time_zone": "",
+            // },
+
+            // // Or memory, with every one of its params:
             // // Keeps the records written in memory, in a store named by store, up to max_records: for tests
             // // and trials; the records are gone when fit stops.
             // "module": "memory",

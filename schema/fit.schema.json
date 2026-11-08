@@ -6899,9 +6899,192 @@
       ],
       "type": "object"
     },
+    "sync.codecs": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "csv"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.codecs.csv"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "json"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.codecs.json"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "line"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.codecs.line"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "wasm"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.codecs.wasm"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "module": {
+          "description": "The module's name within its namespace.",
+          "enum": [
+            "csv",
+            "json",
+            "line",
+            "wasm"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "description": "The module's params."
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "type": "object"
+    },
+    "sync.codecs.csv": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "description": "The columns' names, in order. Read, a row's values are named by them, and those past them c<n>, counting from 1; written, a record's fields of these names are written, a missing one empty. Left out, they are c1, c2 and so on read, and every field of the row written.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "comma": {
+          "default": ",",
+          "description": "The separator, one character other than a quote or a line break. A comma when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "sync.codecs.json": {
+      "additionalProperties": false,
+      "properties": {
+        "form": {
+          "default": "plain",
+          "description": "plain reads and writes a row as a plain JSON object; record reads and writes whole records in their canonical JSON, which keeps every type, the operation, key and namespace. plain when left out.",
+          "enum": [
+            "plain",
+            "record"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "sync.codecs.line": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "default": "line",
+          "description": "The field of after that holds the line. line when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "sync.codecs.wasm": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "description": "A string the plugin reads, for settings of its own.",
+          "type": "string"
+        },
+        "max_memory_bytes": {
+          "default": 134217728,
+          "description": "The most memory the plugin's instance may have. 128 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_output_bytes": {
+          "default": 16777216,
+          "description": "The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode, fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "1s",
+          "description": "How long a call may run; past it the call is stopped and fails. 1s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
     "sync.sinks": {
       "additionalProperties": false,
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "file"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.file"
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -6955,6 +7138,7 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "file",
             "memory",
             "stdout",
             "wasm"
@@ -6967,6 +7151,35 @@
       },
       "required": [
         "module"
+      ],
+      "type": "object"
+    },
+    "sync.sinks.file": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a line of a record: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated values."
+        },
+        "path": {
+          "description": "The file the lines are written to, appended to when it is there. One sink writes a path: neither another file sink nor fit's log or access log may write it.",
+          "type": "string"
+        },
+        "rotate": {
+          "$ref": "#/$defs/config.Rotate",
+          "description": "Rotates and keeps the file as a log file is: by size and time, removing old files by age, count and total size, and compressing them. The file grows without bound when left out."
+        },
+        "template": {
+          "description": "A line made of text and placeholders, in place of codec: {name} is the row's field name (after, or before when after is null) as text, and {$namespace}, {$op}, {$key}, {$commit_time} and {$record} (its canonical JSON) are the record's; {{ is a brace. A newline ends each line.",
+          "type": "string"
+        },
+        "time_zone": {
+          "description": "The zone rotate's interval turns in: local (left out), utc, or an IANA name such as Asia/Shanghai.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
       ],
       "type": "object"
     },
@@ -7041,6 +7254,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "file"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.file"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "generate"
               }
             }
@@ -7074,6 +7303,7 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "file",
             "generate",
             "wasm"
           ],
@@ -7085,6 +7315,76 @@
       },
       "required": [
         "module"
+      ],
+      "type": "object"
+    },
+    "sync.sources.file": {
+      "additionalProperties": false,
+      "properties": {
+        "close_after": {
+          "default": "1m",
+          "description": "How long a file may go without growing before its partial last line (or multiline event) is taken as it is, and the file closed; a closed file is opened again when a scan finds it grown. 1m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a line or an event: line when left out, a message record holding it as after's line."
+        },
+        "fingerprint_bytes": {
+          "default": 1024,
+          "description": "How many bytes of a file's head its fingerprint covers: a file whose device and inode are known but whose head differs is a new one, and a new file whose head matches a file just truncated is its copy, read on from where the original was. 1024 when left out or 0.",
+          "maximum": 65536,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_files": {
+          "default": 100000,
+          "description": "The most files known at once, each in the checkpoint; files found past it are not read, and a warning says so. 100000 when left out or 0.",
+          "maximum": 10000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_line_bytes": {
+          "default": 1048576,
+          "description": "The longest line, or multiline event, in bytes: a longer one is cut there, its rest skipped, and counted. 1 MiB when left out or 0.",
+          "maximum": 67108864,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_open_files": {
+          "default": 256,
+          "description": "The most files open at once: past it, a file read to its end is closed to open another. 256 when left out or 0.",
+          "maximum": 65536,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "multiline": {
+          "$ref": "#/$defs/syncfile.Multiline",
+          "description": "Joins lines into events: a line matching start begins an event, and the lines after it, up to the next, belong to it, as a stack trace does. Each line is a record of its own when left out."
+        },
+        "paths": {
+          "description": "The files to read: paths or globs (*, ? and [...] within one path element), matched again each scan_interval, so new files are found.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "poll_interval": {
+          "default": "250ms",
+          "description": "How long the source waits, once every open file is read to its end, before reading them again. 250ms when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "scan_interval": {
+          "default": "10s",
+          "description": "How often the globs are matched again, to find new, renamed, truncated and deleted files. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "paths"
       ],
       "type": "object"
     },
@@ -7606,6 +7906,26 @@
       },
       "required": [
         "path"
+      ],
+      "type": "object"
+    },
+    "syncfile.Multiline": {
+      "additionalProperties": false,
+      "properties": {
+        "max_lines": {
+          "default": 500,
+          "description": "The most lines of an event: the line past it begins another. 500 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "description": "A regular expression (RE2) a line beginning an event matches.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start"
       ],
       "type": "object"
     },

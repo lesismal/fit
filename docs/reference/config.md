@@ -48,10 +48,10 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`file`](#sync-sinks-file), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
-- [Sync codecs](#sync-codecs): [`wasm`](#sync-codecs-wasm)
+- [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
 ## The config
 
@@ -882,7 +882,7 @@ In JSON:
 
 ### `log.rotate`
 
-Also at `log.loggers.*.rotate`, `access_log.rotate`.
+Also at `log.loggers.*.rotate`, `access_log.rotate`, `rotate`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -6006,8 +6006,37 @@ after.
 
 | Module | What it does |
 | --- | --- |
+| [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
+
+<a id="sync-sources-file"></a>
+
+### `file`
+
+Tails files as Filebeat does: the paths' globs are scanned again each scan_interval, each file known by its device, inode and a fingerprint of its head, so a renamed file is followed, a truncated one read again from its start, a copy taken before a truncation read on from where the original was, and a deleted one finished first. Each line, or each multiline event, goes through the codec into records; the checkpoint holds every file's identity and offset.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `paths` | list of string |  | Required. The files to read: paths or globs (*, ? and [...] within one path element), matched again each scan_interval, so new files are found. |
+| `scan_interval` | duration | `"10s"` | How often the globs are matched again, to find new, renamed, truncated and deleted files. 10s when left out. |
+| `poll_interval` | duration | `"250ms"` | How long the source waits, once every open file is read to its end, before reading them again. 250ms when left out. |
+| `close_after` | duration | `"1m"` | How long a file may go without growing before its partial last line (or multiline event) is taken as it is, and the file closed; a closed file is opened again when a scan finds it grown. 1m when left out. |
+| `max_line_bytes` | integer, 0 to 67108864 | `1048576` | The longest line, or multiline event, in bytes: a longer one is cut there, its rest skipped, and counted. 1 MiB when left out or 0. |
+| `multiline` | [object](#syncfile-multiline) |  | Joins lines into events: a line matching start begins an event, and the lines after it, up to the next, belong to it, as a stack trace does. Each line is a record of its own when left out. |
+| `max_open_files` | integer, 0 to 65536 | `256` | The most files open at once: past it, a file read to its end is closed to open another. 256 when left out or 0. |
+| `max_files` | integer, 0 to 10000000 | `100000` | The most files known at once, each in the checkpoint; files found past it are not read, and a warning says so. 100000 when left out or 0. |
+| `fingerprint_bytes` | integer, 0 to 65536 | `1024` | How many bytes of a file's head its fingerprint covers: a file whose device and inode are known but whose head differs is a new one, and a new file whose head matches a file just truncated is its copy, read on from where the original was. 1024 when left out or 0. |
+| `codec` | [codec](#sync codecs) |  | What makes records of a line or an event: line when left out, a message record holding it as after's line. |
+
+<a id="syncfile-multiline"></a>
+
+### `multiline` in `file`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `start` | string |  | Required. A regular expression (RE2) a line beginning an event matches. |
+| `max_lines` | integer, 0 to 100000 | `500` | The most lines of an event: the line past it begins another. 500 when left out or 0. |
 
 <a id="sync-sources-generate"></a>
 
@@ -6112,9 +6141,24 @@ since what came after the checkpoint is written again after a crash.
 
 | Module | What it does |
 | --- | --- |
+| [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
 | [`wasm`](#sync-sinks-wasm) | A WebAssembly plugin that writes each batch through fit's HTTP client to the hosts it is allowed |
+
+<a id="sync-sinks-file"></a>
+
+### `file`
+
+Writes records as lines to a file through fit's log file sink, by a codec or a template, rotated, kept and compressed as rotate says, as the logs are; a batch is acknowledged once it is in the file and synced.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | string |  | Required. The file the lines are written to, appended to when it is there. One sink writes a path: neither another file sink nor fit's log or access log may write it. |
+| `codec` | [codec](#sync codecs) |  | What makes a line of a record: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated values. |
+| `template` | string |  | A line made of text and placeholders, in place of codec: {name} is the row's field name (after, or before when after is null) as text, and {$namespace}, {$op}, {$key}, {$commit_time} and {$record} (its canonical JSON) are the record's; {{ is a brace. A newline ends each line. |
+| `rotate` | [object](#config-rotate) |  | Rotates and keeps the file as a log file is: by size and time, removing old files by age, count and total size, and compressing them. The file grows without bound when left out. |
+| `time_zone` | string |  | The zone rotate's interval turns in: local (left out), utc, or an IANA name such as Asia/Shanghai. |
 
 <a id="sync-sinks-memory"></a>
 
@@ -6475,12 +6519,48 @@ In JSON:
 
 A codec turns the bytes a source reads (a file's lines, a Kafka message, an HTTP body, an S3
 object) into records, and records into the bytes a sink writes. The sources and sinks that read
-and write bytes (files from I166, then Kafka, HTTP and S3) take one, named by `module`, with its
-`params`; none does yet. A record a codec makes has no position: the source gives it one.
+and write bytes (the `file` source and sink, then Kafka, HTTP and S3) take one, named by `module`,
+with its `params`; `line` when they name none. A record a codec makes has no position: the source
+gives it one. A line a codec refuses still becomes a record: `after` holds the `line` and the
+`error`, so that nothing read is lost.
 
 | Module | What it does |
 | --- | --- |
+| [`csv`](#sync-codecs-csv) | A row of comma-separated values, named by `columns`, read and written |
+| [`json`](#sync-codecs-json) | A JSON object as a row (`plain`), or a whole record in its canonical JSON (`record`) |
+| [`line`](#sync-codecs-line) | A line as a message record's `after.line`, and back |
 | [`wasm`](#sync-codecs-wasm) | A WebAssembly plugin's `fit_sync_decode` and `fit_sync_encode`, for a format of your own |
+
+<a id="sync-codecs-csv"></a>
+
+### `csv`
+
+A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record whose after holds the values as strings, named by columns. Encoded, a record is its after's (or before's) fields, those columns names or all of them, as text.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `columns` | list of string |  | The columns' names, in order. Read, a row's values are named by them, and those past them c<n>, counting from 1; written, a record's fields of these names are written, a missing one empty. Left out, they are c1, c2 and so on read, and every field of the row written. |
+| `comma` | string | `","` | The separator, one character other than a quote or a line break. A comma when left out. |
+
+<a id="sync-codecs-json"></a>
+
+### `json`
+
+A line is a JSON object: with form plain, a message record whose after holds its members, numbers as ints, or floats when they have a fraction or exponent; with form record, a record in its canonical JSON. Encoded, a record is the same, its after (or before, when after is null) as plain JSON or the whole record in its canonical form.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `form` | string: `plain`, `record` | `"plain"` | plain reads and writes a row as a plain JSON object; record reads and writes whole records in their canonical JSON, which keeps every type, the operation, key and namespace. plain when left out. |
+
+<a id="sync-codecs-line"></a>
+
+### `line`
+
+A line is a message record whose after holds the line as a string, in the field field names (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `field` | string | `"line"` | The field of after that holds the line. line when left out. |
 
 <a id="sync-codecs-wasm"></a>
 

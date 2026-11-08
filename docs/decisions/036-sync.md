@@ -148,6 +148,26 @@ The plan's I165 section lists them all; these change the record above.
 5. **JSON is slow in a Go plugin**: locally, 46.5 µs a record against the built-in's 81 ns, so the
    binary form of planning decision 8 is asked for, with the benchmark host's run (I165b).
 
+## Decisions made while building I166 (pending review)
+
+The plan's I166 section lists them all; these change the record above.
+
+1. **Built-in codecs.** `line`, `json` (a row as plain JSON, or a whole record in its canonical
+   form) and `csv` are modules of `sync.codecs` in `fitsync`; a connector names one in its params
+   as a module reference, `line` when it names none. A line a codec refuses becomes a message
+   record holding the line and the error, not a lost line nor a source error.
+2. **A file source's position** is every file's device and inode (on Windows the volume's serial
+   number and file index), a fingerprint of its head, its offset and its records' key, and the heads
+   of files truncated lately, so that a copy taken before a truncation is read on from where its
+   original was. Files gone and closed are forgotten, so it stays bounded. The source sets a
+   position only between lines, every pass or 1,000 records, rather than on every record.
+3. **Records read from files have keys**: the file's device, inode and a hash of its first line,
+   and the offset, so that a line read again after a crash has the key it had and an idempotent
+   sink folds the replay.
+4. **The file sink writes through the logs' file sink** (decision 034), shared with the process's
+   log files: one sink per path, rotation, retention and compression as a log's; a batch is
+   acknowledged once written and synced.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and

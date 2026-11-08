@@ -21,5 +21,6 @@ import (
 	_ "github.com/lesismal/fit/plugin/wasm"
 	_ "github.com/lesismal/fit/streaming"
 	_ "github.com/lesismal/fit/sync"
+	_ "github.com/lesismal/fit/sync/file"
 	_ "github.com/lesismal/fit/webrtc/media"
 )

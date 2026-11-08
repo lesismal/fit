@@ -2,6 +2,7 @@ package logs
 
 import (
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -286,6 +287,8 @@ type control struct {
 	rotate  bool
 	cleanup bool
 	dryRun  bool
+	// write, for WriteSync, is written and synced.
+	write   [][]byte
 	removed []Removed
 	err     error
 	done    chan struct{}
@@ -356,6 +359,8 @@ func (f *File) run() {
 				c.err = f.rotateNowOnWriter()
 			case c.cleanup:
 				c.removed, c.err = f.retention(c.dryRun)
+			case c.write != nil:
+				c.err = f.writeSync(c.write)
 			}
 			close(c.done)
 		case <-t.C:
@@ -382,18 +387,32 @@ func (f *File) drain() {
 	}
 }
 
+// writeSync writes bufs, each as writeBuffer does, and syncs the file,
+// reporting the first error.
+func (f *File) writeSync(bufs [][]byte) error {
+	for _, b := range bufs {
+		if err := f.writeBuffer(b); err != nil {
+			return err
+		}
+	}
+	if err := f.file.Sync(); err != nil {
+		return fmt.Errorf("sync %s: %w", f.path, err)
+	}
+	return nil
+}
+
 // writeBuffer writes one buffer, rotating the file first when the write
 // would pass its size or a period ended.
-func (f *File) writeBuffer(b []byte) {
+func (f *File) writeBuffer(b []byte) error {
 	if f.file == nil {
 		f.dropped.Add(1)
-		return
+		return fmt.Errorf("write %s: the file is not open", f.path)
 	}
 	if f.needRotate(len(b), f.now()) {
 		f.rotate(f.now())
 		if f.file == nil {
 			f.dropped.Add(1)
-			return
+			return fmt.Errorf("write %s: the file is not open after its rotation", f.path)
 		}
 	}
 	n, err := f.file.Write(b)
@@ -402,8 +421,10 @@ func (f *File) writeBuffer(b []byte) {
 	f.currentSize = f.size
 	f.statusMu.Unlock()
 	if err != nil {
-		f.setErr(fmt.Errorf("write %s: %w", f.path, err))
+		err = fmt.Errorf("write %s: %w", f.path, err)
+		f.setErr(err)
 	}
+	return err
 }
 
 // needRotate reports whether a write of n bytes rotates the file.
@@ -595,6 +616,40 @@ func (f *File) Write(p []byte) (int, error) {
 		f.putBuffer(b)
 		f.dropped.Add(1)
 		return 0, ErrQueueFull
+	}
+}
+
+// WriteSync writes bufs, in order, after what is queued, and returns once
+// they are in the file and the file is synced: for a writer that
+// acknowledges what it wrote, as sync's file sink does. Each buffer is one
+// write, which the file rotates before when it would pass its size, so a
+// buffer should hold whole lines. Unlike Write it waits for the disk, so it
+// is never called on a fib worker; ctx ending stops the wait, not the write.
+func (f *File) WriteSync(ctx context.Context, bufs [][]byte) error {
+	if len(bufs) == 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c := &control{write: bufs, done: make(chan struct{})}
+	f.rmu.RLock()
+	if f.closed {
+		f.rmu.RUnlock()
+		return ErrClosed
+	}
+	select {
+	case f.ctl <- c:
+		f.rmu.RUnlock()
+	case <-ctx.Done():
+		f.rmu.RUnlock()
+		return ctx.Err()
+	}
+	select {
+	case <-c.done:
+		return c.err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

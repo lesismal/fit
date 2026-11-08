@@ -240,6 +240,13 @@ func (c *Context) MediaLibrary(name string) *config.MediaLibrary {
 	return nil
 }
 
+// Load loads a module ref of the module's params names, in namespace ns,
+// with the module's own config, as a source loads its codec. Its Cleanup is
+// the caller's to call.
+func (c *Context) Load(ns string, ref config.ModuleRef) (any, error) {
+	return Load(ns, ref, c.env)
+}
+
 // Errorf returns an error about the param named field, or about the params as
 // a whole when field is empty, with its path and position.
 func (c *Context) Errorf(field, format string, args ...any) error {
