@@ -332,7 +332,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | done |
 | I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | done |
 | I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | done |
-| I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
+| I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | done |
 | I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | done |
 | I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | done |
 | I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | done |
@@ -4037,6 +4037,46 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   并行读取各表；之后从 slot 的一致点开始跟随流，因此交接是精确的；块的进度记在检查点中。
 - **完成标准**：在写入进行中做的快照，结束时目标与源的校验和相同；恢复的快照若其导出快照已不存在，则该表从头开始并说明原因。
 - **涉及**：`sync/postgres`、`test/sync`。
+
+**待审阅的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **`snapshot`：`initial`（默认）或 `never`。** `initial` 在没有检查点时读取各表；I178 的行为（只读变更）即 `never`，其测试现已
+   设置它。没有 `always`：新的快照由 Admin API 发起（I188 的 `Snapshot`，它会删除检查点）。备选：默认 `never`，保持 I178 的行为。
+2. **快照从哪里来。** `create` 新建的 slot 用 `EXPORT_SNAPSHOT` 创建，读表期间本次运行的复制连接保持空闲，之后在其一致点
+   `START_REPLICATION`。slot 已存在时（手工创建，或为新快照删除了检查点），在第二条复制连接上用 `EXPORT_SNAPSHOT` 创建一个
+   **临时 slot**，流从*它的*一致点开始，服务器以此为解码起点（之前提交的事务被跳过），因此这里的交接同样精确；快照结束时临时
+   slot 随其连接消失。永久 slot 从不删除或重建（I178 决定 3）。备选：删除并重建 slot，或者不用 slot 取当时的快照、从 slot 的
+   位置重放。
+3. **按键分块并行读取。** 表按主键或其 `REPLICA IDENTITY USING INDEX` 索引（与流的键一致）切成每段 `chunk_rows`（100,000）行
+   的范围：先 `count(*)`，再按键做 `row_number()` 取每第 `chunk_rows` 行的键，二者都在导出快照中，因此在该快照中何时规划都
+   相同。两者都没有的表（无键的 `FULL`，或只发布插入）是一个整表读取的块。同时读取 `snapshot_parallel`（4，最多 64）个块，
+   每个读者用自己的普通连接，每块在 `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TRANSACTION SNAPSHOT` 中通过游标读取
+   （每次 `FETCH` 至多 1,000 行，行大时更少，每次约 16 MiB）。边界是键的文本，作为行与无类型字面量比较，因此服务器能读回的
+   任何键类型都可用。备选：`ctid` 范围（PostgreSQL 14+），或用抽样定边界。
+4. **快照记录**是没有事务（`Tx` 为空）、没有提交时间的 insert，其键和值与流对同一行给出的完全相同（按类型 OID 解析文本值，
+   列相同：不含生成列，保留 publication 的列列表），并应用 publication 的行过滤（15+）。备选：每块一个事务。
+5. **快照期间的位置**为 `{"lsn": <流的起点>, "snapshot": {"id", "tables": [{"name", "chunks"}], "done": "0-41,43", "at":
+   [{"chunk", "key"}]}}`，与 I167 的作业一样放在每块的最后一条记录和每 100 条中的一条上，记录经同一把锁发出，每块扣留一条；
+   快照的最后一条记录只带 `{"lsn": ...}`。因此检查点从不声称目标缺少的块或行已完成。备选：把整个规划放进位置。
+6. **续传。** 快照中途失败的运行保留其临时 slot 的连接，从而保留导出快照，以及规划，五分钟（`holdFor`）；检查点指向该快照的
+   下一次运行在其中精确续传，从每块最后的键之后继续。否则（fit 重启、超过五分钟、slot 由本次运行自己创建而运行会关闭其连接、
+   或 `SET TRANSACTION SNAPSHOT` 返回 22023）快照已不存在：所有块都已完成的表保持完成，其余各表从新的临时 slot 的快照**整表
+   重读**，并用一条警告列出它们，而流仍从第一个快照的点开始，因此两者之间的变更在重读的表上重放，在按键写入的目标中收敛
+   （与 I175 的 MySQL 快照收敛一样）。备选：无论完成多少，都从新的临时 slot 精确地重做整个快照。
+7. **作业**（`mode: "once"`）实现 I167 的 `Chunker`：`Chunks` 规划 publication 的各表（publication 不存在时用 `tables`；不需要也
+   不创建 slot），`ReadChunk` 在自己连接上的独立 `REPEATABLE READ` 事务中读一个块，从 `{"key": [...]}` 之后续传；无键表的块
+   整块重读。作业的各块不在同一个导出快照中（之后没有可交接的流，而快照会在整个作业期间阻挡 vacuum）：每块自身一致，与 MySQL
+   和 MongoDB 的相同。`never` 时作业读到服务器末端的变更，与 I178 相同。备选：作业用一个导出快照，由一条从 `Chunks` 到作业结束
+   的连接持有。
+8. **目录查询**除主键外还读取副本标识索引的列和非生成列；15+ 上读 `pg_publication_tables` 的 `attnames` 和 `rowfilter`。
+   备选：`SELECT *`，包含生成列，忽略列列表和行过滤。
+9. **互通测试**（`test/sync/postgres_snapshot_test.go`，PostgreSQL 13 到 17）：一边插入一边读 3,000 行的表，分别经 `create`
+   新建的 slot 和已存在 slot 旁的临时 slot，每行恰好一次（没有既在快照又在流中的）；三张表（int 键、text 加 int 的复合键、
+   `REPLICA IDENTITY FULL` 无键）在被更新、删除、插入和改键的同时，写往内存目标的管道在第五次保存检查点时被杀掉（通常在快照
+   中途）后再运行，此时快照已不存在、各表重读，最终与各表逐行相等；作业的各块各读一次，以及从某个键之后续传一个块。各版本
+   连续三次通过。
+10. **规模**：约 790 行代码、580 行单元测试（伪造服务器的 SQL 和 slot，无容器时覆盖包内 98.1% 的语句）和 300 行互通测试；
+    没有剩余工作，没有 I179b。
 
 ### I180 PostgreSQL 作为目标
 

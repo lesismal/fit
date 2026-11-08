@@ -9432,6 +9432,12 @@
           ],
           "type": "string"
         },
+        "chunk_rows": {
+          "default": 100000,
+          "description": "The rows of a chunk of the snapshot: a table with a primary key, or a replica identity index, is split into ranges of that key of this many rows, each read in a transaction of its own and resumed after its last row; a table without one is read whole. 100000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "connect_timeout": {
           "default": "10s",
           "description": "How long connecting, TLS and authentication may take. 10s when left out or 0.",
@@ -9439,7 +9445,7 @@
           "type": "string"
         },
         "create": {
-          "description": "Create the publication and the slot when they do not exist, rather than fail. The slot is made with no snapshot: changes come from its creation on.",
+          "description": "Create the publication and the slot when they do not exist, rather than fail. With snapshot initial, the slot made exports the snapshot the tables are read from; with never, changes come from its creation on.",
           "type": "boolean"
         },
         "database": {
@@ -9471,6 +9477,22 @@
         "slot": {
           "description": "The logical replication slot read, of plugin pgoutput: lowercase letters, digits and underscores. With create, made when it does not exist; it is never dropped: drop it (pg_drop_replication_slot) when the pipeline is gone, or the server keeps its WAL for good.",
           "type": "string"
+        },
+        "snapshot": {
+          "default": "initial",
+          "description": "Where a pipeline without a checkpoint starts: initial, every row of the tables, read from a snapshot exported at the point the stream then starts from (the slot's own when create makes it, a temporary slot's otherwise), then the changes after it; never, the changes from the slot's position on. A job (mode once) reads the snapshot and stops, or, with never, the changes up to the server's end. initial when left out.",
+          "enum": [
+            "initial",
+            "never"
+          ],
+          "type": "string"
+        },
+        "snapshot_parallel": {
+          "default": 4,
+          "description": "How many chunks of the snapshot are read at once, each on a connection of its own, before the stream; a job reads job.max_parallel at a time instead. 4 when left out or 0.",
+          "maximum": 64,
+          "minimum": 0,
+          "type": "integer"
         },
         "spool_dir": {
           "description": "The directory streamed transactions are kept in until they commit or abort, a file each, removed then. The system's temporary directory when left out.",
