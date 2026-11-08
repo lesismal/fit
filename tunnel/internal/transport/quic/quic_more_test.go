@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -296,6 +297,40 @@ func TestMaxConns(t *testing.T) {
 	defer c.Close()
 	if _, err := transport.Dial(e, "quic://"+s.hostport(t), 300*time.Millisecond, insecureOpts, open); err == nil {
 		t.Error("a connection past MaxConns was let in")
+	}
+}
+
+// A connection counts toward MaxConns from its first Initial: the server's
+// first flight finishes the client's handshake, and a second client that
+// dials then, while the first connection is still being set up, is not let
+// in.
+func TestMaxConnsWhileAccepting(t *testing.T) {
+	accepted, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	acceptedHook = func() {
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			close(accepted)
+			<-release
+		}
+	}
+	// Cleaned up after the listener's engine, which is made later.
+	t.Cleanup(func() { acceptedHook = nil })
+	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{MaxConns: 1}, false)
+	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
+	e := tunneltest.Engine(t)
+	c, err := transport.Dial(e, "quic://"+s.hostport(t), 5*time.Second, insecureOpts, open)
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	defer c.Close()
+	<-accepted
+	_, err = transport.Dial(e, "quic://"+s.hostport(t), 300*time.Millisecond, insecureOpts, open)
+	close(release)
+	if err == nil {
+		t.Error("a connection past MaxConns was let in while the first was being accepted")
 	}
 }
 

@@ -188,16 +188,26 @@ func (l *listener) OnData(c *fib.Connection, d []byte) {
 		bufferpool.Put(d)
 		return
 	}
+	// The connection takes its place now, under the lock the bound is
+	// checked by: Accept sends the server's first flight, which can finish
+	// the client's handshake, so a client that dials next must find it
+	// counted.
+	qcConn := &conn{local: c.LocalAddr(), open: l.open}
 	l.mu.Lock()
-	closed := l.closed || len(l.conns) >= l.maxConns
+	full := l.closed || len(l.conns) >= l.maxConns
+	if !full {
+		l.conns[qcConn] = struct{}{}
+	}
 	l.mu.Unlock()
-	if closed || c.ShuttingDown() || !l.admit(c, d) {
+	if full || c.ShuttingDown() || !l.admit(c, d) {
 		// The client sends its Initial again, and is let in once a
 		// handshake is over, or answers the Retry admit sent.
+		if !full {
+			l.forget(qcConn)
+		}
 		bufferpool.Put(d)
 		return
 	}
-	qcConn := &conn{local: c.LocalAddr(), open: l.open}
 	path := &peerPath{c: c, p: p, conn: qcConn}
 	l.handshakes.Add(1)
 	qcConn.handshake = func(cc *conn) {
@@ -220,14 +230,16 @@ func (l *listener) OnData(c *fib.Connection, d []byte) {
 		if !shook {
 			l.handshakes.Add(-1)
 		}
-		l.mu.Lock()
-		delete(l.conns, cc)
-		l.mu.Unlock()
+		l.forget(cc)
 	}
 	qc := fq.Accept(path, c.RemoteAddr(), l.config, qcConn, d)
 	if qc == nil {
 		l.handshakes.Add(-1)
+		l.forget(qcConn)
 		return
+	}
+	if acceptedHook != nil {
+		acceptedHook()
 	}
 	qcConn.mu.Lock()
 	qcConn.qc = qc
@@ -235,15 +247,27 @@ func (l *listener) OnData(c *fib.Connection, d []byte) {
 	p.mu.Lock()
 	p.conns = append(p.conns, qcConn)
 	p.mu.Unlock()
+	// A Close that came during Accept found the connection without its
+	// QUIC connection to close.
 	l.mu.Lock()
-	if l.closed {
-		l.mu.Unlock()
+	closed := l.closed
+	l.mu.Unlock()
+	if closed {
 		qc.Close(codeNoError, "listener closed")
-		return
 	}
-	l.conns[qcConn] = struct{}{}
+}
+
+// forget gives the place cc took back.
+func (l *listener) forget(cc *conn) {
+	l.mu.Lock()
+	delete(l.conns, cc)
 	l.mu.Unlock()
 }
+
+// acceptedHook, set by tests only, runs once a client's first Initial has
+// started its connection: the server's first flight, which can finish the
+// client's handshake, is sent by then.
+var acceptedHook func()
 
 // admit reports whether the client Initial in d, from c's address, may
 // start a handshake. Past max handshakes it may not. Past half of them, one
