@@ -30,6 +30,14 @@ import (
 //	                                          "from": "checkpoint" | "start"}
 //	POST   /sync/test                         the same for a pipeline's config not
 //	POST   /sync/dry-run                      applied: {"pipeline": {...}, ...}
+//	GET    /sync/pipelines/{name}/dead-letters
+//	                                          the dead letters a dead_letters sink
+//	                                          keeps, oldest first: ?after=ID&limit=N
+//	POST   /sync/pipelines/{name}/dead-letters/replay
+//	                                          write them to the sinks again:
+//	                                          {"ids": [...]} or {"all": true}
+//	DELETE /sync/pipelines/{name}/dead-letters
+//	                                          drop them: ?id=ID&id=... or ?all=1
 //
 // A change of the checkpoint that would skip or replay records (setting
 // another position, a reset or a snapshot while there is a checkpoint) is
@@ -53,7 +61,7 @@ func (s *Server) syncRuntime(w http.ResponseWriter) *fitsync.Runtime {
 func syncError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	switch {
-	case errors.Is(err, fitsync.ErrNoPipeline):
+	case errors.Is(err, fitsync.ErrNoPipeline), errors.Is(err, fitsync.ErrNoDeadLetters):
 		status = http.StatusNotFound
 	case errors.Is(err, fitsync.ErrConfirm):
 		status = http.StatusConflict
@@ -342,4 +350,103 @@ func (s *Server) syncDryRunConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+// syncDeadLetters answers GET /sync/pipelines/{name}/dead-letters.
+func (s *Server) syncDeadLetters(w http.ResponseWriter, r *http.Request) {
+	rt := s.syncRuntime(w)
+	if rt == nil {
+		return
+	}
+	q := r.URL.Query()
+	var after uint64
+	if v := q.Get("after"); v != "" {
+		var err error
+		if after, err = strconv.ParseUint(v, 10, 64); err != nil {
+			writeError(w, http.StatusBadRequest, "after is a dead letter's id, not "+strconv.Quote(v))
+			return
+		}
+	}
+	limit := 0
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > fitsync.MaxDeadLetterPage {
+			writeError(w, http.StatusBadRequest, "limit is from 1 to "+strconv.Itoa(fitsync.MaxDeadLetterPage))
+			return
+		}
+		limit = n
+	}
+	page, err := rt.DeadLetters(r.PathValue("name"), after, limit)
+	if err != nil {
+		syncError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// replayBody is the body of POST /sync/pipelines/{name}/dead-letters/replay.
+type replayBody struct {
+	IDs []uint64 `json:"ids"`
+	All bool     `json:"all"`
+}
+
+// syncReplay answers POST /sync/pipelines/{name}/dead-letters/replay.
+func (s *Server) syncReplay(w http.ResponseWriter, r *http.Request) {
+	rt := s.syncRuntime(w)
+	if rt == nil {
+		return
+	}
+	var b replayBody
+	if !s.readSyncBody(w, r, &b) {
+		return
+	}
+	switch {
+	case b.All && len(b.IDs) > 0:
+		writeError(w, http.StatusBadRequest, "give ids or all, not both")
+		return
+	case !b.All && len(b.IDs) == 0:
+		writeError(w, http.StatusBadRequest, "name the dead letters to replay: {\"ids\": [...]}, or {\"all\": true}")
+		return
+	}
+	res, err := rt.ReplayDeadLetters(r.Context(), r.PathValue("name"), b.IDs)
+	if err != nil {
+		// A replay that wrote some letters, and could not drop them all
+		// from the file, is a 500: they stay, and are written again.
+		syncError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// syncDropDeadLetters answers DELETE /sync/pipelines/{name}/dead-letters.
+func (s *Server) syncDropDeadLetters(w http.ResponseWriter, r *http.Request) {
+	rt := s.syncRuntime(w)
+	if rt == nil {
+		return
+	}
+	q := r.URL.Query()
+	all, _ := strconv.ParseBool(q.Get("all"))
+	var ids []uint64
+	for _, v := range q["id"] {
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "id is a dead letter's id, not "+strconv.Quote(v))
+			return
+		}
+		ids = append(ids, id)
+	}
+	switch {
+	case all && len(ids) > 0:
+		writeError(w, http.StatusBadRequest, "give id or all, not both")
+		return
+	case !all && len(ids) == 0:
+		writeError(w, http.StatusBadRequest, "name the dead letters to drop: ?id=ID, or ?all=1")
+		return
+	}
+	n, err := rt.DropDeadLetters(r.PathValue("name"), ids)
+	if err != nil {
+		syncError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"dropped": n})
 }

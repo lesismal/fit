@@ -50,6 +50,25 @@ transforms, and returns them with what each became, writing nothing and saving n
 `{"pipeline": {...}}`. `fit sync status`, `pause`, `resume`, `snapshot`, `checkpoint`, `test` and
 `dry-run` call these through the Admin API the bootstrap config names, as `fit token` does.
 
+The Admin API's `/metrics` carries each pipeline's as `fit_sync_*`: its state, the records and
+bytes read, acknowledged and failed, the errors, the queue against its bounds, the lag from commit
+time to acknowledgement (`fit_sync_lag_seconds`) and behind the source's server
+(`fit_sync_source_lag`, in the source's unit: a PostgreSQL slot's bytes of WAL, for sources that
+tell it), and per sink the records and bytes written, the batches, errors, retries and records
+failed (`fit_sync_sink_*`), and the dead letters written, not written, replayed, kept and dropped;
+the status shows the same. The `sync` logger says when a pipeline starts, runs, waits for its
+schedule, stops or is paused, and its errors at most once each 10s, counting those held back. With
+`on_error: "dead_letter"`, the `dead_letters` sink keeps each dead letter, with the record, its
+error, where it failed and its attempts, in `<state_dir>/<pipeline>.dead_letters.jsonl`, bounded
+(10,000 letters, 64 MiB; when full a letter is refused, and the pipeline stops, unless
+`when_full: "drop_oldest"`). `GET /sync/pipelines/{name}/dead-letters` lists them; `POST
+.../dead-letters/replay` with `{"ids": [...]}` or `{"all": true}` stops the pipeline, writes each
+record to the sink it failed at (through the transforms first, to every sink, when a transform
+failed it), drops those written, keeps and reports those failing again, and starts the pipeline
+again; `DELETE .../dead-letters?id=...` or `?all=1` drops them. `fit sync dead-letters` lists,
+`-replay` and `-drop` do the rest. A replay writes a record as it was, over any later change of its
+key the sink has.
+
 ```json
 {
   "sync": {

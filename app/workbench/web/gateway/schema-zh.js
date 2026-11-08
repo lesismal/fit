@@ -1217,5 +1217,9 @@ window.FitSchemaZh = {
 "The user to authenticate as, with SCRAM-SHA-256 and password_env, in place of a user in uri; no authentication when neither names one.": "用于认证的用户，使用 SCRAM-SHA-256，与 password_env 一起使用，代替 uri 中的用户；两者都未给出用户时不认证。",
 "The environment variable holding the user's password, read when the pipeline loads; needs a user, in username or uri.": "保存该用户密码的环境变量，在管道加载时读取；需要有用户，由 username 或 uri 给出。",
 "How long one command may take, from sending it to the end of its answer: a batch of a cursor, a bulk write of up to the sink's max_request_bytes. 60s when left out or 0.": "一条命令从发出到收完应答最多可用多久：游标的一批，或输出端一次至多 max_request_bytes 的批量写入。不设置或为 0 时为 60s。",
-"The most connections open to the primary, the open cursors' among them, shared by a job's parallel readers or writers. 4 when left out or 0.": "到主节点打开的最多连接数，包括打开的游标所占的连接，由作业的并行读取者或写入者共享。不设置或为 0 时为 4。"
+"The most connections open to the primary, the open cursors' among them, shared by a job's parallel readers or writers. 4 when left out or 0.": "到主节点打开的最多连接数，包括打开的游标所占的连接，由作业的并行读取者或写入者共享。不设置或为 0 时为 4。",
+"The file the dead letters are kept in, a JSON line each, a relative path being under the sync's state_dir; <state_dir>/<pipeline>.dead_letters.jsonl when left out. Two pipelines may not share one.": "保存死信的文件，每条一行 JSON，相对路径位于 sync 的 state_dir 之下；不设置时为 <state_dir>/<pipeline>.dead_letters.jsonl。两条流水线不能共用一个文件。",
+"The most dead letters kept. 10000 when left out or 0.": "最多保存的死信条数。不设置或为 0 时为 10000。",
+"The most bytes of dead letters kept, as their lines in the file. 64 MiB when left out or 0.": "最多保存的死信字节数，按它们在文件中的行计算。不设置或为 0 时为 64 MiB。",
+"What a dead letter that does not fit does: refuse fails its write, so that after its attempts the pipeline stops, its checkpoint before the record, and nothing is lost; drop_oldest drops the oldest dead letters to make room, counting them. refuse when left out.": "放不下的死信如何处理：refuse 让它的写入失败，于是在尝试次数用完后流水线停止，检查点停在该记录之前，不丢任何数据；drop_oldest 丢弃最旧的死信腾出空间，并计数。不设置时为 refuse。"
 };

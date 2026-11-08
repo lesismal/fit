@@ -5810,6 +5810,40 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   pending review.
 
 
+### I189 Metrics, logs and dead letters — done
+
+- **Runtime** (`sync/metrics.go`, `sync/deadletters.go`, small additions to `connector.go`,
+  `control.go`, `runtime.go`, `pipeline.go` and `job.go`): per-sink meters (records, bytes,
+  batches, errors, retries, failed), bytes read, dead letters written, not written and replayed;
+  `Run.ReportLag` and `Lagger` for the lag behind the source's server (the postgres source's `Lag`
+  read as it is); `Runtime.WriteMetrics` and the role's `app.Metered`, `fit_sync_*` on `/metrics`;
+  `Status` with `read_bytes`, `sinks`, `source_lag` and `dead_letters`; state changes logged and
+  error lines limited to one each 10s per pipeline. The `dead_letters` sink: a bounded, synced JSON
+  lines file per pipeline, compacted, shared across a reload, `when_full` `refuse` or
+  `drop_oldest`; `DeadLetters`, `ReplayDeadLetters` (the pipeline stopped, the records written to
+  the sink they failed at, or through the transforms to every sink, those written dropped, the
+  pipeline started again) and `DropDeadLetters`.
+- **Admin API** (`admin/sync.go`): `GET /sync/pipelines/{name}/dead-letters`, `POST
+  .../dead-letters/replay`, `DELETE .../dead-letters`; through the console too.
+- **CLI** (`cli/syncadmin.go`): `fit sync dead-letters`, with `-replay` and `-drop`; `fit sync status
+  <pipeline>` shows the sinks, the source's lag and the dead letters.
+- **Docs**: the Sync chapter of the reference, the schema of `dead_letters` (and its Chinese
+  descriptions), the plan's I189 section.
+- **Tests**: every metric written by `/metrics` checked against a pipeline with a retried write, a
+  record failed for good and a source telling its lag; a `Lagger` source; the rate-limited lines;
+  a dead letter replayed while still failing (kept), then after the cause is fixed reaching the
+  failing sink once and the other sink not again, through the API and the console too; a
+  transform's dead letter replayed through the fixed transform to both sinks across a reload; the
+  file's bounds, drop_oldest within one batch, a cut last line, a broken one, compaction, reopening
+  and write failures; replay retries, partial batches and an interrupted replay; every `fit sync
+  dead-letters` form against a fake API. Coverage: `sync/metrics.go` 100%, `sync/deadletters.go`
+  about 95%, `admin/sync.go` and `cli/syncadmin.go` 100% of the new code; `./sync` under the race
+  detector; staticcheck clean on `sync`, `admin` and `cli`.
+- **Differs from the plan**: no change to `observe` was needed. The binlog's and Kafka's lag in
+  position are not reported yet: their sources call `Run.ReportLag` or implement `Lagger` when
+  their owners add it.
+- **Gaps**: the decisions in the plan's I189 section, pending review.
+
 ### I172 A MySQL client: connections, authentication and queries — done
 
 - **Package `sync/mysql/wire`** (`mysqlwire`), no dependencies past the standard library: `Dial`

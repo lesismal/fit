@@ -354,7 +354,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | done |
 | I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | done |
 | I188b | Connection tests for the earlier connectors | I188 | done |
-| I189 | Metrics, logs and dead letters, replayed from the Admin API | I188 | todo |
+| I189 | Metrics, logs and dead letters, replayed from the Admin API | I188 | done |
 | I190 | The workbench's Sync pages, and the assistant's tools for sync | I188, I189, I123 | todo |
 | I191 | Exactly once into MySQL, TiDB and PostgreSQL: the checkpoint written in the sink's transaction | I176, I180 | todo |
 | I192 | The interoperability and recovery matrix in CI | I176, I180, I183, I185 | todo |
@@ -6207,6 +6207,58 @@ review:
 - **Done when**: each metric is checked in a test; a dead letter replayed after the cause is fixed
   reaches the sink once.
 - **Touches**: `sync`, `observe`, `admin`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **Dead letters are a sink module, `dead_letters`**, named as the `dead_letter` sink (I163's
+   decision 3 stands): it keeps each letter as a JSON line of `<state_dir>/<pipeline>.dead_letters.jsonl`
+   (`path` to name another, relative to `state_dir`), synced before the write is acknowledged, and
+   removals as lines of their own, the file compacted once the removed take more than the kept plus
+   1 MiB. The runtime tells it the state directory and the pipeline when the pipeline is made; two
+   sinks of one file (a reload overlapping) share it. It is refused among a pipeline's `sinks`.
+   Other sinks stay usable as `dead_letter`; only `dead_letters` can be listed and replayed.
+   Alternative: a store kept by the runtime itself whenever `on_error` is `dead_letter`.
+2. **Bounds**: `max_records` 10,000 and `max_bytes` 64 MiB; `when_full` `refuse` (the default: the
+   write fails, so after its attempts the pipeline stops before the record, nothing lost) or
+   `drop_oldest` (counted in `fit_sync_dead_letters_dropped_total`). A letter larger than
+   `max_bytes` fails for good. Alternative: drop the oldest by default.
+3. **A replay stops the pipeline** (writing what it holds and its checkpoint), writes the letters
+   itself on the request's goroutine, then starts the pipeline again, as `SetCheckpoint` does,
+   so that the replay is each sink's only writer and nothing in the runtime's queue or watermark
+   changes; one stopped starts again, as `Resume` would. A record a sink failed is written to that
+   sink alone, as the transforms made it (the letter's `at`, `sink <name>`); one a transform
+   failed goes through the transforms again and to every sink. Writes are batched by the sink's
+   `batch` bounds and tried as `retry` says; a letter still failing, whose sink is gone, or that
+   holds no record, is kept and reported; those written are removed. A finished job's letters
+   replay too. Alternative: replayed records put into the running pipeline's queue, with no stop,
+   which needs per-record routing in the dispatcher.
+4. **A replay writes the record as it was**: a later change of the same key that reached the sink is
+   overwritten; the docs say so. Alternative: refuse a replay unless the key has no later record,
+   which fit cannot know.
+5. **Metrics** come from `Runtime.Status` through the role's `app.Metered`, as the other roles'
+   (`fit_sync_*`, labels `pipeline`, and `sink` for `fit_sync_sink_*`); counters are the pipeline's
+   since it was started (a reload that changes it starts them at 0, as Prometheus expects of a
+   restart). Bytes are records' sizes as the queue reckons them, not bytes on the wire. A sink's
+   `batches` are the writes tried, `errors` those that failed, `retries` those tried again,
+   `failed` records it still failed. No throughput gauge: `rate()` of the counters gives it. The
+   status (`GET /sync/pipelines/{name}`) gains `read_bytes`, `sinks`, `source_lag` and
+   `dead_letters`. Alternative: histograms of batch write times.
+6. **Lag behind the source's server** is the source's to tell: `Run.ReportLag(behind, unit)` as it
+   learns it, or a `Lagger` (`Lag() int64`, bytes unless a `LagUnit()` says) asked at each status
+   or scrape; the postgres source's `Lag` (its slot's WAL) is so read already, with no change to it.
+   MySQL's binlog bytes and Kafka's offsets behind are left to those sources' owners. Alternative:
+   the runtime querying servers itself.
+7. **Logs**: a pipeline's start of each run (from its checkpoint or its start), its schedule's next
+   time, a kill, pause, resume, finishing and stopping are logged; sink attempts, transform
+   failures, skipped records, dead letters written and not written are warnings at most one each
+   10s per pipeline, the next line saying how many were held back (sink attempts were debug lines
+   before). Alternative: a limit per error message.
+8. **Endpoints**: `GET /sync/pipelines/{name}/dead-letters?after=&limit=` (100, at most 1,000, oldest
+   first, `more` when there are more), `POST .../dead-letters/replay` with `{"ids"}` or
+   `{"all": true}`, `DELETE .../dead-letters?id=..&id=..` or `?all=1`; 404 when the
+   `dead_letter` sink is not `dead_letters`. `fit sync dead-letters [-after] [-limit]`,
+   `-replay` and `-drop` with ids or `-all`; a replay with letters kept exits 1.
+9. **Size**: about 1,000 lines of code (sync 760, admin 110, cli 150) and 900 of tests.
 
 ### I190 The workbench's Sync pages
 

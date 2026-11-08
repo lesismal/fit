@@ -140,7 +140,11 @@ const DryRunHeader = "Fit-Dry-Run"
 //	                            connections and .../dry-run reads its first
 //	                            records through its transforms, writing
 //	                            nothing; POST /sync/test and /sync/dry-run
-//	                            the same for a pipeline's config (sync.go)
+//	                            the same for a pipeline's config;
+//	                            .../dead-letters lists the dead letters,
+//	                            POST .../dead-letters/replay writes them to
+//	                            the sinks again and DELETE drops them
+//	                            (sync.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //	GET    /debug/pprof/        Go's runtime profiles, as net/http/pprof
@@ -358,6 +362,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /sync/pipelines/{name}/dry-run", s.syncDryRunRunning)
 	mux.HandleFunc("POST /sync/test", s.syncTestConfig)
 	mux.HandleFunc("POST /sync/dry-run", s.syncDryRunConfig)
+	mux.HandleFunc("GET /sync/pipelines/{name}/dead-letters", s.syncDeadLetters)
+	mux.HandleFunc("POST /sync/pipelines/{name}/dead-letters/replay", s.syncReplay)
+	mux.HandleFunc("DELETE /sync/pipelines/{name}/dead-letters", s.syncDropDeadLetters)
 	return mux
 }
 

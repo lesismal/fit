@@ -95,6 +95,7 @@ type sinkRun struct {
 	name  string
 	cfg   *config.SyncSink
 	sink  Sink
+	m     *sinkMeter
 	queue []item
 	bytes int64
 	first time.Time
@@ -122,7 +123,7 @@ func newRun(p *pipe) *run {
 		}
 		var g []*sinkRun
 		for range n {
-			s := &sinkRun{r: r, name: p.cfg.Sinks[i].Name, cfg: &p.cfg.Sinks[i], sink: p.sinks[i], wake: make(chan struct{}, 1)}
+			s := &sinkRun{r: r, name: p.cfg.Sinks[i].Name, cfg: &p.cfg.Sinks[i], sink: p.sinks[i], m: p.sinkMeter(i), wake: make(chan struct{}, 1)}
 			g = append(g, s)
 			r.sinks = append(r.sinks, s)
 		}
@@ -186,6 +187,7 @@ func (r *run) emit(rec *Record) error {
 	r.next++
 	r.pending = append(r.pending, entry{left: -1, size: size, pos: rec.Position, boundary: rec.boundary(), commit: rec.CommitTime})
 	r.p.meter.read.Add(1)
+	r.p.meter.readBytes.Add(int64(size))
 	r.read++
 	r.inRecords++
 	r.inBytes += int64(size)
@@ -300,6 +302,7 @@ func (r *run) dispatch() {
 			if err := c.errs[i]; err != nil {
 				t := c.where[i]
 				r.p.noteErr(err)
+				r.p.logErr("transform %d (%s) failed a record of %s: %v", t, cfg.Transforms[t].Module, rec.Namespace, err)
 				if !r.failedOn(rec, err, fmt.Sprintf("transform %d (%s)", t, cfg.Transforms[t].Module), 1) {
 					c.done()
 					return
@@ -343,7 +346,7 @@ func (r *run) failedOn(rec *Record, err error, where string, attempts int) bool 
 	}
 	switch r.p.cfg.ErrorPolicy() {
 	case config.SyncSkip:
-		r.p.rt.opts.Log.Warnf("pipeline %s: %s: a record of %s is skipped after %d attempts: %v", r.p.cfg.Name, where, rec.Namespace, attempts, err)
+		r.p.logErr("%s: a record of %s is skipped after %d attempts: %v", where, rec.Namespace, attempts, err)
 		return true
 	case config.SyncDeadLetter:
 		return r.deadLetter(rec, err, where, attempts)
@@ -370,13 +373,17 @@ func (r *run) deadLetter(rec *Record, cause error, where string, attempts int) b
 	for n := 1; ; n++ {
 		err := r.p.dl.Write(r.ctx, []*Record{dl})
 		if err == nil {
+			r.p.meter.dlWritten.Add(1)
+			r.p.logErr("%s: a record of %s failed after %d attempts and is kept as a dead letter: %v", where, rec.Namespace, attempts, cause)
 			return true
 		}
 		if r.ctx.Err() != nil {
 			return false
 		}
 		r.p.noteErr(fmt.Errorf("dead_letter sink %s: %w", r.p.cfg.DeadLetter.Name, err))
+		r.p.logErr("dead_letter sink %s: attempt %d failed: %v", r.p.cfg.DeadLetter.Name, n, err)
 		if n >= r.p.cfg.Attempts() {
+			r.p.meter.dlFailed.Add(1)
 			r.fail(fmt.Errorf("dead_letter sink %s: %w; the record had failed at %s: %v", r.p.cfg.DeadLetter.Name, err, where, cause))
 			return false
 		}
@@ -471,6 +478,7 @@ func (s *sinkRun) write(batch []item, recs []*Record) bool {
 			return false
 		}
 		err := s.sink.Write(r.ctx, recs[i:])
+		s.m.wrote(batch[i:], err)
 		if err == nil {
 			if r.crash(CrashWritten) {
 				return false
@@ -492,13 +500,15 @@ func (s *sinkRun) write(batch []item, recs []*Record) bool {
 			return false
 		}
 		r.p.noteErr(fmt.Errorf("sink %s: %w", s.name, err))
+		r.p.logErr("sink %s: attempt %d failed: %v", s.name, attempt, err)
 		if attempt < cfg.Attempts() && !IsPermanent(err) {
-			r.p.rt.opts.Log.Debugf("pipeline %s: sink %s: attempt %d failed: %v", cfg.Name, s.name, attempt, err)
+			s.m.retries.Add(1)
 			if !r.sleep(cfg.Backoff(attempt)) {
 				return false
 			}
 			continue
 		}
+		s.m.failed.Add(1)
 		if !r.failedOn(recs[i], err, "sink "+s.name, attempt) {
 			return false
 		}
@@ -585,7 +595,7 @@ func (r *run) do(from Position) (outcome, error) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		run := &Run{From: from, Once: p.cfg.Once(), Emit: r.emit, Pipeline: p.cfg.Name}
+		run := &Run{From: from, Once: p.cfg.Once(), Emit: r.emit, Pipeline: p.cfg.Name, Lag: p.meter.setLag}
 		var err error
 		if c, ok := p.src.(Chunker); ok && p.cfg.Once() {
 			err = p.runChunks(r.srcCtx, c, run, p.cfg.Parallel())

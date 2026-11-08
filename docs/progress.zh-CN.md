@@ -4132,6 +4132,27 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I189 指标、日志与死信 — 已完成
+
+- **运行时**（`sync/metrics.go`、`sync/deadletters.go`，以及对 `connector.go`、`control.go`、`runtime.go`、`pipeline.go`、
+  `job.go` 的少量补充）：按目标计的计量（记录、字节、批次、错误、重试、失败），读取的字节，写入、未写入和重放的死信；用于落后于源服务器
+  的延迟的 `Run.ReportLag` 和 `Lagger`（postgres 源的 `Lag` 原样读取）；`Runtime.WriteMetrics` 与角色的 `app.Metered`，`/metrics`
+  上的 `fit_sync_*`；`Status` 新增 `read_bytes`、`sinks`、`source_lag` 和 `dead_letters`；状态变化写日志，错误日志每条流水线每 10 秒
+  最多一行。`dead_letters` 目标：每条流水线一个有上限、同步写盘的 JSON 行文件，会压缩，重载时共用，`when_full` 为 `refuse` 或
+  `drop_oldest`；`DeadLetters`、`ReplayDeadLetters`（停止流水线，把记录写到它失败的目标，或经变换写到每个目标，删除写成功的，再启动
+  流水线）和 `DropDeadLetters`。
+- **Admin API**（`admin/sync.go`）：`GET /sync/pipelines/{name}/dead-letters`、`POST .../dead-letters/replay`、
+  `DELETE .../dead-letters`；也可经控制台。
+- **CLI**（`cli/syncadmin.go`）：`fit sync dead-letters`，带 `-replay` 和 `-drop`；`fit sync status <pipeline>` 显示目标、源的延迟和死信。
+- **文档**：参考文档的 Sync 章节，`dead_letters` 的 schema（及其中文说明），计划的 I189 小节。
+- **测试**：用一条有重试写入、一条永久失败记录、源会报告延迟的流水线检查 `/metrics` 写出的每个指标；`Lagger` 源；限速的日志行；
+  仍失败时重放死信（保留），修复原因后它恰好一次到达失败的目标、另一个目标不再收到，也经 API 和控制台；变换的死信在重载后经修好的变换
+  重放到两个目标；文件的上限、同一批内的 drop_oldest、被截断的最后一行、损坏的行、压缩、重新打开与写入失败；重放的重试、部分批次与被
+  中断的重放；对假 API 的每种 `fit sync dead-letters` 用法。覆盖率：新代码中 `sync/metrics.go` 100%、`sync/deadletters.go` 约 95%、
+  `admin/sync.go` 与 `cli/syncadmin.go` 100%；`./sync` 在竞态检测下通过；`sync`、`admin`、`cli` 的 staticcheck 无告警。
+- **与计划的不同**：无需改动 `observe`。binlog 与 Kafka 的位置延迟尚未报告：等这些源的负责人调用 `Run.ReportLag` 或实现 `Lagger`。
+- **缺口**：计划 I189 小节中的决策，待审查。
+
 ### I172 MySQL 客户端：连接、认证与查询 — 已完成
 
 - **包 `sync/mysql/wire`**（`mysqlwire`），只依赖标准库：`Dial`（TCP 或 Unix socket），包括握手、配置时必须使用并校验的

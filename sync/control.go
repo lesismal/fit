@@ -120,6 +120,11 @@ const (
 // meter counts what a pipeline does, for Status.
 type meter struct {
 	read, done, failed, errors atomic.Int64
+	// readBytes is the size of the records read; dlWritten and dlFailed
+	// count the dead letters written and not, replayed those replayed
+	// (I189); lag is the source's last SourceLag, nil until it tells one.
+	readBytes, dlWritten, dlFailed, replayed atomic.Int64
+	lag                                      atomic.Pointer[SourceLag]
 
 	mu sync.Mutex
 	// secs and counts are the records acknowledged in each of the last
@@ -195,6 +200,7 @@ func (p *pipe) fill(st *Status, cur *run) {
 		st.LagSeconds = max(m.acked.Sub(m.commit).Seconds(), 0)
 	}
 	m.mu.Unlock()
+	p.fillMetrics(st)
 }
 
 // pipe returns the pipeline named name; rt.mu is held.
