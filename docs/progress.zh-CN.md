@@ -4181,6 +4181,30 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   没有 I177b。
 - **不足**：计划 I177 一节中的决策，待审查。没有 SASLprep；没有二进制 COPY；`time`、`interval` 等没有对应 Go 类型的值为文本；
   pgoutput 的消息和文本值属于 I178。本项没有在 Linux 上或整套测试中运行（留给合并时）。
+### I181 MongoDB 客户端：BSON 与 OP_MSG — 已完成
+
+- **BSON**（`sync/mongo/wire`，包 `mongowire`）：`Raw` 文档原地读取（`Validate`、`Each`、`Lookup`、带类型的访问器），嵌套
+  至多 200 层；按序写入的 `D`、`E`、`A` 和 `Doc`，以及 `ObjectID`、`Timestamp`、`Binary`、`Regex`、`Decimal128`（按 BSON
+  规范精确解析和书写）、`MinKey`、`MaxKey`；与记录值双向转换（`Raw.Value`、`MarshalValue`），无对应种类的类型保留为规范扩展
+  JSON 的 map 并写回为原类型，JSON 值写成它所含的文档。
+- **协议**：带 body 与文档序列的 `OP_MSG`，检查校验和；`Conn`（`Dial`）：TCP 与 TLS，带客户端元数据的 `hello`，
+  SCRAM-SHA-256（RFC 7677），命令受 context 或 `Timeout` 约束，回答受 `MaxMessageBytes` 约束，命令中途被切断的连接会关闭；
+  带代码和标签的 `CommandError`、`NetError`、`IsNotPrimary`。
+- **客户端**（`New`、`ParseURI`）：从种子及其提到的成员中找到主节点，检查副本集名字，在连接错误或“不是主节点”的回答后重新
+  寻找，并把命令再发送一次；`MaxConns` 个连接的池；游标（`Cursor`、`Next`、`NextBatch`，带批大小与等待时间的 `getMore`，为
+  I182 保留 `postBatchResumeToken`，`Close` 时 `killCursors`）。
+- **测试**：针对进程内假服务器（含 SCRAM 服务端）的单元测试：RFC 7677 的向量，每一步的认证失败，经从节点发现主节点，故障
+  切换后重发命令，拒绝另一个名字的副本集，选择超时内没有主节点，超时与截止时间，被切断的连接以及格式错误、过大、错发和未知的
+  回答，跨多个批次的游标并归还连接，带与不带 CA 的 TLS，连接字符串；BSON 每种类型的双向转换，decimal128 规范中的值，每种类型的
+  格式错误文档，以及 `FuzzBSON`（读出、写入再读出的值是稳定的）；无容器时覆盖率 98.1%。互通（`test/sync/mongo_test.go`、
+  `test/sync/mongo.sh`，由 `test/sync/run.sh` 启动）：MongoDB 6.0、7.0 和 8.0，各为带认证与 TLS 的三成员副本集：由记录值写入
+  一个含每种类型的文档，服务端的 `$type` 与 `$toString` 一致，读回相等；95 个文档经游标以每批十个读出；游标被 kill；命令被其
+  截止时间切断；错误的密码；带 CA 的 TLS，以及不带 CA 时被拒绝；主节点降级后下一次写入落到新主节点上。在竞态检测器下连续运行三次。
+- **与计划的差异**：没有遗漏；代码约 2,700 行，测试约 1,900 行；没有 I181b。
+- **缺口**：计划 I181 小节中的决定，待审查。没有服务器监控、session、事务、压缩、SASLprep、`mongodb+srv`，也没有
+  SCRAM-SHA-256 以外的认证；客户端证书没有对真实服务器试过。`ci.yml` 中 `sync-interop` CI 作业的注释还没有提到 MongoDB。
+  本项没有在 Linux 上或在整个套件的竞态检测器下运行（留给合并时）。
+
 
 ### I169 Elasticsearch 与 OpenSearch 作为源 — 已完成
 

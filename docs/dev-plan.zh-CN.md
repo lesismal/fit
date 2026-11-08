@@ -334,7 +334,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | todo |
 | I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
 | I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | todo |
-| I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | todo |
+| I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | done |
 | I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | todo |
 | I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | todo |
 | I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | todo |
@@ -3904,6 +3904,55 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   `hello` 与副本集主节点发现、SCRAM-SHA-256、TLS、带 `getMore` 的游标、超时；支持 MongoDB 6、7 与 8。
 - **完成标准**：在 Docker 中与副本集互通；BSON 模糊测试；故障切换后能找到新主节点。
 - **涉及**：`sync/mongo/wire`、`test/sync`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前一直有效）：
+
+1. **放在哪里。** 包 `sync/mongo/wire`（`mongowire`）：只是客户端，没有连接器、参数和 schema；I182 的源和 I183 的目标声明连接
+   参数（`uri`，或主机、凭据与 TLS），据此或用 `ParseURI` 构造 `Options`。备选：连接参数在这里声明，由两者共用。
+2. **阻塞式客户端，不在 fib 上。** 一个连接是一个 `net.Conn`（配合 `crypto/tls`），由调用它的 goroutine 一问一答地读写，
+   一次一条命令；同步的连接器在自己的 goroutine 上调用它，从不在 fib worker 上（规则 1）。MongoDB 在每个连接上按序应答，
+   到数据库的连接少而长，change stream 的 `getMore` 在服务端等待；在 fib 的连接上用回调在这里得不到什么，却要为 SCRAM、
+   游标和发现写状态机。备选：基于 fib 连接与回调的客户端。
+3. **无对应类型的值以规范扩展 JSON 加标签。** ObjectId 读成 `{"$oid": "<hex>"}`，timestamp 读成
+   `{"$timestamp": {"t": .., "i": ..}}`，子类型不为 0 的 binary 读成 `{"$binary": {"base64": .., "subType": "04"}}`，
+   `$regularExpression`、`$numberDecimal`（仅 NaN 与无穷）、`$minKey`、`$maxKey`、`$undefined`、`$symbol`、`$code`
+   （带 `$scope`）和 `$dbPointer` 同理；正好是这种形状的 map 写回时还原为其类型，所以读出再写回的文档不变。一个真实文档若
+   唯一的字段是 24 位十六进制的 `$oid`，会被写成 ObjectId（MongoDB 不在存储的文档中保留 `$` 开头的名字）。备选：ObjectId 写成
+   普通十六进制字符串，MongoDB 目标就无法把它与字符串区分。
+4. **整数是 int64。** int32 与 int64 都读成 int；int 不论大小都写成 int64，使一个字段只有一种 BSON 类型（`$type` 查询和校验器
+   看到的）；超出 int64 的 uint 写成 decimal128。MongoDB 到 MongoDB 时 int32 字段因此变成 long。备选：放得下时写成 int32。
+5. **decimal 精确，否则拒绝。** decimal 写成 decimal128；34 位或指数范围放不下时报错，不舍入。decimal128 按 BSON 规范的写法
+   读出：指数小时为普通写法（`-12.3400`），否则为科学计数法（`1E+3`），JSON 也把它当数字。备选：舍入到 34 位。
+6. **时间是 UTC 毫秒。** time 或 date 写成 datetime，向下取整到毫秒，丢掉偏移；datetime 读成 UTC 时间。JSON 值写成它所含的
+   内容：对象为文档，整数为 int64（超出时 34 位放得下则为 decimal128，否则为 double），其他数字为 double。备选：JSON 写成字符串。
+7. **只用主节点，需要时再找。** `Client` 把每条命令发给可写的主节点（副本集的主节点、单机服务器或 mongos）：先种子，再服务器
+   提到的成员，从节点指出的主节点优先，一轮接一轮（100 ms 增长到 1 s），直到 `ServerSelectionTimeout`（30 s）；设置了
+   `ReplicaSet` 时不接受其他副本集的服务器。没有监控 goroutine：只在命令遇到连接错误或“不是主节点”的回答（代码 10107、
+   13435、13436、189、91、11600、11602、10058）时才重新寻找。不从从节点读，不按 election ID 检查过时的主节点。备选：驱动程序的
+   服务器发现与监控，带心跳。
+8. **一条命令至多发送两次。** `Run` 和 `Cursor` 在这类错误后把命令再发给新找到的主节点一次；写入因此可能执行两次，同步的
+   写入（按 `_id` upsert 与 delete）允许这样。没有 session 和可重试写（`lsid`、`txnNumber`）；`getMore` 从不重发（游标只在
+   一台服务器上）。备选：带 session 的可重试写。
+9. **有界连接池。** 到主节点至多 `MaxConns`（4）个连接；游标在耗尽或关闭前一直占着它的连接（`getMore` 必须去同一台服务器），
+   所以忘了关闭的游标会占一个位置。主节点变化时丢弃空闲连接。
+10. **超时。** 一次往返受 context 的截止时间约束，没有时受 `Timeout`（60 s）约束；被任一方切断的往返会关闭连接，因为它的回答
+    可能仍会到来。`ConnectTimeout`（10 s）约束拨号、TLS、`hello` 和认证。大于 `MaxMessageBytes`（48,000,000，服务器声明更小时
+    取其值）的回答在读取前被拒绝。互通测试发现 socket 的截止时间可能早于 context 自己的计时器触发；这样的错误报告为
+    context 的 `DeadlineExceeded`。
+11. **只用 SCRAM-SHA-256，不做 SASLprep。** 密码按原样使用，这对可打印 ASCII 与 SASLprep 结果相同；不支持 SCRAM-SHA-1、
+    X.509、LDAP 和 AWS 认证；服务器只为该用户提供 SCRAM-SHA-1 时报错并说明。加盐密码按客户端缓存（至多八个），连接池的每个
+    连接不必各跑一次 PBKDF2；接受 4,096 到 10,000,000 次迭代。备选：SASLprep 的表。
+12. **不支持的部分。** 拒绝 4.2（wire version 8）之前的服务器（测试了 6.0、7.0 和 8.0）；不压缩；回答带校验和时检查，自己从不
+    发送；`hello` 走 `OP_MSG`，从不用旧的 `OP_QUERY`。
+13. **连接字符串。** `ParseURI` 读取 `mongodb://` 及 `replicaSet`、`authSource`、`authMechanism`（SCRAM-SHA-256）、
+    `tls`/`ssl`、`tlsCAFile`、`tlsCertificateKeyFile`、`connectTimeoutMS`、`socketTimeoutMS`、`serverSelectionTimeoutMS`、
+    `maxPoolSize` 和 `appName`；其他选项都被拒绝，包括 `tlsInsecure`，所以不会悄悄漏掉什么；不读 `mongodb+srv://`（需要 DNS
+    SRV 和 TXT 查询）。备选：经解析器支持 SRV。
+14. **`Doc(k, v, ...)`** 供其他包构造命令，因为 vet 在那里要求 `E` 的字段带名字。
+15. **互通服务器。** 每个版本是一个容器中三个成员的副本集（`test/sync/mongo.sh`），每个成员容器内外端口相同，因为客户端按副本集
+    给成员起的名字（`localhost:<port>`）连接；keyfile 认证、一个 root 用户、带本次运行自有 CA 的 `preferTLS`。
+    `test/sync/run.sh` 在 29661–29683 上启动它们，每次运行都重新创建（`KEEP=1` 也一样），因为证书属于本次运行。CI 的
+    `sync-interop` 作业经 `run.sh` 运行它们；这里没有更新 `ci.yml` 中的注释。
 
 ### I182 MongoDB 作为源
 

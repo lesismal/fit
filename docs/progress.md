@@ -5881,6 +5881,43 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   `time`, `interval` and other types without a Go match come as text; pgoutput's messages and
   text values are I178's. Not run on Linux or under the whole suite by this item (left to the
   merge).
+### I181 A MongoDB client: BSON and OP_MSG — done
+
+- **BSON** (`sync/mongo/wire`, package `mongowire`): `Raw` documents read in place (`Validate`,
+  `Each`, `Lookup`, typed accessors), bounded to 200 levels; `D`, `E`, `A` and `Doc` written in
+  order, with `ObjectID`, `Timestamp`, `Binary`, `Regex`, `Decimal128` (parsed and written exactly
+  as the BSON specification does), `MinKey`, `MaxKey`; record values both ways (`Raw.Value`,
+  `MarshalValue`), with types that have no kind kept as canonical extended JSON maps and written
+  back as their types, JSON values written as the documents they hold.
+- **Wire**: `OP_MSG` with a body and document sequences, checksums checked; `Conn` (`Dial`): TCP
+  with TLS, `hello` with the client's metadata, SCRAM-SHA-256 (RFC 7677), commands bounded by their
+  context or `Timeout`, answers by `MaxMessageBytes`, a connection cut mid-command closed;
+  `CommandError` with codes and labels, `NetError`, `IsNotPrimary`.
+- **Client** (`New`, `ParseURI`): the primary found from the seeds and the members they name, the
+  replica set's name checked, and found again after a connection's error or a not-primary answer,
+  the command then sent once more; a pool of `MaxConns`; cursors (`Cursor`, `Next`, `NextBatch`,
+  `getMore` with a batch size and an await time, `postBatchResumeToken` kept for I182, `killCursors`
+  on `Close`).
+- **Tests**: unit tests against an in-process fake server (SCRAM's server side included): RFC 7677's
+  vector, authentication failures of every step, discovery through a secondary, failover with the
+  command sent again, a set of another name refused, no primary within the selection timeout,
+  timeouts and deadlines, cut connections and malformed, oversized, misdirected and unknown answers,
+  cursors over several batches with their connection given back, TLS with and without the CA,
+  connection strings; BSON's every type both ways, the decimal128 specification's values, malformed
+  documents of every type, and `FuzzBSON` (a value read, written and read again is stable); coverage
+  98.1% with no containers. Interop (`test/sync/mongo_test.go`, `test/sync/mongo.sh`, started by
+  `test/sync/run.sh`): MongoDB 6.0, 7.0 and 8.0, each a replica set of three with authentication and
+  TLS: a document of every type written from record values, the server's `$type` and `$toString`
+  agreeing, read back equal; 95 documents through a cursor in batches of ten; a cursor killed; a
+  command cut by its deadline; a wrong password; TLS with the CA, and refused without it; the primary
+  stepped down and the next write on the new one. Run three times in a row under the race detector.
+- **Differs from the plan**: nothing left out; about 2,700 lines of code and 1,900 of tests; no I181b.
+- **Gaps**: the decisions in the plan's I181 section, pending review. No server monitoring, sessions,
+  transactions, compression, SASLprep, `mongodb+srv` or authentication other than SCRAM-SHA-256; a
+  client certificate is not tried against the real servers. The `sync-interop` CI job's comment in
+  `ci.yml` does not yet name MongoDB. Not run on Linux or under the whole suite's race detector by
+  this item (left to the merge).
+
 
 ### I169 Elasticsearch and OpenSearch as a source — done
 

@@ -280,6 +280,19 @@ The plan's I177 section lists them all; these change the record above.
    `crypto/tls`'s view of the server's certificate. fib stays the way out for HTTP-based systems.
 2. **No `sslmode` that falls back silently**: `disable`, `require`, `verify-ca`, `verify-full` (the
    default); channel binding `prefer` by default.
+## Decisions made while building I181 (pending review)
+
+The plan's I181 section lists them all; these change the record above.
+
+1. **Database clients block, off fib's workers.** A wire client for a database (MongoDB's first) is
+   a `net.Conn` read and written in lockstep by the connector's own goroutine, which "off fib's
+   workers" above allows; fib's asynchronous clients stay the way out for HTTP-based systems.
+2. **Types a record has no kind for travel as canonical extended JSON**: a one-field map named as
+   MongoDB names the type (`{"$oid": ...}`, `{"$timestamp": ...}`), written back as that type, so
+   MongoDB to MongoDB loses nothing but an int32's width (ints are written as int64).
+3. **A command may be sent twice.** The client sends a command once more to a new primary after a
+   connection's error or a not-primary answer, without sessions; sync's idempotent writes are what
+   make that safe.
 
 ## Planning decisions (2026-11-08, pending review)
 

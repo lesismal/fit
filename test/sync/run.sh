@@ -20,8 +20,15 @@
 # unset (CI); the plan's million is
 #
 #   FIT_SYNC_SOURCE_DOCS=1000000 test/sync/run.sh -run SourceSnapshot -v
+#
+# MongoDB 6, 7 and 8 run as replica sets of three members each, with
+# authentication and TLS preferred (test/sync/mongo.sh), on ports
+# MONGO_PORT+61..63, +71..73 and +81..83 (29661-29683 by default); the
+# tests read FIT_SYNC_MONGO_6, _7, _8 (connection strings) and
+# FIT_SYNC_MONGO_CA.
 set -eu
 cd "$(dirname "$0")/../.."
+. test/sync/mongo.sh
 
 ES_IMAGE=${ES_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.19.3}
 OS_IMAGE=${OS_IMAGE:-opensearchproject/opensearch:2.19.3}
@@ -41,6 +48,7 @@ cleanup() {
 	rm -rf "$CERTS"
 	if [ "${KEEP:-}" != 1 ]; then
 		docker rm -f fit-sync-es fit-sync-os fit-sync-ch $(pg_names) >/dev/null 2>&1 || true
+		rm_mongos fit-sync
 	fi
 }
 trap cleanup EXIT
@@ -98,6 +106,18 @@ done
 mysql_start
 
 pg_start
+
+# The sets' certificates are made afresh for each run; a kept container
+# holds the ones it was started with, so it is made again too.
+MONGO_PORT=${MONGO_PORT:-29600}
+mkdir -p "$CERTS/mongo"
+make_mongo_certs "$CERTS/mongo"
+rm_mongos fit-sync
+MONGO_ENV=$(start_mongos fit-sync "$MONGO_PORT" "$CERTS/mongo")
+set -f
+# shellcheck disable=SC2086 # one variable a line, no spaces in them
+export $MONGO_ENV
+set +f
 
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \
