@@ -5,12 +5,15 @@
 # queue of one, so that parallel bulks get 429s; and ClickHouse, with a user
 # and password, over HTTP. The containers are removed
 # at the end; KEEP=1 keeps them, and a second run reuses them.
+# Kafka (three KRaft brokers, with SASL and TLS listeners) and Redpanda are
+# started by test/sync/kafka.sh, which describes them.
 #
 #   test/sync/run.sh [go test flags...]
 #
 # The tests read FIT_SYNC_ES_URL, FIT_SYNC_ES_CA, FIT_SYNC_ES_PASSWORD and
 # FIT_SYNC_OS_URL, FIT_SYNC_OS_CA, FIT_SYNC_OS_PASSWORD, and FIT_SYNC_CH_URL,
-# FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD; without them they
+# FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD, and the FIT_SYNC_KAFKA_* and
+# FIT_SYNC_REDPANDA_* that test/sync/kafka.sh prints; without them they
 # skip, unless FIT_SYNC_INTEROP=required, which this script sets. The
 # source's snapshot test reads FIT_SYNC_SOURCE_DOCS documents, 100,000 when
 # unset (CI); the plan's million is
@@ -32,6 +35,7 @@ cleanup() {
 	rm -rf "$CERTS"
 	if [ "${KEEP:-}" != 1 ]; then
 		docker rm -f fit-sync-es fit-sync-os fit-sync-ch >/dev/null 2>&1 || true
+		test/sync/kafka.sh down
 	fi
 }
 trap cleanup EXIT
@@ -86,6 +90,8 @@ until curl -fsS -u "fit:$PASSWORD" "http://localhost:$CH_PORT/?query=SELECT%201"
 	fi
 	sleep 1
 done
+
+eval "$(test/sync/kafka.sh up)"
 
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \

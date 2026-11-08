@@ -337,7 +337,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | todo |
 | I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | todo |
 | I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | todo |
-| I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | todo |
+| I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | done |
 | I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | todo |
 | I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | todo |
 | I187 | S3 及兼容存储作为目标（滚动的对象）与源（按键顺序的对象） | I163 | todo |
@@ -3826,6 +3826,50 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   lz4 与 zstd 的 v2 record batch；SASL PLAIN 与 SCRAM、TLS；跟随 leader 变化；支持 Kafka 3.x 与 Redpanda。
 - **完成标准**：在 Docker 中与两者互通；每种压缩双向可用；fetch 与 produce 中途 leader 变化不丢数据。
 - **涉及**：`sync/kafka/wire`、`test/sync`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前一直有效）：
+
+1. **放在哪里。** 包 `sync/kafka/wire`，包名 `kafkawire`（而非 `wire`，MySQL、PostgreSQL 与 MongoDB 客户端的 `sync/*/wire`
+   也会用它）。`Config`（引导 broker、客户端 ID、TLS、SASL、超时、重试时长、大小上限）构造的 `Client` 提供 `Metadata`、
+   `Partitions`、`Produce`/`ProduceRecords`、`Fetch`、`ListOffsets`/`Offset`/`OffsetAt`，计划之外还有 `CreateTopics` 与
+   `DeleteTopics`（供测试用，也供 I185 为目标建 topic），以及 `PartitionFor`，即 Java 客户端的 murmur2 分区器，使同一个键落在
+   Java 生产者放它的分区。备选：不做管理 API，由测试用 broker 自带的工具建 topic。
+2. **阻塞连接，不用 fib。** 每个 broker 连接是一个 `net.Conn`（TLS 经 `crypto/tls`），在互斥锁下写入、可同时有多个请求在途，
+   由连接自己的 goroutine 读取并按序把每个响应交给调用者；broker 对一个连接一次只处理一个请求，所以会在 broker 上等待的
+   fetch 对每个 broker 另有一个连接，与 produce、metadata 和 offset 用的连接分开。这就是决定 036 的“到数据库的连接少而长，
+   各占一个 goroutine”：不占用 fib 的 worker，Kafka 的长轮询从事件循环中也得不到好处。备选：fib 引擎加每连接一个解析器。
+3. **只用非 flexible 的 API 版本。** Produce 3–8、Fetch 4–11、ListOffsets 1–5、Metadata 1–8、CreateTopics 2–4、
+   DeleteTopics 1–3、SaslHandshake 1、SaslAuthenticate 1、ApiVersions 0；连接时由 ApiVersions 取双方都支持的最高版本。
+   这些都在 Kafka 4.0 的基线（KIP-896）与 Redpanda 支持的范围内，不需要 tagged field；zstd 需要 Produce 7，较旧的 broker
+   上会被拒绝。备选：用紧凑编码的 flexible 版本，只有 broker 不再支持这些版本时才需要。
+4. **编解码器。** gzip 用标准库；snappy 与 zstd 用 fit 已为 HTTP 压缩引入的 `klauspost/compress`（没有新依赖）；LZ4 在包内
+   实现（帧格式与 xxHash32，约 300 行），因为 fit 的依赖中没有 LZ4。snappy 按 Java 客户端的写法以 xerial 分帧写出，读取时
+   接受裸数据或分帧；LZ4 写成独立的 64 KiB 块，读取时接受任意块大小、链接块与校验和。每次解压在分配内存之前就受
+   `MaxBatchBytes`（64 MiB）限制，响应受 `MaxResponseBytes`（128 MiB）限制。级别：gzip 1–9、zstd 1–22，0 为默认。备选：
+   引入 pierrec/lz4 作为新依赖。
+5. **不幂等，至少一次。** 批次不带 producer ID：应答丢失（连接断开、leader 停止）的 produce 会再发一次，可能写入两次；
+   leader 变化的互通测试中 26 万条记录有 50 条写了两次，没有丢失。调用者对每个分区只有一个 produce 在途时，分区内保持顺序。
+   备选：`InitProducerId` 与序号（幂等生产者），若 I185 的目标需要去重再加。
+6. **以重试跟随 leader。** 因可重试原因（不是 leader、没有 leader、未知 topic、副本不足、超时、连接失败）被拒的分区，
+   在 100 ms 起、加倍至 1 s 的退避后重发，错误表明 leader 已变时先重新读取 metadata，直到调用的 context 结束或过了
+   `RetryFor`（30 s）；不发送 leader epoch（-1），所以客户端不按 epoch 防范过时的 leader。超过 `RequestTimeout`（30 s，
+   在请求它等待的时间之外）仍无应答的 broker 会使其连接及连接上的所有请求失败。备选：按次数重试。
+7. **一次调用，多个分区。** `Produce`、`Fetch` 与 `ListOffsets` 接受多个分区，按 leader 分组，每个 leader 一个请求，各
+   leader 并行，按顺序返回每个分区的结果；每次调用每个分区至多一个批次。fetch 在每个 leader 都应答后才返回，所以有记录的分区
+   要等空闲 broker 的 `MaxWait`；在别的分区已拿到记录之后重试的分区不再等待。备选：每个 broker 一个持续向 channel 输出的
+   fetcher，I185 的源可以在此之上加。
+8. **不是消费者组。** 没有组、提交和心跳 API：offset 由调用者保存在同步的检查点中（I185）。`ReadCommitted` 丢弃已中止事务
+   的记录和控制批次；magic 0 与 1 的消息集（0.11 之前的 broker 写的，或从那时留下的）报错而不读取。备选：读取旧消息集。
+9. **SASL。** PLAIN、SCRAM-SHA-256 与 SCRAM-SHA-512（校验服务端签名，迭代次数至多 2^20）；有生命周期的会话在其 90 % 时
+   重新连接。不支持 OAUTHBEARER 与 GSSAPI。这里允许不带 TLS 的 PLAIN；I185 的配置可以给出警告。备选：拒绝不带 TLS 的
+   PLAIN。
+10. **互通。** `test/sync/kafka.sh` 启动 Kafka 3.9.1（三个同时是 controller 的 KRaft broker，各有 PLAINTEXT、SASL_PLAINTEXT
+    与 SASL_SSL 监听器，以及脚本自己的 CA）和 Redpanda v25.2.9（一个节点，PLAINTEXT 与 SASL 监听器），并打印环境变量；
+    `test/sync/run.sh` 会调用它，所以 CI 的 `sync-interop` 作业也运行这些测试。leader 变化的测试在生产和读取记录的同时，
+    从测试中用 `docker` 停止并杀掉分区的 leader（`FIT_SYNC_KAFKA_CONTAINERS` 中列出的容器）；Redpanda 只有一个节点，没有
+    leader 变化。在 Kafka 上每种编解码器也作为 topic 的 `compression.type`，由 broker 从另一种编解码器重写，再由客户端读取；
+    Redpanda 不重新压缩，所以在那里每种编解码器是写出再读回。没有试 Kafka 4.x。备选：也用 Redpanda 集群测 leader 变化。
+11. **规模**：代码约 3,000 行，测试约 2,800 行（在进程内的假集群上做单元测试，不用容器时语句覆盖率 98.7 %）；没有 I184b。
 
 ### I185 Kafka 作为源与目标；经 TiCDC 的 TiDB
 

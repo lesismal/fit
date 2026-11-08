@@ -4132,6 +4132,33 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I184 Kafka 客户端 — 已完成
+
+- **包 `sync/kafka/wire`**（`kafkawire`）：由引导 broker 构造的 `Client`，提供 `Metadata`、`Partitions`、`Produce`（acks 为
+  all、leader 或 none；任意编解码器与级别）、`Fetch`（多个分区，可选只读已提交，记录从响应中复制出来）、`ListOffsets`
+  （`OffsetLatest`、`OffsetEarliest` 或一个时间）、`CreateTopics` 与 `DeleteTopics`，以及 `PartitionFor`（Java 客户端的
+  murmur2）。对多个分区的请求按 leader 分组并行发送；因可重试原因被拒或连接失败的分区在重新读取 metadata 后重发，直到
+  context 结束或过了 `RetryFor`。
+- **协议**：Produce（3–8）、Fetch（4–11）、ListOffsets（1–5）、Metadata（1–8）、CreateTopics、DeleteTopics、SaslHandshake
+  与 SaslAuthenticate 的非 flexible 版本，按 ApiVersions 选取；magic 2 的 record batch，含 CRC-32C、header、tombstone、
+  控制批次与已中止事务；gzip（标准库）、snappy（xerial 分帧，也读裸数据）与 zstd（`klauspost/compress`），LZ4 帧在包内实现；
+  每次解压和每个响应都有上限。
+- **连接**：阻塞的 `net.Conn`，TLS，SASL PLAIN、SCRAM-SHA-256 与 SCRAM-SHA-512（校验服务端签名，有生命周期的会话会重新
+  连接），请求流水线发送、每连接一个 goroutine 读取，fetch 用单独的连接，沉默超过 `RequestTimeout` 的 broker 的连接被关闭。
+- **测试**：在进程内假集群上的单元测试（leader 迁移、broker 宕机、连接关闭、应答被丢弃、截断、不可读或乱序、
+  NOT_CONTROLLER、每种 SASL 机制及错误密码、TLS、最旧的版本与不支持的版本、只读已提交），在每个字节上损坏的批次、压缩数据和
+  LZ4 帧，lz4 工具生成的帧，xxHash32，Kafka 的 murmur2 测试向量与 RFC 7677 的 SCRAM 示例：不用容器时语句覆盖率 98.7 %，
+  在竞态检测下运行。互通（`test/sync/kafka_test.go`、`test/sync/kafka.sh`，现由 `test/sync/run.sh` 调用）：Kafka 3.9.1
+  （三个 KRaft broker）与 Redpanda v25.2.9，每种编解码器由客户端写出，在 Kafka 上还由 broker 按 topic 的
+  `compression.type` 重写，完整读回并核对 offset、header 和键；经 SASL_PLAINTEXT 与 SASL_SSL 的 SASL PLAIN 及两种 SCRAM，
+  错误密码和未知 CA 被拒绝；Redpanda 的 PLAIN 与 SCRAM-SHA-256；在两个分区不停生产和读取的同时，停止一个分区的 leader、
+  杀掉另一个分区的 leader（确认约 52 万条记录，无丢失，顺序保持，50 条写了两次）。
+- **与计划的差异**：没有遗漏；增加了 `CreateTopics`、`DeleteTopics` 与 `PartitionFor`。代码约 3,000 行，测试约 2,800 行；
+  没有 I184b。
+- **不足**：计划 I184 一节中的决策，待审查。不幂等（重试的 produce 可能写入两次）；没有消费者组；拒绝 magic 2 之前的消息集；
+  没有试 Kafka 4.x 和 Redpanda 集群的 leader 变化；不支持 OAUTHBEARER 与 GSSAPI。CI 的 `sync-interop` 作业名称仍为
+  （Elasticsearch、OpenSearch、ClickHouse），但现在也运行 Kafka。本项没有在 Linux 上或整个套件的竞态检测下运行（留给合并）。
+
 ### I169 Elasticsearch 与 OpenSearch 作为源 — 已完成
 
 - **源 `elasticsearch`**（`sync/elasticsearch/source.go`，与目标同包，共用 `Conn` 及其参数）：记录的命名空间是文档的索引，键为

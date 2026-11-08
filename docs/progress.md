@@ -5810,6 +5810,45 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   pending review.
 
 
+### I184 A Kafka client — done
+
+- **Package `sync/kafka/wire`** (`kafkawire`): a `Client` of bootstrap brokers with `Metadata`,
+  `Partitions`, `Produce` (acks all, leader or none; any codec and level), `Fetch` (many partitions,
+  read committed or not, records copied out of the response), `ListOffsets` (`OffsetLatest`,
+  `OffsetEarliest` or a time), `CreateTopics` and `DeleteTopics`, and `PartitionFor` (the Java
+  client's murmur2). Requests to many partitions are grouped by leader and sent in parallel;
+  partitions refused for a retriable reason, or whose connection failed, are sent again with the
+  metadata read again, until the context ends or `RetryFor`.
+- **The wire**: the non-flexible versions of Produce (3–8), Fetch (4–11), ListOffsets (1–5),
+  Metadata (1–8), CreateTopics, DeleteTopics, SaslHandshake and SaslAuthenticate, picked from
+  ApiVersions; record batches of magic 2 with their CRC-32C, headers, tombstones, control batches
+  and aborted transactions; gzip (standard library), snappy (xerial framing, read raw too) and zstd
+  (`klauspost/compress`), LZ4 frames written here; every decompression and response bounded.
+- **Connections**: blocking `net.Conn`s, TLS, SASL PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512 (the
+  server's signature checked, sessions with a lifetime connected again), requests pipelined and
+  read by a goroutine per connection, fetches on connections of their own, a silent broker's
+  connection failed after `RequestTimeout`.
+- **Tests**: unit tests on an in-process fake cluster (leaders moving, brokers down, connections
+  closed, answers dropped, cut short, unreadable or out of order, NOT_CONTROLLER, SASL with each
+  mechanism and wrong passwords, TLS, the oldest versions and versions not spoken, read committed),
+  corrupted batches, compressed data and LZ4 frames at every byte, the lz4 tool's frames, xxHash32,
+  Kafka's murmur2 vectors and RFC 7677's SCRAM example: 98.7 % of statements with no containers,
+  under the race detector. Interop (`test/sync/kafka_test.go`, `test/sync/kafka.sh`, which
+  `test/sync/run.sh` now runs): Kafka 3.9.1 (three KRaft brokers) and Redpanda v25.2.9, every codec
+  written by the client and, on Kafka, by the broker from a topic's `compression.type`, read back
+  whole with offsets, headers and keys; SASL PLAIN and both SCRAMs over SASL_PLAINTEXT and SASL_SSL,
+  a wrong password and an unknown CA refused; Redpanda's PLAIN and SCRAM-SHA-256; a partition's
+  leader stopped and another's killed while two partitions are produced and fetched without a pause
+  (about 520,000 records acknowledged, none lost, order kept, 50 written twice).
+- **Differs from the plan**: nothing left out; `CreateTopics`, `DeleteTopics` and `PartitionFor`
+  added. About 3,000 lines of code and 2,800 of tests; no I184b.
+- **Gaps**: the decisions in the plan's I184 section, pending review. Not idempotent (a retried
+  produce may write twice); no consumer groups; message sets older than magic 2 refused; Kafka 4.x
+  and a Redpanda cluster's leader changes not tried; OAUTHBEARER and GSSAPI not spoken. CI's
+  `sync-interop` job keeps its name (Elasticsearch, OpenSearch, ClickHouse) though it now runs
+  Kafka too. Not run on Linux or under the whole suite's race detector by this item (left to the
+  merge).
+
 ### I169 Elasticsearch and OpenSearch as a source — done
 
 - **Source `elasticsearch`** (`sync/elasticsearch/source.go`, beside the sink, sharing `Conn` and

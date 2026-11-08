@@ -347,7 +347,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | todo |
 | I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | todo |
 | I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | todo |
-| I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | todo |
+| I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | done |
 | I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
 | I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | todo |
 | I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | todo |
@@ -5152,6 +5152,77 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: interop in Docker with both; every compression both ways; a leader change mid-fetch
   and mid-produce loses nothing.
 - **Touches**: `sync/kafka/wire`, `test/sync`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/kafka/wire`, named `kafkawire` (not `wire`, which the MySQL,
+   PostgreSQL and MongoDB clients' `sync/*/wire` would share). A `Client` of `Config` (bootstrap
+   brokers, client ID, TLS, SASL, timeouts, retry time, size limits) with `Metadata`, `Partitions`,
+   `Produce`/`ProduceRecords`, `Fetch`, `ListOffsets`/`Offset`/`OffsetAt`, and, beyond the plan,
+   `CreateTopics` and `DeleteTopics` (for the tests, and for I185 to make a sink's topic), plus
+   `PartitionFor`, the Java client's murmur2 partitioner, so that keys land where Java producers put
+   them. Alternative: no admin APIs, topics made by the tests with the brokers' tools.
+2. **Blocking connections, not fib.** Each broker connection is a `net.Conn` (TLS through
+   `crypto/tls`), written under a mutex with many requests in flight and read by a goroutine of its
+   own that hands each response to its caller in order; a broker works one request of a
+   connection at a time, so fetches, which wait on the broker, have a connection per broker of
+   their own beside the one for produce, metadata and offsets. This is decision 036's "connections
+   to databases are few and long, each on a goroutine": no fib worker is held, and Kafka's
+   long-polls gain nothing from an event loop. Alternative: fib's engine with a parser per
+   connection.
+3. **Non-flexible API versions only.** Produce 3–8, Fetch 4–11, ListOffsets 1–5, Metadata 1–8,
+   CreateTopics 2–4, DeleteTopics 1–3, SaslHandshake 1, SaslAuthenticate 1, ApiVersions 0; the
+   highest both sides speak is used, from ApiVersions at connect. These are all inside Kafka 4.0's
+   baseline (KIP-896) and Redpanda's, and need no tagged fields; zstd needs Produce 7 and is refused
+   on an older broker. Alternative: the flexible versions with compact encodings, needed only when
+   a broker drops these.
+4. **Codecs.** gzip from the standard library; snappy and zstd from `klauspost/compress`, which fit
+   already requires for HTTP compression (no new dependency); LZ4 written in the package (the frame
+   format and xxHash32, about 300 lines), since no LZ4 is among fit's dependencies. Snappy is
+   written in xerial's framing as the Java client writes it and read raw or framed; LZ4 is written
+   as independent 64 KiB blocks and read with any block size, linked blocks and checksums. Every
+   decompression is bounded by `MaxBatchBytes` (64 MiB) before it allocates, and a response by
+   `MaxResponseBytes` (128 MiB). Levels: gzip 1–9 and zstd 1–22, 0 the default. Alternative:
+   pierrec/lz4 as a new dependency.
+5. **Not idempotent, at least once.** Batches go with no producer ID: a produce whose answer is
+   lost (a connection failing, a leader stopping) is sent again and may be written twice; the
+   leader-change interop saw 50 records written twice out of 260,000, and none lost. Order per
+   partition holds while a caller has one produce per partition in flight. Alternative:
+   `InitProducerId` and sequence numbers (the idempotent producer), left to I185 if its sink needs
+   duplicates gone.
+6. **Leaders followed by retrying.** A partition refused for a retriable reason (not the leader,
+   no leader, an unknown topic, too few replicas, a timeout, a failed connection) is sent again
+   after a backoff of 100 ms doubling to 1 s, with the metadata read again when the error says the
+   leader moved, until the call's context ends or `RetryFor` (30 s) has passed; the leader epoch is
+   not sent (-1), so the client does not fence itself against stale leaders by epoch. A broker
+   silent past `RequestTimeout` (30 s, beyond the wait it was asked for) fails its connection and
+   every request on it. Alternative: a count of retries.
+7. **One call, many partitions.** `Produce`, `Fetch` and `ListOffsets` take many partitions,
+   grouped by leader, one request per leader, the leaders in parallel, and return a result per
+   partition in order; at most one batch per partition per call. A fetch returns when every leader
+   has answered, so a partition with records waits for an idle broker's `MaxWait`; a partition
+   retried after another brought records is asked without waiting. Alternative: a fetcher per
+   broker streaming into a channel, which I185's source may add on top.
+8. **Not a consumer group.** No group, commit or heartbeat APIs: offsets are the caller's, kept in
+   sync's checkpoint (I185). `ReadCommitted` drops aborted transactions' records and control
+   batches; message sets of magic 0 and 1 (written by brokers older than 0.11, or kept from then)
+   are refused with an error rather than read. Alternative: reading old message sets.
+9. **SASL.** PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512 (the server's signature checked, at most 2^20
+   iterations); a session with a lifetime is connected again at 90 % of it. No OAUTHBEARER or
+   GSSAPI. PLAIN without TLS is allowed here; the config of I185 can warn. Alternative: refuse PLAIN
+   without TLS.
+10. **Interop.** `test/sync/kafka.sh` starts Kafka 3.9.1 (three KRaft brokers that are also the
+    controllers, each with PLAINTEXT, SASL_PLAINTEXT and SASL_SSL listeners and a CA of its own)
+    and Redpanda v25.2.9 (one node, PLAINTEXT and SASL listeners), and prints the environment;
+    `test/sync/run.sh` runs it, so CI's `sync-interop` job runs the tests too. The leader-change
+    test stops and kills a partition's leader with `docker` from the test (the containers named in
+    `FIT_SYNC_KAFKA_CONTAINERS`) while records are produced and fetched; Redpanda, one node, has no
+    leader change. On Kafka every codec is also a topic's `compression.type`, so the broker writes
+    it from another codec and the client reads it; Redpanda does not recompress, so there each codec
+    goes one way and back. Kafka 4.x is not tried. Alternative: a Redpanda cluster for leader
+    changes too.
+11. **Size**: about 3,000 lines of code and 2,800 of tests (unit tests on an in-process fake
+    cluster, 98.7 % of statements without containers); no I184b.
 
 ### I185 Kafka as a source and a sink; TiDB through TiCDC
 
