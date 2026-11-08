@@ -6701,14 +6701,34 @@ In JSON:
 
 ### `postgres`
 
-Follows PostgreSQL's changes (13 to 17, wal_level logical) through logical replication: a slot and a publication, created when missing with create, read with pgoutput, large transactions streamed and kept on disk until they commit. Inserts, updates, deletes and truncates become records of db.table namespaces (schema.table), typed by the columns' types, keyed by the primary key or the replica identity, whole transactions at a time. Its position is the LSN at a transaction's end, confirmed to the slot only once every sink has it and the checkpoint is saved, so the server keeps the WAL until then; the slot's lag is logged past lag_warning.
+Follows PostgreSQL's changes (13 to 17, wal_level logical) through logical replication: a slot and a publication, created when missing with create, read with pgoutput, large transactions streamed and kept on disk until they commit. With snapshot initial, the tables are first read whole, in chunks by key in parallel, from a snapshot exported at the point the stream then starts from, so that the hand-over is exact; a job (mode once) reads that snapshot alone. Inserts, updates, deletes and truncates become records of db.table namespaces (schema.table), typed by the columns' types, keyed by the primary key or the replica identity, whole transactions at a time. Its position is the LSN at a transaction's end, confirmed to the slot only once every sink has it and the checkpoint is saved, so the server keeps the WAL until then; the slot's lag is logged past lag_warning.
 
 Follows a PostgreSQL database (13 to 17, `wal_level = logical`) as a logical replica: a
 `publication` names the tables and operations, a `slot` keeps the server's WAL until the source has
 confirmed it, and the stream is read with the built-in `pgoutput` plugin (protocol 1 on 13, 2 with
 streaming from 14). With `create`, a missing publication is made `FOR TABLE` the `tables`, and a
-missing slot is made with no snapshot, so changes come from its creation on; neither is changed or
-dropped later. Without `create`, both must exist: the slot of plugin `pgoutput` on `database`.
+missing slot is made; neither is changed or dropped later. Without `create`, both must exist: the
+slot of plugin `pgoutput` on `database`.
+
+With `snapshot: "initial"` (the default), a pipeline without a checkpoint first reads every row of
+the published tables, then the changes after them, and the hand-over is exact: the rows come from a
+snapshot exported at a point of the WAL, and the stream starts at that very point, so no change is
+both in the snapshot and in the stream, and none is in neither. A slot made by `create` exports the
+snapshot itself; when the slot exists already, a temporary slot is made beside it for the snapshot
+and dropped with its connection. Each table with a primary key (or a `REPLICA IDENTITY USING INDEX`
+index) is split into chunks of `chunk_rows` (100,000) rows by that key, read `snapshot_parallel`
+(4) at a time, each in a `REPEATABLE READ` transaction that takes the exported snapshot
+(`SET TRANSACTION SNAPSHOT`); a table without one is read whole. Snapshot records are inserts with
+no transaction, keyed as the stream keys the table's changes, and the publication's column lists
+and row filters (PostgreSQL 15 and later) apply to them. The position records the chunks done; a
+run that fails keeps the exported snapshot for five minutes, and the next resumes in it at its next
+chunk. Once the snapshot is gone (fit restarted), the tables not finished are read again whole from
+a new snapshot, which a warning says, and the stream starts at the first snapshot's point, so the
+changes between the two are replayed over them: sinks writing by key converge on the tables. The
+snapshot holds back vacuum on the server while it is read. `snapshot: "never"` reads the changes
+alone, from the slot's position. A job (`mode: "once"`) reads the snapshot in chunks, as `job`
+says, each chunk in a transaction of its own and not one snapshot, and needs no slot; with `never`
+it reads the changes up to the server's end at its start.
 
 Each insert, update and delete becomes a record of namespace `schema.table`; a truncate becomes a
 `ddl` record of each table whose `after` holds the `statement` and `truncate: true`. Values are typed
@@ -6834,7 +6854,10 @@ In JSON:
 | `publication` | string |  | Required. The publication read: the tables whose changes come, and which operations. With create, made FOR TABLE tables when it does not exist; it is never changed. |
 | `slot` | string |  | Required. The logical replication slot read, of plugin pgoutput: lowercase letters, digits and underscores. With create, made when it does not exist; it is never dropped: drop it (pg_drop_replication_slot) when the pipeline is gone, or the server keeps its WAL for good. |
 | `tables` | list of string |  | The tables, schema.table or table (in public), the publication is made for with create; with a publication that exists, each must be in it. Required with create. |
-| `create` | boolean |  | Create the publication and the slot when they do not exist, rather than fail. The slot is made with no snapshot: changes come from its creation on. |
+| `create` | boolean |  | Create the publication and the slot when they do not exist, rather than fail. With snapshot initial, the slot made exports the snapshot the tables are read from; with never, changes come from its creation on. |
+| `snapshot` | string: `initial`, `never` | `"initial"` | Where a pipeline without a checkpoint starts: initial, every row of the tables, read from a snapshot exported at the point the stream then starts from (the slot's own when create makes it, a temporary slot's otherwise), then the changes after it; never, the changes from the slot's position on. A job (mode once) reads the snapshot and stops, or, with never, the changes up to the server's end. initial when left out. |
+| `snapshot_parallel` | integer, 0 to 64 | `4` | How many chunks of the snapshot are read at once, each on a connection of its own, before the stream; a job reads job.max_parallel at a time instead. 4 when left out or 0. |
+| `chunk_rows` | integer, 0 or more | `100000` | The rows of a chunk of the snapshot: a table with a primary key, or a replica identity index, is split into ranges of that key of this many rows, each read in a transaction of its own and resumed after its last row; a table without one is read whole. 100000 when left out or 0. |
 | `streaming` | string: `auto`, `off` | `"auto"` | Large transactions streamed by the server while they run (PostgreSQL 14 and later), kept in files under spool_dir until they commit, rather than spilled by the server and sent at their commit: auto, on servers that have it; off. auto when left out. |
 | `spool_dir` | string |  | The directory streamed transactions are kept in until they commit or abort, a file each, removed then. The system's temporary directory when left out. |
 | `status_interval` | duration | `"10s"` | How often the source tells the server the position the sinks have, also when it has not moved, which keeps the connection alive (below the server's wal_sender_timeout). 10s when left out or 0. |
