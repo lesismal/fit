@@ -1,0 +1,289 @@
+# Global settings
+
+[English](07-global-settings.md) | [简体中文](07-global-settings.zh-CN.md)
+
+## What it does
+
+**Global** is the module that edits the config's top-level members that belong to no route, no listener
+and no role: fit's own log, the access log, telemetry, metrics, profiling, limits, the engine and the
+providers. It is the first module of the navigation bar's system group, its pages come in that order,
+each page edits one member and is named for it, and the last two pages are **Other** and
+**Import / Export**.
+
+These pages work like every other page that edits the config ([the function navigation bar](03-navigation.zh-CN.md)):
+the forms are made from the embedded fit JSON Schema, each field carries its description, an optional
+member has a checkbox, and each page has `.conf`, `.yaml` and `.json` tabs that edit the same draft.
+**Save and apply** sends the whole draft with `If-Match`, checks it and then applies it, so it goes
+through the same checks as `fit validate`; **Check** beside it is the same request with `?dry_run=1`,
+which checks without applying.
+
+What this chapter turns on is which changes take effect at once and which need a restart: `log`'s
+`level`, `levels`, `time_zone` and `rotate` take effect on reload, `output` and `format` take a restart;
+`access_log`'s `level`, `time_zone` and `rotate` take effect on reload and the rest take a restart;
+`telemetry`, `engine` and `providers` are read when fit starts, so a change needs a restart; `pprof`
+follows every config applied, with no restart.
+
+## Pages
+
+### Log (`log`)
+
+One form, editing `log`: `level` and the per-logger `levels`, `output`, `format`, `time_zone` and
+`rotate`, plus `loggers` (some loggers' own level, output, format and rotation). fit's own log says what
+it thinks about starting, loading and reloading configs, certificates, providers and the engine, and
+writes nothing for each request; which logger is which, and what each says, is in
+[the config reference's Log chapter](../reference/config.md#log). After Save and apply the level, the
+zone and the rotation take effect at once; the output and the format change at the next restart. The
+files on disk and "N lines dropped" are on the [Logs](11-logs.zh-CN.md) page.
+
+### Access log (`access_log`)
+
+Edits `access_log`: `output`, `flush_interval`, `buffer_bytes`, `level`, `format`, `time_zone` and
+`rotate`. One line per request, as `json` (the default), `text` (logfmt) or `line`. `level` filters by
+status: a response below 400 is info, a 4xx is warn and a 5xx is error, so `warn` writes only the
+requests answered with 4xx and 5xx, and `error` only those answered with 5xx; a request below the level
+costs one comparison and no line. When the buffer is full the lines past it are dropped and counted, so
+a slow output never holds requests up.
+
+### Telemetry (`telemetry`)
+
+Edits `telemetry`: the OTLP/HTTP `endpoint`, `headers_file`, `ca_file`, `cert_file`, `key_file`,
+`service_name` and `timeout`, then `traces` (`sample_ratio`, `max_queue_bytes`, `interval`) and
+`metrics` (`interval`). Without `traces` there are no traces, and without `metrics` nothing is exported
+over OTLP; with `sample_ratio` 0 only the requests whose caller already sampled them are traced. This
+page's settings are read when fit starts: after Save and apply they take effect at the next restart.
+
+### Metrics (`metrics`)
+
+`metrics` has no fields: ticking the member (or writing `metrics {}`) turns it on, counting and timing
+requests by listener and route for the Admin API's `/metrics` in Prometheus's text format. It needs
+`admin` and costs every request a little, so it is off unless written. On the page there is that
+checkbox and the three text tabs.
+
+### Profiling (`pprof`)
+
+Edits `pprof`: `block_profile_rate`, `mutex_profile_fraction` and `max_duration`. This page's **Save and
+apply** turns the profiles on or off at once, with no restart. The console does not serve them: they are
+served by the Admin API at its `/debug/pprof/` on its own address (`admin.address`, `127.0.0.1:2019` by
+default), behind its token; without `pprof` those paths answer 404. For example:
+
+```sh
+go tool pprof http://127.0.0.1:2019/debug/pprof/profile?seconds=30
+```
+
+`seconds` may ask for at most `max_duration` (1m by default). Leave `pprof` out when done: the blocking
+and mutex rates are worth setting only while looking, since sampling costs every such event.
+
+### Limits (`limits`)
+
+Edits `limits`: `max_conns`, `max_header_bytes`, `max_body_bytes`, `max_pending_bytes`,
+`max_write_queue_bytes` and `write_stall_timeout`. These bounds apply to every listener, and each has a
+default, so a config that writes none is still bounded. `max_pending_bytes` may be a number of bytes or
+a share of the memory fit may use, such as `25%`. `max_conns`, `max_pending_bytes` and
+`max_write_queue_bytes` take effect at start, not on a reload; at startup fit prints the limits it
+actually runs with and the settings of both engines. A single route's body limit is set by the
+`body_limit` middleware.
+
+### Engine (`engine`)
+
+Edits `engine`: `event_loops`, `workers`, `min_workers`, `task_queue`, `poll_batch`,
+`read_buffer_size`, `write_watermark`, `loop_wait` and `backlog`. fit runs two engines: the listeners'
+serves clients, and upstream connections are dialed through the other, so that a response waiting for a
+slow client does not hold up the workers that read upstreams. What is left out keeps fib's own default,
+so most configs write no `engine` at all; it is for tuning a busy server on the host it runs on. The
+engines are made when fit starts, so a change needs a restart (saving warns that it waits for one). The
+running engine per port, and what each port serves, is in the [Engine](06-engine.zh-CN.md) chapter.
+
+### Providers (`providers`)
+
+Edits `providers`: a list, one source each, named by `name` (its kind when left out): `docker`,
+`consul`, `consul_kv`, `etcd` and `kubernetes`. The merge rules: what the config writes wins over every
+provider, and a provider over those listed after it; a provider's element named as one before it is left
+out (the shadowed ones are info). The effective config and where each part came from are on the
+[JSON](08-json.zh-CN.md) chapter's Effective tab. This page's settings are read when fit starts.
+
+### Other (`other`)
+
+The members the schema has no page of their own yet are on this page: `access`, `media_library`,
+`schema_version` and `sync`. Each member is one section, with the same raw text tabs as the other pages.
+`access` is the global allow and deny lists: every listener, route, service, role, the Admin API and the
+console go by it, and a more specific `access` decides first
+([who may connect](../configuration.md#who-may-connect)). `media_library` also has its own page in
+the Media library module ([the media library](22-media-library.zh-CN.md) chapter). Once every member has
+a page, this page says "Every member of the config has its own page."
+
+### Import / Export (`transfer`)
+
+The last page takes the whole config: export it as `.conf`, `.yaml`, `.json` or `.store` (the encrypted
+fitstore), or import a file that replaces the whole config. The export is the config as it is saved and
+running; changes not saved yet are not in the file. An import applies at once, through the same path as
+saving, and writes to the store; an import with page members takes only those members from the file.
+`admin` is never exported or imported. Each page's own **Export** and **Import** buttons handle only that
+page's members. See [importing and exporting the config](../console.md#importing-and-exporting-the-config).
+
+## Key parameters
+
+Only the most-used fields; the full tables are in the matching chapter of the config reference.
+
+### log
+
+| field | default | description |
+| --- | --- | --- |
+| `level` | `info` | The least level written, for every logger levels and loggers do not set one for: `debug`, `info`, `warn`, `error`; takes effect on reload |
+| `levels` | | The least level of some loggers, by name, over `level`; takes effect on reload |
+| `output` | | `stdout`, `stderr`, or the path of a file messages are appended to; left out, debug and info go to stdout and warn and error to stderr; takes a restart |
+| `format` | `line` | `line`, `text` (logfmt) or `json`; each line carries the logger's name; takes a restart |
+| `time_zone` | `local` | The zone the time of every line is written in, and the zone a file's `interval` turns at: `local`, `utc` or an IANA name; takes effect on reload |
+| `rotate` | | Rotation and retention of the file; left out, the file grows without bound |
+| `loggers` | | Some loggers' own `level`, `output`, `format` and `rotate` |
+
+Full table: [log](../reference/config.md#log), [log.rotate](../reference/config.md#config-rotate),
+[log.loggers.*](../reference/config.md#config-logger).
+
+### access_log
+
+| field | default | description |
+| --- | --- | --- |
+| `output` | `stdout` | `stdout`, `stderr`, or the path of a file lines are appended to |
+| `flush_interval` | `1s` | How long a line may wait in the buffer before it is written |
+| `buffer_bytes` | 4 MiB | How many bytes of lines may wait; lines past it are dropped and counted |
+| `level` | `info` | The least level of the requests written, by status: a 4xx is warn and a 5xx is error; takes effect on reload |
+| `format` | `json` | `json`, `text` or `line`; takes a restart |
+| `time_zone` | `local` | The zone a line's time is written in, and the zone the file's `interval` turns at; takes effect on reload |
+| `rotate` | | The same as `log`'s `rotate` |
+
+Full table: [access_log](../reference/config.md#access-log).
+
+### telemetry
+
+| field | default | description |
+| --- | --- | --- |
+| `endpoint` | `http://127.0.0.1:4318` | The OTLP/HTTP receiver; traces go to its `/v1/traces` and metrics to `/v1/metrics` |
+| `service_name` | `fit` | The service.name of the resource traces and metrics are about |
+| `timeout` | `10s` | How long an export may take; a batch not sent by then is dropped and counted |
+| `traces.sample_ratio` | 0 | The share of requests traced among those whose caller did not decide, 0 to 1 |
+| `traces.interval` | `5s` | How often spans are exported, and sooner when 256 KiB of them wait |
+| `metrics.interval` | `30s` | How often the metrics are exported |
+
+Full table: [telemetry](../reference/config.md#telemetry).
+
+### metrics
+
+It has no fields: `{}` turns it on. It needs `admin` and costs every request a little, so it is off when
+left out. Full table: [metrics](../reference/config.md#metrics).
+
+### pprof
+
+| field | default | description |
+| --- | --- | --- |
+| `block_profile_rate` | 0 | The block profile: one event per this many nanoseconds spent blocked, on average; 1 for every one |
+| `mutex_profile_fraction` | 0 | The mutex profile: one in this many contended mutexes; 1 for every one |
+| `max_duration` | `1m` | The longest a profile's `seconds` may ask for; a longer request is refused with 400 |
+
+Full table: [pprof](../reference/config.md#pprof).
+
+### limits
+
+| field | default | description |
+| --- | --- | --- |
+| `max_conns` | 100000 | The most client connections the listeners keep open at once, across all of them; one past it is closed as it is accepted; takes effect at start |
+| `max_header_bytes` | 1 MiB | The largest request header a listener takes; a larger one gets 431 |
+| `max_body_bytes` | 16 MiB | The largest request body a listener takes; a larger one gets 413, or ends the connection once it has begun to stream |
+| `max_pending_bytes` | `50%` | The bytes of responses waiting for slow clients across every connection; bytes or a share of memory; takes effect at start |
+| `max_write_queue_bytes` | 32 MiB | The bytes one connection may have queued for its client before fit closes it; takes effect at start |
+| `write_stall_timeout` | `30s` | How long a response may wait for its client to take what it was sent, each time it waits |
+
+Full table: [limits](../reference/config.md#limits).
+
+### engine
+
+| field | default | description |
+| --- | --- | --- |
+| `event_loops` | fib's default | How many event loops each engine waits on; Windows has one whatever this says |
+| `workers` | 100 per CPU | The most workers each engine's pool runs on at once |
+| `min_workers` | 0 | How many workers an idle pool keeps |
+| `task_queue` | fib's default | How many tasks each pool holds waiting for a worker |
+| `read_buffer_size` | 64 KiB | The bytes a connection reads its socket into at a time, also the most a proxied body is passed on in one write |
+| `write_watermark` | fib sizes it from the read buffer and the machine | The backpressure on one connection |
+| `backlog` | the system's | The length of each listening socket's queue of connections not yet accepted |
+
+Full table: [engine](../reference/config.md#engine).
+
+### providers
+
+| field | default | description |
+| --- | --- | --- |
+| `name` | its kind | The name the provider goes by in the effective config and in logs |
+| `docker` | | Routes, upstreams and services from running containers' labels; `endpoint` is `unix:///var/run/docker.sock` |
+| `consul` | | The tags of the services in a Consul catalog; `endpoint` is `http://127.0.0.1:8500` |
+| `consul_kv` | | The keys under `prefix` in Consul's KV store; `fit/` by default |
+| `etcd` | | The keys under `prefix` in etcd; `endpoints` are `http://127.0.0.1:2379` |
+| `kubernetes` | | The cluster's Gateway API resources and Ingresses; `controller_name` is `lesismal.github.io/fit` |
+
+Full table: [providers](../reference/config.md#providers).
+
+## In .conf
+
+A complete config that passes `fit validate`: `log`, `access_log`, `limits` and `engine`, with a minimal
+listener and route.
+
+```fit
+schema_version 1
+
+log {
+	level info
+	levels {
+		engine warn
+		tls info
+	}
+	output /var/log/fit/fit.log
+	format line
+	time_zone Asia/Shanghai
+}
+
+access_log {
+	output /var/log/fit/access.log
+	format json
+	level warn
+	time_zone Asia/Shanghai
+}
+
+limits {
+	max_conns 50000
+	max_header_bytes 64KiB
+	max_body_bytes 16MiB
+	max_pending_bytes 25%
+	max_write_queue_bytes 32MiB
+	write_stall_timeout 30s
+}
+
+engine {
+	event_loops 4
+	workers 512
+	min_workers 8
+	task_queue 2048
+	read_buffer_size 64KiB
+	write_watermark 262144
+	backlog 4096
+}
+
+listener web :8080
+
+route { handler respond { body "hello from fit" } }
+```
+
+## See also
+
+- [The config reference](../reference/config.md): [Log](../reference/config.md#log),
+  [Access log](../reference/config.md#access-log), [Telemetry](../reference/config.md#telemetry),
+  [Metrics](../reference/config.md#metrics), [Profiling](../reference/config.md#pprof),
+  [Limits](../reference/config.md#limits), [Engine](../reference/config.md#engine),
+  [Providers](../reference/config.md#providers), [Access](../reference/config.md#access).
+- [The console and the store](../console.md):
+  [importing and exporting the config](../console.md#importing-and-exporting-the-config).
+- [The config](../configuration.md) and [the .conf format](../reference/fit.md).
+- The [templates](../../templates/README.md):
+  [`00-runtime.conf`](../../templates/conf/conf.d/00-runtime.conf),
+  [`30-observability.conf`](../../templates/conf/conf.d/30-observability.conf),
+  [`50-providers.conf`](../../templates/conf/conf.d/50-providers.conf).
+- Neighbouring chapters: [the function navigation bar](03-navigation.md), [Overview](04-overview.md),
+  [Engine](06-engine.md), [JSON](08-json.md), [Logs](11-logs.md).
