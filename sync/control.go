@@ -759,7 +759,8 @@ func DryRunPipeline(ctx context.Context, cfg *config.SyncPipeline, from Position
 		case <-t.C:
 			// A source that does not return when asked is let go once it
 			// does, and answered without.
-			go func() { <-done; cleanup() }()
+			later := cleanup
+			go func() { <-done; later() }()
 			cleanup = func() {}
 		}
 		t.Stop()

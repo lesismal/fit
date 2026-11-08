@@ -14,8 +14,8 @@
 #   test/sync/kafka.sh down             remove them
 #
 # PREFIX names the containers and the network (fit-sync-); KAFKA_PORT and
-# REDPANDA_PORT are the first of the host ports (29210, nine of them, and
-# 29220, two). The tests read FIT_SYNC_KAFKA_BROKERS, FIT_SYNC_KAFKA_SASL_BROKERS,
+# REDPANDA_PORT are the first of the host ports (29400, nine of them, and
+# 29410, two). The tests read FIT_SYNC_KAFKA_BROKERS, FIT_SYNC_KAFKA_SASL_BROKERS,
 # FIT_SYNC_KAFKA_TLS_BROKERS, FIT_SYNC_KAFKA_CA, FIT_SYNC_KAFKA_USER,
 # FIT_SYNC_KAFKA_PASSWORD, FIT_SYNC_KAFKA_CONTAINERS (node=container, for
 # stopping a leader) and FIT_SYNC_REDPANDA_BROKERS, FIT_SYNC_REDPANDA_SASL_BROKERS.
@@ -25,8 +25,8 @@ cd "$(dirname "$0")/../.."
 PREFIX=${PREFIX:-fit-sync-}
 KAFKA_IMAGE=${KAFKA_IMAGE:-apache/kafka:3.9.1}
 REDPANDA_IMAGE=${REDPANDA_IMAGE:-redpandadata/redpanda:v25.2.9}
-KAFKA_PORT=${KAFKA_PORT:-29210}
-REDPANDA_PORT=${REDPANDA_PORT:-29220}
+KAFKA_PORT=${KAFKA_PORT:-29400}
+REDPANDA_PORT=${REDPANDA_PORT:-29410}
 PASSWORD='Fit-sync-1nterop!'
 NET=${PREFIX}kafka-net
 STATE=${TMPDIR:-/tmp}/${PREFIX}kafka
