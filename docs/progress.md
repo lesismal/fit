@@ -5852,6 +5852,38 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   `tls.Config`; no statement cache, compression or `COM_STMT_SEND_LONG_DATA`; the replica's
   commands are I174's.
 
+### I173 The MySQL binlog: events and values — done
+
+- **Package `sync/mysql/binlog`** (`binlog`), no dependencies past the standard library and `sync`:
+  a `Decoder` of whole events (format description, rotate, MySQL's GTIDs with 8.0's timestamps and
+  versions, anonymous and 8.3's tagged ones, previous GTIDs tagged or not, query, rows query,
+  table map with every piece of optional metadata, rows v1 and v2, partial JSON updates applied to the
+  before value, XID, heartbeat v1 and v2, an uncompressed transaction payload; MariaDB's GTID, GTID
+  list, binlog checkpoint, annotate rows and compressed query and rows events), CRC32 checked, and a
+  `Reader` of binlog files. Every column type to a `fitsync.Value`: integers signed or not, `FLOAT`,
+  `DOUBLE`, `DECIMAL` to 65 digits, `DATE`, `DATETIME`, `TIMESTAMP` and `TIME` old and new with
+  fractions (negative ones too) and zero dates, `YEAR`, `BIT`, `ENUM`, `SET`, strings by charset,
+  blobs, `GEOMETRY`, `VECTOR` and MySQL's binary JSON (opaque decimals, dates and times included).
+- **Bounds**: `MaxEventSize`, `MaxRowsSize`, `MaxTables`, 4,096 columns, JSON's depth and text; the
+  reader's buffer and decompressed data grow with the bytes read, not with a header's claim.
+- **Interop**: `test/sync/mysql.sh` starts the five servers with the binlog in row format, GTIDs on
+  for MySQL and `LOAD_FILE` able to read it; `TestMySQLBinlogInterop` runs `testdata/workload.json`
+  (every type, updates under `FULL` and `MINIMAL`, deletes, a transaction, partial JSON updates on
+  8.0 and 8.4, a DDL, MariaDB's compression, a tagged GTID on 8.4) and checks each server's binlog
+  decodes to the workload's rows; `mysql.sh` and `run.sh` also run `./sync/mysql/binlog`.
+- **Tests**: the binlogs captured from MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and 11 in testdata
+  decode to the rows written, with and without optional metadata; unit tests on built events (99.6%
+  of statements, no containers): every event and its malformed forms, checksums, every value type,
+  JSON forms and bombs, partial-update paths, the bounds; `TestMutations` (every captured event with
+  each byte changed and cut at each length) and `FuzzReader` (no panic, allocation within its bound;
+  fuzzed some minutes, one over-allocation found and fixed: the reader sized its buffer by the
+  header). Interop with all five servers under the race detector, `test/sync/mysql.sh` alone with
+  its own containers, the I172 and I176 MySQL tests passing with the servers' new options. Not run on
+  Linux nor in the full suite (the merge's).
+- **Gaps**: the decisions in the plan's I173 section, pending review. ZSTD-compressed transaction
+  payloads are refused; `Intvar`, `Rand`, `User_var`, `XA_prepare` and the like are left as bytes;
+  MariaDB's pre-10.3 temporal format and encrypted files are refused; the replica protocol is I174's.
+
 ### I176 MySQL and TiDB as a sink — done
 
 - **Package `sync/mysql`** (`syncmysql`), the sink `mysql` on `sync/mysql/wire`: inserts, updates and

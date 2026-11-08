@@ -1,10 +1,13 @@
 #!/bin/sh
 # Starts the MySQL and MariaDB servers sync's MySQL tests run against, in
 # Docker: MySQL 5.7, 8.0 and 8.4, MariaDB 10.11 and 11, each with TLS from a
-# CA made here, a root password, mysql_native_password enabled (8.4) and a
-# max_allowed_packet of 64 MiB. test/sync/run.sh sources it; run alone, it
-# starts them, runs the MySQL tests and removes them (KEEP=1 keeps them, and
-# a second run reuses them):
+# CA made here, a root password, mysql_native_password enabled (8.4), a
+# max_allowed_packet of 64 MiB, the binlog on in row format (GTIDs on for
+# MySQL; MariaDB has its own always) and secure_file_priv off, so that a
+# test can read a binlog's file with LOAD_FILE. test/sync/run.sh sources
+# it; run alone, it starts them, runs the MySQL tests (those of test/sync
+# and sync/mysql/binlog) and removes them (KEEP=1 keeps them, and a second
+# run reuses them):
 #
 #   test/sync/mysql.sh [go test flags...]
 #
@@ -70,14 +73,21 @@ mysql_start() {
 			;;
 		esac
 		name=$MYSQL_PREFIX-$s
+		# MariaDB's and MySQL 5.7's LOAD_FILE read only files readable by
+		# all; UMASK is the mode the servers create their files with.
 		if ! docker inspect "$name" >/dev/null 2>&1; then
-			extra=
-			[ "$s" = mysql84 ] && extra=--mysql-native-password=ON
+			case $s in
+			mysql57) extra="--server-id=1 --log-bin=mysql-bin --gtid-mode=ON --enforce-gtid-consistency=ON" ;;
+			mysql80) extra="--gtid-mode=ON --enforce-gtid-consistency=ON" ;;
+			mysql84) extra="--gtid-mode=ON --enforce-gtid-consistency=ON --mysql-native-password=ON" ;;
+			*) extra="--server-id=1 --log-bin=mysql-bin" ;;
+			esac
 			# shellcheck disable=SC2046
 			docker run -d --name "$name" -p "127.0.0.1:$port:3306" \
-				-e MYSQL_ROOT_PASSWORD="$MYSQL_PASSWORD" -v "$MYSQL_CERTS:/certs:ro" \
+				-e MYSQL_ROOT_PASSWORD="$MYSQL_PASSWORD" -e UMASK=0644 -v "$MYSQL_CERTS:/certs:ro" \
 				$(mysql_image $s) --ssl-ca=/certs/ca.pem --ssl-cert=/certs/server.pem \
-				--ssl-key=/certs/server-key.pem --max-allowed-packet=64M $extra >/dev/null
+				--ssl-key=/certs/server-key.pem --max-allowed-packet=64M \
+				--binlog-format=ROW --secure-file-priv= $extra >/dev/null
 		fi
 		FIT_SYNC_MYSQL="$FIT_SYNC_MYSQL${FIT_SYNC_MYSQL:+,}$s=127.0.0.1:$port"
 		port=$((port + 1))
@@ -142,6 +152,6 @@ case $0 in
 	cd "$(dirname "$0")/../.."
 	trap mysql_cleanup EXIT
 	mysql_start
-	FIT_SYNC_INTEROP=required go test -count=1 -run 'MySQL' "$@" ./test/sync
+	FIT_SYNC_INTEROP=required go test -count=1 -run 'MySQL' "$@" ./test/sync ./sync/mysql/binlog
 	;;
 esac

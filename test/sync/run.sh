@@ -216,4 +216,4 @@ FIT_SYNC_INTEROP=required \
 	FIT_SYNC_REDIS_USER=fit FIT_SYNC_REDIS_PASSWORD="$PASSWORD" \
 	FIT_SYNC_MINIO_URL="http://localhost:$MINIO_PORT" FIT_SYNC_MINIO_ACCESS_KEY=fitminio FIT_SYNC_MINIO_SECRET_KEY="$PASSWORD" \
 	FIT_SYNC_SEAWEED_URL="http://localhost:$SEAWEED_PORT" FIT_SYNC_SEAWEED_ACCESS_KEY=fitseaweed FIT_SYNC_SEAWEED_SECRET_KEY="$PASSWORD" \
-	env $(pg_env) go test -race -count=1 "$@" ./test/sync
+	env $(pg_env) go test -race -count=1 "$@" ./test/sync ./sync/mysql/binlog
