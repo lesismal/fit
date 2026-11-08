@@ -399,7 +399,14 @@ func TestAssistantLists(t *testing.T) {
 	k.ms["m3"].srv.Close()
 	k.waitUp("m1")
 	k.waitState("m3", "down", func(s State) bool { return s.Status == StatusDown || s.Status == StatusError })
-	waitFor(t, "a drift read", func() bool { return len(k.m.SyncStates()) >= 2 })
+	// m1 and m2's drift reads, not any two: m3's, down, may come first.
+	waitFor(t, "m1 and m2's drift reads", func() bool {
+		read := map[string]bool{}
+		for _, s := range k.m.SyncStates() {
+			read[s.Node] = true
+		}
+		return read["m1"] && read["m2"]
+	})
 	a := k.m.Assistant()
 	var ms struct {
 		Members []memberRow
