@@ -167,10 +167,12 @@ func TestJobResumesByChunk(t *testing.T) {
 			again++
 		}
 	}
-	// What was written twice is at most the chunks under way at the kill
-	// (four), past their positions saved.
-	if int64(again) > 4*chunk {
-		t.Fatalf("%d records written twice", again)
+	// What is written twice is only what the first run wrote outside the
+	// chunks its checkpoint had done: the chunks under way at the kill, and
+	// those that finished after the position the last save took (a save's
+	// fsync can take long, on a slow disk, while the readers go on).
+	if limit := firstRun - int64(ndone)*chunk; int64(again) > limit {
+		t.Fatalf("%d records written twice, more than the %d the first run wrote outside the chunks done", again, limit)
 	}
 	end, _ := readJob(t, dir, "copy")
 	if end.Finished == nil || end.Written != total || end.Failed != 0 || end.ChunksDone != len(end.Chunks) || end.Rows != total {
