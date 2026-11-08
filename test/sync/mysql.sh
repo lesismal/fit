@@ -32,8 +32,13 @@ mysql_image() {
 }
 
 mysql_certs() {
-	[ -f "$MYSQL_CERTS/ca.pem" ] && return
-	(
+	# The servers run as their image's mysql user, whose ID is not the
+	# host user's: on a Linux host the bind-mounted directory (mktemp makes
+	# it 0700) and the files must be readable by others. Docker Desktop's
+	# file sharing hides this on macOS.
+	mkdir -p "$MYSQL_CERTS"
+	chmod 755 "$MYSQL_CERTS"
+	[ -f "$MYSQL_CERTS/ca.pem" ] || (
 		cd "$MYSQL_CERTS"
 		openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=fit-sync-test-ca" \
 			-keyout ca-key.pem -out ca.pem 2>/dev/null
@@ -42,8 +47,8 @@ mysql_certs() {
 		printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' >ext.cnf
 		openssl x509 -req -in server.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -days 30 \
 			-extfile ext.cnf -out server.pem 2>/dev/null
-		chmod 644 ./*.pem
 	)
+	chmod 644 "$MYSQL_CERTS"/*.pem
 }
 
 mysql_start() {

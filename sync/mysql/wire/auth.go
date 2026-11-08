@@ -107,6 +107,10 @@ func (c *Conn) handshake(ctx context.Context) error {
 		if err := c.writePacket(b); err != nil {
 			return err
 		}
+		if c.br.Buffered() > 0 {
+			// Bytes past the greeting would be lost under TLS.
+			return fmt.Errorf("%w: data after the greeting", ErrMalformed)
+		}
 		tc := c.cfg.TLS.Clone()
 		if tc.ServerName == "" && !tc.InsecureSkipVerify {
 			host, _, err := net.SplitHostPort(c.cfg.Addr)
