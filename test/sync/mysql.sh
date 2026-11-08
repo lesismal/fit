@@ -1,0 +1,112 @@
+#!/bin/sh
+# Starts the MySQL and MariaDB servers sync's MySQL tests run against, in
+# Docker: MySQL 5.7, 8.0 and 8.4, MariaDB 10.11 and 11, each with TLS from a
+# CA made here, a root password, mysql_native_password enabled (8.4) and a
+# max_allowed_packet of 64 MiB. test/sync/run.sh sources it; run alone, it
+# starts them, runs the MySQL tests and removes them (KEEP=1 keeps them, and
+# a second run reuses them):
+#
+#   test/sync/mysql.sh [go test flags...]
+#
+# The tests read FIT_SYNC_MYSQL, a list of name=host:port, with
+# FIT_SYNC_MYSQL_PASSWORD (root's) and FIT_SYNC_MYSQL_CA (the CA's file);
+# without them they skip. MYSQL_PREFIX names the containers (fit-sync-my),
+# MYSQL_PORT is the first of five host ports (29210), MYSQL_SERVERS picks
+# some of them ("mysql57 mysql80 mysql84 mariadb1011 mariadb11").
+
+MYSQL_PREFIX=${MYSQL_PREFIX:-fit-sync-my}
+MYSQL_PORT=${MYSQL_PORT:-29210}
+MYSQL_SERVERS=${MYSQL_SERVERS:-mysql57 mysql80 mysql84 mariadb1011 mariadb11}
+MYSQL_PASSWORD='Fit-sync-1nterop!'
+MYSQL_CERTS=${MYSQL_CERTS:-$(mktemp -d)}
+
+# mysql_image name: the server's image and its options.
+mysql_image() {
+	case $1 in
+	mysql57) echo "--platform linux/amd64 mysql:5.7" ;;
+	mysql80) echo "mysql:8.0" ;;
+	mysql84) echo "mysql:8.4" ;;
+	mariadb1011) echo "mariadb:10.11" ;;
+	mariadb11) echo "mariadb:11" ;;
+	esac
+}
+
+mysql_certs() {
+	[ -f "$MYSQL_CERTS/ca.pem" ] && return
+	(
+		cd "$MYSQL_CERTS"
+		openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=fit-sync-test-ca" \
+			-keyout ca-key.pem -out ca.pem 2>/dev/null
+		openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost" \
+			-keyout server-key.pem -out server.csr 2>/dev/null
+		printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' >ext.cnf
+		openssl x509 -req -in server.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -days 30 \
+			-extfile ext.cnf -out server.pem 2>/dev/null
+		chmod 644 ./*.pem
+	)
+}
+
+mysql_start() {
+	mysql_certs
+	FIT_SYNC_MYSQL=
+	port=$MYSQL_PORT
+	for s in mysql57 mysql80 mysql84 mariadb1011 mariadb11; do
+		case " $MYSQL_SERVERS " in *" $s "*) ;; *)
+			port=$((port + 1))
+			continue
+			;;
+		esac
+		name=$MYSQL_PREFIX-$s
+		if ! docker inspect "$name" >/dev/null 2>&1; then
+			extra=
+			[ "$s" = mysql84 ] && extra=--mysql-native-password=ON
+			# shellcheck disable=SC2046
+			docker run -d --name "$name" -p "127.0.0.1:$port:3306" \
+				-e MYSQL_ROOT_PASSWORD="$MYSQL_PASSWORD" -v "$MYSQL_CERTS:/certs:ro" \
+				$(mysql_image $s) --ssl-ca=/certs/ca.pem --ssl-cert=/certs/server.pem \
+				--ssl-key=/certs/server-key.pem --max-allowed-packet=64M $extra >/dev/null
+		fi
+		FIT_SYNC_MYSQL="$FIT_SYNC_MYSQL${FIT_SYNC_MYSQL:+,}$s=127.0.0.1:$port"
+		port=$((port + 1))
+	done
+	for s in $MYSQL_SERVERS; do
+		name=$MYSQL_PREFIX-$s
+		i=0
+		# The image's first start runs a server without networking, then the
+		# real one: wait for TCP inside the container.
+		until docker exec "$name" sh -c 'c=mysql; command -v mysql >/dev/null || c=mariadb;
+			$c -h127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SELECT 1"' >/dev/null 2>&1; do
+			i=$((i + 1))
+			if [ $i -gt 180 ]; then
+				echo "$name did not start:" >&2
+				docker logs --tail 50 "$name" >&2
+				exit 1
+			fi
+			sleep 1
+		done
+	done
+	FIT_SYNC_MYSQL_PASSWORD=$MYSQL_PASSWORD
+	FIT_SYNC_MYSQL_CA=$MYSQL_CERTS/ca.pem
+	export FIT_SYNC_MYSQL FIT_SYNC_MYSQL_PASSWORD FIT_SYNC_MYSQL_CA
+}
+
+mysql_cleanup() {
+	if [ "${KEEP:-}" != 1 ]; then
+		for s in $MYSQL_SERVERS; do
+			docker rm -f "$MYSQL_PREFIX-$s" >/dev/null 2>&1 || true
+		done
+		rm -rf "$MYSQL_CERTS"
+	else
+		echo "kept $MYSQL_PREFIX-*; its CA is in MYSQL_CERTS=$MYSQL_CERTS, to pass again" >&2
+	fi
+}
+
+case $0 in
+*mysql.sh)
+	set -eu
+	cd "$(dirname "$0")/../.."
+	trap mysql_cleanup EXIT
+	mysql_start
+	FIT_SYNC_INTEROP=required go test -count=1 -run 'MySQL' "$@" ./test/sync
+	;;
+esac

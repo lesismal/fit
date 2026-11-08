@@ -5810,6 +5810,47 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   pending review.
 
 
+### I172 A MySQL client: connections, authentication and queries — done
+
+- **Package `sync/mysql/wire`** (`mysqlwire`), no dependencies past the standard library: `Dial`
+  (TCP or a Unix socket) with the handshake, TLS required when configured and verified, and the
+  password plugins `mysql_native_password`, `caching_sha2_password` (fast path; full authentication
+  in clear over TLS or a socket, else RSA with `ServerPublicKey` or a key retrieved with
+  `AllowPublicKeyRetrieval`), `sha256_password` and `mysql_clear_password`, with the server's
+  switches between them; `Query` and `Exec` as text, or prepared, executed and closed with
+  arguments; `Prepare` and `Stmt.Query`/`Exec`/`Reset`/`Close` in the binary protocol; `Rows` with
+  `Next`, `Values`, `NextResultSet` and `Close`; `InsertRows`, multi-row inserts split by 65,535
+  placeholders and `max_allowed_packet`; `Begin`, `Commit`, `Rollback`, `InTransaction`; `Ping`,
+  `UseDatabase`. Values typed by column, the same from both protocols (`DateTime` for dates and
+  times, `time.Duration` for `TIME`); packets past 16 MiB split and joined both ways.
+- **Timeouts and failures**: `Config.Timeout` (60s) bounds each wait for the server, a call's context
+  the call; either, a broken stream or a malformed packet closes the connection with an error, the
+  server's errors (`*Error`) do not; `MaxPacketSize` (64 MiB) bounds a packet read.
+- **Interop**: `test/sync/mysql.sh` (sourced by `test/sync/run.sh`, or run alone) starts MySQL 5.7,
+  8.0 and 8.4 and MariaDB 10.11 and 11 with TLS from a CA of its own; `test/sync/mysql_test.go`.
+- **Tests**: unit tests against an in-process fake server (96.8% of statements, no containers): every
+  plugin's path and refusal, auth switches, TLS, greetings refused or malformed, text and binary
+  result sets with and without `DEPRECATE_EOF`, several result sets, `LOAD DATA LOCAL` refused, a
+  server closing the connection mid-result, mid-packet and before the columns, out-of-order and
+  oversized packets, every malformed row and value, 17 MiB packets each way, `Config.Timeout`, a
+  context's deadline and its cancellation, parameters of every Go type, `InsertRows` split by
+  placeholders and by size with its statements closed. Interop with all five servers (also under the
+  race detector): native, `sha256_password` and `caching_sha2_password` users over TLS, with the key
+  retrieved and given, the fast path, a wrong password (1045) and an unknown CA refused; 38 columns
+  of every type (every integer at its limits, `FLOAT`, `DOUBLE`, `DECIMAL(65,30)`, `BIT(64)`, strings,
+  binaries, texts and blobs with a 17 MiB `LONGBLOB`, `ENUM`, `SET`, dates, `DATETIME(6)`,
+  `TIMESTAMP(6)`, negative `TIME(6)`, `YEAR`, `JSON`, `GEOMETRY`, NULLs and zero dates) inserted with
+  parameters and read back the same through prepared statements and text, and each found again as a
+  parameter; 40,000 rows in two statements and upserts; transactions committed and rolled back; a
+  procedure's two result sets; a connection killed mid-result (text and binary) is an error, not a
+  hang; a context's deadline and `Config.Timeout` end `SLEEP(30)`. `test/sync/mysql.sh` passed alone,
+  creating and removing its containers. Not run on Linux nor in the full suite (the merge's).
+- **Differs from the plan**: also `sha256_password` and `mysql_clear_password`. About 1,630 lines of
+  code, 1,890 of unit tests and 700 of interop; nothing left, so no I172b.
+- **Gaps**: the decisions in the plan's I172 section, pending review. MariaDB's `client_ed25519` and
+  `parsec` are not supported; MySQL 5.7's TLS needs the `TLS_RSA_*` suites named in the caller's
+  `tls.Config`; no statement cache, compression or `COM_STMT_SEND_LONG_DATA`; the replica's
+  commands are I174's.
 ### I169 Elasticsearch and OpenSearch as a source — done
 
 - **Source `elasticsearch`** (`sync/elasticsearch/source.go`, beside the sink, sharing `Conn` and

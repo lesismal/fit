@@ -3,8 +3,9 @@
 # and OpenSearch 2, each a single node with security on (TLS with a CA of its
 # own, basic authentication) and a write thread pool of one thread and a
 # queue of one, so that parallel bulks get 429s; and ClickHouse, with a user
-# and password, over HTTP. The containers are removed
-# at the end; KEEP=1 keeps them, and a second run reuses them.
+# and password, over HTTP; and MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and
+# 11, through test/sync/mysql.sh, which says what they read. The containers
+# are removed at the end; KEEP=1 keeps them, and a second run reuses them.
 #
 #   test/sync/run.sh [go test flags...]
 #
@@ -28,7 +29,10 @@ CH_PORT=${CH_PORT:-29202}
 PASSWORD='Fit-sync-1nterop!'
 CERTS=$(mktemp -d)
 
+. test/sync/mysql.sh
+
 cleanup() {
+	mysql_cleanup
 	rm -rf "$CERTS"
 	if [ "${KEEP:-}" != 1 ]; then
 		docker rm -f fit-sync-es fit-sync-os fit-sync-ch >/dev/null 2>&1 || true
@@ -86,6 +90,7 @@ until curl -fsS -u "fit:$PASSWORD" "http://localhost:$CH_PORT/?query=SELECT%201"
 	fi
 	sleep 1
 done
+mysql_start
 
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \

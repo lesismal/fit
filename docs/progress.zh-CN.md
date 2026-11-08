@@ -4132,6 +4132,35 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I172 MySQL 客户端：连接、认证与查询 — 已完成
+
+- **包 `sync/mysql/wire`**（`mysqlwire`），只依赖标准库：`Dial`（TCP 或 Unix socket），包括握手、配置时必须使用并校验的
+  TLS，以及密码插件 `mysql_native_password`、`caching_sha2_password`（快速路径；完整认证经 TLS 或 socket 明文发送，否则用
+  `ServerPublicKey` 或经 `AllowPublicKeyRetrieval` 取得的公钥做 RSA 加密）、`sha256_password` 与 `mysql_clear_password`，
+  并支持服务端在它们之间切换；`Query` 与 `Exec` 以文本发送，带参数时预处理、执行并关闭；二进制协议的 `Prepare` 与
+  `Stmt.Query`/`Exec`/`Reset`/`Close`；带 `Next`、`Values`、`NextResultSet` 与 `Close` 的 `Rows`；`InsertRows`，按
+  65,535 个占位符与 `max_allowed_packet` 切分的多行插入；`Begin`、`Commit`、`Rollback`、`InTransaction`；`Ping`、
+  `UseDatabase`。值按列的类型给出，两种协议一致（日期时间为 `DateTime`，`TIME` 为 `time.Duration`）；超过 16 MiB 的包在两个
+  方向都会拆分与重组。
+- **超时与失败**：`Config.Timeout`（60s）限制每次等待服务端的时间，调用的 context 限制整个调用；二者之一、断开的流或格式错误
+  的包都会以错误关闭连接，服务端的错误（`*Error`）不会；`MaxPacketSize`（64 MiB）限制一次读的包。
+- **互通**：`test/sync/mysql.sh`（由 `test/sync/run.sh` 引入，也可单独运行）启动 MySQL 5.7、8.0、8.4 与 MariaDB 10.11、
+  11，使用自建 CA 的 TLS；测试在 `test/sync/mysql_test.go`。
+- **测试**：针对进程内假服务端的单元测试（不用容器时语句覆盖率 96.8%）：每个插件的各条路径与拒绝、认证切换、TLS、被拒绝
+  或格式错误的握手、带与不带 `DEPRECATE_EOF` 的文本与二进制结果集、多个结果集、拒绝 `LOAD DATA LOCAL`、服务端在结果中途、
+  包中途与列之前关闭连接、乱序与超大的包、各种格式错误的行和值、两个方向的 17 MiB 包、`Config.Timeout`、context 的截止
+  时间与取消、各种 Go 类型的参数、按占位符和按大小切分且语句都已关闭的 `InsertRows`。与全部五个服务端互通（也在竞态检测下）：
+  native、`sha256_password` 与 `caching_sha2_password` 用户经 TLS、取得公钥与给定公钥、快速路径，错误密码（1045）与未知 CA
+  被拒绝；38 个各种类型的列（各种整数的极值、`FLOAT`、`DOUBLE`、`DECIMAL(65,30)`、`BIT(64)`、字符串、二进制、带 17 MiB
+  `LONGBLOB` 的 text 与 blob、`ENUM`、`SET`、日期、`DATETIME(6)`、`TIMESTAMP(6)`、负的 `TIME(6)`、`YEAR`、`JSON`、
+  `GEOMETRY`、NULL 与零日期）以参数插入，经预处理语句和文本读回一致，并各自作为参数再查到；40,000 行分两条语句插入以及
+  upsert；事务的提交与回滚；存储过程的两个结果集；结果中途被 kill 的连接（文本与二进制）返回错误而不是挂起；context 的截止
+  时间与 `Config.Timeout` 能结束 `SLEEP(30)`。`test/sync/mysql.sh` 单独运行通过，并创建和删除了它的容器。没有在 Linux 上或
+  整个测试集中运行（留给合并时）。
+- **与计划的差异**：另外支持 `sha256_password` 与 `mysql_clear_password`。代码约 1,630 行，单元测试约 1,890 行，互通测试约
+  700 行；没有剩余工作，因此没有 I172b。
+- **不足**：计划 I172 一节中的决策，待审查。不支持 MariaDB 的 `client_ed25519` 与 `parsec`；MySQL 5.7 的 TLS 需要调用方在
+  `tls.Config` 中列出 `TLS_RSA_*` 套件；没有语句缓存、压缩和 `COM_STMT_SEND_LONG_DATA`；副本的命令归 I174。
 ### I169 Elasticsearch 与 OpenSearch 作为源 — 已完成
 
 - **源 `elasticsearch`**（`sync/elasticsearch/source.go`，与目标同包，共用 `Conn` 及其参数）：记录的命名空间是文档的索引，键为
