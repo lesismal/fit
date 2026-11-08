@@ -311,14 +311,15 @@ jobs:
           go vet ./...
           go test -race -count=1 ./...
 
-  # Sync's Elasticsearch and OpenSearch sink against the real servers (I168),
-  # and ClickHouse's sink and source (I170): test/sync/run.sh starts
-  # Elasticsearch 8 and OpenSearch 2 in Docker, with TLS, authentication and a
-  # write pool small enough to answer 429s, and ClickHouse 25.8, and requires
-  # the interop tests to run rather than skip. It also starts PostgreSQL 13 to
-  # 17 with TLS, SCRAM and logical replication for the wire client (I177).
+  # Sync's interop tests against real servers: test/sync/run.sh starts, in
+  # Docker, Elasticsearch 8 and OpenSearch 2 with TLS, authentication and a
+  # write pool small enough to answer 429s (I168, I169), ClickHouse 25.8
+  # (I170), MySQL 5.7, 8.0, 8.4 and MariaDB 10.11, 11 (I172), PostgreSQL 13 to
+  # 17 with TLS, SCRAM and logical replication (I177), MongoDB 6, 7 and 8 as
+  # replica sets (I181), Redis 7 and Valkey 8 (I186), and MinIO and SeaweedFS
+  # (I187), and requires the interop tests to run rather than skip.
   sync-interop:
-    name: Sync interop (Elasticsearch, OpenSearch, ClickHouse)
+    name: Sync interop (Elasticsearch, OpenSearch, ClickHouse, databases, Redis, S3)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

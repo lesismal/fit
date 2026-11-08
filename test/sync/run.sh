@@ -5,9 +5,10 @@
 # queue of one, so that parallel bulks get 429s; ClickHouse, with a user
 # and password, over HTTP; MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and 11
 # (test/sync/mysql.sh, which says what they read); and PostgreSQL 13 to 17
-# with TLS, SCRAM and logical replication (test/sync/postgres.sh); and Redis 7, with an ACL user and a TLS port of
-# a CA made here, and Valkey 8, with the same user. The containers are
-# removed at the end; KEEP=1 keeps them, and a second run reuses them.
+# with TLS, SCRAM and logical replication (test/sync/postgres.sh); Redis 7,
+# with an ACL user and a TLS port of a CA made here, and Valkey 8, with the
+# same user; and MinIO and SeaweedFS's S3 gateway, each with an access key
+# of its own. The containers are removed at the end; KEEP=1 keeps them, and a second run reuses them.
 #
 #   test/sync/run.sh [go test flags...]
 #
@@ -16,7 +17,9 @@
 # FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD, FIT_SYNC_PG, FIT_SYNC_PG_CA_DIR,
 # FIT_SYNC_PG_USER, FIT_SYNC_PG_PASSWORD, and FIT_SYNC_REDIS_ADDR,
 # FIT_SYNC_REDIS_TLS_ADDR, FIT_SYNC_REDIS_CA, FIT_SYNC_VALKEY_ADDR,
-# FIT_SYNC_REDIS_USER, FIT_SYNC_REDIS_PASSWORD; without them they
+# FIT_SYNC_REDIS_USER, FIT_SYNC_REDIS_PASSWORD, and FIT_SYNC_MINIO_URL,
+# FIT_SYNC_MINIO_ACCESS_KEY, FIT_SYNC_MINIO_SECRET_KEY and the same of
+# FIT_SYNC_SEAWEED_; without them they
 # skip, unless FIT_SYNC_INTEROP=required, which this script sets. The
 # source's snapshot test reads FIT_SYNC_SOURCE_DOCS documents, 100,000 when
 # unset (CI); the plan's million is
@@ -43,6 +46,10 @@ VALKEY_IMAGE=${VALKEY_IMAGE:-valkey/valkey:8-alpine}
 REDIS_PORT=${REDIS_PORT:-29386}
 REDIS_TLS_PORT=${REDIS_TLS_PORT:-29387}
 VALKEY_PORT=${VALKEY_PORT:-29388}
+MINIO_IMAGE=${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}
+MINIO_PORT=${MINIO_PORT:-29215}
+SEAWEED_IMAGE=${SEAWEED_IMAGE:-chrislusf/seaweedfs:4.50}
+SEAWEED_PORT=${SEAWEED_PORT:-29216}
 PASSWORD='Fit-sync-1nterop!'
 CERTS=$(mktemp -d)
 . test/sync/postgres.sh
@@ -54,7 +61,7 @@ cleanup() {
 	mysql_cleanup
 	rm -rf "$CERTS"
 	if [ "${KEEP:-}" != 1 ]; then
-		docker rm -f fit-sync-es fit-sync-os fit-sync-ch fit-sync-redis fit-sync-valkey $(pg_names) >/dev/null 2>&1 || true
+		docker rm -f fit-sync-es fit-sync-os fit-sync-ch fit-sync-redis fit-sync-valkey fit-sync-minio fit-sync-seaweed $(pg_names) >/dev/null 2>&1 || true
 		rm_mongos fit-sync
 	fi
 }
@@ -101,6 +108,20 @@ docker run -d --name fit-sync-redis -p "127.0.0.1:$REDIS_PORT:6379" -p "127.0.0.
 if ! docker inspect fit-sync-valkey >/dev/null 2>&1; then
 	docker run -d --name fit-sync-valkey -p "127.0.0.1:$VALKEY_PORT:6379" "$VALKEY_IMAGE" \
 		valkey-server --user fit on ">$PASSWORD" '~*' '&*' '+@all' >/dev/null
+fi
+
+if ! docker inspect fit-sync-minio >/dev/null 2>&1; then
+	docker run -d --name fit-sync-minio -p "127.0.0.1:$MINIO_PORT:9000" \
+		-e MINIO_ROOT_USER=fitminio -e MINIO_ROOT_PASSWORD="$PASSWORD" \
+		"$MINIO_IMAGE" server /data >/dev/null
+fi
+# SeaweedFS reads its S3 identities from a file, copied in before it starts.
+if ! docker inspect fit-sync-seaweed >/dev/null 2>&1; then
+	printf '{"identities":[{"name":"fit","credentials":[{"accessKey":"fitseaweed","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' "$PASSWORD" >"$CERTS/s3.json"
+	docker create --name fit-sync-seaweed -p "127.0.0.1:$SEAWEED_PORT:8333" \
+		"$SEAWEED_IMAGE" server -s3 -s3.config=/etc/fit-s3.json -dir=/data >/dev/null
+	docker cp "$CERTS/s3.json" fit-sync-seaweed:/etc/fit-s3.json
+	docker start fit-sync-seaweed >/dev/null
 fi
 
 # wait_for name user url ca: until the cluster answers its root.
@@ -159,6 +180,23 @@ for c in fit-sync-redis fit-sync-valkey; do
 	done
 done
 
+# until_up name url: until url answers at all (an S3 server answers 403 to
+# a request with no signature).
+until_up() {
+	i=0
+	until curl -sS -o /dev/null "$2" 2>/dev/null; do
+		i=$((i + 1))
+		if [ $i -gt 120 ]; then
+			echo "$1 did not start:" >&2
+			docker logs --tail 50 "$1" >&2
+			exit 1
+		fi
+		sleep 1
+	done
+}
+until_up fit-sync-minio "http://localhost:$MINIO_PORT/minio/health/ready"
+until_up fit-sync-seaweed "http://localhost:$SEAWEED_PORT/"
+
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \
 	FIT_SYNC_OS_URL="https://localhost:$OS_PORT" FIT_SYNC_OS_CA="$CERTS/os-ca.pem" FIT_SYNC_OS_PASSWORD="$PASSWORD" \
@@ -166,4 +204,6 @@ FIT_SYNC_INTEROP=required \
 	FIT_SYNC_REDIS_ADDR="127.0.0.1:$REDIS_PORT" FIT_SYNC_REDIS_TLS_ADDR="127.0.0.1:$REDIS_TLS_PORT" \
 	FIT_SYNC_REDIS_CA="$CERTS/redis-ca.pem" FIT_SYNC_VALKEY_ADDR="127.0.0.1:$VALKEY_PORT" \
 	FIT_SYNC_REDIS_USER=fit FIT_SYNC_REDIS_PASSWORD="$PASSWORD" \
+	FIT_SYNC_MINIO_URL="http://localhost:$MINIO_PORT" FIT_SYNC_MINIO_ACCESS_KEY=fitminio FIT_SYNC_MINIO_SECRET_KEY="$PASSWORD" \
+	FIT_SYNC_SEAWEED_URL="http://localhost:$SEAWEED_PORT" FIT_SYNC_SEAWEED_ACCESS_KEY=fitseaweed FIT_SYNC_SEAWEED_SECRET_KEY="$PASSWORD" \
 	env $(pg_env) go test -race -count=1 "$@" ./test/sync

@@ -27,5 +27,6 @@ import (
 	_ "github.com/lesismal/fit/sync/file"
 	_ "github.com/lesismal/fit/sync/httpsync"
 	_ "github.com/lesismal/fit/sync/redis"
+	_ "github.com/lesismal/fit/sync/s3"
 	_ "github.com/lesismal/fit/webrtc/media"
 )
