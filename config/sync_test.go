@@ -33,6 +33,17 @@ func TestSync(t *testing.T) {
 		b.Sinks[0].Records() != 3 || b.Sinks[0].Bytes() != 100 || b.Sinks[0].Wait() != 5*time.Millisecond {
 		t.Fatalf("settings: %+v", b)
 	}
+	if s, loc, err := b.Schedule(); a.Parallel() != DefaultSyncMaxParallel || s != nil || loc != nil || err != nil {
+		t.Fatalf("job defaults: %d %v %v %v", a.Parallel(), s, loc, err)
+	}
+	b.Job = &SyncJob{MaxParallel: 9, Schedule: "@daily", TimeZone: "Asia/Shanghai"}
+	if s, loc, err := b.Schedule(); b.Parallel() != 9 || s == nil || err != nil || loc.String() != "Asia/Shanghai" {
+		t.Fatalf("job: %d %v %v %v", b.Parallel(), s, loc, err)
+	}
+	b.Job.TimeZone = ""
+	if _, loc, _ := b.Schedule(); loc != time.UTC {
+		t.Fatalf("job time zone: %v", loc)
+	}
 	for _, bad := range []struct{ doc, want string }{
 		{`[{"name": "-a", "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "not a valid name"},
 		{`[{"name": "a", "source": {"module": "g"}, "sinks": [` + sink + `]}, {"name": "a", "source": {"module": "g"}, "sinks": [` + sink + `]}]`, `another pipeline is already named "a"`},
@@ -48,6 +59,11 @@ func TestSync(t *testing.T) {
 		{`[{"name": "a", "on_error": "dead_letter", "dead_letter": ` + sink + `, "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "already named"},
 		{`[{"name": "a", "mode": "batch", "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "mode"},
 		{`[{"name": "a", "retry": {"backoff": "2s", "max_backoff": "1s"}, "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "shorter than backoff"},
+		{`[{"name": "a", "job": {}, "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "job is for pipelines of mode once"},
+		{`[{"name": "a", "mode": "once", "job": {"schedule": "* * *"}, "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "job.schedule: \"* * *\" has 3 fields"},
+		{`[{"name": "a", "mode": "once", "job": {"schedule": "@reboot"}, "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "not a descriptor"},
+		{`[{"name": "a", "mode": "once", "job": {"time_zone": "Mars/Base"}, "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "not a time zone"},
+		{`[{"name": "a", "mode": "once", "job": {"max_parallel": 257}, "source": {"module": "g"}, "sinks": [` + sink + `]}]`, "max_parallel"},
 	} {
 		if _, err := Load([]byte(head + bad.doc + `}}`)); err == nil || !strings.Contains(err.Error(), bad.want) {
 			t.Errorf("%s: %v, want %q", bad.doc, err, bad.want)

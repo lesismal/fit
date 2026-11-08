@@ -20,8 +20,18 @@ Everything is bounded: `queue` bounds the records read and not yet acknowledged 
 records and bytes, so a slow sink holds the source back rather than growing memory; each sink's
 `batch` bounds a write in records, bytes and time. Pipelines run on goroutines of their own, a few
 for each, never on fib's workers. A reload starts the pipelines it adds, stops those it removes and
-restarts only those whose settings changed. `mode: "once"` stops at the source's end with the
-checkpoint written, as a batch job. See [decision 036](../decisions/036-sync.md).
+restarts only those whose settings changed. See [decision 036](../decisions/036-sync.md).
+
+A pipeline of `mode: "once"` is a batch job, as DataX runs them: it stops at the source's end with
+the checkpoint written. A source that can split its snapshot (by ranges of a table's primary key,
+or `generate`'s `chunk_records`) is read in chunks, `job.max_parallel` at a time, and each sink that
+takes writes at once gets as many writers, a record's key always going to the same one. The
+checkpoint keeps the job's progress: its chunks, those done, where each under way is, and the
+records read, written and failed, with an ETA; so a job interrupted, by a crash or a restart, goes
+on from its finished chunks without reading them again. A finished job does not run again when fit
+restarts; `job.schedule`, in cron's five fields, starts it again, a new job each time, never while a
+run is still going. `fit sync run <pipeline> --once` runs one on its own from the command line and
+exits with its result.
 
 ```json
 {

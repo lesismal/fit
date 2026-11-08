@@ -330,7 +330,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | I165 | WASM plugins for sync: transforms, codecs, and source and sink connectors on fit's HTTP client and timers; the guest SDKs | I163 | done |
 | I165b | WASM sync plugins, the rest: the benchmark host's run and a binary record form if it asks; TinyGo and Rust plugins built and run in the tests; examples in fit-examples | I165 | todo |
 | I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | done |
-| I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | todo |
+| I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | done |
 | I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | todo |
 | I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | todo |
 | I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | todo |
@@ -4531,6 +4531,95 @@ track can place it); exactly-once into sinks with no transactions.
   sources is killed half way and finishes on restart without repeating finished chunks; the command
   exits non-zero with the failed records' count; a schedule runs and never overlaps a run still going.
 - **Touches**: `sync`, `cli`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **The chunk interface.** A source that can split its snapshot implements `Chunker` beside
+   `Source`: `Chunks(ctx)` plans the whole snapshot when a job starts, and `ReadChunk(ctx, chunk,
+   from, emit)` reads one chunk from its start or after a position of the chunk's own. A `Chunk` is
+   a namespace, `lo` and `hi` key bounds in the source's own JSON (`lo` included, `hi` not, nil
+   unbounded) and the rows it is reckoned to hold. The plan is kept in the checkpoint
+   (`job.chunks`), so a job resumed reads the chunks it planned even if the data has changed; at
+   most 100,000. A plan of no chunks means the source reads whole (`Run`). I175, I179, I182 and
+   I169 implement it. Alternative: chunks found as the job goes (the next chunk's upper bound
+   queried when the last ends, as Debezium's incremental snapshots), which keeps the checkpoint
+   small for huge tables but plans one chunk at a time.
+2. **A chunk is done only once every sink has all its records, through I163's watermark.** The
+   job's position is `{"done": "0-41,43", "at": [{"chunk": 42, "from": <the chunk's position>}]}`,
+   the state of every chunk as of the record that carries it. The chunks' readers emit through one
+   lock, each holding its last record back until the next is read, so a chunk's last record carries
+   the position that marks it done; a position goes on that record and on one in every 100. Since
+   the watermark passes a record only once every record emitted before it is acknowledged, a saved
+   position never claims a chunk, or a record within one, that a sink lacks; the runtime's
+   watermark, checkpoint file and crash points are unchanged. Alternative: a watermark per chunk.
+3. **Parallel writers only for a chunked snapshot, and only for sinks that say so.** `max_parallel`
+   is both how many chunks are read at once and how many writers each `ParallelSink` (a new marker
+   interface; `memory` is one, the database sinks will be) gets; a record goes to the writer its
+   key's hash (FNV-1a of the key's canonical JSON; by sequence for a record without a key) picks,
+   so one key is never written out of order. A job whose source does not split, and every stream,
+   keep one writer per sink, since their records carry transactions and a key's successive changes.
+   Alternative: a module instance per writer, which the file sink's one sink per path refuses, or
+   parallel writes for every job.
+4. **Snapshot records lose their transactions**: chunks read at once interleave, so `ReadChunk`'s
+   records are each a transaction of their own (`Tx` cleared), and every one ends one.
+5. **The progress is the checkpoint's `job` part**: `started`, `finished`, `read`, `written`,
+   `failed`, `rows`, `eta`, `chunks_done` and the plan. `written` counts the source records every
+   sink acknowledged (one a transform dropped among them), `failed` those `on_error` `skip` or
+   `dead_letter` took, both as of the saved position; `read` counts records emitted, those past the
+   checkpoint counting again after a restart. The ETA is the plan's rows left at the rate of the
+   run under way; none when the source does not reckon rows. `Status` gains `Job` (live) and
+   `Next`. The checkpoint's version stays 1: the part is optional. Alternative: a progress file of
+   its own.
+6. **A finished job does not run again by itself.** A checkpoint whose job finished keeps fit,
+   restarted or reloaded, from running it again (its state is `finished`); before I167, `once`
+   ran again from its checkpoint, so a file source read what was new. A schedule's next time, or
+   `fit sync run`, starts a new job: a chunked source from its start, with a new plan, any other
+   source from where the last job ended, so a file or a cursor copies what is new. A new job's
+   checkpoint, with its plan, is written as it starts, so that one interrupted before its first
+   checkpoint is known to be. I165's connector test, which ran a finished job again by restarting
+   the runtime, now does so with `RunPipeline`. Alternative: every new job from the start; or `once` running again at
+   every start, as before.
+7. **The schedule's syntax**: `job.schedule` in cron's five fields (minute, hour, day of the month,
+   month, day of the week; `*`, values, ranges, lists, steps, month and day names, 7 for Sunday, and
+   Vixie cron's rule that a day matching either day field runs when both are restricted) or
+   `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`, `@midnight`, `@hourly`; no seconds
+   field, `@reboot` or `@every`. `job.time_zone` is an IANA name or `Local`, `UTC` when left out,
+   as the streaming channels' schedules. Times a daylight saving change skips do not run; times it
+   repeats run once. The parser is fit's own (`internal/cron`, about 190 lines), no dependency.
+   Alternative: robfig/cron, with a seconds field.
+8. **No overlap, no catching up.** A pipeline's goroutine runs a job and then waits for the next
+   time, so runs never overlap; times passing during a run are skipped (the next run is at the
+   first time after it ends), and times passing while fit is down are not made up, except that a
+   job interrupted (its checkpoint not finished) goes on at once when fit starts. Alternative: one
+   run at once for times missed, as anacron.
+9. **`job` is refused unless `mode` is `once`**; `max_parallel` is 4 when left out, at most 256.
+10. **`fit sync run [-c config]... [--once] <pipeline>`**, flags before or after the name: it loads
+    the config as `fit validate` does (without compiling the rest of it), runs that one pipeline
+    and nothing else, and exits. `--once` makes a stream pipeline a job; without it the pipeline
+    runs in its mode until it ends or SIGINT or SIGTERM. A finished job starts anew, the schedule is
+    not waited for, and a source failing `retry.max_attempts` times in a row stops it
+    (`Options.SourceAttempts`), rather than restarting for ever as in a server. The log goes to
+    stderr at info, not to the config's log outputs, so as not to write into a running fit's log
+    files; the progress to stdout. Exit codes: 0 everything written; 3 records failed, with their
+    count on stderr; 1 the pipeline stopped, or a job was interrupted; 2 used wrongly.
+    Alternative: exit 1 for failed records too.
+11. **`fit sync run` has no fib engine**, so a WASM connector's `http_request` fails under it, and
+    it does not check that a running fit is not running the same pipeline, whose checkpoint both
+    would write. Alternative: an engine of its own; a lock file in `state_dir`.
+12. **The million-row test** kills the job at one of the six crash points, picked at random, once
+    half the records are written, and checks that the chunks the checkpoint had done are written
+    exactly once, every record at least once, and at most the four chunks under way twice. It copies
+    a million records (100 chunks of 10,000) without the race detector, and 200,000 (100 chunks of
+    2,000) under it, where a million take some 20 seconds a run; it counts ids in a test-only sink,
+    `counter`, since `memory` would keep a million records (about a gigabyte). The schedule's test
+    drives a fake `Clock` (`Options.Clock`).
+13. **A fix on the way: the `memory` sink and a `BatchError` past the batch.** A `BatchError` whose
+    index is the batch's length kept the whole batch in the store while the runtime, taking the
+    index as out of range, wrote it all again: I163's `TestSinkFailsMidBatch` failed 14 times in
+    1,000 on Linux on `origin/main` (203 records for 200). The store now keeps nothing for an index
+    outside the batch, as the runtime reads it; 1,000 runs in a row pass.
+14. **Size**: about 1,160 lines of code (the cron parser and `fit sync run` included) and 540 of
+    tests, past the plan's 1,500; nothing is left, so there is no I167b.
 
 ### I168 Elasticsearch and OpenSearch as a sink
 

@@ -168,6 +168,34 @@ The plan's I166 section lists them all; these change the record above.
    log files: one sink per path, rotation, retention and compression as a log's; a batch is
    acknowledged once written and synced.
 
+## Decisions made while building I167 (pending review)
+
+The plan's I167 section lists them all; these change the record above.
+
+1. **Jobs and chunked snapshots.** A pipeline of `mode: "once"` is a job. A source that can split
+   its snapshot implements `Chunker`: `Chunks` plans the chunks when a job starts (a namespace,
+   `lo` and `hi` key bounds in the source's own JSON, the rows reckoned), the plan kept in the
+   checkpoint; `ReadChunk` reads one, `job.max_parallel` at a time. The job's position holds the
+   chunks done and where each under way is; a chunk's last record carries the position marking it
+   done, so through the watermark a chunk is done only once every sink has acknowledged all its
+   records, and a job interrupted reads no finished chunk again. Snapshot records carry no
+   transactions.
+2. **Parallel writers** only for a chunked snapshot, and only for sinks implementing
+   `ParallelSink`: each gets `job.max_parallel` writers, records sent by their key's hash so that
+   a key is never written out of order; otherwise one writer per sink, as before.
+3. **The progress is kept in the checkpoint** (`job`: when it started and finished, records read,
+   written and failed, the rows reckoned, an ETA, the chunks done and the plan), whose version
+   stays 1. A finished job is not run again when fit restarts or reloads; a schedule's next time or
+   `fit sync run` starts a new job, a chunked source from its start and any other from where the
+   last ended.
+4. **Schedules**: `job.schedule` in cron's five fields or a descriptor, no seconds, in
+   `job.time_zone` (`UTC` by default), parsed by fit's own parser (`internal/cron`), no dependency;
+   runs never overlap, times missed are not made up, and a job interrupted goes on at once when fit
+   starts.
+5. **`fit sync run <pipeline> [--once]`** runs one pipeline on its own, without a server, and exits
+   with its result: 0 all written, 3 records failed, 1 stopped or interrupted, 2 used wrongly; a
+   source failing past `retry.max_attempts` in a row stops it rather than restarting it for ever.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and
@@ -192,4 +220,6 @@ The plan's I166 section lists them all; these change the record above.
   checkpoints, batches, retries, `on_error`, reloads and the crash tests from the runtime.
 - Sinks must be idempotent; the docs of each say how it is.
 - The runtime's goroutines per pipeline are bounded: a supervisor, the source, a dispatcher, a
-  checkpoint ticker, one per sink and one waiting for the sinks; all stop on `Close`.
+  checkpoint ticker, one per sink and one waiting for the sinks; a job reading a chunked snapshot
+  adds `job.max_parallel` chunk readers, and as many writers for each `ParallelSink` (I167); all
+  stop on `Close`.

@@ -3,6 +3,7 @@ package fitsync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,10 +31,58 @@ const MaxGenerateTx = 100000
 
 // Generate is the source generate.
 type Generate struct {
-	Records   int64           `json:"records,omitempty" min:"0" doc:"How many records to make, after which the source ends and the pipeline stops; 0, or left out, makes them without end."`
-	TxSize    int             `json:"tx_size,omitempty" min:"0" max:"100000" default:"1" doc:"How many records a transaction holds; 1, or left out, makes each record a transaction of its own, without a transaction ID."`
-	Namespace string          `json:"namespace,omitempty" default:"\"generate.records\"" doc:"The records' namespace. generate.records when left out."`
-	Interval  config.Duration `json:"interval,omitempty" doc:"How long to wait after each transaction; none when left out."`
+	Records      int64           `json:"records,omitempty" min:"0" doc:"How many records to make, after which the source ends and the pipeline stops; 0, or left out, makes them without end."`
+	TxSize       int             `json:"tx_size,omitempty" min:"0" max:"100000" default:"1" doc:"How many records a transaction holds; 1, or left out, makes each record a transaction of its own, without a transaction ID."`
+	Namespace    string          `json:"namespace,omitempty" default:"\"generate.records\"" doc:"The records' namespace. generate.records when left out."`
+	Interval     config.Duration `json:"interval,omitempty" doc:"How long to wait after each transaction; none when left out."`
+	ChunkRecords int64           `json:"chunk_records,omitempty" min:"0" doc:"In a job (mode once), split the records into chunks of this many, by ranges of their ids, read job.max_parallel at a time, each record a transaction of its own: for trying out jobs. Needs records; at most 100000 chunks. Not split when left out."`
+}
+
+// Chunks plans chunk_records' chunks, none without it.
+func (g *Generate) Chunks(context.Context) ([]Chunk, error) {
+	if g.ChunkRecords <= 0 || g.Records <= 0 {
+		return nil, nil
+	}
+	if (g.Records+g.ChunkRecords-1)/g.ChunkRecords > MaxChunks {
+		return nil, fmt.Errorf("generate: %d records in chunks of %d are more than %d chunks", g.Records, g.ChunkRecords, MaxChunks)
+	}
+	var plan []Chunk
+	for lo := int64(0); lo < g.Records; lo += g.ChunkRecords {
+		hi := min(lo+g.ChunkRecords, g.Records)
+		plan = append(plan, Chunk{Namespace: g.Namespace, Lo: fmt.Appendf(nil, "%d", lo), Hi: fmt.Appendf(nil, "%d", hi), Rows: hi - lo})
+	}
+	return plan, nil
+}
+
+// ReadChunk makes the records of c, from its Lo, or from's count, to before
+// its Hi.
+func (g *Generate) ReadChunk(ctx context.Context, c Chunk, from Position, emit func(*Record) error) error {
+	var lo, hi int64
+	if err := errors.Join(json.Unmarshal(c.Lo, &lo), json.Unmarshal(c.Hi, &hi)); err != nil {
+		return fmt.Errorf("generate: the chunk %s-%s: %w", c.Lo, c.Hi, err)
+	}
+	if from != nil {
+		var p struct{ N int64 }
+		if err := json.Unmarshal(from, &p); err != nil {
+			return fmt.Errorf("generate: the position %s: %w", from, err)
+		}
+		lo = p.N
+	}
+	for n := lo; n < hi; n++ {
+		if err := emit(GenerateRecord(g.Namespace, n, g.Records, 1)); err != nil {
+			return err
+		}
+		if d := g.Interval.Std(); d > 0 {
+			t := time.NewTimer(d)
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+				t.Stop()
+				return ctx.Err()
+			}
+		}
+	}
+	return nil
 }
 
 func (g *Generate) txSize() int64 { return max(int64(g.TxSize), 1) }
@@ -114,6 +163,9 @@ type Memory struct {
 	MaxRecords int    `json:"max_records,omitempty" min:"0" default:"100000" doc:"The most records the store keeps; a write past it fails, as a full disk would. 100000 when left out or 0."`
 }
 
+// ParallelWrites marks Memory a ParallelSink: its store has a lock.
+func (*Memory) ParallelWrites() {}
+
 // Write keeps batch in the store.
 func (m *Memory) Write(ctx context.Context, batch []*Record) error {
 	return MemoryStore(m.Store).write(ctx, batch, m.MaxRecords)
@@ -180,8 +232,10 @@ func (s *MemStore) write(ctx context.Context, batch []*Record, most int) error {
 	var err error
 	if hook != nil {
 		if err = hook(ctx, batch); err != nil {
+			// A BatchError's index names a record of the batch; one past
+			// it says, as the runtime takes it, that none was written.
 			keep = nil
-			if be, ok := err.(*BatchError); ok && be.Index >= 0 && be.Index <= len(batch) {
+			if be, ok := err.(*BatchError); ok && be.Index >= 0 && be.Index < len(batch) {
 				keep = batch[:be.Index]
 			}
 		}

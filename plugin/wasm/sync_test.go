@@ -361,8 +361,8 @@ func memSink(store string) map[string]any {
 }
 
 // TestSyncConnectors reads a paged HTTP API through a source plugin into a
-// sink plugin, which posts it back, and a memory sink; then, after a
-// restart, resumes from the checkpoint, reading only what is new.
+// sink plugin, which posts it back, and a memory sink; then, run again,
+// goes on from the checkpoint, reading only what is new.
 func TestSyncConnectors(t *testing.T) {
 	a := &pagedAPI{}
 	a.add("a", "b", "c", "d", "e")
@@ -384,8 +384,10 @@ func TestSyncConnectors(t *testing.T) {
 		t.Fatalf("%s, %d posted", got, a.postedCount())
 	}
 	a.add("f", "g", "h")
-	if st := runOnce(t, opts, cfg); st.State != "finished" || string(st.Checkpoint) != `{"after":8}` {
-		t.Fatalf("%+v", st)
+	// A finished job runs again when asked (fit sync run, or a schedule),
+	// as a new job going on from where the last ended.
+	if st, err := fitsync.RunPipeline(t.Context(), cfg, "p", opts); err != nil || st.State != "finished" || string(st.Checkpoint) != `{"after":8}` {
+		t.Fatalf("%v %+v", err, st)
 	}
 	if got := ids(store.Records()); got != "1 2 3 4 5 6 7 8" || a.postedCount() != 8 {
 		t.Fatalf("%s, %d posted", got, a.postedCount())

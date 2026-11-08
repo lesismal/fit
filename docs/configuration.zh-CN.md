@@ -102,7 +102,7 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `webrtc` | TURN 服务器（`turn`）、`whip` 和 `whep` 的媒体端口（`media`）、`webrtc_proxy` 的转发（`proxy`） | [WebRTC](reference/config.md#webrtc)、[WebRTC](webrtc.zh-CN.md) |
 | `streaming` | 流媒体角色：带 RTMP、RTSP、SRT 监听器以及 `stream_whip` 和 `stream_whep` 的 WebRTC 端口的媒体 hub；由媒体库条目组成的频道，以及推流目标 | [Streaming](reference/config.md#streaming)、[流媒体](streaming.zh-CN.md)、[频道](channels.zh-CN.md) |
 | `media_library` | 媒体库：把媒体文件所在的目录编目成条目，及其版本、音轨、字幕和海报 | [Media library](reference/config.md#media-library)、[媒体库](media-library.zh-CN.md) |
-| `sync` | 同步角色：从源读取记录并写入目标的流水线，只在所有目标都确认后才保存检查点；其连接器是 `sync.sources`、`sync.sinks`、`sync.transforms` 和 `sync.codecs` 中的模块，内置变换有 `filter`、`route`、`fields`、`key`、`cast`、`mask` 和 `envelope`，内置编解码器有 `line`、`json` 和 `csv`，文件可作源（`file`，跨轮转跟踪通配符匹配的文件）和目标（`file`，经由日志文件写入器，像日志一样轮转），WebAssembly 插件（`wasm`）可作变换、编解码器、源和目标 | [Sync](reference/config.md#sync)、[决定 036](decisions/036-sync.zh-CN.md) |
+| `sync` | 同步角色：从源读取记录并写入目标的流水线，只在所有目标都确认后才保存检查点；其连接器是 `sync.sources`、`sync.sinks`、`sync.transforms` 和 `sync.codecs` 中的模块，内置变换有 `filter`、`route`、`fields`、`key`、`cast`、`mask` 和 `envelope`，内置编解码器有 `line`、`json` 和 `csv`，文件可作源（`file`，跨轮转跟踪通配符匹配的文件）和目标（`file`，经由日志文件写入器，像日志一样轮转），WebAssembly 插件（`wasm`）可作变换、编解码器、源和目标；`mode: "once"` 的流水线是批处理作业：快照按块并行读取、按块续传，可按 `job.schedule` 定时运行，也可用 `fit sync run` 单独运行 | [Sync](reference/config.md#sync)、[决定 036](decisions/036-sync.zh-CN.md) |
 | `providers` | Docker、Consul、etcd 和 Kubernetes | [Providers](reference/config.md#providers) |
 | `schema_version` | 配置的版本，1；可不写 | [兼容性](compatibility.zh-CN.md#schema-的版本) |
 
@@ -150,6 +150,11 @@ fit validate -c fit.yaml -c conf.d
 使用同一 secret 的运行中的 fit 在其过期前都接受它。`fit token create -c fit.conf -role tunnel.hub -name lab -ttl 90d`
 经 Admin API 向运行中的 fit 申请一个由其[隧道 hub](tunnel.zh-CN.md#令牌)或 [LLM 角色](llm.zh-CN.md#令牌)签发的连接
 令牌，并打印它，只此一次；`fit token list`、`expiry` 和 `revoke` 列出令牌及其最近使用、修改某个令牌的过期时间、吊销某个令牌。
+
+`fit sync run -c fit.conf --once copy-orders` 单独运行一条[同步](reference/config.md#sync)流水线，不提供配置中的监听器或其他任何服务，
+像 cron 任务或脚本那样，在它结束时退出：`--once` 即使其 `mode` 为 `stream` 也把它作为批处理作业运行，源能拆分快照时按块读取。
+之前已完成的作业重新开始，被中断的作业从其检查点继续，也不等待其 `job.schedule`。它打印作业读取、写入和失败的记录数；
+每条记录都已写入时退出码为 0，有记录失败（`on_error` 为 `skip` 或 `dead_letter`）时为 3 并给出失败数，流水线停止或作业被中断时为 1。
 
 ## 一个地址，一个服务器
 

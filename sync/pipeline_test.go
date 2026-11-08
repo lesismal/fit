@@ -620,16 +620,16 @@ func TestCheck(t *testing.T) {
 func TestCheckpointFile(t *testing.T) {
 	dir := t.TempDir()
 	s := &store{dir: filepath.Join(dir, "state"), name: "p"}
-	if pos, err := s.load(); err != nil || pos != nil {
+	if pos, _, err := s.load(); err != nil || pos != nil {
 		t.Fatalf("%v %s", err, pos)
 	}
-	if err := s.save(Position(`{"n":3}`)); err != nil {
+	if err := s.save(Position(`{"n":3}`), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(s.dir, ".p.json.tmp-123"), []byte("half"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if pos, err := s.load(); err != nil || string(pos) != `{"n":3}` {
+	if pos, _, err := s.load(); err != nil || string(pos) != `{"n":3}` {
 		t.Fatalf("%v %s", err, pos)
 	}
 	if left, _ := filepath.Glob(filepath.Join(s.dir, ".p.json.tmp-*")); len(left) != 0 {
@@ -639,7 +639,7 @@ func TestCheckpointFile(t *testing.T) {
 		if err := os.WriteFile(s.path(), []byte(bad), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.load(); err == nil {
+		if _, _, err := s.load(); err == nil {
 			t.Errorf("%s: no error", bad)
 		}
 	}

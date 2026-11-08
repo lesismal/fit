@@ -111,7 +111,7 @@ More: the [JSON reference](reference/json.md).
 | `webrtc` | A TURN server (`turn`), the media port of `whip` and `whep` (`media`), and the relay of `webrtc_proxy` (`proxy`) | [WebRTC](reference/config.md#webrtc), [WebRTC](webrtc.md) |
 | `streaming` | The streaming role: a media hub with RTMP, RTSP and SRT listeners and the WebRTC port of `stream_whip` and `stream_whep`; channels of a media library's items, and push targets | [Streaming](reference/config.md#streaming), [streaming](streaming.md), [channels](channels.md) |
 | `media_library` | Media libraries: directories of media files catalogued into items, their renditions, audio, subtitles and posters | [Media library](reference/config.md#media-library), [media library](media-library.md) |
-| `sync` | The sync role: pipelines that read records from a source and write them to sinks, with a checkpoint saved only once every sink has them; its connectors are modules of `sync.sources`, `sync.sinks`, `sync.transforms` and `sync.codecs`, with built-in transforms `filter`, `route`, `fields`, `key`, `cast`, `mask` and `envelope`, built-in codecs `line`, `json` and `csv`, files as a source (`file`, tailing globs across rotations) and a sink (`file`, through the log file sink, rotated as a log is), and WebAssembly plugins (`wasm`) as transforms, codecs, sources and sinks | [Sync](reference/config.md#sync), [decision 036](decisions/036-sync.md) |
+| `sync` | The sync role: pipelines that read records from a source and write them to sinks, with a checkpoint saved only once every sink has them; its connectors are modules of `sync.sources`, `sync.sinks`, `sync.transforms` and `sync.codecs`, with built-in transforms `filter`, `route`, `fields`, `key`, `cast`, `mask` and `envelope`, built-in codecs `line`, `json` and `csv`, files as a source (`file`, tailing globs across rotations) and a sink (`file`, through the log file sink, rotated as a log is), and WebAssembly plugins (`wasm`) as transforms, codecs, sources and sinks; a pipeline of `mode: "once"` is a batch job, its snapshot read in parallel chunks and resumed by chunk, run again by `job.schedule` or on its own by `fit sync run` | [Sync](reference/config.md#sync), [decision 036](decisions/036-sync.md) |
 | `providers` | Docker, Consul, etcd and Kubernetes | [Providers](reference/config.md#providers) |
 | `schema_version` | The version of the config, 1; optional | [Compatibility](compatibility.md#the-schemas-version) |
 
@@ -169,6 +169,14 @@ bearer token; a running fit with the same secret takes it until it expires. `fit
 -role tunnel.hub -name lab -ttl 90d` asks a running fit, through its Admin API, for a link token its
 [tunnel hub](tunnel.md#tokens) or [LLM role](llm.md#tokens) issues, and prints it, once; `fit token
 list`, `expiry` and `revoke` list the tokens with their last use, change one's expiry and revoke one.
+
+`fit sync run -c fit.conf --once copy-orders` runs one [sync](reference/config.md#sync) pipeline on its
+own, without serving the config's listeners or anything else, as a cron job or a script would, and exits
+when it ends: `--once` runs it as a batch job even when its `mode` is `stream`, its source's snapshot
+read in chunks where the source splits one. A job that finished before starts anew, one interrupted goes
+on from its checkpoint, and its `job.schedule` is not waited for. It prints the job's records read,
+written and failed, and exits 0 when every record was written, 3 when records failed (`on_error`
+`skip` or `dead_letter`), with their count, and 1 when the pipeline stopped or the job was interrupted.
 
 ## One address, one server
 

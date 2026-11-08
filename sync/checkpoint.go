@@ -20,6 +20,8 @@ type Checkpoint struct {
 	Pipeline string          `json:"pipeline"`
 	Position json.RawMessage `json:"position,omitempty"`
 	Saved    time.Time       `json:"saved"`
+	// Job is the progress of a pipeline of mode once.
+	Job *Progress `json:"job,omitempty"`
 }
 
 // store keeps one pipeline's checkpoint.
@@ -33,9 +35,9 @@ func (s *store) path() string { return filepath.Join(s.dir, s.name+".json") }
 
 func (s *store) tempPattern() string { return "." + s.name + ".json.tmp-*" }
 
-// load reads the checkpoint, nil when there is none yet, and removes the
-// temporary files a crash left.
-func (s *store) load() (Position, error) {
+// load reads the checkpoint and the job's progress, nil when there is none
+// yet, and removes the temporary files a crash left.
+func (s *store) load() (Position, *Progress, error) {
 	if olds, _ := filepath.Glob(filepath.Join(s.dir, s.tempPattern())); len(olds) > 0 {
 		for _, o := range olds {
 			_ = os.Remove(o)
@@ -43,33 +45,33 @@ func (s *store) load() (Position, error) {
 	}
 	data, err := os.ReadFile(s.path())
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var c Checkpoint
 	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("the checkpoint %s: %w", s.path(), err)
+		return nil, nil, fmt.Errorf("the checkpoint %s: %w", s.path(), err)
 	}
 	if c.Version < 1 || c.Version > CheckpointVersion {
-		return nil, fmt.Errorf("the checkpoint %s is of version %d, which this fit does not read", s.path(), c.Version)
+		return nil, nil, fmt.Errorf("the checkpoint %s is of version %d, which this fit does not read", s.path(), c.Version)
 	}
 	if len(c.Position) == 0 || string(c.Position) == "null" {
-		return nil, nil
+		return nil, c.Job, nil
 	}
 	pos, err := appendCompact(nil, c.Position)
-	return Position(pos), err
+	return Position(pos), c.Job, err
 }
 
 // errCrashed is a save a crash hook stopped.
 var errCrashed = errors.New("sync: crashed")
 
-// save writes pos as the checkpoint: to a temporary file, synced, then
-// renamed over the last, so that a crash leaves the old one or the new one
-// whole.
-func (s *store) save(pos Position) error {
-	data, err := json.MarshalIndent(Checkpoint{Version: CheckpointVersion, Pipeline: s.name, Position: json.RawMessage(pos), Saved: time.Now().UTC()}, "", "  ")
+// save writes pos as the checkpoint, with the job's progress if any: to a
+// temporary file, synced, then renamed over the last, so that a crash
+// leaves the old one or the new one whole.
+func (s *store) save(pos Position, job *Progress) error {
+	data, err := json.MarshalIndent(Checkpoint{Version: CheckpointVersion, Pipeline: s.name, Position: json.RawMessage(pos), Saved: time.Now().UTC(), Job: job}, "", "  ")
 	if err != nil {
 		return err
 	}

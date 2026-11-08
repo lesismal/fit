@@ -44,7 +44,7 @@ a config against it and more.
 - [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey), [`media_auth[].url_signing`](#config-urlsigning)
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
-- [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry)
+- [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
@@ -3618,8 +3618,18 @@ Everything is bounded: `queue` bounds the records read and not yet acknowledged 
 records and bytes, so a slow sink holds the source back rather than growing memory; each sink's
 `batch` bounds a write in records, bytes and time. Pipelines run on goroutines of their own, a few
 for each, never on fib's workers. A reload starts the pipelines it adds, stops those it removes and
-restarts only those whose settings changed. `mode: "once"` stops at the source's end with the
-checkpoint written, as a batch job. See [decision 036](../decisions/036-sync.md).
+restarts only those whose settings changed. See [decision 036](../decisions/036-sync.md).
+
+A pipeline of `mode: "once"` is a batch job, as DataX runs them: it stops at the source's end with
+the checkpoint written. A source that can split its snapshot (by ranges of a table's primary key,
+or `generate`'s `chunk_records`) is read in chunks, `job.max_parallel` at a time, and each sink that
+takes writes at once gets as many writers, a record's key always going to the same one. The
+checkpoint keeps the job's progress: its chunks, those done, where each under way is, and the
+records read, written and failed, with an ETA; so a job interrupted, by a crash or a restart, goes
+on from its finished chunks without reading them again. A finished job does not run again when fit
+restarts; `job.schedule`, in cron's five fields, starts it again, a new job each time, never while a
+run is still going. `fit sync run <pipeline> --once` runs one on its own from the command line and
+exits with its result.
 
 In a .conf file:
 
@@ -3731,6 +3741,7 @@ In JSON:
 | `checkpoint_interval` | duration | `"5s"` | How often, at most, the checkpoint is written when it has moved; it is also written when the pipeline stops. Records after the last checkpoint written are written again after a crash, so sinks write idempotently. 5s when left out. |
 | `queue` | [object](#config-syncqueue) |  | The bound on records read and not yet acknowledged by every sink: past it the source waits, so a slow sink slows the source rather than growing memory. The defaults when left out. |
 | `retry` | [object](#config-syncretry) |  | How a failed write is tried again, with a backoff doubling up to max_backoff, before on_error applies. A source that fails restarts the pipeline from its checkpoint after the same backoff, for as long as it fails. The defaults when left out. |
+| `job` | [object](#config-syncjob) |  | How a pipeline of mode once runs as a batch job: its source's snapshot read in chunks, max_parallel at a time, where the source can split it, its progress kept in the checkpoint so that a job interrupted goes on from its finished chunks, and a schedule starting it again. Only with mode once; the defaults when left out. |
 
 <a id="config-syncsink"></a>
 
@@ -3772,6 +3783,16 @@ Also at `sync.pipelines[].dead_letter`.
 | `max_attempts` | integer, 0 to 1000 | `5` | How many times a write is tried, the first included, before on_error applies. 5 when left out or 0. |
 | `backoff` | duration | `"200ms"` | The wait before the first try again, doubled at each after. 200ms when left out or 0. |
 | `max_backoff` | duration | `"30s"` | The longest wait between tries. 30s when left out or 0. |
+
+<a id="config-syncjob"></a>
+
+### `sync.pipelines[].job`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_parallel` | integer, 0 to 256 | `4` | How many chunks of the source's snapshot are read at once, and how many writers each sink that can take writes at once (the memory sink, the database sinks) has, a record's key always going to the same writer, so that one key is never written out of order. A source that cannot split its snapshot is read whole, and a sink that cannot take writes at once has one writer. 4 when left out or 0. |
+| `schedule` | string |  | When the job starts again, in cron's five fields (minute, hour, day of the month, month, day of the week, as 0 3 * * * for 03:00 every day) or a descriptor (@hourly, @daily, @weekly, @monthly, @yearly), in time_zone. A run never overlaps one still going: times passing while a job runs are skipped. A job interrupted, by a crash or a restart, goes on at once; one finished waits for the next time. Without a schedule a job runs once, when its pipeline starts, and not again once finished. |
+| `time_zone` | string | `"UTC"` | The IANA time zone the schedule is in, as Asia/Shanghai, or Local for the host's. UTC when left out. Times a daylight saving change skips do not run; times it repeats run once. |
 
 <a id="providers"></a>
 
@@ -6050,6 +6071,7 @@ Makes numbered records of every value type, the same ones each time, in transact
 | `tx_size` | integer, 0 to 100000 | `1` | How many records a transaction holds; 1, or left out, makes each record a transaction of its own, without a transaction ID. |
 | `namespace` | string | `"generate.records"` | The records' namespace. generate.records when left out. |
 | `interval` | duration |  | How long to wait after each transaction; none when left out. |
+| `chunk_records` | integer, 0 or more |  | In a job (mode once), split the records into chunks of this many, by ranges of their ids, read job.max_parallel at a time, each record a transaction of its own: for trying out jobs. Needs records; at most 100000 chunks. Not split when left out. |
 
 <a id="sync-sources-wasm"></a>
 

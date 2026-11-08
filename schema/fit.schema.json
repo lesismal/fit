@@ -3476,6 +3476,28 @@
       },
       "type": "object"
     },
+    "config.SyncJob": {
+      "additionalProperties": false,
+      "properties": {
+        "max_parallel": {
+          "default": 4,
+          "description": "How many chunks of the source's snapshot are read at once, and how many writers each sink that can take writes at once (the memory sink, the database sinks) has, a record's key always going to the same writer, so that one key is never written out of order. A source that cannot split its snapshot is read whole, and a sink that cannot take writes at once has one writer. 4 when left out or 0.",
+          "maximum": 256,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schedule": {
+          "description": "When the job starts again, in cron's five fields (minute, hour, day of the month, month, day of the week, as 0 3 * * * for 03:00 every day) or a descriptor (@hourly, @daily, @weekly, @monthly, @yearly), in time_zone. A run never overlaps one still going: times passing while a job runs are skipped. A job interrupted, by a crash or a restart, goes on at once; one finished waits for the next time. Without a schedule a job runs once, when its pipeline starts, and not again once finished.",
+          "type": "string"
+        },
+        "time_zone": {
+          "default": "UTC",
+          "description": "The IANA time zone the schedule is in, as Asia/Shanghai, or Local for the host's. UTC when left out. Times a daylight saving change skips do not run; times it repeats run once.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.SyncPipeline": {
       "additionalProperties": false,
       "properties": {
@@ -3488,6 +3510,10 @@
         "dead_letter": {
           "$ref": "#/$defs/config.SyncSink",
           "description": "The sink records go to when on_error is dead_letter, each a message record holding the record's canonical JSON, the error, where it failed and the attempts made. Needed with dead_letter, and only with it. A dead letter it cannot write either, after its attempts, stops the pipeline."
+        },
+        "job": {
+          "$ref": "#/$defs/config.SyncJob",
+          "description": "How a pipeline of mode once runs as a batch job: its source's snapshot read in chunks, max_parallel at a time, where the source can split it, its progress kept in the checkpoint so that a job interrupted goes on from its finished chunks, and a schedule starting it again. Only with mode once; the defaults when left out."
         },
         "mode": {
           "default": "stream",
@@ -7391,6 +7417,11 @@
     "sync.sources.generate": {
       "additionalProperties": false,
       "properties": {
+        "chunk_records": {
+          "description": "In a job (mode once), split the records into chunks of this many, by ranges of their ids, read job.max_parallel at a time, each record a transaction of its own: for trying out jobs. Needs records; at most 100000 chunks. Not split when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "interval": {
           "description": "How long to wait after each transaction; none when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",

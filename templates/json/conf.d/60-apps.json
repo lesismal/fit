@@ -3346,6 +3346,12 @@
             // // How long to wait after each transaction; none when left out.
             // // duration, as "1.5s" or "2m".
             // "interval": "10s",
+
+            // // In a job (mode once), split the records into chunks of this many, by ranges of their ids,
+            // // read job.max_parallel at a time, each record a transaction of its own: for trying out jobs.
+            // // Needs records; at most 100000 chunks. Not split when left out.
+            // // integer, 0 or more.
+            // "chunk_records": 0,
           // },
 
           // // Or wasm, with every one of its params:
@@ -4175,6 +4181,35 @@
           // // The longest wait between tries. 30s when left out or 0.
           // // duration, as "1.5s" or "2m"; default "30s".
           // "max_backoff": "30s",
+        // },
+
+        // // How a pipeline of mode once runs as a batch job: its source's snapshot read in chunks,
+        // // max_parallel at a time, where the source can split it, its progress kept in the checkpoint
+        // // so that a job interrupted goes on from its finished chunks, and a schedule starting it
+        // // again. Only with mode once; the defaults when left out.
+        // // object.
+        // "job": {
+          // // How many chunks of the source's snapshot are read at once, and how many writers each sink
+          // // that can take writes at once (the memory sink, the database sinks) has, a record's key
+          // // always going to the same writer, so that one key is never written out of order. A source
+          // // that cannot split its snapshot is read whole, and a sink that cannot take writes at once has
+          // // one writer. 4 when left out or 0.
+          // // integer, 0 to 256; default 4.
+          // "max_parallel": 4,
+
+          // // When the job starts again, in cron's five fields (minute, hour, day of the month, month, day
+          // // of the week, as 0 3 * * * for 03:00 every day) or a descriptor (@hourly, @daily, @weekly,
+          // // @monthly, @yearly), in time_zone. A run never overlaps one still going: times passing while
+          // // a job runs are skipped. A job interrupted, by a crash or a restart, goes on at once; one
+          // // finished waits for the next time. Without a schedule a job runs once, when its pipeline
+          // // starts, and not again once finished.
+          // // string.
+          // "schedule": "",
+
+          // // The IANA time zone the schedule is in, as Asia/Shanghai, or Local for the host's. UTC when
+          // // left out. Times a daylight saving change skips do not run; times it repeats run once.
+          // // string; default "UTC".
+          // "time_zone": "UTC",
         // },
       // },
     // ],

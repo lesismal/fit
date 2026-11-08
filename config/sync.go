@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/lesismal/fit/internal/cron"
 )
 
 // The defaults of Sync's pipelines.
@@ -17,6 +19,8 @@ const (
 	DefaultSyncBatchWait          = time.Second
 	DefaultSyncBackoff            = 200 * time.Millisecond
 	DefaultSyncMaxBackoff         = 30 * time.Second
+	DefaultSyncMaxParallel        = 4
+	MaxSyncParallel               = 256
 )
 
 // The modes and error policies of a SyncPipeline.
@@ -50,6 +54,7 @@ type SyncPipeline struct {
 	CheckpointInterval Duration    `json:"checkpoint_interval,omitempty" default:"\"5s\"" doc:"How often, at most, the checkpoint is written when it has moved; it is also written when the pipeline stops. Records after the last checkpoint written are written again after a crash, so sinks write idempotently. 5s when left out."`
 	Queue              *SyncQueue  `json:"queue,omitempty" doc:"The bound on records read and not yet acknowledged by every sink: past it the source waits, so a slow sink slows the source rather than growing memory. The defaults when left out."`
 	Retry              *SyncRetry  `json:"retry,omitempty" doc:"How a failed write is tried again, with a backoff doubling up to max_backoff, before on_error applies. A source that fails restarts the pipeline from its checkpoint after the same backoff, for as long as it fails. The defaults when left out."`
+	Job                *SyncJob    `json:"job,omitempty" doc:"How a pipeline of mode once runs as a batch job: its source's snapshot read in chunks, max_parallel at a time, where the source can split it, its progress kept in the checkpoint so that a job interrupted goes on from its finished chunks, and a schedule starting it again. Only with mode once; the defaults when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -61,6 +66,41 @@ type SyncSink struct {
 	Batch *SyncBatch `json:"batch,omitempty" doc:"How records are gathered into a write: a batch is written once it holds max_records records or max_bytes bytes, or max_wait after its first record arrived, whichever comes first, and at once when the source has ended. The defaults when left out."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// SyncJob is how a pipeline of mode once runs as a batch job.
+type SyncJob struct {
+	MaxParallel int    `json:"max_parallel,omitempty" min:"0" max:"256" default:"4" doc:"How many chunks of the source's snapshot are read at once, and how many writers each sink that can take writes at once (the memory sink, the database sinks) has, a record's key always going to the same writer, so that one key is never written out of order. A source that cannot split its snapshot is read whole, and a sink that cannot take writes at once has one writer. 4 when left out or 0."`
+	Schedule    string `json:"schedule,omitempty" doc:"When the job starts again, in cron's five fields (minute, hour, day of the month, month, day of the week, as 0 3 * * * for 03:00 every day) or a descriptor (@hourly, @daily, @weekly, @monthly, @yearly), in time_zone. A run never overlaps one still going: times passing while a job runs are skipped. A job interrupted, by a crash or a restart, goes on at once; one finished waits for the next time. Without a schedule a job runs once, when its pipeline starts, and not again once finished."`
+	TimeZone    string `json:"time_zone,omitempty" default:"\"UTC\"" doc:"The IANA time zone the schedule is in, as Asia/Shanghai, or Local for the host's. UTC when left out. Times a daylight saving change skips do not run; times it repeats run once."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Parallel returns job.max_parallel, or its default.
+func (p *SyncPipeline) Parallel() int {
+	if p.Job == nil || p.Job.MaxParallel <= 0 {
+		return DefaultSyncMaxParallel
+	}
+	return min(p.Job.MaxParallel, MaxSyncParallel)
+}
+
+// Schedule returns the job's schedule and its time zone, nil when it has
+// none.
+func (p *SyncPipeline) Schedule() (*cron.Schedule, *time.Location, error) {
+	if p.Job == nil || p.Job.Schedule == "" {
+		return nil, nil, nil
+	}
+	s, err := cron.Parse(p.Job.Schedule)
+	if err != nil {
+		return nil, nil, err
+	}
+	tz := p.Job.TimeZone
+	if tz == "" {
+		tz = "UTC"
+	}
+	loc, err := time.LoadLocation(tz)
+	return s, loc, err
 }
 
 // SyncQueue bounds a pipeline's records in flight.
@@ -216,6 +256,21 @@ func (c *Config) checkSync(add func(Value, string, ...any)) {
 			add(p.At.Field("on_error"), "on_error dead_letter needs a dead_letter sink")
 		case p.ErrorPolicy() != SyncDeadLetter && p.DeadLetter != nil:
 			add(p.At.Field("dead_letter"), "a dead_letter sink is used only with on_error dead_letter")
+		}
+		if j := p.Job; j != nil {
+			if !p.Once() {
+				add(j.At, "job is for pipelines of mode once")
+			}
+			if j.Schedule != "" {
+				if _, err := cron.Parse(j.Schedule); err != nil {
+					add(j.At.Field("schedule"), "%v", err)
+				}
+			}
+			if j.TimeZone != "" {
+				if _, err := time.LoadLocation(j.TimeZone); err != nil {
+					add(j.At.Field("time_zone"), "%q is not a time zone: an IANA name, as Asia/Shanghai, or Local", j.TimeZone)
+				}
+			}
 		}
 		if r := p.Retry; r != nil && r.Backoff > 0 && r.MaxBackoff > 0 && r.MaxBackoff < r.Backoff {
 			add(r.At.Field("max_backoff"), "max_backoff %s is shorter than backoff %s", r.MaxBackoff, r.Backoff)

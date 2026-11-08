@@ -13,6 +13,7 @@ package fitsync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -67,8 +68,59 @@ type Sink interface {
 	// A *BatchError says how many of them were written before the one that
 	// failed; any other error says none was. A batch is written again, or
 	// from the record that failed, so writes must be idempotent. Write is
-	// called on one goroutine at a time, and must return once ctx ends.
+	// called on one goroutine at a time, unless the Sink is a
+	// ParallelSink, and must return once ctx ends.
 	Write(ctx context.Context, batch []*Record) error
+}
+
+// ParallelSink is a Sink whose Write may be called on several goroutines at
+// once: a job's sink implementing it gets job.max_parallel writers, each
+// record going to the writer its key hashes to, so that a key is never
+// written out of order.
+type ParallelSink interface {
+	Sink
+	// ParallelWrites marks the sink.
+	ParallelWrites()
+}
+
+// Chunker is a Source whose snapshot can be split into chunks, which a job
+// (a pipeline of mode once) reads several at a time, job.max_parallel, and
+// resumes by chunk: a chunk is not read again once every sink has
+// acknowledged all its records. A database's table splits by ranges of its
+// primary key, a collection by ranges of _id.
+type Chunker interface {
+	Source
+	// Chunks plans the snapshot as chunks, in the order they are read;
+	// none says the source is not split, and Run reads it whole. It is
+	// called when a job starts, and the plan is kept in the job's
+	// checkpoint, so that a job resumed reads the chunks it planned even if
+	// the data has changed since. At most MaxChunks.
+	Chunks(ctx context.Context) ([]Chunk, error)
+	// ReadChunk reads chunk c, handing each record to emit in order: from
+	// its start when from is nil, or after the record whose Position from
+	// is. Positions are the chunk's own; the runtime puts them in the
+	// job's. It returns nil at the chunk's end, and emit's error, ctx's or
+	// its own otherwise; an error restarts the job from its checkpoint.
+	// Several chunks are read at once, each on a goroutine of its own, and
+	// their records' transactions are dropped: a snapshot has none.
+	ReadChunk(ctx context.Context, c Chunk, from Position, emit func(*Record) error) error
+}
+
+// MaxChunks is the most chunks a snapshot may be split into.
+const MaxChunks = 100000
+
+// Chunk is a part of a source's snapshot: a range of keys of a namespace.
+type Chunk struct {
+	// Namespace is the table, index or collection the chunk is of, when the
+	// source reads several.
+	Namespace string `json:"namespace,omitempty"`
+	// Lo and Hi bound the chunk's keys, from Lo to before Hi, in the
+	// source's own JSON form; nil is unbounded.
+	Lo json.RawMessage `json:"lo,omitempty"`
+	Hi json.RawMessage `json:"hi,omitempty"`
+	// Rows is how many records the source reckons the chunk holds, 0 when
+	// it cannot tell: the job's ETA comes from them.
+	Rows int64 `json:"rows,omitempty"`
 }
 
 // BatchError is a Sink's error about one record of a batch: those before it

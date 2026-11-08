@@ -88,6 +88,11 @@ type Options struct {
 	// Engine is the fib engine modules dial their own connections through,
 	// as a WASM connector's HTTP client does; nil gives them none.
 	Engine *fib.Engine
+	// Clock is the time jobs' schedules go by: the system's when nil.
+	Clock Clock
+	// SourceAttempts, when above 0, is how many times in a row a source
+	// may fail before its pipeline stops, rather than restarting for ever.
+	SourceAttempts int
 }
 
 // Runtime runs pipelines, and moves them to each config applied.
@@ -95,6 +100,9 @@ type Runtime struct {
 	opts  Options
 	mu    sync.Mutex // held for a whole Apply or Close
 	pipes map[string]*pipe
+	// oneRun is RunPipeline's: a job runs now, anew when it had finished,
+	// and once, whatever its schedule.
+	oneRun bool
 }
 
 // NewRuntime returns a Runtime running no pipeline yet.
@@ -272,13 +280,18 @@ type Status struct {
 	Name string
 	// State is starting, running, retrying (its source failed, and it
 	// starts again after a backoff), finished (its source ended, all
-	// written), stopped (on_error stop, or a dead letter not written) or
-	// killed (by a crash hook).
+	// written), stopped (on_error stop, a dead letter not written, or a
+	// source failing past RunPipeline's attempts), scheduled (a job
+	// waiting for its schedule's next time) or killed (by a crash hook).
 	State string
 	// Err is the last error, if any.
 	Err string
 	// Checkpoint is the position last saved.
 	Checkpoint Position
+	// Job is the progress of a pipeline of mode once, nil for others.
+	Job *Progress
+	// Next is when a scheduled job starts next, while it waits.
+	Next time.Time
 }
 
 // Status returns every pipeline's state, by name.
@@ -291,9 +304,7 @@ func (rt *Runtime) Status() []Status {
 	rt.mu.Unlock()
 	out := make([]Status, 0, len(ps))
 	for _, p := range ps {
-		p.mu.Lock()
-		out = append(out, Status{Name: p.cfg.Name, State: p.state, Err: p.err, Checkpoint: p.saved})
-		p.mu.Unlock()
+		out = append(out, p.status())
 	}
 	slices.SortFunc(out, func(a, b Status) int {
 		if a.Name < b.Name {
@@ -323,6 +334,22 @@ type pipe struct {
 	state string
 	err   string
 	saved Position
+	job   *Progress
+	cur   *run
+	next  time.Time
+}
+
+// status returns the pipeline's state, its job's progress as of now.
+func (p *pipe) status() Status {
+	p.mu.Lock()
+	st := Status{Name: p.cfg.Name, State: p.state, Err: p.err, Checkpoint: p.saved}
+	if st.State == "scheduled" {
+		st.Next = p.next
+	}
+	cur := p.cur
+	p.mu.Unlock()
+	st.Job = p.progress(cur, nil, false)
+	return st
 }
 
 func (rt *Runtime) newPipe(dir string, cfg *config.SyncPipeline, m *modules) *pipe {
@@ -349,19 +376,61 @@ func (p *pipe) noteSaved(pos Position) {
 	p.mu.Unlock()
 }
 
-// loop runs the pipeline from its checkpoint, again after a backoff each
-// time its source fails, until it ends or is stopped.
+// loop runs the pipeline, and a job again at each time of its schedule, a
+// job interrupted resumed at once; until it is stopped, or ends with no
+// schedule.
 func (p *pipe) loop() {
 	defer close(p.done)
+	sched, _, _ := p.cfg.Schedule()
+	if p.rt.oneRun || !p.cfg.Once() {
+		sched = nil
+	}
+	again := p.rt.oneRun
+	if sched != nil && !p.interrupted() {
+		if !p.wait() {
+			return
+		}
+		again = true
+	}
+	for {
+		switch p.runOnce(again) {
+		case outStopped, outKilled:
+			return
+		}
+		if sched == nil || !p.wait() {
+			return
+		}
+		again = true
+	}
+}
+
+// runOnce runs the pipeline from its checkpoint, again after a backoff each
+// time its source fails, until it ends or is stopped: a job finished is run
+// anew only when again is true.
+func (p *pipe) runOnce(again bool) outcome {
 	log := p.rt.opts.Log
 	for attempt := 1; ; {
-		from, err := p.store.load()
+		from, err := p.start(again)
+		switch {
+		case errors.Is(err, errJobDone):
+			p.setState("finished", nil)
+			return outFinished
+		case errors.Is(err, errCrashed):
+			p.setState("killed", nil)
+			return outKilled
+		}
 		if err == nil {
 			p.noteSaved(from)
 			p.setState("running", nil)
 			r := newRun(p)
+			p.mu.Lock()
+			p.cur = r
+			p.mu.Unlock()
 			var out outcome
 			out, err = r.do(from)
+			p.mu.Lock()
+			p.cur = nil
+			p.mu.Unlock()
 			if r.saved {
 				attempt = 1
 			}
@@ -369,17 +438,22 @@ func (p *pipe) loop() {
 			case outFinished:
 				p.setState("finished", nil)
 				log.Infof("pipeline %s finished", p.cfg.Name)
-				return
+				return out
 			case outStopped:
-				return
+				return out
 			case outKilled:
 				p.setState("killed", nil)
-				return
+				return out
 			case outFailed:
 				p.setState("stopped", err)
 				log.Errorf("pipeline %s stopped: %v", p.cfg.Name, err)
-				return
+				return out
 			}
+		}
+		if n := p.rt.opts.SourceAttempts; n > 0 && attempt >= n {
+			p.setState("stopped", err)
+			log.Errorf("pipeline %s stopped after %d attempts: %v", p.cfg.Name, attempt, err)
+			return outFailed
 		}
 		p.setState("retrying", err)
 		wait := p.cfg.Backoff(attempt)
@@ -390,7 +464,7 @@ func (p *pipe) loop() {
 		case <-t.C:
 		case <-p.stopping:
 			t.Stop()
-			return
+			return outStopped
 		}
 	}
 }

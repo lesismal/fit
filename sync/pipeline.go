@@ -39,6 +39,8 @@ type entry struct {
 	size     int
 	pos      Position
 	boundary bool
+	// failed is set once on_error took one of what it became.
+	failed bool
 }
 
 type item struct {
@@ -66,10 +68,22 @@ type run struct {
 	err        error
 	base, next uint64
 	pending    []entry
+	from       Position
 	mark       Position
 	dirty      bool
 	saved      bool
-	sinks      []*sinkRun
+	// sinks are the sinks' writers, groups the writers of each sink: one,
+	// or a job's max_parallel for a ParallelSink.
+	sinks  []*sinkRun
+	groups [][]*sinkRun
+	// read counts the source records emitted; done and failed those past
+	// the head of the queue, and markDone and markFailed as of the mark,
+	// all from the job's progress on; startDone and started are done and
+	// the time when the run began, for the ETA. finishing says the source
+	// ended and everything was written, which the last checkpoint records.
+	read, done, failed, markDone, markFailed, startDone int64
+	started                                             time.Time
+	finishing                                           bool
 }
 
 type sinkRun struct {
@@ -91,11 +105,28 @@ func notify(c chan struct{}) {
 }
 
 func newRun(p *pipe) *run {
-	r := &run{p: p, wake: make(chan struct{}, 1), space: make(chan struct{}, 1)}
+	r := &run{p: p, wake: make(chan struct{}, 1), space: make(chan struct{}, 1), started: time.Now()}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.srcCtx, r.cancelSrc = context.WithCancel(r.ctx)
+	// A job reading a snapshot in chunks, which has no transactions and
+	// each key once, writes with several writers where a sink takes them.
+	snapshot := len(p.jobChunks()) > 0
 	for i := range p.sinks {
-		r.sinks = append(r.sinks, &sinkRun{r: r, name: p.cfg.Sinks[i].Name, cfg: &p.cfg.Sinks[i], sink: p.sinks[i], wake: make(chan struct{}, 1)})
+		n := 1
+		if _, ok := p.sinks[i].(ParallelSink); ok && snapshot {
+			n = p.cfg.Parallel()
+		}
+		var g []*sinkRun
+		for range n {
+			s := &sinkRun{r: r, name: p.cfg.Sinks[i].Name, cfg: &p.cfg.Sinks[i], sink: p.sinks[i], wake: make(chan struct{}, 1)}
+			g = append(g, s)
+			r.sinks = append(r.sinks, s)
+		}
+		r.groups = append(r.groups, g)
+	}
+	if prog := p.progress(nil, nil, false); prog != nil {
+		r.done, r.failed = prog.Written+prog.Failed, prog.Failed
+		r.read, r.markDone, r.markFailed, r.startDone = r.done, r.done, r.failed, r.done
 	}
 	return r
 }
@@ -147,6 +178,7 @@ func (r *run) emit(rec *Record) error {
 	rec.seq, rec.made = r.next, false
 	r.next++
 	r.pending = append(r.pending, entry{left: -1, size: size, pos: rec.Position, boundary: rec.boundary()})
+	r.read++
 	r.inRecords++
 	r.inBytes += int64(size)
 	r.queue = append(r.queue, rec)
@@ -170,8 +202,13 @@ func (r *run) advance() {
 		r.base++
 		r.inRecords--
 		r.inBytes -= int64(e.size)
+		r.done++
+		if e.failed {
+			r.failed++
+		}
 		if e.boundary && e.pos != nil {
 			r.mark, r.dirty = e.pos, true
+			r.markDone, r.markFailed = r.done, r.failed
 		}
 		freed = true
 	}
@@ -196,6 +233,7 @@ func (r *run) ack(items []item) {
 func (r *run) dispatch() {
 	cfg := r.p.cfg
 	c := newStages(r.p.transforms)
+	var keyBuf []byte
 	for {
 		r.mu.Lock()
 		for len(r.queue) == 0 && !r.srcDone {
@@ -228,19 +266,20 @@ func (r *run) dispatch() {
 			outs := c.outs[start:k]
 			if err := c.errs[i]; err != nil {
 				t := c.where[i]
-				if !r.failed(rec, err, fmt.Sprintf("transform %d (%s)", t, cfg.Transforms[t].Module), 1) {
+				if !r.failedOn(rec, err, fmt.Sprintf("transform %d (%s)", t, cfg.Transforms[t].Module), 1) {
 					c.done()
 					return
 				}
 				outs = nil
 			}
 			r.mu.Lock()
-			r.pending[rec.seq-r.base].left = len(outs) * len(r.sinks)
-			for _, s := range r.sinks {
-				if len(s.queue) == 0 {
-					s.first = time.Now()
-				}
+			r.pending[rec.seq-r.base].left = len(outs) * len(r.groups)
+			for _, g := range r.groups {
 				for _, o := range outs {
+					s := g[laneOf(o.rec, len(g), &keyBuf)]
+					if len(s.queue) == 0 {
+						s.first = time.Now()
+					}
 					n := o.rec.Size()
 					s.queue = append(s.queue, item{o.rec, n})
 					s.bytes += int64(n)
@@ -259,9 +298,14 @@ func (r *run) dispatch() {
 	}
 }
 
-// failed takes a record that failed at where, after attempts, as on_error
+// failedOn takes a record that failed at where, after attempts, as on_error
 // says: it reports whether the run goes on past it.
-func (r *run) failed(rec *Record, err error, where string, attempts int) bool {
+func (r *run) failedOn(rec *Record, err error, where string, attempts int) bool {
+	if r.p.cfg.ErrorPolicy() != config.SyncStop {
+		r.mu.Lock()
+		r.pending[rec.seq-r.base].failed = true
+		r.mu.Unlock()
+	}
 	switch r.p.cfg.ErrorPolicy() {
 	case config.SyncSkip:
 		r.p.rt.opts.Log.Warnf("pipeline %s: %s: a record of %s is skipped after %d attempts: %v", r.p.cfg.Name, where, rec.Namespace, attempts, err)
@@ -418,7 +462,7 @@ func (s *sinkRun) write(batch []item, recs []*Record) bool {
 			}
 			continue
 		}
-		if !r.failed(recs[i], err, "sink "+s.name, attempt) {
+		if !r.failedOn(recs[i], err, "sink "+s.name, attempt) {
 			return false
 		}
 		r.ack(batch[i : i+1])
@@ -433,14 +477,19 @@ func (r *run) checkpoint() {
 	r.saveMu.Lock()
 	defer r.saveMu.Unlock()
 	r.mu.Lock()
-	if !r.dirty || r.killed.Load() {
+	if !r.dirty && !r.finishing || r.killed.Load() {
 		r.mu.Unlock()
 		return
 	}
-	pos := r.mark
-	r.dirty = false
+	pos, finishing := r.mark, r.finishing
+	at := &markState{pos, r.markDone, r.markFailed}
+	r.dirty, r.finishing = false, false
 	r.mu.Unlock()
-	err := r.p.store.save(pos)
+	if pos == nil {
+		pos = r.from
+	}
+	prog := r.p.progress(r, at, finishing)
+	err := r.p.store.save(pos, prog)
 	if errors.Is(err, errCrashed) {
 		r.kill()
 		return
@@ -451,7 +500,7 @@ func (r *run) checkpoint() {
 	if err != nil {
 		r.p.rt.opts.Log.Errorf("pipeline %s: saving its checkpoint: %v", r.p.cfg.Name, err)
 		r.mu.Lock()
-		r.dirty = true
+		r.dirty, r.finishing = true, finishing
 		r.mu.Unlock()
 		return
 	}
@@ -459,6 +508,11 @@ func (r *run) checkpoint() {
 	r.saved = true
 	r.mu.Unlock()
 	r.p.noteSaved(pos)
+	if prog != nil {
+		r.p.mu.Lock()
+		r.p.job = prog
+		r.p.mu.Unlock()
+	}
 	if r.crash(CrashCheckpointSaved) {
 		return
 	}
@@ -482,6 +536,7 @@ const (
 // was killed.
 func (r *run) do(from Position) (outcome, error) {
 	p := r.p
+	r.from = from
 	var wg sync.WaitGroup
 	sinksDone := make(chan struct{})
 	var sinks sync.WaitGroup
@@ -493,7 +548,13 @@ func (r *run) do(from Position) (outcome, error) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		err := p.src.Run(r.srcCtx, &Run{From: from, Once: p.cfg.Once(), Emit: r.emit})
+		run := &Run{From: from, Once: p.cfg.Once(), Emit: r.emit}
+		var err error
+		if c, ok := p.src.(Chunker); ok && p.cfg.Once() {
+			err = p.runChunks(r.srcCtx, c, run, p.cfg.Parallel())
+		} else {
+			err = p.src.Run(r.srcCtx, run)
+		}
 		r.mu.Lock()
 		r.srcDone = true
 		if err != nil && r.srcCtx.Err() == nil {
@@ -534,6 +595,9 @@ func (r *run) do(from Position) (outcome, error) {
 	if r.killed.Load() {
 		return outKilled, nil
 	}
+	r.mu.Lock()
+	r.finishing = p.cfg.Once() && !stopped && r.err == nil && r.srcErr == nil && r.drained
+	r.mu.Unlock()
 	r.checkpoint()
 	r.mu.Lock()
 	defer r.mu.Unlock()

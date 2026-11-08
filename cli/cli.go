@@ -35,6 +35,9 @@ Commands:
 	           and the other media handlers and roles
 	token      issue, list, change and revoke the link tokens a running fit's
 	           tunnel hub and LLM listeners take, through its Admin API
+	sync       run one pipeline of the config's sync on its own, as a job
+	           with --once, without serving anything else (fit sync run
+	           [-c config]... [--once] <pipeline>)
 	store     export or import the config kept encrypted in admin.store
 	cluster    a manager's members, groups, diffs, metrics, certificates and
 	           logs, and its rollouts started, followed and aborted, through
@@ -77,6 +80,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runToken(args[1:], stdout, stderr)
 	case "store":
 		return runStore(args[1:], stdout, stderr)
+	case "sync":
+		return runSync(args[1:], stdout, stderr)
 	case "cluster":
 		return runCluster(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
