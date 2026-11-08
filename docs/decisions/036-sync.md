@@ -260,6 +260,19 @@ The plan's I170 section lists them all; these change the record above.
    values as the position, so rows that share a cursor value are read once each, and in a job its
    snapshot splits by ranges of the key (`Chunker`).
 
+## Decisions made while building I186 (pending review)
+
+The plan's I186 section lists them all; these change the record above.
+
+1. **Sync has a RESP client of its own**, `sync/redis/wire` (RESP2 and RESP3, TLS, ACL users,
+   pipelining, bounded replies), rather than `tlsmgr/sharedstore`'s unexported RESP2 client; moving
+   `sharedstore` onto it is left for later.
+2. **A stream's checkpoint is the only cursor**: the `redis` source reads with `XREAD` from the last
+   entry IDs, makes no consumer group and acknowledges nothing on the server.
+3. **A sink may count a server's refusal of a duplicate as written**: with entry IDs from the keys,
+   the `redis` sink treats `XADD`'s refusal of an ID at or below the stream's last as an entry the
+   stream has, which makes a stream copy exactly once.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and

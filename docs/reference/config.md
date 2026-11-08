@@ -48,8 +48,8 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`redis`](#sync-sources-redis), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`redis`](#sync-sinks-redis), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -6111,6 +6111,7 @@ after.
 | [`file`](#sync-sources-file) | Tails files and globs, following rotation by rename and by copy and truncation, with multiline events |
 | [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
 | [`http`](#sync-sources-http) | Records posted to a `sync_ingest` route, each request answered once every sink has them |
+| [`redis`](#sync-sources-redis) | Redis and Valkey streams read with `XREAD` from the last entry IDs read, no consumer group |
 | [`wasm`](#sync-sources-wasm) | A WebAssembly plugin that polls, through fit's HTTP client to the hosts it is allowed, from its checkpoint |
 
 <a id="sync-sources-clickhouse"></a>
@@ -6511,6 +6512,118 @@ In JSON:
 | `max_pending_requests` | integer, 0 to 1000000 | `1024` | The most requests taken and not yet answered for good, waiting to be read or for their records' acknowledgement; one past it is answered 503 at once. 1024 when left out or 0. |
 | `max_pending_bytes` | integer, 0 or more | `67108864` | The most bytes of bodies taken and not yet read into records; a body past it is answered 503 at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0. |
 
+<a id="sync-sources-redis"></a>
+
+### `redis`
+
+Reads Redis or Valkey streams with XREAD, from the entry IDs of the checkpoint, each entry a record: a message of its fields, or the record the sink redis wrote with form record. Its position is the last entry ID read of each stream, so a restart reads on after it; no consumer group is made or acknowledged. In a job (mode once) it reads what the streams hold and stops.
+
+Reads Redis or Valkey streams (Redis 6 and later; RESP2 alone for older servers), `streams` together
+in one `XREAD` of up to `count` (1000) entries of each, waiting `block` (5s) for more. Each entry is
+a record: with `form: "fields"` a `message` whose `after` holds the entry's fields (UTF-8 values as
+strings, others as bytes) and whose key is `{"id": "<entry ID>"}`; with `form: "record"` the record
+the [`redis` sink](#sync-sinks-redis) wrote with `form: "record"`, its operation, key, namespace and
+rows kept (an entry without a `record` field, or one that is not a record, is read as fields). The
+commit time is the entry ID's milliseconds, unless the record has its own; `namespace` is the
+stream's key, or the record's own.
+
+The position is the last entry ID read of each stream, `{"streams": {"orders": "1731000000000-3"}}`,
+so a restart reads on after it. No consumer group is made or acknowledged: the checkpoint is the
+only cursor, and entries are not removed. A pipeline without a checkpoint starts at each stream's
+first entry (`snapshot: "initial"`), or after its last entry now (`snapshot: "never"`); a stream
+added to `streams` later starts the same way. Entries trimmed away (`MAXLEN`, `XTRIM`, `XDEL`) before
+the source read them are not seen. In a job (`mode: "once"`) the source reads what the streams hold,
+without waiting, and stops.
+
+The connection is TCP, or TLS with `tls` (checked against the system's roots or `ca_file`'s,
+`cert_file` and `key_file` for a client certificate); `username` and `password_env` authenticate as
+an ACL user, `password_env` alone as the default user. `protocol` is the RESP version; left out it
+is 3 when the server knows `HELLO`, 2 otherwise. A standalone server or a primary: not Redis
+Cluster.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines events-out {
+		source redis {
+			address redis.internal:6379
+			username sync
+			password_env REDIS_SYNC_PASSWORD
+			tls true
+			streams events:orders events:payments
+		}
+		sinks search { sink elasticsearch { urls https://es:9200 } }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: events-out
+      source:
+        module: redis
+        params:
+          address: redis.internal:6379
+          username: sync
+          password_env: REDIS_SYNC_PASSWORD
+          tls: true
+          streams:
+            - events:orders
+            - events:payments
+      sinks:
+        - name: search
+          sink:
+            module: elasticsearch
+            params:
+              urls:
+                - https://es:9200
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "events-out",
+        "source": {"module": "redis", "params": {
+          "address": "redis.internal:6379", "username": "sync", "password_env": "REDIS_SYNC_PASSWORD",
+          "tls": true, "streams": ["events:orders", "events:payments"]}},
+        "sinks": [{"name": "search", "sink": {"module": "elasticsearch", "params": {"urls": ["https://es:9200"]}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:6379"` | The server's host and port, a standalone server or a primary (not Redis Cluster). 127.0.0.1:6379 when left out. |
+| `username` | string |  | The ACL user to authenticate as, with password_env; the default user when left out. |
+| `password_env` | string |  | The environment variable holding the password, read when the pipeline loads; no authentication when left out. |
+| `db` | integer, 0 or more |  | The database selected. 0 when left out. |
+| `protocol` | integer, 0 to 3 |  | The RESP version spoken, 2 or 3. When left out, 3 if the server knows HELLO (Redis 6 and later, Valkey), 2 otherwise. |
+| `tls` | boolean |  | Connect over TLS, the server's certificate checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one (tls-auth-clients); needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; address's host when left out. |
+| `timeout` | duration | `"10s"` | How long connecting, and each command but XREAD's wait, may take. 10s when left out or 0. |
+| `streams` | list of string |  | Required. The streams read, by their keys, together, in one XREAD. |
+| `form` | string: `fields`, `record` | `"fields"` | What an entry is: fields, a message record whose row is the entry's fields, its key the entry's ID; record, the record held in its record field in canonical JSON, as the sink redis writes with form record, with its operation, key, namespace and rows (an entry without one is read as fields). fields when left out. |
+| `namespace` | string |  | The records' namespace. The stream's key when left out, or, for form record, the record's own. |
+| `snapshot` | string: `initial`, `never` | `"initial"` | Where a pipeline without a checkpoint starts: initial, at each stream's first entry; never, after its last entry now, reading only what comes after. initial when left out. |
+| `count` | integer, 0 to 100000 | `1000` | The most entries one XREAD reads of each stream. 1000 when left out or 0. |
+| `block` | duration | `"5s"` | How long one XREAD waits for new entries before asking again. 5s when left out or 0. |
+
 <a id="sync-sources-wasm"></a>
 
 ### `wasm`
@@ -6606,6 +6719,7 @@ since what came after the checkpoint is written again after a crash.
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`http`](#sync-sinks-http) | Batches posted as NDJSON or a JSON array, with headers, authentication and an idempotency key, retried on 5xx and timeouts |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
+| [`redis`](#sync-sinks-redis) | Redis and Valkey, pipelined: stream entries with `XADD` (IDs from the keys for an exact copy), or a key per record with `SET`, `HSET` and `DEL`, with a TTL |
 | [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
 | [`wasm`](#sync-sinks-wasm) | A WebAssembly plugin that writes each batch through fit's HTTP client to the hosts it is allowed |
 
@@ -6999,6 +7113,137 @@ Keeps the records written in memory, in a store named by store, up to max_record
 | --- | --- | --- | --- |
 | `store` | string | `"default"` | The store's name: sinks naming the same store write into it. default when left out. |
 | `max_records` | integer, 0 or more | `100000` | The most records the store keeps; a write past it fails, as a full disk would. 100000 when left out or 0. |
+
+<a id="sync-sinks-redis"></a>
+
+### `redis`
+
+Writes records to Redis or Valkey, pipelined: with mode stream, each record an entry added to a stream named from its namespace with XADD, its fields the row's (form fields) or the record in canonical JSON (form record), the entry's ID the server's or, with entry_id key, the record's key, so that a replay adds nothing twice; with mode keys, one key per record, named from its namespace and key: SET of the row as JSON or of the record, or HSET of the row's fields in place of the hash, with an optional TTL, and DEL on a delete.
+
+Writes records to Redis or Valkey, each batch's commands pipelined, at most `max_pipeline` (1000) in
+one round trip, in order.
+
+With `mode: "stream"` (the default) each record is an entry added with `XADD` to the stream
+`stream` names (`{namespace}`; `{key}` is the record's key as text). With `form: "fields"` the entry's
+fields are the row's (`after`, or `before` for a delete, or the key when both are null), each value
+as text, maps and arrays as JSON, nulls left out, and `op_field` adds the operation first; with
+`form: "record"` one field, `record`, holds the whole record in its canonical JSON, which the
+[`redis` source](#sync-sources-redis) reads back with every type. `max_len` trims each stream to
+about that many entries (`MAXLEN ~`). The entry's ID is the server's (`entry_id: "auto"`), so a
+batch written again after a crash adds its entries again; with `entry_id: "key"` it is the record's
+key (its `id` field, or the key itself), an ID as `ms-seq`, as the `redis` source gives: an entry
+the stream already has, at or below its last, is refused by the server and counted as written, so a
+stream copied from another loses nothing and holds nothing twice across restarts.
+
+With `mode: "keys"` each record is the value of a key, `key` (`{namespace}:{key}`), a key of several
+fields named by their values joined by `:`: `value: "json"` sets the row as a plain JSON object,
+`value: "record"` the whole record in its canonical JSON, and `value: "hash"` sets the row's fields
+as a hash, the key deleted and set again in one `MULTI` so that no field of an earlier row stays. A
+delete deletes the key. `ttl` sets each key's expiry as it is written. Writing the same records again
+leaves the same keys.
+
+A record the server refuses for good (`WRONGTYPE`, a bad ID) fails, and `on_error` takes it, the
+records before it written; an error that may pass (`LOADING`, `OOM`, `READONLY`, `BUSY`, `NOAUTH`,
+`NOPERM`, a connection lost, a `timeout`) is tried again by the pipeline's `retry`. DDL records are
+skipped. The connection is as the source's.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-cache {
+		source file { paths /var/log/shop/orders.ndjson; codec json }
+		transforms key { fields order_id }
+		sinks cache {
+			sink redis {
+				address redis.internal:6379
+				password_env REDIS_PASSWORD
+				mode keys
+				key order:{key}
+				value hash
+				ttl 24h
+			}
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-cache
+      source:
+        module: file
+        params:
+          paths:
+            - /var/log/shop/orders.ndjson
+          codec:
+            module: json
+      transforms:
+        - module: key
+          params:
+            fields:
+              - order_id
+      sinks:
+        - name: cache
+          sink:
+            module: redis
+            params:
+              address: redis.internal:6379
+              password_env: REDIS_PASSWORD
+              mode: keys
+              key: order:{key}
+              value: hash
+              ttl: 24h
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-cache",
+        "source": {"module": "file", "params": {"paths": ["/var/log/shop/orders.ndjson"], "codec": {"module": "json"}}},
+        "transforms": [{"module": "key", "params": {"fields": ["order_id"]}}],
+        "sinks": [{"name": "cache", "sink": {"module": "redis", "params": {
+          "address": "redis.internal:6379", "password_env": "REDIS_PASSWORD",
+          "mode": "keys", "key": "order:{key}", "value": "hash", "ttl": "24h"}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:6379"` | The server's host and port, a standalone server or a primary (not Redis Cluster). 127.0.0.1:6379 when left out. |
+| `username` | string |  | The ACL user to authenticate as, with password_env; the default user when left out. |
+| `password_env` | string |  | The environment variable holding the password, read when the pipeline loads; no authentication when left out. |
+| `db` | integer, 0 or more |  | The database selected. 0 when left out. |
+| `protocol` | integer, 0 to 3 |  | The RESP version spoken, 2 or 3. When left out, 3 if the server knows HELLO (Redis 6 and later, Valkey), 2 otherwise. |
+| `tls` | boolean |  | Connect over TLS, the server's certificate checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one (tls-auth-clients); needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; address's host when left out. |
+| `timeout` | duration | `"10s"` | How long connecting, and each round trip of a batch's commands, may take. 10s when left out or 0. |
+| `mode` | string: `stream`, `keys` | `"stream"` | How records are written: stream, each an entry added to a stream with XADD; keys, each the value of a key of its own, set, replaced or deleted. stream when left out. |
+| `stream` | string | `"{namespace}"` | With mode stream, the stream's key: text with {namespace}, the record's namespace, and {key}, its key's text. {namespace} when left out. |
+| `form` | string: `fields`, `record` | `"fields"` | With mode stream, what an entry holds: fields, the row's fields (after, or before for a delete), each value as text, maps and arrays as JSON, nulls left out; record, one field, record, holding the whole record in its canonical JSON, which the source redis reads back with every type, the operation and the key. fields when left out. |
+| `op_field` | string |  | With mode stream and form fields, a field set to the record's operation (insert, update, delete, message) before the row's fields, so that a delete can be told from an insert. None when left out. |
+| `entry_id` | string: `auto`, `key` | `"auto"` | With mode stream, the entry's ID: auto, the server's (XADD *), so that a batch written again after a crash adds its entries again; key, the record's key (its id field, or the key itself), an ID as ms-seq as the source redis gives, so that a replay's entries, at or below the stream's last, are refused by the server and counted as written: a stream copied exactly once. auto when left out. |
+| `max_len` | integer, 0 or more |  | With mode stream, trim each stream to about this many entries as they are added (XADD MAXLEN ~). Not trimmed when left out or 0. |
+| `key` | string | `"{namespace}:{key}"` | With mode keys, the key a record is written to: text with {namespace}, the record's namespace, and {key}, its key's text, a key of several fields their values joined by ':'. A record without a key fails. {namespace}:{key} when left out. |
+| `value` | string: `json`, `record`, `hash` | `"json"` | With mode keys, what a key holds: json, the row as a plain JSON object (SET); record, the whole record in its canonical JSON (SET); hash, the row's fields as a hash (HSET), each value as text, maps and arrays as JSON, nulls left out, the key deleted and set in one MULTI so that no field of an earlier row stays. A delete deletes the key (DEL). json when left out. |
+| `ttl` | duration |  | With mode keys, how long a key written lives (SET PX, PEXPIRE). For ever when left out or 0. |
+| `max_pipeline` | integer, 0 to 100000 | `1000` | The most commands sent in one round trip; a batch with more is sent in several, in order. 1000 when left out or 0. |
 
 <a id="sync-sinks-stdout"></a>
 
