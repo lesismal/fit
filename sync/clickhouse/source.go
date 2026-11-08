@@ -50,10 +50,9 @@ type Source struct {
 	PollInterval  config.Duration   `json:"poll_interval,omitempty" default:"\"5s\"" doc:"How long to wait, once the rows past the cursor are read, before asking again. 5s when left out or 0."`
 	ChunkRows     int64             `json:"chunk_rows,omitempty" min:"0" doc:"In a job (mode once), split the snapshot into ranges of the key of about this many rows, read job.max_parallel at a time and resumed by chunk; the next job starts from the beginning. Not split when left out, and the job reads by the cursor, the next job going on after it."`
 
-	conn    *Conn
-	inner   string
-	order   []string
-	cursorT bool // the cursor is a DateTime: it is the records' commit time
+	conn  *Conn
+	inner string
+	order []string
 }
 
 // bound is a column's value as the position keeps it: its type and its text
