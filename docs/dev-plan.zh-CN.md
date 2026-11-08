@@ -326,7 +326,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I170 | ClickHouse 作为目标（去重令牌、`ReplacingMergeTree`）与源（按游标轮询） | I163 | done |
 | I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | done |
 | I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | done |
-| I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | todo |
+| I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | done |
 | I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | todo |
 | I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | todo |
 | I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | done |
@@ -3791,6 +3791,52 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   小数秒的时间类型、`BIT`、`SET`、`ENUM`、作为字节的 `GEOMETRY`、JSON 的二进制形式）。
 - **完成标准**：testdata 中从每个服务端版本采集的 binlog 解码出测试写入的行；对解码器的模糊测试既不 panic，也不超出其分配上限。
 - **涉及**：`sync/mysql/binlog`。
+
+**待审查的决策**（实现时所做，2026-11-09；在用户裁定前有效）：
+
+1. **位置。** 包 `sync/mysql/binlog`（`binlog`），与 `mysqlwire` 一样是库：`Decoder` 每次接收一个完整事件（头、体与校验和），
+   保存 format description 与各 table map；其上有读取 binlog 文件的 `Reader`。副本的命令（`COM_REGISTER_SLAVE`、
+   `COM_BINLOG_DUMP_GTID`）仍归 I174。备选：由解码器自己读流。
+2. **值是 `fitsync.Value`**，按计划所写，而不是 `mysqlwire` 的类型：整数为 `Int`，无符号列为 `Uint`（`YEAR` 为 `Int`）；
+   `FLOAT` 取最短十进制表示的 `Float`；`DECIMAL` 为 `Decimal`；`DATE` 为 `Date`；`DATETIME` 为 `Decoder.Location`（默认 UTC）
+   中的 `Time`；`TIMESTAMP` 为 UTC 的 `Time`；零日期或含零部分的日期为 MySQL 写法的 `String`；`TIME` 为 `String`
+   （`[-]HH:MM:SS[.小数]`，fitsync 没有时长类型）；`BIT` 为 `Uint`；`ENUM` 与 `SET` 在名字已知时为名字的 `String`，否则为
+   序号或位的 `Uint`；字符串为列字符集下其字节的 `String`（不转换），二进制串（字符集 63）为 `Bytes`，字符集未知时
+   `CHAR`/`VARCHAR` 为 `String`、`BLOB`/`TEXT` 为 `Bytes`；JSON（MySQL 的二进制形式）为 MySQL 打印形式的 `JSON` 文本；
+   `GEOMETRY` 与 `VECTOR` 为 `Bytes`。备选：`mysqlwire` 的类型，由 I174 映射。
+3. **由源补全 table map。** `TableMap` 的 `Columns` 是导出的；可选元数据缺少的部分（5.7、MariaDB 默认的 `NO_LOG`、MySQL 的
+   `MINIMAL` 没有列名）由 I174 在解码其后的 rows 事件前从 `information_schema` 补上（名字、`Unsigned`、`Charset`、
+   `EnumValues`、`SetValues`），在 `Decoder.OnTableMap` 中完成：每个 table map 解码后、其后的 rows 之前调用（transaction payload 内的
+   也一样，其 rows 在同一次调用中解码）；`TableMap.Metadata` 说明服务端发送了哪些。测试按 workload 的描述做同样的事。观察到并遵循：
+   MySQL 在符号位图中把 `YEAR` 算作数值列，MariaDB 在字符集元数据中把 `GEOMETRY` 算作字符列。
+4. **校验和。** format description 指明时校验每个事件的 CRC32，description 自身也校验；`SetChecksum` 用于副本在其之前收到的
+   事件（人造的 rotate）。
+5. **JSON 部分更新**（`binlog_row_value_options=PARTIAL_JSON`）会被应用：后值是前值应用差异（替换、插入、删除）后的结果，
+   目标总能拿到整个文档；没有前值（`binlog_row_image` 不是 `FULL`）时拒绝该事件（`ErrUnsupported`）。备选：把差异传下去。
+6. **MySQL 8.3 的带标签 GTID 与 8.0.26 的 heartbeat v2** 按 MySQL 的序列化格式解码（版本、大小、最后必需字段，然后是字段 ID
+   与变长值；UUID 为 16 个整数；GNO 与逻辑时钟为 zigzag 有符号），依据 MySQL 源码推出，并以 8.4 中带标签事务的 binlog 核对；
+   带标签的 previous-GTIDs 格式也是如此。
+7. **压缩。** 解码 MariaDB 压缩的 query 与 rows 事件（zlib，标准库），以及 MySQL 的 `Transaction_payload`
+   （`binlog_transaction_compression`，ZSTD 经由 fit 已为 Kafka 依赖的 `github.com/klauspost/compress/zstd`）；payload 中的
+   事件放在 `Payload.Events`，解压后大小以 `MaxEventSize` 为上限（随流实际给出的数据读取，解码器的窗口与内存同样受限）。互通
+   workload 在 MySQL 8.0 上为一个事务开启压缩。备选：拒绝 payload，由 I174 要求 `binlog_transaction_compression=OFF`。
+8. **不进一步解码**（`*Unknown`，即事件体字节）：`Intvar`、`Rand`、`User_var`、`Stop`、`Incident`、`Ignorable`、`XA_prepare`、
+   view change、v0 rows 事件。拒绝：5.0 之前的 `DECIMAL`、MariaDB 10.3 之前的时间格式（`mysql56_temporal_format=OFF`），以及
+   加密的 MariaDB 文件（`Start_encryption`；副本收到的流已解密）。
+9. **上限**：事件最多 `MaxEventSize`（64 MiB）；一个 rows 事件的值最多 `MaxRowsSize`（64 MiB，事件两倍更大时取之），按
+   fitsync 的方式估算（每个值 32 字节加其文本）；4,096 列；`MaxTables`（4,096）个 table map，超过即全部忘掉（每个事务自带其
+   map）；JSON 深 100 层，文本最多为其字节的 16 倍（偏移可能共享一个值）；不占字节的行被拒绝。`Reader` 的缓冲与解压后的事件
+   随实际读到的字节增长，从不按头声称的长度分配。模糊测试 `FuzzReader` 检查不 panic 且分配不超过输入的 2,048 倍加 4 MiB；
+   `TestMutations` 把每个采集到的事件逐字节改动、在每个长度截断后解码。
+10. **互通与 testdata。** `test/sync/mysql.sh` 现在启动的每个服务端都开启行格式 binlog、MySQL 开启 GTID、关闭
+    `secure_file_priv` 并设 `UMASK=0644`（MariaDB 与 5.7 的 `LOAD_FILE` 只读所有人可读的文件）；`TestMySQLBinlogInterop`
+    （在 `sync/mysql/binlog` 中，`mysql.sh` 与 `run.sh` 现在也运行该包）在单独的 binlog 文件中执行 `testdata/workload.json`，
+    用 `LOAD_FILE` 读出文件并检查解码得到 workload 的行（只看它自己的库：`go test` 同时运行写同一批服务端的
+    `./test/sync`）；设置 `FIT_SYNC_MYSQL_BINLOG_TESTDATA` 时写出文件，`testdata/*.binlog`
+    即如此采集（8.4 与 MariaDB 11 用 `binlog_row_metadata=FULL`，由测试设置并恢复；8.0 为 `MINIMAL`；5.7 与 MariaDB 10.11
+    没有）。`TestCapturedBinlogs` 无需容器即可检查它们。备选：副本协议，归 I174。
+11. **规模**：代码约 2,870 行（含注释），单元测试约 1,710 行（语句覆盖 99.6%，无容器），互通与 workload 约 260 行；没有剩余
+    工作，因此没有 I173b。
 
 ### I174 MySQL 与 MariaDB 作为源
 

@@ -336,7 +336,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | done |
 | I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | done |
 | I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | done |
-| I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | todo |
+| I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | done |
 | I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | todo |
 | I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | todo |
 | I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | done |
@@ -5116,6 +5116,74 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: binlogs captured from each server version in testdata decode to the rows the tests
   wrote; a fuzz test over the decoder neither panics nor allocates past its bounds.
 - **Touches**: `sync/mysql/binlog`.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/mysql/binlog` (`binlog`), a library like `mysqlwire`: a `Decoder`
+   that takes one whole event at a time (header, body and checksum) and keeps the format description
+   and the table maps, and a `Reader` of binlog files over it. The replica's commands
+   (`COM_REGISTER_SLAVE`, `COM_BINLOG_DUMP_GTID`) stay I174's. Alternative: a decoder reading the
+   stream itself.
+2. **Values are `fitsync.Value`s**, as the plan says, not `mysqlwire`'s types: integers `Int`, or `Uint`
+   when the column is unsigned (`YEAR` an `Int`); `FLOAT` its shortest decimal as a `Float`; `DECIMAL`
+   a `Decimal`; `DATE` a `Date`; `DATETIME` a `Time` in `Decoder.Location` (UTC by default);
+   `TIMESTAMP` a `Time` in UTC; a zero date, or one with zero parts, a `String` as MySQL writes it;
+   `TIME` a `String` (`[-]HH:MM:SS[.frac]`, fitsync having no duration); `BIT` a `Uint`; `ENUM` and
+   `SET` the `String` of their names when known, else a `Uint` of the index or bits; character strings
+   `String`s of their bytes in the column's charset (not converted), binary ones (charset 63) `Bytes`,
+   with the charset unknown `CHAR`/`VARCHAR` `String` and `BLOB`/`TEXT` `Bytes`; JSON (MySQL's binary
+   form) `JSON` text as MySQL prints it; `GEOMETRY` and `VECTOR` `Bytes`. Alternative: `mysqlwire`'s
+   types, mapped by I174.
+3. **The source completes a table map.** A `TableMap`'s `Columns` are exported; what the optional
+   metadata lacks (5.7, MariaDB's default `NO_LOG`, MySQL's `MINIMAL` without names) I174 fills in
+   from `information_schema` (name, `Unsigned`, `Charset`, `EnumValues`, `SetValues`) before the rows
+   events after it are decoded, in `Decoder.OnTableMap`, called with each table map before the rows
+   after it (also inside a transaction payload, whose rows are decoded in the same call);
+   `TableMap.Metadata` says which pieces the server sent. The tests do the
+   same from the workload's description. Observed and followed: MySQL counts `YEAR` among the numeric
+   columns of the signedness bitmap, and MariaDB counts `GEOMETRY` among the character columns of the
+   charset metadata.
+4. **Checksums.** CRC32 checked on every event when the format description says so; the description
+   itself checked; `SetChecksum` for the events a replica gets before it (the artificial rotate).
+5. **Partial JSON updates** (`binlog_row_value_options=PARTIAL_JSON`) are applied: the after value is
+   the before value with the diffs (replace, insert, remove) applied, so a sink always gets the whole
+   document; without the before value (`binlog_row_image` not `FULL`) the event is refused
+   (`ErrUnsupported`). Alternative: the diffs passed on.
+6. **MySQL 8.3's tagged GTIDs and 8.0.26's heartbeat v2** are decoded from MySQL's serialization
+   format (version, size, last required field, then field IDs and variable-length values; a UUID as 16
+   integers; GNO and the logical clock zigzag-signed), worked out from MySQL's sources and checked
+   against 8.4's binlog with a tagged transaction; the tagged previous-GTIDs format too.
+7. **Compression.** MariaDB's compressed query and rows events (zlib, standard library) and MySQL's
+   `Transaction_payload` (`binlog_transaction_compression`, ZSTD through
+   `github.com/klauspost/compress/zstd`, which fit already depends on for Kafka) are decoded; a
+   payload's events come out in `Payload.Events`, its uncompressed size bounded by `MaxEventSize`
+   (read as the stream gives it, the decoder's window and memory bounded the same). The interop
+   workload turns compression on for a transaction on MySQL 8.0. Alternative: payloads refused, with
+   `binlog_transaction_compression=OFF` required by I174.
+8. **Not decoded further** (`*Unknown`, the body's bytes): `Intvar`, `Rand`, `User_var`, `Stop`,
+   `Incident`, `Ignorable`, `XA_prepare`, view changes, the v0 rows events. Refused: pre-5.0
+   `DECIMAL`, MariaDB's pre-10.3 temporal format (`mysql56_temporal_format=OFF`), and an encrypted
+   MariaDB file (`Start_encryption`; a replica's stream comes decrypted).
+9. **Bounds**: an event at most `MaxEventSize` (64 MiB); the values of one rows event at most
+   `MaxRowsSize` (64 MiB, or twice the event if more), reckoned as fitsync does (32 bytes a value and its
+   text); 4,096 columns; `MaxTables` (4,096) table maps, past which all are forgotten (each transaction
+   carries its own); JSON 100 levels deep and its text at most 16 times its bytes (offsets may share a
+   value); a row that takes no bytes refused. The `Reader`'s buffer and a decompressed event grow with
+   the bytes actually read, never with the length a header claims. A fuzz test (`FuzzReader`) checks
+   no panic and allocation within 2,048 times the input plus 4 MiB; `TestMutations` decodes every
+   captured event with each byte changed and cut at each length.
+10. **Interop and testdata.** `test/sync/mysql.sh` now starts every server with the binlog on in row
+    format, GTIDs on for MySQL, `secure_file_priv` off and `UMASK=0644` (MariaDB's and 5.7's
+    `LOAD_FILE` read only files readable by all); `TestMySQLBinlogInterop` (in `sync/mysql/binlog`,
+    which `mysql.sh` and `run.sh` now also run) runs `testdata/workload.json` in a binlog file of its
+    own, reads the file with `LOAD_FILE` and checks it decodes to the workload's rows (those of its own database: `go test` runs
+    `./test/sync` beside it, writing to the same servers); with
+    `FIT_SYNC_MYSQL_BINLOG_TESTDATA` it writes the file, as `testdata/*.binlog` were captured (8.4 and
+    MariaDB 11 with `binlog_row_metadata=FULL`, set and restored by the test; 8.0 `MINIMAL`; 5.7 and
+    MariaDB 10.11 none). `TestCapturedBinlogs` checks them without containers. Alternative: the replica
+    protocol, which is I174's.
+11. **Size**: about 2,870 lines of code (with comments), 1,710 of unit tests (99.6% of statements, no
+    containers) and 260 of interop and workload; nothing left, so no I173b.
 
 ### I174 MySQL and MariaDB as a source
 

@@ -1,0 +1,116 @@
+{
+  "comment": "The statements TestMySQLBinlogInterop runs on each server, and the rows the binlog must decode to. A step or a want with 'only' applies to the servers whose names start with one of its prefixes. A want's values are by column, [kind, text]; a column not named is null (or not in the image). The tables' columns say what a source would read from information_schema, for servers whose table maps lack the optional metadata.",
+  "tables": [
+    {
+      "name": "num",
+      "create": "CREATE TABLE num (id INT PRIMARY KEY, ti TINYINT, tu TINYINT UNSIGNED, si SMALLINT, su SMALLINT UNSIGNED, mi MEDIUMINT, mu MEDIUMINT UNSIGNED, i INT, iu INT UNSIGNED, bi BIGINT, bu BIGINT UNSIGNED, f FLOAT, d DOUBLE, d1 DECIMAL(10,2), d2 DECIMAL(65,30), d3 DECIMAL(5,0) UNSIGNED, b1 BIT(1), b13 BIT(13), b64 BIT(64), y YEAR)",
+      "columns": [
+        {"name": "id"}, {"name": "ti"}, {"name": "tu", "unsigned": true}, {"name": "si"}, {"name": "su", "unsigned": true},
+        {"name": "mi"}, {"name": "mu", "unsigned": true}, {"name": "i"}, {"name": "iu", "unsigned": true},
+        {"name": "bi"}, {"name": "bu", "unsigned": true}, {"name": "f"}, {"name": "d"}, {"name": "d1"}, {"name": "d2"},
+        {"name": "d3", "unsigned": true}, {"name": "b1"}, {"name": "b13"}, {"name": "b64"}, {"name": "y", "unsigned": true}, {"name": "extra"}
+      ]
+    },
+    {
+      "name": "tm",
+      "create": "CREATE TABLE tm (id INT PRIMARY KEY, dt DATE, t0 TIME, t3 TIME(3), t6 TIME(6), dt0 DATETIME, dt2 DATETIME(2), dt6 DATETIME(6), ts0 TIMESTAMP NULL DEFAULT NULL, ts4 TIMESTAMP(4) NULL DEFAULT NULL, t1 TIME(1))",
+      "columns": [
+        {"name": "id"}, {"name": "dt"}, {"name": "t0"}, {"name": "t3"}, {"name": "t6"}, {"name": "dt0"}, {"name": "dt2"},
+        {"name": "dt6"}, {"name": "ts0"}, {"name": "ts4"}, {"name": "t1"}
+      ]
+    },
+    {
+      "name": "str",
+      "create": "CREATE TABLE str (id INT PRIMARY KEY, c CHAR(10), vc VARCHAR(300), cb BINARY(4), vb VARBINARY(10), tt TINYTEXT, tx TEXT, mt MEDIUMTEXT, lt LONGTEXT, tb TINYBLOB, bl BLOB, mb MEDIUMBLOB, lb LONGBLOB, e ENUM('a','b','c'), s SET('x','y','z'), g GEOMETRY, cw CHAR(255), l1 VARCHAR(10) CHARACTER SET latin1) DEFAULT CHARSET=utf8mb4",
+      "columns": [
+        {"name": "id"}, {"name": "c"}, {"name": "vc"}, {"name": "cb", "binary": true}, {"name": "vb", "binary": true},
+        {"name": "tt"}, {"name": "tx"}, {"name": "mt"}, {"name": "lt"},
+        {"name": "tb", "binary": true}, {"name": "bl", "binary": true}, {"name": "mb", "binary": true}, {"name": "lb", "binary": true},
+        {"name": "e", "enum": ["a", "b", "c"]}, {"name": "s", "set": ["x", "y", "z"]}, {"name": "g", "binary": true}, {"name": "cw"}, {"name": "l1"}
+      ]
+    },
+    {
+      "name": "js",
+      "create": "CREATE TABLE js (id INT PRIMARY KEY, j JSON)",
+      "columns": [{"name": "id"}, {"name": "j"}]
+    }
+  ],
+  "steps": [
+    {"sql": "INSERT INTO num VALUES (1, -128, 255, -32768, 65535, -8388608, 16777215, -2147483648, 4294967295, -9223372036854775808, 18446744073709551615, 3.25, -2.5e-300, -12345678.91, '-1234567890123456789012345678901234.000000000000000000000000000001', 99999, b'1', b'1010101010101', 0xFFFFFFFFFFFFFFFF, 2155), (2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '-0.05', '0.000000000000000000000000000001', 0, b'0', 0, 1, 0), (3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)"},
+    {"sql": "INSERT INTO tm VALUES (1, '2024-02-29', '12:34:56', '-01:02:03.250', '-12:00:00.123456', '1999-12-31 23:59:59', '2000-01-01 00:00:00.12', '9999-12-31 23:59:59.999999', '2038-01-19 03:14:07', '1970-01-01 00:00:01.0001', '-00:00:01.5'), (2, '0000-00-00', '00:00:00', '838:59:59', '-838:59:59', '0000-00-00 00:00:00', '2024-00-10 00:00:00.5', NULL, '0000-00-00 00:00:00', NULL, '00:00:00.1')"},
+    {"sql": "INSERT INTO str VALUES (1, 'abc', 'héllo wörld', 0x01020304, 0xff00, 'tiny', 'text', 'medium', 'long', 0x00, 0x0102, 0x03, 0x04, 'b', 'x,z', ST_GeomFromText('POINT(1 2)'), 'wide 中', 'café'), (2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)"},
+    {"sql": "INSERT INTO js VALUES (1, '{\"a\": 1, \"b\": [true, false, null], \"c\": \"x\\\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\"}'), (2, '[1, [2, [3]], {}, \"\"]'), (3, '\"str\"'), (4, '3.25'), (5, NULL)"},
+    {"sql": "INSERT INTO js VALUES (6, JSON_OBJECT('d', CAST('2024-01-02' AS DATE), 'dt', CAST('2024-01-02 03:04:05.5' AS DATETIME(1)), 't', CAST('01:02:03' AS TIME), 'dec', CAST(12.34 AS DECIMAL(5,2))))", "only": ["mysql"]},
+    {"sql": "SET SESSION binlog_transaction_compression = ON", "only": ["mysql80"]},
+    {"sql": "BEGIN"},
+    {"sql": "UPDATE num SET i = i + 1, f = 0.5 WHERE id = 1"},
+    {"sql": "DELETE FROM str WHERE id = 2"},
+    {"sql": "UPDATE tm SET t0 = '01:00:00' WHERE id = 2"},
+    {"sql": "COMMIT"},
+    {"sql": "SET SESSION binlog_transaction_compression = OFF", "only": ["mysql80"]},
+    {"sql": "SET SESSION binlog_row_image = 'MINIMAL'"},
+    {"sql": "UPDATE num SET i = 5 WHERE id = 2"},
+    {"sql": "SET SESSION binlog_row_image = 'FULL'"},
+    {"sql": "SET SESSION binlog_rows_query_log_events = ON", "only": ["mysql"]},
+    {"sql": "DELETE FROM num WHERE id = 3"},
+    {"sql": "SET SESSION binlog_rows_query_log_events = OFF", "only": ["mysql"]},
+    {"sql": "SET SESSION binlog_row_value_options = 'PARTIAL_JSON'", "only": ["mysql8"]},
+    {"sql": "UPDATE js SET j = JSON_SET(j, '$.a', 2, '$.new', 'n') WHERE id = 1"},
+    {"sql": "UPDATE js SET j = JSON_REMOVE(j, '$.b[1]'), j = JSON_REPLACE(j, '$.c', 'z') WHERE id = 1"},
+    {"sql": "UPDATE js SET j = JSON_SET(j, '$[1][1][0]', 30) WHERE id = 2"},
+    {"sql": "SET SESSION binlog_row_value_options = ''", "only": ["mysql8"]},
+    {"sql": "ALTER TABLE num ADD COLUMN extra INT"},
+    {"sql": "INSERT INTO num (id, extra) VALUES (4, 7)"},
+    {"sql": "SET GLOBAL log_bin_compress = ON", "only": ["mariadb"]},
+    {"sql": "SET GLOBAL log_bin_compress_min_len = 10", "only": ["mariadb"]},
+    {"sql": "INSERT INTO str (id, tx) VALUES (3, REPEAT('compressed ', 100))"},
+    {"sql": "UPDATE str SET tx = 'short' WHERE id = 3"},
+    {"sql": "SET GLOBAL log_bin_compress = OFF", "only": ["mariadb"]},
+    {"sql": "SET gtid_next = 'AUTOMATIC:fit'", "only": ["mysql84"]},
+    {"sql": "INSERT INTO js VALUES (7, '[]')"},
+    {"sql": "SET gtid_next = 'AUTOMATIC'", "only": ["mysql84"]}
+  ],
+  "want": [
+    {"op": "insert", "table": "num", "after": {"id": ["int", "1"], "ti": ["int", "-128"], "tu": ["uint", "255"], "si": ["int", "-32768"], "su": ["uint", "65535"], "mi": ["int", "-8388608"], "mu": ["uint", "16777215"], "i": ["int", "-2147483648"], "iu": ["uint", "4294967295"], "bi": ["int", "-9223372036854775808"], "bu": ["uint", "18446744073709551615"], "f": ["float", "3.25"], "d": ["float", "-2.5e-300"], "d1": ["decimal", "-12345678.91"], "d2": ["decimal", "-1234567890123456789012345678901234.000000000000000000000000000001"], "d3": ["decimal", "99999"], "b1": ["uint", "1"], "b13": ["uint", "5461"], "b64": ["uint", "18446744073709551615"], "y": ["int", "2155"]}},
+    {"op": "insert", "table": "num", "after": {"id": ["int", "2"], "ti": ["int", "0"], "tu": ["uint", "0"], "si": ["int", "0"], "su": ["uint", "0"], "mi": ["int", "0"], "mu": ["uint", "0"], "i": ["int", "0"], "iu": ["uint", "0"], "bi": ["int", "0"], "bu": ["uint", "0"], "f": ["float", "0"], "d": ["float", "0"], "d1": ["decimal", "-0.05"], "d2": ["decimal", "0.000000000000000000000000000001"], "d3": ["decimal", "0"], "b1": ["uint", "0"], "b13": ["uint", "0"], "b64": ["uint", "1"], "y": ["int", "0"]}},
+    {"op": "insert", "table": "num", "after": {"id": ["int", "3"]}},
+    {"op": "insert", "table": "tm", "after": {"id": ["int", "1"], "dt": ["date", "2024-02-29"], "t0": ["string", "12:34:56"], "t3": ["string", "-01:02:03.250"], "t6": ["string", "-12:00:00.123456"], "dt0": ["time", "1999-12-31T23:59:59Z"], "dt2": ["time", "2000-01-01T00:00:00.12Z"], "dt6": ["time", "9999-12-31T23:59:59.999999Z"], "ts0": ["time", "2038-01-19T03:14:07Z"], "ts4": ["time", "1970-01-01T00:00:01.0001Z"], "t1": ["string", "-00:00:01.5"]}},
+    {"op": "insert", "table": "tm", "after": {"id": ["int", "2"], "dt": ["string", "0000-00-00"], "t0": ["string", "00:00:00"], "t3": ["string", "838:59:59.000"], "t6": ["string", "-838:59:59.000000"], "dt0": ["string", "0000-00-00 00:00:00"], "dt2": ["string", "2024-00-10 00:00:00.50"], "ts0": ["string", "0000-00-00 00:00:00"], "t1": ["string", "00:00:00.1"]}},
+    {"op": "insert", "table": "str", "after": {"id": ["int", "1"], "c": ["string", "abc"], "vc": ["string", "héllo wörld"], "cb": ["hex", "01020304"], "vb": ["hex", "ff00"], "tt": ["string", "tiny"], "tx": ["string", "text"], "mt": ["string", "medium"], "lt": ["string", "long"], "tb": ["hex", "00"], "bl": ["hex", "0102"], "mb": ["hex", "03"], "lb": ["hex", "04"], "e": ["string", "b"], "s": ["string", "x,z"], "g": ["hex", "000000000101000000000000000000f03f0000000000000040"], "cw": ["string", "wide 中"], "l1": ["stringhex", "636166e9"]}},
+    {"op": "insert", "table": "str", "after": {"id": ["int", "2"]}},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "1"], "j": ["json", "{\"a\": 1, \"b\": [true, false, null], \"c\": \"x\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\"}"]}, "only": ["mysql"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "2"], "j": ["json", "[1, [2, [3]], {}, \"\"]"]}, "only": ["mysql"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "3"], "j": ["json", "\"str\""]}, "only": ["mysql"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "4"], "j": ["json", "3.25"]}, "only": ["mysql"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "1"], "j": ["string", "{\"a\": 1, \"b\": [true, false, null], \"c\": \"x\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\"}"]}, "only": ["mariadb"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "2"], "j": ["string", "[1, [2, [3]], {}, \"\"]"]}, "only": ["mariadb"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "3"], "j": ["string", "\"str\""]}, "only": ["mariadb"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "4"], "j": ["string", "3.25"]}, "only": ["mariadb"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "5"]}},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "6"], "j": ["json", "{\"d\": \"2024-01-02\", \"t\": \"01:02:03.000000\", \"dt\": \"2024-01-02 03:04:05.500000\", \"dec\": 12.34}"]}, "only": ["mysql"]},
+    {"op": "update", "table": "num",
+      "before": {"id": ["int", "1"], "ti": ["int", "-128"], "tu": ["uint", "255"], "si": ["int", "-32768"], "su": ["uint", "65535"], "mi": ["int", "-8388608"], "mu": ["uint", "16777215"], "i": ["int", "-2147483648"], "iu": ["uint", "4294967295"], "bi": ["int", "-9223372036854775808"], "bu": ["uint", "18446744073709551615"], "f": ["float", "3.25"], "d": ["float", "-2.5e-300"], "d1": ["decimal", "-12345678.91"], "d2": ["decimal", "-1234567890123456789012345678901234.000000000000000000000000000001"], "d3": ["decimal", "99999"], "b1": ["uint", "1"], "b13": ["uint", "5461"], "b64": ["uint", "18446744073709551615"], "y": ["int", "2155"]},
+      "after": {"id": ["int", "1"], "ti": ["int", "-128"], "tu": ["uint", "255"], "si": ["int", "-32768"], "su": ["uint", "65535"], "mi": ["int", "-8388608"], "mu": ["uint", "16777215"], "i": ["int", "-2147483647"], "iu": ["uint", "4294967295"], "bi": ["int", "-9223372036854775808"], "bu": ["uint", "18446744073709551615"], "f": ["float", "0.5"], "d": ["float", "-2.5e-300"], "d1": ["decimal", "-12345678.91"], "d2": ["decimal", "-1234567890123456789012345678901234.000000000000000000000000000001"], "d3": ["decimal", "99999"], "b1": ["uint", "1"], "b13": ["uint", "5461"], "b64": ["uint", "18446744073709551615"], "y": ["int", "2155"]}},
+    {"op": "delete", "table": "str", "before": {"id": ["int", "2"]}},
+    {"op": "update", "table": "tm",
+      "before": {"id": ["int", "2"], "dt": ["string", "0000-00-00"], "t0": ["string", "00:00:00"], "t3": ["string", "838:59:59.000"], "t6": ["string", "-838:59:59.000000"], "dt0": ["string", "0000-00-00 00:00:00"], "dt2": ["string", "2024-00-10 00:00:00.50"], "ts0": ["string", "0000-00-00 00:00:00"], "t1": ["string", "00:00:00.1"]},
+      "after": {"id": ["int", "2"], "dt": ["string", "0000-00-00"], "t0": ["string", "01:00:00"], "t3": ["string", "838:59:59.000"], "t6": ["string", "-838:59:59.000000"], "dt0": ["string", "0000-00-00 00:00:00"], "dt2": ["string", "2024-00-10 00:00:00.50"], "ts0": ["string", "0000-00-00 00:00:00"], "t1": ["string", "00:00:00.1"]}},
+    {"op": "update", "table": "num", "before": {"id": ["int", "2"]}, "after": {"i": ["int", "5"]}},
+    {"op": "delete", "table": "num", "before": {"id": ["int", "3"]}},
+    {"op": "update", "table": "js", "before": {"id": ["int", "1"], "j": ["json", "{\"a\": 1, \"b\": [true, false, null], \"c\": \"x\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\"}"]},
+      "after": {"id": ["int", "1"], "j": ["json", "{\"a\": 2, \"b\": [true, false, null], \"c\": \"x\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\", \"new\": \"n\"}"]}, "only": ["mysql"]},
+    {"op": "update", "table": "js", "before": {"id": ["int", "1"], "j": ["json", "{\"a\": 2, \"b\": [true, false, null], \"c\": \"x\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\", \"new\": \"n\"}"]},
+      "after": {"id": ["int", "1"], "j": ["json", "{\"a\": 2, \"b\": [true, null], \"c\": \"z\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\", \"new\": \"n\"}"]}, "only": ["mysql"]},
+    {"op": "update", "table": "js", "before": {"id": ["int", "2"], "j": ["json", "[1, [2, [3]], {}, \"\"]"]}, "after": {"id": ["int", "2"], "j": ["json", "[1, [2, [30]], {}, \"\"]"]}, "only": ["mysql"]},
+    {"op": "update", "table": "js", "before": {"id": ["int", "1"], "j": ["string", "{\"a\": 1, \"b\": [true, false, null], \"c\": \"x\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\"}"]},
+      "after": {"id": ["int", "1"], "j": ["json-string", "{\"a\": 2, \"b\": [true, false, null], \"c\": \"x\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\", \"new\": \"n\"}"]}, "only": ["mariadb"]},
+    {"op": "update", "table": "js", "before": {"id": ["int", "1"], "j": ["json-string", "{\"a\": 2, \"b\": [true, false, null], \"c\": \"x\\\"y\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\", \"new\": \"n\"}"]},
+      "after": {"id": ["int", "1"], "j": ["json-string", "{\"a\": 2, \"b\": [true, null], \"c\": \"z\", \"dd\": 1.5, \"big\": 18446744073709551615, \"neg\": -9223372036854775808, \"i32\": 100000, \"s\": \"é\", \"new\": \"n\"}"]}, "only": ["mariadb"]},
+    {"op": "update", "table": "js", "before": {"id": ["int", "2"], "j": ["json-string", "[1, [2, [3]], {}, \"\"]"]}, "after": {"id": ["int", "2"], "j": ["json-string", "[1, [2, [30]], {}, \"\"]"]}, "only": ["mariadb"]},
+    {"op": "insert", "table": "num", "after": {"id": ["int", "4"], "extra": ["int", "7"]}},
+    {"op": "insert", "table": "str", "after": {"id": ["int", "3"], "tx": ["repeat", "compressed |100"]}},
+    {"op": "update", "table": "str", "before": {"id": ["int", "3"], "tx": ["repeat", "compressed |100"]}, "after": {"id": ["int", "3"], "tx": ["string", "short"]}},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "7"], "j": ["json", "[]"]}, "only": ["mysql"]},
+    {"op": "insert", "table": "js", "after": {"id": ["int", "7"], "j": ["string", "[]"]}, "only": ["mariadb"]}
+  ]
+}
