@@ -17,6 +17,9 @@ import (
 var namespaces = []struct{ ns, title, kind, file string }{
 	{module.Handlers, "Handlers", "handler", "handlers.md"},
 	{module.Middlewares, "Middleware", "middleware", "middleware.md"},
+	{"sync.sources", "Sync sources", "source", "sync_sources.md"},
+	{"sync.sinks", "Sync sinks", "sink", "sync_sinks.md"},
+	{"sync.transforms", "Sync transforms", "transform", "sync_transforms.md"},
 }
 
 // Reference returns the config reference, as Markdown: every field of the
@@ -61,7 +64,7 @@ func Reference() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		p := part{title: n.title, anchor: strings.ToLower(n.title), chapter: c}
+		p := part{title: n.title, anchor: strings.ReplaceAll(strings.ToLower(n.title), " ", "-"), chapter: c}
 		for _, info := range module.Namespace(n.ns) {
 			if info.Doc == "" {
 				r.missing = append(r.missing, "module "+info.ID)

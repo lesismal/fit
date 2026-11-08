@@ -1,0 +1,97 @@
+// Package fitsync is fit's sync role: pipelines that read records from a
+// producer, a source, put them through transforms and write them to
+// consumers, sinks, with a checkpoint saved only once every sink has
+// acknowledged what it covers. Its directory is sync, as config and the
+// plan name it; its name is fitsync, so that it does not shadow the standard
+// library's sync where both are imported. See docs/decisions/036-sync.md.
+//
+// Connectors and transforms are modules, in the namespaces sync.sources,
+// sync.sinks and sync.transforms, their params decoded as strictly as any
+// module's. None of them runs on a fib worker: each pipeline runs on
+// goroutines of its own, a bounded number of them.
+package fitsync
+
+import (
+	"context"
+	"errors"
+	"fmt"
+)
+
+// The namespaces of sync's modules.
+const (
+	Sources    = "sync.sources"
+	Sinks      = "sync.sinks"
+	Transforms = "sync.transforms"
+)
+
+// Source reads records. It is a module of the namespace sync.sources.
+type Source interface {
+	// Run reads records from where r.From says, in order, handing each to
+	// r.Emit, until ctx ends or the source reaches its end. It returns nil
+	// at its end, which stops the pipeline with its checkpoint written, and
+	// ctx's error, or its own, otherwise. An error restarts the pipeline
+	// from its checkpoint, after a backoff; Run is then called again, on
+	// the same Source.
+	Run(ctx context.Context, r *Run) error
+}
+
+// Run is what a Source's Run is given.
+type Run struct {
+	// From is the checkpoint, the Position of the last record every sink
+	// acknowledged that ends a transaction; nil when there is none, and the
+	// source starts where its params say.
+	From Position
+	// Once says the pipeline's mode is once: the source stops at its end,
+	// as the end of a snapshot or of the files as they are now, rather
+	// than wait for more.
+	Once bool
+	// Emit hands a record on, and returns once the queue has room for it:
+	// a full queue holds the source here. It returns an error once the
+	// pipeline stops, which Run returns. Records of one transaction are
+	// emitted one after the other, the first with Tx.First and the last
+	// with Tx.Last, and Position is set on the records the source can
+	// resume after.
+	Emit func(*Record) error
+}
+
+// Confirmer is a Source told of each checkpoint once it is saved, as a
+// PostgreSQL slot is told the LSN it may release, never before every sink
+// has acknowledged it.
+type Confirmer interface {
+	Confirm(p Position)
+}
+
+// Sink writes records. It is a module of the namespace sync.sinks.
+type Sink interface {
+	// Write writes a batch, in order. nil acknowledges every record in it.
+	// A *BatchError says how many of them were written before the one that
+	// failed; any other error says none was. A batch is written again, or
+	// from the record that failed, so writes must be idempotent. Write is
+	// called on one goroutine at a time, and must return once ctx ends.
+	Write(ctx context.Context, batch []*Record) error
+}
+
+// BatchError is a Sink's error about one record of a batch: those before it
+// were written.
+type BatchError struct {
+	// Index is the record's, in the batch.
+	Index int
+	Err   error
+}
+
+func (e *BatchError) Error() string { return fmt.Sprintf("record %d of the batch: %v", e.Index, e.Err) }
+func (e *BatchError) Unwrap() error { return e.Err }
+
+// Transform changes records on their way from the source to the sinks. It is
+// a module of the namespace sync.transforms.
+type Transform interface {
+	// Apply hands emit what r becomes: nothing to drop it, r or a change of
+	// it, or several records to split it, each made with r.Clone so that it
+	// counts as r. It is called on one goroutine, record after record, and
+	// must not block. An error fails the record, which on_error then
+	// takes.
+	Apply(r *Record, emit func(*Record)) error
+}
+
+// errStopped is Emit's error once the pipeline stops.
+var errStopped = errors.New("sync: the pipeline is stopping")

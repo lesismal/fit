@@ -1,5 +1,5 @@
-// Package standard imports every module fit ships with, so that importing it
-// registers them all.
+// Package standard imports every module fit ships with, sync's connectors
+// among them, so that importing it registers them all.
 package standard
 
 import (
@@ -20,5 +20,6 @@ import (
 	_ "github.com/lesismal/fit/middleware/rewrite"
 	_ "github.com/lesismal/fit/plugin/wasm"
 	_ "github.com/lesismal/fit/streaming"
+	_ "github.com/lesismal/fit/sync"
 	_ "github.com/lesismal/fit/webrtc/media"
 )

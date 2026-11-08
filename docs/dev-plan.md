@@ -325,7 +325,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I195.
 | I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | done |
 | I162 | One address, one server: config validation refuses two parts of the config on one address and transport, across listeners, the Admin API, consoles and every role, with an error naming both; every binding checks at bind time that no other socket holds its address; fib's TURN relays never share a port of the range (A70) | — | done |
 | **Sync** | | | |
-| I163 | Decision 036; `sync`: the record model, pipelines (source, transforms, sinks, `stream` or `once`), a bounded queue, batches, acknowledgements to a watermark that never splits a transaction, the checkpoint file, retries and `on_error` | I04 | todo |
+| I163 | Decision 036; `sync`: the record model, pipelines (source, transforms, sinks, `stream` or `once`), a bounded queue, batches, acknowledgements to a watermark that never splits a transaction, the checkpoint file, retries and `on_error` | I04 | done |
 | I164 | Built-in transforms: `filter`, `route`, `fields`, `key`, `cast`, `mask`, `envelope` | I163 | todo |
 | I165 | WASM plugins for sync: transforms, codecs, and source and sink connectors on fit's HTTP client and timers; the guest SDKs | I163 | todo |
 | I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | todo |
@@ -4148,6 +4148,45 @@ track can place it); exactly-once into sinks with no transactions.
   checkpoint written; `dead_letter` writes the record and its error to the named sink; a reload
   restarts only changed pipelines; under the race detector.
 - **Touches**: `docs/decisions` (036), `sync`, `config`, `module`, `schema`, `cli`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Package path.** The directory is `sync`, the package name `fitsync`: the plan's paths
+   (`sync/file`, `sync/mysql/wire`) and the config's `sync` stay, and the name does not shadow the
+   standard library's `sync`, which the runtime imports. Alternative: a directory `datasync`.
+2. **A sink's shape.** `{"name", "sink": {"module", "params"}, "batch"}`: the module in a reference
+   of its own, so the schema, the decoder and `module.Load` treat it as every module reference.
+   Alternative: the plan sketch's flat `{"name", "type", ...params}`, which needs a decoder and
+   schema of its own.
+3. **Dead letters.** `dead_letter` is a sink of its own, required with `on_error: dead_letter` and
+   refused without it, rather than one of `sinks` (which would take every record too). A dead
+   letter is a `message` record whose `after` holds `error`, `at`, `attempts` and `record` (the
+   canonical JSON). Alternative: `dead_letter` naming one of `sinks`.
+4. **`state_dir` is required** when `sync` is set: where checkpoints live is worth saying.
+   Alternative: a default under `$XDG_DATA_HOME/fit/sync`, as ACME's storage.
+5. **Retry settings are the pipeline's**, shared by its sinks, the dead letter sink and the source's
+   restarts. Alternative: each sink its own.
+6. **A batch error that names no record** is retried whole; once its attempts are spent its first
+   record is the failed one, `on_error` takes it, and the rest is retried with fresh attempts, so a
+   sink that is down costs each skipped record its attempts. Alternative: write the batch record by
+   record once to find the bad ones.
+7. **Transforms are per record** (`Apply(r, emit)`), on the dispatcher goroutine; a batch interface
+   for WASM is I165's to add. Alternative: a batch interface now.
+8. **A source's error restarts the pipeline from its checkpoint for as long as it fails**, after the
+   backoff; only sink and transform errors follow `on_error`. Alternative: a source's error past
+   its attempts follows `on_error` too.
+9. **Byte sizes are integers** (`max_bytes: 4194304`), as `rotate`'s and the media library's are, not
+   `"5MiB"` as the plan's sketch had. Alternative: a size type taking units, for every byte field.
+10. **The queue bound counts records from `Emit` until the watermark passes them**, so one bound
+    covers the queue, the transforms and every sink's pending batch; a record larger than
+    `max_bytes` goes through alone once the queue is empty. Alternative: separate bounds per stage.
+11. **Sources are told the checkpoint after it is saved** (`Confirmer`), not when the watermark
+    moves, so a PostgreSQL slot never releases what the file does not hold yet.
+12. **Crash tests use a hook** (`Options.Crash` at six named points, killing the pipeline as
+    `kill -9` would), not a subprocess killed for real. Alternative: a helper binary killed with
+    SIGKILL, slower and not portable to Windows.
+13. **No metrics, Admin API or status endpoint yet**: `Runtime.Status` is there for I188 and I189;
+    a pipeline's state is in its log meanwhile, under a logger of its own, `sync`.
 
 ### I164 Built-in transforms
 

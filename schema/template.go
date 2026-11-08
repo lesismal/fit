@@ -217,7 +217,7 @@ func (t *templater) field(f config.Field, path string, mod *module.Info) *tnode 
 	case typ.Kind() == reflect.Slice && typ.Elem() == moduleRefType:
 		n.isArray = true
 		if !t.lean {
-			n.elems = t.middleware()
+			n.elems = t.modules(f.Module)
 		}
 	default:
 		if v, ok := t.examples[ep]; ok {
@@ -242,9 +242,17 @@ func elemStruct(t reflect.Type) bool {
 }
 
 // moduleField makes a route's handler: respond, written out; the other
-// handlers have routes of their own (see handlerRoutes).
+// handlers have routes of their own (see handlerRoutes). A module of
+// another namespace, as a sync pipeline's source, is its namespace's first,
+// written out.
 func (t *templater) moduleField(n *tnode, f config.Field, path string) *tnode {
 	n.isObject = true
+	if f.Module != module.Handlers {
+		if infos := module.Namespace(f.Module); len(infos) > 0 {
+			n.children = t.moduleRef(f.Module, infos[0].Name(), path)
+		}
+		return n
+	}
 	name := t.handler
 	if name == "" {
 		name = "respond"
@@ -289,12 +297,12 @@ func (t *templater) handlerRoutes() []*tnode {
 	return out
 }
 
-// middleware makes a route's middleware: every middleware module, each
-// with all its params, commented out.
-func (t *templater) middleware() []*tnode {
+// modules makes a list of modules of namespace ns, as a route's
+// middleware: every module of it, each with all its params, commented out.
+func (t *templater) modules(ns string) []*tnode {
 	var out []*tnode
-	for _, info := range module.Namespace(module.Middlewares) {
-		out = append(out, &tnode{isObject: true, children: t.moduleRef(module.Middlewares, info.Name(), "")})
+	for _, info := range module.Namespace(ns) {
+		out = append(out, &tnode{isObject: true, children: t.moduleRef(ns, info.Name(), "")})
 	}
 	return out
 }

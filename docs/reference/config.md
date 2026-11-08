@@ -43,9 +43,13 @@ a config against it and more.
 - [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey), [`media_auth[].url_signing`](#config-urlsigning)
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
+- [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
+- [Sync sources](#sync-sources): [`generate`](#sync-sources-generate)
+- [Sync sinks](#sync-sinks): [`memory`](#sync-sinks-memory), [`stdout`](#sync-sinks-stdout)
+- [Sync transforms](#sync-transforms)
 
 ## The config
 
@@ -124,6 +128,7 @@ In JSON:
 | `media_auth` | list of [object](#config-mediaauth) |  | Named policies of who may publish and play which streams, with tokens, users and keys for tokens fit signs: the handlers and roles that take media (whip, whep, webrtc_proxy) refer to one with their auth param. A handler without auth lets everyone in, as the route's middleware allow. |
 | `streaming` | [object](#config-streaming) |  | fit's streaming role, beside the gateway on its engine: one media hub where a stream is published once, over RTMP, RTSP, SRT or WHIP, and played over any of them, HTTP-FLV and HLS too, each listener and handler with its media_auth policy. None when left out. |
 | `media_library` | list of [object](#config-medialibrary) |  | Named libraries of media files: directories scanned into a catalog of items, each a title with its renditions, audio, subtitles and poster, probed off fib's workers on a bounded file pool of the library's own, and read by the Admin API's /media/library. None when left out: no files are scanned or served. |
+| `sync` | [object](#config-sync) |  | fit's sync role: pipelines that read records from a source (a database's changes, files, a queue) and write them to sinks, each with a checkpoint saved only once every sink has acknowledged the records it covers, kept in state_dir. None when left out: no connections out and no state on disk. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -847,7 +852,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `level` | string: `debug`, `info`, `warn`, `error` | `"info"` | The least level written, of every logger levels and loggers do not set one for: debug, info, warn or error. info when left out. A change takes effect on reload. |
-| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
+| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server), sync (its pipelines) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
 | `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart. |
 | `format` | string: `line`, `text`, `json` | `"line"` | How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart. |
 | `time_zone` | string |  | The zone the time of every line is written in, and the zone a file's interval is rotated at: local (the default), utc, or an IANA zone name such as Asia/Shanghai. So 24h turns at local midnight by default, and at UTC midnight with utc. The zone database is embedded, so an IANA name works in a container without zoneinfo. A change takes effect on reload. |
@@ -3420,6 +3425,187 @@ In JSON:
 | `min_free_bytes` | integer, 0 or more | `1073741824` | The disk space left free beside the uploads under way: an upload whose bytes, with those of the others still to come, would leave less free on upload_dir's disk is refused 507 before any of it is written. 1 GiB when left out or 0. |
 | `upload_expiry` | duration | `"24h"` | How long an upload not written to is kept before it is given up and its temporary file removed, at the next scan; at least 1m. An upload is kept across restarts until then. 24h when left out. |
 
+<a id="sync"></a>
+
+## Sync
+
+fit's sync role: pipelines that read records from a source, put them through transforms in order,
+and write them to one or more sinks, as Filebeat does for files and Canal, Debezium or DataX do for
+databases. Every source makes, and every sink takes, the same record: its source and namespace, an
+operation (`insert`, `update`, `delete`, `ddl`, `message`), the key, the row before and after as
+typed values, the commit time, the transaction and the source's position. Sources, sinks and
+transforms are modules, of the namespaces `sync.sources`, `sync.sinks` and `sync.transforms`, named
+by `module` with their `params`, as handlers are.
+
+Nothing is lost: a pipeline's checkpoint, `<state_dir>/<name>.json`, is the position of the last
+record every sink has acknowledged that ends a source transaction, never one inside a transaction.
+It is written at most every `checkpoint_interval` and when the pipeline stops, to a temporary file,
+synced and renamed into place, and a pipeline starts from it; so after a crash or `kill -9` the
+records after it are written again, and sinks write idempotently. A write that fails is tried
+again, `retry.max_attempts` in all with a doubling backoff, from the record that failed; a record
+still failing, or one a transform fails on, goes as `on_error` says: `stop` the pipeline, `skip` it,
+or write it to the `dead_letter` sink. A source that fails restarts the pipeline from its
+checkpoint, after the same backoff.
+
+Everything is bounded: `queue` bounds the records read and not yet acknowledged by every sink, in
+records and bytes, so a slow sink holds the source back rather than growing memory; each sink's
+`batch` bounds a write in records, bytes and time. Pipelines run on goroutines of their own, a few
+for each, never on fib's workers. A reload starts the pipelines it adds, stops those it removes and
+restarts only those whose settings changed. `mode: "once"` stops at the source's end with the
+checkpoint written, as a batch job. See [decision 036](../decisions/036-sync.md).
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines trial {
+		mode once
+		source generate { records 1000; tx_size 10 }
+		sinks out { sink stdout; batch { max_records 100; max_wait 200ms } }
+		sinks kept { sink memory { store trial } }
+		on_error dead_letter
+		dead_letter { name errors; sink stdout }
+		checkpoint_interval 1s
+		queue { max_records 5000; max_bytes 16MiB }
+		retry { max_attempts 5; backoff 200ms; max_backoff 30s }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: trial
+      mode: once
+      source:
+        module: generate
+        params:
+          records: 1000
+          tx_size: 10
+      sinks:
+        - name: out
+          sink:
+            module: stdout
+          batch:
+            max_records: 100
+            max_wait: 200ms
+        - name: kept
+          sink:
+            module: memory
+            params:
+              store: trial
+      on_error: dead_letter
+      dead_letter:
+        name: errors
+        sink:
+          module: stdout
+      checkpoint_interval: 1s
+      queue:
+        max_records: 5000
+        max_bytes: 16777216
+      retry:
+        max_attempts: 5
+        backoff: 200ms
+        max_backoff: 30s
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "trial",
+        "mode": "once",
+        "source": {"module": "generate", "params": {"records": 1000, "tx_size": 10}},
+        "sinks": [
+          {"name": "out", "sink": {"module": "stdout"}, "batch": {"max_records": 100, "max_wait": "200ms"}},
+          {"name": "kept", "sink": {"module": "memory", "params": {"store": "trial"}}}
+        ],
+        "on_error": "dead_letter",
+        "dead_letter": {"name": "errors", "sink": {"module": "stdout"}},
+        "checkpoint_interval": "1s",
+        "queue": {"max_records": 5000, "max_bytes": 16777216},
+        "retry": {"max_attempts": 5, "backoff": "200ms", "max_backoff": "30s"}
+      }
+    ]
+  }
+}
+```
+
+<a id="config-sync"></a>
+
+### `sync`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `state_dir` | string |  | Required. The directory each pipeline's checkpoint is kept in, as <state_dir>/<pipeline>.json, written to a temporary file, synced and renamed into place. Made when missing. A pipeline starts from its checkpoint there; moving a pipeline to another fit means moving its file. |
+| `pipelines` | list of [object](#config-syncpipeline) |  | The pipelines, each a source, its transforms in order and its sinks, with one checkpoint. A reload starts the pipelines added, stops those removed and restarts only those whose settings changed. |
+
+<a id="config-syncpipeline"></a>
+
+### `sync.pipelines[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The pipeline's name, unique, which names its checkpoint file. Letters, digits, '_', '.' and '-'. |
+| `source` | [source](#sync sources) |  | Required. Where the records come from, and its params. |
+| `transforms` | list of [transform](#sync transforms) |  | What each record goes through, in order, before the sinks: a transform may change, drop or split a record. None when left out. |
+| `sinks` | list of [object](#config-syncsink) |  | Required. Where every record is written, at least one: each sink takes every record, in order, in batches of its own, and the checkpoint is the position all of them have acknowledged. |
+| `mode` | string: `stream`, `once` | `"stream"` | stream follows the source for good; once stops at the source's end, as a batch job, with the checkpoint written. A pipeline also stops when its source has an end and reaches it. stream when left out. |
+| `on_error` | string: `stop`, `skip`, `dead_letter` | `"stop"` | What happens to a record a sink still fails to write, or a transform fails on, once its attempts are spent: stop stops the pipeline, its checkpoint before the record, until the config changes or fit restarts; skip leaves the record out of that sink, and logs it; dead_letter writes it, with its error, to the dead_letter sink before going on. stop when left out. |
+| `dead_letter` | [object](#config-syncsink) |  | The sink records go to when on_error is dead_letter, each a message record holding the record's canonical JSON, the error, where it failed and the attempts made. Needed with dead_letter, and only with it. A dead letter it cannot write either, after its attempts, stops the pipeline. |
+| `checkpoint_interval` | duration | `"5s"` | How often, at most, the checkpoint is written when it has moved; it is also written when the pipeline stops. Records after the last checkpoint written are written again after a crash, so sinks write idempotently. 5s when left out. |
+| `queue` | [object](#config-syncqueue) |  | The bound on records read and not yet acknowledged by every sink: past it the source waits, so a slow sink slows the source rather than growing memory. The defaults when left out. |
+| `retry` | [object](#config-syncretry) |  | How a failed write is tried again, with a backoff doubling up to max_backoff, before on_error applies. A source that fails restarts the pipeline from its checkpoint after the same backoff, for as long as it fails. The defaults when left out. |
+
+<a id="config-syncsink"></a>
+
+### `sync.pipelines[].sinks[]`
+
+Also at `sync.pipelines[].dead_letter`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The sink's name, unique in its pipeline, which logs and errors call it by. Letters, digits, '_', '.' and '-'. |
+| `sink` | [sink](#sync sinks) |  | Required. What the records are written to, and its params. |
+| `batch` | [object](#config-syncbatch) |  | How records are gathered into a write: a batch is written once it holds max_records records or max_bytes bytes, or max_wait after its first record arrived, whichever comes first, and at once when the source has ended. The defaults when left out. |
+
+<a id="config-syncbatch"></a>
+
+### `sync.pipelines[].sinks[].batch`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_records` | integer, 0 or more | `500` | The most records in a batch. 500 when left out or 0. |
+| `max_bytes` | integer, 0 or more | `4194304` | The most bytes in a batch, as the records' sizes are reckoned; a record larger than it is a batch of its own. 4 MiB when left out or 0. |
+| `max_wait` | duration | `"1s"` | How long a batch waits for more records after its first arrived. 1s when left out or 0. |
+
+<a id="config-syncqueue"></a>
+
+### `sync.pipelines[].queue`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_records` | integer, 0 or more | `10000` | The most records read and not yet acknowledged by every sink. 10000 when left out or 0. |
+| `max_bytes` | integer, 0 or more | `67108864` | The most bytes, as the records' sizes are reckoned, read and not yet acknowledged by every sink. A record larger than all of it waits until the queue is empty, and then goes through alone. 64 MiB when left out or 0. |
+
+<a id="config-syncretry"></a>
+
+### `sync.pipelines[].retry`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_attempts` | integer, 0 to 1000 | `5` | How many times a write is tried, the first included, before on_error applies. 5 when left out or 0. |
+| `backoff` | duration | `"200ms"` | The wait before the first try again, doubled at each after. 200ms when left out or 0. |
+| `max_backoff` | duration | `"30s"` | The longest wait between tries. 30s when left out or 0. |
+
 <a id="providers"></a>
 
 ## Providers
@@ -5642,3 +5828,68 @@ In JSON:
 | --- | --- | --- | --- |
 | `path` | list of string |  | Required. The property's path, by segment, as ["route_metadata", "filter_metadata", "envoy.filters.http.wasm", "auth"]. |
 | `value` | string |  | Its value. |
+
+<a id="sync-sources"></a>
+
+## Sync sources
+
+A pipeline's `source` reads its records: one of these, named by `module`, with its `params`. A
+source resumes from the pipeline's checkpoint, and gives each record the position it resumes
+after.
+
+| Module | What it does |
+| --- | --- |
+| [`generate`](#sync-sources-generate) | Numbered records of every value type, for trials and tests |
+
+<a id="sync-sources-generate"></a>
+
+### `generate`
+
+Makes numbered records of every value type, the same ones each time, in transactions of tx_size: for trying out sinks and transforms, and for tests. Its position is the count of records made; it ends after records.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `records` | integer, 0 or more |  | How many records to make, after which the source ends and the pipeline stops; 0, or left out, makes them without end. |
+| `tx_size` | integer, 0 to 100000 | `1` | How many records a transaction holds; 1, or left out, makes each record a transaction of its own, without a transaction ID. |
+| `namespace` | string | `"generate.records"` | The records' namespace. generate.records when left out. |
+| `interval` | duration |  | How long to wait after each transaction; none when left out. |
+
+<a id="sync-sinks"></a>
+
+## Sync sinks
+
+A pipeline's sink, and its `dead_letter`, writes records: one of these, named by `module` in its
+`sink`, with its `params`. A sink acknowledges a batch once it is written, and writes idempotently,
+since what came after the checkpoint is written again after a crash.
+
+| Module | What it does |
+| --- | --- |
+| [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
+| [`stdout`](#sync-sinks-stdout) | Writes each record to standard output as a line of its canonical JSON |
+
+<a id="sync-sinks-memory"></a>
+
+### `memory`
+
+Keeps the records written in memory, in a store named by store, up to max_records: for tests and trials; the records are gone when fit stops.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `store` | string | `"default"` | The store's name: sinks naming the same store write into it. default when left out. |
+| `max_records` | integer, 0 or more | `100000` | The most records the store keeps; a write past it fails, as a full disk would. 100000 when left out or 0. |
+
+<a id="sync-sinks-stdout"></a>
+
+### `stdout`
+
+Writes each record to fit's standard output as a line of its canonical JSON: for trials and for watching a pipeline.
+
+It has no fields: `{}` turns it on.
+
+<a id="sync-transforms"></a>
+
+## Sync transforms
+
+A pipeline's `transforms` change records on their way from the source to the sinks, in order: a
+transform may change a record, drop it or split it into several. fit has no transforms yet; filters,
+routes, fields, keys, casts, masks and envelopes come in I164, and WASM transforms in I165.
