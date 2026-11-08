@@ -56,6 +56,9 @@ SEAWEED_IMAGE=${SEAWEED_IMAGE:-chrislusf/seaweedfs:4.50}
 SEAWEED_PORT=${SEAWEED_PORT:-29216}
 PASSWORD='Fit-sync-1nterop!'
 CERTS=$(mktemp -d)
+# mktemp makes the directory 0700: a server in a container, running as its
+# own user, could not read the certificates bind-mounted from it on Linux.
+chmod 755 "$CERTS"
 . test/sync/postgres.sh
 PG_CA_DIR=$CERTS
 
