@@ -353,7 +353,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
 | **BitTorrent** | | | |
 | I196 | fib 为 BitTorrent 客户端补 A75–A79：存储与哈希不上 fib worker、快速续传、运行时可改的限制、按地址拒绝 peer、客户端跑在调用者的引擎上 | — | done |
-| I197 | `bittorrent.client` 角色：配置、跑在共享引擎上、`data_dir` 下的状态文件、恢复与 reload（决定 037） | I196 | todo |
+| I197 | `bittorrent.client` 角色：配置、跑在共享引擎上、`data_dir` 下的状态文件、恢复与 reload（决定 037） | I196 | done |
 | I198 | 添加任务（磁力链、文件、URL、`watch_dir`）、分类与媒体库重扫、排队、磁盘检查 | I197 | todo |
 | I199 | `alt_speed` 调度、单任务限制、角色的 `access`、`access` 读 `.p2p` 和 `.dat` 黑名单（所有模块可用） | I197 | todo |
 | I200 | `bt_stream`：经 HTTP Range 边下边播，允许按磁力链临时添加 | I197 | todo |
@@ -4547,6 +4547,46 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
 - **完成标准**：添加的任务在重启后仍在，且不经校验就续传；reload 改限制保留 peer；改 `listen` 保留任务；慢 peer、断连、磁盘错误测试；
   中英文文档。
 - **涉及**：`bittorrent`、`app`、`config`、`schema`、`docs`。
+- **完成** 2026-11-09：`bittorrent` 包（`role.go`、`state.go`、`api.go`），角色在 `app/standard` 注册；配置
+  `bittorrent.client`（`config/bittorrent.go`）及其检查，其端口加入地址冲突检查（TCP 和 UDP），新增 `bittorrent` 日志记录器；
+  schema、参考、模板、`schema-zh.js`；中英文 [BitTorrent](bittorrent.zh-CN.md) 文档。角色控制台的代码从
+  `tunnel/internal/common` 移到 `app/roleconsole`，由隧道的角色和本角色共用。测试：经 app Manager 启停角色；两个角色在回环上
+  下载；重启后不读取数据即拥有全部分片（统计存储读取次数）；磁力链接的 .torrent 被保存并据以恢复；reload 改限制保留 peer
+  和客户端；改 `listen` 保留任务（端口被占时恢复旧客户端）；改 `data_dir`；限速（慢）链路下载中途断开做种方并换另一个；
+  access 关闭已连接的 peer；存储写入错误；状态目录无法写入；损坏和超大的状态文件；损坏的任务保留在列表中；API 的拒绝
+  （上限、错误输入、通向 `download_dir` 之外的名称）；控制台的路由。
+
+**待审查的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **状态是三类文件而不是一个**：`torrents.json`（列表）、`torrents/<id>.torrent`、`resume/<id>.resume`，各自经临时文件、同步、
+   改名写入。原因：.torrent 可达数 MiB（v2 分片层、大量文件），续传数据随分片和文件数增长，单个文件每次保存都要重写所有任务的
+   字节；按任务分文件只重写变化的部分。备选：一个包含全部内容的 bencode 或 JSON 文件；嵌入式数据库。
+2. **无法读取的状态文件使角色不启动**（`ErrState`，错误中给出文件；配置的其余部分照常运行）：JSON 无法解析、版本更新、超过
+   100000 个任务、ID 重复或格式错误、相对目录、或超过 64 MiB。原因：以空列表启动会在下次保存时覆盖列表、丢失所有任务。
+   备选：把坏文件改名留存（`torrents.json.bad-<时间>`）后以空列表启动。
+3. **自身文件无法读取的任务保留在列表中**，带错误（状态 `error`）并照常保存，直到被移除，其他任务照常运行；无法读取的续传
+   数据被丢弃，该任务全部重新校验。备选：丢弃这样的任务并记一行日志。
+4. **`listen` 和 `data_dir` 必填；`download_dir` 默认 `<data_dir>/downloads`。** 原因：只在配置写明的地方打开 BitTorrent 端口，
+   不隐式采用 fib 的 `:6881`。备选：`listen` 默认 `:6881`；`download_dir` 必填。
+5. **用 `disk_queue_bytes` 而不是 `disk_queue`**，遵循 fit 的 `*_bytes` 命名；开放 **`save_interval`**（默认 5s）。列表的变化
+   （添加、移除、暂停、恢复、优先级、顺序下载）在 API 调用中立即保存；续传数据在 `ResumeGen` 变化时由保存协程写入。
+6. **哪些更改新建客户端**：`listen`、`encryption`、`dht`、`pex`、`utp`、`lsd`、`disk_workers`、`disk_queue_bytes`（都只在 fib 的
+   `NewClient` 中读取），以及 `data_dir`。**新的 `data_dir` 像重启一样从该目录的状态开始**，旧目录保留已保存的内容。备选：把
+   任务迁到新目录；拒绝这项更改。
+7. **新客户端无法创建时**（端口被占）**恢复旧客户端**，用旧配置和同样的任务，reload 报告错误；两者之间客户端短暂不可用。
+   备选：关闭旧客户端前先探测新端口（旧客户端占着同一端口时无法探测）。
+8. **任务 ID** 是 v1 info hash 的十六进制，或截断到 20 字节的 v2 hash，即 fib 的 `Client.Torrent` 所查的值。
+9. **因做种上限暂停的任务保存为暂停**，以免重启（fib 的上传计数从零开始）后再次做种。做种比例和时间从添加或 fit 启动时
+   算起（fib 的计数不持久化）。备选：在状态中保存上传和下载总量（供 I203 的统计）。
+10. **存储错误**（fib 的 `EventError`，任务继续运行）保留在任务状态中，直到有分片校验通过或状态改变，每种只记一次日志；
+    `ErrResumeData` 只记日志。
+11. **`max_torrents`** 默认 1000（最多 100000）；调低时不移除任务、拒绝新增；状态中超过它的任务全部恢复。
+12. **角色控制台的代码移到 `app/roleconsole`**，与隧道的角色共用，而不是复制；控制台在 I203/I204 之前只读地提供
+    `GET /api/torrents` 和 `/api/torrents/<id>`。
+13. **角色的 `access`（A78）放在 I197**，按任务说明：每次 Apply 设置 gate 后调用 `Client.Refilter`；`.p2p`/`.dat` 列表格式仍在 I199。
+14. **不可配置**：peer ID 前缀（fib 的 `-FB0001-`）、tracker 开关、每秒拨号数、DHT 路由节点（公共节点）、预分配。
+
+遗留：fib 客户端为 `OnEvent` 排队事件用的是无上限的切片；fit 的处理只取一个短锁，队列会排空，但上限应在 fib 中（需要时提 fib 请求）。
 
 ### I198 添加任务、分类与排队
 

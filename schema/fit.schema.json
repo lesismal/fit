@@ -678,6 +678,154 @@
       },
       "type": "object"
     },
+    "config.BitTorrent": {
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/config.BitTorrentClient",
+          "description": "Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP trackers), downloading and seeding torrents kept in data_dir across restarts. None when left out."
+        }
+      },
+      "type": "object"
+    },
+    "config.BitTorrentClient": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The peer addresses the client deals with, deciding before the global access: a peer it refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and are not asked about. A change applies at once, closing the connected peers it now refuses. Every address when left out, unless the global access says otherwise."
+        },
+        "console": {
+          "$ref": "#/$defs/config.RoleConsole",
+          "description": "The client's web pages; none when left out."
+        },
+        "data_dir": {
+          "description": "The directory the client's state is kept in: torrents.json, the list of torrents with their sources, directories, file priorities and whether they are paused; torrents/, their .torrent files; and resume/, their resume data, so that a restart resumes without hashing what is on disk again. Each file is written to a temporary file, synced and renamed into place. Made when missing. A state file that does not read, or is larger than its bound, keeps the role from starting, rather than being overwritten. A change makes a new client, which starts from the state in the new directory, as a restart would; the old directory is left as it was saved.",
+          "type": "string"
+        },
+        "dht": {
+          "default": true,
+          "description": "Find peers through the mainline DHT (BEP 5), bootstrapping from the public routers. On when left out. A change makes a new client.",
+          "type": "boolean"
+        },
+        "disk_queue_bytes": {
+          "default": 67108864,
+          "description": "The most bytes of received blocks waiting to be written: past it the client stops reading from the peers that sent them until half has been written, so that a slow disk slows the peers rather than growing memory. 64 MiB when left out or 0. A change makes a new client.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "disk_workers": {
+          "description": "How many goroutines read and write the torrents' files and hash their pieces, which never happens on a fib worker. The number of CPUs, at most 8, when left out or 0. A change makes a new client.",
+          "maximum": 64,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "download_dir": {
+          "description": "The directory torrents added from now on download into, each torrent's files below it, their names made safe for the system; no path of a torrent leads out of it. A torrent keeps the directory it was added with when this changes. <data_dir>/downloads when left out.",
+          "type": "string"
+        },
+        "encryption": {
+          "default": "prefer",
+          "description": "How peer connections use Message Stream Encryption: prefer dials with it and again in plaintext when a peer refuses, accepting both; allow dials in plaintext first, accepting both; require dials and accepts only encrypted connections. prefer when left out. A change makes a new client.",
+          "enum": [
+            "allow",
+            "prefer",
+            "require"
+          ],
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/config.BitTorrentLimits",
+          "description": "The client's rates and connection, seeding and torrent limits. A change applies in place, keeping the peers connected, but those over a lowered connection limit. The defaults when left out."
+        },
+        "listen": {
+          "description": "The host and port peers reach the client at, the same port for TCP and UDP (uTP, the DHT and UDP trackers share it), as in \":6881\". Port 0 picks one free for both. A change makes a new client: the torrents are saved, the client closed, and the torrents added to the new one, resuming without a check.",
+          "type": "string"
+        },
+        "lsd": {
+          "description": "Find peers on the local network by local service discovery (BEP 14, IPv4 multicast). Off by default. A change makes a new client.",
+          "type": "boolean"
+        },
+        "pex": {
+          "default": true,
+          "description": "Exchange peers with connected peers (BEP 11). On when left out. A change makes a new client.",
+          "type": "boolean"
+        },
+        "save_interval": {
+          "default": "5s",
+          "description": "How often, at most, the state is saved when something changed: a piece verified, a torrent added, removed, paused or its metadata received. It is saved when the role stops too, and changes to the list of torrents are saved at once. 5s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "utp": {
+          "default": true,
+          "description": "Speak uTP (BEP 29) beside TCP: peers are dialed over uTP first, then TCP. On when left out. A change makes a new client.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "listen",
+        "data_dir"
+      ],
+      "type": "object"
+    },
+    "config.BitTorrentLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "download_rate": {
+          "description": "The most bytes per second downloaded, payload of all torrents together. Unlimited when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_conns": {
+          "default": 200,
+          "description": "The most peer connections of the client at once. 200 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_conns_per_torrent": {
+          "default": 50,
+          "description": "The most peer connections of one torrent at once. 50 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_half_open": {
+          "default": 32,
+          "description": "The most dials to peers in flight at once. 32 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_torrents": {
+          "default": 1000,
+          "description": "The most torrents the client holds, running or paused; one more is refused. Lowering it removes none. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "seed_ratio": {
+          "description": "Pause a torrent once it has uploaded this many times its size since it was added or fit started. Seeds for ever when left out or 0.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "seed_time": {
+          "description": "Pause a torrent once it has seeded this long since it was added or fit started. Seeds for ever when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "upload_rate": {
+          "description": "The most bytes per second uploaded, payload of all torrents together. Unlimited when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "upload_slots": {
+          "default": 4,
+          "description": "How many peers a torrent uploads to at once, beside one optimistic unchoke. 4 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "config.Certificate": {
       "additionalProperties": false,
       "properties": {
@@ -2177,7 +2325,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server), sync (its pipelines) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
+          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server), sync (its pipelines), bittorrent (its roles) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
           "type": "object"
         },
         "loggers": {
@@ -9805,6 +9953,10 @@
     "auto_https": {
       "$ref": "#/$defs/config.AutoHTTPS",
       "description": "HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."
+    },
+    "bittorrent": {
+      "$ref": "#/$defs/config.BitTorrent",
+      "description": "fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on disk."
     },
     "engine": {
       "$ref": "#/$defs/config.Engine",

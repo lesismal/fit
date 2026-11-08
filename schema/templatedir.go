@@ -46,13 +46,14 @@ var dirFiles = []dirFile{
 	{name: "50-providers", fields: []string{"providers"}, about: []string{
 		"Routes, upstreams, services and listeners from Docker, Consul, etcd and Kubernetes.",
 	}},
-	{name: "60-apps", fields: []string{"llm", "tunnel", "webrtc", "media_auth", "streaming", "media_library", "sync"}, about: []string{
+	{name: "60-apps", fields: []string{"llm", "tunnel", "webrtc", "media_auth", "streaming", "media_library", "sync", "bittorrent"}, about: []string{
 		"The roles run beside the gateway on its engine: the LLM feature's and the tunnel's, AI",
 		"models shared among machines and services behind NAT reached through a server,",
 		"WebRTC's TURN server and media server, the media_auth policies of who may publish",
 		"and play which streams, the streaming role's hub with its RTMP, RTSP, SRT and",
 		"WebRTC listeners, the media libraries, directories of files catalogued, and the sync",
-		"role's pipelines, records read from a source and written to sinks.",
+		"role's pipelines, records read from a source and written to sinks, and the BitTorrent",
+		"client, which downloads and seeds torrents kept in its data_dir.",
 	}},
 	{name: "sites/api.example.com", fields: []string{"routes", "upstreams"}, about: []string{
 		"A site: the routes of api.example.com, proxied to its upstream, which is here with",

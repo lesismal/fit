@@ -43,6 +43,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"streaming", "Streaming", "streaming", "streaming.md"},
 	{"media_library", "Media library", "media-library", "media_library.md"},
 	{"sync", "Sync", "sync", "sync.md"},
+	{"bittorrent", "BitTorrent", "bittorrent", "bittorrent.md"},
 	{"providers", "Providers", "providers", "providers.md"},
 }
 

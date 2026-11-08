@@ -15,7 +15,8 @@
 // WebRTC's TURN server and media server, the media_auth policies of who may publish
 // and play which streams, the streaming role's hub with its RTMP, RTSP, SRT and
 // WebRTC listeners, the media libraries, directories of files catalogued, and the sync
-// role's pipelines, records read from a source and written to sinks.
+// role's pipelines, records read from a source and written to sinks, and the BitTorrent
+// client, which downloads and seeds torrents kept in its data_dir.
 {
   // The LLM feature's roles to run beside the gateway, on its engine: a hub, a node and a proxy,
   // which share AI models among machines and serve them to agents. None when left out. What
@@ -6955,5 +6956,246 @@
         // },
       // },
     // ],
+  // },
+
+  // fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds
+  // torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on
+  // disk.
+  // object.
+  // "bittorrent": {
+    // // Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP
+    // // trackers), downloading and seeding torrents kept in data_dir across restarts. None when left
+    // // out.
+    // // object.
+    // "client": {
+      // // The host and port peers reach the client at, the same port for TCP and UDP (uTP, the DHT and
+      // // UDP trackers share it), as in ":6881". Port 0 picks one free for both. A change makes a new
+      // // client: the torrents are saved, the client closed, and the torrents added to the new one,
+      // // resuming without a check.
+      // // string; required.
+      // "listen": "",
+
+      // // The directory the client's state is kept in: torrents.json, the list of torrents with their
+      // // sources, directories, file priorities and whether they are paused; torrents/, their .torrent
+      // // files; and resume/, their resume data, so that a restart resumes without hashing what is on
+      // // disk again. Each file is written to a temporary file, synced and renamed into place. Made
+      // // when missing. A state file that does not read, or is larger than its bound, keeps the role
+      // // from starting, rather than being overwritten. A change makes a new client, which starts from
+      // // the state in the new directory, as a restart would; the old directory is left as it was
+      // // saved.
+      // // string; required.
+      // "data_dir": "",
+
+      // // The directory torrents added from now on download into, each torrent's files below it, their
+      // // names made safe for the system; no path of a torrent leads out of it. A torrent keeps the
+      // // directory it was added with when this changes. <data_dir>/downloads when left out.
+      // // string.
+      // "download_dir": "",
+
+      // // How peer connections use Message Stream Encryption: prefer dials with it and again in
+      // // plaintext when a peer refuses, accepting both; allow dials in plaintext first, accepting
+      // // both; require dials and accepts only encrypted connections. prefer when left out. A change
+      // // makes a new client.
+      // // one of: allow, prefer, require; default "prefer".
+      // "encryption": "prefer",
+
+      // // Find peers through the mainline DHT (BEP 5), bootstrapping from the public routers. On when
+      // // left out. A change makes a new client.
+      // // boolean; default true.
+      // "dht": true,
+
+      // // Exchange peers with connected peers (BEP 11). On when left out. A change makes a new client.
+      // // boolean; default true.
+      // "pex": true,
+
+      // // Speak uTP (BEP 29) beside TCP: peers are dialed over uTP first, then TCP. On when left out.
+      // // A change makes a new client.
+      // // boolean; default true.
+      // "utp": true,
+
+      // // Find peers on the local network by local service discovery (BEP 14, IPv4 multicast). Off by
+      // // default. A change makes a new client.
+      // // boolean.
+      // "lsd": true,
+
+      // // How many goroutines read and write the torrents' files and hash their pieces, which never
+      // // happens on a fib worker. The number of CPUs, at most 8, when left out or 0. A change makes a
+      // // new client.
+      // // integer, 0 to 64.
+      // "disk_workers": 0,
+
+      // // The most bytes of received blocks waiting to be written: past it the client stops reading
+      // // from the peers that sent them until half has been written, so that a slow disk slows the
+      // // peers rather than growing memory. 64 MiB when left out or 0. A change makes a new client.
+      // // integer, 0 or more; default 67108864.
+      // "disk_queue_bytes": 67108864,
+
+      // // How often, at most, the state is saved when something changed: a piece verified, a torrent
+      // // added, removed, paused or its metadata received. It is saved when the role stops too, and
+      // // changes to the list of torrents are saved at once. 5s when left out.
+      // // duration, as "1.5s" or "2m"; default "5s".
+      // "save_interval": "5s",
+
+      // // The client's rates and connection, seeding and torrent limits. A change applies in place,
+      // // keeping the peers connected, but those over a lowered connection limit. The defaults when
+      // // left out.
+      // // object.
+      // "limits": {
+        // // The most bytes per second uploaded, payload of all torrents together. Unlimited when left
+        // // out or 0.
+        // // integer, 0 or more.
+        // "upload_rate": 0,
+
+        // // The most bytes per second downloaded, payload of all torrents together. Unlimited when left
+        // // out or 0.
+        // // integer, 0 or more.
+        // "download_rate": 0,
+
+        // // The most peer connections of the client at once. 200 when left out or 0.
+        // // integer, 0 or more; default 200.
+        // "max_conns": 200,
+
+        // // The most peer connections of one torrent at once. 50 when left out or 0.
+        // // integer, 0 or more; default 50.
+        // "max_conns_per_torrent": 50,
+
+        // // The most dials to peers in flight at once. 32 when left out or 0.
+        // // integer, 0 or more; default 32.
+        // "max_half_open": 32,
+
+        // // How many peers a torrent uploads to at once, beside one optimistic unchoke. 4 when left out
+        // // or 0.
+        // // integer, 0 or more; default 4.
+        // "upload_slots": 4,
+
+        // // Pause a torrent once it has uploaded this many times its size since it was added or fit
+        // // started. Seeds for ever when left out or 0.
+        // // number, 0 or more.
+        // "seed_ratio": 0,
+
+        // // Pause a torrent once it has seeded this long since it was added or fit started. Seeds for
+        // // ever when left out.
+        // // duration, as "1.5s" or "2m".
+        // "seed_time": "10s",
+
+        // // The most torrents the client holds, running or paused; one more is refused. Lowering it
+        // // removes none. 1000 when left out or 0.
+        // // integer, 0 to 100000; default 1000.
+        // "max_torrents": 1000,
+      // },
+
+      // // The peer addresses the client deals with, deciding before the global access: a peer it
+      // // refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never
+      // // dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and
+      // // are not asked about. A change applies at once, closing the connected peers it now refuses.
+      // // Every address when left out, unless the global access says otherwise.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
+      // // The client's web pages; none when left out.
+      // // object.
+      // "console": {
+        // // The host and port the pages listen on. A host that is not a loopback address needs cert_file
+        // // and key_file, so that passwords never cross a network in the clear.
+        // // string; required.
+        // "address": "127.0.0.1:9000",
+
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
+
+        // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
+        // // pages are served over TLS.
+        // // string.
+        // "cert_file": "/etc/fit/example.com.pem",
+
+        // // A PEM file with the certificate's private key.
+        // // string.
+        // "key_file": "/etc/fit/example.com.key",
+
+        // // Who may log in: at least one user.
+        // // list of object; required.
+        // "users": [
+          // {
+            // // The user's name.
+            // // string; required.
+            // "username": "fit",
+
+            // // The bcrypt hash of the user's password, as fit hash-password makes it.
+            // // string; required.
+            // "password_hash": "$2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG",
+          // },
+        // ],
+
+        // // How long a login lasts without a request. 30m when left out.
+        // // duration, as "1.5s" or "2m"; default "30m".
+        // "session_timeout": "30m",
+
+        // // How long a login lasts at most, however busy. 12h when left out.
+        // // duration, as "1.5s" or "2m"; default "12h".
+        // "session_lifetime": "12h",
+
+        // // The most logins kept at once; one more ends the oldest. 64 when left out or 0.
+        // // integer, 0 or more; default 64.
+        // "max_sessions": 64,
+
+        // // The most connections the pages keep open at once, a quarter of them kept for those with a
+        // // login. When they are taken, a new connection closes the oldest of those without one, of the
+        // // client holding the most, and is closed as it is accepted only when every one has a login;
+        // // one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
+        // // when left out or 0.
+        // // integer, 0 or more; default 32.
+        // "max_conns": 32,
+
+        // // The client addresses the pages serve, deciding before the global access, which applies to
+        // // the pages too: a connection either refuses is closed as soon as it is accepted. It follows
+        // // every config applied, without restarting the pages. Set allow to "127.0.0.1" (and "::1") to
+        // // keep local access whatever the global access says. Every address is served, unless the
+        // // global access says otherwise, when left out.
+        // // object.
+        // "access": {
+          // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+          // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+          // // first.
+          // // list of string.
+          // "allow": ["127.0.0.1", "::1", "10.0.0.0/8"],
+
+          // // IP addresses and CIDR prefixes refused, whatever allow holds.
+          // // list of string.
+          // "deny": ["203.0.113.0/24"],
+
+          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // list of string.
+          // "allow_files": [],
+
+          // // Files of more deny entries, written as allow_files.
+          // // list of string.
+          // "deny_files": [],
+        // },
+      // },
+    // },
   // },
 }

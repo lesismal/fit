@@ -28,13 +28,13 @@ type Tunnel struct {
 }
 
 // HasApps reports whether c runs any role: the LLM feature's, the tunnel's,
-// WebRTC's, the streaming role or the sync role.
+// WebRTC's, the streaming role, the sync role or the BitTorrent client.
 func (c *Config) HasApps() bool {
 	a, t, w := c.LLM, c.Tunnel, c.WebRTC
 	return a != nil && (a.Hub != nil || a.Node != nil || a.Proxy != nil) ||
 		t != nil && (t.Hub != nil || t.Node != nil || t.Proxy != nil) ||
 		w != nil && (w.TURN != nil || w.Media != nil || w.Proxy != nil) ||
-		c.Streaming != nil || c.Sync != nil
+		c.Streaming != nil || c.Sync != nil || c.BitTorrent != nil && c.BitTorrent.Client != nil
 }
 
 // RoleConsole is a role's web pages, behind logins as admin.console's are,
@@ -68,7 +68,7 @@ func checkRoleConsole(c *RoleConsole, add func(Value, string, ...any)) {
 }
 
 // RoleConsoles returns the roles' pages c sets: those of the llm and the
-// tunnel roles.
+// tunnel roles, and the BitTorrent client's.
 func (c *Config) RoleConsoles() []*RoleConsole {
 	var out []*RoleConsole
 	add := func(rc *RoleConsole) {
@@ -97,6 +97,9 @@ func (c *Config) RoleConsoles() []*RoleConsole {
 		if t.Proxy != nil {
 			add(t.Proxy.Console)
 		}
+	}
+	if b := c.BitTorrent; b != nil && b.Client != nil {
+		add(b.Client.Console)
 	}
 	return out
 }

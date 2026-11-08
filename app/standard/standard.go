@@ -1,13 +1,14 @@
 // Package standard imports every role of the apps fit ships with, the
 // LLM feature's, the tunnel's, WebRTC's TURN and media hubs, and the
-// media_auth policies, the streaming role, the media libraries and the
-// sync role, so that importing it registers them all.
+// media_auth policies, the streaming role, the media libraries, the
+// sync role and the BitTorrent client, so that importing it registers them all.
 package standard
 
 import (
 	// The roles are added here as they are made; see
 	// docs/decisions/028-llm-and-tunnel.md and 029-webrtc.md.
 	_ "github.com/lesismal/fit/app"
+	_ "github.com/lesismal/fit/bittorrent"
 	_ "github.com/lesismal/fit/llm/hub"
 	_ "github.com/lesismal/fit/llm/node"
 	_ "github.com/lesismal/fit/llm/proxy"
