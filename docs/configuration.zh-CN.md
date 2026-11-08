@@ -171,6 +171,30 @@ fib 的引擎以 SO_REUSEPORT 监听，让每个事件循环各在自己的套�
   这种绑定）：别的进程的，或之后被某个角色的页面改到那里的。若有，它以 `TCP 127.0.0.1:8080 is taken: another
   process, or another part of fit, listens there` 失败，配置的其余部分照常运行，与任何无法绑定的地址一样。
 
+## 谁可以连接
+
+`access` 是客户端地址的允许名单（白名单）与拒绝名单（黑名单）：IP 地址与 CIDR 前缀，可直接写也可放在文件中。顶层的是全局的；
+listener、路由、service 以及每个角色（`admin`、`admin.console`、`streaming`、`webrtc.*`、`tunnel.*`、`llm.*`）都可以设置自己的，
+并且先由它决定。名单的 `deny` 拒绝，`allow` 放行，`allow` 非空时拒绝其外的地址；三者都不适用时交给外一层，所以路由可以放开全局
+名单关闭的地址，也可以关闭全局名单放开的地址：
+
+```yaml
+access:
+  deny: [203.0.113.0/24]
+  deny_files: [/etc/fit/drop.txt]
+listeners:
+  - {name: web, address: ":8080"}
+upstreams:
+  - {name: backoffice, addresses: ["10.0.0.9:8080"]}
+routes:
+  - match: {path: [/admin/*]}
+    access: {allow: [10.0.0.0/8]}
+    handler: {module: proxy, params: {upstream: backoffice}}
+```
+
+凡是 fit 在 accept 时就能决定的，被拒的连接在读取任何内容之前就被关闭；否则被拒的 HTTP 请求得到 `403`。详见
+[参考](reference/config.md#access)。
+
 ## 修改运行中的配置
 
 无论哪种格式，`fit run` 在收到 SIGHUP 时，或使用 `-watch` 时每当某个文件变化、目录中加入或移除文件，都会重新应用配置。

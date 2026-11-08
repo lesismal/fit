@@ -79,6 +79,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` | 1, 11 | I131–I134 (032) |
 | A70 | TURN relays that never share a port of the range | done, fib `856ad5b` | 11 | I162 |
 | A72 | A segment's tracks begin at its keyframe | done, fib `e4e10c0` | 11 | I134, I136 |
+| A73 | A binding refuses peers by address at accept | done, fib `8de0a75` | 11, 12 | I163 |
 
 ## Evidence
 
@@ -2417,3 +2418,24 @@ allocations are unchanged (`BenchmarkMuxerEncryption`).
 **How fit uses it.** Nothing changes in fit but the version; `TestChannelInterop` now checks every
 channel hls.js plays for its decoded frames (95% of 25 a second played) and for the largest step
 between frames presented one after the other (at most 0.2s).
+
+## A73: A binding refuses peers by address at accept
+
+**Status.** Found on 2026-11-08, from I163 (access lists). Done in fib at `8de0a75`, made by fit's
+session per [rule 15](rules.md#7-when-fib-falls-short); fit is on `8de0a75`.
+
+**Problem.** fit's allow and deny lists of client addresses had nowhere to refuse a peer before fib
+had made a Connection for it: a handler's `OnOpen` can close a TCP connection, but the connection has
+been allocated, registered with a loop and counted against `MaxConns` by then, and a UDP peer closed
+in `OnOpen` is made again by its next datagram, so a refused QUIC, TURN or SRT client costs a
+Connection per datagram.
+
+**As built.** `Binding.Filter func(netip.AddrPort) bool`, asked about every TCP connection right after
+accept (epoll, kqueue, IOCP and the portable backend) and every UDP peer before its first datagram
+makes it a connection; a refusal closes the socket, or drops the datagram, with no Connection, no
+`OnOpen` and no `MaxConns` slot. It runs on the event loop and is asked again each time, never cached,
+so a policy read from an atomic pointer changes with a store. Unix sockets and `OpenUDPPeer` are not
+asked; open connections and known UDP peers are not checked again. A nil Filter costs a nil check.
+
+**How fit uses it.** Every listener's bindings, and every role's, set `Filter` to an `access.Gate`,
+which a config applied swaps; see I163.

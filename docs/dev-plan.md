@@ -322,6 +322,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | done |
 | I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | done |
 | I162 | One address, one server: config validation refuses two parts of the config on one address and transport, across listeners, the Admin API, consoles and every role, with an error naming both; every binding checks at bind time that no other socket holds its address; fib's TURN relays never share a port of the range (A70) | — | done |
+| **Access** | | | |
+| I163 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 
 ## M0, foundations
 
@@ -3955,6 +3957,58 @@ Principles, in the order they bind:
    one relayed port. Fixed in fib (`856ad5b`) with a set of reserved ports and the same plain bind;
    fit moved to that commit, which also brings `925f292` and `0ddaba3` (media/hls) from another
    session.
+
+## Access
+
+### I163 Allow and deny lists of client addresses
+
+- **Why**: asked for on 2026-11-08: fit should take allow lists (whitelists) and deny lists
+  (blacklists) of client addresses, set for the whole config and for each service module on its
+  own, the module's own taking precedence over the global one.
+- **Do**: `config.Access` (`allow`, `deny`, `allow_files`, `deny_files`) at the top level and on
+  listeners, routes, services and the roles; package `access` compiling a list into sorted ranges
+  looked up by binary search, a `Policy` of the lists that apply, most specific first, and a `Gate`
+  swapped when a config is applied; fib's `Binding.Filter` (A73) so that a refused peer costs no
+  Connection; the Admin API, the console and every role's listeners gated too.
+- **Done when**: a refused peer is closed at accept, or its datagrams dropped, where the policy is
+  known then; a route's, service's or role's own access overrides the global one both ways, with
+  tests; a reload changes the policy without binding anew; list files are watched; docs in English
+  and Chinese; the race tests and CI pass.
+- **Touches**: `access`, `config`, `runtime`, `listener`, `l4`, `app`, `admin`, `app/console`,
+  `streaming`, `webrtc`, `tunnel`, `llm`, `schema`, `docs`; fib's `core` (A73).
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **How the layers combine.** Each list may decide: its `deny` refuses, else its `allow` serves,
+   else an `allow` with entries refuses whatever it does not hold; otherwise it has no say and the
+   next one out decides (route, then listener, then global; service, then listener, then global;
+   role, then global). An address none has a say on is served. So a more specific list overrides
+   both ways, and within one list deny beats allow. Alternatives: a local list replacing the global
+   one wholesale, or lists only narrowing (a local allow could not serve what the global deny
+   refuses).
+2. **Where it is decided.** At accept, through `Binding.Filter`, when the listener's policy is
+   all there is: a refused TCP connection is closed before anything is read, a refused UDP or
+   HTTP/3 peer's datagrams dropped. A listener whose routes or services set an access of their own,
+   or that takes PROXY headers, decides later instead: an HTTP request refused is answered 403
+   (plain text), a tcp connection closed once its PROXY header and ClientHello say which service
+   takes it, a socks client refused at its request. A tcp or udp listener with one service and no
+   server names decides at accept with that service's policy.
+3. **Which address.** The connection's, or the one its PROXY header names; never
+   `X-Forwarded-For`, which a client writes itself. Behind a CDN, the PROXY protocol or the CDN's
+   own lists are the way.
+4. **Changes apply to what starts after them.** Open connections, HTTP/2 and HTTP/3 connections'
+   later requests on a listener decided at accept, and known UDP peers are not checked again. A
+   reload keeps the bindings and swaps their gates.
+5. **List files.** One entry a line, `#` and `;` comments, at most 64 MiB a file; read when the
+   config is applied and watched as certificate files are, so a change applies the config again.
+   A file that cannot be read fails the config, as a bad certificate file does.
+6. **ACME.** An allow list on a listener that answers HTTP-01 or TLS-ALPN-01 challenges must serve
+   the CA's validation servers; fit does not open a hole for them, since their addresses are not
+   published. Documented in the reference.
+7. **fib's Filter (A73).** Not counted in `Stats.ConnsRefused`, which stays `MaxConns`'s; Unix
+   sockets and `OpenUDPPeer` (ICE's own peers) are not asked; a refused UDP peer is asked again for
+   each datagram rather than remembered, so that a policy change takes effect at once and nothing
+   grows with the peers refused.
 
 ## Performance
 

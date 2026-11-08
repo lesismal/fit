@@ -312,6 +312,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I160 | 隧道与 LLM mesh 的 TLS（2026-11-06 审查所得）：链路的证书选项与地址分开传递，地址中的任何内容都不能覆盖 pin；非 loopback 时拒绝 `quic_insecure`；没有 store 时自签证书在重启后保留；LLM 监听的证书文件变化时重新加载 | I159 | done |
 | I161 | Admin API 与控制台的未认证连接，以及 Windows 与大小写不敏感文件系统上的文件名（2026-11-06 审查所得）：写与读同样受限，为已认证客户端保留连接位；fastcgi 像 static 一样拒绝反斜杠；换了大小写的扩展名不会以源码形式返回 | — | done |
 | I162 | 一个地址，一个服务器：配置校验拒绝在同一地址和传输上监听的两处配置，跨监听器、Admin API、控制台和所有角色，错误中写明两者；每个绑定在绑定时检查没有其他套接字占着它的地址；fib 的 TURN 中继不再共用端口范围内的同一端口（A70） | — | done |
+| **访问控制** | | | |
+| I163 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
 
 ## M0 基础
 
@@ -2982,6 +2984,40 @@ fit 自身的日志和访问日志都会写文件，而今天的文件只打开�
 7. **fib 的 TURN 中继（A70）。** 在这里发现：设置 `port_min`/`port_max` 时，两个分配可能共用同一个中继端口。已在 fib
    （`856ad5b`）中以预留端口集合加同样的普通绑定修复；fit 已移到该提交，它还带来另一会话的 `925f292` 和 `0ddaba3`
    （media/hls）。
+
+## 访问控制
+
+### I163 客户端地址的允许与拒绝名单
+
+- **为什么**：2026-11-08 提出：fit 要支持客户端地址的允许名单（白名单）与拒绝名单（黑名单），既能全局配置，也能为每个服务模块
+  单独配置，模块自己的优先于全局的。
+- **做什么**：顶层以及 listener、路由、service 和各角色上的 `config.Access`（`allow`、`deny`、`allow_files`、`deny_files`）；
+  `access` 包把名单编译为有序区间、按二分查找，`Policy` 是适用的各名单（最具体的在前），`Gate` 在应用配置时替换；fib 的
+  `Binding.Filter`（A73），使被拒的对端不花掉一个 Connection；Admin API、控制台与每个角色的监听也一并受控。
+- **完成标准**：能在 accept 时得知策略的，被拒对端在 accept 时关闭或丢弃其数据报；路由、service 或角色自己的 access 双向覆盖
+  全局的，有测试；重载改变策略而不重新绑定；名单文件被监视；中英文文档；race 测试与 CI 通过。
+- **涉及**：`access`、`config`、`runtime`、`listener`、`l4`、`app`、`admin`、`app/console`、`streaming`、`webrtc`、`tunnel`、
+  `llm`、`schema`、`docs`；fib 的 `core`（A73）。
+
+**待评审的决定**（实现时做出，2026-11-08；在用户裁定前有效）：
+
+1. **各层如何组合。** 每个名单都可以决定：命中其 `deny` 则拒绝，否则命中其 `allow` 则放行，否则 `allow` 非空时拒绝其外的一切；
+   都不是则它不表态，由外一层决定（路由、listener、全局；service、listener、全局；角色、全局）。没有任何名单表态的地址放行。
+   因此更具体的名单双向覆盖，同一名单内 deny 优先于 allow。备选：局部名单整体替换全局名单，或局部名单只能收紧。
+2. **在哪里决定。** listener 的策略就是全部时，在 accept 时经 `Binding.Filter` 决定：被拒的 TCP 连接在读取任何内容前关闭，
+   被拒的 UDP 或 HTTP/3 对端的数据报被丢弃。listener 的路由或 service 有自己的 access、或 listener 接受 PROXY 头时，改为稍后
+   决定：HTTP 请求回 403（纯文本），tcp 连接在 PROXY 头与 ClientHello 确定 service 后关闭，socks 客户端在其请求时拒绝。
+   只有一个 service 且无 server_names 的 tcp 或 udp listener 在 accept 时按该 service 的策略决定。
+3. **用哪个地址。** 连接的地址，或 PROXY 头写明的地址；从不用客户端自己能写的 `X-Forwarded-For`。在 CDN 之后，用 PROXY 协议
+   或 CDN 自己的名单。
+4. **变更作用于之后开始的连接。** 已打开的连接、在 accept 时决定的 listener 上 HTTP/2 与 HTTP/3 连接后续的请求、已知的 UDP
+   对端都不复查。重载保留绑定，替换其 gate。
+5. **名单文件。** 每行一项，`#` 与 `;` 注释，每个文件至多 64 MiB；应用配置时读取，并像证书文件一样被监视，变化时重新应用配置。
+   读取失败的文件使配置失败，与坏的证书文件一样。
+6. **ACME。** 应答 HTTP-01 或 TLS-ALPN-01 挑战的 listener 上的允许名单必须放行 CA 的验证服务器；fit 不为其开洞，因为它们的
+   地址不公开。已写入参考文档。
+7. **fib 的 Filter（A73）。** 不计入 `Stats.ConnsRefused`（仍只计 `MaxConns`）；Unix 套接字与 `OpenUDPPeer`（ICE 自己的对端）
+   不询问；被拒的 UDP 对端每个数据报都重新询问而不记住，策略变化即时生效，也不随被拒对端增长。
 
 ## 性能
 

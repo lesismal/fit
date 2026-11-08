@@ -195,6 +195,33 @@ address without an error, and split the connections between the two. fit does no
   process, or another part of fit, listens there`, and the rest of the config runs, as for any
   address that cannot be bound.
 
+## Who may connect
+
+`access` holds allow lists (whitelists) and deny lists (blacklists) of client addresses: IP
+addresses and CIDR prefixes, inline or in files. The top-level one is global; a listener, route,
+service and every role (`admin`, `admin.console`, `streaming`, `webrtc.*`, `tunnel.*`, `llm.*`)
+may set its own, which decides first. A list's `deny` refuses, its `allow` serves, and an `allow`
+with entries refuses what it does not hold; a list that says none of these leaves the address to
+the next one out, so a route can open what the global list closes, or close what it opens:
+
+```yaml
+access:
+  deny: [203.0.113.0/24]
+  deny_files: [/etc/fit/drop.txt]
+listeners:
+  - {name: web, address: ":8080"}
+upstreams:
+  - {name: backoffice, addresses: ["10.0.0.9:8080"]}
+routes:
+  - match: {path: [/admin/*]}
+    access: {allow: [10.0.0.0/8]}
+    handler: {module: proxy, params: {upstream: backoffice}}
+```
+
+Refused connections are closed as they are accepted wherever fit can decide then, before anything
+is read; otherwise a refused HTTP request gets `403`. The [reference](reference/config.md#access)
+has the details.
+
 ## Changing a running config
 
 `fit run` applies its config files again on SIGHUP, or with `-watch` each time one changes, or a

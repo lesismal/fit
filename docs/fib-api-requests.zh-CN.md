@@ -77,6 +77,7 @@
 | A64 | 非分片 MP4 文件的读取器 | 已完成，fib `8998d58` | 1、11 | I131–I134（032） |
 | A70 | TURN 中继不共用端口范围内的同一端口 | 已完成，fib `856ad5b` | 11 | I162 |
 | A72 | 分片的各轨道从其关键帧开始 | 已完成，fib `e4e10c0` | 11 | I134、I136 |
+| A73 | 绑定在 accept 时按地址拒绝对端 | 已完成，fib `8de0a75` | 11、12 | I163 |
 
 ## 证据
 
@@ -1825,3 +1826,19 @@ SO_REUSEPORT 监听的引擎占着的端口被跳过，中继关闭后端口回�
 
 **fit 如何使用。** fit 除版本外不变；`TestChannelInterop` 现在检查 hls.js 播放的每个频道解码的帧数（每播放一秒至少 25 帧的 95%），
 以及相邻两帧呈现之间的最大间隔（至多 0.2 s）。
+
+## A73：绑定在 accept 时按地址拒绝对端
+
+**状态。** 2026-11-08 由 I163（访问控制名单）发现。按[规则 15](rules.zh-CN.md#七fib-满足不了时) 由 fit 的会话在 fib 中完成，
+提交 `8de0a75`；fit 已用该提交。
+
+**问题。** fit 的客户端地址黑白名单在 fib 为对端建好 Connection 之前无处拒绝：处理器的 `OnOpen` 可以关闭 TCP 连接，但那时
+连接已分配、已注册到事件循环、已计入 `MaxConns`；UDP 对端在 `OnOpen` 中关闭后，下一个数据报又会重建它，被拒的 QUIC、TURN
+或 SRT 客户端每个数据报都要花掉一个 Connection。
+
+**实现。** `Binding.Filter func(netip.AddrPort) bool`：每个 TCP 连接在 accept 之后立即询问（epoll、kqueue、IOCP 与可移植后端），
+每个 UDP 对端在其第一个数据报建立连接之前询问；被拒则关闭套接字或丢弃数据报，不建 Connection、不调 `OnOpen`、不占 `MaxConns`。
+它在事件循环上运行，每次都重新询问、从不缓存，因此从原子指针读取的策略一次存储即可生效。Unix 套接字与 `OpenUDPPeer` 不询问；
+已打开的连接与已知的 UDP 对端不再复查。Filter 为 nil 时只多一次判空。
+
+**fit 如何使用。** 每个 listener 与每个角色的绑定都把 `Filter` 设为一个 `access.Gate`，应用配置时替换其策略；见 I163。
