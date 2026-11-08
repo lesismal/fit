@@ -195,7 +195,7 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 		}
 		if s.Snapshot == "" || s.Snapshot == "pit" {
 			var held *fitsync.Record
-			err := s.scan(ctx, nil, nil, func(h *hit) error {
+			err := s.scan(ctx, nil, func(h *hit) error {
 				rec, err := s.record(h, fitsync.OpInsert)
 				if err != nil {
 					return err
@@ -527,7 +527,7 @@ func (s *Source) poll(ctx context.Context, pos *position, emit func(*fitsync.Rec
 func (s *Source) drain(ctx context.Context, pos *position, emit func(*fitsync.Record) error) error {
 	q := map[string]any{"bool": map[string]any{"filter": []any{s.bound(pos.Cursor, "gte", "lte")}, "must_not": []any{map[string]any{"ids": map[string]any{"values": pos.IDs}}}}}
 	var held *fitsync.Record
-	err := s.scan(ctx, q, nil, func(h *hit) error {
+	err := s.scan(ctx, q, func(h *hit) error {
 		rec, err := s.record(h, fitsync.OpUpdate)
 		if err != nil {
 			return err
@@ -570,10 +570,9 @@ func (s *Source) count(ctx context.Context) (int64, error) {
 	return c.Count, nil
 }
 
-// scan reads the documents query matches (all when nil), in slice
-// [id, max] of the _id when slice is set, through a point in time, in pages,
-// handing each to each in order; the point in time is closed at the end.
-func (s *Source) scan(ctx context.Context, query any, slice []int, each func(*hit) error) error {
+// scan reads the documents query matches (all when nil) through a point in
+// time, in pages, handing each to each in order; the point in time is closed at the end.
+func (s *Source) scan(ctx context.Context, query any, each func(*hit) error) error {
 	info, err := s.conn.Info(ctx)
 	if err != nil {
 		return err
@@ -600,9 +599,6 @@ func (s *Source) scan(ctx context.Context, query any, slice []int, each func(*hi
 		}
 		if query != nil {
 			body["query"] = query
-		}
-		if slice != nil {
-			body["slice"] = map[string]any{"field": "_id", "id": slice[0], "max": slice[1]}
 		}
 		res, err := s.search(ctx, "/_search", "", body)
 		if err != nil {
