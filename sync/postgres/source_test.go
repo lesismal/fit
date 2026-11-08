@@ -46,7 +46,7 @@ func srcLoad(t *testing.T, params map[string]any) (*Source, error) {
 }
 
 func srcParams(extra map[string]any) map[string]any {
-	p := map[string]any{"user": "u", "database": "db", "publication": "pub", "slot": "slot", "sslmode": "disable"}
+	p := map[string]any{"user": "u", "database": "db", "publication": "pub", "slot": "slot", "sslmode": "disable", "snapshot": "never"}
 	for k, v := range extra {
 		p[k] = v
 	}
@@ -193,6 +193,8 @@ type srcFake struct {
 	slotErr  error
 	startErr error
 	created  []pgwire.SlotOptions
+	point    pgwire.LSN      // the slot's consistent point, 5 when 0
+	onExport func(id string) // told of a snapshot exported
 	start    pgwire.LSN
 	opts     []string
 
@@ -217,7 +219,17 @@ func (f *srcFake) SimpleQuery(_ context.Context, sql string) ([]pgwire.Result, e
 func (f *srcFake) IdentifySystem(context.Context) (pgwire.System, error) { return f.sys, f.sysErr }
 func (f *srcFake) CreateReplicationSlot(_ context.Context, name string, o pgwire.SlotOptions) (pgwire.Slot, error) {
 	f.created = append(f.created, o)
-	return pgwire.Slot{Name: name, ConsistentPoint: 5}, f.slotErr
+	slot := pgwire.Slot{Name: name, ConsistentPoint: 5}
+	if f.point != 0 {
+		slot.ConsistentPoint = f.point
+	}
+	if o.Snapshot == pgwire.SnapshotExport && f.slotErr == nil {
+		slot.SnapshotName = "snap-" + name
+		if f.onExport != nil {
+			f.onExport(slot.SnapshotName)
+		}
+	}
+	return slot, f.slotErr
 }
 func (f *srcFake) StartReplication(_ context.Context, _ string, start pgwire.LSN, options ...string) error {
 	f.start, f.opts = start, options
@@ -283,7 +295,7 @@ type srcCatalog struct {
 
 func newSrcCatalog() *srcCatalog {
 	return &srcCatalog{walLevel: "logical", pub: true, slot: true, slotRow: []string{"pgoutput", "logical", "db"},
-		idents: [][]string{{"public", "t", "d", `["id"]`}, {"public", "f", "f", "\x00"}}}
+		idents: [][]string{{"public", "t", "d", `["id"]`, "\x00", `["id","v","doc"]`}, {"public", "f", "f", "\x00", "\x00", `["id","v","doc"]`}}}
 }
 
 func (c *srcCatalog) answer(sql string) ([]pgwire.Result, error) {
@@ -737,7 +749,7 @@ func TestSourcePrepare(t *testing.T) {
 		}
 		f := newSrcFake(cat.answer)
 		s := srcMust(t, c.params)
-		if _, err := s.prepare(ctx, f, true); err == nil || !strings.Contains(err.Error(), c.want) {
+		if _, err := s.prepare(ctx, f, true, false); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
 		}
 	}
@@ -746,7 +758,7 @@ func TestSourcePrepare(t *testing.T) {
 	// row.
 	cat := newSrcCatalog()
 	cat.pubKeyless, cat.idents[0][2] = true, "n"
-	if _, err := srcMust(t, nil).prepare(ctx, newSrcFake(cat.answer), true); err != nil {
+	if _, err := srcMust(t, nil).prepare(ctx, newSrcFake(cat.answer), true, false); err != nil {
 		t.Fatal(err)
 	}
 	f := newSrcFake(func(sql string) ([]pgwire.Result, error) {
@@ -755,17 +767,17 @@ func TestSourcePrepare(t *testing.T) {
 		}
 		return cat.answer(sql)
 	})
-	if _, err := srcMust(t, nil).prepare(ctx, f, true); err == nil {
+	if _, err := srcMust(t, nil).prepare(ctx, f, true, false); err == nil {
 		t.Fatal("no wal_level")
 	}
 
 	// Created when missing, with create.
 	cat = newSrcCatalog()
 	cat.pub, cat.slot = false, false
-	cat.idents = [][]string{{"public", "t", "d", `["id"]`}, {"s", "u", "i", "\x00"}}
+	cat.idents = [][]string{{"public", "t", "d", `["id"]`, "\x00", `["id"]`}, {"s", "u", "i", "\x00", `["k"]`, `["k"]`}}
 	f = newSrcFake(cat.answer)
 	s := srcMust(t, map[string]any{"create": true, "tables": []string{"t", "s.u"}})
-	st, err := s.prepare(ctx, f, true)
+	st, err := s.prepare(ctx, f, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -780,7 +792,7 @@ func TestSourcePrepare(t *testing.T) {
 		t.Fatalf("%v %s", err, f.queries())
 	}
 	f.slotErr = errors.New("no slot made")
-	if _, err := s.prepare(ctx, f, true); err == nil || err.Error() != "no slot made" {
+	if _, err := s.prepare(ctx, f, true, false); err == nil || err.Error() != "no slot made" {
 		t.Fatal(err)
 	}
 	// An empty publication has no tables to check.

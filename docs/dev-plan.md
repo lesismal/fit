@@ -342,7 +342,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | done |
 | I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | done |
 | I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | done |
-| I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | todo |
+| I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | done |
 | I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | done |
 | I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | done |
 | I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | done |
@@ -5413,6 +5413,75 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: a snapshot taken under writes ends with the sink equal to the source by checksum; a
   resumed snapshot whose exported snapshot is gone starts the table again and says so.
 - **Touches**: `sync/postgres`, `test/sync`.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **`snapshot`: `initial` (the default) or `never`.** `initial` reads the tables when there is no
+   checkpoint; I178's behaviour (changes alone) is `never`, which its tests now set. No `always`:
+   a new snapshot is the Admin API's (I188's `Snapshot`, which removes the checkpoint).
+   Alternative: `never` the default, keeping I178's.
+2. **Where the snapshot comes from.** A slot `create` makes is made with `EXPORT_SNAPSHOT`, the
+   run's replication connection staying idle while the tables are read, then `START_REPLICATION`
+   at its consistent point. When the slot exists already (made by hand, or the checkpoint removed
+   for a new snapshot), a **temporary slot** is made on a second replication connection with
+   `EXPORT_SNAPSHOT`, and the stream starts at *its* consistent point, which the server takes as
+   the start of decoding (transactions committed before it are skipped), so the hand-over is exact
+   there too; the temporary slot goes with its connection when the snapshot ends. The permanent
+   slot is never dropped or made again (I178 decision 3). Alternative: drop and make the slot
+   again, or a snapshot of the moment without a slot, replayed over from the slot's position.
+3. **Chunks by key, read in parallel.** A table is split by its primary key, or its `REPLICA
+   IDENTITY USING INDEX` index (as the stream keys it), into ranges of `chunk_rows` (100,000) rows:
+   `count(*)`, then the key of every `chunk_rows`-th row from `row_number()` over the key, both in
+   the exported snapshot, so the plan is the same whenever it is made in that snapshot. A table with
+   neither (`FULL` without a key, or inserts-only publications) is one chunk read whole.
+   `snapshot_parallel` (4, at most 64) chunks are read at once, each reader on a normal connection
+   of its own, each chunk in `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TRANSACTION
+   SNAPSHOT` through a cursor (`FETCH` of up to 1,000 rows, fewer when rows are large, about
+   16 MiB a fetch). Bounds are the key's text, compared as a row with untyped literals, so every
+   key type the server can read back works. Alternative: `ctid` ranges (PostgreSQL 14+), or
+   sampling for the bounds.
+4. **Snapshot records** are inserts with no transaction (`Tx` empty), no commit time, keyed and
+   valued exactly as the stream would key and value the same row (text values by type OID, the
+   same columns: generated ones left out, the publication's column list kept), and the
+   publication's row filter (15+) is applied. Alternative: a transaction per chunk.
+5. **The position during the snapshot** is `{"lsn": <the stream's start>, "snapshot": {"id",
+   "tables": [{"name", "chunks"}], "done": "0-41,43", "at": [{"chunk", "key"}]}}`, put as I167's
+   job does it on each chunk's last record and on one in every 100, the records emitted through one
+   lock, each chunk's held back by one; the snapshot's very last record carries `{"lsn": ...}`
+   alone. So a checkpoint never claims a chunk or a row a sink lacks. Alternative: the whole plan
+   in the position.
+6. **Resuming.** A run that fails mid-snapshot keeps its temporary slot's connection, and so the
+   exported snapshot, for five minutes (`holdFor`), with its plan; the next run whose checkpoint
+   names that snapshot resumes in it exactly, at each chunk's last key. Otherwise (fit restarted,
+   the five minutes passed, the slot made by the run itself, whose connection the run closes, or
+   `SET TRANSACTION SNAPSHOT` says 22023) the snapshot is gone: the tables whose chunks were all
+   done stay done, the others are read **again whole** from a new temporary slot's snapshot, with
+   a warning naming them, and the stream still starts at the first snapshot's point, so the changes
+   between the two are replayed over the tables read again and converge in sinks writing by key
+   (as I175's MySQL snapshot converges). Alternative: the whole snapshot again from a new
+   temporary slot, exact, whatever was done.
+7. **Jobs** (`mode: "once"`) implement I167's `Chunker`: `Chunks` plans the publication's tables
+   (or `tables`, when the publication does not exist; no slot is needed or made), and `ReadChunk`
+   reads a chunk in a `REPEATABLE READ` transaction of its own on a connection of its own, resumed
+   after `{"key": [...]}`; a keyless table's chunk is read whole again. A job's chunks are not in
+   one exported snapshot (nothing follows it to hand over to, and a snapshot would hold vacuum back
+   for the whole job): each is consistent in itself, as MySQL's and MongoDB's. With `never` a job
+   reads the changes up to the server's end, as I178's did. Alternative: one exported snapshot for
+   the job, held by a connection from `Chunks` to the job's end.
+8. **The catalog query** reads, beside the primary key, the replica identity index's columns and the
+   non-generated columns; on 15+ `pg_publication_tables`' `attnames` and `rowfilter`. Alternative:
+   `SELECT *`, generated columns included, column lists and row filters ignored.
+9. **Interop** (`test/sync/postgres_snapshot_test.go`, PostgreSQL 13 to 17): a 3,000-row table
+   read while rows are inserted, through a slot `create` makes and through a temporary slot beside
+   a slot that exists, every row exactly once (none in both the snapshot and the stream); three
+   tables (an int key, a composite text and int key, none with `REPLICA IDENTITY FULL`) written to
+   by updates, deletes, inserts and key changes while a pipeline into the memory sink is killed at
+   its fifth saved checkpoint, usually mid-snapshot, and run again, the snapshot then gone and the
+   tables read again, ending equal to the tables row for row; a job's chunks read once each, and a
+   chunk resumed after a key. Three runs in a row pass on every version.
+10. **Size**: about 790 lines of code, 580 of unit tests (fakes of the server's SQL and slots,
+    98.1% of the package's statements without containers) and 300 of interop; nothing left, no
+    I179b.
 
 ### I180 PostgreSQL as a sink
 

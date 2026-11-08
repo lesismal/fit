@@ -5952,6 +5952,34 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I178 section, pending review. No snapshot (I179); no
   `binary` pgoutput, no protocol 3 or 4 (two-phase, parallel apply); a streamed transaction's spool
   has no bound of its own; the slot is never dropped by fit.
+### I179 The PostgreSQL snapshot — done
+
+- **Snapshot** (`sync/postgres/source_snapshot.go`): with `snapshot: "initial"` (the default; I178's
+  behaviour is `never`), a pipeline without a checkpoint reads the published tables from an
+  exported snapshot, then streams from the point it was exported at: the slot's own when `create`
+  makes it (`EXPORT_SNAPSHOT`, the replication connection idle meanwhile), a temporary slot's on a
+  second connection when the slot exists. Tables split by the primary key or replica identity index
+  into ranges of `chunk_rows` rows, planned in the snapshot, read `snapshot_parallel` at a time,
+  each in a `REPEATABLE READ` transaction that sets the snapshot, through a cursor; keyless tables
+  whole. Records keyed and valued as the stream's; column lists and row filters (15+) applied. The
+  position carries the chunks done and where those under way are; a failed run keeps the exporter
+  five minutes and the next resumes in it; once it is gone, unfinished tables are read again from a
+  new snapshot with a warning, the stream starting at the first one's point, converging. Jobs
+  implement `Chunker`, a transaction per chunk, no slot.
+- **Tests**: unit tests against fakes of the server's SQL, cursors and slots (new slot, temporary
+  slot, resumed in the held snapshot, resumed after it is gone, every failure, jobs, ranges, column
+  lists and filters), 98.1% of the package's statements without containers, under the race
+  detector. Interop (`test/sync/postgres_snapshot_test.go`) with PostgreSQL 13 to 17: rows inserted
+  during the snapshot each come exactly once, through a new slot and a temporary one; three tables
+  under updates, deletes, inserts and key changes, a pipeline killed mid-snapshot and resumed after
+  its snapshot is gone, ending equal to the tables; a job's chunks; three runs in a row pass, and
+  every other PostgreSQL interop test still passes. Not run on Linux nor in the full suite.
+- **Differs from the plan**: a slot that exists gets its snapshot from a temporary slot (the plan's
+  "new slot for a new snapshot"), not by being made again; a resumed snapshot is exact only while
+  this fit holds the exporter, after which unfinished tables converge by replay; a job's chunks
+  are not in one snapshot. About 790 lines of code, 580 of unit tests and 300 of interop; no I179b.
+- **Gaps**: the decisions in the plan's I179 section, pending review. A snapshot holds back vacuum
+  while it is read; a keyless table is re-read whole when interrupted.
 ### I181 A MongoDB client: BSON and OP_MSG — done
 
 - **BSON** (`sync/mongo/wire`, package `mongowire`): `Raw` documents read in place (`Validate`,
