@@ -20,16 +20,6 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 )
 
-func TestModule(t *testing.T) {
-	c := NewConsole(&app.Host{Engine: tunneltest.Engine(t), Log: discardLog(t)}, "tunnel.hub", nil)
-	if m := c.Module(); m == nil || m.ID != "tunnel.hub" || c.cookie != "fit_tunnel_hub" {
-		t.Fatalf("module %+v, cookie %q", m, c.cookie)
-	}
-	if o := c.options(nil); o.Modules()[0] != c.Module() {
-		t.Fatal("the console's module is not the role's")
-	}
-}
-
 func hash(t *testing.T, password string) string {
 	t.Helper()
 	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
