@@ -316,10 +316,10 @@ jobs:
   # write pool small enough to answer 429s (I168, I169), ClickHouse 25.8
   # (I170), MySQL 5.7, 8.0, 8.4 and MariaDB 10.11, 11 (I172), PostgreSQL 13 to
   # 17 with TLS, SCRAM and logical replication (I177), MongoDB 6, 7 and 8 as
-  # replica sets (I181), Redis 7 and Valkey 8 (I186), and MinIO and SeaweedFS
-  # (I187), and requires the interop tests to run rather than skip.
+  # replica sets (I181), Kafka 3.9 and Redpanda (I184), Redis 7 and Valkey 8
+  # (I186), and MinIO and SeaweedFS (I187), and requires the interop tests to run rather than skip.
   sync-interop:
-    name: Sync interop (Elasticsearch, OpenSearch, ClickHouse, databases, Redis, S3)
+    name: Sync interop (Elasticsearch, OpenSearch, ClickHouse, databases, Kafka, Redis, S3)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

@@ -8,7 +8,10 @@
 # with TLS, SCRAM and logical replication (test/sync/postgres.sh); Redis 7,
 # with an ACL user and a TLS port of a CA made here, and Valkey 8, with the
 # same user; and MinIO and SeaweedFS's S3 gateway, each with an access key
-# of its own. The containers are removed at the end; KEEP=1 keeps them, and a second run reuses them.
+# of its own. Kafka (three KRaft brokers, with SASL and TLS listeners) and
+# Redpanda are started by test/sync/kafka.sh, which describes them. The
+# containers are removed at the end; KEEP=1 keeps them, and a second run
+# reuses them.
 #
 #   test/sync/run.sh [go test flags...]
 #
@@ -19,7 +22,8 @@
 # FIT_SYNC_REDIS_TLS_ADDR, FIT_SYNC_REDIS_CA, FIT_SYNC_VALKEY_ADDR,
 # FIT_SYNC_REDIS_USER, FIT_SYNC_REDIS_PASSWORD, and FIT_SYNC_MINIO_URL,
 # FIT_SYNC_MINIO_ACCESS_KEY, FIT_SYNC_MINIO_SECRET_KEY and the same of
-# FIT_SYNC_SEAWEED_; without them they
+# FIT_SYNC_SEAWEED_, and the FIT_SYNC_KAFKA_* and FIT_SYNC_REDPANDA_* that
+# test/sync/kafka.sh prints; without them they
 # skip, unless FIT_SYNC_INTEROP=required, which this script sets. The
 # source's snapshot test reads FIT_SYNC_SOURCE_DOCS documents, 100,000 when
 # unset (CI); the plan's million is
@@ -63,6 +67,7 @@ cleanup() {
 	if [ "${KEEP:-}" != 1 ]; then
 		docker rm -f fit-sync-es fit-sync-os fit-sync-ch fit-sync-redis fit-sync-valkey fit-sync-minio fit-sync-seaweed $(pg_names) >/dev/null 2>&1 || true
 		rm_mongos fit-sync
+		test/sync/kafka.sh down
 	fi
 }
 trap cleanup EXIT
@@ -196,6 +201,8 @@ until_up() {
 }
 until_up fit-sync-minio "http://localhost:$MINIO_PORT/minio/health/ready"
 until_up fit-sync-seaweed "http://localhost:$SEAWEED_PORT/"
+
+eval "$(test/sync/kafka.sh up)"
 
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \

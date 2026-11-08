@@ -321,6 +321,17 @@ The plan's I186 section lists them all; these change the record above.
 3. **A sink may count a server's refusal of a duplicate as written**: with entry IDs from the keys,
    the `redis` sink treats `XADD`'s refusal of an ID at or below the stream's last as an entry the
    stream has, which makes a stream copy exactly once.
+## Decisions made while building I184 (pending review)
+
+The plan's I184 section lists them all; these change the record above.
+
+1. **Kafka's connections are blocking `net.Conn`s**, one goroutine reading each, fetches on
+   connections of their own: "few and long, each on a goroutine" applies to Kafka as to the
+   databases, and no fib worker is held by a long-poll.
+2. **A dependency fit already has may serve a protocol**: snappy and zstd come from
+   `klauspost/compress` (fit's HTTP compression); LZ4, which no dependency has, is written in fit.
+3. **The Kafka client is at least once**: not idempotent, so a produce retried after a lost answer
+   may write its records twice, which sinks downstream of a Kafka source already tolerate.
 
 ## Planning decisions (2026-11-08, pending review)
 
