@@ -7,3 +7,4 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 | [`proxy`](#http-handlers-proxy) | A reverse proxy to an upstream |
 | [`respond`](#http-handlers-respond) | A fixed status, fields and body |
 | [`static`](#http-handlers-static) | Files from a directory |
+| [`sync_ingest`](#http-handlers-sync_ingest) | Records posted into a sync pipeline's `http` source, answered once its sinks have them |

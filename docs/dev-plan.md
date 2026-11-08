@@ -334,7 +334,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | done |
 | I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | todo |
 | I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | todo |
-| I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | todo |
+| I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | done |
 | I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | todo |
 | I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | todo |
 | I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | todo |
@@ -4745,6 +4745,99 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: a client that retries until answered loses nothing across a fit restart; a full queue
   answers 503 without blocking a worker; the sink's retries carry the same idempotency key.
 - **Touches**: `sync/httpsync`, `handler`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives, and how the handler finds the source.** The source and the sink are package
+   `sync/httpsync` (`httpsync`); the handler `sync_ingest` is package `handler/syncingest`. The
+   handler names the pipeline (`pipeline`), and finds its source through a registry of the process
+   (`httpsync.Lookup`), where the source is while its `Run` runs; `fitsync.Run` gains `Pipeline`, the
+   name, for it. While no source is registered (the pipeline not in the config, restarting after a
+   failure, stopped) the handler answers 503. Alternative: a name of the source's own (`endpoint`)
+   the handler names, or the handler inside `httpsync`.
+2. **Answered at the watermark, not at the checkpoint.** A new optional interface,
+   `fitsync.Acknowledger` (`Acknowledged(pos)`), is told each position the watermark moves to, as it
+   moves, outside the run's lock; the source answers 200 every request up to it. `Confirmer` would
+   answer only once the checkpoint is saved, up to `checkpoint_interval` later, and the HTTP source
+   has nothing to resume from: once every sink has a request's records they are safe. Alternative:
+   `Confirmer`.
+3. **A request is a transaction.** Its records, when more than one, carry `Tx.ID`
+   `http-<run>-<n>` with `First` and `Last`, and its last record the position
+   `{"run": "<random>", "request": <n>}`, so the watermark never stops inside a request and a SQL
+   sink may write one in a transaction of its own. The position is saved in the checkpoint like any
+   other and ignored at a restart. Records get `source` `http`, `namespace` (`http`) when they have
+   none, and the time the request came as their commit time when they have none.
+4. **What `on_error` took counts as acknowledged.** A record a transform or sink failed, skipped or
+   sent to `dead_letter`, lets its request be answered 200: the pipeline's policy decides what a
+   failed record is, as for every source. With `on_error: stop` the pipeline stops, and the requests
+   waiting are answered 503 at its stop (the module's `Cleanup`) or at their `timeout`.
+   Alternative: answer such a request 422 or 500.
+5. **Bounds and backpressure.** The handler reads the body on the worker as `OnBody` delivers it,
+   into a buffer bounded by its `max_body_bytes` (8 MiB, at most 1 GiB; 413 past it), and hands it to
+   the source without waiting (`Offer`); the source decodes on the pipeline's goroutine, so a WASM
+   codec never runs on a worker. The source bounds what it holds: `max_pending_requests` (1024)
+   counts a request from `Offer` until it is answered for good, a request whose handler has answered
+   503 on its timeout still counting until its records are acknowledged; `max_pending_bytes`
+   (64 MiB) counts bodies not yet decoded (one body always fits when none waits). A full queue holds
+   the source in `Emit`, its pending requests fill, and the next request is answered 503 at once.
+   Alternative: the pipeline's `queue` alone, with a non-blocking `Emit` the runtime would add.
+6. **The body's formats.** Without `codec`, a body is a sequence of JSON values, each an object or an
+   array of objects, so one parser reads JSON (one object or an array) and NDJSON alike; its
+   `Content-Type` is `application/json`, `application/x-ndjson`, `application/ndjson`,
+   `application/jsonl`, `application/x-jsonlines`, a `+json` type, `text/plain` or none, any other
+   415. `form` is the `json` codec's (`plain` rows or whole `record`s). With `codec`, any
+   `Content-Type`, and `framing` `lines` (each line, empty ones skipped, `\r` dropped) or `body`.
+   A body is decoded whole before any record is emitted: one bad value answers 400 and writes
+   nothing. Alternative: one format per `Content-Type`, strictly.
+7. **At least once, no deduplication in the source.** A request answered 503 on its timeout may
+   still be written, and a client that sends it again writes it twice; an idempotent sink folds it
+   when the records have keys (`form: "record"`, or a `key` transform). The source does not keep the
+   clients' `Idempotency-Key`s. Alternative: keep the keys seen for a while and answer a repeat 200
+   without writing it.
+8. **The answers**: JSON, `{"records": n}` with 200 and `{"records": 0, "error": "..."}` otherwise;
+   405 with `Allow: POST` for another method; `Retry-After` from `retry_after` (1s) in whole seconds,
+   at least 1; `Cache-Control: no-store`. An empty body is 200 with no records, at once.
+9. **No cross-check at validation.** A `sync_ingest` naming a pipeline that is not there, or whose
+   source is not `http`, is not refused by `fit validate`: a module's `Provision` does not see the
+   config's `sync`. It answers 503 at run time. Alternative: a check in the config's validation.
+10. **Restarts and stops.** A pipeline restarting after its source failed answers 503 every request
+    its earlier run emitted and did not have acknowledged (that run's records are gone with it); a
+    pipeline stopped by a reload or fit's stop stops taking requests (those not yet decoded get 503),
+    lets the sinks write what they hold, which answers their requests 200, and answers the rest 503.
+    In a job (`mode: "once"`) the source never ends.
+11. **The sink's retries are the pipeline's.** A 5xx, 408, 429, a timeout or a connection's error
+    fails the write, and the pipeline's `retry` sends it again from the request that failed (those
+    before it acknowledged through a `BatchError`); any other answer that is not a 2xx, a 3xx among
+    them since fib's client does not follow redirects, is `Permanent`, to `on_error` at once. A 429
+    is not waited out as the `elasticsearch` sink's is, nor `Retry-After` read: it counts against
+    `retry.max_attempts`. Alternative: wait out 429 and honour `Retry-After`, as I168's decision 8.
+12. **The idempotency key** is 32 hex digits (128 bits) of a SHA-256 of each record's position,
+    length first, and the request's body, in `idempotency_header` (`Idempotency-Key`). Positions alone
+    do not tell batches apart, since most records carry none (the file source puts one on every
+    thousandth, the HTTP source on a request's last); the body alone would make two batches of the
+    same lines at different places one. A request sent again has the same records and body, so the
+    same key; a batch split by `max_request_bytes` is split the same way again from the record that
+    failed, so the request that failed comes back with its key. A replay after a crash batched
+    otherwise gets other keys: the receiver still needs idempotent writes. Alternative: the first and
+    last positions only, as I170's deduplication token.
+13. **The sink's shape.** `format` `ndjson` (default) or `json` (an array), `form` `plain` or
+    `record`, or a `codec` with `content_type`; `method` `POST` or `PUT`; `headers`, which may not
+    set `Authorization`, `Content-Type`, `Content-Length`, `Host` or the idempotency header; basic
+    authentication (`username`, `password_env`) or a bearer token (`bearer_token_env`), from the
+    environment only as I168's; TLS with `ca_file`, `cert_file`, `key_file`, `server_name`, never
+    skipped; one `url`, no failover; responses read up to 1 MiB, their first 300 bytes in errors; the
+    role's engine, or one of its own (`fit sync run`); a `ParallelSink`. Alternative: several URLs
+    with failover, as the `elasticsearch` sink's.
+14. **The tests.** The restart test serves the route and runs sync in the test's process, stops the
+    listener, the config and the sync runtime while eight clients post 400 records (each sent again
+    until answered 200), and starts them again on another address: every record is in the sink. The
+    `memory` sink's store, which outlives the runtime in the process, stands in for a durable sink.
+    The full-queue test holds the sink, answers the second request 503 with `Retry-After` at once,
+    and answers twenty requests to another route meanwhile. The sink's test fails a request with a
+    503 and then a timeout, and the three sends carry one key. The tests ran on macOS under the race
+    detector; by the scope the user set for this round, not on Linux, and not the `./sync/...` and
+    `./handler/...` sweeps, which the merge runs.
+15. **Size**: about 1,000 lines of code (with the runtime's hook) and 940 of tests; nothing is left, so there is no I171b.
 
 ### I172 A MySQL client: connections, authentication and queries
 

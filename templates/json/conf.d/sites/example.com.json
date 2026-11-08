@@ -1352,6 +1352,38 @@
       // },
     // },
     // {
+      // // A route whose handler is sync_ingest, with every one of its params.
+      // "name": "sync_ingest-example",
+      // "handler": {
+        // // Hands the bodies POSTed to the route to the http source of the sync pipeline it names, and
+        // // answers each 200 once every sink of the pipeline has acknowledged its records; 503 with
+        // // Retry-After when the pipeline is not running, its pending requests are full, or the wait
+        // // passes timeout, so that a client that sends again until answered 200 loses nothing. The
+        // // route's middleware, authentication and limits, applies as to any handler.
+        // "module": "sync_ingest",
+        // "params": {
+          // // The sync pipeline whose source, an http source, takes the bodies. While it is not running
+          // // (not in the config, starting again, or stopped), requests are answered 503.
+          // // string; required.
+          // "pipeline": "",
+
+          // // How long a request waits for every sink to acknowledge its records before it is answered
+          // // 503; its records may still be written, and a client sending it again then writes them twice,
+          // // which an idempotent sink folds. 30s when left out or 0.
+          // // duration, as "1.5s" or "2m"; default "30s".
+          // "timeout": "30s",
+
+          // // The largest body taken; a larger one is answered 413. 8 MiB when left out or 0.
+          // // integer, 0 to 1073741824; default 8388608.
+          // "max_body_bytes": 8388608,
+
+          // // The Retry-After a 503 carries, in whole seconds, at least 1. 1s when left out or 0.
+          // // duration, as "1.5s" or "2m"; default "1s".
+          // "retry_after": "1s",
+        // },
+      // },
+    // },
+    // {
       // // A route whose handler is vod, with every one of its params.
       // "name": "vod-example",
       // "handler": {

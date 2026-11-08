@@ -3223,6 +3223,113 @@
           # # integer, 0 or more.
           # chunk_records: 0
 
+        # # Or http, with every one of its params:
+        # # Takes records posted to a route whose handler is sync_ingest naming the pipeline: a body of
+        # # JSON (an object, an array of objects, or several of them, as NDJSON) or of a codec's format
+        # # becomes records, and the request is answered 200 only once every sink has acknowledged them,
+        # # 503 with Retry-After when the source's pending requests are full or the wait passes the
+        # # handler's timeout, so a client that retries until answered loses nothing. It has no
+        # # checkpoint to resume from: what was not answered 200 is the client's to send again.
+        # module: "http"
+        # params:
+          # # What makes records of a body, in place of JSON: each line of it, or the whole body
+          # # (framing), goes to the codec, whatever the request's Content-Type. JSON when left out: the
+          # # body is JSON or NDJSON, its Content-Type application/json, application/x-ndjson,
+          # # application/jsonl, a +json type, text/plain or none.
+          # # module.
+          # codec:
+            # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+            # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+            # # (or before's) fields, those columns names or all of them, as text.
+            # module: "csv"
+            # params:
+              # # The columns' names, in order. Read, a row's values are named by them, and those past them
+              # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+              # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+              # # list of string.
+              # columns: []
+
+              # # The separator, one character other than a quote or a line break. A comma when left out.
+              # # string; default ",".
+              # comma: ","
+
+            # # Or json, with every one of its params:
+            # # A line is a JSON object: with form plain, a message record whose after holds its members,
+            # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+            # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+            # # null) as plain JSON or the whole record in its canonical form.
+            # module: "json"
+            # params:
+              # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+              # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+              # # when left out.
+              # # one of: plain, record; default "plain".
+              # form: "plain"
+
+            # # Or line, with every one of its params:
+            # # A line is a message record whose after holds the line as a string, in the field field names
+            # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+            # module: "line"
+            # params:
+              # # The field of after that holds the line. line when left out.
+              # # string; default "line".
+              # field: "line"
+
+            # # Or wasm, with every one of its params:
+            # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+            # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+            # # sinks that read and write bytes.
+            # module: "wasm"
+            # params:
+              # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+              # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+              # # GOARCH=wasm go build -buildmode=c-shared.
+              # # string; required.
+              # path: "/etc/fit/plugins/filter.wasm"
+
+              # # A string the plugin reads, for settings of its own.
+              # # string.
+              # config: "{}"
+
+              # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+              # # duration, as "1.5s" or "2m"; default "1s".
+              # timeout: "1s"
+
+              # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+              # # integer, 0 or more; default 134217728.
+              # max_memory_bytes: 134217728
+
+              # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+              # # 0.
+              # # integer, 0 or more; default 16777216.
+              # max_output_bytes: 16777216
+
+          # # With codec, what the codec is handed: lines, each line of the body (empty lines skipped, a
+          # # trailing \r dropped), or body, the whole body at once, for a format of several lines per
+          # # record. lines when left out.
+          # # one of: lines, body; default "lines".
+          # framing: "lines"
+
+          # # Without codec, what each JSON object is: plain, a row, made a message record whose after
+          # # holds its members; record, a whole record in its canonical JSON, with its operation, key and
+          # # namespace. plain when left out.
+          # # one of: plain, record; default "plain".
+          # form: "plain"
+
+          # # The namespace of records that come without one. http when left out.
+          # # string; default "http".
+          # namespace: "http"
+
+          # # The most requests taken and not yet answered for good, waiting to be read or for their
+          # # records' acknowledgement; one past it is answered 503 at once. 1024 when left out or 0.
+          # # integer, 0 to 1000000; default 1024.
+          # max_pending_requests: 1024
+
+          # # The most bytes of bodies taken and not yet read into records; a body past it is answered 503
+          # # at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0.
+          # # integer, 0 or more; default 67108864.
+          # max_pending_bytes: 67108864
+
         # # Or wasm, with every one of its params:
         # # Runs a WebAssembly plugin that exports fit_sync_poll: given its checkpoint, it returns
         # # records and the next checkpoint, reading through fit's HTTP client from the hosts
@@ -3748,6 +3855,163 @@
               # # string.
               # time_zone: ""
 
+            # # Or http, with every one of its params:
+            # # Posts batches of records to an HTTP endpoint, as NDJSON or a JSON array (or a codec's
+            # # format), through fib's asynchronous HTTP client, with the headers and authentication the
+            # # config gives and an idempotency key made from the batch's records and their positions, the
+            # # same each time the batch is sent again. A 5xx, 408, 429, a timeout or a connection's error
+            # # is tried again by the pipeline's retry; any other answer but a 2xx fails the records for
+            # # good, which on_error takes.
+            # module: "http"
+            # params:
+              # # The endpoint batches are sent to, http or https, as https://collector.example.com/ingest.
+              # # fib's client does not follow redirects: a 3xx fails the records.
+              # # string; required.
+              # url: ""
+
+              # # The request's method. POST when left out.
+              # # one of: POST, PUT; default "POST".
+              # method: "POST"
+
+              # # How a batch is written: ndjson, a line of JSON per record (application/x-ndjson); json, a
+              # # JSON array of them (application/json). ndjson when left out; codec takes its place.
+              # # one of: ndjson, json; default "ndjson".
+              # format: "ndjson"
+
+              # # What each record's JSON is: plain, its row (after, or before when after is null) as a plain
+              # # JSON object; record, the whole record in its canonical JSON, with its operation, key,
+              # # namespace and position. plain when left out.
+              # # one of: plain, record; default "plain".
+              # form: "plain"
+
+              # # A codec that writes the batch's records in place of format and form, the body being what it
+              # # makes of them, sent with content_type.
+              # # module.
+              # codec:
+                # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+                # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+                # # (or before's) fields, those columns names or all of them, as text.
+                # module: "csv"
+                # params:
+                  # # The columns' names, in order. Read, a row's values are named by them, and those past them
+                  # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                  # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                  # # list of string.
+                  # columns: []
+
+                  # # The separator, one character other than a quote or a line break. A comma when left out.
+                  # # string; default ",".
+                  # comma: ","
+
+                # # Or json, with every one of its params:
+                # # A line is a JSON object: with form plain, a message record whose after holds its members,
+                # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+                # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+                # # null) as plain JSON or the whole record in its canonical form.
+                # module: "json"
+                # params:
+                  # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                  # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                  # # when left out.
+                  # # one of: plain, record; default "plain".
+                  # form: "plain"
+
+                # # Or line, with every one of its params:
+                # # A line is a message record whose after holds the line as a string, in the field field names
+                # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+                # module: "line"
+                # params:
+                  # # The field of after that holds the line. line when left out.
+                  # # string; default "line".
+                  # field: "line"
+
+                # # Or wasm, with every one of its params:
+                # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+                # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+                # # sinks that read and write bytes.
+                # module: "wasm"
+                # params:
+                  # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                  # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                  # # GOARCH=wasm go build -buildmode=c-shared.
+                  # # string; required.
+                  # path: "/etc/fit/plugins/filter.wasm"
+
+                  # # A string the plugin reads, for settings of its own.
+                  # # string.
+                  # config: "{}"
+
+                  # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+                  # # duration, as "1.5s" or "2m"; default "1s".
+                  # timeout: "1s"
+
+                  # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                  # # integer, 0 or more; default 134217728.
+                  # max_memory_bytes: 134217728
+
+                  # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                  # # 0.
+                  # # integer, 0 or more; default 16777216.
+                  # max_output_bytes: 16777216
+
+              # # The Content-Type of a codec's body. application/octet-stream when left out; format sets its
+              # # own.
+              # # string.
+              # content_type: ""
+
+              # # Header fields every request carries, as an X-Tenant. Not Authorization, which username or
+              # # bearer_token_env set, nor Content-Type or the idempotency header.
+              # # object of string.
+              # headers: {}
+
+              # # The user for basic authentication, with password_env.
+              # # string.
+              # username: "fit"
+
+              # # The environment variable holding username's password, read when the pipeline loads.
+              # # string.
+              # password_env: ""
+
+              # # The environment variable holding a token sent as Authorization: Bearer, read when the
+              # # pipeline loads. Not with username.
+              # # string.
+              # bearer_token_env: ""
+
+              # # The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's
+              # # records' positions and its body, the same each time the request is sent again, so a receiver
+              # # can drop a request it already took. Idempotency-Key when left out.
+              # # string; default "Idempotency-Key".
+              # idempotency_header: "Idempotency-Key"
+
+              # # A PEM file of the certificates the endpoint's is checked against, in place of the system's
+              # # roots. The check cannot be turned off.
+              # # string.
+              # ca_file: "/etc/fit/ca.pem"
+
+              # # A PEM file of a client certificate, and the chain after it, presented to an endpoint that
+              # # asks for one; needs key_file.
+              # # string.
+              # cert_file: "/etc/fit/example.com.pem"
+
+              # # The PEM file of cert_file's private key.
+              # # string.
+              # key_file: "/etc/fit/example.com.key"
+
+              # # The name the endpoint's certificate must have, and the TLS server name sent; the URL's host
+              # # when left out.
+              # # string.
+              # server_name: ""
+
+              # # How long one request may take, from connecting to the end of its answer; one that takes
+              # # longer is tried again. 30s when left out or 0.
+              # # duration, as "1.5s" or "2m"; default "30s".
+              # timeout: "30s"
+
+              # # The most bytes of one request's body; a batch larger is sent in several, in order, and a
+              # # record larger alone fails for good. 8 MiB when left out or 0.
+              # # integer, 0 or more; default 8388608.
+              # max_request_bytes: 8388608
+
             # # Or memory, with every one of its params:
             # # Keeps the records written in memory, in a store named by store, up to max_records: for tests
             # # and trials; the records are gone when fit stops.
@@ -4065,6 +4329,163 @@
             # # Asia/Shanghai.
             # # string.
             # time_zone: ""
+
+          # # Or http, with every one of its params:
+          # # Posts batches of records to an HTTP endpoint, as NDJSON or a JSON array (or a codec's
+          # # format), through fib's asynchronous HTTP client, with the headers and authentication the
+          # # config gives and an idempotency key made from the batch's records and their positions, the
+          # # same each time the batch is sent again. A 5xx, 408, 429, a timeout or a connection's error
+          # # is tried again by the pipeline's retry; any other answer but a 2xx fails the records for
+          # # good, which on_error takes.
+          # module: "http"
+          # params:
+            # # The endpoint batches are sent to, http or https, as https://collector.example.com/ingest.
+            # # fib's client does not follow redirects: a 3xx fails the records.
+            # # string; required.
+            # url: ""
+
+            # # The request's method. POST when left out.
+            # # one of: POST, PUT; default "POST".
+            # method: "POST"
+
+            # # How a batch is written: ndjson, a line of JSON per record (application/x-ndjson); json, a
+            # # JSON array of them (application/json). ndjson when left out; codec takes its place.
+            # # one of: ndjson, json; default "ndjson".
+            # format: "ndjson"
+
+            # # What each record's JSON is: plain, its row (after, or before when after is null) as a plain
+            # # JSON object; record, the whole record in its canonical JSON, with its operation, key,
+            # # namespace and position. plain when left out.
+            # # one of: plain, record; default "plain".
+            # form: "plain"
+
+            # # A codec that writes the batch's records in place of format and form, the body being what it
+            # # makes of them, sent with content_type.
+            # # module.
+            # codec:
+              # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+              # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+              # # (or before's) fields, those columns names or all of them, as text.
+              # module: "csv"
+              # params:
+                # # The columns' names, in order. Read, a row's values are named by them, and those past them
+                # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                # # list of string.
+                # columns: []
+
+                # # The separator, one character other than a quote or a line break. A comma when left out.
+                # # string; default ",".
+                # comma: ","
+
+              # # Or json, with every one of its params:
+              # # A line is a JSON object: with form plain, a message record whose after holds its members,
+              # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+              # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+              # # null) as plain JSON or the whole record in its canonical form.
+              # module: "json"
+              # params:
+                # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                # # when left out.
+                # # one of: plain, record; default "plain".
+                # form: "plain"
+
+              # # Or line, with every one of its params:
+              # # A line is a message record whose after holds the line as a string, in the field field names
+              # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+              # module: "line"
+              # params:
+                # # The field of after that holds the line. line when left out.
+                # # string; default "line".
+                # field: "line"
+
+              # # Or wasm, with every one of its params:
+              # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+              # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+              # # sinks that read and write bytes.
+              # module: "wasm"
+              # params:
+                # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                # # GOARCH=wasm go build -buildmode=c-shared.
+                # # string; required.
+                # path: "/etc/fit/plugins/filter.wasm"
+
+                # # A string the plugin reads, for settings of its own.
+                # # string.
+                # config: "{}"
+
+                # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+                # # duration, as "1.5s" or "2m"; default "1s".
+                # timeout: "1s"
+
+                # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                # # integer, 0 or more; default 134217728.
+                # max_memory_bytes: 134217728
+
+                # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                # # 0.
+                # # integer, 0 or more; default 16777216.
+                # max_output_bytes: 16777216
+
+            # # The Content-Type of a codec's body. application/octet-stream when left out; format sets its
+            # # own.
+            # # string.
+            # content_type: ""
+
+            # # Header fields every request carries, as an X-Tenant. Not Authorization, which username or
+            # # bearer_token_env set, nor Content-Type or the idempotency header.
+            # # object of string.
+            # headers: {}
+
+            # # The user for basic authentication, with password_env.
+            # # string.
+            # username: "fit"
+
+            # # The environment variable holding username's password, read when the pipeline loads.
+            # # string.
+            # password_env: ""
+
+            # # The environment variable holding a token sent as Authorization: Bearer, read when the
+            # # pipeline loads. Not with username.
+            # # string.
+            # bearer_token_env: ""
+
+            # # The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's
+            # # records' positions and its body, the same each time the request is sent again, so a receiver
+            # # can drop a request it already took. Idempotency-Key when left out.
+            # # string; default "Idempotency-Key".
+            # idempotency_header: "Idempotency-Key"
+
+            # # A PEM file of the certificates the endpoint's is checked against, in place of the system's
+            # # roots. The check cannot be turned off.
+            # # string.
+            # ca_file: "/etc/fit/ca.pem"
+
+            # # A PEM file of a client certificate, and the chain after it, presented to an endpoint that
+            # # asks for one; needs key_file.
+            # # string.
+            # cert_file: "/etc/fit/example.com.pem"
+
+            # # The PEM file of cert_file's private key.
+            # # string.
+            # key_file: "/etc/fit/example.com.key"
+
+            # # The name the endpoint's certificate must have, and the TLS server name sent; the URL's host
+            # # when left out.
+            # # string.
+            # server_name: ""
+
+            # # How long one request may take, from connecting to the end of its answer; one that takes
+            # # longer is tried again. 30s when left out or 0.
+            # # duration, as "1.5s" or "2m"; default "30s".
+            # timeout: "30s"
+
+            # # The most bytes of one request's body; a batch larger is sent in several, in order, and a
+            # # record larger alone fails for good. 8 MiB when left out or 0.
+            # # integer, 0 or more; default 8388608.
+            # max_request_bytes: 8388608
 
           # # Or memory, with every one of its params:
           # # Keeps the records written in memory, in a store named by store, up to max_records: for tests

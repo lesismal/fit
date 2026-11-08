@@ -5145,6 +5145,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "sync_ingest"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.sync_ingest"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "vod"
               }
             }
@@ -5221,6 +5237,7 @@
             "static",
             "stream_whep",
             "stream_whip",
+            "sync_ingest",
             "vod",
             "webrtc_proxy",
             "whep",
@@ -5860,6 +5877,38 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "http.handlers.sync_ingest": {
+      "additionalProperties": false,
+      "properties": {
+        "max_body_bytes": {
+          "default": 8388608,
+          "description": "The largest body taken; a larger one is answered 413. 8 MiB when left out or 0.",
+          "maximum": 1073741824,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pipeline": {
+          "description": "The sync pipeline whose source, an http source, takes the bodies. While it is not running (not in the config, starting again, or stopped), requests are answered 503.",
+          "type": "string"
+        },
+        "retry_after": {
+          "default": "1s",
+          "description": "The Retry-After a 503 carries, in whole seconds, at least 1. 1s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long a request waits for every sink to acknowledge its records before it is answered 503; its records may still be written, and a client sending it again then writes them twice, which an idempotent sink folds. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipeline"
+      ],
       "type": "object"
     },
     "http.handlers.vod": {
@@ -7131,6 +7180,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "http"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.http"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "memory"
               }
             }
@@ -7182,6 +7247,7 @@
           "enum": [
             "elasticsearch",
             "file",
+            "http",
             "memory",
             "stdout",
             "wasm"
@@ -7308,6 +7374,106 @@
       ],
       "type": "object"
     },
+    "sync.sinks.http": {
+      "additionalProperties": false,
+      "properties": {
+        "bearer_token_env": {
+          "description": "The environment variable holding a token sent as Authorization: Bearer, read when the pipeline loads. Not with username.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the endpoint's is checked against, in place of the system's roots. The check cannot be turned off.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to an endpoint that asks for one; needs key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "A codec that writes the batch's records in place of format and form, the body being what it makes of them, sent with content_type."
+        },
+        "content_type": {
+          "description": "The Content-Type of a codec's body. application/octet-stream when left out; format sets its own.",
+          "type": "string"
+        },
+        "form": {
+          "default": "plain",
+          "description": "What each record's JSON is: plain, its row (after, or before when after is null) as a plain JSON object; record, the whole record in its canonical JSON, with its operation, key, namespace and position. plain when left out.",
+          "enum": [
+            "plain",
+            "record"
+          ],
+          "type": "string"
+        },
+        "format": {
+          "default": "ndjson",
+          "description": "How a batch is written: ndjson, a line of JSON per record (application/x-ndjson); json, a JSON array of them (application/json). ndjson when left out; codec takes its place.",
+          "enum": [
+            "ndjson",
+            "json"
+          ],
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Header fields every request carries, as an X-Tenant. Not Authorization, which username or bearer_token_env set, nor Content-Type or the idempotency header.",
+          "type": "object"
+        },
+        "idempotency_header": {
+          "default": "Idempotency-Key",
+          "description": "The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' positions and its body, the same each time the request is sent again, so a receiver can drop a request it already took. Idempotency-Key when left out.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_request_bytes": {
+          "default": 8388608,
+          "description": "The most bytes of one request's body; a batch larger is sent in several, in order, and a record larger alone fails for good. 8 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "method": {
+          "default": "POST",
+          "description": "The request's method. POST when left out.",
+          "enum": [
+            "POST",
+            "PUT"
+          ],
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the endpoint's certificate must have, and the TLS server name sent; the URL's host when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long one request may take, from connecting to the end of its answer; one that takes longer is tried again. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "url": {
+          "description": "The endpoint batches are sent to, http or https, as https://collector.example.com/ingest. fib's client does not follow redirects: a 3xx fails the records.",
+          "type": "string"
+        },
+        "username": {
+          "description": "The user for basic authentication, with password_env.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "sync.sinks.memory": {
       "additionalProperties": false,
       "properties": {
@@ -7411,6 +7577,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "http"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.http"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "wasm"
               }
             }
@@ -7430,6 +7612,7 @@
           "enum": [
             "file",
             "generate",
+            "http",
             "wasm"
           ],
           "type": "string"
@@ -7542,6 +7725,52 @@
           "maximum": 100000,
           "minimum": 0,
           "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "sync.sources.http": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a body, in place of JSON: each line of it, or the whole body (framing), goes to the codec, whatever the request's Content-Type. JSON when left out: the body is JSON or NDJSON, its Content-Type application/json, application/x-ndjson, application/jsonl, a +json type, text/plain or none."
+        },
+        "form": {
+          "default": "plain",
+          "description": "Without codec, what each JSON object is: plain, a row, made a message record whose after holds its members; record, a whole record in its canonical JSON, with its operation, key and namespace. plain when left out.",
+          "enum": [
+            "plain",
+            "record"
+          ],
+          "type": "string"
+        },
+        "framing": {
+          "default": "lines",
+          "description": "With codec, what the codec is handed: lines, each line of the body (empty lines skipped, a trailing \\r dropped), or body, the whole body at once, for a format of several lines per record. lines when left out.",
+          "enum": [
+            "lines",
+            "body"
+          ],
+          "type": "string"
+        },
+        "max_pending_bytes": {
+          "default": 67108864,
+          "description": "The most bytes of bodies taken and not yet read into records; a body past it is answered 503 at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_pending_requests": {
+          "default": 1024,
+          "description": "The most requests taken and not yet answered for good, waiting to be read or for their records' acknowledgement; one past it is answered 503 at once. 1024 when left out or 0.",
+          "maximum": 1000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "namespace": {
+          "default": "http",
+          "description": "The namespace of records that come without one. http when left out.",
+          "type": "string"
         }
       },
       "type": "object"

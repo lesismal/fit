@@ -214,6 +214,23 @@ The plan's I168 section lists them all; these change the record above.
 4. **A sink without the role's engine runs one of its own** for fib's HTTP client, so `fit sync run`
    reaches HTTP-based sinks.
 
+## Decisions made while building I171 (pending review)
+
+The plan's I171 section lists them all; these change the record above.
+
+1. **Sources may hear of acknowledgements before the checkpoint.** `fitsync.Acknowledger` is told
+   each position the watermark moves to, as it moves, before the checkpoint is saved; the `http`
+   source answers its clients then, since what every sink has is safe, and `Confirmer` stays the
+   hook for sources whose server must not release data before the checkpoint holds it.
+2. **A source that takes records in is found by its pipeline's name.** `fitsync.Run` carries the
+   pipeline's name; the `http` source registers under it while it runs, and the `sync_ingest`
+   handler looks it up, answering 503 while there is none.
+3. **What `on_error` took counts as acknowledged** for a source answering its clients: an HTTP
+   request whose record was skipped or dead-lettered is answered 200.
+4. **An HTTP sink's idempotency key** covers the request's records' positions and its body, since
+   most records carry no position; a resend carries the same key, a replay batched otherwise
+   another.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and
