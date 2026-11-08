@@ -308,7 +308,7 @@ Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`
 | --- | --- | --- | --- |
 | `allow` | list of string |  | IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry here or in allow_files, every address neither holds is refused, unless deny refuses it first. |
 | `deny` | list of string |  | IP addresses and CIDR prefixes refused, whatever allow holds. |
-| `allow_files` | list of string |  | Files of more allow entries: an address or prefix on each line, with blank lines and what follows # or ; left out, as the lists published for firewalls are written. Read when the config is applied, and applied again when one changes; each at most 64 MiB. |
+| `allow_files` | list of string |  | Files of more allow entries, one on each line, each line told apart by its content: an address or prefix, with what follows # or ; left out, as the lists published for firewalls are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name, where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4 addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or // are left out; any other line is an error. Read when the config is applied, and applied again when one changes; each at most 64 MiB. |
 | `deny_files` | list of string |  | Files of more deny entries, written as allow_files. |
 
 <a id="config-proxyprotocol"></a>
@@ -1225,8 +1225,15 @@ first. An Admin API on a Unix socket is never checked: its peers have no address
 `admin.access` with one is an error. A config applied with an allow list that leaves out the address
 the change came from does not close that connection, but the next one is refused.
 
-A list file has an address or prefix on each line, with blank lines and what follows `#` or `;`
-left out; it is read when the config is applied, and the config applied again when it changes.
+A list file has one entry on each line, each line told apart by its content, so that one file may
+mix them: an address or prefix, with what follows `#` or `;` left out; a range, `first-last`; an
+eMule `ipfilter.dat` line, `first - last , level , name`, where a line of a level above 127 is not
+listed (qBittorrent's reading, and eMule's at its default filter level); or a PeerGuardian `.p2p`
+line, `name:first-last`. IPv4 addresses in ranges may have leading zeros, as `ipfilter.dat` writes
+them. Blank lines and lines that begin with `#`, `;` or `//` are left out; any other line is an
+error naming the file and the line, and the config is not applied. A file is read when the config
+is applied, and the config applied again when it changes; each file is at most 64 MiB. The same
+files serve every module with an `access`, the BitTorrent client's included.
 An allow list on a listener that obtains certificates with ACME's HTTP-01 or TLS-ALPN-01 challenges
 must serve the CA's validation servers, or the certificates cannot be obtained.
 

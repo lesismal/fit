@@ -20,6 +20,10 @@
 // the global deny refuses, and a route's deny refuses one the global allow
 // serves.
 //
+// List files (allow_files, deny_files) hold addresses and prefixes, ranges,
+// eMule ipfilter.dat lines and PeerGuardian .p2p lines, told apart line by
+// line (see ReadFile), for every module that has an access.
+//
 // A Gate holds the Policy a long-lived socket goes by, swapped atomically
 // when the config is applied, so that the accept path reads it with one load.
 package access
@@ -83,18 +87,18 @@ func Compile(a *config.Access, files map[string][sha256.Size]byte) (*List, error
 		return nil, nil
 	}
 	var errs config.Errors
-	var allow, deny []netip.Prefix
-	parse := func(entries []string, at config.Value, into *[]netip.Prefix) {
+	var allow, deny []Range
+	parse := func(entries []string, at config.Value, into *[]Range) {
 		for i, s := range entries {
 			p, err := router.ParsePrefix(strings.TrimSpace(s))
 			if err != nil {
 				errs = append(errs, at.Index(i).Errorf("%v", err))
 				continue
 			}
-			*into = append(*into, p)
+			*into = append(*into, RangeOf(p))
 		}
 	}
-	read := func(paths []string, at config.Value, into *[]netip.Prefix) {
+	read := func(paths []string, at config.Value, into *[]Range) {
 		for i, path := range paths {
 			ps, sum, err := ReadFile(path)
 			if err != nil {
@@ -138,10 +142,22 @@ func Files(a *config.Access) []string {
 	return append(slices.Clone(a.AllowFiles), a.DenyFiles...)
 }
 
-// ReadFile reads a list file: an IP address or CIDR prefix on each line,
-// with blank lines and what follows a '#' or ';' left out, as the lists
-// published for firewalls are written. It returns the file's SHA-256 too.
-func ReadFile(path string) ([]netip.Prefix, [sha256.Size]byte, error) {
+// ReadFile reads a list file, at most MaxFileBytes, and returns the
+// ranges it lists and the file's SHA-256. Each line is one of (see
+// parseLine, which tells them apart by the line's content, so that one file
+// may mix them):
+//
+//   - an IP address or CIDR prefix, with what follows a '#' or ';' left
+//     out, as the lists published for firewalls are written;
+//   - a range, "first-last" or "first - last";
+//   - an eMule ipfilter.dat line, "first - last , level , name": a line
+//     whose level is above 127 is not listed, as qBittorrent and eMule
+//     (at its default filter level) leave it out;
+//   - a PeerGuardian .p2p line, "name:first-last".
+//
+// Blank lines and lines that begin with '#', ';' or "//" are left out. A
+// line that is none of these makes the file an error, naming the line.
+func ReadFile(path string) ([]Range, [sha256.Size]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, [sha256.Size]byte{}, err
@@ -158,27 +174,28 @@ func ReadFile(path string) ([]netip.Prefix, [sha256.Size]byte, error) {
 		return nil, [sha256.Size]byte{}, fmt.Errorf("%s: larger than %d bytes", path, MaxFileBytes)
 	}
 	sum := sha256.Sum256(buf.Bytes())
-	var ps []netip.Prefix
-	sc := bufio.NewScanner(&buf)
-	sc.Buffer(make([]byte, 0, 4096), 4096)
+	rs, err := parseList(&buf, path)
+	return rs, sum, err
+}
+
+// parseList parses the lines of a list file named name.
+func parseList(r io.Reader, name string) ([]Range, error) {
+	var rs []Range
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 4096), maxLineBytes)
 	for n := 1; sc.Scan(); n++ {
-		line := sc.Text()
-		if i := strings.IndexAny(line, "#;"); i >= 0 {
-			line = line[:i]
-		}
-		if line = strings.TrimSpace(line); line == "" {
-			continue
-		}
-		p, err := router.ParsePrefix(line)
+		rg, ok, err := parseLine(sc.Text())
 		if err != nil {
-			return nil, sum, fmt.Errorf("%s:%d: %v", path, n, err)
+			return nil, fmt.Errorf("%s:%d: %v", name, n, err)
 		}
-		ps = append(ps, p)
+		if ok {
+			rs = append(rs, rg)
+		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, sum, fmt.Errorf("%s: %v", path, err)
+		return nil, fmt.Errorf("%s: %v", name, err)
 	}
-	return ps, sum, nil
+	return rs, nil
 }
 
 // Policy is the lists that apply somewhere, the most specific first. A nil
@@ -276,33 +293,18 @@ type range6 struct{ lo, hi u128 }
 
 func (s *set) empty() bool { return len(s.v4) == 0 && len(s.v6) == 0 }
 
-func newSet(ps []netip.Prefix) set {
+// newSet returns the set of rs, ranges whose ends are of one family and
+// in order, as RangeOf and parseLine make them.
+func newSet(rs []Range) set {
 	var s set
-	for _, p := range ps {
-		p = p.Masked()
-		a := p.Addr()
-		if a.Is4() {
-			lo := binary.BigEndian.Uint32(a.AsSlice())
-			// A shift by 32 gives 0, so a /0 holds every address.
-			host := uint32(1)<<(32-p.Bits()) - 1
-			s.v4 = append(s.v4, range4{lo, lo | host})
+	for _, r := range rs {
+		if r.Lo.Is4() {
+			s.v4 = append(s.v4, range4{binary.BigEndian.Uint32(r.Lo.AsSlice()), binary.BigEndian.Uint32(r.Hi.AsSlice())})
 			continue
 		}
-		b := a.As16()
-		lo := u128{binary.BigEndian.Uint64(b[:8]), binary.BigEndian.Uint64(b[8:])}
-		hi := lo
-		switch bits := 128 - p.Bits(); {
-		case bits >= 64:
-			hi.lo = ^uint64(0)
-			if bits == 128 {
-				hi.hi = ^uint64(0)
-			} else if bits > 64 {
-				hi.hi |= uint64(1)<<(bits-64) - 1
-			}
-		case bits > 0:
-			hi.lo |= uint64(1)<<bits - 1
-		}
-		s.v6 = append(s.v6, range6{lo, hi})
+		lo, hi := r.Lo.As16(), r.Hi.As16()
+		s.v6 = append(s.v6, range6{u128{binary.BigEndian.Uint64(lo[:8]), binary.BigEndian.Uint64(lo[8:])},
+			u128{binary.BigEndian.Uint64(hi[:8]), binary.BigEndian.Uint64(hi[8:])}})
 	}
 	slices.SortFunc(s.v4, func(a, b range4) int { return cmp.Compare(a.lo, b.lo) })
 	s.v4 = merge4(s.v4)

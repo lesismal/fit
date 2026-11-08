@@ -601,7 +601,7 @@ func (f *ForwardProxy) Idle() time.Duration {
 type Access struct {
 	Allow      []string `json:"allow,omitempty" doc:"IP addresses and CIDR prefixes served, as \"10.0.0.0/8\" or \"2001:db8::/32\": with any entry here or in allow_files, every address neither holds is refused, unless deny refuses it first."`
 	Deny       []string `json:"deny,omitempty" doc:"IP addresses and CIDR prefixes refused, whatever allow holds."`
-	AllowFiles []string `json:"allow_files,omitempty" doc:"Files of more allow entries: an address or prefix on each line, with blank lines and what follows # or ; left out, as the lists published for firewalls are written. Read when the config is applied, and applied again when one changes; each at most 64 MiB."`
+	AllowFiles []string `json:"allow_files,omitempty" doc:"Files of more allow entries, one on each line, each line told apart by its content: an address or prefix, with what follows # or ; left out, as the lists published for firewalls are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name, where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4 addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or // are left out; any other line is an error. Read when the config is applied, and applied again when one changes; each at most 64 MiB."`
 	DenyFiles  []string `json:"deny_files,omitempty" doc:"Files of more deny entries, written as allow_files."`
 
 	At Value `json:"-" fit:"self"`
