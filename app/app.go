@@ -165,6 +165,8 @@ func set(member any) bool {
 		return m != nil
 	case *config.BitTorrentClient:
 		return m != nil
+	case *config.BitTorrentTracker:
+		return m != nil
 	}
 	return true
 }
@@ -257,6 +259,9 @@ func members(c *config.Config) []memberAt {
 	}
 	if b := c.BitTorrent; b != nil && b.Client != nil {
 		ms = append(ms, memberAt{"bittorrent.client", b.Client.At})
+	}
+	if b := c.BitTorrent; b != nil && b.Tracker != nil {
+		ms = append(ms, memberAt{"bittorrent.tracker", b.Tracker.At})
 	}
 	return ms
 }

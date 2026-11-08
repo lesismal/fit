@@ -368,7 +368,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I198 | Adding torrents (magnet, file, URL, `watch_dir`), categories with a media library rescan, queueing, disk checks | I197 | todo |
 | I199 | `alt_speed` schedules, per-torrent limits, the role's `access`, `.p2p` and `.dat` blocklists in `access` for every module | I197 | todo |
 | I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | done |
-| I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | todo |
+| I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | done |
 | I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | done |
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | todo |
 | I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | todo |
@@ -6658,6 +6658,79 @@ Not run: the Linux race run, and the full suite (left to the main session).
 - **Done when**: libtorrent and anacrolix announce to it over HTTP and UDP; a private tracker refuses
   unknown passkeys and info hashes; bounds tested.
 - **Touches**: `bittorrent`, `handler`, `mediaauth`.
+- **Done** 2026-11-09: package `bittorrent/tracker` (`tracker.go`, `hooks.go`, `handler.go`,
+  `api.go`), the role `bittorrent.tracker` and the handler `bt_tracker` registered by
+  `app/standard` and `modules/standard`; config `bittorrent.tracker` (`config/bittorrent_tracker.go`:
+  `listen`, `interval`, `min_interval`, `peer_ttl`, `max_torrents`, `max_peers_per_torrent`,
+  `max_peers`, `max_numwant`, `max_scrape`, `auth`, `allow`, `allow_files`, `access`, `console`)
+  with its checks, its UDP port in the address clash check, its files watched (`app.Info.CertFiles`);
+  users' passkeys and `AllowPasskey` in `mediaauth` (`passkey.go`); schema, reference, templates,
+  `schema-zh.js`; a tracker section in [BitTorrent](bittorrent.md) in both languages. Tests: the
+  role through the app Manager; announces and scrapes over HTTP (through the `bt_tracker` module)
+  and UDP with fib's tracker client, the role's statistics; two fib clients downloading a private
+  torrent that find each other only through the tracker (the seeder over HTTP with a token, the
+  leecher over UDP with a user's passkey); passkeys of users and tokens in the path and the query,
+  over HTTP and UDP, refused when missing, unknown or without the grant, scrapes too, and a policy not
+  loaded failing closed; the allow-list inline and in a file, refused hashes, the file changed and
+  applied again, a bad line and a missing file refusing the reload with the list before kept; the
+  store's bounds and `max_numwant`; access refusing UDP before a connection and HTTP with a failure,
+  lifted by a reload; reloads in place (the interval keeping the swarms, a taken port leaving all as
+  it was, `listen` moved and removed, new bounds starting a new store); a client sending its
+  announce a byte at a time, clients cut midway, garbage datagrams; the console's routes; the
+  passkey redaction; `mediaauth`'s passkeys (keyrings, other secrets, public play); the config's
+  checks and clashes. libtorrent and anacrolix interop is I205.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **A user's passkey is derived, not stored**: the first 32 hex digits of HMAC-SHA256(the policy's
+   signing key, "fit bittorrent passkey\0" + name); tokens, static or signed, are passkeys as they
+   are; a passkey's grant must play `bittorrent/<info hash in hex>`. Why: `media_auth` already has
+   users, tokens, grants by pattern and key rotation, and a password cannot ride in a URL a .torrent
+   file keeps for ever; deriving needs no new state and rotating the secret revokes every passkey.
+   With a keyring every key's passkey is taken and the default key's handed out. Alternatives: a
+   `passkey` field per user in `media_auth`; passkeys kept in a file of the role; long-lived signed
+   tokens only.
+2. **A private tracker fails closed** while its policy is not loaded ("the tracker's passkeys are not
+   available"); a policy whose `public` has `play` lets everyone in, as it does for streams.
+3. **The store's default bounds are fit's, below fib's**: `max_torrents` 100000 (fib 1048576),
+   `max_peers_per_torrent` 10000 (65536), `max_peers` 500000 (2097152), about 80 MiB at most; the
+   maxima are fib's defaults (`max_peers` up to 4194304). Alternative: fib's defaults.
+4. **A change of the store's bounds or `peer_ttl` makes a new store**, the swarms starting empty
+   (clients announce again within their interval), since fib's `MemoryStore` takes them only when
+   made; the interval, `min_interval`, `max_numwant` and `max_scrape` make a new fib `Server` on the
+   same store, with the role's one UDP secret, so swarms and UDP connection IDs survive.
+   Alternatives: refuse such a change until a restart; wait for fib to set bounds at run time.
+5. **An allow-list file with a bad line, or one that does not read, refuses the reload**, the list
+   before staying in force. Why: a typo would otherwise silently refuse a torrent, or with a missing
+   file, every torrent. Alternative: skip bad lines with a warning.
+6. **The role's `access` is checked in the `bt_tracker` handler for HTTP** (a failure "refused", BEP 3
+   style), and by the UDP binding's `Filter` before a connection is made; HTTP is accepted by fit's
+   listeners, whose access is the global one and the listener's. Alternative: the role's access for
+   UDP only.
+7. **The access log never holds a passkey**: `?passkey=` is always replaced by `REDACTED` in the
+   request URI; the path segment before `announce`/`scrape` only when the tracker is private, so that
+   a public tracker's `/tracker/announce` stays readable.
+8. **Per-torrent statistics are for a torrent named, and listed for the allow-list's torrents**;
+   a public tracker cannot list what it tracks, because fib's `MemoryStore` has no way to enumerate
+   its torrents. Keeping our own index beside the store would work around fib (rule 15), so it is a
+   fib request instead (below). Counters: announces and scrapes served, refusals by reason
+   (`unregistered`, counted per refused hash, scrapes included; `passkey`; `access`).
+9. **A user's passkey is read on the role's console**, `GET /api/passkey?user=`, behind its login,
+   until I203's Admin API and I204's pages; the console's other routes are `GET /api/stats`,
+   `/api/torrents` (`offset`, `limit` ≤ 1000) and `/api/torrents/<hash>`.
+10. **A private scrape needs a passkey whose grant plays every torrent it names**; a scrape naming
+    none gets nothing, as fib serves it, whoever asks.
+11. **`bt_tracker` has no params**: fib's dispatch by the path's last segment, so the route's match
+    decides where the tracker lives (`/announce`, `/tracker/*`).
+12. **Not configurable**: fib's `TrustIPParam` (off: a peer is recorded at the address its request
+    came from), the default numwant (fib's 50), the UDP secret (random per role, kept across reloads,
+    not restarts: UDP clients connect again).
+
+Open from it: fib requests to file — `MemoryStore` cannot list its torrents (a `Range(func(InfoHash,
+Stats) bool)` would give a public tracker's per-torrent statistics) nor change its bounds while
+it runs (a `SetConfig(MemoryStoreConfig)` would keep the swarms across such a reload); fib's client
+announces `started` while a seeder checks its existing data, then `completed` when the check ends,
+so a seeder counts as a completed download. No metrics of the tracker yet (I203's metrics).
 
 ### I202 Publishing a directory as torrents
 

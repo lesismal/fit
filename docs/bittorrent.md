@@ -298,3 +298,83 @@ does not have it, provided the request also has `publish` on `bt/<info hash>`:
 | `max_temporary` | 4 (at most 1000) |
 | `max_temporary_bytes` | 16 GiB |
 | `temporary_ttl` | 10m (at most 7 days) |
+## The tracker
+
+The `bittorrent.tracker` role is a BitTorrent tracker, fib's
+([`fib/bittorrent/tracker`](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)), one a
+process, off unless the config sets it. HTTP and HTTPS announces and scrapes (BEP 3, 23, 7 and 48)
+come through any route whose handler is `bt_tracker`, on fit's listeners, with their TLS, access
+and middleware; UDP ones (BEP 15, with BEP 41's URL data) come to the role's own `listen`, which
+may be left out for an HTTP-only tracker. A request is an announce when the last segment of its
+path begins with `announce`, and a scrape when it begins with `scrape`, so a route matching
+`/tracker/*` serves `/tracker/announce` and `/tracker/<passkey>/announce` alike. Every announce
+and scrape is served on the worker that read it: the store takes a short lock of one of its 64
+shards, and the hooks below are lookups in what the config compiled.
+
+```fit
+bittorrent {
+	tracker {
+		listen :6969
+		auth members
+		allow_files /etc/fit/torrents.txt
+	}
+}
+routes {
+	route { match { path /tracker/* }; handler bt_tracker }
+}
+```
+
+**Swarms** live in memory, in fib's `MemoryStore`, and do not survive a restart: clients announce
+again within their interval. A peer is forgotten `peer_ttl` (1h) after its last announce, which
+must be longer than `interval` (30m), and a torrent with no peers left is forgotten with its
+completed count.
+
+| Bound | Default | At most |
+| --- | --- | --- |
+| `max_torrents`, torrents tracked at once; one more is refused "tracker is full" | 100000 | 1048576 |
+| `max_peers_per_torrent`; a peer past it gets peers but is not handed out | 10000 | 65536 |
+| `max_peers`, of all torrents, about 150 bytes each | 500000 | 4194304 |
+| `max_numwant`, peers in one answer (50 when the client asks for none; UDP answers within 1400 bytes) | 200 | 1000 |
+| `max_scrape`, torrents in one HTTP scrape (a UDP one holds 74 at most) | 64 | 1000 |
+| The allow-list, inline and from files | | 1048576 info hashes, 64 MiB a file |
+
+**Private.** With `auth`, the name of a `media_auth` policy, every announce and scrape needs a
+passkey, in the path (`/<passkey>/announce`) or the query (`?passkey=`), and the passkey's grant
+must play the stream `bittorrent/<info hash in hex>`: `play: ["bittorrent/*"]` for every torrent,
+or one hash for one torrent. A passkey is one of the policy's tokens, static or signed by fit
+(`fit media-token`, the media pages), or a user's passkey: 32 hex digits derived from the
+policy's signing key and the user's name, which the role's console hands out at
+`/api/passkey?user=<name>`. Rotating the policy's secret, or its keyring's default key, changes
+every user's passkey; without a secret, passkeys change when fit restarts. Over UDP the passkey
+comes in the URL data clients send from the tracker URL, `udp://host:6969/<passkey>/announce`.
+Refusals are failure reasons: "a passkey is required", "unknown passkey", "the passkey may not use
+this torrent". The passkey is replaced by `REDACTED` in the access log. A policy whose `public`
+includes `play` lets everyone in. While the policy is not loaded the tracker refuses every
+request.
+
+**The allow-list.** With `allow` (hex info hashes: 40 digits for v1, 64 for v2, tracked by their
+first 20 bytes) or `allow_files` (one a line, `#` comments), only those torrents are tracked:
+others are refused "unregistered torrent" and scrapes of them get nothing. The files are watched
+as certificate and access list files are: a change applies the config again and they are read
+anew. A file with a line that is not an info hash, or one that does not read, refuses the
+reload, and the list before stays in force.
+
+**Access.** The role's `access`, then the global one, drops UDP datagrams from refused addresses
+before fib makes a connection for them, and answers HTTP announces and scrapes from them with the
+failure reason "refused" (the route's listener has the global access too).
+
+**Reloads.** The allow-list, `auth`, `access` and the console change in place. `interval`,
+`min_interval`, `max_numwant` and `max_scrape` make a new fib tracker on the same store, so the
+swarms stay, and UDP connection IDs stay good (the role keeps one secret). `max_torrents`,
+`max_peers_per_torrent`, `max_peers` and `peer_ttl` make a new store, since fib's `MemoryStore`
+takes them only when it is made: the swarms start empty and fill as clients announce again. A
+`listen` change moves the UDP port; one that cannot be bound fails the reload and leaves the
+tracker as it was.
+
+**Statistics.** The role's Go API has `Stats` (torrents and peers kept, announces and scrapes
+served, refusals by reason, the bounds), `Torrent(hash)` (seeders, leechers, completed) and
+`Torrents`, the swarms of the allow-list's torrents; its console serves them read-only as
+`GET /api/stats`, `/api/torrents` (`offset`, `limit`, at most 1000) and `/api/torrents/<hash>`,
+and as `/api/m/bittorrent.tracker/...` as a module. A public tracker cannot list the torrents it
+tracks: fib's `MemoryStore` answers only for a torrent named. The Admin API's
+`/bittorrent/tracker/stats` comes with I203.

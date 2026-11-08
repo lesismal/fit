@@ -3,6 +3,7 @@
 package standard
 
 import (
+	_ "github.com/lesismal/fit/bittorrent/tracker"
 	_ "github.com/lesismal/fit/handler/btpublish"
 	_ "github.com/lesismal/fit/handler/btstream"
 	_ "github.com/lesismal/fit/handler/fastcgi"

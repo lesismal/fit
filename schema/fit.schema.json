@@ -684,6 +684,10 @@
         "client": {
           "$ref": "#/$defs/config.BitTorrentClient",
           "description": "Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP trackers), downloading and seeding torrents kept in data_dir across restarts. None when left out."
+        },
+        "tracker": {
+          "$ref": "#/$defs/config.BitTorrentTracker",
+          "description": "Run a BitTorrent tracker, on fit's engine: HTTP announces and scrapes through routes whose handler is bt_tracker, UDP ones on its own listen, public or private (passkeys of a media_auth policy), with an allow-list of info hashes. Its swarms are kept in memory, bounded. None when left out."
         }
       },
       "type": "object"
@@ -919,6 +923,94 @@
         "name",
         "dir"
       ],
+      "type": "object"
+    },
+    "config.BitTorrentTracker": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the tracker serves, deciding before the global access: a UDP datagram from an address it refuses is dropped before a connection is made, and an HTTP announce or scrape through bt_tracker from one is answered with a failure reason. A change applies at once. Every address when left out, unless the global access says otherwise."
+        },
+        "allow": {
+          "description": "The info hashes the tracker tracks, in hex: 40 digits for a v1 hash, or 64 for a v2 one, tracked by its first 20 bytes as v2 clients announce it. With any here or in allow_files, announces of other torrents are refused with \"unregistered torrent\", and scrapes of them get nothing. Every torrent when both are left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allow_files": {
+          "description": "Files of more allowed info hashes: one on each line, as allow has them, with blank lines and what follows # left out. Read when the config is applied, and read again when one changes; each at most 64 MiB, and at most 1048576 info hashes in all.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "auth": {
+          "description": "The media_auth policy whose passkeys the tracker takes, which makes it private: an announce or scrape must carry a passkey, in its path as /<passkey>/announce or as ?passkey=, that is one of the policy's tokens (static, or signed by fit) or a user's passkey, derived from the policy's secret and the user's name, and whose grant plays bittorrent/<info hash in hex> (play [\"bittorrent/*\"] for every torrent). Others are refused with a failure reason. Public when left out: anyone may announce.",
+          "type": "string"
+        },
+        "console": {
+          "$ref": "#/$defs/config.RoleConsole",
+          "description": "The tracker's web pages: its statistics, read-only. None when left out."
+        },
+        "interval": {
+          "default": "30m",
+          "description": "How often clients are told to announce. 30m when left out. A change applies at once, keeping the swarms.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "listen": {
+          "description": "The host and port the tracker answers UDP announces and scrapes on (BEP 15), as \":6969\". Announces over HTTP and HTTPS come through a route whose handler is bt_tracker, on fit's listeners. No UDP when left out. A change moves the UDP port, keeping the swarms.",
+          "type": "string"
+        },
+        "max_numwant": {
+          "default": 200,
+          "description": "The most peers an announce gets, whatever its numwant asks; 50 when it asks for none. A UDP answer is also kept within 1400 bytes. 200 when left out or 0.",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_peers": {
+          "default": 500000,
+          "description": "The most peers kept of all torrents together, each about 150 bytes; a peer past it still gets peers but is not handed out. 500000 when left out or 0. A change makes a new store.",
+          "maximum": 4194304,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_peers_per_torrent": {
+          "default": 10000,
+          "description": "The most peers kept of one torrent; a peer past it still gets peers but is not handed out. 10000 when left out or 0. A change makes a new store.",
+          "maximum": 65536,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_scrape": {
+          "default": 64,
+          "description": "The most torrents one HTTP scrape may name; a UDP scrape is bounded to 74 by its packet. A scrape naming none, a full scrape, gets nothing. 64 when left out or 0.",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_torrents": {
+          "default": 100000,
+          "description": "The most torrents tracked at once; an announce of one more is refused with \"tracker is full\". 100000 when left out or 0. A change makes a new store: the swarms start empty and fill again as clients announce.",
+          "maximum": 1048576,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_interval": {
+          "description": "The \"min interval\" of HTTP answers: how soon a client may announce again of its own accord. None when left out. At most interval. A change applies at once, keeping the swarms.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "peer_ttl": {
+          "default": "1h",
+          "description": "How long a peer is kept after its last announce, longer than interval so that a peer announcing a little late is not forgotten; a torrent left without peers is forgotten, its completed count with it. 1h when left out. A change makes a new store: the swarms start empty and fill again as clients announce.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "config.Certificate": {
@@ -5244,6 +5336,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "bt_tracker"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.bt_tracker"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "fastcgi"
               }
             }
@@ -5503,6 +5611,7 @@
           "enum": [
             "bt_publish",
             "bt_stream",
+            "bt_tracker",
             "fastcgi",
             "forward_proxy",
             "hls",
@@ -5611,6 +5720,11 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "http.handlers.bt_tracker": {
+      "additionalProperties": false,
+      "properties": {},
       "type": "object"
     },
     "http.handlers.fastcgi": {
@@ -10243,7 +10357,7 @@
     },
     "bittorrent": {
       "$ref": "#/$defs/config.BitTorrent",
-      "description": "fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on disk."
+      "description": "fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP, and a tracker. None when left out: no BitTorrent port and no state on disk."
     },
     "engine": {
       "$ref": "#/$defs/config.Engine",

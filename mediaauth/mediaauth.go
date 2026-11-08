@@ -209,6 +209,9 @@ type state struct {
 	// secret, as each key's url does with the keyring's.
 	url    *urlConfig
 	urlKey *urlKey
+	// passkeys are the users' BitTorrent passkeys, by their SHA-256, of
+	// every key; see passkey.go.
+	passkeys map[[32]byte]*user
 }
 
 // mediaKey is one key of a policy's keyring.
@@ -367,6 +370,7 @@ func (p *Policy) compile(cfg *config.MediaAuth, old *state) (*state, error) {
 		}
 		st.url = u
 	}
+	st.passkeys = userPasskeys(st)
 	return st, nil
 }
 

@@ -748,6 +748,21 @@
       // },
     // },
     // {
+      // // A route whose handler is bt_tracker, with every one of its params.
+      // "name": "bt_tracker-example",
+      // "handler": {
+        // // Serves the bittorrent.tracker role's HTTP announces and scrapes (BEP 3, 23, 7 and 48): a
+        // // request whose path ends in announce is an announce, and one ending in scrape a scrape,
+        // // whatever comes before, so that /announce, /tracker/announce and a private tracker's
+        // // /<passkey>/announce all work. Refusals are answered 200 with a failure reason, as BEP 3 has
+        // // them; 503 while the role does not run. The route's listeners, TLS and middleware apply as to
+        // // any handler; the passkey is replaced by REDACTED in the access log.
+        // "module": "bt_tracker",
+        // "params": {
+        // },
+      // },
+    // },
+    // {
       // // A route whose handler is fastcgi, with every one of its params.
       // "name": "fastcgi-example",
       // "handler": {

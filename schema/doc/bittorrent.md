@@ -37,6 +37,20 @@ with a dot and symbolic links are left out, and `files`, `exclude`, `max_files` 
 that a restart takes those whose files kept their size, times and inode without building or checking
 them again. See [decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
 
+`bittorrent.tracker` is a BitTorrent tracker on fib's tracker, one a process: HTTP and HTTPS
+announces and scrapes come through any route whose handler is `bt_tracker`, on fit's listeners
+and TLS, and UDP ones (BEP 15) on the role's own `listen`, which may be left out. The swarms are
+kept in memory, bounded by `max_torrents`, `max_peers_per_torrent` and `max_peers`; a peer is
+forgotten `peer_ttl` after its last announce. With `auth`, a `media_auth` policy, the tracker is
+private: each announce and scrape carries a passkey, as `/<passkey>/announce` or `?passkey=`, one
+of the policy's tokens or a user's passkey (derived from the policy's secret and the user's name,
+read on the console's `/api/passkey?user=`), whose grant must play `bittorrent/<info hash>`.
+With `allow` or `allow_files`, only the info hashes listed are tracked; the files are read again
+when they change. A reload changes the allow-list, `auth`, `access` and `console` in place; the
+interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms; the store's bounds and
+`peer_ttl` start them empty. See [decision 037](../decisions/037-bittorrent.md) and
+[BitTorrent](../bittorrent.md).
+
 ```json
 {
   "listeners": [{"name": "web", "address": ":8080"}],
@@ -59,11 +73,17 @@ them again. See [decision 037](../decisions/037-bittorrent.md) and [BitTorrent](
         "web_seed": "https://example.com/releases/",
         "files": ["*.iso", "*.tar.gz"]
       }]
+    },
+    "tracker": {
+      "listen": ":6969",
+      "interval": "30m",
+      "max_torrents": 10000
     }
   },
   "routes": [
     {"match": {"path": ["/releases/*"]}, "handler": {"module": "static", "params": {"root": "/srv/releases", "strip_prefix": "/releases"}}},
-    {"match": {"path": ["/torrents/*"]}, "handler": {"module": "bt_publish"}}
+    {"match": {"path": ["/torrents/*"]}, "handler": {"module": "bt_publish"}},
+    {"match": {"path": ["/announce", "/scrape"]}, "handler": {"module": "bt_tracker"}}
   ]
 }
 ```
