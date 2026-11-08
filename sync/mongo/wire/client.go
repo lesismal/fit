@@ -217,14 +217,23 @@ func (c *Client) lost(gen uint64) {
 
 // findPrimary asks the seeds and the members they name, in turn, until one
 // is the primary, for at most ServerSelectionTimeout.
-func (c *Client) findPrimary(ctx context.Context) (*Conn, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.o.ServerSelectionTimeout)
+func (c *Client) findPrimary(parent context.Context) (*Conn, error) {
+	ctx, cancel := context.WithTimeout(parent, c.o.ServerSelectionTimeout)
 	defer cancel()
 	var errs []string
 	note := func(addr string, err error) {
 		if len(errs) < 8 {
 			errs = append(errs, addr+": "+err.Error())
 		}
+	}
+	// The end of the caller's context is its error, for errors.Is; the
+	// selection timeout's is not.
+	stop := func() error {
+		why := ctxDone(parent)
+		if why == nil {
+			why = fmt.Errorf("within %v", c.o.ServerSelectionTimeout)
+		}
+		return fmt.Errorf("mongowire: no primary found (%w): %s", why, strings.Join(errs, "; "))
 	}
 	for wait := 100 * time.Millisecond; ; wait = min(2*wait, time.Second) {
 		c.mu.Lock()
@@ -243,7 +252,7 @@ func (c *Client) findPrimary(ctx context.Context) (*Conn, error) {
 			if err != nil {
 				note(addr, err)
 				if ctx.Err() != nil {
-					return nil, fmt.Errorf("mongowire: no primary found (%v): %s", ctx.Err(), strings.Join(errs, "; "))
+					return nil, stop()
 				}
 				continue
 			}
@@ -275,7 +284,7 @@ func (c *Client) findPrimary(ctx context.Context) (*Conn, error) {
 		}
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("mongowire: no primary found (%v): %s", ctx.Err(), strings.Join(errs, "; "))
+			return nil, stop()
 		case <-time.After(wait):
 		}
 		errs = errs[:0]
