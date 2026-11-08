@@ -779,22 +779,20 @@ func TestStaleIdle(t *testing.T) {
 		{"POST", "", 502},
 		{"POST", "abc", 502},
 	} {
+		// A response ends before its connection is given back, and a
+		// stale connection closes after its request was sent again: the
+		// round before's connections settle first, or bye.php could find
+		// none idle and dial one more, which leaves two idle.
+		if n := waitSettled(t, h.pool); n > 1 {
+			t.Fatalf("%s %q: %d connections before bye.php", tc.method, tc.body, n)
+		}
 		if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", "/bye.php", nil)); rec.Response.StatusCode != 200 {
 			t.Fatalf("bye: %d", rec.Response.StatusCode)
 		}
-		// The response ends before the connection is given back.
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			h.pool.mu.Lock()
-			idle := len(h.pool.idleSet)
-			h.pool.mu.Unlock()
-			if idle == 1 {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("the connection not idle")
-			}
-			time.Sleep(time.Millisecond)
+		// bye.php's connection, the only one, is idle once given back,
+		// and the request below takes it.
+		if n := waitSettled(t, h.pool); n != 1 {
+			t.Fatalf("%s %q: %d connections after bye.php", tc.method, tc.body, n)
 		}
 		var body io.Reader
 		if tc.body != "" {
@@ -807,6 +805,25 @@ func TestStaleIdle(t *testing.T) {
 		if rec.Response.StatusCode != tc.code {
 			t.Errorf("%s %q: %d", tc.method, tc.body, rec.Response.StatusCode)
 		}
+	}
+}
+
+// waitSettled waits until every connection p has open is idle, and returns
+// how many there are.
+func waitSettled(t *testing.T, p *pool) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		p.mu.Lock()
+		open, idle := p.open, len(p.idleSet)
+		p.mu.Unlock()
+		if open == idle {
+			return open
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d connections open, %d of them idle", open, idle)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
