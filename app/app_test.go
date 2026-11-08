@@ -460,7 +460,7 @@ func isClosed(ch chan struct{}) bool {
 // A role's policy is its own list, then the global access of the config
 // the Manager applied last; a Host of no Manager goes by its own alone, and
 // a list that does not compile is an error.
-func TestHostAccess(t *testing.T) {
+func TestHostAccessGlobal(t *testing.T) {
 	m := NewManager(nil, nil, nil, nil)
 	defer m.Stop(context.Background())
 	if err := m.Apply(&config.Config{Access: &config.Access{Deny: []string{"10.0.0.0/8"}}}); err != nil {

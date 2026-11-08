@@ -63,7 +63,7 @@ func TestAccess(t *testing.T) {
  "proxy": {"name": "me", "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}],
   "web_proxies": [{"name": "hub", "listen": %q, "url": "ws://%s/", "password": "sock"}], "console": %s,
   "access": {"deny": ["10.0.0.0/8"]}}
-}}`, a.listen, a.sock, consoleJSON(freeAddr(t)), uplinkJSON("hub", a.listen), echo, uplinkJSON("hub", a.listen), a.fwd, a.proxy, a.sock, consoleJSON(a.con))
+}}`, a.listen, a.sock, consoleJSON(freeAddr(t)), uplinkJSON("hub", a.listen), echo, uplinkJSON("hub", a.listen), a.fwd, a.proxy, a.sock, pagesJSON(a.con))
 	})
 	h.waitNode("hub", "lab", "echo")
 	indexes := func() [2]int {
@@ -115,4 +115,11 @@ func TestAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused(t, a.fwd)
+}
+
+// pagesJSON is the proxy's console, whose own access serves the loopback
+// whatever the global access says, so that the test can use the pages.
+func pagesJSON(addr string) string {
+	c := consoleJSON(addr)
+	return c[:len(c)-1] + `, "access": {"allow": ["127.0.0.0/8"]}}`
 }
