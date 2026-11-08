@@ -344,7 +344,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | todo |
 | I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | todo |
 | I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | todo |
-| I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | todo |
+| I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | done |
 | I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | todo |
 | I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | todo |
 | I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | todo |
@@ -5126,6 +5126,81 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: interop with a replica set in Docker; a BSON fuzz test; a failover finds the new
   primary.
 - **Touches**: `sync/mongo/wire`, `test/sync`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/mongo/wire` (`mongowire`): a client only, with no connector, no
+   params and no schema; I182's source and I183's sink declare the connection's params (a `uri`, or
+   hosts, credentials and TLS) and build `Options` from them, or from `ParseURI`. Alternative: the
+   connection's params declared here, shared by both.
+2. **A blocking client, off fib.** A connection is a `net.Conn` (with `crypto/tls`) read and written
+   in lockstep, one command at a time, by the goroutine that calls it; sync's connectors call it from
+   goroutines of their own, never from a fib worker (rule 1). MongoDB answers each request on its
+   connection in order, connections to a database are few and long, and a change stream's `getMore`
+   waits on the server; callbacks on fib's connections would buy nothing here and cost a state machine
+   for SCRAM, cursors and discovery. Alternative: the client on fib's connections with callbacks.
+3. **Types with no match are tagged as canonical extended JSON.** An ObjectId reads as
+   `{"$oid": "<hex>"}`, a timestamp as `{"$timestamp": {"t": .., "i": ..}}`, binary other than subtype
+   0 as `{"$binary": {"base64": .., "subType": "04"}}`, and so `$regularExpression`, `$numberDecimal`
+   (NaN and infinities only), `$minKey`, `$maxKey`, `$undefined`, `$symbol`, `$code` (with `$scope`)
+   and `$dbPointer`; a map of exactly that shape is written back as its type, so a document read and
+   written again is the same document. A real document whose only field is `$oid` with 24 hex digits
+   would be written as an ObjectId (MongoDB keeps `$` names out of stored documents). Alternative:
+   ObjectIds as plain hex strings, which a MongoDB sink could not tell from strings.
+4. **Integers are int64.** int32 and int64 read as ints; an int is written as an int64 whatever its
+   value, so one field keeps one BSON type (what `$type` queries and validators see); a uint past
+   int64's range is a decimal128. MongoDB to MongoDB, an int32 field so becomes a long.
+   Alternative: an int32 when it fits.
+5. **Decimals are exact or refused.** A decimal is a decimal128; one that 34 digits or the exponent's
+   range cannot hold exactly is an error, not rounded. A decimal128 reads as the BSON specification
+   writes it: plain for small exponents (`-12.3400`), scientific otherwise (`1E+3`), which JSON
+   takes as a number. Alternative: rounding to 34 digits.
+6. **Times are UTC milliseconds.** A time or a date is written as a datetime, rounded down to the
+   millisecond, its offset dropped; a datetime reads as a time in UTC. A JSON value is written as
+   what it holds: objects as documents, integers as int64 (past it a decimal128 when 34 digits hold
+   it, else a double), other numbers as doubles. Alternative: JSON as a string.
+7. **The primary only, found when needed.** A `Client` sends every command to a writable primary (a
+   replica set's, a standalone server, a mongos): the seeds, then the members a server names, the
+   primary a secondary names tried first, round after round (100 ms growing to 1 s) for
+   `ServerSelectionTimeout` (30 s); with `ReplicaSet` set, a server of another set is not taken. There
+   is no monitoring goroutine: the primary is looked for again only when a command meets a
+   connection's error or a not-primary answer (codes 10107, 13435, 13436, 189, 91, 11600, 11602,
+   10058). No reads from secondaries, no stale-primary check by election ID. Alternative: the
+   drivers' server discovery and monitoring, with heartbeats.
+8. **A command is sent at most twice.** `Run` and `Cursor` send a command once more to the primary
+   found after such an error; a write may so be applied twice, which sync's writes (upserts and
+   deletes by `_id`) allow. No sessions or retryable writes (`lsid`, `txnNumber`); a `getMore` is
+   never sent again (its cursor lives on one server). Alternative: retryable writes with sessions.
+9. **A bounded pool.** `MaxConns` (4) connections to the primary; a cursor holds its connection
+   until it is exhausted or closed (its `getMore`s must go to the same server), so a cursor left open
+   holds a slot. Idle connections are dropped when the primary changes.
+10. **Timeouts.** A round trip is bounded by its context's deadline, or by `Timeout` (60 s) when it has
+    none; one cut by either closes the connection, since its answer may still come. `ConnectTimeout`
+    (10 s) bounds the dial, TLS, `hello` and authentication. An answer larger than
+    `MaxMessageBytes` (48,000,000, or less when the server says so) is refused before it is read.
+    The interop test found that the socket's deadline can pass before the context's own timer fires;
+    such an error is reported as the context's `DeadlineExceeded`.
+11. **SCRAM-SHA-256 only, without SASLprep.** The password is used as given, which is what SASLprep
+    gives for printable ASCII; SCRAM-SHA-1, X.509, LDAP and AWS authentication are not spoken; a
+    server that offers the user only SCRAM-SHA-1 is an error that says so. The salted password is
+    kept per client (at most eight), so the pool's connections do not each run PBKDF2; 4,096 to
+    10,000,000 iterations are accepted. Alternative: SASLprep's tables.
+12. **What is not spoken.** Servers older than 4.2 (wire version 8) are refused (6.0, 7.0 and 8.0 are
+    tested); no compression; checksums are checked when a reply has one and never sent; `hello` goes
+    over `OP_MSG`, never the old `OP_QUERY`.
+13. **Connection strings.** `ParseURI` reads `mongodb://` with `replicaSet`, `authSource`,
+    `authMechanism` (SCRAM-SHA-256), `tls`/`ssl`, `tlsCAFile`, `tlsCertificateKeyFile`,
+    `connectTimeoutMS`, `socketTimeoutMS`, `serverSelectionTimeoutMS`, `maxPoolSize` and `appName`;
+    any other option is refused, `tlsInsecure` among them, so nothing is silently left out;
+    `mongodb+srv://` is not read (it needs DNS SRV and TXT lookups). Alternative: SRV through the
+    resolver.
+14. **`Doc(k, v, ...)`** builds a command from other packages, where vet wants `E`'s fields named.
+15. **The interop servers.** Each version is a replica set of three members in one container
+    (`test/sync/mongo.sh`), each member on the same port inside and out, since the client reaches
+    members by the names the set gives them (`localhost:<port>`); keyfile authentication, a root user,
+    `preferTLS` with a CA of the run's own. `test/sync/run.sh` starts them on 29661–29683 and makes
+    them afresh on every run, `KEEP=1` too, as their certificates are the run's. CI's
+    `sync-interop` job runs them through `run.sh`; its comment in `ci.yml` is not updated here.
 
 ### I182 MongoDB as a source
 
