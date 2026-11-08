@@ -1,0 +1,355 @@
+// Package access decides which client addresses fit serves: allow lists
+// (whitelists) and deny lists (blacklists) of IP addresses and CIDR
+// prefixes, set for the whole config and for each listener, route, service
+// and role, where the most specific one that has a say decides.
+//
+// A List is one place's allow and deny entries, compiled into sorted ranges
+// that an address is looked up in by binary search, so that a list of
+// thousands of prefixes costs a lookup a few comparisons. A Policy is the
+// lists that apply somewhere, the most specific first: a route's, then its
+// listener's, then the global one. Each list in turn may decide:
+//
+//   - an address its deny holds is refused;
+//   - else an address its allow holds is served;
+//   - else, when its allow has entries, the address is refused, since an
+//     allow list serves only what it holds;
+//   - else the list has no say, and the next one decides.
+//
+// An address no list has a say on is served. A more specific list therefore
+// overrides a less specific one both ways: a route's allow serves an address
+// the global deny refuses, and a route's deny refuses one the global allow
+// serves.
+//
+// A Gate holds the Policy a long-lived socket goes by, swapped atomically
+// when the config is applied, so that the accept path reads it with one load.
+package access
+
+import (
+	"bufio"
+	"bytes"
+	"cmp"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"net/netip"
+	"os"
+	"slices"
+	"strings"
+	"sync/atomic"
+
+	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/router"
+)
+
+// MaxFileBytes bounds a list file, so that a mistaken path cannot have fit
+// read a huge file into memory: 64 MiB holds millions of entries.
+const MaxFileBytes = 64 << 20
+
+// List is one place's allow and deny entries.
+type List struct {
+	allow, deny set
+}
+
+// verdict is what a list says of an address.
+type verdict int8
+
+const (
+	noSay verdict = iota
+	allowed
+	denied
+)
+
+func (l *List) verdict(a netip.Addr) verdict {
+	switch {
+	case l.deny.contains(a):
+		return denied
+	case l.allow.contains(a):
+		return allowed
+	case !l.allow.empty():
+		return denied
+	}
+	return noSay
+}
+
+// Empty reports whether l has no entries, and so never has a say.
+func (l *List) Empty() bool { return l == nil || l.allow.empty() && l.deny.empty() }
+
+// Compile compiles a, reading its files; it returns nil for a nil or empty
+// a. files, when not nil, is given the SHA-256 of each file read, by path,
+// for the config to be applied again when one changes.
+func Compile(a *config.Access, files map[string][sha256.Size]byte) (*List, error) {
+	if a == nil {
+		return nil, nil
+	}
+	var errs config.Errors
+	var allow, deny []netip.Prefix
+	parse := func(entries []string, at config.Value, into *[]netip.Prefix) {
+		for i, s := range entries {
+			p, err := router.ParsePrefix(strings.TrimSpace(s))
+			if err != nil {
+				errs = append(errs, at.Index(i).Errorf("%v", err))
+				continue
+			}
+			*into = append(*into, p)
+		}
+	}
+	read := func(paths []string, at config.Value, into *[]netip.Prefix) {
+		for i, path := range paths {
+			ps, sum, err := ReadFile(path)
+			if err != nil {
+				errs = append(errs, at.Index(i).Errorf("%v", err))
+				continue
+			}
+			if files != nil {
+				files[path] = sum
+			}
+			*into = append(*into, ps...)
+		}
+	}
+	parse(a.Allow, a.At.Field("allow"), &allow)
+	parse(a.Deny, a.At.Field("deny"), &deny)
+	read(a.AllowFiles, a.At.Field("allow_files"), &allow)
+	read(a.DenyFiles, a.At.Field("deny_files"), &deny)
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	l := &List{allow: newSet(allow), deny: newSet(deny)}
+	if l.Empty() {
+		return nil, nil
+	}
+	return l, nil
+}
+
+// ReadFile reads a list file: an IP address or CIDR prefix on each line,
+// with blank lines and what follows a '#' or ';' left out, as the lists
+// published for firewalls are written. It returns the file's SHA-256 too.
+func ReadFile(path string) ([]netip.Prefix, [sha256.Size]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, [sha256.Size]byte{}, err
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err == nil && st.Size() > MaxFileBytes {
+		return nil, [sha256.Size]byte{}, fmt.Errorf("%s: larger than %d bytes", path, MaxFileBytes)
+	}
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(io.LimitReader(f, MaxFileBytes+1)); err != nil {
+		return nil, [sha256.Size]byte{}, err
+	}
+	if buf.Len() > MaxFileBytes {
+		return nil, [sha256.Size]byte{}, fmt.Errorf("%s: larger than %d bytes", path, MaxFileBytes)
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	var ps []netip.Prefix
+	sc := bufio.NewScanner(&buf)
+	sc.Buffer(make([]byte, 0, 4096), 4096)
+	for n := 1; sc.Scan(); n++ {
+		line := sc.Text()
+		if i := strings.IndexAny(line, "#;"); i >= 0 {
+			line = line[:i]
+		}
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		p, err := router.ParsePrefix(line)
+		if err != nil {
+			return nil, sum, fmt.Errorf("%s:%d: %v", path, n, err)
+		}
+		ps = append(ps, p)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, sum, fmt.Errorf("%s: %v", path, err)
+	}
+	return ps, sum, nil
+}
+
+// Policy is the lists that apply somewhere, the most specific first. A nil
+// Policy serves every address.
+type Policy struct {
+	lists []*List
+}
+
+// Chain returns the policy of lists, the most specific first; nil lists, and
+// empty ones, are left out. It returns nil when none is left.
+func Chain(lists ...*List) *Policy {
+	var p Policy
+	for _, l := range lists {
+		if !l.Empty() {
+			p.lists = append(p.lists, l)
+		}
+	}
+	if len(p.lists) == 0 {
+		return nil
+	}
+	return &p
+}
+
+// Allows reports whether p serves a. An IPv4 address mapped into IPv6
+// counts as IPv4; an invalid address is served only when no list has
+// entries, which a nil p says.
+func (p *Policy) Allows(a netip.Addr) bool {
+	if p == nil {
+		return true
+	}
+	if !a.IsValid() {
+		return false
+	}
+	a = a.Unmap().WithZone("")
+	for _, l := range p.lists {
+		switch l.verdict(a) {
+		case allowed:
+			return true
+		case denied:
+			return false
+		}
+	}
+	return true
+}
+
+// Gate is the policy a socket goes by, swapped when the config is applied.
+// The zero Gate serves everyone.
+type Gate struct {
+	p atomic.Pointer[Policy]
+}
+
+// Set has g go by p from now on; nil serves everyone.
+func (g *Gate) Set(p *Policy) { g.p.Store(p) }
+
+// Policy returns the policy g goes by now.
+func (g *Gate) Policy() *Policy { return g.p.Load() }
+
+// Allows reports whether g serves peer, as fib's Binding.Filter asks. A nil
+// g serves everyone.
+func (g *Gate) Allows(peer netip.AddrPort) bool {
+	if g == nil {
+		return true
+	}
+	return g.p.Load().Allows(peer.Addr())
+}
+
+// set is a set of addresses: sorted, merged ranges of each family.
+type set struct {
+	v4 []range4
+	v6 []range6
+}
+
+type range4 struct{ lo, hi uint32 }
+
+type u128 struct{ hi, lo uint64 }
+
+func (a u128) cmp(b u128) int {
+	if c := cmp.Compare(a.hi, b.hi); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.lo, b.lo)
+}
+
+func (a u128) next() (u128, bool) {
+	if a.lo != ^uint64(0) {
+		return u128{a.hi, a.lo + 1}, true
+	}
+	if a.hi != ^uint64(0) {
+		return u128{a.hi + 1, 0}, true
+	}
+	return a, false
+}
+
+type range6 struct{ lo, hi u128 }
+
+func (s *set) empty() bool { return len(s.v4) == 0 && len(s.v6) == 0 }
+
+func newSet(ps []netip.Prefix) set {
+	var s set
+	for _, p := range ps {
+		p = p.Masked()
+		a := p.Addr()
+		if a.Is4() {
+			lo := binary.BigEndian.Uint32(a.AsSlice())
+			// A shift by 32 gives 0, so a /0 holds every address.
+			host := uint32(1)<<(32-p.Bits()) - 1
+			s.v4 = append(s.v4, range4{lo, lo | host})
+			continue
+		}
+		b := a.As16()
+		lo := u128{binary.BigEndian.Uint64(b[:8]), binary.BigEndian.Uint64(b[8:])}
+		hi := lo
+		switch bits := 128 - p.Bits(); {
+		case bits >= 64:
+			hi.lo = ^uint64(0)
+			if bits == 128 {
+				hi.hi = ^uint64(0)
+			} else if bits > 64 {
+				hi.hi |= uint64(1)<<(bits-64) - 1
+			}
+		case bits > 0:
+			hi.lo |= uint64(1)<<bits - 1
+		}
+		s.v6 = append(s.v6, range6{lo, hi})
+	}
+	slices.SortFunc(s.v4, func(a, b range4) int { return cmp.Compare(a.lo, b.lo) })
+	s.v4 = merge4(s.v4)
+	slices.SortFunc(s.v6, func(a, b range6) int { return a.lo.cmp(b.lo) })
+	s.v6 = merge6(s.v6)
+	return s
+}
+
+// merge4 merges sorted ranges that overlap or touch.
+func merge4(rs []range4) []range4 {
+	out := rs[:0]
+	for _, r := range rs {
+		if n := len(out); n > 0 && (out[n-1].hi == ^uint32(0) || r.lo <= out[n-1].hi+1) {
+			out[n-1].hi = max(out[n-1].hi, r.hi)
+			continue
+		}
+		out = append(out, r)
+	}
+	return slices.Clip(out)
+}
+
+func merge6(rs []range6) []range6 {
+	out := rs[:0]
+	for _, r := range rs {
+		if n := len(out); n > 0 {
+			next, ok := out[n-1].hi.next()
+			if !ok || r.lo.cmp(next) <= 0 {
+				if r.hi.cmp(out[n-1].hi) > 0 {
+					out[n-1].hi = r.hi
+				}
+				continue
+			}
+		}
+		out = append(out, r)
+	}
+	return slices.Clip(out)
+}
+
+func (s *set) contains(a netip.Addr) bool {
+	if a.Is4() {
+		if len(s.v4) == 0 {
+			return false
+		}
+		b := a.As4()
+		v := binary.BigEndian.Uint32(b[:])
+		// The first range starting past v; the one before it may hold v.
+		i, _ := slices.BinarySearchFunc(s.v4, v, func(r range4, v uint32) int {
+			if r.lo <= v {
+				return -1
+			}
+			return 1
+		})
+		return i > 0 && v <= s.v4[i-1].hi
+	}
+	if len(s.v6) == 0 {
+		return false
+	}
+	b := a.As16()
+	v := u128{binary.BigEndian.Uint64(b[:8]), binary.BigEndian.Uint64(b[8:])}
+	i, _ := slices.BinarySearchFunc(s.v6, v, func(r range6, v u128) int {
+		if r.lo.cmp(v) <= 0 {
+			return -1
+		}
+		return 1
+	})
+	return i > 0 && v.cmp(s.v6[i-1].hi) <= 0
+}

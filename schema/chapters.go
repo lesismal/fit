@@ -29,6 +29,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"access_log", "Access log", "access-log", "access_log.md"},
 	{"telemetry", "Telemetry", "telemetry", "telemetry.md"},
 	{"limits", "Limits", "limits", "limits.md"},
+	{"access", "Access", "access", "access.md"},
 	{"engine", "Engine", "engine", "engine.md"},
 	{"admin", "Admin API", "admin-api", "admin.md"},
 	{"auto_https", "HTTPS by default", "https-by-default", "auto_https.md"},

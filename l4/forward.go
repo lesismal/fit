@@ -12,6 +12,7 @@ import (
 	fib "github.com/lesismal/fib"
 	"github.com/lesismal/fib/socks"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/netguard"
 	"github.com/lesismal/fit/router"
@@ -208,13 +209,13 @@ var errCommand = &socks.ReplyError{Version: socks.Version5, Code: socks.ReplyCom
 
 // NewSOCKS returns the SOCKS server of a listener's socks: CONNECT, without
 // authentication, for the clients and to the destinations r allows.
-func NewSOCKS(r *Rules) *socks.Server {
+func NewSOCKS(r *Rules, gate *access.Gate) *socks.Server {
 	return socks.NewServer(socks.Config{
 		Allow: func(req *socks.Request) error {
 			switch {
 			case req.Command != socks.CommandConnect:
 				return errCommand
-			case !r.Client(req.Conn.RemoteAddrPort().Addr()), !r.Allows(req.Addr):
+			case !r.Client(req.Conn.RemoteAddrPort().Addr()), !gate.Allows(req.Conn.RemoteAddrPort()), !r.Allows(req.Addr):
 				return ErrRefused
 			}
 			return nil

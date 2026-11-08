@@ -22,6 +22,7 @@ import (
 
 	fib "github.com/lesismal/fib"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/l4"
@@ -167,6 +168,92 @@ type Listener struct {
 	// SOCKS, for a listener that serves socks, is who may use it and where
 	// to.
 	SOCKS *l4.Rules
+
+	// Access is the client addresses the listener serves: its own access,
+	// then the global one; nil serves everyone.
+	Access *access.Policy
+	// AcceptAccess is the policy the listener's sockets ask at accept, for
+	// TCP connections and new UDP peers, or nil when they serve every peer
+	// there. It is Access, or a udp or lone tcp service's policy before it,
+	// unless the address is known only later, after a PROXY header, or a
+	// route or service of the listener decides for itself: then nil, and
+	// CheckRequests, the L4 entry and SOCKSAccess decide.
+	AcceptAccess *access.Policy
+	// CheckRequests has every HTTP request checked against RouteAccess, by
+	// its route, or Access when no route takes it; a request refused is
+	// answered 403.
+	CheckRequests bool
+	RouteAccess   []*access.Policy
+	// SOCKSAccess is what the listener's socks checks a client against
+	// when AcceptAccess has not.
+	SOCKSAccess *access.Policy
+}
+
+// serviceAccess is a service of a listener and its access list; names says
+// it takes connections by server name.
+type serviceAccess struct {
+	svc   *l4.Service
+	list  *access.List
+	names bool
+}
+
+// compileAccess sets l's policies from the global list, l's own, its
+// routes', by Route.Index, and its services'. proxy says l takes PROXY
+// headers, which name the address only after the accept.
+func (l *Listener) compileAccess(global, own *access.List, routes []*access.List, services []serviceAccess, proxy bool) {
+	l.Access = access.Chain(own, global)
+	routed := false
+	for _, r := range l.Routes {
+		routed = routed || !routes[r.Index].Empty()
+	}
+	serviced := false
+	for _, s := range services {
+		serviced = serviced || !s.list.Empty()
+	}
+	if l.Access == nil && !routed && !serviced {
+		return
+	}
+	if l.L4 != nil {
+		policies := make(map[*l4.Service]*access.Policy, len(services))
+		for _, s := range services {
+			policies[s.svc] = access.Chain(s.list, own, global)
+		}
+		l.L4.SetAccess(l.Access, policies)
+	}
+	switch {
+	case !proxy && !routed && !serviced:
+		l.AcceptAccess = l.Access
+		return
+	case !proxy && !routed && len(services) == 1 && !services[0].names && !config.Sniffs(l.Protocols):
+		// A lone service takes every connection, or every udp session:
+		// its policy is known at accept.
+		l.AcceptAccess = access.Chain(services[0].list, own, global)
+		return
+	}
+	// Decided later, by what takes the connection.
+	if l.L4 != nil {
+		l.L4.CheckAccess()
+	}
+	l.SOCKSAccess = l.Access
+	if l.ServesHTTP() {
+		l.CheckRequests = true
+		l.RouteAccess = make([]*access.Policy, len(routes))
+		for _, r := range l.Routes {
+			l.RouteAccess[r.Index] = l.Access
+			if !routes[r.Index].Empty() {
+				l.RouteAccess[r.Index] = access.Chain(routes[r.Index], own, global)
+			}
+		}
+	}
+}
+
+// RequestAccess returns the policy a request route takes on l is checked
+// against, route being nil for one no route takes.
+func (l *Listener) RequestAccess(route *Route) *access.Policy {
+	if route == nil {
+		return l.Access
+	}
+	return l.RouteAccess[route.Index]
 }
 
 // ServesHTTP reports whether l serves HTTP, and so routes.
@@ -285,6 +372,40 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		return nil, errs
 	}
 
+	// The access lists: the global one, and each route's and service's.
+	files := map[string][sha256.Size]byte{}
+	global, err := access.Compile(c.Access, files)
+	if err != nil {
+		errs = append(errs, config.AsErrors(err)...)
+	}
+	routeLists := make([]*access.List, len(c.Routes))
+	for i := range c.Routes {
+		if routeLists[i], err = access.Compile(c.Routes[i].Access, files); err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+		}
+	}
+	serviceLists := make([]*access.List, len(c.Services))
+	for i := range c.Services {
+		if serviceLists[i], err = access.Compile(c.Services[i].Access, files); err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+		}
+	}
+	listenerLists := make(map[string]*access.List, len(c.Listeners))
+	for i := range c.Listeners {
+		lc := &c.Listeners[i]
+		if listenerLists[lc.Name], err = access.Compile(lc.Access, files); err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+		}
+	}
+	g.watchFiles(files)
+	if len(errs) > 0 {
+		cleanupModules(g)
+		return nil, errs
+	}
+	// The services each listener's entry hands connections to, with their
+	// lists, for its access.
+	listenerServices := map[string][]serviceAccess{}
+
 	trusted := map[string]l4.Trusted{}
 	for _, lc := range c.Listeners {
 		if pp := lc.ProxyProtocol; pp != nil {
@@ -316,6 +437,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 				entries[name] = l4.NewEntry(t)
 			}
 			entries[name].Add(svc, sc.ServerNames)
+			listenerServices[name] = append(listenerServices[name], serviceAccess{svc, serviceLists[i], len(sc.ServerNames) > 0})
 		}
 	}
 
@@ -393,6 +515,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		}
 		slices.SortStableFunc(l.Routes, func(a, b *Route) int { return b.Priority - a.Priority })
 		l.Router = newRouter(l.Routes)
+		l.compileAccess(global, listenerLists[lc.Name], routeLists, listenerServices[lc.Name], len(trusted[lc.Name]) > 0)
 		g.Listeners = append(g.Listeners, l)
 	}
 	if len(errs) > 0 {

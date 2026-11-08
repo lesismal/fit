@@ -33,6 +33,7 @@ import (
 	"github.com/lesismal/fib"
 
 	"github.com/lesismal/fit/app/console"
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/logs"
@@ -277,6 +278,23 @@ type Host struct {
 	m *Manager
 }
 
+// Access compiles a role's own access, own, and returns its policy: own,
+// then the config's global access, as the config being applied has it. A
+// role calls it on every Apply, for the global access may have changed when
+// its own member has not, and sets the result on the access.Gate its
+// bindings' Filter asks; nil serves everyone.
+func (h *Host) Access(own *config.Access) (*access.Policy, error) {
+	l, err := access.Compile(own, nil)
+	if err != nil {
+		return nil, err
+	}
+	var global *access.List
+	if h.m != nil {
+		global = h.m.global.Load()
+	}
+	return access.Chain(l, global), nil
+}
+
 // DefaultDrainTimeout is how long a role may let what a server it replaced
 // holds run out, unless the Manager's SetDrainTimeout says otherwise: the
 // listeners' default.
@@ -360,6 +378,9 @@ type Manager struct {
 	drain atomic.Int64
 	// kept is KeepBeside's prefix of the files the roles keep.
 	kept atomic.Pointer[string]
+	// global is the config's access, for the roles' policies; nil when it
+	// sets none.
+	global atomic.Pointer[access.List]
 
 	edits   chan editReq
 	stop    chan struct{}
@@ -457,6 +478,15 @@ func (m *Manager) Apply(c *config.Config) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var errs []error
+	// The global access, which every role's policy ends with: set before
+	// the roles apply, which take it into their gates. Compiling the
+	// listeners' config checked it; a file that has gone bad since is
+	// reported, and the roles go by none.
+	global, err := access.Compile(c.Access, nil)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("access: %w", err))
+	}
+	m.global.Store(global)
 	for _, info := range Roles() {
 		member := info.Member(c)
 		r := m.running[info.ID]

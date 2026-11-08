@@ -135,6 +135,34 @@
         // "idle_timeout": "5m",
       // },
 
+      // The client addresses the listener serves, deciding before the global access: a connection it
+      // refuses is closed as soon as it is accepted, or, for HTTP/3 and udp, its datagrams dropped,
+      // unless a route or service of the listener sets an access of its own, which then decides
+      // first, for its requests or connections. With proxy_protocol the address is the one the
+      // header names.
+      // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["*.example.com", "10.1.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["169.254.169.254"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
       // Take a PROXY protocol header, of version 1 or 2, at the start of each connection from a
       // trusted address, and serve the connection as from the client it names. For listeners of tcp
       // and of HTTP over TCP; with tls the header comes before TLS. HTTP/3 takes none.
@@ -210,6 +238,32 @@
         // // of routes, and its hosts and paths do not make a route more specific: give it a priority.
         // // string.
         // "expr": "Host(\"example.com\") && (PathPrefix(\"/api/\") || Method(\"POST\"))",
+      // },
+
+      // The client addresses the route serves, deciding before its listener's access and the global
+      // one: a request it refuses is answered 403. The address is the connection's, or the one its
+      // PROXY header names, not X-Forwarded-For's.
+      // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["*.example.com", "10.1.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["169.254.169.254"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
       // },
 
       // Middleware a request passes through, in order, before the handler.
@@ -1881,6 +1935,32 @@
       // // list of string.
       // "server_names": ["db.example.com"],
 
+      // // The client addresses the service takes, deciding before its listener's access and the global
+      // // one: a connection it refuses is closed, once its PROXY header and ClientHello are read when
+      // // the listener needs them, and the datagrams of a udp session it refuses are dropped.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["*.example.com", "10.1.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["169.254.169.254"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
       // // Send each upstream connection a PROXY protocol header of this version (v1, text, or v2,
       // // binary) first, naming the client's address and the one it connected to. For tcp listeners.
       // // one of: v1, v2.
@@ -2150,6 +2230,33 @@
     // // nothing to send. 30s when left out.
     // // duration, as "1.5s" or "2m"; default "30s".
     // "write_stall_timeout": "30s",
+  // },
+
+  // The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every
+  // listener, route, service and role that sets no access of its own that decides: a more
+  // specific one, set on a listener, route, service or role, decides first, and this one only
+  // for an address that one has no say on. Every address is served when left out.
+  // object.
+  // "access": {
+    // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+    // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+    // // first.
+    // // list of string.
+    // "allow": ["*.example.com", "10.1.0.0/16"],
+
+    // // IP addresses and CIDR prefixes refused, whatever allow holds.
+    // // list of string.
+    // "deny": ["169.254.169.254"],
+
+    // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+    // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+    // // config is applied, and applied again when one changes; each at most 64 MiB.
+    // // list of string.
+    // "allow_files": [],
+
+    // // Files of more deny entries, written as allow_files.
+    // // list of string.
+    // "deny_files": [],
   // },
 
   // How fib, the network engine fit serves and dials on, is set up: its event loops, workers and

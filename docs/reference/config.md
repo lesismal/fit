@@ -23,7 +23,7 @@ a config against it and more.
 ## Contents
 
 - [The config](#the-config)
-- [Listeners](#listeners): [`listeners[]`](#config-listener), [`listeners[].tls`](#config-tls), [`listeners[].tls.certificates[]`](#config-certificate), [`listeners[].tls.client_auth`](#config-clientauth), [`listeners[].socks`](#config-forwardproxy), [`listeners[].proxy_protocol`](#config-proxyprotocol)
+- [Listeners](#listeners): [`listeners[]`](#config-listener), [`listeners[].tls`](#config-tls), [`listeners[].tls.certificates[]`](#config-certificate), [`listeners[].tls.client_auth`](#config-clientauth), [`listeners[].socks`](#config-forwardproxy), [`listeners[].access`](#config-access), [`listeners[].proxy_protocol`](#config-proxyprotocol)
 - [Routes](#routes): [`routes[]`](#config-route), [`routes[].match`](#config-match)
 - [Upstreams](#upstreams): [`upstreams[]`](#config-upstream), [`upstreams[].sticky_cookie`](#config-stickycookie), [`upstreams[].health_check`](#config-healthcheck)
 - [Services](#services): [`services[]`](#config-service)
@@ -31,6 +31,7 @@ a config against it and more.
 - [Access log](#access-log): [`access_log`](#config-accesslog)
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
+- [Access](#access)
 - [Engine](#engine): [`engine`](#config-engine)
 - [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser), [`admin.assistant.mcp`](#config-assistantmcp), [`admin.cluster`](#config-cluster), [`admin.cluster_member`](#config-clustermember)
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
@@ -112,6 +113,7 @@ In JSON:
 | `access_log` | [object](#config-accesslog) |  | Where a line is written for each request, as JSON or, as its format says, text or line; no access log when left out. |
 | `telemetry` | [object](#config-telemetry) |  | OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts. |
 | `limits` | [object](#config-limits) |  | Limits that apply to every listener. |
+| `access` | [object](#config-access) |  | The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every listener, route, service and role that sets no access of its own that decides: a more specific one, set on a listener, route, service or role, decides first, and this one only for an address that one has no say on. Every address is served when left out. |
 | `engine` | [object](#config-engine) |  | How fib, the network engine fit serves and dials on, is set up: its event loops, workers and buffers. fib's own defaults for what is left out, and for all of it when engine is. Read when fit starts: a change takes effect when fit restarts. |
 | `admin` | [object](#config-admin) |  | The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. |
 | `auto_https` | [object](#config-autohttps) |  | HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out. |
@@ -241,6 +243,7 @@ In JSON:
 | `mptcp` | boolean |  | Listen the listener's TCP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not; a client without Multipath TCP falls back too. Off by default: a listener is plain TCP. udp listeners and HTTP/3 take none. |
 | `tls` | [object](#config-tls) |  | Serve TLS, with these certificates: the listener's HTTP is HTTPS. |
 | `socks` | [object](#config-forwardproxy) |  | Who may use the listener's socks, and where it connects them: needed with socks. It serves CONNECT, without authentication, and refuses BIND and UDP ASSOCIATE. |
+| `access` | [object](#config-access) |  | The client addresses the listener serves, deciding before the global access: a connection it refuses is closed as soon as it is accepted, or, for HTTP/3 and udp, its datagrams dropped, unless a route or service of the listener sets an access of its own, which then decides first, for its requests or connections. With proxy_protocol the address is the one the header names. |
 | `proxy_protocol` | [object](#config-proxyprotocol) |  | Take a PROXY protocol header, of version 1 or 2, at the start of each connection from a trusted address, and serve the connection as from the client it names. For listeners of tcp and of HTTP over TCP; with tls the header comes before TLS. HTTP/3 takes none. |
 
 <a id="config-tls"></a>
@@ -286,6 +289,19 @@ Also at `webrtc.turn.tls.certificates[]`.
 | `ports` | list of integer |  | The destination ports allowed; any when left out. |
 | `connect_timeout` | duration | `"10s"` | How long resolving and connecting to a destination may take. 10s when left out. |
 | `idle_timeout` | duration | `"5m"` | How long a proxied connection may carry nothing either way before both sides are closed. 5m when left out. |
+
+<a id="config-access"></a>
+
+### `listeners[].access`
+
+Also at `routes[].access`, `services[].access`, `access`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `allow` | list of string |  | IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry here or in allow_files, every address neither holds is refused, unless deny refuses it first. |
+| `deny` | list of string |  | IP addresses and CIDR prefixes refused, whatever allow holds. |
+| `allow_files` | list of string |  | Files of more allow entries: an address or prefix on each line, with blank lines and what follows # or ; left out, as the lists published for firewalls are written. Read when the config is applied, and applied again when one changes; each at most 64 MiB. |
+| `deny_files` | list of string |  | Files of more deny entries, written as allow_files. |
 
 <a id="config-proxyprotocol"></a>
 
@@ -446,6 +462,7 @@ In JSON:
 | `listeners` | list of string |  | The names of the listeners the route serves; every listener when left out. |
 | `priority` | integer |  | Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one with the most other matchers set (method, header, query, remote_ip, path_regexp, expr), then the one written first. |
 | `match` | [object](#config-match) |  | What a request must match; every request when left out. |
+| `access` | [object](#config-access) |  | The client addresses the route serves, deciding before its listener's access and the global one: a request it refuses is answered 403. The address is the connection's, or the one its PROXY header names, not X-Forwarded-For's. |
 | `middleware` | list of [middleware](#middleware) |  | Middleware a request passes through, in order, before the handler. |
 | `handler` | [handler](#handlers) |  | Required. What answers the request. |
 
@@ -708,6 +725,7 @@ In JSON:
 | `idle_timeout` | duration |  | How long a connection or a udp session may carry nothing either way before both sides are closed; 10m for a connection and 1m for a udp session when left out. |
 | `max_conns` | integer, 0 or more | `10000` | The most connections and udp sessions the service proxies at once; a connection past it is closed as soon as it is accepted, and the datagrams of a session past it are dropped. 10000 when left out or 0. |
 | `server_names` | list of string |  | The server names (SNI) of the TLS connections the service takes from its tcp listeners, which it proxies as they are, without terminating their TLS; "*.example.com" takes the names one label below example.com. A tcp listener may then be listed by several services: a connection goes to the one whose names hold the name its ClientHello asks for, or else to the listener's service without server_names, if it has one, as one that is not TLS or asks for no name does; otherwise it is closed. The ClientHello must come within 10s. |
+| `access` | [object](#config-access) |  | The client addresses the service takes, deciding before its listener's access and the global one: a connection it refuses is closed, once its PROXY header and ClientHello are read when the listener needs them, and the datagrams of a udp session it refuses are dropped. |
 | `proxy_protocol` | string: `v1`, `v2` |  | Send each upstream connection a PROXY protocol header of this version (v1, text, or v2, binary) first, naming the client's address and the one it connected to. For tcp listeners. |
 
 <a id="log"></a>
@@ -1148,6 +1166,114 @@ In JSON:
 | `max_body_bytes` | integer, 0 or more | `16777216` | The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0. |
 | `max_write_queue_bytes` | integer, 0 or more | `33554432` | The bytes one connection may have queued for its client before fit closes it, the bound on a peer that stops reading. 32 MiB when left out or 0. Takes effect at start, not on a reload. |
 | `write_stall_timeout` | duration | `"30s"` | How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out. |
+
+<a id="access"></a>
+
+## Access
+
+Which client addresses fit serves, by allow lists (whitelists) and deny lists (blacklists) of IP
+addresses and CIDR prefixes, written inline or in files, as the lists published for firewalls are.
+The top-level `access` is global: every listener, route, service and role goes by it. Each of them
+may set an `access` of its own, which decides first, so that the more specific setting wins:
+
+- a list's `deny` refuses an address, whatever its `allow` holds;
+- else its `allow` serves an address it holds;
+- else, when its `allow` has entries, it refuses the address, since an allow list serves only what
+  it holds;
+- else it has no say, and the next one out decides: a route's, then its listener's, then the global
+  one; a service's, then its listener's, then the global one; a role's, then the global one. An
+  address none has a say on is served.
+
+A route's `allow` therefore serves an address the global `deny` refuses, and a route's `deny`
+refuses one the global `allow` serves; `"allow": ["0.0.0.0/0", "::/0"]` opens a route or service
+to every address whatever the global access says.
+
+Where it can, fit decides when a connection is accepted: a refused TCP connection is closed before
+anything is read from it, and the datagrams of a refused HTTP/3 or udp peer are dropped before a
+session is made for them. A listener whose routes or services set an access of their own, or that
+takes PROXY headers, decides later instead: a refused HTTP request is answered `403`, and a refused
+`tcp` connection closed once its service is known. The address is the connection's, or the one its
+PROXY header names, never `X-Forwarded-For`'s. A change applies to connections and udp sessions that
+start after it.
+
+A list file has an address or prefix on each line, with blank lines and what follows `#` or `;`
+left out; it is read when the config is applied, and the config applied again when it changes.
+An allow list on a listener that obtains certificates with ACME's HTTP-01 or TLS-ALPN-01 challenges
+must serve the CA's validation servers, or the certificates cannot be obtained.
+
+In a .conf file:
+
+```fit
+access { deny 203.0.113.0/24; deny_files /etc/fit/drop.txt }
+
+listener web :8080
+listener internal :8081 { access { allow 10.0.0.0/8 192.168.0.0/16 } }
+
+route {
+	listeners web
+	match { path /partner/* }
+	access { allow 203.0.113.7 198.51.100.0/24 }
+	handler respond { body partners }
+}
+
+route { handler respond { body hello } }
+```
+
+In YAML:
+
+```yaml
+access:
+  deny:
+    - 203.0.113.0/24
+  deny_files:
+    - /etc/fit/drop.txt
+listeners:
+  - name: web
+    address: :8080
+  - name: internal
+    address: :8081
+    access:
+      allow:
+        - 10.0.0.0/8
+        - 192.168.0.0/16
+routes:
+  - listeners:
+      - web
+    match:
+      path:
+        - /partner/*
+    access:
+      allow:
+        - 203.0.113.7
+        - 198.51.100.0/24
+    handler:
+      module: respond
+      params:
+        body: partners
+  - handler:
+      module: respond
+      params:
+        body: hello
+```
+
+In JSON:
+
+```json
+{
+  "access": {
+    "deny": ["203.0.113.0/24"],
+    "deny_files": ["/etc/fit/drop.txt"]
+  },
+  "listeners": [
+    {"name": "web", "address": ":8080"},
+    {"name": "internal", "address": ":8081", "access": {"allow": ["10.0.0.0/8", "192.168.0.0/16"]}}
+  ],
+  "routes": [
+    {"listeners": ["web"], "match": {"path": ["/partner/*"]}, "access": {"allow": ["203.0.113.7", "198.51.100.0/24"]}, "handler": {"module": "respond", "params": {"body": "partners"}}},
+    {"handler": {"module": "respond", "params": {"body": "hello"}}}
+  ]
+}
+```
 
 <a id="engine"></a>
 

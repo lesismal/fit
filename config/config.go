@@ -32,6 +32,7 @@ type Config struct {
 	AccessLog     *AccessLog     `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON or, as its format says, text or line; no access log when left out."`
 	Telemetry     *Telemetry     `json:"telemetry,omitempty" doc:"OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts."`
 	Limits        Limits         `json:"limits,omitzero" doc:"Limits that apply to every listener."`
+	Access        *Access        `json:"access,omitempty" doc:"The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every listener, route, service and role that sets no access of its own that decides: a more specific one, set on a listener, route, service or role, decides first, and this one only for an address that one has no say on. Every address is served when left out."`
 	Engine        *Engine        `json:"engine,omitempty" doc:"How fib, the network engine fit serves and dials on, is set up: its event loops, workers and buffers. fib's own defaults for what is left out, and for all of it when engine is. Read when fit starts: a change takes effect when fit restarts."`
 	Admin         *Admin         `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
 	AutoHTTPS     *AutoHTTPS     `json:"auto_https,omitempty" doc:"HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."`
@@ -454,6 +455,7 @@ type Service struct {
 	IdleTimeout   Duration `json:"idle_timeout,omitempty" doc:"How long a connection or a udp session may carry nothing either way before both sides are closed; 10m for a connection and 1m for a udp session when left out."`
 	MaxConns      int      `json:"max_conns,omitempty" min:"0" default:"10000" doc:"The most connections and udp sessions the service proxies at once; a connection past it is closed as soon as it is accepted, and the datagrams of a session past it are dropped. 10000 when left out or 0."`
 	ServerNames   []string `json:"server_names,omitempty" doc:"The server names (SNI) of the TLS connections the service takes from its tcp listeners, which it proxies as they are, without terminating their TLS; \"*.example.com\" takes the names one label below example.com. A tcp listener may then be listed by several services: a connection goes to the one whose names hold the name its ClientHello asks for, or else to the listener's service without server_names, if it has one, as one that is not TLS or asks for no name does; otherwise it is closed. The ClientHello must come within 10s."`
+	Access        *Access  `json:"access,omitempty" doc:"The client addresses the service takes, deciding before its listener's access and the global one: a connection it refuses is closed, once its PROXY header and ClientHello are read when the listener needs them, and the datagrams of a udp session it refuses are dropped."`
 	ProxyProtocol string   `json:"proxy_protocol,omitempty" enum:"v1,v2" doc:"Send each upstream connection a PROXY protocol header of this version (v1, text, or v2, binary) first, naming the client's address and the one it connected to. For tcp listeners."`
 
 	At Value `json:"-" fit:"self"`
@@ -550,6 +552,7 @@ type Listener struct {
 	MPTCP         bool           `json:"mptcp,omitempty" doc:"Listen the listener's TCP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not; a client without Multipath TCP falls back too. Off by default: a listener is plain TCP. udp listeners and HTTP/3 take none."`
 	TLS           *TLS           `json:"tls,omitempty" doc:"Serve TLS, with these certificates: the listener's HTTP is HTTPS."`
 	SOCKS         *ForwardProxy  `json:"socks,omitempty" doc:"Who may use the listener's socks, and where it connects them: needed with socks. It serves CONNECT, without authentication, and refuses BIND and UDP ASSOCIATE."`
+	Access        *Access        `json:"access,omitempty" doc:"The client addresses the listener serves, deciding before the global access: a connection it refuses is closed as soon as it is accepted, or, for HTTP/3 and udp, its datagrams dropped, unless a route or service of the listener sets an access of its own, which then decides first, for its requests or connections. With proxy_protocol the address is the one the header names."`
 	ProxyProtocol *ProxyProtocol `json:"proxy_protocol,omitempty" doc:"Take a PROXY protocol header, of version 1 or 2, at the start of each connection from a trusted address, and serve the connection as from the client it names. For listeners of tcp and of HTTP over TCP; with tls the header comes before TLS. HTTP/3 takes none."`
 
 	At Value `json:"-" fit:"self"`
@@ -582,6 +585,22 @@ func (f *ForwardProxy) Connect() time.Duration {
 // Idle returns the proxy's idle timeout, or its default.
 func (f *ForwardProxy) Idle() time.Duration {
 	return time.Duration(orDefault(int64(f.IdleTimeout), int64(DefaultForwardIdleTimeout)))
+}
+
+// Access is an allow list (whitelist) and a deny list (blacklist) of client
+// addresses, set for the whole config or for one listener, route, service
+// or role. Of the lists that apply, the most specific decides: an address
+// its deny holds is refused, one its allow holds served, and, when its allow
+// has entries, any other address refused; otherwise it has no say and the
+// next one, out to the global access, decides. An address none has a say on
+// is served.
+type Access struct {
+	Allow      []string `json:"allow,omitempty" doc:"IP addresses and CIDR prefixes served, as \"10.0.0.0/8\" or \"2001:db8::/32\": with any entry here or in allow_files, every address neither holds is refused, unless deny refuses it first."`
+	Deny       []string `json:"deny,omitempty" doc:"IP addresses and CIDR prefixes refused, whatever allow holds."`
+	AllowFiles []string `json:"allow_files,omitempty" doc:"Files of more allow entries: an address or prefix on each line, with blank lines and what follows # or ; left out, as the lists published for firewalls are written. Read when the config is applied, and applied again when one changes; each at most 64 MiB."`
+	DenyFiles  []string `json:"deny_files,omitempty" doc:"Files of more deny entries, written as allow_files."`
+
+	At Value `json:"-" fit:"self"`
 }
 
 // ProxyProtocol is what a listener takes PROXY protocol headers from.
@@ -654,6 +673,7 @@ type Route struct {
 	Listeners  []string    `json:"listeners,omitempty" doc:"The names of the listeners the route serves; every listener when left out."`
 	Priority   int         `json:"priority,omitempty" doc:"Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one with the most other matchers set (method, header, query, remote_ip, path_regexp, expr), then the one written first."`
 	Match      *Match      `json:"match,omitempty" doc:"What a request must match; every request when left out."`
+	Access     *Access     `json:"access,omitempty" doc:"The client addresses the route serves, deciding before its listener's access and the global one: a request it refuses is answered 403. The address is the connection's, or the one its PROXY header names, not X-Forwarded-For's."`
 	Middleware []ModuleRef `json:"middleware,omitempty" module:"http.middleware" doc:"Middleware a request passes through, in order, before the handler."`
 	Handler    ModuleRef   `json:"handler" fit:"required" module:"http.handlers" doc:"What answers the request."`
 

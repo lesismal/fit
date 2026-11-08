@@ -27,9 +27,10 @@ var dirFiles = []dirFile{
 		"workers, buffers, the backpressure of one connection). An upstream's own timeouts are",
 		"in its site's file.",
 	}},
-	{name: "10-listeners", fields: []string{"listeners"}, about: []string{
+	{name: "10-listeners", fields: []string{"access", "listeners"}, about: []string{
 		"The listeners every site shares: addresses, protocols (HTTP/1.1, h2c, h2, h3, tcp,",
-		"udp, socks), TLS, client certificates and the PROXY protocol.",
+		"udp, socks), TLS, client certificates and the PROXY protocol; and the global access,",
+		"the client addresses fit serves, which each listener, route and service may override.",
 	}},
 	{name: "20-tls", fields: []string{"auto_https", "acme"}, about: []string{
 		"Certificates: HTTPS by default, and how ACME obtains and renews certificates.",

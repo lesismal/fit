@@ -6,6 +6,8 @@ import (
 	"time"
 
 	fib "github.com/lesismal/fib"
+
+	"github.com/lesismal/fit/access"
 )
 
 // OpeningTimeout bounds how long a connection may take to send what a
@@ -22,6 +24,35 @@ type Entry struct {
 	// wild holds the services of names "*.d", by d.
 	wild    map[string]*Service
 	trusted Trusted
+	// check has each connection's address checked, once its service is
+	// known, against its service's policy in policies, or against access
+	// when it goes to none; the listener checked it at accept otherwise.
+	check    bool
+	access   *access.Policy
+	policies map[*Service]*access.Policy
+}
+
+// SetAccess sets the policies CheckAccess has the entry check: listener's,
+// for a connection no service takes, and each service's.
+func (e *Entry) SetAccess(listener *access.Policy, services map[*Service]*access.Policy) {
+	e.access, e.policies = listener, services
+}
+
+// CheckAccess has the entry check each connection's address, once its
+// PROXY header and its ClientHello are read as the entry needs them, against
+// the policy of the service that takes it.
+func (e *Entry) CheckAccess() { e.check = true }
+
+// allows reports whether c, going to s, or to none when s is nil, may.
+func (e *Entry) allows(c *fib.Connection, s *Service) bool {
+	if !e.check {
+		return true
+	}
+	p := e.access
+	if s != nil {
+		p = e.policies[s]
+	}
+	return p.Allows(c.RemoteAddrPort().Addr())
 }
 
 // NewEntry returns an entry that takes PROXY headers from trusted, or from
@@ -86,7 +117,7 @@ func (e *Entry) Open(c *fib.Connection, release func(), term fib.Handler) {
 		return
 	}
 	if !proxy && (!e.routes() || c.IsUDP()) {
-		if e.fallback == nil {
+		if e.fallback == nil || !e.allows(c, e.fallback) {
 			_ = c.Close()
 			release()
 			return
@@ -155,7 +186,7 @@ func (o *opening) data(c *fib.Connection, data []byte) {
 	if s == nil {
 		s = o.e.fallback
 	}
-	if s == nil {
+	if s == nil || !o.e.allows(c, s) {
 		_ = c.Close()
 		return
 	}

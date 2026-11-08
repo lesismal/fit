@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	stdhttp "net/http"
 	"slices"
 	"strconv"
@@ -36,6 +37,7 @@ import (
 	"github.com/lesismal/fib/mux"
 	fibtls "github.com/lesismal/fib/tls"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/internal/fibconf"
@@ -94,6 +96,19 @@ type binding struct {
 	// UDP one; udpAddr is HTTP/3's.
 	addr    net.Addr
 	udpAddr net.Addr
+	// accept is the policy its sockets ask about each TCP connection and
+	// each new UDP peer as fib accepts them, and socks the one its socks
+	// checks clients against: the current graph's listener's AcceptAccess
+	// and SOCKSAccess, taken on when a reload keeps the binding.
+	accept      access.Gate
+	socksAccess access.Gate
+	filter      func(netip.AddrPort) bool
+}
+
+// setAccess has b go by l's policies.
+func (b *binding) setAccess(l *runtime.Listener) {
+	b.accept.Set(l.AcceptAccess)
+	b.socksAccess.Set(l.SOCKSAccess)
 }
 
 // certs is a listener's tlsmgr.Manager, as a binding holds it.
@@ -225,6 +240,8 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
 		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted, socks: l.SOCKS.Key(),
 		mptcp: l.MPTCP}
+	b.setAccess(l)
+	b.filter = b.accept.Allows
 	var tlsConfig *tls.Config
 	if l.Certificates != nil {
 		b.certs.Store(&certs{l.Certificates})
@@ -247,7 +264,7 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 		}
 		h := &l4Listener{dispatcher: dispatcher{rt: s.rt, name: l.Name}}
 		var err error
-		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h, MultipathTCP: l.MPTCP}); err != nil {
+		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h, MultipathTCP: l.MPTCP, Filter: b.filter}); err != nil {
 			return fail(err)
 		}
 		return b, nil
@@ -261,7 +278,7 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 		}
 		h := &l4Listener{dispatcher: dispatcher{rt: s.rt, name: l.Name}}
 		var err error
-		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: l.Address, Handler: h}); err != nil {
+		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: l.Address, Handler: h, Filter: b.filter}); err != nil {
 			return fail(err)
 		}
 		b.addr = b.udpAddr
@@ -297,16 +314,16 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 		}
 		switch {
 		case config.Sniffs(l.Protocols):
-			h = s.sniff(l, h, tlsConfig != nil)
+			h = s.sniff(l, b, h, tlsConfig != nil)
 		case l.SOCKS != nil:
-			h = l4.NewSOCKS(l.SOCKS)
+			h = l4.NewSOCKS(l.SOCKS, &b.socksAccess)
 		}
 		if len(l.ProxyTrusted) > 0 {
 			// The PROXY header comes first, before TLS.
 			h = l4.AcceptProxy(l.ProxyTrusted, h)
 		}
 		var err error
-		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h, MultipathTCP: l.MPTCP}); err != nil {
+		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h, MultipathTCP: l.MPTCP, Filter: b.filter}); err != nil {
 			return fail(err)
 		}
 		// HTTP/3 goes on the port TCP got, which is the one Alt-Svc names.
@@ -328,7 +345,7 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 		}
 		h := http3.NewHandlerWithConfig(http3Config(l, tlsConfig), &dispatcher{rt: s.rt, name: l.Name})
 		var err error
-		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: udpAddress, Handler: h}); err != nil {
+		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: udpAddress, Handler: h, Filter: b.filter}); err != nil {
 			return fail(taken(err))
 		}
 		if tcpDispatcher != nil {
@@ -349,7 +366,7 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 // SOCKS greeting to SOCKS; an HTTP request, on a listener in the clear, to
 // HTTP; and the rest to the service without server_names, or it is closed.
 // web is the listener's HTTP handler, with its TLS when tls says it has.
-func (s *Server) sniff(l *runtime.Listener, web fib.Handler, tls bool) fib.Handler {
+func (s *Server) sniff(l *runtime.Listener, b *binding, web fib.Handler, tls bool) fib.Handler {
 	var routes []mux.Route
 	var fallback fib.Handler
 	switch {
@@ -365,7 +382,7 @@ func (s *Server) sniff(l *runtime.Listener, web fib.Handler, tls bool) fib.Handl
 		routes = append(routes, mux.Route{Match: mux.TLS(), Handler: web})
 	}
 	if l.SOCKS != nil {
-		routes = append(routes, mux.Route{Match: mux.SOCKS(), Handler: l4.NewSOCKS(l.SOCKS)})
+		routes = append(routes, mux.Route{Match: mux.SOCKS(), Handler: l4.NewSOCKS(l.SOCKS, &b.socksAccess)})
 	}
 	if web != nil && !tls {
 		h1, h2c := slices.Contains(l.Protocols, config.ProtocolHTTP1), slices.Contains(l.Protocols, config.ProtocolH2C)
@@ -545,8 +562,11 @@ func (s *Server) Reload(g *runtime.Graph) (added, removed []Addr, err error) {
 	}
 	s.rt.Swap(g)
 	for i, l := range g.Listeners {
-		if l.Certificates != nil && !slices.Contains(fresh, next[i]) {
-			next[i].certs.Store(&certs{l.Certificates})
+		if !slices.Contains(fresh, next[i]) {
+			if l.Certificates != nil {
+				next[i].certs.Store(&certs{l.Certificates})
+			}
+			next[i].setAccess(l)
 		}
 	}
 	s.bound = next
@@ -777,7 +797,18 @@ func (d *dispatcher) announceH3() {
 
 func (d *dispatcher) setAltSvc(value string) { d.altSvc.Store(&[]string{value}) }
 
+// remoteIP returns the address of a request's RemoteAddr, which fib writes
+// as host:port; an invalid one when it is not.
+func remoteIP(remoteAddr string) netip.Addr {
+	ap, err := netip.ParseAddrPort(remoteAddr)
+	if err != nil {
+		return netip.Addr{}
+	}
+	return ap.Addr()
+}
+
 var (
+	forbidden      = []byte("403 forbidden\n")
 	notFound       = []byte("404 page not found\n")
 	badRequestPath = []byte("400 bad request path\n")
 )
@@ -823,7 +854,8 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	var route *runtime.Route
 	var metrics *observe.RequestMetrics
 	redirect := 0
-	if l := d.listener(g); l != nil {
+	l := d.listener(g)
+	if l != nil {
 		redirect = l.RedirectHTTPS
 		if !badPath {
 			route, _ = l.Router.Match(c.Request)
@@ -853,6 +885,8 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		}
 	}
 	switch {
+	case l != nil && l.CheckRequests && !l.RequestAccess(route).Allows(remoteIP(c.Request.RemoteAddr)):
+		_ = c.Respond(stdhttp.StatusForbidden, "text/plain; charset=utf-8", forbidden)
 	case route != nil:
 		route.Handler.ServeHTTP(c)
 	case badPath:

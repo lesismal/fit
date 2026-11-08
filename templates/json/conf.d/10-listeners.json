@@ -11,7 +11,8 @@
 //
 // This file:
 // The listeners every site shares: addresses, protocols (HTTP/1.1, h2c, h2, h3, tcp,
-// udp, socks), TLS, client certificates and the PROXY protocol.
+// udp, socks), TLS, client certificates and the PROXY protocol; and the global access,
+// the client addresses fit serves, which each listener, route and service may override.
 {
   // The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by
   // default makes them from the routes' host names; see auto_https.
@@ -134,6 +135,34 @@
         // "idle_timeout": "5m",
       // },
 
+      // The client addresses the listener serves, deciding before the global access: a connection it
+      // refuses is closed as soon as it is accepted, or, for HTTP/3 and udp, its datagrams dropped,
+      // unless a route or service of the listener sets an access of its own, which then decides
+      // first, for its requests or connections. With proxy_protocol the address is the one the
+      // header names.
+      // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["*.example.com", "10.1.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["169.254.169.254"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
       // Take a PROXY protocol header, of version 1 or 2, at the start of each connection from a
       // trusted address, and serve the connection as from the client it names. For listeners of tcp
       // and of HTTP over TCP; with tls the header comes before TLS. HTTP/3 takes none.
@@ -147,4 +176,31 @@
       // },
     },
   ],
+
+  // The client addresses fit serves, by allow (whitelist) and deny (blacklist) lists, for every
+  // listener, route, service and role that sets no access of its own that decides: a more
+  // specific one, set on a listener, route, service or role, decides first, and this one only
+  // for an address that one has no say on. Every address is served when left out.
+  // object.
+  // "access": {
+    // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+    // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+    // // first.
+    // // list of string.
+    // "allow": ["*.example.com", "10.1.0.0/16"],
+
+    // // IP addresses and CIDR prefixes refused, whatever allow holds.
+    // // list of string.
+    // "deny": ["169.254.169.254"],
+
+    // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+    // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+    // // config is applied, and applied again when one changes; each at most 64 MiB.
+    // // list of string.
+    // "allow_files": [],
+
+    // // Files of more deny entries, written as allow_files.
+    // // list of string.
+    // "deny_files": [],
+  // },
 }

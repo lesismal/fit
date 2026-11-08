@@ -48,7 +48,9 @@ func (c *Config) Validate() Errors {
 			listeners[l.Name] = true
 		}
 	}
+	c.Access.check(add)
 	for _, l := range c.Listeners {
+		l.Access.check(add)
 		switch {
 		case !namePattern.MatchString(l.Name):
 			add(l.At.Field("name"), "%q is not a valid name: use letters, digits, '_', '.' and '-', starting with a letter or digit", l.Name)
@@ -167,6 +169,7 @@ func (c *Config) Validate() Errors {
 	}
 	routes := map[string]bool{}
 	for _, r := range c.Routes {
+		r.Access.check(add)
 		if r.Name != "" {
 			switch {
 			case !namePattern.MatchString(r.Name):
@@ -316,6 +319,7 @@ func (c *Config) Validate() Errors {
 	fallback := map[string]string{}
 	byName := map[[2]string]string{}
 	for _, sv := range c.Services {
+		sv.Access.check(add)
 		switch {
 		case !namePattern.MatchString(sv.Name):
 			add(sv.At.Field("name"), "%q is not a valid name: use letters, digits, '_', '.' and '-', starting with a letter or digit", sv.Name)
@@ -622,6 +626,34 @@ func checkStore(st *Store, add func(Value, string, ...any)) {
 // clear.
 // nodeIDPattern is what admin.node_id may be.
 var nodeIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// check checks a's entries are addresses and prefixes; its files are read,
+// and checked, when the config is compiled.
+func (a *Access) check(add func(Value, string, ...any)) {
+	if a == nil {
+		return
+	}
+	for _, f := range []struct {
+		name    string
+		entries []string
+	}{{"allow", a.Allow}, {"deny", a.Deny}} {
+		for i, s := range f.entries {
+			if _, err := router.ParsePrefix(strings.TrimSpace(s)); err != nil {
+				add(a.At.Field(f.name).Index(i), "%v", err)
+			}
+		}
+	}
+	for _, f := range []struct {
+		name  string
+		paths []string
+	}{{"allow_files", a.AllowFiles}, {"deny_files", a.DenyFiles}} {
+		for i, p := range f.paths {
+			if strings.TrimSpace(p) == "" {
+				add(a.At.Field(f.name).Index(i), "the path is empty")
+			}
+		}
+	}
+}
 
 func checkAdminAddress(a *Admin, add func(Value, string, ...any)) {
 	if network, address := a.Network(); network == "unix" {
