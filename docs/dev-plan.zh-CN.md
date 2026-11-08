@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I196。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I209。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -350,6 +350,20 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I194 | 同步的文档与示例 | I190 | todo |
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
+| **BitTorrent** | | | |
+| I196 | fib 为 BitTorrent 客户端补 A75–A79：存储与哈希不上 fib worker、快速续传、运行时可改的限制、按地址拒绝 peer、客户端跑在调用者的引擎上 | — | doing |
+| I197 | `bittorrent.client` 角色：配置、跑在共享引擎上、`data_dir` 下的状态文件、恢复与 reload（决定 037） | I196 | todo |
+| I198 | 添加任务（磁力链、文件、URL、`watch_dir`）、分类与媒体库重扫、排队、磁盘检查 | I197 | todo |
+| I199 | `alt_speed` 调度、单任务限制、角色的 `access`、`access` 读 `.p2p` 和 `.dat` 黑名单（所有模块可用） | I197 | todo |
+| I200 | `bt_stream`：经 HTTP Range 边下边播，允许按磁力链临时添加 | I197 | todo |
+| I201 | `bittorrent.tracker` 角色：HTTP 的 `bt_tracker`、UDP、私有 passkey、白名单、统计 | I196 | todo |
+| I202 | 把目录发布成带 web seed 的 hybrid 种子，跟随磁盘变化 | I197 | todo |
+| I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | todo |
+| I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | todo |
+| I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | todo |
+| I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
+| I207 | （第二阶段）集群共享的 tracker Store | I201 | todo |
+| I208 | （第二阶段）RSS 自动下载 | I198 | todo |
 
 ## M0 基础
 
@@ -3915,3 +3929,108 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
    Elasticsearch、MongoDB 和 Kafka 不需要 schema。
 10. **顺序：** 先做核心、变换、WASM 和文件（I163–I167），然后是基于 HTTP 的系统（I168–I171，借助 fib 的客户端成本低），然后是
     数据库（I172–I183），然后是 Kafka、Redis 和 S3，最后是运维。同意，还是先做数据库？
+
+## BitTorrent：下载与做种、tracker、发布
+
+2026-11-08 规划，[决定 037](decisions/037-bittorrent.zh-CN.md)。fit 在 fib 的 `bittorrent` 包上提供 BitTorrent：下载和做种的客户端角色、
+边下边播的处理器、tracker 角色，以及把目录发布成种子。fib 的客户端要先补 A75–A79（I196）：它现在在 fib worker 上做磁盘读写和哈希。
+第一阶段是 I196–I205；第二阶段（I206–I208）是集群、集群共享的 tracker Store 和 RSS。I197 完成后，I198–I202 可以并行，每项一个 worktree 子代理。
+
+原则，按约束先后：
+
+- **不阻塞 worker**（规则 1）：存储、哈希、`Reader` 的读、生成种子、状态文件都在有界 pool 上；pool 满时暂停读该 peer。
+- **一切有界**（规则 11）：任务数、连接数（总数、单任务、半开）、元数据与 .torrent 大小、URL 下载、`watch_dir` 单次扫描、事件队列、
+  `bt_stream` 的流和临时添加的任务，以及下载可占的磁盘。
+- **状态在 `data_dir`，重启不重新哈希**（A76）；reload 当场改限制（A77），只有 `listen` 或 DHT、uTP 开关变化才重建客户端。
+- **一个端口，在 fit 的共享引擎上**（A79），受配置的 `access`（A78）和 `limits` 约束。
+
+### I196 fib 为 BitTorrent 客户端补 A75–A79
+
+- **为什么**：fib 的客户端在读取 peer 消息的 fib worker 上写块、读上传数据、校验 piece；每次启动都重新哈希全部数据；限制在
+  `NewClient` 时固定；不能按地址拒绝 peer；总是自建引擎。
+- **做什么**：在 fib 中做 A75（存储与哈希放到有界 pool，满时 `HoldReads`）、A76（`Torrent.ResumeData`、`AddOptions.Resume`）、
+  A77（`Client.SetLimits`、`Torrent.SetLimits`）、A78（`Config.Filter`、`Client.Refilter`）、A79（客户端跑在调用者的引擎上）；
+  文档和待审决定写在 fib 的 `docs/bittorrent*.md`；fit 跟进该 commit。
+- **完成标准**：测试表明慢存储不会卡住同引擎的其他连接；带续传数据重启后不为校验读数据就完成；改限制不断开 peer；被拒地址不能经
+  TCP 或 uTP 连入，也不会被拨号；两个客户端共用一个引擎，关掉一个另一个不受影响；fib 的 CI、race 与 Linux 测试通过。
+- **涉及**：fib 的 `bittorrent`、`bittorrent/peer`、`bittorrent/utp`、`bittorrent/dht`，可能还有 `core`；fit 的 `go.mod`、
+  `docs/fib-api-requests*.md`。
+
+### I197 `bittorrent.client` 角色
+
+- **为什么**：其他各项都建立在它上面。
+- **做什么**：fit 的 `bittorrent` 包，注册 `bittorrent.client` 角色；配置（`listen`、`data_dir`、`download_dir`、`encryption`、`dht`、
+  `pex`、`utp`、`lsd`、`limits`、`access`、`console`），默认值按决定 037；客户端跑在共享引擎上；状态文件（任务、分类、优先级、
+  .torrent、续传数据；临时文件、fsync、rename，至多每几秒一次以及停止时）；启动时恢复；reload 原地生效；schema、参考文档、`schema-zh.js`。
+- **完成标准**：添加的任务在重启后仍在，且不经校验就续传；reload 改限制保留 peer；改 `listen` 保留任务；慢 peer、断连、磁盘错误测试；
+  中英文文档。
+- **涉及**：`bittorrent`、`app`、`config`、`schema`、`docs`。
+
+### I198 添加任务、分类与排队
+
+- **做什么**：磁力链、.torrent 上传、.torrent URL（fit 的 HTTP 客户端，限大小）、`watch_dir`（.torrent 和 .magnet 文件，添加后移走）；
+  分类有目录、速率、做种限制，可选绑定 `media_library`，完成后重扫；`max_active_downloads` 与 `max_active_seeds` 加排队；
+  下载前和下载中检查剩余空间（medialib 的 diskfree），不足时暂停并报错；路径限制在分类目录内。
+- **完成标准**：每种添加方式都有测试，包括错误和超大输入；下载到库根目录的完成任务出现在其目录中；一个任务完成时队列启动下一个。
+- **涉及**：`bittorrent`、`medialib`。
+
+### I199 速率调度、单任务限制与黑名单
+
+- **做什么**：`alt_speed` 按周调度；分类和单任务限制（A77）；角色上的 `access` 经 A78 生效，策略变化后调用 `Client.Refilter`；
+  `access` 的名单文件也读 eMule 的 `.p2p` 和 `.dat`，按内容识别格式，所有模块可用。
+- **完成标准**：用假时钟测试调度切换速率；拒绝名单会关闭已连接的 peer；`.p2p` 和 `.dat` 的解析（范围、注释、级别、坏行）在 `access` 的测试中覆盖。
+- **涉及**：`bittorrent`、`access`、`config`、`docs`。
+
+### I200 `bt_stream`：边下边播
+
+- **做什么**：路由处理器，按 info hash 加文件序号或路径提供任务中的文件，支持 Range；请求的区段经 fib 的 `Reader` 在有界 pool 上读取，
+  因此优先下载；`max_streams`、读超时、预读上限；`media_auth`；允许按磁力链临时添加，有数量与磁盘上限，最后一个流结束后过期。
+- **完成标准**：对仍在下载的文件发出浏览器式的 Range 请求，在其 piece 到达后得到回应；慢读者、断连、流数已满都有测试。
+- **涉及**：`bittorrent`、`handler`、`mediaauth`。
+
+### I201 `bittorrent.tracker` 角色
+
+- **做什么**：在 fib 的 `tracker.Server` 上提供 `bt_tracker`（HTTP announce 与 scrape）和角色的 UDP `listen`；公开或私有（passkey 来自
+  `media_auth`），info hash 白名单（内联或文件，监视变化）；统计。
+- **完成标准**：libtorrent 和 anacrolix 经 HTTP 与 UDP 向它 announce；私有 tracker 拒绝未知 passkey 和 info hash；上限有测试。
+- **涉及**：`bittorrent`、`handler`、`mediaauth`。
+
+### I202 把目录发布成种子
+
+- **做什么**：`publish` 块：把目录生成 hybrid 种子（每个文件一个，或整个目录一个）并做种；`.torrent` 和磁力链经路由给出；web seed 指向
+  fit 的静态文件；磁盘变化时重新生成，与静态文件跟随磁盘的方式相同；哈希在有界 pool 上。
+- **完成标准**：客户端只从 fit 的做种、或只从 web seed 都能下载发布的文件；文件变化后生成新种子，旧种子停止。
+- **涉及**：`bittorrent`、`handler`。
+
+### I203 Admin API、事件、`fit bt`、指标
+
+- **做什么**：`/bittorrent/torrents`（列表、添加、上传、暂停、继续、删除、重新校验、优先级、限制）及其文件、peer、tracker，
+  `/bittorrent/tracker/stats`，事件的 SSE 流；`fit bt add|ls|info|pause|resume|rm|limit`；按分类和状态的指标；事件写入 fit 日志。
+- **涉及**：`bittorrent`、`admin`、`cli`、`observe`。
+
+### I204 工作台的 BitTorrent 页面
+
+- **做什么**：任务列表（速率、进度、ETA、分享率），任务的文件、peer、tracker 和 piece，添加对话框，tracker 页，发布页；
+  schema 描述补到 `schema-zh.js`；AI 助手函数（列出、添加、暂停），遵守其审批规则。
+- **涉及**：`app/workbench`、`assistant`。
+
+### I205 互通、故障测试、基准与文档
+
+- **做什么**：fit 的客户端和 tracker 在容器里与 libtorrent、anacrolix 互通（沿用 fib 的互通方式）；负载下的磁盘满、重启和 reload；
+  吞吐与 CPU 只在基准主机上测；`docs/bittorrent*.md`、参考文档、fit-examples 中的示例。
+- **涉及**：`test`、`bench`、`docs`、fit-examples。
+
+### I206 （第二阶段）集群与 BitTorrent 分发
+
+- **做什么**：集群汇总各成员的任务和速率；经私有种子加直连 peer，把大文件（llm 节点的模型、发布包）分发到一组成员，与 rollout 配合。
+- **涉及**：`cluster`、`bittorrent`、`app/workbench`。
+
+### I207 （第二阶段）集群共享的 tracker Store
+
+- **做什么**：基于 fit 共享存储（redis、etcd）的 `tracker.Store`，让多个成员上的 tracker 如同一个。
+- **涉及**：`bittorrent`、fit 的共享存储。
+
+### I208 （第二阶段）RSS 自动下载
+
+- **做什么**：按计划轮询订阅源，用规则（模式、分类、大小上限、剧集去重）添加任务；订阅源、条目和历史都有上限。
+- **涉及**：`bittorrent`。

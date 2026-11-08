@@ -79,6 +79,11 @@
 | A72 | 分片的各轨道从其关键帧开始 | 已完成，fib `e4e10c0` | 11 | I134、I136 |
 | A73 | 绑定在 accept 时按地址拒绝对端 | 已完成，fib `8de0a75` | 11、12 | I195 |
 | A74 | `webrtc.MuxConfig.Filter`：在对端的第一个数据报就拒绝它的 Mux | 已完成，fib `f957983` | 11 | I195 |
+| A75 | BitTorrent 客户端的存储与哈希不上 fib worker | 进行中 | 1、8、11 | I196 |
+| A76 | BitTorrent 快速续传数据 | 进行中 | — | I196、I197 |
+| A77 | BitTorrent 运行时可改的限制与单任务限制 | 进行中 | 11 | I196、I199 |
+| A78 | `bittorrent.Config.Filter`：按地址拒绝 peer | 进行中 | 11 | I196、I199 |
+| A79 | BitTorrent 客户端跑在调用者的引擎上 | 进行中 | 11 | I196、I197 |
 
 ## 证据
 
@@ -1866,3 +1871,59 @@ Apply 设置，`webrtc.media` 也有自己的 `access`。
 fib 有自己的测试覆盖它。`streaming` 的 WebRTC 端口和 `webrtc.media` 传入各自的 gate，`webrtc.media` 也有了 `access`
 （`TestMediaAccess`，以及 `streaming` 的 `TestAccess` 中的 WebRTC 端口）。
 
+## A75：BitTorrent 客户端绝不在 worker 上读写存储或校验 piece
+
+**状态。** 2026-11-08 由 I196（[决定 037](decisions/037-bittorrent.zh-CN.md)）提出；由 fit 的会话按[规则 15](rules.zh-CN.md#七fib-满足不了时)在 fib 中实现。
+
+**问题。** `bittorrent/peer.Server.OnData` 跑在 fib worker 上，调用客户端的 `OnMessage`，后者在返回前把每个块写入存储（`writeData`），
+一个 piece 收齐后对整块哈希（`verifyPiece`，SHA-1 或 SHA-256，最多数 MiB），并读出 peer 请求的数据（上传泵中的 `readData`）。违反规则 1。
+
+**建议的 API。** 客户端自己的有界 pool 负责存储与哈希（`Config.DiskWorkers`，以及排队字节数上限）；块从读缓冲区复制出来再排队，
+达到上限时暂停读该 peer（`Connection.HoldReads`）；上传在 pool 上读取并从那里发送。
+
+**fit 如何使用。** 经由客户端；fit 还可以按角色配置设定 pool 大小。
+
+## A76：快速续传数据
+
+**状态。** 2026-11-08 由 I196 提出；由 fit 的会话在 fib 中实现。
+
+**问题。** 添加时存储里已有数据的任务要整体哈希校验，做种数 TB 的服务器每次重启都要全部重读。
+
+**建议的 API。** `Torrent.ResumeData()`：带版本的数据，包含已校验的 piece 以及每个文件的大小和修改时间；`AddOptions.Resume`：
+文件仍匹配的 piece 不经校验直接算作已有，其余校验；无效或属于其他任务的数据退回整体校验。
+
+**fit 如何使用。** `bittorrent.client` 角色把每个任务的续传数据存在 `data_dir` 下的状态文件里，启动时传回（I197）。
+
+## A77：运行时可改的限制，以及单任务限制
+
+**状态。** 2026-11-08 由 I196 提出；由 fit 的会话在 fib 中实现。
+
+**问题。** `bittorrent.Config` 的速率、连接上限、上传槽和做种限制只在 `NewClient` 时读一次；没有针对单个任务的限制。fit 在线 reload
+配置，并按时段（`alt_speed`）、分类和任务切换速率。
+
+**建议的 API。** `Client.SetLimits` 与 `Limits`；`Torrent.SetLimits`、`Limits` 与 `AddOptions.Limits`，零值继承客户端的；
+调低连接上限时关闭最没用的 peer。
+
+**fit 如何使用。** reload、调度切换和 Admin API 设置它们，不断开 peer（I197、I199、I203）。
+
+## A78：按地址拒绝 BitTorrent peer
+
+**状态。** 2026-11-08 由 I196 提出；由 fit 的会话在 fib 中实现。
+
+**问题。** fit 的 `access` 名单（I195）以及 I199 加入的 `.p2p`、`.dat` 黑名单无法作用于客户端：它的 TCP 绑定、uTP、DHT，以及它从
+tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
+
+**建议的 API。** `Config.Filter func(peer netip.AddrPort) bool`，含义与 `fib.Binding.Filter` 相同，peer 每种进入或被拨号的途径都询问它；
+`Client.Refilter` 关闭它现在拒绝的已打开连接。
+
+**fit 如何使用。** `Filter: gate.Allows`，应用的配置改变策略后调用 `Refilter`（I199）。
+
+## A79：BitTorrent 客户端跑在调用者的引擎上
+
+**状态。** 2026-11-08 由 I196 提出（用户为该角色选择了 fit 的共享引擎）；由 fit 的会话在 fib 中实现。
+
+**问题。** `bittorrent.NewClient` 总是按 `Config.Engine` 自建并运行一个引擎。
+
+**建议的 API。** 可以交给它一个正在运行的引擎；它把自己的 TCP 和 UDP 绑定加到上面，`Close` 时只移除自己的绑定和连接。
+
+**fit 如何使用。** `bittorrent.client` 角色跑在 fit 的引擎上，受其 `limits` 约束（I197）。
