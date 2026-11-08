@@ -7228,6 +7228,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "mysql"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.mysql"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "redis"
               }
             }
@@ -7298,6 +7314,7 @@
             "file",
             "http",
             "memory",
+            "mysql",
             "redis",
             "s3",
             "stdout",
@@ -7636,6 +7653,94 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.sinks.mysql": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:3306",
+          "description": "The server's host and port: MySQL 5.7 or later, MariaDB 10.11 or later, or TiDB. 127.0.0.1:3306 when left out.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs tls and key_file.",
+          "type": "string"
+        },
+        "database": {
+          "description": "The database of a table named without one.",
+          "type": "string"
+        },
+        "ddl": {
+          "default": "report",
+          "description": "What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes it, which with on_error stop stops the pipeline before it, for a person to change the table. report when left out.",
+          "enum": [
+            "report",
+            "stop"
+          ],
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_transaction_bytes": {
+          "description": "The most bytes of values one of the server's transactions holds: past it, a transaction is committed at the next record that ends a source transaction, and a source transaction larger than this alone is committed in parts, with a warning. Against TiDB, whose transactions are bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and MariaDB.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads; none when left out.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; address's host when left out.",
+          "type": "string"
+        },
+        "server_public_key_file": {
+          "description": "A PEM file of the server's RSA public key, with which caching_sha2_password and sha256_password send the password without TLS. Without it and without TLS, a user of those plugins logs in only through the server's cache.",
+          "type": "string"
+        },
+        "table": {
+          "default": "{namespace}",
+          "description": "The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, with a primary or unique key on the record's key columns, which the upserts rely on. {namespace} when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long connecting, and each wait for the server in a statement, may take. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, required: a server that does not offer it is refused, never spoken to in plain text. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "tls_rsa": {
+          "description": "Offer TLS's RSA key exchange besides the default suites, for MySQL 5.7's image, which offers no other that Go has; needs tls. false when left out.",
+          "type": "boolean"
+        },
+        "transactions": {
+          "default": "source",
+          "description": "How records are grouped in the server's transactions: source, each source transaction as one, and the records without one (a snapshot's) of a batch together; batch, a batch's records up to the last that ends a source transaction in one, several source transactions together, and those after it, a part of one source transaction, in one held open into the next batch. Either way a source transaction is never committed in part, unless it is larger than max_transaction_bytes. source when left out.",
+          "enum": [
+            "source",
+            "batch"
+          ],
+          "type": "string"
+        },
+        "username": {
+          "description": "The user to log in as, which needs INSERT, UPDATE and DELETE on the tables written.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ],
       "type": "object"
     },
     "sync.sinks.redis": {

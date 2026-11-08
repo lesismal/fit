@@ -286,6 +286,20 @@ The plan's I172 section lists them all; these change the record above.
    on fib's asynchronous client.
 2. **TLS to a database is required when configured, never preferred**, and verified; a server that
    does not offer it is refused rather than spoken to in plain text.
+## Decisions made while building I176 (pending review)
+
+The plan's I176 section lists them all; these change the record above.
+
+1. **A sink may hold a source transaction open across batches**, acknowledging its records while
+   the server's transaction is open: the checkpoint never passes a transaction's end before every
+   sink has its last record, so a crash replays it whole. The sink keeps what the open transaction
+   holds and writes it again on a new connection; one that groups several source transactions
+   commits at a batch's last record that ends one, so that what it holds open is never a whole
+   source transaction the watermark could pass.
+2. **A record refused for good inside a source transaction** is failed alone, what came before it
+   committed: the transaction is then in the sink in part, until `on_error: "stop"` replays it, or
+   for good with `skip` and `dead_letter`.
+
 ## Decisions made while building I177 (pending review)
 
 The plan's I177 section lists them all; these change the record above.

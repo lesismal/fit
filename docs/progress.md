@@ -5851,6 +5851,43 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   `parsec` are not supported; MySQL 5.7's TLS needs the `TLS_RSA_*` suites named in the caller's
   `tls.Config`; no statement cache, compression or `COM_STMT_SEND_LONG_DATA`; the replica's
   commands are I174's.
+
+### I176 MySQL and TiDB as a sink — done
+
+- **Package `sync/mysql`** (`syncmysql`), the sink `mysql` on `sync/mysql/wire`: inserts, updates and
+  messages as `INSERT ... ON DUPLICATE KEY UPDATE`, deletes by the key's columns (row constructors for
+  a key of several), an update that changed its key deleting the old row first; each run of a batch's
+  records for one table and one set of columns one multi-row statement (`InsertRows`), deletes up to
+  1,000 keys a statement. `transactions: "source"` (each source transaction one of the server's, held
+  open across batches until its last record, and written again on a new connection should the old
+  one fail) or `"batch"` (several, committed at a batch's last record that ends one);
+  `max_transaction_bytes` (16 MiB against TiDB) commits a transaction past it, a source transaction
+  larger alone in parts. `ddl: "report"` or `"stop"`. A record the server refuses for good is found by
+  writing the statement's rows one at a time and fails alone, those before it committed; deadlocks,
+  lock waits, TiDB's conflicts and lost connections are retried. TiDB is told by its version: its
+  session allows explicit `AUTO_RANDOM` values. Every session writes times in UTC and with
+  `NO_AUTO_VALUE_ON_ZERO`. TLS required when set, `tls_rsa` for MySQL 5.7; the connection test
+  (`fitsync.Tester`) logs in and runs `SELECT 1`. Registered in `modules/standard`.
+- **Docs**: the schema and reference (chapter `sync_sinks_mysql.md`, the sinks' table), templates,
+  `schema-zh.js`, the configuration's sync row.
+- **Tests**: unit tests against a fake connection with transactions (statements undone whole, a
+  connection's close rolling back) and a fake server for the client's dial (98.1% of statements, no
+  containers): a stream with key changes converging across replays in batches of several sizes in
+  both modes, a source transaction across batches committed at its end, a broken connection while
+  one is open written again, refusals in a multi-row statement and alone, every record the sink
+  cannot write, DDL reported and stopped, TiDB's session and transactions split by size, failures at
+  every statement, composite keys, every value kind, the error classes, every param's check.
+  Interop (`test/sync/mysql_sink_test.go`): a mixed load in transactions through the runtime,
+  killed at random points and restarted from its checkpoint, then replayed whole, ends equal by
+  checksum to the expected rows on MySQL 5.7, 8.0 and 8.4, MariaDB 10.11 and 11 and TiDB v8.5.3, in
+  both modes; `test/sync/mysql.sh` (which now starts TiDB too) passed alone, with I172's tests,
+  creating and removing its containers. Not run on Linux nor in the full suite (the merge's).
+- **Differs from the plan**: the interop pipeline's source is a test load, not MySQL: I174's source
+  does not exist yet, so the MySQL-to-MySQL run is I174's. About 790 lines of code, 1,000 of unit
+  tests and 300 of interop; no I176b.
+- **Gaps**: the decisions in the plan's I176 section, pending review. `ddl: "stop"` stops the pipeline
+  only with `on_error: "stop"`; a source transaction past `max_transaction_bytes`, or one with a
+  record refused, is committed in part; no parallel writers for jobs.
 ### I177 A PostgreSQL client: connections, authentication and queries — done
 
 - **Package `sync/postgres/wire`** (`pgwire`), a blocking client on `net.Conn` and `crypto/tls`

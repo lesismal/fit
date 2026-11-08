@@ -7614,6 +7614,104 @@ upstreams:
               # # integer, 0 or more; default 100000.
               # max_records: 100000
 
+            # # Or mysql, with every one of its params:
+            # # Writes records to MySQL, MariaDB or TiDB: inserts, updates and messages as INSERT ... ON
+            # # DUPLICATE KEY UPDATE of the row, deletes as DELETE by the key's columns, each run of a
+            # # batch's records for one table and one set of columns a multi-row statement; each source
+            # # transaction is written as one of the server's (transactions: source), or several of them
+            # # together (transactions: batch), so that the table never holds half of one. Writing the same
+            # # records again leaves the same rows. DDL records are reported, or stop the pipeline (ddl:
+            # # stop).
+            # module: "mysql"
+            # params:
+              # # The server's host and port: MySQL 5.7 or later, MariaDB 10.11 or later, or TiDB.
+              # # 127.0.0.1:3306 when left out.
+              # # string; default "127.0.0.1:3306".
+              # address: "127.0.0.1:3306"
+
+              # # The user to log in as, which needs INSERT, UPDATE and DELETE on the tables written.
+              # # string; required.
+              # username: "fit"
+
+              # # The environment variable holding username's password, read when the pipeline loads; none
+              # # when left out.
+              # # string.
+              # password_env: ""
+
+              # # The database of a table named without one.
+              # # string.
+              # database: ""
+
+              # # Connect over TLS, required: a server that does not offer it is refused, never spoken to in
+              # # plain text. The server's certificate is checked against the system's roots or ca_file's; the
+              # # check cannot be turned off.
+              # # boolean.
+              # tls: true
+
+              # # A PEM file of the certificates the server's is checked against, in place of the system's
+              # # roots, for a CA of its own; needs tls.
+              # # string.
+              # ca_file: "/etc/fit/ca.pem"
+
+              # # A PEM file of a client certificate, and the chain after it, presented to a server that asks
+              # # for one; needs tls and key_file.
+              # # string.
+              # cert_file: "/etc/fit/example.com.pem"
+
+              # # The PEM file of cert_file's private key.
+              # # string.
+              # key_file: "/etc/fit/example.com.key"
+
+              # # The name the server's certificate must have, and the TLS server name sent; address's host
+              # # when left out.
+              # # string.
+              # server_name: ""
+
+              # # Offer TLS's RSA key exchange besides the default suites, for MySQL 5.7's image, which offers
+              # # no other that Go has; needs tls. false when left out.
+              # # boolean.
+              # tls_rsa: true
+
+              # # A PEM file of the server's RSA public key, with which caching_sha2_password and
+              # # sha256_password send the password without TLS. Without it and without TLS, a user of those
+              # # plugins logs in only through the server's cache.
+              # # string.
+              # server_public_key_file: ""
+
+              # # How long connecting, and each wait for the server in a statement, may take. 60s when left
+              # # out or 0.
+              # # duration, as "1.5s" or "2m"; default "60s".
+              # timeout: "60s"
+
+              # # The table a record goes to: text with {namespace}, the record's namespace; db.table names
+              # # the database too. The table is not made: it is the user's, with a primary or unique key on
+              # # the record's key columns, which the upserts rely on. {namespace} when left out.
+              # # string; default "{namespace}".
+              # table: "{namespace}"
+
+              # # How records are grouped in the server's transactions: source, each source transaction as
+              # # one, and the records without one (a snapshot's) of a batch together; batch, a batch's
+              # # records up to the last that ends a source transaction in one, several source transactions
+              # # together, and those after it, a part of one source transaction, in one held open into the
+              # # next batch. Either way a source transaction is never committed in part, unless it is larger
+              # # than max_transaction_bytes. source when left out.
+              # # one of: source, batch; default "source".
+              # transactions: "source"
+
+              # # What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes
+              # # it, which with on_error stop stops the pipeline before it, for a person to change the table.
+              # # report when left out.
+              # # one of: report, stop; default "report".
+              # ddl: "report"
+
+              # # The most bytes of values one of the server's transactions holds: past it, a transaction is
+              # # committed at the next record that ends a source transaction, and a source transaction larger
+              # # than this alone is committed in parts, with a warning. Against TiDB, whose transactions are
+              # # bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and
+              # # MariaDB.
+              # # integer, 0 or more.
+              # max_transaction_bytes: 0
+
             # # Or redis, with every one of its params:
             # # Writes records to Redis or Valkey, pipelined: with mode stream, each record an entry added
             # # to a stream named from its namespace with XADD, its fields the row's (form fields) or the
@@ -8464,6 +8562,104 @@ upstreams:
             # # left out or 0.
             # # integer, 0 or more; default 100000.
             # max_records: 100000
+
+          # # Or mysql, with every one of its params:
+          # # Writes records to MySQL, MariaDB or TiDB: inserts, updates and messages as INSERT ... ON
+          # # DUPLICATE KEY UPDATE of the row, deletes as DELETE by the key's columns, each run of a
+          # # batch's records for one table and one set of columns a multi-row statement; each source
+          # # transaction is written as one of the server's (transactions: source), or several of them
+          # # together (transactions: batch), so that the table never holds half of one. Writing the same
+          # # records again leaves the same rows. DDL records are reported, or stop the pipeline (ddl:
+          # # stop).
+          # module: "mysql"
+          # params:
+            # # The server's host and port: MySQL 5.7 or later, MariaDB 10.11 or later, or TiDB.
+            # # 127.0.0.1:3306 when left out.
+            # # string; default "127.0.0.1:3306".
+            # address: "127.0.0.1:3306"
+
+            # # The user to log in as, which needs INSERT, UPDATE and DELETE on the tables written.
+            # # string; required.
+            # username: "fit"
+
+            # # The environment variable holding username's password, read when the pipeline loads; none
+            # # when left out.
+            # # string.
+            # password_env: ""
+
+            # # The database of a table named without one.
+            # # string.
+            # database: ""
+
+            # # Connect over TLS, required: a server that does not offer it is refused, never spoken to in
+            # # plain text. The server's certificate is checked against the system's roots or ca_file's; the
+            # # check cannot be turned off.
+            # # boolean.
+            # tls: true
+
+            # # A PEM file of the certificates the server's is checked against, in place of the system's
+            # # roots, for a CA of its own; needs tls.
+            # # string.
+            # ca_file: "/etc/fit/ca.pem"
+
+            # # A PEM file of a client certificate, and the chain after it, presented to a server that asks
+            # # for one; needs tls and key_file.
+            # # string.
+            # cert_file: "/etc/fit/example.com.pem"
+
+            # # The PEM file of cert_file's private key.
+            # # string.
+            # key_file: "/etc/fit/example.com.key"
+
+            # # The name the server's certificate must have, and the TLS server name sent; address's host
+            # # when left out.
+            # # string.
+            # server_name: ""
+
+            # # Offer TLS's RSA key exchange besides the default suites, for MySQL 5.7's image, which offers
+            # # no other that Go has; needs tls. false when left out.
+            # # boolean.
+            # tls_rsa: true
+
+            # # A PEM file of the server's RSA public key, with which caching_sha2_password and
+            # # sha256_password send the password without TLS. Without it and without TLS, a user of those
+            # # plugins logs in only through the server's cache.
+            # # string.
+            # server_public_key_file: ""
+
+            # # How long connecting, and each wait for the server in a statement, may take. 60s when left
+            # # out or 0.
+            # # duration, as "1.5s" or "2m"; default "60s".
+            # timeout: "60s"
+
+            # # The table a record goes to: text with {namespace}, the record's namespace; db.table names
+            # # the database too. The table is not made: it is the user's, with a primary or unique key on
+            # # the record's key columns, which the upserts rely on. {namespace} when left out.
+            # # string; default "{namespace}".
+            # table: "{namespace}"
+
+            # # How records are grouped in the server's transactions: source, each source transaction as
+            # # one, and the records without one (a snapshot's) of a batch together; batch, a batch's
+            # # records up to the last that ends a source transaction in one, several source transactions
+            # # together, and those after it, a part of one source transaction, in one held open into the
+            # # next batch. Either way a source transaction is never committed in part, unless it is larger
+            # # than max_transaction_bytes. source when left out.
+            # # one of: source, batch; default "source".
+            # transactions: "source"
+
+            # # What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes
+            # # it, which with on_error stop stops the pipeline before it, for a person to change the table.
+            # # report when left out.
+            # # one of: report, stop; default "report".
+            # ddl: "report"
+
+            # # The most bytes of values one of the server's transactions holds: past it, a transaction is
+            # # committed at the next record that ends a source transaction, and a source transaction larger
+            # # than this alone is committed in parts, with a warning. Against TiDB, whose transactions are
+            # # bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and
+            # # MariaDB.
+            # # integer, 0 or more.
+            # max_transaction_bytes: 0
 
           # # Or redis, with every one of its params:
           # # Writes records to Redis or Valkey, pipelined: with mode stream, each record an entry added
