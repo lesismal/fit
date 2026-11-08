@@ -5859,6 +5859,43 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I169 section, pending review. Deletes are seen only through
   `deleted_field`; a document written below the checkpoint after polling passed it is missed; a
   stream's snapshot interrupted starts over; no `query` param.
+### I188 The Admin API and `fit sync` — done
+
+- **Runtime** (`sync/control.go`, small additions to `runtime.go`, `pipeline.go` and `job.go`):
+  `Pause` holds `Emit` at the source's next record, `Resume` releases it and starts again a pipeline
+  stopped on an error or killed; `Snapshot` and `ResetCheckpoint` remove the checkpoint and restart
+  the pipeline (a snapshot runs a job at once), `SetCheckpoint` stops it, writes the position and
+  restarts it, each refusing with `ErrConfirm` a move of the checkpoint without `confirm`;
+  `Checkpoint` reads the file; `Tester`, an optional connection test of a source or sink, run by
+  `Test` on the running modules and `TestPipeline` on a config's; `DryRun` and `DryRunPipeline`,
+  a fresh source and transforms run from the checkpoint or the start, bounded by records, bytes and
+  time, nothing acknowledged or saved; `ParsePipeline`; `Status` with JSON names, `paused`, the queue,
+  records read, acknowledged and failed, errors with the last and its time, throughput over ten
+  seconds and the lag from commit time to acknowledgement; `Register`/`Lookup` by engine.
+- **Admin API** (`admin/sync.go`): `GET /sync/pipelines`, `GET`/`POST /sync/pipelines/{name}`
+  (pause, resume, snapshot), `GET`/`PUT`/`DELETE .../checkpoint`, `POST .../test`, `.../dry-run`,
+  `POST /sync/test` and `/sync/dry-run` for a config not applied; 404 without the role or the
+  pipeline, 409 without `confirm`; the capability `sync` in `/node`; through the console under
+  `/api/m/admin/`.
+- **CLI** (`cli/syncadmin.go`): `fit sync status|pause|resume|snapshot|checkpoint|test|dry-run`
+  through the Admin API the bootstrap config names, tables or `-json`.
+- **Docs**: the Sync chapter of the reference (`schema/doc/sync.md`), `docs/configuration*.md`, the
+  plan's I188 section.
+- **Tests**: pause holding the source while the queue drains and the checkpoint reaches every record
+  read, then resume; the counts, throughput, lag and JSON; the checkpoint shown, set (refused
+  without confirm, the same position allowed, a finished job going on from 60), reset and
+  snapshotted, a scheduled job's snapshot running at once while a reset waits; a stopped pipeline
+  resumed; dry runs through a dropping, splitting and failing transform leaving the checkpoint file
+  and the sink as they were, from the start and from the checkpoint, a stream timing out, a source
+  failing, refused modules and a source not returning; connection tests through the running
+  modules and a config; a broken and an unremovable checkpoint; every endpoint through the Admin API
+  and through the console with a login, the change logged; every `fit sync` command against a fake
+  API. Coverage of the new code: `sync/control.go` 98%+, `admin/sync.go` 100%, `cli/syncadmin.go`
+  100%; `./sync` under the race detector; staticcheck clean on `sync`, `admin` and `cli`.
+- **Differs from the plan**: `fit sync snapshot` added; the connectors' own `Test` methods (file,
+  Elasticsearch, ClickHouse, HTTP, WASM) are not written, so their tests say `tested: false`.
+- **Gaps**: the decisions in the plan's I188 section, pending review. A pause is not kept across a
+  restart of fit; the lag is the lag of acknowledgement, not behind the source's head (I189).
 ### I171 HTTP as a source and a sink — done
 
 - **Source `http`** (`sync/httpsync/source.go`, package `httpsync`): takes the bodies a route's

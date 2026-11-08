@@ -39,12 +39,19 @@ or was interrupted while a job; 2 when used wrongly.
 const syncFailedExit = 3
 
 func runSync(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "run" {
-		if len(args) > 0 && (args[0] == "-h" || args[0] == "-help" || args[0] == "--help" || args[0] == "help") {
-			fmt.Fprint(stdout, syncUsage)
-			return 0
-		}
-		fmt.Fprint(stderr, syncUsage)
+	if len(args) == 0 {
+		fmt.Fprint(stderr, syncAdminUsage)
+		return 2
+	}
+	switch args[0] {
+	case "run":
+	case "status", "pause", "resume", "snapshot", "checkpoint", "test", "dry-run":
+		return syncAdmin(args[0], args[1:], stdout, stderr)
+	case "-h", "-help", "--help", "help":
+		fmt.Fprint(stdout, syncAdminUsage)
+		return 0
+	default:
+		fmt.Fprintf(stderr, "fit sync: unknown command %q\n\n%s", args[0], syncAdminUsage)
 		return 2
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -179,6 +179,12 @@ read in chunks where the source splits one. A job that finished before starts an
 on from its checkpoint, and its `job.schedule` is not waited for. It prints the job's records read,
 written and failed, and exits 0 when every record was written, 3 when records failed (`on_error`
 `skip` or `dead_letter`), with their count, and 1 when the pipeline stopped or the job was interrupted.
+`fit sync status -c fit.conf` asks a running fit, through its Admin API, for its pipelines' state,
+checkpoints, counts, throughput and lag; `fit sync pause` and `resume` hold and release a pipeline's
+source, `snapshot` reads it again from the start, `checkpoint` shows, sets (`-set`) or resets
+(`-reset`) its checkpoint, a change that would skip or replay records only with `-confirm`, `test`
+tests its connectors' connections, and `dry-run` prints its first records as its transforms leave
+them, writing nothing.
 
 ## One address, one server
 

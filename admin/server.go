@@ -130,6 +130,17 @@ const DryRunHeader = "Fit-Dry-Run"
 //	                            or skips one; /streaming/push the push
 //	                            targets, POST .../{name} starts, stops or
 //	                            restarts one (channels.go)
+//	GET    /sync/pipelines      the sync role's pipelines: each one's state,
+//	                            checkpoint, queue, counts, throughput, lag
+//	                            and errors; /sync/pipelines/{name} one, and
+//	                            POST there pauses, resumes or snapshots it;
+//	                            .../checkpoint shown, set (PUT) and reset
+//	                            (DELETE), with confirm when that skips or
+//	                            replays records; POST .../test tests its
+//	                            connections and .../dry-run reads its first
+//	                            records through its transforms, writing
+//	                            nothing; POST /sync/test and /sync/dry-run
+//	                            the same for a pipeline's config (sync.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //	GET    /debug/pprof/        Go's runtime profiles, as net/http/pprof
@@ -337,6 +348,16 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /streaming/channels/{name...}", s.channelAction)
 	mux.HandleFunc("GET /streaming/push", s.listPush)
 	mux.HandleFunc("POST /streaming/push/{name...}", s.pushAction)
+	mux.HandleFunc("GET /sync/pipelines", s.syncPipelines)
+	mux.HandleFunc("GET /sync/pipelines/{name}", s.syncPipeline)
+	mux.HandleFunc("POST /sync/pipelines/{name}", s.syncAction)
+	mux.HandleFunc("GET /sync/pipelines/{name}/checkpoint", s.syncCheckpoint)
+	mux.HandleFunc("PUT /sync/pipelines/{name}/checkpoint", s.syncSetCheckpoint)
+	mux.HandleFunc("DELETE /sync/pipelines/{name}/checkpoint", s.syncResetCheckpoint)
+	mux.HandleFunc("POST /sync/pipelines/{name}/test", s.syncTestRunning)
+	mux.HandleFunc("POST /sync/pipelines/{name}/dry-run", s.syncDryRunRunning)
+	mux.HandleFunc("POST /sync/test", s.syncTestConfig)
+	mux.HandleFunc("POST /sync/dry-run", s.syncDryRunConfig)
 	return mux
 }
 

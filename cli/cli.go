@@ -37,7 +37,9 @@ Commands:
 	           tunnel hub and LLM listeners take, through its Admin API
 	sync       run one pipeline of the config's sync on its own, as a job
 	           with --once, without serving anything else (fit sync run
-	           [-c config]... [--once] <pipeline>)
+	           [-c config]... [--once] <pipeline>); and a running fit's
+	           pipelines, through its Admin API: status, pause, resume,
+	           snapshot, checkpoint, test and dry-run
 	store     export or import the config kept encrypted in admin.store
 	cluster    a manager's members, groups, diffs, metrics, certificates and
 	           logs, and its rollouts started, followed and aborted, through

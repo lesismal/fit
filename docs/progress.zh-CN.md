@@ -4164,6 +4164,30 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   规模，没有剩余工作，因此没有 I169b。
 - **缺口**：计划 I169 小节中的决定，待审查。删除只能经 `deleted_field` 看到；轮询越过检查点之后才以低于它的值写入的文档会被
   漏掉；流的快照中断后从头开始；没有 `query` 参数。
+### I188 Admin API 与 `fit sync` — 已完成
+
+- **运行时**（`sync/control.go`，以及对 `runtime.go`、`pipeline.go` 和 `job.go` 的少量增补）：`Pause` 让源在下一条记录处的
+  `Emit` 停下，`Resume` 放开它，并重新启动因错误停止或被杀死的流水线；`Snapshot` 与 `ResetCheckpoint` 删除检查点并重启流水线
+  （快照会立即运行作业），`SetCheckpoint` 先停止它、写入位置再重启，没有 `confirm` 时移动检查点都以 `ErrConfirm` 拒绝；
+  `Checkpoint` 读取文件；`Tester` 是源或目标可选的连接测试，`Test` 对运行中的模块、`TestPipeline` 对配置的模块运行它；
+  `DryRun` 与 `DryRunPipeline` 从检查点或从头运行新加载的源与变换，受记录数、字节数和时间限制，不确认也不保存；`ParsePipeline`；
+  `Status` 加上 JSON 名称、`paused`、队列、读取/确认/失败的记录数、错误数及最后一个错误和时间、十秒内的吞吐和从提交时间到确认
+  的延迟；按引擎的 `Register`/`Lookup`。
+- **Admin API**（`admin/sync.go`）：`GET /sync/pipelines`，`GET`/`POST /sync/pipelines/{name}`（pause、resume、snapshot），
+  `GET`/`PUT`/`DELETE .../checkpoint`，`POST .../test`、`.../dry-run`，针对未应用配置的 `POST /sync/test` 与
+  `/sync/dry-run`；没有角色或流水线时 404，缺少 `confirm` 时 409；`/node` 中的能力 `sync`；经控制台在 `/api/m/admin/` 下提供。
+- **命令行**（`cli/syncadmin.go`）：`fit sync status|pause|resume|snapshot|checkpoint|test|dry-run`，经引导配置指定的
+  Admin API，输出表格或 `-json`。
+- **文档**：参考文档的 Sync 章节（`schema/doc/sync.md`）、`docs/configuration*.md`、计划的 I188 小节。
+- **测试**：暂停让源停下，队列排空且检查点覆盖读过的每条记录，然后恢复；计数、吞吐、延迟和 JSON；检查点的查看、设置（没有
+  confirm 时拒绝，相同位置允许，已完成的作业从 60 继续）、重置与快照，有调度的作业快照立即运行而重置等待；恢复已停止的流水线；
+  经过丢弃、拆分和失败的变换的试运行，检查点文件与目标保持原样，从头和从检查点，流超时，源失败，被拒绝的模块和不返回的源；
+  经运行中模块和经配置的连接测试；损坏的和无法删除的检查点；每个端点经 Admin API 和登录后的控制台，改动记入日志；每个
+  `fit sync` 命令对假 API。新代码覆盖率：`sync/control.go` 98% 以上，`admin/sync.go` 100%，`cli/syncadmin.go` 100%；
+  `./sync` 在竞态检测器下通过；`sync`、`admin` 与 `cli` 的 staticcheck 无问题。
+- **与计划的差异**：加了 `fit sync snapshot`；连接器自己的 `Test` 方法（file、Elasticsearch、ClickHouse、HTTP、WASM）没有写，
+  因此它们的测试显示 `tested: false`。
+- **缺口**：计划 I188 小节中的决定，待审查。暂停不会跨 fit 重启保留；延迟是确认的延迟，不是落后于源头部的延迟（I189）。
 ### I171 HTTP 作为源与目标 — 已完成
 
 - **源 `http`**（`sync/httpsync/source.go`，包 `httpsync`）：接收路由的 `sync_ingest` 交来的请求体（`Offer`，从不等待），
