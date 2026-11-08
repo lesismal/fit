@@ -419,10 +419,18 @@ func TestPipelineSkipsBadDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
 	st, err := fitsync.RunPipeline(context.Background(), c.Sync, "p", fitsync.Options{})
-	if err != nil || st.State != "finished" || time.Since(start) > 900*time.Millisecond {
-		t.Fatalf("%v %+v after %v", err, st, time.Since(start))
+	if err != nil || st.State != "finished" {
+		t.Fatalf("%v %+v", err, st)
+	}
+	// A permanent refusal is not retried: the bad document was sent once.
+	// (Counted, not timed: a run under the race detector on a busy runner
+	// may take longer than the backoff it skips.)
+	f.mu.Lock()
+	sent := f.seen["generate.records/10"]
+	f.mu.Unlock()
+	if sent != 1 {
+		t.Errorf("the refused document was sent %d times", sent)
 	}
 	// 50 records, a seventh of them deletes of documents never written.
 	if n := len(f.docs); n != 50-7-1 {
