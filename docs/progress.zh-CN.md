@@ -4132,6 +4132,27 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I177 PostgreSQL 客户端：连接、认证与查询 — 已完成
+
+- **包 `sync/postgres/wire`**（`pgwire`），基于 `net.Conn` 与 `crypto/tls` 的阻塞客户端，不引入驱动：以 `SSLRequest` 和
+  `sslmode`（默认 `verify-full`，不静默降级）启动，SCRAM-SHA-256 与 SCRAM-SHA-256-PLUS（`tls-server-end-point`，默认
+  `prefer`），MD5 和明文密码除非允许否则拒绝；简单查询协议（`SimpleQuery`，多条语句，行为文本）与扩展协议（`Query`、
+  `Prepare`、`Exec`，行流式读取，常见类型及其数组从二进制解码，其余为文本）；`COPY FROM STDIN`（`CopyIn`、`WriteRow`、
+  `CopyFrom`、`Abort`）与 `COPY TO STDOUT`（`CopyTo`）；复制连接的 `IDENTIFY_SYSTEM`、`CREATE_REPLICATION_SLOT`（可导出快照）、
+  `DROP_REPLICATION_SLOT`、`START_REPLICATION` 及其流（`ReceiveReplication`、`SendStandbyStatus`、`EndReplication`），以及
+  `LSN`。上下文结束时发送 `CancelRequest` 并关闭连接；服务端错误为带 SQLSTATE 的 `*Error`，连接仍可用。
+- **测试**：针对进程内按脚本运行的后端的单元测试（TLS、SCRAM 服务端一侧、RFC 7677 的向量、取消请求、畸形和截断的消息、
+  结果中途关闭连接的服务端），不用容器覆盖 96.9% 的语句，在竞态检测下运行。互通测试（`test/sync/postgres_test.go`、
+  `test/sync/postgres.sh`，由 `test/sync/run.sh` 引入）在 Docker 中针对 PostgreSQL 13、14、15、16 和 17：各种 `sslmode`
+  下的 TLS，错误的名字和根证书被拒绝，带与不带通道绑定的 SCRAM 以及错误密码；常见类型经扩展协议往返、NULL、1 MB 的值、
+  命名语句、错误与事务状态；一百万行的 `COPY` 按行数与求和校验，`COPY TO`，中止的和被拒绝的复制；导出快照的 slot 被另一个
+  连接导入，从 slot 的一致点开始的 `pgoutput` 流，standby status 更新使 `confirmed_flush_lsn` 准确前移；上下文结束时服务端的
+  查询被取消。
+- **与计划的差异**：为 I179 和 I180 的校验和增加了 `CopyTo`。代码约 2,600 行，单元测试约 2,000 行，互通测试约 500 行；
+  没有 I177b。
+- **不足**：计划 I177 一节中的决策，待审查。没有 SASLprep；没有二进制 COPY；`time`、`interval` 等没有对应 Go 类型的值为文本；
+  pgoutput 的消息和文本值属于 I178。本项没有在 Linux 上或整套测试中运行（留给合并时）。
+
 ### I169 Elasticsearch 与 OpenSearch 作为源 — 已完成
 
 - **源 `elasticsearch`**（`sync/elasticsearch/source.go`，与目标同包，共用 `Conn` 及其参数）：记录的命名空间是文档的索引，键为

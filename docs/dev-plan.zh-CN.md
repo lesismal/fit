@@ -330,7 +330,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | todo |
 | I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | todo |
 | I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | todo |
-| I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | todo |
+| I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | done |
 | I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | todo |
 | I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
 | I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | todo |
@@ -3773,6 +3773,55 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   MD5 除非显式开启否则拒绝、简单与扩展查询协议、`COPY FROM STDIN`、复制连接的命令；支持 PostgreSQL 13 到 17。
 - **完成标准**：在 Docker 中与每个版本互通：常见类型都能经扩展协议往返，一百万行的 `COPY`，带与不带通道绑定的 SCRAM。
 - **涉及**：`sync/postgres/wire`、`test/sync`。
+
+**待审查的决策**（实现时所做，2026-11-08；在用户裁定之前有效）：
+
+1. **位置。** 包 `sync/postgres/wire`，包名 `pgwire`，以免与同时导入的 `sync/mysql/wire` 冲突。备选：包名 `wire`。
+2. **基于 `net.Conn` 与 `crypto/tls` 的阻塞连接，而不是 fib。** 一个 `Conn` 由它自己的一个 goroutine 使用，与决定 036 中
+   数据库连接的做法一致（少、长、不占 fib 的 worker）：协议是一问一答，COPY 和复制流需要阻塞写带来的背压，通道绑定需要从
+   `crypto/tls` 取得服务端证书。只有 `SendStandbyStatus` 可以与等在 `ReceiveReplication` 中的 goroutine 并行。备选：fib 的
+   异步连接加回调。
+3. **`sslmode`**：`disable`、`require`、`verify-ca` 与默认的 `verify-full`；没有 `prefer` 和 `allow`，它们静默退回明文，
+   决定 036 不允许。用 `SSLRequest` 请求 TLS；不使用 PostgreSQL 17 的直接 TLS（`sslnegotiation=direct`）。`Config.TLS`
+   携带根证书、客户端证书和服务器名；连接器将从 `ca_file` 等参数构造它。备选：像 libpq 一样默认 `prefer`。
+4. **通道绑定**（`tls-server-end-point`）默认 `prefer`：使用 TLS 且服务端提供时用 SCRAM-SHA-256-PLUS；使用 TLS 而服务端不
+   提供时发 `y,,`（被剥掉的提供会被服务端发现）；没有 TLS 时发 `n,,`。`require` 在服务端没有用 -PLUS 认证时失败，服务端根本
+   不要密码时也失败。以 Ed25519 签名的证书没有对应的哈希：`prefer` 下不绑定，`require` 下报错。备选：TLS 下默认 `require`。
+5. **SCRAM 不做 SASLprep**：密码按字节使用，与 PostgreSQL 对 SASLprep 拒绝的密码的处理相同；ASCII 密码两种方式结果一样，
+   规范化会改变的非 ASCII 密码无法认证。服务端要求超过 4,194,304 次迭代时拒绝。备选：在 fit 中实现 SASLprep（RFC 4013）。
+6. **MD5 和明文密码默认拒绝**，除非设置 `AllowMD5` 或 `AllowCleartext`；不支持 Kerberos、GSSAPI 和 SSPI。
+7. **上下文结束会断开连接。** 在单独的连接上发送 `CancelRequest`（尽力而为，明文 TCP），并以上下文的错误关闭连接；调用方新建
+   连接，因为协议无法从任意位置恢复。wire 没有自己的单次调用超时：调用方用上下文限定；上下文没有截止时间时，`ConnectTimeout`
+   （10 秒）限定连接过程。服务端错误（`*Error`，带 SQLSTATE 和各字段）不影响连接继续使用。备选：等待被取消查询的错误并保留连接。
+8. **扩展协议每次 `Query` 两个往返**：先 Parse 和 Describe，再 Bind 和 Execute，这样能知道参数类型，并对这里能解码的类型以
+   二进制请求结果，其余类型用文本。`Prepare` 命名一条语句，之后每次执行一个往返。参数以文本发送，只有 `bytea` 参数的
+   `[]byte` 以二进制发送。备选：二进制参数，或语句缓存。
+9. **取值。** 整数和 `oid` 为 `int64`，`float4`/`float8` 为 `float64`，`numeric` 为 `Numeric`（精确的十进制文本，含 `NaN`
+   和无穷），`json`/`jsonb` 为 `JSON`，`uuid` 为字符串，`bytea` 为 `[]byte`，`date` 为 UTC 零点，`timestamp` 为其墙上时间
+   按 UTC 表示，`timestamptz` 为 UTC，日期和时间戳的无穷为字符串 `infinity`/`-infinity`，这些类型的数组为 `[]any`（多维时
+   嵌套）；其他类型（`time`、`timetz`、`interval`、`money`、`inet`、枚举、范围、复合类型）为服务端的文本。参数：Go 的数值、
+   布尔、字符串，`time.Time` 按参数类型写出（`timestamp` 用其所在时区的墙上时间，`timestamptz` 带偏移；年份 1 到 9999），
+   `time.Duration` 作为 interval，`Numeric`、`JSON`、指针，以及作为数组字面量的切片。备选：为 time 和 interval 定义 fit
+   自己的类型。
+10. **上限**：服务端的单条消息至多 `MaxMessageBytes`（64 MiB）；`SimpleQuery` 保留的结果行总量同样受此限制，用于命令和小结果；
+    `Query` 流式读取行。备选：除服务端的 1 GB 外不设上限。
+11. **COPY**：`CopyIn` 每个 CopyData 攒 64 KiB；`WriteRow` 与 `AppendCopyRow` 写 COPY 的文本格式；数据传输中服务端的错误
+    在 `Close` 时得知；`Abort` 发送 CopyFail。另外提供了计划之外的 `CopyTo`（COPY TO STDOUT），供 I179 和 I180 的测试做
+    校验和。不提供二进制 COPY。备选：写入时同时留意服务端的错误。
+12. **复制命令**：`IDENTIFY_SYSTEM`；`CREATE_REPLICATION_SLOT`，只建逻辑 slot，15 起用新语法、之前用旧语法，带快照动作
+    （`export`、`use`、`nothing`）；`DROP_REPLICATION_SLOT [WAIT]`；带加引号插件选项的 `START_REPLICATION ... LOGICAL`；
+    读成 `XLogData` 和 `Keepalive` 的流；standby status 更新；`EndReplication`。不在这里：物理复制、`BASE_BACKUP`、
+    `TIMELINE_HISTORY`、`READ_REPLICATION_SLOT`、`ALTER_REPLICATION_SLOT`，以及解码 `pgoutput` 的消息，那是 I178 的工作
+    （pgoutput 以文本发送值，因此 I178 还要按类型 OID 把文本转成值）。
+13. **互通。** `test/sync/postgres.sh` 启动 `postgres:13`…`17-bookworm`（`fit-sync-pg13`…，端口 29513–29517），TLS 用容器内
+    `openssl` 生成的 CA 并复制出来，用户 `fit` 用 SCRAM，`wal_level=logical`；`test/sync/run.sh` 引入它，CI 的
+    `sync-interop` 作业运行这些测试（`test/sync/postgres_test.go`，读取 `FIT_SYNC_PG`、`FIT_SYNC_PG_CA_DIR`、
+    `FIT_SYNC_PG_USER`、`FIT_SYNC_PG_PASSWORD`，没有时跳过）。PostgreSQL 13 的 initdb 除非给出 `--auth-host=scram-sha-256`，
+    否则把超级用户密码存为 MD5，脚本设置了它。MD5 的拒绝只针对假服务端测试。备选：为一个 MD5 用户加一行 pg_hba。
+14. **单元测试针对进程内按脚本运行的后端**（TLS 证书在测试中生成，SCRAM 的服务端一侧，统计取消请求），与 `sync/elasticsearch`
+    的假集群相同：不用容器时覆盖包内 96.9% 的语句。备选：回放抓包。
+15. **规模**：代码连注释约 2,600 行，单元测试约 2,000 行，互通测试约 500 行，超出计划中一个客户端的规模，因为复制命令和
+    COPY TO 也在其中；没有剩余工作，因此没有 I177b。
 
 ### I178 PostgreSQL 作为源
 

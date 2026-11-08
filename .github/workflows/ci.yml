@@ -315,7 +315,8 @@ jobs:
   # and ClickHouse's sink and source (I170): test/sync/run.sh starts
   # Elasticsearch 8 and OpenSearch 2 in Docker, with TLS, authentication and a
   # write pool small enough to answer 429s, and ClickHouse 25.8, and requires
-  # the interop tests to run rather than skip.
+  # the interop tests to run rather than skip. It also starts PostgreSQL 13 to
+  # 17 with TLS, SCRAM and logical replication for the wire client (I177).
   sync-interop:
     name: Sync interop (Elasticsearch, OpenSearch, ClickHouse)
     runs-on: ubuntu-latest

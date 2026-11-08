@@ -260,6 +260,17 @@ The plan's I170 section lists them all; these change the record above.
    values as the position, so rows that share a cursor value are read once each, and in a job its
    snapshot splits by ranges of the key (`Chunker`).
 
+## Decisions made while building I177 (pending review)
+
+The plan's I177 section lists them all; these change the record above.
+
+1. **Database wire clients are blocking connections** on `net.Conn` and `crypto/tls`, each on a
+   goroutine of its own, not fib's asynchronous connections: request and answer, COPY and the
+   replication stream want a blocking write's backpressure, and channel binding needs
+   `crypto/tls`'s view of the server's certificate. fib stays the way out for HTTP-based systems.
+2. **No `sslmode` that falls back silently**: `disable`, `require`, `verify-ca`, `verify-full` (the
+   default); channel binding `prefer` by default.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and
