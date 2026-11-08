@@ -26,6 +26,7 @@
 - [媒体库：点播与频道](#媒体库点播与频道)
 - [集群管理](#集群管理)
 - [日志：文件、切割与保留](#日志文件切割与保留)
+- [数据同步：从生产者到消费者](#数据同步从生产者到消费者)
 
 ## 如何进行一次迭代
 
@@ -101,6 +102,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | `observe` | 访问日志、指标、追踪 |
 | `logs` | fit 自身的日志：logger、级别，以及日志和访问日志写出、切割与保留的文件（I155–I156） |
 | `plugin/...` | 编译期模块和 WASM |
+| `sync/...` | 数据同步：记录、流水线、检查点、变换，以及每个连接器及其线协议（`sync/mysql`、`sync/postgres`、`sync/mongo`、`sync/kafka` 等；决定 036） |
 | `adapter/...` | 配置适配器：友好格式、nginx |
 | `bench` | 基准测试框架，nginx、Caddy、Traefik 和 fit 的配置，测试结果 |
 | `test/e2e` | 端到端测试和一致性测试 |
@@ -312,6 +314,39 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I160 | 隧道与 LLM mesh 的 TLS（2026-11-06 审查所得）：链路的证书选项与地址分开传递，地址中的任何内容都不能覆盖 pin；非 loopback 时拒绝 `quic_insecure`；没有 store 时自签证书在重启后保留；LLM 监听的证书文件变化时重新加载 | I159 | done |
 | I161 | Admin API 与控制台的未认证连接，以及 Windows 与大小写不敏感文件系统上的文件名（2026-11-06 审查所得）：写与读同样受限，为已认证客户端保留连接位；fastcgi 像 static 一样拒绝反斜杠；换了大小写的扩展名不会以源码形式返回 | — | done |
 | I162 | 一个地址，一个服务器：配置校验拒绝在同一地址和传输上监听的两处配置，跨监听器、Admin API、控制台和所有角色，错误中写明两者；每个绑定在绑定时检查没有其他套接字占着它的地址；fib 的 TURN 中继不再共用端口范围内的同一端口（A70） | — | done |
+| **数据同步** | | | |
+| I163 | 决定 036；`sync`：记录模型、流水线（源、变换、目标，`stream` 或 `once`）、有上限的队列、批次、推进水位线且绝不拆开事务的确认、检查点文件、重试与 `on_error` | I04 | todo |
+| I164 | 内置变换：`filter`、`route`、`fields`、`key`、`cast`、`mask`、`envelope` | I163 | todo |
+| I165 | 同步的 WASM 插件：变换、编解码器，以及基于 fit 的 HTTP 客户端与定时器的源和目标连接器；guest SDK | I163 | todo |
+| I166 | 文件作为源（跟踪与通配，跟随切割与截断，多行合并）与目标（经 I155 的文件写入器） | I163, I155 | todo |
+| I167 | 像 DataX 一样的批处理作业：分块并行快照、按块续传，`fit sync run --once`，调度 | I163 | todo |
+| I168 | Elasticsearch 与 OpenSearch 作为目标：按 `_id` 的 `_bulk`、逐条错误、遇 429 退避 | I163 | todo |
+| I169 | Elasticsearch 与 OpenSearch 作为源：point in time 快照，之后按游标轮询 | I168 | todo |
+| I170 | ClickHouse 作为目标（去重令牌、`ReplacingMergeTree`）与源（按游标轮询） | I163 | todo |
+| I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | todo |
+| I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | todo |
+| I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | todo |
+| I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | todo |
+| I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | todo |
+| I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | todo |
+| I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | todo |
+| I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | todo |
+| I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
+| I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | todo |
+| I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | todo |
+| I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | todo |
+| I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | todo |
+| I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | todo |
+| I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | todo |
+| I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | todo |
+| I187 | S3 及兼容存储作为目标（滚动的对象）与源（按键顺序的对象） | I163 | todo |
+| I188 | Admin API 与 `fit sync`：状态、暂停、恢复、检查点、连接测试、试运行 | I163 | todo |
+| I189 | 指标、日志与死信，可从 Admin API 重放 | I188 | todo |
+| I190 | workbench 的 Sync 页面，以及助手的同步工具 | I188, I189, I123 | todo |
+| I191 | 写入 MySQL、TiDB 和 PostgreSQL 时恰好一次：检查点写在目标的事务中 | I176, I180 | todo |
+| I192 | CI 中的互通与恢复矩阵 | I176, I180, I183, I185 | todo |
+| I193 | 对比 Filebeat、Canal、Debezium 和 DataX 的基准测试 | I192 | todo |
+| I194 | 同步的文档与示例 | I190 | todo |
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
 
@@ -3056,3 +3091,383 @@ fit 自身的日志和访问日志都会写文件，而今天的文件只打开�
 4. **A/B 构建的是什么。** fit 的 main 调用了 `Context.SetIdleTimeout`，`5c0e5b9` 没有它，因此两边都从 fit `35270ef4`（v1.7.1 的
    固定版本，与发现开销的那次 A/B 相同）构建，在临时 modfile 中用 `replace`。由于用户的 `qwen27b.service` 占着 8081，运行时把
    基准框架的 h2c 端口临时改为 8091，未提交。
+
+## 数据同步：从生产者到消费者
+
+2026-11-08 提出。fit 新增 `sync`：由流水线从生产者（**源**，source）读取变更或记录，写入消费者（**目标**，sink），
+如同 Filebeat 之于文件，DataX、Canal 或 Debezium 之于数据库。源与目标像其他角色一样在配置中设置；下面每一种基础设施
+既可作源也可作目标，因此任意两者都能连接；内置连接器和变换覆盖不到的，由 WASM 插件扩展。流水线可以一直运行（流式：
+跟踪文件、跟随 binlog），也可以只运行一次（批处理作业：复制一张表后停止）。决定 036 记录下面的选择。
+
+原则，按约束顺序：
+
+- **不丢数据，且由检查点保证。** 源的位置（事务结束处的 binlog GTID 集合或文件与偏移、PostgreSQL 的 LSN、MongoDB 的
+  resume token、文件的标识与偏移、Kafka 的 offset、游标的最后取值）只有在流水线的每个目标都确认了它之前的所有记录后
+  才保存；重启、崩溃或 `kill -9` 之后从上次保存的位置继续。投递语义为至少一次；目标以幂等方式写入（按键 upsert、
+  文档 ID、去重令牌），因此重放后收敛到相同状态。服务端为读者保留数据的源（PostgreSQL 的 slot、Kafka 的 offset）也只在
+  此时、绝不提前被告知位置。
+- **事务保持完整。** 检查点不会落在源事务的中间；同一事务的记录带有事务 ID 和边界，SQL 目标可以把它们写成自己的一个事务。
+  从源到目标按键保序；目标可以并行处理不同的键，同一个键绝不乱序。
+- **一切有上限**（规则 11）：阶段之间队列的字节数与记录数、批次的字节数、记录数与时间、单条记录的大小、插件的内存与时间、
+  保留的死信。慢的目标通过队列减慢源，并报告延迟；fit 内没有任何东西无限增长。源的服务端在此期间保留的数据（slot 的 WAL、
+  binlog）也会报告，并有告警阈值。
+- **不占用 fib 的 worker。** 同步不在请求路径上：流水线的源、变换和目标运行在各自的 goroutine 上，每条流水线有上限；基于
+  HTTP 的系统（Elasticsearch、ClickHouse、HTTP、S3）经由 fib 的异步 HTTP 客户端；到数据库的连接少而长，每个连接一个
+  goroutine。接收记录的监听器（HTTP 源）在不阻塞 worker 的情况下移交记录（规则 1）。
+- **依赖精简**（设计原则 6）：线协议（MySQL 及其复制流、PostgreSQL 及逻辑复制、MongoDB 的 OP_MSG 与 BSON、Kafka、RESP、
+  SigV4）在 fit 中自行实现，如同 fib 自己的协议，每一个都在 Docker 中对照真实服务端检查；不引入任何驱动。规范记录是 fit
+  自己的类型，任何连接器的类型都不会泄漏到另一个连接器。
+- **一种记录模型。** 每个源产生、每个目标接收同一种记录：源及其命名空间（`db.table`、索引、集合、文件、topic）、操作
+  （`insert`、`update`、`delete`、`ddl`、`message`）、键、变更前后的行（带类型的值：null、bool、int、uint、float、以文本
+  表示的 decimal、string、bytes、time、date、JSON、array、map）、提交时间、事务，以及不透明的位置。变换和插件只看到它。
+- **凭据与 fit 其他地方一样**：存放在 `admin.store` 中，或由环境变量名指定（`password_env`，如同助手的 `api_key_env`），在页面中只写一次、以掩码显示；凡服务端提供 TLS
+  就使用并校验，没有静默的 `insecure`。
+- **默认关闭**：没有 `sync` 就没有外连，也不在磁盘上留状态。
+
+下文用词：**流水线**，一个源、它的变换和一个或多个目标，共用一个检查点；**快照**，表中已有的行，在其变更之前或代替其变更
+读取一次；**游标**，在系统没有变更流时源据以轮询的单调列或字段（更新时间、版本号）。
+
+每种基础设施作为源和作为目标分别是什么：
+
+| 基础设施 | 作为源 | 它的检查点 | 作为目标 | 迭代 |
+| --- | --- | --- | --- | --- |
+| 文件行 | 像 Filebeat 一样跟踪路径和通配：发现新文件，跟随改名与截断式切割，保留不完整的末行，合并多行 | 文件的设备号、inode 和文件头指纹，以及偏移 | 行（原样、JSON、CSV 或模板）经 fit 的文件写入器写出，切割并保留（I155） | I166 |
+| MySQL、MariaDB | 行格式的 binlog，以副本身份读取（`COM_BINLOG_DUMP_GTID`）；按主键分块的快照 | 事务结束处的 GTID 集合，或文件与偏移 | 按主键 upsert 与 delete，批量写入，可按源事务写入 | I172–I176 |
+| TiDB | 经 TiCDC 的变更（canal-json 或 TiCDC simple 协议，来自 Kafka）；经 MySQL 协议的快照 | Kafka offset，记录中带提交 TS | MySQL 目标：TiDB 使用 MySQL 协议 | I185 |
+| PostgreSQL | 使用 `pgoutput`、slot 和 publication 的逻辑复制；取自 slot 导出快照的快照 | LSN，只在目标确认后才向 slot 确认 | `INSERT ... ON CONFLICT DO UPDATE` 与 delete，批量写入；快照用 `COPY` | I177–I180 |
+| ClickHouse | 没有变更流：经 HTTP 接口按游标轮询，按查询做快照 | 游标的最后取值及该值上的键 | 经 HTTP 插入（`JSONEachRow`），带去重令牌；delete 写成 `ReplacingMergeTree` 的版本与删除标记 | I170 |
+| Elasticsearch、OpenSearch | 用 point in time 与 `search_after` 做快照；之后按游标字段轮询 | 游标的最后排序值 | 按由键得到的 `_id` 做 `_bulk` index 与 delete，逐条处理错误，遇 429 退避 | I168、I169 |
+| MongoDB | 带 `fullDocument` 的 change stream，按 `_id` 范围的快照 | resume token | bulk write：按 `_id` upsert 与 delete | I181–I183 |
+| Kafka（及 Redpanda） | 从 fit 自己保存的 offset 读取 topic 与分区 | 每个分区的 offset | 带键生产，批量、压缩 | I184、I185 |
+| Redis | stream（从某个 ID 起 `XREAD`） | 最后的 ID | `XADD`，或每条记录一个键（`SET`/`HSET`/`DEL`） | I186 |
+| HTTP | 记录 POST 到 fit 的路由，目标收到后才应答 | 无：客户端重试直到收到应答 | 以 JSON 或 NDJSON 批量 POST | I171 |
+| S3 及兼容存储 | 某前缀下的新对象，按键顺序，逐行读取 | 最后的键及其偏移 | 由批量行组成的对象，按大小和时间滚动 | I187 |
+| WASM 连接器 | 经 fit 的 HTTP 客户端和定时器读取的插件 | 插件返回的不透明字节 | 经同样方式写出的插件 | I165 |
+
+配置中的流水线大致如下（名称可能在 I163 中调整）：
+
+```json
+"sync": {
+  "state_dir": "/var/lib/fit/sync",
+  "pipelines": [{
+    "name": "orders-to-search",
+    "source": {"type": "mysql", "addr": "db:3306", "user": "repl", "password_env": "MYSQL_REPL_PASSWORD",
+               "server_id": 4101, "tables": ["shop.orders", "shop.order_items"], "snapshot": "initial"},
+    "transforms": [{"type": "route", "map": {"shop.orders": "orders"}},
+                   {"type": "wasm", "module": "plugins/mask.wasm"}],
+    "sinks": [{"name": "es", "type": "elasticsearch", "urls": ["https://es:9200"],
+               "batch": {"max_records": 1000, "max_bytes": "5MiB", "max_wait": "1s"}}],
+    "on_error": "stop"
+  }]
+}
+```
+
+workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其状态、延迟和吞吐；由 schema 生成的流水线编辑器，带
+**测试连接**和试运行（显示前几条记录，不写入也不保存位置）；检查点的查看与重置（需确认）；错误与死信；暂停、恢复和重新快照。
+
+不在这条路线内：跨源的 SQL join 或聚合（流处理器的工作；WASM 变换一次只看到一个批次）；把 DDL 重放到 SQL 目标（I163 决定；
+只报告、不执行）；同一条流水线同时在多个 fit 实例上运行（一条流水线运行在一个 fit 上；集群路线可以安排它的位置）；
+对没有事务的目标做到恰好一次。
+
+### I163 决定 036；记录、流水线与检查点
+
+- **做什么**：决定 036（上述原则、记录模型、至少一次加幂等目标、协议在 fit 中自行实现，以及下面待定的选择）。包 `sync`：
+  记录及其带类型的值，有一种规范的 JSON 形式；`config.Sync`，含 `state_dir` 和 `pipelines`（源、变换、目标，`mode` 为
+  `stream` 或 `once`，`on_error` 为 `stop`、`skip` 或 `dead_letter`，队列与批次上限），注册进模块注册表，使连接器成为模块
+  （`sync.sources.*`、`sync.sinks.*`、`sync.transforms.*`），由 `fit validate` 检查并在 schema 中描述；运行时：源写入有上限
+  的队列，变换按顺序执行，每个目标按记录数、字节数和时间分批并确认；确认推进一条由连续位置组成的水位线，它绝不落在事务
+  中间；检查点存储把水位线写到 `<state_dir>/<pipeline>.json`（临时文件、`fsync`、改名），最多每 `checkpoint_interval` 一次
+  以及停止时，流水线从它启动；带退避的重试，之后按 `on_error` 处理；测试用的 `generate` 源以及 `memory` 和 `stdout` 目标；
+  重载时增加、删除并重启配置变化了的流水线，其他流水线继续运行。
+- **完成标准**：记录从 `generate` 流到两个目标，检查点是两者都已确认的最小值；目标在批次中途失败、写入与检查点之间崩溃、
+  在随机位置 `kill -9`（由一个能在任意位置停下运行时的测试辅助完成）都不丢数据，只重放检查点之后的部分；检查点从不落在
+  事务中间；队列满时源停止，目标卡住时内存保持在上限之内；`once` 在源结束时停止并写下检查点；`dead_letter` 把记录及其错误
+  写到指定的目标；重载只重启发生变化的流水线；在竞态检测器下通过。
+- **涉及**：`docs/decisions`（036）、`sync`、`config`、`module`、`schema`、`cli`、`docs`。
+
+### I164 内置变换
+
+- **做什么**：`filter`（按带通配的命名空间、按操作、按字段值）、`route`（命名空间改名或映射，例如表到索引或 topic）、
+  `fields`（保留、删除、改名、设常量、移入或移出嵌套 map）、`key`（从字段选择或构造键）、`cast`（字段类型）、`mask`
+  （对字段做哈希或置空）和 `envelope`（把记录变成扁平文档、before/after 对或 Debezium 的形状，供需要的目标使用）；每个都是
+  模块，按顺序串联。
+- **完成标准**：每个变换都有覆盖所有值类型和操作的表驱动测试；一串变换每条记录至多复制一次记录；delete 在任何会删掉键字段
+  的变换后仍保有键，否则拒绝该配置。
+- **涉及**：`sync/transform`、`schema`、`docs`。
+
+### I165 同步的 WASM 插件：变换、编解码器与连接器
+
+- **做什么**：在 `plugin/wasm` 的 HTTP ABI 旁增加宿主模块 `fit_sync`，共用其运行时、实例池和上限。**变换**插件导出
+  `fit_sync_transform(batch)`：读取批次（记录的规范 JSON，基准测试需要时再加二进制形式），并通过 `record_emit` 为每条记录
+  输出零条或多条记录，由此实现过滤、修改、拆分和路由。**编解码器**插件把字节变成记录（`fit_sync_decode`，用于文件行、
+  Kafka 消息、HTTP 请求体和 S3 对象），把记录变成字节（`fit_sync_encode`）。**连接器**插件可以是源
+  （`fit_sync_poll(checkpoint)` 返回记录和下一个检查点）或目标（`fit_sync_write(batch)`），通过宿主函数完成 I/O：经 fib 异步
+  客户端向配置允许的主机发出 HTTP 请求、定时器、插件配置和日志；没有原始套接字。每次调用都有时间和内存上限；陷入异常或
+  超限的插件使该批次失败，随后按 `on_error` 处理。guest SDK（`plugin/wasm/guest`，Go 与 TinyGo）和一个 Rust crate 增加
+  同步相关的调用，并附示例。
+- **完成标准**：一个 TinyGo 变换能丢弃、修改和拆分记录；一个编解码器能从文件读取自定义行格式；一个连接器插件能把分页的
+  HTTP API 读入目标，并在重启后从检查点继续；超出时间或内存、或调用了不允许的主机的插件使批次失败，检查点保持不动；
+  实例池让流水线的吞吐与做同样工作的内置变换相差不超过 20%，在压测主机上测量。
+- **涉及**：`plugin/wasm`、`plugin/wasm/guest`、`sync`、`docs`、fit-examples。
+
+### I166 文件作为源与目标
+
+- **做什么**：源 `file`：路径与通配，每 `scan_interval` 扫描一次；每个文件以设备号、inode 和文件开头字节的指纹识别，因此
+  能跟随改名，复用的 inode 被视为新文件；截断后从头读；读取中被删除的文件先读完；每行不超过 `max_line_bytes`，不完整的
+  末行保留到它结束或超过 `close_after`；按起始模式合并多行；同时读取的文件数有上限；检查点是每个文件的偏移；由编解码器
+  （`line`、`json`、`csv`、WASM 编解码器）生成记录。目标 `file`：记录按行写出（原样、JSON、CSV 或模板），经 `logs` 的文件
+  写入器，因此切割、保留和压缩沿用 I155。
+- **完成标准**：跟踪经过改名切割、复制后截断和删除时不丢行也不重复行，用一个写编号行、在随机位置崩溃的写入程序检查；一万个
+  文件时保持在打开文件数上限内；超长的行被截断并计数；目标与日志一样切割。
+- **涉及**：`sync/file`、`logs`、`docs`。
+
+### I167 像 DataX 一样的批处理作业
+
+- **做什么**：把 `mode: "once"` 做成作业：源的快照按块并行读取（源有键范围时按键范围），由 `max_parallel` 个写入者写出，
+  进度（已读、已写、失败的行数和预计剩余时间）记在检查点中，作业中断后从已完成的块继续；`fit sync run <pipeline> --once`
+  不启动服务器、从命令行运行一个作业并以其结果退出；调度（`schedule`，cron 语法）再次启动作业。
+- **完成标准**：一个在两个分块的 `generate`/`memory` 连接器之间复制一百万行的作业在中途被杀死，重启后完成，且不重复已完成
+  的块；命令以非零状态退出并给出失败记录数；调度能运行，且绝不与仍在运行的那次重叠。
+- **涉及**：`sync`、`cli`、`docs`。
+
+### I168 Elasticsearch 与 OpenSearch 作为目标
+
+- **做什么**：目标 `elasticsearch`（OpenSearch 经同一实现，自动识别其差异）：经 fib 异步 HTTP 客户端的 `_bulk`，insert 与
+  update 用 `index` 或 `create`，delete 用 `delete`，`_id` 取自记录的键，索引取自命名空间或带日期的模板，支持 routing 和
+  pipeline 选项；读取逐条结果，429 与 5xx 退避重试，mapping 错误交给 `on_error`；basic 认证、API key、带 CA 的 TLS。
+- **完成标准**：在 Docker 中与 Elasticsearch 8 和 OpenSearch 2 互通：insert、update 和 delete 在重放后收敛；一个 bulk 中有
+  一个坏文档时只有它失败；429 带来的背压减慢流水线而不丢记录。
+- **涉及**：`sync/elasticsearch`、`test/sync`、`docs`。
+
+### I169 Elasticsearch 与 OpenSearch 作为源
+
+- **做什么**：源 `elasticsearch`：对索引模式用 point in time 和基于 `_shard_doc` 的 `search_after` 做快照；之后若 `cursor`
+  指定了字段（更新时间、序号），则按该字段和 `_id` 用 `search_after` 轮询；检查点是最后的排序值。轮询看不到删除；文档说明
+  这一点，并建议使用软删除字段。
+- **完成标准**：一百万个文档的快照完整且有序；轮询能拿到快照期间写入的更新，包括游标值相同的多条；重启后无缺口地继续。
+- **涉及**：`sync/elasticsearch`、`test/sync`、`docs`。
+
+### I170 ClickHouse 作为目标与源
+
+- **做什么**：经 fib 异步客户端使用 HTTP 接口：目标 `clickhouse`，批次以 `JSONEachRow` 插入，`insert_deduplication_token`
+  由批次首尾位置生成，使重放的批次被服务端丢弃；delete 与 update 写成 `ReplacingMergeTree` 的行，带版本列和删除标记（或在
+  配置时使用轻量 `DELETE`）；源 `clickhouse`，按查询做快照，之后按游标列轮询。
+- **完成标准**：在 Docker 中与 ClickHouse 互通；同一批次发送两次只存一份；重放后用 `FINAL` 查询的最终状态正确；源从游标继续。
+- **涉及**：`sync/clickhouse`、`test/sync`、`docs`。
+
+### I171 HTTP 作为源与目标
+
+- **做什么**：源 `http`，fit 路由上的处理器 `sync_ingest`：JSON、NDJSON 或编解码器格式的 POST 变成记录，只有在流水线的目标
+  确认后才回 200，队列满或等待超过 `timeout` 时回 503 并带 `Retry-After`；路由的中间件（认证、限流）照常生效。目标 `http`：
+  以 JSON 或 NDJSON 批量 POST，头部与认证取自配置，5xx 和超时重试，幂等键由批次的位置生成。
+- **完成标准**：一个重试直到收到应答的客户端在 fit 重启前后不丢数据；队列满时回 503 且不阻塞 worker；目标的重试带同一个
+  幂等键。
+- **涉及**：`sync/httpsync`、`handler`、`docs`。
+
+### I172 MySQL 客户端：连接、认证与查询
+
+- **做什么**：包 `sync/mysql/wire`：握手、TLS、`mysql_native_password` 和 `caching_sha2_password`（快速路径，以及经 TLS 或
+  服务端 RSA 公钥的完整认证）、文本查询与结果集、二进制协议的预处理语句、带参数的多行插入、事务、每次调用的超时；支持
+  MySQL 5.7、8.0、8.4，MariaDB 10.11 与 11。
+- **完成标准**：在 Docker 中与每个版本互通：每种列类型经预处理语句往返一致；每种认证插件都能认证；服务端在结果中途关闭
+  连接时返回错误，而不是挂起。
+- **涉及**：`sync/mysql/wire`、`test/sync`。
+
+### I173 MySQL binlog：事件与值
+
+- **做什么**：解码 binlog：format description、rotate、GTID（MySQL 与 MariaDB 两种）、query、带可选元数据的 table map、
+  `WRITE`/`UPDATE`/`DELETE_ROWS` v1 与 v2、JSON 部分更新、XID、heartbeat；校验 CRC32；每种列类型到记录的值（decimal、带
+  小数秒的时间类型、`BIT`、`SET`、`ENUM`、作为字节的 `GEOMETRY`、JSON 的二进制形式）。
+- **完成标准**：testdata 中从每个服务端版本采集的 binlog 解码出测试写入的行；对解码器的模糊测试既不 panic，也不超出其分配上限。
+- **涉及**：`sync/mysql/binlog`。
+
+### I174 MySQL 与 MariaDB 作为源
+
+- **做什么**：源 `mysql`：以其 `server_id` 作为副本连接，检查 `binlog_format=ROW` 和 `binlog_row_image=FULL`，从检查点的
+  GTID 集合（或文件与偏移）开始，否则从当前开始；服务端支持时列名取自 `binlog_row_metadata=FULL`，否则在启动时以及流中每个
+  DDL 之后读取 `information_schema`；`tables` 按通配包含与排除；每个 XID 处一个检查点；DDL 作为 `ddl` 记录；用 heartbeat
+  计算延迟；重连后从最后投递的事务继续。
+- **完成标准**：与每个版本互通：多表的 insert、update 和 delete，流中途的 DDL，服务端重启，以及 binlog 被清除（报错说明需要
+  重新快照，而不是沉默）；在随机位置 `kill -9` fit 不丢任何事务。
+- **涉及**：`sync/mysql`、`test/sync`、`docs`。
+
+### I175 MySQL 快照及其到 binlog 的交接
+
+- **做什么**：`snapshot: "initial"`（没有检查点时）、`"always"` 或 `"never"`：先读 binlog 位置（`SHOW BINARY LOG STATUS` 或
+  `SHOW MASTER STATUS`，以及已执行的 GTID），然后在带一致性快照的 `REPEATABLE READ` 事务中按主键分块读取每张表，不加全局锁；
+  之后从先前读到的位置开始跟随流，快照期间的变更会再次应用，在幂等目标中收敛；块的进度记在检查点中；没有主键的表除非指定
+  了键，否则拒绝。
+- **完成标准**：对快照期间仍在写入的表做快照，结束时目标与源相同（对两边做校验和检查）；中断的快照从下一个块继续。
+- **涉及**：`sync/mysql`、`test/sync`。
+
+### I176 MySQL 与 TiDB 作为目标
+
+- **做什么**：目标 `mysql`：insert 与 update 写成 `INSERT ... ON DUPLICATE KEY UPDATE`，delete 按键删除，按表合并成多行语句
+  批量写入；`transactions: "source"` 把每个源事务写成一个事务，`"batch"` 把若干个合成一个；`ddl: "report"`（默认）或
+  `"stop"`；适用于 TiDB，其差异（事务大小、`AUTO_RANDOM`）予以处理或拒绝。
+- **完成标准**：在 Docker 中与 MySQL 8.4 和 TiDB 互通：MySQL 到 MySQL 的流水线在混合写入负载下，经过重放和一次杀进程后，
+  结束时校验和相同。
+- **涉及**：`sync/mysql`、`test/sync`、`docs`。
+
+### I177 PostgreSQL 客户端：连接、认证与查询
+
+- **做什么**：包 `sync/postgres/wire`：启动、TLS（使用 TLS 时默认 `sslmode` 为 `verify-full`）、SCRAM-SHA-256（含通道绑定）、
+  MD5 除非显式开启否则拒绝、简单与扩展查询协议、`COPY FROM STDIN`、复制连接的命令；支持 PostgreSQL 13 到 17。
+- **完成标准**：在 Docker 中与每个版本互通：常见类型都能经扩展协议往返，一百万行的 `COPY`，带与不带通道绑定的 SCRAM。
+- **涉及**：`sync/postgres/wire`、`test/sync`。
+
+### I178 PostgreSQL 作为源
+
+- **做什么**：源 `postgres`：publication 与 slot 不存在时创建（`create: true`）或要求已存在；以 `pgoutput`（协议 2，服务端
+  支持时流式传输大事务）执行 `START_REPLICATION`；relation、insert、update、delete、truncate、begin 和 commit 消息变成记录，
+  按 relation 的类型 OID 定类型；检查 `REPLICA IDENTITY`，使 delete 与 update 带有键；只在目标确认后才在 standby status
+  update 中发送已刷写的 LSN，并应答 keepalive；报告 slot 的延迟，带告警阈值。
+- **完成标准**：与每个版本互通：多表变更、大事务、truncate、服务端重启；slot 的 `confirmed_flush_lsn` 从不超过目标已有的
+  位置；`kill -9` fit 不丢任何事务。
+- **涉及**：`sync/postgres`、`test/sync`、`docs`。
+
+### I179 PostgreSQL 快照
+
+- **做什么**：以 `EXPORT_SNAPSHOT` 创建 slot（或为新快照创建新 slot），在 `SET TRANSACTION SNAPSHOT` 到该快照的事务中按键分块
+  并行读取各表；之后从 slot 的一致点开始跟随流，因此交接是精确的；块的进度记在检查点中。
+- **完成标准**：在写入进行中做的快照，结束时目标与源的校验和相同；恢复的快照若其导出快照已不存在，则该表从头开始并说明原因。
+- **涉及**：`sync/postgres`、`test/sync`。
+
+### I180 PostgreSQL 作为目标
+
+- **做什么**：目标 `postgres`：`INSERT ... ON CONFLICT (key) DO UPDATE` 和按键 delete，按表批量写入，快照用 `COPY` 写入临时表
+  再合并，需要时保持源事务；类型由记录的值映射，映射写进文档。
+- **完成标准**：PostgreSQL 到 PostgreSQL、MySQL 到 PostgreSQL 的流水线在混合负载下，经过重放和一次杀进程后，结束时校验和相同。
+- **涉及**：`sync/postgres`、`test/sync`、`docs`。
+
+### I181 MongoDB 客户端：BSON 与 OP_MSG
+
+- **做什么**：包 `sync/mongo/wire`：BSON 与记录值之间的编解码（无对应类型的保留为带标签的值）、带 section 的 `OP_MSG`、
+  `hello` 与副本集主节点发现、SCRAM-SHA-256、TLS、带 `getMore` 的游标、超时；支持 MongoDB 6、7 与 8。
+- **完成标准**：在 Docker 中与副本集互通；BSON 模糊测试；故障切换后能找到新主节点。
+- **涉及**：`sync/mongo/wire`、`test/sync`。
+
+### I182 MongoDB 作为源
+
+- **做什么**：源 `mongo`：在数据库或集合上开 change stream，`fullDocument: updateLookup`（或配合 pre-image 用
+  `whenAvailable`），resume token 作为检查点；先取流的开始时间、再按 `_id` 范围做快照，使交接有重叠；invalidate 或 token 已
+  超出 oplog 时报错并说明需要快照。
+- **完成标准**：与副本集互通：insert、update、replace 和 delete，故障切换，fit 重启；`kill -9` 前后不丢数据。
+- **涉及**：`sync/mongo`、`test/sync`、`docs`。
+
+### I183 MongoDB 作为目标
+
+- **做什么**：目标 `mongo`：无序 bulk write，upsert（按由键得到的 `_id` 做 replace）和 delete，读取逐文档错误，write concern
+  取自配置。
+- **完成标准**：MySQL 到 MongoDB、MongoDB 到 MongoDB 的流水线在重放后收敛。
+- **涉及**：`sync/mongo`、`test/sync`、`docs`。
+
+### I184 Kafka 客户端
+
+- **做什么**：包 `sync/kafka/wire`：metadata、produce、fetch、list offsets 和 API versions 所需的协议版本；带 gzip、snappy、
+  lz4 与 zstd 的 v2 record batch；SASL PLAIN 与 SCRAM、TLS；跟随 leader 变化；支持 Kafka 3.x 与 Redpanda。
+- **完成标准**：在 Docker 中与两者互通；每种压缩双向可用；fetch 与 produce 中途 leader 变化不丢数据。
+- **涉及**：`sync/kafka/wire`、`test/sync`。
+
+### I185 Kafka 作为源与目标；经 TiCDC 的 TiDB
+
+- **做什么**：源 `kafka`：从 fit 检查点中的 offset 读取 topic 与分区（不用消费组，使检查点与其他部分在一起；可选地提交到消费组
+  以便观察），每个 topic 一个编解码器（`json`、原样、canal-json、Debezium 的 JSON、TiCDC simple 协议、WASM 编解码器）；目标
+  `kafka`：记录的键作为消息键，topic 取自命名空间，批量并压缩，默认要求所有 ISR 确认。TiDB 作为源：TiCDC changefeed 以
+  canal-json 或 simple 协议写入 Kafka，解码为带提交 TS 的记录；在此之前经 MySQL 协议按某个 TS（`tidb_snapshot`）做快照。
+- **完成标准**：与 Kafka 和 Redpanda 互通；Kafka 到 Kafka 的复制在杀进程前后保持按键顺序；Docker 中带 TiCDC 的 TiDB 集群同步到
+  PostgreSQL，结束时校验和相同。
+- **涉及**：`sync/kafka`、`sync/tidb`、`test/sync`、`docs`。
+
+### I186 Redis 作为源与目标
+
+- **做什么**：支持 TLS 与 ACL 认证的 RESP2/RESP3 客户端（`sync/redis/wire`）；源 `redis`，从检查点的 ID 起用 `XREAD` 读取
+  stream；目标 `redis`，`XADD` 到由命名空间得到的 stream，或每条记录一个键（`SET` 文档、`HSET` 字段、delete 时 `DEL`），可选
+  TTL，使用 pipeline。
+- **完成标准**：在 Docker 中与 Redis 7 和 Valkey 互通；一个 stream 在杀进程前后复制不丢数据。
+- **涉及**：`sync/redis`、`test/sync`、`docs`。
+
+### I187 S3 及兼容存储作为源与目标
+
+- **做什么**：经 fib 异步 HTTP 客户端的 SigV4 签名；目标 `s3`，由批量行（JSON、CSV 或编解码器）组成的对象，按大小和时间滚动，
+  名称由含日期和批次首个位置的模板生成，可选 gzip，完整后才写出；源 `s3`，按键顺序列出某前缀下的对象并逐行读取，最后的键和
+  偏移作为检查点。
+- **完成标准**：在 Docker 中与 MinIO 互通；重放时写了两次的对象名称和内容都相同；源能在对象中间继续。
+- **涉及**：`sync/s3`、`test/sync`、`docs`。
+
+### I188 Admin API 与 `fit sync`
+
+- **做什么**：Admin API 中的 `/sync/pipelines`（也经控制台）：每条流水线的状态、位置、延迟、吞吐、队列、错误和最后一个错误；
+  暂停、恢复、重新快照；检查点的查看、设置与重置（会跳过或重放数据的重置需要 `confirm`）；测试源或目标的连接；试运行，读取
+  前几条记录、经过变换后返回，不写入也不保存位置。在此之上提供 `fit sync status|pause|resume|checkpoint|test|dry-run|run`。
+- **完成标准**：每个端点都有测试，经控制台的也有；试运行后检查点与目标保持原样；暂停让源停下并保留检查点。
+- **涉及**：`sync`、`admin`、`cli`、`docs`。
+
+### I189 指标、日志与死信
+
+- **做什么**：每条流水线与每个目标的指标：进出的记录数与字节数、批次、重试、错误、死信、队列占用、按时间计的延迟（提交时间到
+  确认）与按位置计的延迟（slot 或 binlog 落后的字节数、Kafka 落后的 offset）；状态变化写日志，错误日志限速；死信保存在有上限
+  的文件写入器中，含记录、错误和尝试次数，可从 Admin API 重放。
+- **完成标准**：每个指标都有测试检查；修复原因后重放的死信恰好到达目标一次。
+- **涉及**：`sync`、`observe`、`admin`、`docs`。
+
+### I190 workbench 的 Sync 页面
+
+- **做什么**：一级菜单 **Sync**：流水线表格，含状态、延迟和吞吐迷你图；流水线页面，含由 schema 生成的编辑器（各连接器的字段）、
+  **测试连接**、显示记录的**试运行**、需确认才能重置的检查点、可重放的错误与死信、暂停、恢复和重新快照；助手的同步只读工具和
+  一个同步技能（I124 的注册表）。
+- **完成标准**：在 workbench 的测试中，完全通过页面新建、测试、试运行、保存并观察一条流水线，中英文均可。
+- **涉及**：`app/workbench`、`assistant`、`docs`。
+
+### I191 写入事务型目标时恰好一次
+
+- **做什么**：对 MySQL、TiDB 和 PostgreSQL 目标提供 `checkpoint: "sink"`：位置与记录在同一事务中写入目标的一张表
+  （`_fit_sync_checkpoints`），启动时优先于本地文件读回，因此重放不会重复写入。
+- **完成标准**：在目标提交与本地检查点之间注入崩溃，没有任何行被写两次（用一张记录写入次数的目标表检查）；本地文件仍服务于
+  其他目标。
+- **涉及**：`sync/mysql`、`sync/postgres`、`sync`。
+
+### I192 互通与恢复矩阵
+
+- **做什么**：`test/sync`：涵盖每个连接器的服务端及其版本的 Docker Compose 矩阵，以及一个测试：每个源对一组固定的目标写入混合
+  负载，在随机位置多次杀掉 fit，结束时比较目标与源；凡改动 `sync/` 的推送都在 CI 中运行，完整矩阵每晚运行，从不跳过（v1.7.1
+  的 CI 规则）。
+- **完成标准**：矩阵在 CI 中运行并通过；坏掉的连接器会让它失败。
+- **涉及**：`test/sync`、CI 配置。
+
+### I193 基准测试
+
+- **做什么**：在压测主机上：文件对比 Filebeat（每秒行数、CPU、内存），MySQL 到 Elasticsearch、MySQL 到 Kafka 对比 Canal 与
+  Debezium，PostgreSQL 到 Kafka 对比 Debezium，MySQL 批量复制对比 DataX；附 profile，发现的开销予以修复或记录。
+- **完成标准**：结果写入 `bench` 和带评分的报告（规则 24），并说明 fit 所处的位置。
+- **涉及**：`bench`、`docs`。
+
+### I194 同步的文档与示例
+
+- **做什么**：`docs/sync.md` 及其中文版：概念、每个连接器的设置、保证，以及每个源对服务端的要求（binlog 设置、复制用户的权限、
+  publication、副本集）、系统之间的类型映射、插件、运维；fit-examples 中的示例：文件到 Elasticsearch、MySQL 到 PostgreSQL、
+  PostgreSQL 到 Kafka、一个 WASM 变换。
+- **完成标准**：链接检查通过；每个示例都在 fit-examples 的 CI 中运行。
+- **涉及**：`docs`、fit-examples。
+
+### 待审查的决策（2026-11-08）
+
+规划时所做；在用户裁定前按此执行，I163 把它们写入决定 036。
+
+1. **协议在 fit 中自行实现，不用驱动。** MySQL、PostgreSQL、MongoDB、Kafka、Redis 和 SigV4 在 `sync/*/wire` 中实现，如同 fib
+   实现自己的协议，每一个都对照真实服务端测试。备选：在 fit 自己的接口之后使用 go-mysql、pgx、MongoDB 驱动和 franz-go——眼下
+   工作量少得多，但违背设计原则 6，并带来数百个间接依赖包。
+2. **至少一次加幂等目标；只在目标有事务时做到恰好一次（I191）。** 备选：在每个目标中记录已写位置，而多数目标无法原子地保存它。
+3. **默认把检查点存为每条流水线一个本地文件**，而不是 `admin.store` 或目标中。因此一条流水线运行在一个 fit 上；迁移它就是迁移
+   它的文件。备选：存进 store，使它随导出的 store 一起迁移。
+4. **每条流水线一个检查点，取最慢的目标。** 慢目标会拖住其他目标的位置（但不拖住它们的写入，写入由队列限制）。备选：每个目标
+   一条流水线，各自连接源。
+5. **MySQL 快照不加锁、靠重放收敛**（I175），而不采用 DBLog 与 Flink CDC 的水位线算法；PostgreSQL 的导出快照本身就让交接精确。
+6. **ClickHouse 和 Elasticsearch 作为源时按游标轮询**，看不到删除；它们没有可跟随的变更流。
+7. **TiDB 的变更经 TiCDC 走 Kafka**，而不是 TiDB 旧的 binlog（Pump/Drainer，已弃用）。
+8. **WASM ABI 先以 JSON 传递记录**，只有 I165 的基准测试显示 JSON 的开销超过 20% 时才加二进制形式；连接器插件获得 HTTP 和定时器，
+   没有原始套接字。
+9. **DDL 只报告，不重放到 SQL 目标**；目标中的 schema 由人创建（之后可以加一个打印建议 DDL 的 `fit sync schema` 命令）。
+   Elasticsearch、MongoDB 和 Kafka 不需要 schema。
+10. **顺序：** 先做核心、变换、WASM 和文件（I163–I167），然后是基于 HTTP 的系统（I168–I171，借助 fib 的客户端成本低），然后是
+    数据库（I172–I183），然后是 Kafka、Redis 和 S3，最后是运维。同意，还是先做数据库？

@@ -28,6 +28,7 @@ of room.
 - [Media library: video on demand and channels](#media-library-video-on-demand-and-channels)
 - [Cluster management](#cluster-management)
 - [Logging: files, rotation and retention](#logging-files-rotation-and-retention)
+- [Sync: moving data from producers to consumers](#sync-moving-data-from-producers-to-consumers)
 
 ## How to work an iteration
 
@@ -111,6 +112,7 @@ should touch as few of these as it can.
 | `observe` | access logs, metrics, tracing |
 | `logs` | fit's own log: loggers, levels, and the files the log and the access log write through, rotated and kept (I155–I156) |
 | `plugin/...` | compile-time modules and WASM |
+| `sync/...` | sync: records, pipelines, checkpoints, transforms, and each connector with its wire protocol (`sync/mysql`, `sync/postgres`, `sync/mongo`, `sync/kafka`, ...; decision 036) |
 | `adapter/...` | config adapters: friendly format, nginx |
 | `bench` | the benchmark harness, configs for nginx, Caddy, Traefik and fit, results |
 | `test/e2e` | end-to-end and conformance suites |
@@ -322,6 +324,39 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I195.
 | I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | done |
 | I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | done |
 | I162 | One address, one server: config validation refuses two parts of the config on one address and transport, across listeners, the Admin API, consoles and every role, with an error naming both; every binding checks at bind time that no other socket holds its address; fib's TURN relays never share a port of the range (A70) | — | done |
+| **Sync** | | | |
+| I163 | Decision 036; `sync`: the record model, pipelines (source, transforms, sinks, `stream` or `once`), a bounded queue, batches, acknowledgements to a watermark that never splits a transaction, the checkpoint file, retries and `on_error` | I04 | todo |
+| I164 | Built-in transforms: `filter`, `route`, `fields`, `key`, `cast`, `mask`, `envelope` | I163 | todo |
+| I165 | WASM plugins for sync: transforms, codecs, and source and sink connectors on fit's HTTP client and timers; the guest SDKs | I163 | todo |
+| I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | todo |
+| I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | todo |
+| I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | todo |
+| I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | todo |
+| I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | todo |
+| I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | todo |
+| I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | todo |
+| I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | todo |
+| I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | todo |
+| I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | todo |
+| I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | todo |
+| I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | todo |
+| I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | todo |
+| I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | todo |
+| I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | todo |
+| I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | todo |
+| I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | todo |
+| I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | todo |
+| I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | todo |
+| I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
+| I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | todo |
+| I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | todo |
+| I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | todo |
+| I189 | Metrics, logs and dead letters, replayed from the Admin API | I188 | todo |
+| I190 | The workbench's Sync pages, and the assistant's tools for sync | I188, I189, I123 | todo |
+| I191 | Exactly once into MySQL, TiDB and PostgreSQL: the checkpoint written in the sink's transaction | I176, I180 | todo |
+| I192 | The interoperability and recovery matrix in CI | I176, I180, I183, I185 | todo |
+| I193 | Benchmarks against Filebeat, Canal, Debezium and DataX | I192 | todo |
+| I194 | Sync's documentation and examples | I190 | todo |
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 
@@ -4063,3 +4098,491 @@ Work on throughput and latency that no feature track owns.
    sides were built from fit `35270ef4` (the v1.7.1 pin, as in the A/B that found the cost) with a
    `replace` in a scratch modfile. The harness's h2c port was moved to 8091 for the run, uncommitted,
    since the user's `qwen27b.service` holds 8081.
+
+## Sync: moving data from producers to consumers
+
+Proposed 2026-11-08. fit gains `sync`: pipelines that read changes or records from a producer (a
+**source**) and write them to consumers (**sinks**), as Filebeat does for files and DataX, Canal or
+Debezium do for databases. Sources and sinks are set in the config like any role; every kind of
+infrastructure below is both a source and a sink, so any pair can be joined; and what the built-in
+connectors and transforms do not cover is added by WASM plugins. A pipeline can run for good (a
+stream: tail a file, follow a binlog) or once (a batch job: copy a table and stop). Decision 036
+records the choices below.
+
+Principles, in the order they bind:
+
+- **Nothing is lost, and the checkpoint proves it.** A source's position (a binlog GTID set or file
+  and offset at a transaction's end, a PostgreSQL LSN, a MongoDB resume token, a file's identity and
+  offset, a Kafka offset, a cursor's last value) is saved only after every sink of the pipeline has
+  acknowledged every record up to it, and a restart, crash or `kill -9` resumes from the last saved
+  position. Delivery is at least once; sinks write idempotently (upserts by key, document IDs,
+  deduplication tokens), so a replay converges to the same state. A source whose server keeps data
+  for its readers (a PostgreSQL slot, a Kafka offset) is told the position only then, never earlier.
+- **Transactions stay whole.** A checkpoint never falls inside a source transaction; records of one
+  transaction carry its ID and boundaries, and a SQL sink can write them in one transaction of its own.
+  Order is kept per key from source to sink; sinks may run keys in parallel, never one key out of order.
+- **Bounded everything** (rule 11): the queue between stages in bytes and records, a batch in bytes,
+  records and time, a record's size, a plugin's memory and time, the dead letters kept. A slow sink
+  slows the source through the queue, and the lag is reported; nothing grows without limit in fit.
+  What a source's server keeps meanwhile (a slot's WAL, binlogs) is reported with a warning threshold.
+- **Off fib's workers.** Sync is not on the request path: a pipeline's source, transforms and sinks run
+  on goroutines of their own, bounded per pipeline; HTTP-based systems (Elasticsearch, ClickHouse,
+  HTTP, S3) go out through fib's asynchronous HTTP client; connections to databases are few and long,
+  each on a goroutine. A listener that takes records in (the HTTP source) hands them over without
+  blocking a worker (rule 1).
+- **Lean dependencies** (design principle 6): the wire protocols (MySQL with its replication stream,
+  PostgreSQL with logical replication, MongoDB's OP_MSG and BSON, Kafka, RESP, SigV4) are written in
+  fit, as fib's own protocols are, each checked against the real server in Docker; no driver is
+  imported. The canonical record is fit's own type, so no connector's types leak into another.
+- **One record model.** Every source produces, and every sink takes, the same record: the source and
+  its namespace (`db.table`, an index, a collection, a file, a topic), an operation (`insert`,
+  `update`, `delete`, `ddl`, `message`), the key, the row before and after as typed values (null,
+  bool, int, uint, float, decimal as text, string, bytes, time, date, JSON, array, map), the commit
+  time, the transaction, and the opaque position. Transforms and plugins see only this.
+- **Credentials as everywhere in fit**: in `admin.store` or named by an environment variable (`password_env`, as the assistant's `api_key_env`), written once in the pages and
+  shown masked; TLS to every server that offers it, verified, with no silent `insecure`.
+- **Off by default**: no `sync`, no connections out, no state on disk.
+
+Words used below: a **pipeline**, one source, its transforms and one or more sinks, with one
+checkpoint; a **snapshot**, the existing rows of a table read once, before or instead of its
+changes; a **cursor**, a monotonic column or field (an update time, a version) a source polls by when
+the system has no change stream.
+
+What each kind of infrastructure is as a source and as a sink:
+
+| Infrastructure | As a source | Its checkpoint | As a sink | Iterations |
+| --- | --- | --- | --- | --- |
+| File lines | tail paths and globs as Filebeat does: new files found, rotation by rename and by truncation followed, partial last lines held, multiline joins | the file's device, inode and a fingerprint of its head, and the offset | lines (raw, JSON, CSV or a template) through fit's file sink, rotated and kept (I155) | I166 |
+| MySQL, MariaDB | the binlog in row format, as a replica (`COM_BINLOG_DUMP_GTID`); a snapshot chunked by primary key | GTID set, or file and offset, at a transaction's end | upserts and deletes by primary key, batched, optionally in the source's transactions | I172–I176 |
+| TiDB | changes through TiCDC (canal-json or TiCDC's simple protocol, from Kafka); a snapshot over the MySQL protocol | Kafka offsets, the commit TS in the record | the MySQL sink: TiDB speaks MySQL's protocol | I185 |
+| PostgreSQL | logical replication with `pgoutput`, a slot and a publication; a snapshot from the slot's exported snapshot | the LSN, confirmed to the slot only after the sinks | `INSERT ... ON CONFLICT DO UPDATE` and deletes, batched; `COPY` for snapshots | I177–I180 |
+| ClickHouse | no change stream: polled by a cursor over the HTTP interface, a snapshot by query | the cursor's last value and the keys at it | inserts over HTTP (`JSONEachRow`), with deduplication tokens; deletes as a `ReplacingMergeTree` version and a deleted flag | I170 |
+| Elasticsearch, OpenSearch | a snapshot with a point in time and `search_after`; then polled by a cursor field | the cursor's last sort values | `_bulk` index and delete by `_id` from the key, per-item errors, 429 backed off | I168, I169 |
+| MongoDB | change streams with `fullDocument`, a snapshot by `_id` ranges | the resume token | bulk writes: upserts and deletes by `_id` | I181–I183 |
+| Kafka (and Redpanda) | topics and partitions read from fit's own offsets | offsets per partition | produce with the key, batched, compressed | I184, I185 |
+| Redis | streams (`XREAD` from an ID) | the last ID | `XADD`, or a key per record (`SET`/`HSET`/`DEL`) | I186 |
+| HTTP | records posted to a fit route, answered once the sinks have them | none: the client retries until answered | batches posted as JSON or NDJSON | I171 |
+| S3 and compatibles | new objects under a prefix, in key order, read as lines | the last key and its offset | objects of batched lines, rolled by size and time | I187 |
+| WASM connectors | a plugin that reads through fit's HTTP client and timers | opaque bytes the plugin returns | a plugin that writes through the same | I165 |
+
+How a pipeline looks in the config (the names may change in I163):
+
+```json
+"sync": {
+  "state_dir": "/var/lib/fit/sync",
+  "pipelines": [{
+    "name": "orders-to-search",
+    "source": {"type": "mysql", "addr": "db:3306", "user": "repl", "password_env": "MYSQL_REPL_PASSWORD",
+               "server_id": 4101, "tables": ["shop.orders", "shop.order_items"], "snapshot": "initial"},
+    "transforms": [{"type": "route", "map": {"shop.orders": "orders"}},
+                   {"type": "wasm", "module": "plugins/mask.wasm"}],
+    "sinks": [{"name": "es", "type": "elasticsearch", "urls": ["https://es:9200"],
+               "batch": {"max_records": 1000, "max_bytes": "5MiB", "max_wait": "1s"}}],
+    "on_error": "stop"
+  }]
+}
+```
+
+The workbench's Sync menu, built up by the iterations below: pipelines with their state, lag and
+throughput; a pipeline's editor made from the schema, with **Test connection** and a dry run that
+shows the first records without writing or saving a position; the checkpoint, shown and reset with a
+confirmation; errors and dead letters; pause, resume and a new snapshot.
+
+Not in this track: SQL joins or aggregations across sources (a stream processor's work; a WASM
+transform sees one batch at a time); DDL replayed into SQL sinks (I163 decides; reported, not
+applied); one pipeline run on several fit instances at once (a pipeline runs on one fit; the cluster
+track can place it); exactly-once into sinks with no transactions.
+
+### I163 Decision 036; records, pipelines and checkpoints
+
+- **Do**: decision 036 (the principles above, the record model, at-least-once with idempotent sinks,
+  protocols written in fit, and the pending choices below). Package `sync`: the record and its typed
+  values, with a canonical JSON form; `config.Sync` with `state_dir` and `pipelines` (source,
+  transforms, sinks, `mode` `stream` or `once`, `on_error` `stop`, `skip` or `dead_letter`, queue and
+  batch limits), registered in the module registry so connectors are modules (`sync.sources.*`,
+  `sync.sinks.*`, `sync.transforms.*`), checked by `fit validate` and described in the schema; the
+  runtime: a source feeds a bounded queue, transforms run in order, each sink batches by records,
+  bytes and time and acknowledges; acknowledgements advance a watermark of contiguous positions that
+  never falls inside a transaction; the checkpoint store writes the watermark to
+  `<state_dir>/<pipeline>.json` (temporary file, `fsync`, rename) at most each `checkpoint_interval`
+  and at shutdown, and a pipeline starts from it; retries with backoff, then `on_error`; a `generate`
+  source and `memory` and `stdout` sinks for tests; a reload adds, removes and restarts pipelines whose
+  config changed, keeping the others running.
+- **Done when**: records flow from `generate` to two sinks and the checkpoint is the minimum both have
+  acknowledged; a sink failing mid-batch, a crash between a write and a checkpoint, and `kill -9` at
+  random points (a test helper that stops the runtime anywhere) lose nothing and replay only after
+  the checkpoint; a checkpoint never lands inside a transaction; a full queue stops the source, and
+  memory stays within the limits under a stalled sink; `once` stops at the source's end with the
+  checkpoint written; `dead_letter` writes the record and its error to the named sink; a reload
+  restarts only changed pipelines; under the race detector.
+- **Touches**: `docs/decisions` (036), `sync`, `config`, `module`, `schema`, `cli`, `docs`.
+
+### I164 Built-in transforms
+
+- **Do**: `filter` (by namespace with globs, by operation, by a field's value), `route` (namespace
+  renamed or mapped, e.g. tables to indices or topics), `fields` (keep, drop, rename, set a constant,
+  move into or out of a nested map), `key` (choose or build the key from fields), `cast` (a field's
+  type), `mask` (hash or blank fields), and `envelope` (a record turned into a flat document, a
+  before/after pair or Debezium's shape for sinks that take one); each a module, chained in order.
+- **Done when**: each transform has table tests over every value type and operation; a chain of them
+  allocates no more than one record copy per record; a delete keeps its key through every transform
+  that would drop the key's fields, or the config is refused.
+- **Touches**: `sync/transform`, `schema`, `docs`.
+
+### I165 WASM plugins for sync: transforms, codecs and connectors
+
+- **Do**: a host module `fit_sync` beside the HTTP ABI of `plugin/wasm`, sharing its runtime, pool of
+  instances and bounds. A **transform** plugin exports `fit_sync_transform(batch)`: it reads the batch
+  (the records' canonical JSON, a binary form later if the benchmark asks), and emits zero or more
+  records for each through `record_emit`, so it filters, changes, splits and routes. A **codec**
+  plugin turns bytes into records (`fit_sync_decode`, for file lines, Kafka messages, HTTP bodies and
+  S3 objects) and records into bytes (`fit_sync_encode`). A **connector** plugin is a source
+  (`fit_sync_poll(checkpoint)` returning records and the next checkpoint) or a sink
+  (`fit_sync_write(batch)`), doing its I/O through host functions: an HTTP request on fib's
+  asynchronous client to the hosts the config allows, a timer, the plugin's config and a log; no raw
+  sockets. Every call has a time and memory limit; a plugin that traps or overruns fails the batch,
+  which then follows `on_error`. The guest SDK (`plugin/wasm/guest`, Go and TinyGo) and a Rust crate
+  gain the sync calls, with examples.
+- **Done when**: a TinyGo transform drops, changes and splits records; a codec reads a custom line
+  format from files; a connector plugin reads a paged HTTP API into a sink and resumes from its
+  checkpoint after a restart; a plugin past its time or memory, or calling a host not allowed, fails
+  the batch and leaves the checkpoint where it was; a pool of instances keeps a pipeline's throughput
+  within 20% of a built-in transform doing the same work, measured on the benchmark host.
+- **Touches**: `plugin/wasm`, `plugin/wasm/guest`, `sync`, `docs`, fit-examples.
+
+### I166 Files as a source and a sink
+
+- **Do**: source `file`: paths and globs, scanned each `scan_interval`; each file known by its device,
+  inode and a fingerprint of its first bytes, so a rename is followed and a reused inode is a new file;
+  truncation starts the file again; a file deleted while read is finished first; lines up to
+  `max_line_bytes`, a partial last line held until it ends or `close_after` passes; multiline joins by
+  a start pattern; files read at once limited; the checkpoint is every file's offset; a codec
+  (`line`, `json`, `csv`, a WASM codec) makes the record. Sink `file`: records written as lines (raw,
+  JSON, CSV or a template) through the `logs` file sink, so rotation, retention and compression are
+  I155's.
+- **Done when**: a tail across rename rotation, copy-and-truncate and deletion loses and repeats no
+  line, checked against a writer of numbered lines with a crash at random points; ten thousand files
+  stay within the open-file limit; a line past the limit is cut and counted; the sink rotates as the
+  log does.
+- **Touches**: `sync/file`, `logs`, `docs`.
+
+### I167 Batch jobs, as DataX runs them
+
+- **Do**: `mode: "once"` made a job: the source's snapshot read in parallel chunks (by key ranges where
+  the source has them), written with `max_parallel` writers, a progress record (rows read, written,
+  failed, ETA) in the checkpoint so a job interrupted resumes from its finished chunks; `fit sync run
+  <pipeline> --once` runs one from the command line without a server and exits with its result; a
+  schedule (`schedule`, cron syntax) starts a job again.
+- **Done when**: a job copying a million rows between two `generate`/`memory` connectors with chunked
+  sources is killed half way and finishes on restart without repeating finished chunks; the command
+  exits non-zero with the failed records' count; a schedule runs and never overlaps a run still going.
+- **Touches**: `sync`, `cli`, `docs`.
+
+### I168 Elasticsearch and OpenSearch as a sink
+
+- **Do**: sink `elasticsearch` (OpenSearch through the same, its differences detected): `_bulk` over
+  fib's asynchronous HTTP client, `index` or `create` for inserts and updates, `delete` for deletes,
+  `_id` from the record's key, the index from the namespace or a template with a date, routing and
+  pipeline options; per-item results read, 429 and 5xx retried with backoff, a mapping error sent to
+  `on_error`; basic auth, API keys, TLS with a CA.
+- **Done when**: interop with Elasticsearch 8 and OpenSearch 2 in Docker: inserts, updates and deletes
+  converge after replays; a bulk with one bad document fails only that one; backpressure from 429 slows
+  the pipeline without losing records.
+- **Touches**: `sync/elasticsearch`, `test/sync`, `docs`.
+
+### I169 Elasticsearch and OpenSearch as a source
+
+- **Do**: source `elasticsearch`: a snapshot of an index pattern with a point in time and
+  `search_after` on `_shard_doc`, then, if `cursor` names a field (an update time, a sequence),
+  polling by that field with `search_after` on it and the `_id`; the checkpoint is the last sort
+  values. Deletes are not seen by polling; the docs say so and suggest a soft-delete field.
+- **Done when**: a snapshot of a million documents is complete and in order; polling picks up updates
+  written during it, including several with the same cursor value; a restart resumes without gaps.
+- **Touches**: `sync/elasticsearch`, `test/sync`, `docs`.
+
+### I170 ClickHouse as a sink and a source
+
+- **Do**: over the HTTP interface on fib's asynchronous client: sink `clickhouse`, batches inserted as
+  `JSONEachRow` with `insert_deduplication_token` set from the batch's first and last positions, so a
+  replayed batch is dropped by the server; deletes and updates written as rows of a
+  `ReplacingMergeTree` with a version column and a deleted flag (or lightweight `DELETE` when
+  configured); source `clickhouse`, a snapshot by query and then polling by a cursor column.
+- **Done when**: interop with ClickHouse in Docker; a batch sent twice is stored once; the final state
+  after replays is right with `FINAL`; the source resumes from its cursor.
+- **Touches**: `sync/clickhouse`, `test/sync`, `docs`.
+
+### I171 HTTP as a source and a sink
+
+- **Do**: source `http`, a handler `sync_ingest` on a fit route: a POST of JSON, NDJSON or a codec's
+  format becomes records, and is answered 200 only once the pipeline's sinks have acknowledged them,
+  or 503 with `Retry-After` when the queue is full or the wait passes `timeout`; the route's
+  middleware (auth, limits) applies. Sink `http`: batches posted as JSON or NDJSON with headers and
+  auth from the config, retried on 5xx and timeouts, idempotency key from the batch's positions.
+- **Done when**: a client that retries until answered loses nothing across a fit restart; a full queue
+  answers 503 without blocking a worker; the sink's retries carry the same idempotency key.
+- **Touches**: `sync/httpsync`, `handler`, `docs`.
+
+### I172 A MySQL client: connections, authentication and queries
+
+- **Do**: package `sync/mysql/wire`: the handshake, TLS, `mysql_native_password` and
+  `caching_sha2_password` (fast path, full authentication over TLS or with the server's RSA key),
+  text queries and result sets, prepared statements with the binary protocol, multi-row inserts with
+  parameters, transactions, timeouts on every call; MySQL 5.7, 8.0, 8.4, MariaDB 10.11 and 11.
+- **Done when**: interop in Docker with each version: every column type round-trips through a
+  prepared statement; authentication with each plugin; a server closing the connection mid-result is
+  an error, not a hang.
+- **Touches**: `sync/mysql/wire`, `test/sync`.
+
+### I173 The MySQL binlog: events and values
+
+- **Do**: decoding of the binlog: format description, rotate, GTID (MySQL's and MariaDB's), query,
+  table map with optional metadata, `WRITE`/`UPDATE`/`DELETE_ROWS` v1 and v2, partial JSON updates,
+  XID, heartbeat; CRC32 checksums checked; every column type to the record's values (decimal, temporal
+  types with fractions, `BIT`, `SET`, `ENUM`, `GEOMETRY` as bytes, JSON's binary form).
+- **Done when**: binlogs captured from each server version in testdata decode to the rows the tests
+  wrote; a fuzz test over the decoder neither panics nor allocates past its bounds.
+- **Touches**: `sync/mysql/binlog`.
+
+### I174 MySQL and MariaDB as a source
+
+- **Do**: source `mysql`: connects as a replica with its `server_id`, checks `binlog_format=ROW` and
+  `binlog_row_image=FULL`, starts from the checkpoint's GTID set (or file and offset), else from now;
+  column names from `binlog_row_metadata=FULL` where the server has it, else from
+  `information_schema` read at start and again after each DDL in the stream; `tables` include and
+  exclude by glob; a checkpoint at each XID; DDL as `ddl` records; heartbeats for lag; a reconnect
+  resumes from the last delivered transaction.
+- **Done when**: interop with each version: inserts, updates and deletes across many tables, a DDL
+  mid-stream, a server restart and a binlog purge (an error saying a new snapshot is needed, not
+  silence); `kill -9` of fit at random points loses no transaction.
+- **Touches**: `sync/mysql`, `test/sync`, `docs`.
+
+### I175 The MySQL snapshot and its hand-over to the binlog
+
+- **Do**: `snapshot: "initial"` (when there is no checkpoint), `"always"` or `"never"`: the binlog
+  position read first (`SHOW BINARY LOG STATUS` or `SHOW MASTER STATUS`, GTID executed), then each
+  table read in chunks by primary key in a `REPEATABLE READ` transaction with a consistent snapshot,
+  without global locks; the stream then starts from the position read first, so changes during the
+  snapshot are applied again and converge in idempotent sinks; chunk progress in the checkpoint;
+  tables without a primary key refused unless a key is named.
+- **Done when**: a snapshot of tables written to during it ends with the sink equal to the source
+  (checked by a checksum of both); an interrupted snapshot resumes at its next chunk.
+- **Touches**: `sync/mysql`, `test/sync`.
+
+### I176 MySQL and TiDB as a sink
+
+- **Do**: sink `mysql`: inserts and updates as `INSERT ... ON DUPLICATE KEY UPDATE` and deletes by key,
+  batched per table into multi-row statements, `transactions: "source"` writing each source
+  transaction as one, or `"batch"` grouping several; `ddl: "report"` (the default) or `"stop"`; works
+  against TiDB, whose differences (the size of a transaction, `AUTO_RANDOM`) are handled or refused.
+- **Done when**: interop with MySQL 8.4 and TiDB in Docker: a MySQL-to-MySQL pipeline under a mixed
+  write load ends equal by checksum, across replays and a kill.
+- **Touches**: `sync/mysql`, `test/sync`, `docs`.
+
+### I177 A PostgreSQL client: connections, authentication and queries
+
+- **Do**: package `sync/postgres/wire`: startup, TLS (`sslmode` with `verify-full` the default where
+  TLS is used), SCRAM-SHA-256 (with channel binding), MD5 refused unless enabled, the simple and the
+  extended query protocol, `COPY FROM STDIN`, the replication connection's commands; PostgreSQL 13 to
+  17.
+- **Done when**: interop with each version in Docker: every common type through the extended
+  protocol, `COPY` of a million rows, SCRAM with and without channel binding.
+- **Touches**: `sync/postgres/wire`, `test/sync`.
+
+### I178 PostgreSQL as a source
+
+- **Do**: source `postgres`: the publication and the slot created if missing (`create: true`) or
+  required; `START_REPLICATION` with `pgoutput` (protocol 2, streaming of large transactions when the
+  server has it); relation, insert, update, delete, truncate, begin and commit messages to records,
+  typed by the relation's type OIDs; `REPLICA IDENTITY` checked so deletes and updates carry their
+  key; standby status updates sent with the flushed LSN only once the sinks have acknowledged it, and
+  keepalives answered; slot lag reported with a warning threshold.
+- **Done when**: interop with each version: changes across many tables, a large transaction, a
+  truncate, a server restart; the slot's `confirmed_flush_lsn` never passes what the sinks have; `kill
+  -9` of fit loses no transaction.
+- **Touches**: `sync/postgres`, `test/sync`, `docs`.
+
+### I179 The PostgreSQL snapshot
+
+- **Do**: the slot created with `EXPORT_SNAPSHOT` (or a new slot for a new snapshot), the tables read
+  in chunks by key in transactions that `SET TRANSACTION SNAPSHOT` to it, in parallel; the stream then
+  starts at the slot's consistent point, so the hand-over is exact; chunk progress in the checkpoint.
+- **Done when**: a snapshot taken under writes ends with the sink equal to the source by checksum; a
+  resumed snapshot whose exported snapshot is gone starts the table again and says so.
+- **Touches**: `sync/postgres`, `test/sync`.
+
+### I180 PostgreSQL as a sink
+
+- **Do**: sink `postgres`: `INSERT ... ON CONFLICT (key) DO UPDATE` and deletes by key, batched per
+  table, `COPY` into a temporary table and a merge for snapshots, the source's transactions kept when
+  asked; types mapped from the record's values, with the mapping in the docs.
+- **Done when**: PostgreSQL-to-PostgreSQL and MySQL-to-PostgreSQL pipelines end equal by checksum
+  under a mixed load, across replays and a kill.
+- **Touches**: `sync/postgres`, `test/sync`, `docs`.
+
+### I181 A MongoDB client: BSON and OP_MSG
+
+- **Do**: package `sync/mongo/wire`: BSON encoding and decoding to the record's values (with types
+  that have no match kept as tagged values), `OP_MSG` with sections, `hello` and replica set discovery
+  of the primary, SCRAM-SHA-256, TLS, cursors with `getMore`, timeouts; MongoDB 6, 7 and 8.
+- **Done when**: interop with a replica set in Docker; a BSON fuzz test; a failover finds the new
+  primary.
+- **Touches**: `sync/mongo/wire`, `test/sync`.
+
+### I182 MongoDB as a source
+
+- **Do**: source `mongo`: change streams on databases or collections with
+  `fullDocument: updateLookup` (or `whenAvailable` with pre-images), the resume token as the
+  checkpoint, a snapshot by `_id` ranges with the stream's start time taken first so the hand-over
+  overlaps; an invalidate or a token too old for the oplog is an error saying a snapshot is needed.
+- **Done when**: interop with a replica set: inserts, updates, replaces and deletes, a failover, a
+  restart of fit; nothing lost across `kill -9`.
+- **Touches**: `sync/mongo`, `test/sync`, `docs`.
+
+### I183 MongoDB as a sink
+
+- **Do**: sink `mongo`: unordered bulk writes of upserts (replace by `_id` from the key) and deletes,
+  per-document errors read, write concern from the config.
+- **Done when**: MySQL-to-MongoDB and MongoDB-to-MongoDB pipelines converge across replays.
+- **Touches**: `sync/mongo`, `test/sync`, `docs`.
+
+### I184 A Kafka client
+
+- **Do**: package `sync/kafka/wire`: the protocol versions needed for metadata, produce, fetch,
+  list offsets and API versions; record batches v2 with gzip, snappy, lz4 and zstd; SASL PLAIN and
+  SCRAM, TLS; leader changes followed; Kafka 3.x and Redpanda.
+- **Done when**: interop in Docker with both; every compression both ways; a leader change mid-fetch
+  and mid-produce loses nothing.
+- **Touches**: `sync/kafka/wire`, `test/sync`.
+
+### I185 Kafka as a source and a sink; TiDB through TiCDC
+
+- **Do**: source `kafka`: topics and partitions read from offsets in fit's checkpoint (not a consumer
+  group, so the checkpoint stays with the rest; a group commit optional for visibility), a codec per
+  topic (`json`, raw, canal-json, Debezium's JSON, TiCDC's simple protocol, a WASM codec); sink
+  `kafka`: the record's key as the message key, the topic from the namespace, batched and compressed,
+  acknowledged by all in-sync replicas by default. TiDB as a source: a TiCDC changefeed to Kafka with
+  canal-json or the simple protocol, decoded into records with the commit TS, and the TiDB snapshot
+  over the MySQL protocol at a TS (`tidb_snapshot`) before it.
+- **Done when**: interop with Kafka and Redpanda; Kafka-to-Kafka copies keep per-key order across a
+  kill; a TiDB cluster with TiCDC in Docker syncs into PostgreSQL and ends equal by checksum.
+- **Touches**: `sync/kafka`, `sync/tidb`, `test/sync`, `docs`.
+
+### I186 Redis as a source and a sink
+
+- **Do**: a RESP2 and RESP3 client (`sync/redis/wire`) with TLS and ACL authentication; source
+  `redis`, streams read with `XREAD` from the checkpoint's ID; sink `redis`, `XADD` to a stream from
+  the namespace, or one key per record (`SET` of the document, `HSET` of its fields, `DEL` on delete)
+  with an optional TTL, pipelined.
+- **Done when**: interop with Redis 7 and Valkey in Docker; a stream copied across a kill loses
+  nothing.
+- **Touches**: `sync/redis`, `test/sync`, `docs`.
+
+### I187 S3 and compatibles as a source and a sink
+
+- **Do**: SigV4 signing over fib's asynchronous HTTP client; sink `s3`, objects of batched lines
+  (JSON, CSV or a codec) rolled by size and time, named by a template with the date and the batch's
+  first position, gzip optional, written only once complete; source `s3`, objects under a prefix
+  listed in key order and read as lines, the last key and offset as the checkpoint.
+- **Done when**: interop with MinIO in Docker; an object written twice in a replay has the same name
+  and content; the source resumes inside an object.
+- **Touches**: `sync/s3`, `test/sync`, `docs`.
+
+### I188 The Admin API and `fit sync`
+
+- **Do**: `/sync/pipelines` in the Admin API (and through the console): each pipeline's state,
+  position, lag, throughput, queue, errors and last error; pause, resume, a new snapshot; the
+  checkpoint shown, set and reset (a reset that would skip or replay data needs `confirm`); a test of
+  a source's or sink's connection; a dry run that reads the first records through the transforms and
+  returns them, writing nothing and saving no position. `fit sync status|pause|resume|checkpoint|
+  test|dry-run|run` on top.
+- **Done when**: every endpoint has tests, through the console too; a dry run leaves the checkpoint
+  and the sinks as they were; pause holds the source and keeps the checkpoint.
+- **Touches**: `sync`, `admin`, `cli`, `docs`.
+
+### I189 Metrics, logs and dead letters
+
+- **Do**: metrics per pipeline and sink: records and bytes in and out, batches, retries, errors, dead
+  letters, queue fill, lag in time (commit time to acknowledgement) and in position (a slot's or
+  binlog's bytes behind, Kafka's offsets behind); log lines for state changes, rate-limited for errors;
+  dead letters kept in a bounded file sink with the record, the error and the attempt count, and
+  replayed from the Admin API.
+- **Done when**: each metric is checked in a test; a dead letter replayed after the cause is fixed
+  reaches the sink once.
+- **Touches**: `sync`, `observe`, `admin`, `docs`.
+
+### I190 The workbench's Sync pages
+
+- **Do**: a first-level **Sync** entry: pipelines as a table with state, lag and throughput sparklines;
+  a pipeline's page with its editor made from the schema (each connector's fields), **Test
+  connection**, **Dry run** with the records shown, the checkpoint with reset behind a confirmation,
+  errors and dead letters with replay, pause, resume and a new snapshot; the assistant's read tools
+  and a skill for sync (I124's registry).
+- **Done when**: a pipeline is made, tested, dry-run, saved and watched entirely from the pages, in
+  both languages, in the workbench's tests.
+- **Touches**: `app/workbench`, `assistant`, `docs`.
+
+### I191 Exactly once into transactional sinks
+
+- **Do**: for the MySQL, TiDB and PostgreSQL sinks, `checkpoint: "sink"`: the position written to a
+  table of the sink's (`_fit_sync_checkpoints`) in the same transaction as the records, and read back
+  at start in preference to the local file, so a replay writes nothing twice.
+- **Done when**: with a crash injected between the sink's commit and the local checkpoint, no row is
+  written twice (checked with a sink table that counts writes); the local file still serves other
+  sinks.
+- **Touches**: `sync/mysql`, `sync/postgres`, `sync`.
+
+### I192 The interoperability and recovery matrix
+
+- **Do**: `test/sync`: a Docker Compose matrix of every connector's servers and versions, and a test
+  that, for each source against a fixed set of sinks, writes a mixed load, kills fit at random points
+  several times and compares the sink with the source at the end; in CI on every push that touches
+  `sync/`, the full matrix nightly, never skipped (the CI rule of v1.7.1).
+- **Done when**: the matrix runs in CI and passes; a broken connector fails it.
+- **Touches**: `test/sync`, CI config.
+
+### I193 Benchmarks
+
+- **Do**: on the benchmark host: files against Filebeat (lines a second, CPU, memory), MySQL to
+  Elasticsearch and MySQL to Kafka against Canal and Debezium, PostgreSQL to Kafka against Debezium,
+  a MySQL batch copy against DataX; with profiles, and the costs found fixed or recorded.
+- **Done when**: the results are in `bench` and the scored report (rule 24), with where fit stands.
+- **Touches**: `bench`, `docs`.
+
+### I194 Sync's documentation and examples
+
+- **Do**: `docs/sync.md` and its Chinese twin: concepts, every connector's settings, the guarantees
+  and what each source needs on its server (binlog settings, a replication user's grants, a
+  publication, a replica set), the type mapping between systems, plugins, operations; examples in
+  fit-examples: files to Elasticsearch, MySQL to PostgreSQL, PostgreSQL to Kafka, a WASM transform.
+- **Done when**: links checked; each example runs in fit-examples' CI.
+- **Touches**: `docs`, fit-examples.
+
+### Decisions pending review (2026-11-08)
+
+Made while planning; each stands until the user rules on it, and I163 writes them into decision 036.
+
+1. **Protocols written in fit, no drivers.** MySQL, PostgreSQL, MongoDB, Kafka, Redis and SigV4 are
+   implemented in `sync/*/wire`, as fib does its protocols, each tested against real servers.
+   Alternative: go-mysql, pgx, the MongoDB driver and franz-go behind fit's interfaces — far less work
+   now, against design principle 6 and with hundreds of transitive packages.
+2. **At least once, idempotent sinks; exactly once only where the sink has transactions (I191).**
+   Alternative: a log of written positions in every sink, which most sinks cannot hold atomically.
+3. **The checkpoint in a local file per pipeline**, not in `admin.store` or a sink, by default. A
+   pipeline therefore runs on one fit; moving it means moving its file. Alternative: the store, so it
+   travels with an exported store.
+4. **One checkpoint per pipeline, at the slowest sink.** A slow sink holds back the others' position
+   (not their writes, which the queue bounds). Alternative: one pipeline per sink, each with its own
+   connection to the source.
+5. **MySQL snapshots without locks, converging through replays** (I175), rather than the watermark
+   algorithm of DBLog and Flink CDC; PostgreSQL's exported snapshot makes its hand-over exact anyway.
+6. **ClickHouse and Elasticsearch as sources by cursor polling**, deletes not seen; they have no change
+   stream to follow.
+7. **TiDB's changes through TiCDC via Kafka**, not TiDB's old binlog (Pump/Drainer, deprecated).
+8. **The WASM ABI passes records as JSON first**, a binary form only if I165's benchmark shows JSON
+   costs more than 20%; connector plugins get HTTP and timers, not raw sockets.
+9. **DDL is reported, not replayed into SQL sinks**; schemas in sinks are created by people (a
+   `fit sync schema` command printing suggested DDL can come later). Elasticsearch, MongoDB and Kafka
+   need no schema.
+10. **Order:** core, transforms, WASM and files first (I163–I167), then the HTTP-based systems
+    (I168–I171, cheap with fib's client), then the databases (I172–I183), then Kafka, Redis and S3,
+    then operations. Agreed, or databases first?
