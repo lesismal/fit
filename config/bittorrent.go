@@ -37,6 +37,8 @@ const (
 // See docs/decisions/037-bittorrent.md and docs/bittorrent.md.
 type BitTorrent struct {
 	Client *BitTorrentClient `json:"client,omitempty" doc:"Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP trackers), downloading and seeding torrents kept in data_dir across restarts. None when left out."`
+	// Tracker is the bittorrent.tracker role, in bittorrent_tracker.go.
+	Tracker *BitTorrentTracker `json:"tracker,omitempty" doc:"Run a BitTorrent tracker, on fit's engine: HTTP announces and scrapes through routes whose handler is bt_tracker, UDP ones on its own listen, public or private (passkeys of a media_auth policy), with an allow-list of info hashes. Its swarms are kept in memory, bounded. None when left out."`
 
 	At Value `json:"-" fit:"self"`
 }

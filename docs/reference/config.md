@@ -45,9 +45,9 @@ a config against it and more.
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
-- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits)
+- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits), [`bittorrent.tracker`](#config-bittorrenttracker)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
@@ -133,7 +133,7 @@ In JSON:
 | `streaming` | [object](#config-streaming) |  | fit's streaming role, beside the gateway on its engine: one media hub where a stream is published once, over RTMP, RTSP, SRT or WHIP, and played over any of them, HTTP-FLV and HLS too, each listener and handler with its media_auth policy. None when left out. |
 | `media_library` | list of [object](#config-medialibrary) |  | Named libraries of media files: directories scanned into a catalog of items, each a title with its renditions, audio, subtitles and poster, probed off fib's workers on a bounded file pool of the library's own, and read by the Admin API's /media/library. None when left out: no files are scanned or served. |
 | `sync` | [object](#config-sync) |  | fit's sync role: pipelines that read records from a source (a database's changes, files, a queue) and write them to sinks, each with a checkpoint saved only once every sink has acknowledged the records it covers, kept in state_dir. None when left out: no connections out and no state on disk. |
-| `bittorrent` | [object](#config-bittorrent) |  | fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on disk. |
+| `bittorrent` | [object](#config-bittorrent) |  | fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP, and a tracker. None when left out: no BitTorrent port and no state on disk. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -302,7 +302,7 @@ Also at `webrtc.turn.tls.certificates[]`.
 
 ### `listeners[].access`
 
-Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`, `llm.hub.access`, `llm.node.access`, `llm.proxy.access`, `tunnel.hub.access`, `tunnel.proxy.access`, `webrtc.turn.access`, `webrtc.media.access`, `webrtc.proxy.access`, `streaming.access`, `bittorrent.client.access`.
+Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`, `llm.hub.access`, `llm.node.access`, `llm.proxy.access`, `tunnel.hub.access`, `tunnel.proxy.access`, `webrtc.turn.access`, `webrtc.media.access`, `webrtc.proxy.access`, `streaming.access`, `bittorrent.client.access`, `bittorrent.tracker.access`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -2187,7 +2187,7 @@ In JSON:
 
 ### `llm.hub.console`
 
-Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.node.console`, `tunnel.proxy.console`, `bittorrent.client.console`.
+Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.node.console`, `tunnel.proxy.console`, `bittorrent.client.console`, `bittorrent.tracker.console`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -3861,8 +3861,21 @@ A reload changes `limits`, `access`, `save_interval` and `console` in place, kee
 connected (but those over a lowered connection limit, and those the access now refuses); a change
 of `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers` or `disk_queue_bytes` makes
 a new client, the torrents saved from the old one and added to the new one without a check. A new
-`data_dir` starts from that directory's state, as a restart would. See
-[decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
+`data_dir` starts from that directory's state, as a restart would.
+
+`bittorrent.tracker` is a BitTorrent tracker on fib's tracker, one a process: HTTP and HTTPS
+announces and scrapes come through any route whose handler is `bt_tracker`, on fit's listeners
+and TLS, and UDP ones (BEP 15) on the role's own `listen`, which may be left out. The swarms are
+kept in memory, bounded by `max_torrents`, `max_peers_per_torrent` and `max_peers`; a peer is
+forgotten `peer_ttl` after its last announce. With `auth`, a `media_auth` policy, the tracker is
+private: each announce and scrape carries a passkey, as `/<passkey>/announce` or `?passkey=`, one
+of the policy's tokens or a user's passkey (derived from the policy's secret and the user's name,
+read on the console's `/api/passkey?user=`), whose grant must play `bittorrent/<info hash>`.
+With `allow` or `allow_files`, only the info hashes listed are tracked; the files are read again
+when they change. A reload changes the allow-list, `auth`, `access` and `console` in place; the
+interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms; the store's bounds and
+`peer_ttl` start them empty. See [decision 037](../decisions/037-bittorrent.md) and
+[BitTorrent](../bittorrent.md).
 
 In a .conf file:
 
@@ -3883,8 +3896,10 @@ bittorrent {
 		}
 		access { deny 10.0.0.0/8 }
 	}
+	tracker { listen :6969; interval 30m; max_torrents 10000 }
 }
 
+route { match { path /announce /scrape }; handler bt_tracker }
 route { handler respond { body fit } }
 ```
 
@@ -3908,7 +3923,17 @@ bittorrent:
     access:
       deny:
         - 10.0.0.0/8
+  tracker:
+    listen: :6969
+    interval: 30m
+    max_torrents: 10000
 routes:
+  - match:
+      path:
+        - /announce
+        - /scrape
+    handler:
+      module: bt_tracker
   - handler:
       module: respond
       params:
@@ -3933,9 +3958,17 @@ In JSON:
         "max_torrents": 500
       },
       "access": {"deny": ["10.0.0.0/8"]}
+    },
+    "tracker": {
+      "listen": ":6969",
+      "interval": "30m",
+      "max_torrents": 10000
     }
   },
-  "routes": [{"handler": {"module": "respond", "params": {"body": "fit"}}}]
+  "routes": [
+    {"match": {"path": ["/announce", "/scrape"]}, "handler": {"module": "bt_tracker"}},
+    {"handler": {"module": "respond", "params": {"body": "fit"}}}
+  ]
 }
 ```
 
@@ -3946,6 +3979,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `client` | [object](#config-bittorrentclient) |  | Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP trackers), downloading and seeding torrents kept in data_dir across restarts. None when left out. |
+| `tracker` | [object](#config-bittorrenttracker) |  | Run a BitTorrent tracker, on fit's engine: HTTP announces and scrapes through routes whose handler is bt_tracker, UDP ones on its own listen, public or private (passkeys of a media_auth policy), with an allow-list of info hashes. Its swarms are kept in memory, bounded. None when left out. |
 
 <a id="config-bittorrentclient"></a>
 
@@ -3983,6 +4017,27 @@ In JSON:
 | `seed_ratio` | number, 0 or more |  | Pause a torrent once it has uploaded this many times its size since it was added or fit started. Seeds for ever when left out or 0. |
 | `seed_time` | duration |  | Pause a torrent once it has seeded this long since it was added or fit started. Seeds for ever when left out. |
 | `max_torrents` | integer, 0 to 100000 | `1000` | The most torrents the client holds, running or paused; one more is refused. Lowering it removes none. 1000 when left out or 0. |
+
+<a id="config-bittorrenttracker"></a>
+
+### `bittorrent.tracker`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | The host and port the tracker answers UDP announces and scrapes on (BEP 15), as ":6969". Announces over HTTP and HTTPS come through a route whose handler is bt_tracker, on fit's listeners. No UDP when left out. A change moves the UDP port, keeping the swarms. |
+| `interval` | duration | `"30m"` | How often clients are told to announce. 30m when left out. A change applies at once, keeping the swarms. |
+| `min_interval` | duration |  | The "min interval" of HTTP answers: how soon a client may announce again of its own accord. None when left out. At most interval. A change applies at once, keeping the swarms. |
+| `peer_ttl` | duration | `"1h"` | How long a peer is kept after its last announce, longer than interval so that a peer announcing a little late is not forgotten; a torrent left without peers is forgotten, its completed count with it. 1h when left out. A change makes a new store: the swarms start empty and fill again as clients announce. |
+| `max_torrents` | integer, 0 to 1048576 | `100000` | The most torrents tracked at once; an announce of one more is refused with "tracker is full". 100000 when left out or 0. A change makes a new store: the swarms start empty and fill again as clients announce. |
+| `max_peers_per_torrent` | integer, 0 to 65536 | `10000` | The most peers kept of one torrent; a peer past it still gets peers but is not handed out. 10000 when left out or 0. A change makes a new store. |
+| `max_peers` | integer, 0 to 4194304 | `500000` | The most peers kept of all torrents together, each about 150 bytes; a peer past it still gets peers but is not handed out. 500000 when left out or 0. A change makes a new store. |
+| `max_numwant` | integer, 0 to 1000 | `200` | The most peers an announce gets, whatever its numwant asks; 50 when it asks for none. A UDP answer is also kept within 1400 bytes. 200 when left out or 0. |
+| `max_scrape` | integer, 0 to 1000 | `64` | The most torrents one HTTP scrape may name; a UDP scrape is bounded to 74 by its packet. A scrape naming none, a full scrape, gets nothing. 64 when left out or 0. |
+| `auth` | string |  | The media_auth policy whose passkeys the tracker takes, which makes it private: an announce or scrape must carry a passkey, in its path as /<passkey>/announce or as ?passkey=, that is one of the policy's tokens (static, or signed by fit) or a user's passkey, derived from the policy's secret and the user's name, and whose grant plays bittorrent/<info hash in hex> (play ["bittorrent/*"] for every torrent). Others are refused with a failure reason. Public when left out: anyone may announce. |
+| `allow` | list of string |  | The info hashes the tracker tracks, in hex: 40 digits for a v1 hash, or 64 for a v2 one, tracked by its first 20 bytes as v2 clients announce it. With any here or in allow_files, announces of other torrents are refused with "unregistered torrent", and scrapes of them get nothing. Every torrent when both are left out. |
+| `allow_files` | list of string |  | Files of more allowed info hashes: one on each line, as allow has them, with blank lines and what follows # left out. Read when the config is applied, and read again when one changes; each at most 64 MiB, and at most 1048576 info hashes in all. |
+| `access` | [object](#config-access) |  | The client addresses the tracker serves, deciding before the global access: a UDP datagram from an address it refuses is dropped before a connection is made, and an HTTP announce or scrape through bt_tracker from one is answered with a failure reason. A change applies at once. Every address when left out, unless the global access says otherwise. |
+| `console` | [object](#config-roleconsole) |  | The tracker's web pages: its statistics, read-only. None when left out. |
 
 <a id="providers"></a>
 
@@ -4153,6 +4208,50 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 | [`respond`](#http-handlers-respond) | A fixed status, fields and body |
 | [`static`](#http-handlers-static) | Files from a directory |
 | [`sync_ingest`](#http-handlers-sync_ingest) | Records posted into a sync pipeline's `http` source, answered once its sinks have them |
+
+<a id="http-handlers-bt_tracker"></a>
+
+### `bt_tracker`
+
+Serves the bittorrent.tracker role's HTTP announces and scrapes (BEP 3, 23, 7 and 48): a request whose path ends in announce is an announce, and one ending in scrape a scrape, whatever comes before, so that /announce, /tracker/announce and a private tracker's /<passkey>/announce all work. Refusals are answered 200 with a failure reason, as BEP 3 has them; 503 while the role does not run. The route's listeners, TLS and middleware apply as to any handler; the passkey is replaced by REDACTED in the access log.
+
+Serves the `bittorrent.tracker` role's announces and scrapes over HTTP, and HTTPS on a TLS
+listener, through fib's tracker: a request whose path's last segment begins with `announce` is an
+announce, one beginning with `scrape` a scrape, whatever comes before: a route matching
+`/tracker/*` serves `/tracker/announce` and a private tracker's `/tracker/<passkey>/announce`
+alike. Refusals (an info hash the allow-list lacks, a passkey refused, an address the role's `access` refuses, a full store) are answered `200` with a
+bencoded failure reason, as BEP 3 has them; another path is `404`, and `503` while the role does
+not run. It answers on the worker that read the request, never waiting. The passkey is replaced by
+`REDACTED` in the request URI the access log writes.
+
+In a .conf file:
+
+```fit
+route { match { path /announce /scrape /tracker/* }; handler bt_tracker }
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /announce
+    - /scrape
+    - /tracker/*
+handler:
+  module: bt_tracker
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/announce", "/scrape", "/tracker/*"]},
+  "handler": {"module": "bt_tracker"}
+}
+```
+
+It has no fields: `{}` turns it on.
 
 <a id="http-handlers-fastcgi"></a>
 

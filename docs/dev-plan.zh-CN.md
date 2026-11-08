@@ -358,7 +358,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I198 | 添加任务（磁力链、文件、URL、`watch_dir`）、分类与媒体库重扫、排队、磁盘检查 | I197 | todo |
 | I199 | `alt_speed` 调度、单任务限制、角色的 `access`、`access` 读 `.p2p` 和 `.dat` 黑名单（所有模块可用） | I197 | todo |
 | I200 | `bt_stream`：经 HTTP Range 边下边播，允许按磁力链临时添加 | I197 | todo |
-| I201 | `bittorrent.tracker` 角色：HTTP 的 `bt_tracker`、UDP、私有 passkey、白名单、统计 | I196 | todo |
+| I201 | `bittorrent.tracker` 角色：HTTP 的 `bt_tracker`、UDP、私有 passkey、白名单、统计 | I196 | done |
 | I202 | 把目录发布成带 web seed 的 hybrid 种子，跟随磁盘变化 | I197 | todo |
 | I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | todo |
 | I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | todo |
@@ -4768,6 +4768,52 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
   `media_auth`），info hash 白名单（内联或文件，监视变化）；统计。
 - **完成标准**：libtorrent 和 anacrolix 经 HTTP 与 UDP 向它 announce；私有 tracker 拒绝未知 passkey 和 info hash；上限有测试。
 - **涉及**：`bittorrent`、`handler`、`mediaauth`。
+- **完成** 2026-11-09：包 `bittorrent/tracker`（`tracker.go`、`hooks.go`、`handler.go`、`api.go`），角色 `bittorrent.tracker` 和处理器
+  `bt_tracker` 由 `app/standard` 和 `modules/standard` 注册；配置 `bittorrent.tracker`（`config/bittorrent_tracker.go`：`listen`、
+  `interval`、`min_interval`、`peer_ttl`、`max_torrents`、`max_peers_per_torrent`、`max_peers`、`max_numwant`、`max_scrape`、`auth`、
+  `allow`、`allow_files`、`access`、`console`）及其检查，其 UDP 端口纳入地址冲突检查，其文件被监视（`app.Info.CertFiles`）；`mediaauth`
+  中的用户 passkey 和 `AllowPasskey`（`passkey.go`）；schema、参考、模板、`schema-zh.js`；中英文 [BitTorrent](bittorrent.zh-CN.md)
+  中的 tracker 一节。测试：经 app Manager 的角色；用 fib 的 tracker 客户端经 HTTP（通过 `bt_tracker` 模块）和 UDP 的 announce 与
+  scrape，角色的统计；两个 fib 客户端只经 tracker 互相找到并下载一个私有种子（做种方用令牌经 HTTP，下载方用用户 passkey 经 UDP）；
+  用户和令牌的 passkey 放在路径和查询中、经 HTTP 和 UDP，缺失、未知或授权不含该种子时被拒，scrape 亦然，策略未加载时拒绝一切；内联和
+  文件中的允许列表，被拒的哈希，文件变化后重新应用，坏行和缺失文件使重载失败且保留之前的列表；存储上限和 `max_numwant`；access 在
+  建立连接前拒绝 UDP、以失败原因拒绝 HTTP，重载后解除；原地重载（interval 保留 swarm、端口被占时一切照旧、`listen` 移动和移除、新
+  上限新建存储）；逐字节发送 announce 的客户端、中途断开的客户端、垃圾数据报；控制台路由；passkey 脱敏；`mediaauth` 的 passkey
+  （keyring、其他密钥、公开播放）；配置检查与冲突。与 libtorrent、anacrolix 的互通在 I205。
+
+**待审决定**（实现时作出，2026-11-09；在用户裁决前有效）：
+
+1. **用户的 passkey 是派生的，不存储**：HMAC-SHA256(策略的签名密钥, "fit bittorrent passkey\0" + 用户名) 的前 32 位十六进制；
+   令牌（静态的或签发的）原样作为 passkey；passkey 的授权须能播放 `bittorrent/<十六进制 info hash>`。原因：`media_auth` 已有用户、
+   令牌、按模式的授权和密钥轮换，而密码不能放进 .torrent 文件永久保存的 URL；派生无需新状态，轮换 secret 即吊销所有 passkey。有
+   keyring 时接受每个密钥的 passkey，给出默认密钥的。备选：`media_auth` 中每个用户一个 `passkey` 字段；角色自己的文件保存 passkey；
+   只用长期有效的签发令牌。
+2. **私有 tracker 在策略未加载时拒绝一切**（"the tracker's passkeys are not available"）；`public` 含 `play` 的策略让所有人进入，与
+   流相同。
+3. **存储的默认上限是 fit 的，低于 fib 的**：`max_torrents` 100000（fib 1048576），`max_peers_per_torrent` 10000（65536），
+   `max_peers` 500000（2097152），最多约 80 MiB；最大值是 fib 的默认值（`max_peers` 最多 4194304）。备选：用 fib 的默认值。
+4. **存储上限或 `peer_ttl` 的更改会新建存储**，swarm 从空开始（客户端在其间隔内重新 announce），因为 fib 的 `MemoryStore` 只在创建时
+   接受它们；interval、`min_interval`、`max_numwant` 和 `max_scrape` 在同一存储上新建 fib `Server`，用角色唯一的 UDP 密钥，swarm 和
+   UDP 连接 ID 都保留。备选：拒绝此类更改直到重启；等 fib 支持运行时设置上限。
+5. **允许列表文件有坏行或无法读取时重载失败**，之前的列表继续生效。原因：否则一个笔误会悄悄拒绝某个种子，缺失文件则拒绝所有种子。
+   备选：跳过坏行并警告。
+6. **HTTP 的角色 `access` 在 `bt_tracker` 处理器中检查**（BEP 3 风格的失败原因 "refused"），UDP 由绑定的 `Filter` 在建立连接前检查；
+   HTTP 由 fit 的监听器接受，其 access 是全局的和监听器的。备选：角色的 access 只管 UDP。
+7. **访问日志中永不出现 passkey**：请求 URI 中的 `?passkey=` 总被替换为 `REDACTED`；`announce`/`scrape` 之前的路径段只在私有时替换，
+   以便公开 tracker 的 `/tracker/announce` 保持可读。
+8. **单个种子的统计按指名的种子给出，列表只列允许列表中的种子**；公开 tracker 无法列出它跟踪的内容，因为 fib 的 `MemoryStore` 无法
+   枚举其种子。在存储旁另建索引就是绕过 fib（规则 15），所以改为向 fib 提需求（见下）。计数：已服务的 announce 和 scrape，按原因的
+   拒绝（`unregistered` 按每个被拒哈希计，含 scrape；`passkey`；`access`）。
+9. **用户的 passkey 在角色控制台上读取**，`GET /api/passkey?user=`，在其登录之后，直到 I203 的 Admin API 和 I204 的页面；控制台的
+   其他路由是 `GET /api/stats`、`/api/torrents`（`offset`、`limit` ≤ 1000）和 `/api/torrents/<hash>`。
+10. **私有 scrape 需要授权覆盖其所有种子的 passkey**；不指名任何种子的 scrape 得不到任何内容，正如 fib 的处理，无论谁来问。
+11. **`bt_tracker` 没有参数**：fib 按路径最后一段分派，所以由路由的匹配决定 tracker 在哪里（`/announce`、`/tracker/*`）。
+12. **不可配置**：fib 的 `TrustIPParam`（关：peer 记录为其请求来自的地址），默认 numwant（fib 的 50），UDP 密钥（每个角色随机，重载
+    时保留，重启时不保留：UDP 客户端会重新连接）。
+
+由此遗留：要向 fib 提的需求——`MemoryStore` 无法列出其种子（`Range(func(InfoHash, Stats) bool)` 可给出公开 tracker 的单种子统计），
+也无法在运行时改变上限（`SetConfig(MemoryStoreConfig)` 可让这类重载保留 swarm）；fib 的客户端在做种方检查已有数据时 announce
+`started`，检查结束时 announce `completed`，于是做种方被算作一次完成的下载。tracker 还没有指标（I203 的指标）。
 
 ### I202 把目录发布成种子
 

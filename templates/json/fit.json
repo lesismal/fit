@@ -818,6 +818,21 @@
       },
     },
     // {
+      // // A route whose handler is bt_tracker, with every one of its params.
+      // "name": "bt_tracker-example",
+      // "handler": {
+        // // Serves the bittorrent.tracker role's HTTP announces and scrapes (BEP 3, 23, 7 and 48): a
+        // // request whose path ends in announce is an announce, and one ending in scrape a scrape,
+        // // whatever comes before, so that /announce, /tracker/announce and a private tracker's
+        // // /<passkey>/announce all work. Refusals are answered 200 with a failure reason, as BEP 3 has
+        // // them; 503 while the role does not run. The route's listeners, TLS and middleware apply as to
+        // // any handler; the passkey is replaced by REDACTED in the access log.
+        // "module": "bt_tracker",
+        // "params": {
+        // },
+      // },
+    // },
+    // {
       // // A route whose handler is fastcgi, with every one of its params.
       // "name": "fastcgi-example",
       // "handler": {
@@ -10225,8 +10240,8 @@
   // },
 
   // fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds
-  // torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on
-  // disk.
+  // torrents on one port for TCP and UDP, and a tracker. None when left out: no BitTorrent port
+  // and no state on disk.
   // object.
   // "bittorrent": {
     // // Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP
@@ -10379,6 +10394,196 @@
       // },
 
       // // The client's web pages; none when left out.
+      // // object.
+      // "console": {
+        // // The host and port the pages listen on. A host that is not a loopback address needs cert_file
+        // // and key_file, so that passwords never cross a network in the clear.
+        // // string; required.
+        // "address": "127.0.0.1:9000",
+
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
+
+        // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
+        // // pages are served over TLS.
+        // // string.
+        // "cert_file": "/etc/fit/example.com.pem",
+
+        // // A PEM file with the certificate's private key.
+        // // string.
+        // "key_file": "/etc/fit/example.com.key",
+
+        // // Who may log in: at least one user.
+        // // list of object; required.
+        // "users": [
+          // {
+            // // The user's name.
+            // // string; required.
+            // "username": "fit",
+
+            // // The bcrypt hash of the user's password, as fit hash-password makes it.
+            // // string; required.
+            // "password_hash": "$2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG",
+          // },
+        // ],
+
+        // // How long a login lasts without a request. 30m when left out.
+        // // duration, as "1.5s" or "2m"; default "30m".
+        // "session_timeout": "30m",
+
+        // // How long a login lasts at most, however busy. 12h when left out.
+        // // duration, as "1.5s" or "2m"; default "12h".
+        // "session_lifetime": "12h",
+
+        // // The most logins kept at once; one more ends the oldest. 64 when left out or 0.
+        // // integer, 0 or more; default 64.
+        // "max_sessions": 64,
+
+        // // The most connections the pages keep open at once, a quarter of them kept for those with a
+        // // login. When they are taken, a new connection closes the oldest of those without one, of the
+        // // client holding the most, and is closed as it is accepted only when every one has a login;
+        // // one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
+        // // when left out or 0.
+        // // integer, 0 or more; default 32.
+        // "max_conns": 32,
+
+        // // The client addresses the pages serve, deciding before the global access, which applies to
+        // // the pages too: a connection either refuses is closed as soon as it is accepted. It follows
+        // // every config applied, without restarting the pages. Set allow to "127.0.0.1" (and "::1") to
+        // // keep local access whatever the global access says. Every address is served, unless the
+        // // global access says otherwise, when left out.
+        // // object.
+        // "access": {
+          // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+          // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+          // // first.
+          // // list of string.
+          // "allow": ["127.0.0.1", "::1", "10.0.0.0/8"],
+
+          // // IP addresses and CIDR prefixes refused, whatever allow holds.
+          // // list of string.
+          // "deny": ["203.0.113.0/24"],
+
+          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // list of string.
+          // "allow_files": [],
+
+          // // Files of more deny entries, written as allow_files.
+          // // list of string.
+          // "deny_files": [],
+        // },
+      // },
+    // },
+
+    // // Run a BitTorrent tracker, on fit's engine: HTTP announces and scrapes through routes whose
+    // // handler is bt_tracker, UDP ones on its own listen, public or private (passkeys of a
+    // // media_auth policy), with an allow-list of info hashes. Its swarms are kept in memory,
+    // // bounded. None when left out.
+    // // object.
+    // "tracker": {
+      // // The host and port the tracker answers UDP announces and scrapes on (BEP 15), as ":6969".
+      // // Announces over HTTP and HTTPS come through a route whose handler is bt_tracker, on fit's
+      // // listeners. No UDP when left out. A change moves the UDP port, keeping the swarms.
+      // // string.
+      // "listen": "",
+
+      // // How often clients are told to announce. 30m when left out. A change applies at once, keeping
+      // // the swarms.
+      // // duration, as "1.5s" or "2m"; default "30m".
+      // "interval": "30m",
+
+      // // The "min interval" of HTTP answers: how soon a client may announce again of its own accord.
+      // // None when left out. At most interval. A change applies at once, keeping the swarms.
+      // // duration, as "1.5s" or "2m".
+      // "min_interval": "10s",
+
+      // // How long a peer is kept after its last announce, longer than interval so that a peer
+      // // announcing a little late is not forgotten; a torrent left without peers is forgotten, its
+      // // completed count with it. 1h when left out. A change makes a new store: the swarms start
+      // // empty and fill again as clients announce.
+      // // duration, as "1.5s" or "2m"; default "1h".
+      // "peer_ttl": "1h",
+
+      // // The most torrents tracked at once; an announce of one more is refused with "tracker is
+      // // full". 100000 when left out or 0. A change makes a new store: the swarms start empty and
+      // // fill again as clients announce.
+      // // integer, 0 to 1048576; default 100000.
+      // "max_torrents": 100000,
+
+      // // The most peers kept of one torrent; a peer past it still gets peers but is not handed out.
+      // // 10000 when left out or 0. A change makes a new store.
+      // // integer, 0 to 65536; default 10000.
+      // "max_peers_per_torrent": 10000,
+
+      // // The most peers kept of all torrents together, each about 150 bytes; a peer past it still
+      // // gets peers but is not handed out. 500000 when left out or 0. A change makes a new store.
+      // // integer, 0 to 4194304; default 500000.
+      // "max_peers": 500000,
+
+      // // The most peers an announce gets, whatever its numwant asks; 50 when it asks for none. A UDP
+      // // answer is also kept within 1400 bytes. 200 when left out or 0.
+      // // integer, 0 to 1000; default 200.
+      // "max_numwant": 200,
+
+      // // The most torrents one HTTP scrape may name; a UDP scrape is bounded to 74 by its packet. A
+      // // scrape naming none, a full scrape, gets nothing. 64 when left out or 0.
+      // // integer, 0 to 1000; default 64.
+      // "max_scrape": 64,
+
+      // // The media_auth policy whose passkeys the tracker takes, which makes it private: an announce
+      // // or scrape must carry a passkey, in its path as /<passkey>/announce or as ?passkey=, that is
+      // // one of the policy's tokens (static, or signed by fit) or a user's passkey, derived from the
+      // // policy's secret and the user's name, and whose grant plays bittorrent/<info hash in hex>
+      // // (play ["bittorrent/*"] for every torrent). Others are refused with a failure reason. Public
+      // // when left out: anyone may announce.
+      // // string.
+      // "auth": "",
+
+      // // The info hashes the tracker tracks, in hex: 40 digits for a v1 hash, or 64 for a v2 one,
+      // // tracked by its first 20 bytes as v2 clients announce it. With any here or in allow_files,
+      // // announces of other torrents are refused with "unregistered torrent", and scrapes of them get
+      // // nothing. Every torrent when both are left out.
+      // // list of string.
+      // "allow": ["*.example.com", "10.1.0.0/16"],
+
+      // // Files of more allowed info hashes: one on each line, as allow has them, with blank lines and
+      // // what follows # left out. Read when the config is applied, and read again when one changes;
+      // // each at most 64 MiB, and at most 1048576 info hashes in all.
+      // // list of string.
+      // "allow_files": [],
+
+      // // The client addresses the tracker serves, deciding before the global access: a UDP datagram
+      // // from an address it refuses is dropped before a connection is made, and an HTTP announce or
+      // // scrape through bt_tracker from one is answered with a failure reason. A change applies at
+      // // once. Every address when left out, unless the global access says otherwise.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
+        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
+        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
+      // // The tracker's web pages: its statistics, read-only. None when left out.
       // // object.
       // "console": {
         // // The host and port the pages listen on. A host that is not a loopback address needs cert_file

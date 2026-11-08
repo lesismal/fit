@@ -128,6 +128,13 @@ func (c *Config) binds() []bind {
 		add("bittorrent.client", bc.At.Field("listen"), "tcp", bc.Listen)
 		add("bittorrent.client", bc.At.Field("listen"), "udp", bc.Listen)
 	}
+	if b := c.BitTorrent; b != nil && b.Tracker != nil {
+		bt := b.Tracker
+		console("bittorrent.tracker.console", bt.Console)
+		if bt.Listen != "" {
+			add("bittorrent.tracker", bt.At.Field("listen"), "udp", bt.Listen)
+		}
+	}
 	if w := c.WebRTC; w != nil {
 		if t := w.TURN; t != nil {
 			for i, a := range t.Listen {

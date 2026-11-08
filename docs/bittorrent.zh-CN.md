@@ -100,3 +100,65 @@ metainfo 拒绝含 `..`、`.`、空或含 `/` 的路径段，其文件存储把�
 `Pause`，`Resume`，`Remove`（可同时删除数据），`SetFilePriority`，`SetSequential`，`Save`，以及取得 fib 种子的 `Torrent`。
 设置了角色的控制台时，它目前只读地提供 `GET /api/torrents` 和 `GET /api/torrents/<id>`；显示该角色模块的任何控制台以
 `/api/m/bittorrent.client/torrents` 和 `/api/m/bittorrent.client/torrents/<id>` 提供它们。
+
+## Tracker
+
+`bittorrent.tracker` 角色是一个 BitTorrent tracker，即 fib 的
+（[`fib/bittorrent/tracker`](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)），每个进程一个，配置不设置时关闭。
+HTTP 和 HTTPS 的 announce 与 scrape（BEP 3、23、7 和 48）经由处理器为 `bt_tracker` 的任何路由到来，走 fit 的监听器及其
+TLS、access 和中间件；UDP 的（BEP 15，带 BEP 41 的 URL 数据）到角色自己的 `listen`，只用 HTTP 的 tracker 可以不设它。
+路径最后一段以 `announce` 开头的请求是 announce，以 `scrape` 开头的是 scrape，所以匹配 `/tracker/*` 的路由同样服务
+`/tracker/announce` 和 `/tracker/<passkey>/announce`。每个 announce 和 scrape 都在读到它的 worker 上服务：存储只短暂
+锁住 64 个分片之一，下面的钩子都是对配置编译结果的查找。
+
+```fit
+bittorrent {
+	tracker {
+		listen :6969
+		auth members
+		allow_files /etc/fit/torrents.txt
+	}
+}
+routes {
+	route { match { path /tracker/* }; handler bt_tracker }
+}
+```
+
+**Swarm** 保存在内存中，即 fib 的 `MemoryStore`，重启后不保留：客户端会在其间隔内再次 announce。peer 在最后一次 announce
+之后 `peer_ttl`（1h）被遗忘，它必须长于 `interval`（30m）；没有 peer 的种子连同其完成次数一起被遗忘。
+
+| 上限 | 默认 | 最多 |
+| --- | --- | --- |
+| `max_torrents`，同时跟踪的种子；再多一个以 "tracker is full" 拒绝 | 100000 | 1048576 |
+| `max_peers_per_torrent`；超出的 peer 能获得 peer，但不会被分发 | 10000 | 65536 |
+| `max_peers`，所有种子合计，每个约 150 字节 | 500000 | 4194304 |
+| `max_numwant`，一次应答中的 peer（客户端未指定时 50；UDP 应答限制在 1400 字节内） | 200 | 1000 |
+| `max_scrape`，一次 HTTP scrape 的种子（UDP 的最多 74 个） | 64 | 1000 |
+| 允许列表，内联和文件合计 | | 1048576 个 info hash，每个文件 64 MiB |
+
+**私有。** 设置 `auth`（一个 `media_auth` 策略的名字）后，每个 announce 和 scrape 都需要 passkey，放在路径中
+（`/<passkey>/announce`）或查询中（`?passkey=`），且 passkey 的授权须能播放流 `bittorrent/<十六进制 info hash>`：
+`play: ["bittorrent/*"]` 表示所有种子，或写一个哈希只表示一个种子。passkey 是策略的令牌之一（静态的，或 fit 签发的：
+`fit media-token`、媒体页面），或用户的 passkey：由策略的签名密钥和用户名派生的 32 位十六进制数，角色的控制台在
+`/api/passkey?user=<name>` 给出。轮换策略的 secret 或其 keyring 的默认密钥会改变每个用户的 passkey；没有 secret 时，
+passkey 在 fit 重启后改变。UDP 上 passkey 在客户端依 tracker URL 发送的 URL 数据中：`udp://host:6969/<passkey>/announce`。
+拒绝以失败原因应答："a passkey is required"、"unknown passkey"、"the passkey may not use this torrent"。访问日志中的
+passkey 被替换为 `REDACTED`。`public` 含 `play` 的策略让所有人进入。策略未加载时 tracker 拒绝所有请求。
+
+**允许列表。** 设置 `allow`（十六进制 info hash：v1 为 40 位，v2 为 64 位，按前 20 字节跟踪）或 `allow_files`（每行一个，
+`#` 注释）后，只跟踪这些种子：其他的以 "unregistered torrent" 拒绝，对它们的 scrape 得不到任何内容。文件像证书和 access
+列表文件一样被监视：变化时重新应用配置并重新读取。有一行不是 info hash 或无法读取的文件会使重载失败，之前的列表继续生效。
+
+**Access。** 角色的 `access`，然后是全局的，在 fib 为被拒地址的 UDP 数据报建立连接之前将其丢弃，并以失败原因 "refused"
+应答来自被拒地址的 HTTP announce 和 scrape（路由的监听器也有全局 access）。
+
+**重载。** 允许列表、`auth`、`access` 和控制台原地改变。`interval`、`min_interval`、`max_numwant` 和 `max_scrape` 在同一
+存储上新建 fib tracker，swarm 保留，UDP 连接 ID 仍然有效（角色保持同一个密钥）。`max_torrents`、`max_peers_per_torrent`、
+`max_peers` 和 `peer_ttl` 会新建存储，因为 fib 的 `MemoryStore` 只在创建时接受它们：swarm 从空开始，随客户端再次 announce
+而填充。`listen` 的更改会移动 UDP 端口；无法绑定时重载失败，tracker 保持原样。
+
+**统计。** 角色的 Go API 有 `Stats`（保存的种子和 peer、已服务的 announce 和 scrape、按原因的拒绝次数、上限）、
+`Torrent(hash)`（做种者、下载者、完成次数）以及 `Torrents`（允许列表中种子的 swarm）；其控制台只读地提供
+`GET /api/stats`、`/api/torrents`（`offset`、`limit`，最多 1000）和 `/api/torrents/<hash>`，作为模块时为
+`/api/m/bittorrent.tracker/...`。公开的 tracker 无法列出它跟踪的种子：fib 的 `MemoryStore` 只对指名的种子作答。
+Admin API 的 `/bittorrent/tracker/stats` 随 I203 而来。

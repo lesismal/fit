@@ -23,8 +23,21 @@ A reload changes `limits`, `access`, `save_interval` and `console` in place, kee
 connected (but those over a lowered connection limit, and those the access now refuses); a change
 of `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers` or `disk_queue_bytes` makes
 a new client, the torrents saved from the old one and added to the new one without a check. A new
-`data_dir` starts from that directory's state, as a restart would. See
-[decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
+`data_dir` starts from that directory's state, as a restart would.
+
+`bittorrent.tracker` is a BitTorrent tracker on fib's tracker, one a process: HTTP and HTTPS
+announces and scrapes come through any route whose handler is `bt_tracker`, on fit's listeners
+and TLS, and UDP ones (BEP 15) on the role's own `listen`, which may be left out. The swarms are
+kept in memory, bounded by `max_torrents`, `max_peers_per_torrent` and `max_peers`; a peer is
+forgotten `peer_ttl` after its last announce. With `auth`, a `media_auth` policy, the tracker is
+private: each announce and scrape carries a passkey, as `/<passkey>/announce` or `?passkey=`, one
+of the policy's tokens or a user's passkey (derived from the policy's secret and the user's name,
+read on the console's `/api/passkey?user=`), whose grant must play `bittorrent/<info hash>`.
+With `allow` or `allow_files`, only the info hashes listed are tracked; the files are read again
+when they change. A reload changes the allow-list, `auth`, `access` and `console` in place; the
+interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms; the store's bounds and
+`peer_ttl` start them empty. See [decision 037](../decisions/037-bittorrent.md) and
+[BitTorrent](../bittorrent.md).
 
 ```json
 {
@@ -42,8 +55,16 @@ a new client, the torrents saved from the old one and added to the new one witho
         "max_torrents": 500
       },
       "access": {"deny": ["10.0.0.0/8"]}
+    },
+    "tracker": {
+      "listen": ":6969",
+      "interval": "30m",
+      "max_torrents": 10000
     }
   },
-  "routes": [{"handler": {"module": "respond", "params": {"body": "fit"}}}]
+  "routes": [
+    {"match": {"path": ["/announce", "/scrape"]}, "handler": {"module": "bt_tracker"}},
+    {"handler": {"module": "respond", "params": {"body": "fit"}}}
+  ]
 }
 ```

@@ -176,6 +176,10 @@ func cases(e *env) []tc {
 		// an HMAC token at once.
 		{module: "media_tokens", middleware: jwt.middleware, header: jwt.header,
 			handler: `{"module": "media_tokens", "params": {"auth": "live"}}`, status: 404, inline: true},
+		// Without the bittorrent.tracker role it answers 503 at once; with
+		// it, an announce is served inline too, the store's lock held
+		// briefly, which bittorrent/tracker's tests drive.
+		{module: "bt_tracker", handler: `{"module": "bt_tracker"}`, status: 503, inline: true},
 		{module: "test_late", handler: lateHandler, status: 200},
 	}
 }
