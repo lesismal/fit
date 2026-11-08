@@ -79,8 +79,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` | 1, 11 | I131–I134 (032) |
 | A70 | TURN relays that never share a port of the range | done, fib `856ad5b` | 11 | I162 |
 | A72 | A segment's tracks begin at its keyframe | done, fib `e4e10c0` | 11 | I134, I136 |
-| A73 | A binding refuses peers by address at accept | done, fib `8de0a75` | 11, 12 | I163 |
-| A74 | `webrtc.MuxConfig.Filter`: a Mux that refuses peers at their first datagram | done, fib `f957983` | 11 | I163 |
+| A73 | A binding refuses peers by address at accept | done, fib `8de0a75` | 11, 12 | I195 |
+| A74 | `webrtc.MuxConfig.Filter`: a Mux that refuses peers at their first datagram | done, fib `f957983` | 11 | I195 |
 
 ## Evidence
 
@@ -2422,7 +2422,7 @@ between frames presented one after the other (at most 0.2s).
 
 ## A73: A binding refuses peers by address at accept
 
-**Status.** Found on 2026-11-08, from I163 (access lists). Done in fib at `8de0a75`, made by fit's
+**Status.** Found on 2026-11-08, from I195 (access lists). Done in fib at `8de0a75`, made by fit's
 session per [rule 15](rules.md#7-when-fib-falls-short); fit is on `8de0a75`.
 
 **Problem.** fit's allow and deny lists of client addresses had nowhere to refuse a peer before fib
@@ -2439,7 +2439,7 @@ so a policy read from an atomic pointer changes with a store. Unix sockets and `
 asked; open connections and known UDP peers are not checked again. A nil Filter costs a nil check.
 
 **How fit uses it.** Every listener's bindings, and every role's, set `Filter` to an `access.Gate`,
-which a config applied swaps; see I163.
+which a config applied swaps; see I195.
 
 ## A74: A Mux that refuses peers at their first datagram
 

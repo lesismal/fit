@@ -119,7 +119,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I163.
+Status: `todo`, `doing` or `done`. The next free iteration number is I195.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -323,7 +323,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | done |
 | I162 | One address, one server: config validation refuses two parts of the config on one address and transport, across listeners, the Admin API, consoles and every role, with an error naming both; every binding checks at bind time that no other socket holds its address; fib's TURN relays never share a port of the range (A70) | — | done |
 | **Access** | | | |
-| I163 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
+| I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 
 ## M0, foundations
 
@@ -3960,7 +3960,7 @@ Principles, in the order they bind:
 
 ## Access
 
-### I163 Allow and deny lists of client addresses
+### I195 Allow and deny lists of client addresses
 
 - **Why**: asked for on 2026-11-08: fit should take allow lists (whitelists) and deny lists
   (blacklists) of client addresses, set for the whole config and for each service module on its
