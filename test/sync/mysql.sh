@@ -13,7 +13,8 @@
 #
 # The tests read FIT_SYNC_MYSQL, a list of name=host:port, with
 # FIT_SYNC_MYSQL_PASSWORD (root's) and FIT_SYNC_MYSQL_CA (the CA's file);
-# without them they skip. MYSQL_PREFIX names the containers (fit-sync-my),
+# without them they skip; FIT_SYNC_MYSQL_PREFIX is MYSQL_PREFIX, by which the
+# source's test restarts a server. MYSQL_PREFIX names the containers (fit-sync-my),
 # MYSQL_PORT is the first of five host ports (29210), MYSQL_SERVERS picks
 # some of them ("mysql57 mysql80 mysql84 mariadb1011 mariadb11").
 #
@@ -110,7 +111,9 @@ mysql_start() {
 	done
 	FIT_SYNC_MYSQL_PASSWORD=$MYSQL_PASSWORD
 	FIT_SYNC_MYSQL_CA=$MYSQL_CERTS/ca.pem
-	export FIT_SYNC_MYSQL FIT_SYNC_MYSQL_PASSWORD FIT_SYNC_MYSQL_CA
+	# The source's tests restart a server under a pipeline by its name.
+	FIT_SYNC_MYSQL_PREFIX=$MYSQL_PREFIX
+	export FIT_SYNC_MYSQL FIT_SYNC_MYSQL_PASSWORD FIT_SYNC_MYSQL_CA FIT_SYNC_MYSQL_PREFIX
 	[ "$TIDB" = 1 ] && tidb_start
 	return 0
 }

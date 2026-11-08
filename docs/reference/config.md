@@ -48,7 +48,7 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`mysql`](#sync-sources-mysql), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
@@ -6696,6 +6696,139 @@ In JSON:
 | `batch_size` | integer, 0 to 100000 | `1000` | The most documents, or changes, one batch of a cursor holds. 1000 when left out or 0. |
 | `max_await` | duration | `"1s"` | How long the server holds a request for changes while there are none, below timeout; also how long the last record of a transaction may wait to be known as its last. 1s when left out or 0. |
 | `chunk_documents` | integer, 0 or more | `100000` | In a job (mode once), the documents a chunk of the snapshot is reckoned to hold: each collection is split into as many ranges of _id as its count needs, from a sample of _ids, read job.max_parallel at a time. 100000 when left out or 0. |
+
+<a id="sync-sources-mysql"></a>
+
+### `mysql`
+
+Follows MySQL (5.7 and later) or MariaDB (10.11 and later) as a replica: the binlog in row format, read with COM_BINLOG_DUMP_GTID (or MariaDB's GTID position, or a file and offset) from the checkpoint, else from now. Each row inserted, updated or deleted is a record of namespace db.table, its key the primary key's columns, a DDL a ddl record; the records of a transaction carry its GTID and boundaries, and the checkpoint, the GTID set and the file and offset at a transaction's end, never falls inside one. A position the server no longer has (binlogs purged) is an error saying a new snapshot is needed.
+
+Follows MySQL (5.7 and later) or MariaDB (10.11 and later) as a replica, through fit's own client of
+their protocol, on connections of the pipeline's own, never on a fib worker: the source registers
+with its `server_id` and reads the binlog as a replica does. The server needs the binlog on
+(`log_bin`), `binlog_format = ROW` and `binlog_row_image = FULL`, which the source checks when it
+starts; the user needs `REPLICATION SLAVE`, `REPLICATION CLIENT` and `SELECT` on the tables read.
+
+Each row inserted, updated or deleted in a table `tables` names (and `exclude` does not) becomes a
+record of namespace `db.table`, its `after` (or, for a delete, its `before`) the row as a map of its
+columns, its `key` the primary key's columns (or those `keys` names; none for a table with
+neither). An update carries the row before and after; one that changed the key comes as a delete
+of the old key and an insert of the new row, so that a sink writing by key does not keep both.
+Values are typed by their columns: integers (unsigned ones as such), floats, decimals as their
+text, dates, `DATETIME` in UTC and `TIMESTAMP` as the instant, `TIME` and zero dates as the
+server's text, character strings as text, binary strings and `GEOMETRY` as bytes, `BIT` as an
+unsigned integer, `ENUM` and `SET` as their names, `JSON` as JSON. Column names come from the binlog
+where the server writes them (`binlog_row_metadata = FULL`), else from `information_schema`, read
+again after each DDL: a table changed since the events read were written is then named as it is
+now, its columns past the old count `@n` by position, which `binlog_row_metadata = FULL` avoids. A
+DDL of a table read (`CREATE`, `ALTER`, `DROP`, `RENAME`, `TRUNCATE`) is a `ddl` record whose
+`after` holds the `statement` and the `database`.
+
+Records come a transaction at a time, in commit order, each with the transaction's GTID (or its
+binlog file and offset on a server without GTIDs) and its commit time. The position, at each
+transaction's end, is `{"gtids": "...", "file": "mysql-bin.000042", "pos": 1234}`: the server's
+GTID set executed up to it (MySQL's, or MariaDB's `gtid_binlog_pos` form), and the file and offset
+after it. A pipeline resumes from its checkpoint by GTIDs where the server has them
+(`COM_BINLOG_DUMP_GTID`, or MariaDB's `@slave_connect_state`), else by file and offset; without a
+checkpoint it starts from the server's binlog now. A stream cut, as by a server restarting, is read
+again from the last transaction handed on, a transaction cut in the middle without handing on its
+records twice. A position the server no longer has, its binlogs purged, is an error saying a new
+snapshot is needed.
+
+`heartbeat` (10s) is how long the server waits, with nothing to send, before it says so: the source
+then reports no lag. Otherwise it reports, every 10 seconds, the binlog bytes the server holds past
+its position (`SHOW BINARY LOGS`), as the pipeline's lag. In a job (`mode: "once"`) the source reads
+to the binlog's end as it is when it asks, and stops.
+
+TLS, when `tls` is set, is required and verified; MySQL 5.7's image needs `tls_rsa`. **Test
+connection** logs in and checks the binlog's settings.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-search {
+		source mysql {
+			address db.internal:3306
+			username repl
+			password_env MYSQL_REPL_PASSWORD
+			tls true
+			ca_file /etc/fit/mysql-ca.pem
+			server_id 4101
+			tables shop.orders shop.order_items
+		}
+		sinks search { sink elasticsearch { urls https://es:9200 } }
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-to-search
+      source:
+        module: mysql
+        params:
+          address: db.internal:3306
+          username: repl
+          password_env: MYSQL_REPL_PASSWORD
+          tls: true
+          ca_file: /etc/fit/mysql-ca.pem
+          server_id: 4101
+          tables:
+            - shop.orders
+            - shop.order_items
+      sinks:
+        - name: search
+          sink:
+            module: elasticsearch
+            params:
+              urls:
+                - https://es:9200
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-to-search",
+        "source": {"module": "mysql", "params": {
+          "address": "db.internal:3306", "username": "repl", "password_env": "MYSQL_REPL_PASSWORD",
+          "tls": true, "ca_file": "/etc/fit/mysql-ca.pem", "server_id": 4101,
+          "tables": ["shop.orders", "shop.order_items"]}},
+        "sinks": [{"name": "search", "sink": {"module": "elasticsearch", "params": {"urls": ["https://es:9200"]}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:3306"` | The server's host and port: MySQL 5.7 or later, or MariaDB 10.11 or later, with the binlog on (log_bin), binlog_format ROW and binlog_row_image FULL. 127.0.0.1:3306 when left out. |
+| `username` | string |  | Required. The user to log in as, which needs REPLICATION SLAVE, REPLICATION CLIENT and SELECT on the tables read (information_schema tells the source the columns' names and keys). |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
+| `tls` | boolean |  | Connect over TLS, required: a server that does not offer it is refused, never spoken to in plain text. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; address's host when left out. |
+| `tls_rsa` | boolean |  | Offer TLS's RSA key exchange besides the default suites, for MySQL 5.7's image, which offers no other that Go has; needs tls. false when left out. |
+| `server_public_key_file` | string |  | A PEM file of the server's RSA public key, with which caching_sha2_password and sha256_password send the password without TLS. Without it and without TLS, a user of those plugins logs in only through the server's cache. |
+| `timeout` | duration | `"60s"` | How long connecting, and each wait for the server, may take; above heartbeat. 60s when left out or 0. |
+| `server_id` | integer, 0 or more |  | Required. The replica's server ID, unique among the server's replicas and the servers of its topology: a second replica connecting with the same ID cuts the first one off. Not 0. |
+| `tables` | list of string |  | The tables read, as db.table globs (* and ? within a name, [ranges]): shop.orders, shop.*. Every table of every database but mysql, sys, information_schema and performance_schema when left out. |
+| `exclude` | list of string |  | Tables left out of those tables names, as db.table globs. |
+| `keys` | object of list of string |  | The key's columns of tables, by db.table, in place of the primary key: for a table without one, or to key by a unique key. A table with neither key nor primary key has records without a key. |
+| `heartbeat` | duration | `"10s"` | How long the server waits, when it has nothing to send, before it sends a heartbeat, which tells the source that it is caught up and the connection alive; below timeout. 10s when left out or 0. |
 
 <a id="sync-sources-postgres"></a>
 

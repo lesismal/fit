@@ -337,7 +337,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | done |
 | I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | done |
 | I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | done |
-| I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | todo |
+| I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | done |
 | I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | todo |
 | I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | done |
 | I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | done |
@@ -5197,6 +5197,92 @@ track can place it); exactly-once into sinks with no transactions.
   mid-stream, a server restart and a binlog purge (an error saying a new snapshot is needed, not
   silence); `kill -9` of fit at random points loses no transaction.
 - **Touches**: `sync/mysql`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **Where it lives.** The source `mysql` (`sync.sources.mysql`) in package `sync/mysql` beside I176's
+   sink, in `source*.go`; it takes the sink's connection params but `database` (through the same
+   `wireConfig`, so `tls_rsa` serves MySQL 5.7 here too), and `server_id` (required, not 0),
+   `tables` and `exclude` (`db.table` globs; every table but those of `mysql`, `sys`,
+   `information_schema` and `performance_schema` when left out), `keys` and `heartbeat`.
+2. **The replica's commands in `mysqlwire`**, additive: `Conn.Command` (a command answered by OK, as
+   `COM_REGISTER_SLAVE`), `Conn.StartBinlog` and `Conn.ReadEvent` (a binlog packet's event; `io.EOF`
+   at a non-blocking dump's end; the server's `*Error`), the commands' constants exported. A
+   connection that streams is the stream's alone: any other call is `ErrBusy`, and `Close` sends no
+   `COM_QUIT`.
+3. **Two connections**: the stream, and a second, made when first needed, for `information_schema`
+   and `SHOW BINARY LOGS` while the first streams. Both on the pipeline's goroutine.
+4. **By GTIDs where the server has them.** MySQL with `gtid_mode = ON`: `COM_BINLOG_DUMP_GTID` with
+   `BINLOG_THROUGH_GTID` and the checkpoint's set; MariaDB (always): `@slave_connect_state` (strict
+   mode off) and `COM_BINLOG_DUMP`; otherwise the file and offset. The position always holds both,
+   `{"gtids", "file", "pos"}`, the GTID set as the server writes it (MariaDB's `gtid_binlog_pos`
+   form, the last GTID of each domain). A set with MySQL 8.3's tagged GTIDs resumes by file and
+   offset: their encoding in the dump command is not written yet. Alternative: tagged GTIDs encoded
+   too, from MySQL's sources and checked against 8.4.
+5. **From now, and no checkpoint before the first record.** Without a checkpoint the stream starts at
+   the server's binlog position now (`SHOW BINARY LOG STATUS` from 8.2, else `SHOW MASTER STATUS`,
+   and MariaDB's `gtid_binlog_pos`); a transaction of tables not read moves no checkpoint, as
+   I182's decision 11 has it. So a pipeline on a quiet table reads again, after a restart, what the
+   server wrote since its last record, and the server purging those binlogs makes it ask for a new
+   snapshot though nothing of its tables was lost. Alternative: a record without a row that carries
+   the position (the record model has none), or the position kept by the source outside the
+   checkpoint.
+6. **Column names from the binlog, else `information_schema`.** A table map with names
+   (`binlog_row_metadata = FULL`) is used as it is, its primary key with it; otherwise the columns
+   (name, `unsigned`, binary or not, `ENUM` and `SET` values) and the primary key
+   (`STATISTICS`) are read once per table and kept until the next DDL in the stream, which clears
+   them all. Events written before a change of the table are named as the table is now: when the
+   counts differ, the columns past the shorter are named `@n` by position, with a warning. A
+   column's character set is told only as binary or not (strings keep their bytes, I173's decision
+   2). Alternative: a history of the schema replayed from the DDL, as Debezium keeps.
+7. **Keys and key changes.** The key is the primary key, or `keys`' columns for a table; a table with
+   neither has records without a key, which a sink writing by key refuses (for the snapshot, I175
+   refuses such a table). An update whose key changed is a delete of the old key and an insert of the
+   new row, in its transaction, as I178's decision 5. Alternative: an update whose `before` holds the
+   old key, which the `mysql` sink handles but others do not.
+8. **Transactions.** A record's `Tx.ID` is the GTID (`uuid:gno`, `uuid:tag:gno`, MariaDB's
+   `domain-server-sequence`), or `file:offset` of the transaction's first event without GTIDs; the
+   source holds one record back so the last is flagged, and only the last carries the position, the
+   file and offset after its `XID` (or `COMMIT`); a transaction compressed in a payload is read as
+   any. A DDL (`CREATE`, `ALTER`, `DROP`, `RENAME`, `TRUNCATE`) is a transaction of its own and a
+   `ddl` record of `db.table` when its table is told (from the statement, its database the
+   statement's default), else of `db` when the source reads that database, `after` the
+   `statement` and the `database`; other statements (`GRANT`, `FLUSH`, ...) are passed over.
+9. **Refusals stop rather than lose.** `log_bin`, `binlog_format = ROW` and `binlog_row_image = FULL`
+   are checked at each connection (and by **Test connection**); a rows event without every column
+   (a session's `binlog_row_image`) and a statement-based change of a database read (a session's
+   `binlog_format`) are errors, which restart the pipeline from its checkpoint until fixed by hand.
+   Alternative: such events passed over with a warning.
+10. **A stream cut is read again where it was.** An error of the connection (not the server's)
+    reconnects up to five times in a row (100 ms, doubling) from the last transaction handed on; a
+    transaction cut inside is read again whole and its records already handed on are passed over by
+    count, the binlog being the same. The server's errors go to the pipeline: 1236 (a position it no
+    longer has, binlogs purged) as an error saying a new snapshot is needed.
+11. **Lag in bytes** (I189's `Run.ReportLag`): 0 at each heartbeat outside a transaction (the server
+    had nothing to send), and at most every 10 seconds at a transaction's end the bytes of the
+    server's binlogs past the position (`SHOW BINARY LOGS` on the second connection: the rest of the
+    file read and the files after it; nothing reported when it is refused, which needs `REPLICATION
+    CLIENT`). Not counted while a long transaction is read. Alternative: GTIDs behind, which a server
+    without GTIDs and MariaDB's domains make uneven.
+12. **Heartbeats**: the session sets `@master_heartbeat_period` and `@source_heartbeat_period` (8.0.26
+    renamed it; both names, harmless where unknown) to `heartbeat`, 10 s, which must be below
+    `timeout` since every read waits at most that; the checksum likewise, `@master_binlog_checksum`
+    and `@source_binlog_checksum`; MariaDB's `@mariadb_slave_capability = 4` for its GTID events.
+13. **A job** (`mode: "once"`) asks for a non-blocking dump: the server ends the stream at its binlog's
+    end and the source stops there (I175 makes a job the snapshot).
+14. **Interop** (`test/sync/mysql_source_test.go`, on `test/sync/mysql.sh`'s five servers): changes
+    across two tables in one transaction, an update, a key changed, a DDL mid-stream and rows after
+    it, deletes, compared record by record; a restart from a checkpoint; the binlogs purged for real
+    under a checkpoint (an error asking for a snapshot); the connection test; and a MySQL-to-MySQL
+    pipeline through I176's sink under a mixed write load, killed at random points (`Options.Crash`)
+    and, with `FIT_SYNC_MYSQL_PREFIX` (which `mysql.sh` now exports), the server restarted with
+    `docker restart` under it, ending equal by checksum. The purge takes a lock file
+    (`$TMPDIR/fit-sync-mysql-binlog.lock`) that `TestMySQLBinlogInterop` now takes too, since `go
+    test` runs that package beside `./test/sync` on the same servers and it reads a binlog file of its
+    own.
+15. **Size**: about 1,430 lines of code (`mysqlwire` 74 of them), 1,240 of unit tests against a fake
+    connection with built events (the package at 96.5% of statements without containers) and 420 of
+    interop; nothing left, no I174b.
 
 ### I175 The MySQL snapshot and its hand-over to the binlog
 

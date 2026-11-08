@@ -327,7 +327,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I171 | HTTP 作为源（`sync_ingest`，目标收到记录后才应答）与目标 | I163 | done |
 | I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | done |
 | I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | done |
-| I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | todo |
+| I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | done |
 | I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | todo |
 | I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | done |
 | I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | done |
@@ -3847,6 +3847,61 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 - **完成标准**：与每个版本互通：多表的 insert、update 和 delete，流中途的 DDL，服务端重启，以及 binlog 被清除（报错说明需要
   重新快照，而不是沉默）；在随机位置 `kill -9` fit 不丢任何事务。
 - **涉及**：`sync/mysql`、`test/sync`、`docs`。
+
+**待评审的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **放在哪里。** 源 `mysql`（`sync.sources.mysql`）放在包 `sync/mysql` 中，与 I176 的目标并列，文件为 `source*.go`；它采用
+   目标的连接参数，但没有 `database`（经由同一个 `wireConfig`，所以 `tls_rsa` 在这里同样服务 MySQL 5.7），另有 `server_id`
+   （必填，不能为 0）、`tables` 和 `exclude`（`db.table` 通配；不设置时为除 `mysql`、`sys`、`information_schema`、
+   `performance_schema` 之外的所有表）、`keys` 和 `heartbeat`。
+2. **副本命令放进 `mysqlwire`**，只做增加：`Conn.Command`（以 OK 应答的命令，如 `COM_REGISTER_SLAVE`）、`Conn.StartBinlog`
+   和 `Conn.ReadEvent`（binlog 包中的事件；非阻塞 dump 结束时为 `io.EOF`；服务器的 `*Error`），命令常量导出。进入流式读取的
+   连接只属于该流：其他调用返回 `ErrBusy`，`Close` 不发送 `COM_QUIT`。
+3. **两条连接**：一条读流；另一条在首次需要时建立，在第一条读流期间用于 `information_schema` 和 `SHOW BINARY LOGS`。两者都在
+   流水线自己的 goroutine 上。
+4. **服务器有 GTID 时按 GTID 续读。** MySQL 且 `gtid_mode = ON`：用 `COM_BINLOG_DUMP_GTID`，带 `BINLOG_THROUGH_GTID` 和检查点
+   的集合；MariaDB（总是有）：`@slave_connect_state`（关闭严格模式）加 `COM_BINLOG_DUMP`；否则按文件与偏移。位置总是同时
+   保存两者，`{"gtids", "file", "pos"}`，GTID 集合采用服务器的写法（MariaDB 为 `gtid_binlog_pos` 形式，每个域的最后一个
+   GTID）。含 MySQL 8.3 带标签 GTID 的集合按文件与偏移续读：dump 命令中它们的编码尚未实现。备选：按 MySQL 源码实现带标签
+   GTID 的编码并在 8.4 上验证。
+5. **从当前开始，第一条记录之前没有检查点。** 没有检查点时，流从服务器当前的 binlog 位置开始（8.2 起用 `SHOW BINARY LOG
+   STATUS`，否则 `SHOW MASTER STATUS`，MariaDB 另读 `gtid_binlog_pos`）；与 I182 的决定 11 相同，不读的表的事务不移动检查点。
+   因此一条只读冷门表的流水线重启后会重读服务器自其最后一条记录以来写的 binlog，若服务器已清除这些 binlog，它会要求重新
+   快照，尽管它的表没有丢任何数据。备选：一条携带位置但没有行的记录（记录模型没有这种记录），或由源在检查点之外保存位置。
+6. **列名取自 binlog，否则取自 `information_schema`。** 带列名的表映射（`binlog_row_metadata = FULL`）直接使用，主键也随之
+   给出；否则每张表读取一次列（名称、`unsigned`、是否二进制、`ENUM` 和 `SET` 的值）和主键（`STATISTICS`），保留到流中下一个
+   DDL，届时全部清除。表变更前写下的事件按表的当前结构命名：列数不同时，超出较短一方的列按位置命名为 `@n`，并记录警告。
+   列的字符集只区分二进制与否（字符串保留原字节，I173 的决定 2）。备选：像 Debezium 那样根据 DDL 重放维护 schema 历史。
+7. **键与键的变化。** 键是主键，或 `keys` 为该表指定的列；两者都没有的表，其记录没有键，按键写入的目标会拒绝它们（快照时，
+   I175 直接拒绝这样的表）。键改变的 update 变成旧键的 delete 加新行的 insert，同在其事务中，与 I178 的决定 5 相同。备选：
+   在 `before` 中带旧键的 update，`mysql` 目标能处理，其他目标不能。
+8. **事务。** 记录的 `Tx.ID` 是 GTID（`uuid:gno`、`uuid:tag:gno`、MariaDB 的 `domain-server-sequence`），没有 GTID 时为事务
+   第一个事件的 `file:offset`；源扣住一条记录以便标出最后一条，只有最后一条携带位置，即其 `XID`（或 `COMMIT`）之后的文件与
+   偏移；压缩在 payload 中的事务照常读取。DDL（`CREATE`、`ALTER`、`DROP`、`RENAME`、`TRUNCATE`）自成一个事务：能从语句看出
+   表时（库名缺省为语句的默认库）是 `db.table` 的 `ddl` 记录，否则在源读取该库时是 `db` 的记录，`after` 为 `statement` 和
+   `database`；其他语句（`GRANT`、`FLUSH` 等）跳过。
+9. **宁可停下也不丢。** 每次连接（以及**测试连接**）都检查 `log_bin`、`binlog_format = ROW` 和 `binlog_row_image = FULL`；
+   缺列的 rows 事件（某会话的 `binlog_row_image`）和所读库中基于语句的变更（某会话的 `binlog_format`）是错误，流水线会从检查点
+   重启，直到人工修正。备选：跳过此类事件并记录警告。
+10. **流中断后从原处重读。** 连接的错误（不是服务器的）最多连续重连五次（100 ms 起翻倍），从最后交出的事务之后继续；在事务
+    中间中断的，整个事务重读，已交出的记录按计数跳过，因为 binlog 内容相同。服务器的错误交给流水线：1236（服务器已没有该
+    位置，binlog 已清除）报错说明需要重新快照。
+11. **以字节计的延迟**（I189 的 `Run.ReportLag`）：事务之外收到心跳时为 0（服务器无可发送），并在事务结束时至多每 10 秒一次
+    报告服务器 binlog 中超出当前位置的字节数（在第二条连接上 `SHOW BINARY LOGS`：当前文件的剩余部分加之后的文件；被拒绝时
+    不报告，该语句需要 `REPLICATION CLIENT`）。读取长事务期间不计算。备选：落后的 GTID 数，在没有 GTID 的服务器和 MariaDB 的
+    多个域下并不均匀。
+12. **心跳**：会话把 `@master_heartbeat_period` 和 `@source_heartbeat_period`（8.0.26 改名；两个名字都设，不认识的无害）设为
+    `heartbeat`，即 10 s，它必须小于 `timeout`，因为每次读最多等那么久；校验和同样设置 `@master_binlog_checksum` 和
+    `@source_binlog_checksum`；MariaDB 设 `@mariadb_slave_capability = 4` 以得到其 GTID 事件。
+13. **作业**（`mode: "once"`）请求非阻塞 dump：服务器在 binlog 末尾结束流，源随之停止（I175 让作业变成快照）。
+14. **互通**（`test/sync/mysql_source_test.go`，基于 `test/sync/mysql.sh` 的五个服务器）：一个事务中跨两张表的变更、一次
+    update、一次键改变、流中途的 DDL 及其后的行、delete，逐条比较记录；从检查点重启；在检查点下真实清除 binlog（报错要求
+    快照）；连接测试；以及一条经 I176 目标的 MySQL 到 MySQL 流水线，在混合写入负载下于随机位置被杀（`Options.Crash`），并在
+    设置 `FIT_SYNC_MYSQL_PREFIX`（`mysql.sh` 现已导出）时用 `docker restart` 在其运行中重启服务器，最终校验和相同。清除 binlog
+    时取一个锁文件（`$TMPDIR/fit-sync-mysql-binlog.lock`），`TestMySQLBinlogInterop` 现在也取它，因为 `go test` 会在同一组
+    服务器上与 `./test/sync` 并行运行那个包，而它读取自己的 binlog 文件。
+15. **规模**：约 1,430 行代码（其中 `mysqlwire` 74 行），1,240 行基于伪连接和构造事件的单元测试（不用容器时包覆盖率 96.5%），
+    420 行互通测试；没有遗留，不需要 I174b。
 
 ### I175 MySQL 快照及其到 binlog 的交接
 

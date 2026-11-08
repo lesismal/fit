@@ -3686,6 +3686,99 @@
           # # integer, 0 or more; default 100000.
           # chunk_documents: 100000
 
+        # # Or mysql, with every one of its params:
+        # # Follows MySQL (5.7 and later) or MariaDB (10.11 and later) as a replica: the binlog in row
+        # # format, read with COM_BINLOG_DUMP_GTID (or MariaDB's GTID position, or a file and offset)
+        # # from the checkpoint, else from now. Each row inserted, updated or deleted is a record of
+        # # namespace db.table, its key the primary key's columns, a DDL a ddl record; the records of a
+        # # transaction carry its GTID and boundaries, and the checkpoint, the GTID set and the file and
+        # # offset at a transaction's end, never falls inside one. A position the server no longer has
+        # # (binlogs purged) is an error saying a new snapshot is needed.
+        # module: "mysql"
+        # params:
+          # # The server's host and port: MySQL 5.7 or later, or MariaDB 10.11 or later, with the binlog
+          # # on (log_bin), binlog_format ROW and binlog_row_image FULL. 127.0.0.1:3306 when left out.
+          # # string; default "127.0.0.1:3306".
+          # address: "127.0.0.1:3306"
+
+          # # The user to log in as, which needs REPLICATION SLAVE, REPLICATION CLIENT and SELECT on the
+          # # tables read (information_schema tells the source the columns' names and keys).
+          # # string; required.
+          # username: "fit"
+
+          # # The environment variable holding username's password, read when the pipeline loads; none
+          # # when left out.
+          # # string.
+          # password_env: ""
+
+          # # Connect over TLS, required: a server that does not offer it is refused, never spoken to in
+          # # plain text. The server's certificate is checked against the system's roots or ca_file's; the
+          # # check cannot be turned off.
+          # # boolean.
+          # tls: true
+
+          # # A PEM file of the certificates the server's is checked against, in place of the system's
+          # # roots, for a CA of its own; needs tls.
+          # # string.
+          # ca_file: "/etc/fit/ca.pem"
+
+          # # A PEM file of a client certificate, and the chain after it, presented to a server that asks
+          # # for one; needs tls and key_file.
+          # # string.
+          # cert_file: "/etc/fit/example.com.pem"
+
+          # # The PEM file of cert_file's private key.
+          # # string.
+          # key_file: "/etc/fit/example.com.key"
+
+          # # The name the server's certificate must have, and the TLS server name sent; address's host
+          # # when left out.
+          # # string.
+          # server_name: ""
+
+          # # Offer TLS's RSA key exchange besides the default suites, for MySQL 5.7's image, which offers
+          # # no other that Go has; needs tls. false when left out.
+          # # boolean.
+          # tls_rsa: true
+
+          # # A PEM file of the server's RSA public key, with which caching_sha2_password and
+          # # sha256_password send the password without TLS. Without it and without TLS, a user of those
+          # # plugins logs in only through the server's cache.
+          # # string.
+          # server_public_key_file: ""
+
+          # # How long connecting, and each wait for the server, may take; above heartbeat. 60s when left
+          # # out or 0.
+          # # duration, as "1.5s" or "2m"; default "60s".
+          # timeout: "60s"
+
+          # # The replica's server ID, unique among the server's replicas and the servers of its topology:
+          # # a second replica connecting with the same ID cuts the first one off. Not 0.
+          # # integer, 0 or more; required.
+          # server_id: 0
+
+          # # The tables read, as db.table globs (* and ? within a name, [ranges]): shop.orders, shop.*.
+          # # Every table of every database but mysql, sys, information_schema and performance_schema when
+          # # left out.
+          # # list of string.
+          # tables: []
+
+          # # Tables left out of those tables names, as db.table globs.
+          # # list of string.
+          # exclude: []
+
+          # # The key's columns of tables, by db.table, in place of the primary key: for a table without
+          # # one, or to key by a unique key. A table with neither key nor primary key has records without
+          # # a key.
+          # # object of list of string.
+          # keys: {}
+
+          # # How long the server waits, when it has nothing to send, before it sends a heartbeat, which
+          # # tells the source that it is caught up and the connection alive; below timeout. 10s when left
+          # # out or 0.
+          # # duration, as "1.5s" or "2m"; default "10s".
+          # heartbeat: "10s"
+
         # # Or postgres, with every one of its params:
         # # Follows PostgreSQL's changes (13 to 17, wal_level logical) through logical replication: a
         # # slot and a publication, created when missing with create, read with pgoutput, large
