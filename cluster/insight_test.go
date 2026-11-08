@@ -316,7 +316,17 @@ func TestCertificateInventory(t *testing.T) {
 	var inv CertsBody
 	waitFor(t, "the certificates read", func() bool {
 		inv = f.m.Certificates()
-		return len(inv.Certificates) == 3
+		// c has no certificates: its read is waited for too, not only
+		// a's and b's.
+		if len(inv.Certificates) != 3 || len(inv.Nodes) != 3 {
+			return false
+		}
+		for _, n := range inv.Nodes {
+			if n.Read.IsZero() {
+				return false
+			}
+		}
+		return true
 	})
 	first := inv.Certificates[0]
 	if first.Node != "b" || first.Names[0] != "soon.example" || first.Issuer != "Test CA soon.example" || first.DaysLeft != 3 || first.Listener != "api" || first.Status != StatusUp {
