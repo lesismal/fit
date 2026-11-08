@@ -37,11 +37,11 @@ var (
 
 // Sink is the sink mongo.
 type Sink struct {
-	URI             string          `json:"uri,omitempty" doc:"The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts."`
-	Hosts           []string        `json:"hosts,omitempty" doc:"The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers."`
+	URI             string          `json:"uri,omitempty" doc:"The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts; the params below replace what it sets."`
+	Hosts           []string        `json:"hosts,omitempty" doc:"The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers. The primary is found again after a failover."`
 	ReplicaSet      string          `json:"replica_set,omitempty" doc:"The replica set's name: a server of another set is not taken. Any set when left out."`
-	Username        string          `json:"username,omitempty" doc:"The user to authenticate as, with SCRAM-SHA-256 and password_env; no authentication when left out."`
-	PasswordEnv     string          `json:"password_env,omitempty" doc:"The environment variable holding username's password, read when the pipeline loads."`
+	Username        string          `json:"username,omitempty" doc:"The user to authenticate as, with SCRAM-SHA-256 and password_env, in place of a user in uri; no authentication when neither names one."`
+	PasswordEnv     string          `json:"password_env,omitempty" doc:"The environment variable holding the user's password, read when the pipeline loads; needs a user, in username or uri."`
 	AuthSource      string          `json:"auth_source,omitempty" doc:"The database the user is defined in. admin when left out."`
 	TLS             bool            `json:"tls,omitempty" doc:"Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. These TLS params replace the connection string's TLS options."`
 	CAFile          string          `json:"ca_file,omitempty" doc:"A PEM file of the certificates the servers' are checked against, in place of the system's roots, for a CA of its own; needs tls."`
@@ -49,8 +49,8 @@ type Sink struct {
 	KeyFile         string          `json:"key_file,omitempty" doc:"The PEM file of cert_file's private key, when cert_file does not hold it."`
 	ServerName      string          `json:"server_name,omitempty" doc:"The name the servers' certificates must have, and the TLS server name sent; each server's host when left out."`
 	ConnectTimeout  config.Duration `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long connecting to a server may take, its TLS, hello and authentication. 10s when left out or 0."`
-	Timeout         config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long one command, a bulk write of up to max_request_bytes, may take. 60s when left out or 0."`
-	MaxConns        int             `json:"max_conns,omitempty" min:"0" max:"1000" default:"4" doc:"The most connections open to the primary, shared by a job's parallel writers. 4 when left out or 0."`
+	Timeout         config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long one command may take, from sending it to the end of its answer: a batch of a cursor, a bulk write of up to the sink's max_request_bytes. 60s when left out or 0."`
+	MaxConns        int             `json:"max_conns,omitempty" min:"0" max:"1000" default:"4" doc:"The most connections open to the primary, the open cursors' among them, shared by a job's parallel readers or writers. 4 when left out or 0."`
 	Database        string          `json:"database,omitempty" doc:"The database every record is written to. When left out, the record's namespace's part before its first '.', a namespace without one failing its record."`
 	Collection      string          `json:"collection,omitempty" doc:"The collection every record is written to. When left out, the record's namespace after its first '.', or the whole namespace when it has none and database is set."`
 	WriteConcern    string          `json:"write_concern,omitempty" doc:"The write concern's w: majority, a number of members (1 or more; 0, unacknowledged writes, is refused), or a tag set's name. The server's default (majority on a replica set) when left out."`
@@ -63,12 +63,17 @@ type Sink struct {
 	maxBytes int
 }
 
+// conn is the sink's ConnParams.
+func (s *Sink) conn() ConnParams {
+	return ConnParams{URI: s.URI, Hosts: s.Hosts, ReplicaSet: s.ReplicaSet, Username: s.Username, PasswordEnv: s.PasswordEnv,
+		AuthSource: s.AuthSource, TLS: s.TLS, CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName,
+		ConnectTimeout: s.ConnectTimeout, Timeout: s.Timeout, MaxConns: s.MaxConns}
+}
+
 // Provision checks the params and reads the password and TLS files;
 // nothing is sent until the first write or test.
 func (s *Sink) Provision(ctx *module.Context) error {
-	o, errs := sinkOptions(ctx, sinkConnParams{URI: s.URI, Hosts: s.Hosts, ReplicaSet: s.ReplicaSet, Username: s.Username,
-		PasswordEnv: s.PasswordEnv, AuthSource: s.AuthSource, TLS: s.TLS, CAFile: s.CAFile, CertFile: s.CertFile,
-		KeyFile: s.KeyFile, ServerName: s.ServerName, ConnectTimeout: s.ConnectTimeout, Timeout: s.Timeout, MaxConns: s.MaxConns})
+	c, errs := NewClient(ctx, s.conn())
 	if w := s.WriteConcern; w != "" {
 		if n, err := strconv.Atoi(w); err == nil {
 			if n < 1 {
@@ -95,14 +100,10 @@ func (s *Sink) Provision(ctx *module.Context) error {
 	if s.maxBytes <= 0 {
 		s.maxBytes = DefaultSinkMaxRequestBytes
 	}
+	s.client = c
 	if len(errs) > 0 {
 		return errs
 	}
-	c, err := mongowire.New(o)
-	if err != nil {
-		return err
-	}
-	s.client = c
 	return nil
 }
 
@@ -120,8 +121,7 @@ func (s *Sink) ParallelWrites() {}
 
 // Test finds the primary, authenticates and pings it.
 func (s *Sink) Test(ctx context.Context) error {
-	_, err := s.client.Run(ctx, "admin", mongowire.Doc("ping", int32(1)))
-	return err
+	return Ping(ctx, s.client)
 }
 
 // sinkOp is a record as the sink writes it: an update or delete statement

@@ -347,6 +347,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | done |
 | I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | done |
 | I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | done |
+| I183b | One set of MongoDB connection params for the source and the sink | I182, I183 | done |
 | I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | done |
 | I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
 | I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | done |
@@ -5707,6 +5708,35 @@ track can place it); exactly-once into sinks with no transactions.
     wait on I174's and I182's sources; the collection copy stands in for the second until then, and
     I192's matrix is to run both. Alternative: hold I183 until those sources are merged.
 12. **Size**: about 620 lines of code and 950 of tests; nothing is left, no I183b.
+
+### I183b One set of MongoDB connection params
+
+I182's source and I183's sink were built at once and took different connection params: the source
+`uri`, `password_env` and `timeout`, the sink `uri` or `hosts` and a dozen more. Made one set, so
+that a MongoDB is configured the same way for either. Done on 2026-11-09. Decisions made, pending
+review:
+
+1. **The sink's set, for both.** `ConnParams` in `sync/mongo/conn.go`: `uri` or `hosts`,
+   `replica_set`, `username`, `password_env`, `auth_source`, `tls`, `ca_file`, `cert_file`,
+   `key_file`, `server_name`, `connect_timeout`, `timeout`, `max_conns`; the source gains all but
+   its three, none renamed, so neither side's configs change. `sinkconn.go` is gone; `NewClient`
+   checks the params and makes the client for both. Alternative: the source's three only, TLS and
+   users in `uri`.
+2. **Declared flat in both, kept alike by a test.** `config` reads no embedded structs, so `Source`
+   and `Sink` each declare `ConnParams`' fields first, with its names, types and tags (the docs
+   now worded for either), and copy them with `conn()`; `TestConnParamsShared` fails on any
+   difference. Alternative: a nested `connection` object (a new config shape), or embedded structs
+   in `config` (shared code, left alone).
+3. **The source's `uri` no longer required**: `uri` or `hosts`, as the sink's, checked in
+   `Provision`.
+4. **The params replace the connection string's settings, and nothing else.** The string's
+   `appName` now stands (the sink set `fit-sync` over it), and so does its `socketTimeoutMS` when
+   `timeout` is left out (the source set 60s over it); `fit-sync` and 60s when neither sets them. The checks are the sink's: a password in `uri` refused, `password_env` needs
+   a user (`username` or the one in `uri`), a user needs `password_env`, `username` and a user in
+   `uri` refused together, the TLS files need `tls`.
+5. **The sink's connection test is `Ping`**, as the source's, so its errors start with `mongo:`.
+6. **Interop**: the source's TLS subtest of `TestMongoSourceStream` now connects with `username`,
+   `tls` and `ca_file` instead of the user and TLS in `uri`; the others keep `uri`.
 
 ### I184 A Kafka client
 

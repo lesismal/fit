@@ -6049,6 +6049,23 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I183 section, pending review. The sink's connection params
   are to be made one with I182's at the merge. No transactions (no sessions in I181).
 
+### I183b One set of MongoDB connection params — done
+
+- **`sync/mongo/conn.go`**: `ConnParams`, the one set of connection params of the source and the
+  sink `mongo` (`uri` or `hosts`, `replica_set`, `username`, `password_env`, `auth_source`, `tls`,
+  `ca_file`, `cert_file`, `key_file`, `server_name`, `connect_timeout`, `timeout`, `max_conns`),
+  declared flat in both with the same tags; `NewClient` checks them for both; `sinkconn.go` removed.
+  The source gains the sink's params; no param renamed. The sink's test is `Ping`.
+- **Docs**: both schema chapters (`sync_sources_mongo.md`, `sync_sinks_mongo.md`), the reference and
+  templates regenerated, `schema-zh.js` (eight descriptions gone, six new).
+- **Tests**: `TestConnParamsShared` (the three declarations alike, `conn()` copying every field),
+  `TestConnParamsSource` (hosts, a user, TLS files and timeouts on the source; `socketTimeoutMS`
+  kept); `syncmongo` 99.3% of statements without containers, under the race detector.
+  `test/sync`'s `TestMongo*` against MongoDB 6, 7 and 8 replica sets (`test/sync/mongo.sh`, run
+  alone as `i183b-*` on ports 49700+), the source's TLS stream test now through `username`, `tls`
+  and `ca_file`: all pass.
+- **Gaps**: the decisions in the plan's I183b section, pending review.
+
 ### I184 A Kafka client — done
 
 - **Package `sync/kafka/wire`** (`kafkawire`): a `Client` of bootstrap brokers with `Metadata`,

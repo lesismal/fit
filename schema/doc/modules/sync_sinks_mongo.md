@@ -28,9 +28,10 @@ unacknowledged writes (`w: 0`) are refused, as nothing could then be checkpointe
 (`job.max_parallel`) share the connections, at most `max_conns`. **Test connection** finds the
 primary, authenticates and sends `ping`.
 
-The password is never in `uri`: `password_env` names the variable holding it. `tls` with `ca_file`
-(and `cert_file` for a client certificate, its key in it or in `key_file`) replaces the connection
-string's TLS options; the servers' certificates are always checked.
+The connection takes the same params as the `mongo` source's. The password is never in `uri`:
+`password_env` names the variable holding it, the user being `username` or the one in `uri`. `tls`
+with `ca_file` (and `cert_file` for a client certificate, its key in it or in `key_file`) replaces
+the connection string's TLS options; the servers' certificates are always checked.
 
 ```json
 {

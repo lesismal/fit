@@ -39,24 +39,42 @@ var (
 
 // Source is the source mongo.
 type Source struct {
-	URI          string          `json:"uri" fit:"required" doc:"The connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; no password (password_env holds it), and no mongodb+srv. The primary is found from the hosts and found again after a failover."`
-	PasswordEnv  string          `json:"password_env,omitempty" doc:"The environment variable holding the password of uri's user, read when the pipeline loads; no authentication when left out."`
-	Timeout      config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long one command may take, from sending it to the end of its answer. 60s when left out or 0."`
-	Database     string          `json:"database,omitempty" doc:"The database read. Every database but admin, config and local when left out."`
-	Collections  []string        `json:"collections,omitempty" doc:"The collections of database read. Every collection of it (not views, time series or system collections) when left out; needs database."`
-	FullDocument string          `json:"full_document,omitempty" enum:"updateLookup,whenAvailable,required" default:"\"updateLookup\"" doc:"What an update's after is: updateLookup, the document as it is when the change is read (an update of a document deleted since is passed over: its delete follows); whenAvailable or required, its post-image, which the collection must record (changeStreamPreAndPostImages), passed over or an error when there is none. updateLookup when left out."`
-	Before       string          `json:"full_document_before_change,omitempty" enum:"off,whenAvailable,required" default:"\"off\"" doc:"Whether updates and deletes carry the document as it was, their before: off, no; whenAvailable or required, its pre-image, which the collection must record (changeStreamPreAndPostImages), left out or an error when there is none. off when left out."`
-	Snapshot     string          `json:"snapshot,omitempty" enum:"initial,never" default:"\"initial\"" doc:"Where a pipeline without a checkpoint starts: initial, every document there is, then the changes from just before it read them; never, the changes from now. initial when left out."`
-	BatchSize    int             `json:"batch_size,omitempty" min:"0" max:"100000" default:"1000" doc:"The most documents, or changes, one batch of a cursor holds. 1000 when left out or 0."`
-	MaxAwait     config.Duration `json:"max_await,omitempty" default:"\"1s\"" doc:"How long the server holds a request for changes while there are none, below timeout; also how long the last record of a transaction may wait to be known as its last. 1s when left out or 0."`
-	ChunkDocs    int64           `json:"chunk_documents,omitempty" min:"0" default:"100000" doc:"In a job (mode once), the documents a chunk of the snapshot is reckoned to hold: each collection is split into as many ranges of _id as its count needs, from a sample of _ids, read job.max_parallel at a time. 100000 when left out or 0."`
+	URI            string          `json:"uri,omitempty" doc:"The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts; the params below replace what it sets."`
+	Hosts          []string        `json:"hosts,omitempty" doc:"The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers. The primary is found again after a failover."`
+	ReplicaSet     string          `json:"replica_set,omitempty" doc:"The replica set's name: a server of another set is not taken. Any set when left out."`
+	Username       string          `json:"username,omitempty" doc:"The user to authenticate as, with SCRAM-SHA-256 and password_env, in place of a user in uri; no authentication when neither names one."`
+	PasswordEnv    string          `json:"password_env,omitempty" doc:"The environment variable holding the user's password, read when the pipeline loads; needs a user, in username or uri."`
+	AuthSource     string          `json:"auth_source,omitempty" doc:"The database the user is defined in. admin when left out."`
+	TLS            bool            `json:"tls,omitempty" doc:"Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. These TLS params replace the connection string's TLS options."`
+	CAFile         string          `json:"ca_file,omitempty" doc:"A PEM file of the certificates the servers' are checked against, in place of the system's roots, for a CA of its own; needs tls."`
+	CertFile       string          `json:"cert_file,omitempty" doc:"A PEM file of a client certificate, presented to servers that ask for one; with its key in it too, as MongoDB's tlsCertificateKeyFile, unless key_file is set. Needs tls."`
+	KeyFile        string          `json:"key_file,omitempty" doc:"The PEM file of cert_file's private key, when cert_file does not hold it."`
+	ServerName     string          `json:"server_name,omitempty" doc:"The name the servers' certificates must have, and the TLS server name sent; each server's host when left out."`
+	ConnectTimeout config.Duration `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long connecting to a server may take, its TLS, hello and authentication. 10s when left out or 0."`
+	Timeout        config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long one command may take, from sending it to the end of its answer: a batch of a cursor, a bulk write of up to the sink's max_request_bytes. 60s when left out or 0."`
+	MaxConns       int             `json:"max_conns,omitempty" min:"0" max:"1000" default:"4" doc:"The most connections open to the primary, the open cursors' among them, shared by a job's parallel readers or writers. 4 when left out or 0."`
+	Database       string          `json:"database,omitempty" doc:"The database read. Every database but admin, config and local when left out."`
+	Collections    []string        `json:"collections,omitempty" doc:"The collections of database read. Every collection of it (not views, time series or system collections) when left out; needs database."`
+	FullDocument   string          `json:"full_document,omitempty" enum:"updateLookup,whenAvailable,required" default:"\"updateLookup\"" doc:"What an update's after is: updateLookup, the document as it is when the change is read (an update of a document deleted since is passed over: its delete follows); whenAvailable or required, its post-image, which the collection must record (changeStreamPreAndPostImages), passed over or an error when there is none. updateLookup when left out."`
+	Before         string          `json:"full_document_before_change,omitempty" enum:"off,whenAvailable,required" default:"\"off\"" doc:"Whether updates and deletes carry the document as it was, their before: off, no; whenAvailable or required, its pre-image, which the collection must record (changeStreamPreAndPostImages), left out or an error when there is none. off when left out."`
+	Snapshot       string          `json:"snapshot,omitempty" enum:"initial,never" default:"\"initial\"" doc:"Where a pipeline without a checkpoint starts: initial, every document there is, then the changes from just before it read them; never, the changes from now. initial when left out."`
+	BatchSize      int             `json:"batch_size,omitempty" min:"0" max:"100000" default:"1000" doc:"The most documents, or changes, one batch of a cursor holds. 1000 when left out or 0."`
+	MaxAwait       config.Duration `json:"max_await,omitempty" default:"\"1s\"" doc:"How long the server holds a request for changes while there are none, below timeout; also how long the last record of a transaction may wait to be known as its last. 1s when left out or 0."`
+	ChunkDocs      int64           `json:"chunk_documents,omitempty" min:"0" default:"100000" doc:"In a job (mode once), the documents a chunk of the snapshot is reckoned to hold: each collection is split into as many ranges of _id as its count needs, from a sample of _ids, read job.max_parallel at a time. 100000 when left out or 0."`
 
 	client *mongowire.Client
 }
 
+// conn is the source's ConnParams.
+func (s *Source) conn() ConnParams {
+	return ConnParams{URI: s.URI, Hosts: s.Hosts, ReplicaSet: s.ReplicaSet, Username: s.Username, PasswordEnv: s.PasswordEnv,
+		AuthSource: s.AuthSource, TLS: s.TLS, CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName,
+		ConnectTimeout: s.ConnectTimeout, Timeout: s.Timeout, MaxConns: s.MaxConns}
+}
+
 // Provision checks the params; nothing is sent until the source runs.
 func (s *Source) Provision(ctx *module.Context) error {
-	c, errs := NewClient(ctx, ConnParams{URI: s.URI, PasswordEnv: s.PasswordEnv, Timeout: s.Timeout})
+	c, errs := NewClient(ctx, s.conn())
 	s.client = c
 	add := func(field, format string, args ...any) {
 		errs = append(errs, ctx.Params.Field(field).Errorf(format, args...))

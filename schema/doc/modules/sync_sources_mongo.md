@@ -43,10 +43,14 @@ starts it again.
 `job.max_parallel` at a time, each resumed after its last `_id`. With `snapshot: "never"`, a job
 reads the change stream from its checkpoint until it is caught up.
 
-The connection: `uri` is a `mongodb://` connection string with the hosts, `replicaSet`,
-`authSource`, `tls=true` and `tlsCAFile` (the server's certificate is always checked),
-`tlsCertificateKeyFile` and the timeouts; the user is in `uri`, its password in the environment
-variable `password_env` (a password in `uri` is refused). `timeout` bounds each command.
+The connection takes the same params as the `mongo` sink's: the servers as `uri`, a `mongodb://`
+connection string (its hosts, `replicaSet`, `authSource`, `tls`, `tlsCAFile`,
+`tlsCertificateKeyFile`, the timeouts, `maxPoolSize`, `appName`), or as `hosts`; `replica_set`,
+`username`, `auth_source`, `tls` with `ca_file`, `cert_file`, `key_file` and `server_name`,
+`connect_timeout`, `timeout` and `max_conns` replace what the connection string sets. The user is
+in `uri` or `username`, its password in the environment variable `password_env` (a password in
+`uri` is refused); the servers' certificates are always checked. `timeout` bounds each command, and
+`max_await` must be below it.
 
 ```json
 {

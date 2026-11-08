@@ -337,6 +337,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | done |
 | I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | done |
 | I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | done |
+| I183b | 源与目标共用一套 MongoDB 连接参数 | I182, I183 | done |
 | I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | done |
 | I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | todo |
 | I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | done |
@@ -4182,6 +4183,27 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
     相同；校验器的拒绝为永久错误；连接测试。MySQL 到 MongoDB 和 MongoDB 到 MongoDB 的*流水线*有待 I174 和 I182 的源；在那之前
     由集合复制代替后者，I192 的矩阵将运行两者。备选：等这些源合并后再完成 I183。
 12. **规模**：代码约 620 行，测试约 950 行；没有遗留，没有 I183b。
+
+### I183b 一套 MongoDB 连接参数
+
+I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`、`password_env` 和 `timeout`，目标有 `uri` 或 `hosts`
+及十几个其他参数。现合为一套，配置 MongoDB 时对两者都一样。2026-11-09 完成。所做的决定，待审查：
+
+1. **两者都用目标的那一套。** `sync/mongo/conn.go` 中的 `ConnParams`：`uri` 或 `hosts`、`replica_set`、`username`、
+   `password_env`、`auth_source`、`tls`、`ca_file`、`cert_file`、`key_file`、`server_name`、`connect_timeout`、
+   `timeout`、`max_conns`；源在原有三个之外得到其余参数，没有改名，两边已有的配置都不变。`sinkconn.go` 已删除；
+   `NewClient` 为两者检查参数并创建客户端。备选：只用源的三个参数，TLS 与用户写在 `uri` 中。
+2. **在两者中平铺声明，由测试保持一致。** `config` 不读取嵌入结构体，所以 `Source` 和 `Sink` 各自把 `ConnParams` 的字段放在
+   最前面，名称、类型和标签都相同（说明改为对两者都适用），由 `conn()` 复制；`TestConnParamsShared` 在有任何差异时失败。
+   备选：嵌套的 `connection` 对象（新的配置形状），或让 `config` 支持嵌入结构体（共享代码，未改动）。
+3. **源的 `uri` 不再必填**：与目标一样，`uri` 或 `hosts`，在 `Provision` 中检查。
+4. **参数只替换连接串中对应的设置。** 连接串的 `appName` 现在保留（之前目标会用 `fit-sync` 覆盖它），不设置 `timeout` 时
+   连接串的 `socketTimeoutMS` 也保留（之前源会用 60s 覆盖它）；都没有设置时为 60s 和 `fit-sync`。检查沿用目标的：`uri` 中带密码被拒绝，
+   `password_env` 需要用户（`username` 或 `uri` 中的用户），用户需要 `password_env`，`username` 与 `uri` 中的用户不能同时给出，
+   TLS 文件需要 `tls`。
+5. **目标的连接测试改用 `Ping`**，与源相同，错误以 `mongo:` 开头。
+6. **互通**：`TestMongoSourceStream` 中源的 TLS 子测试改用 `username`、`tls` 和 `ca_file` 连接，不再把用户和 TLS 写在 `uri`
+   中；其他测试仍用 `uri`。
 
 ### I184 Kafka 客户端
 

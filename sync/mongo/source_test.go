@@ -55,6 +55,7 @@ func TestSourceProvision(t *testing.T) {
 		params map[string]any
 		want   string
 	}{
+		{map[string]any{}, "uri or hosts"},
 		{map[string]any{"uri": "http://h"}, "starts with mongodb://"},
 		{map[string]any{"uri": "mongodb://u:p@h"}, "holds a password"},
 		{map[string]any{"uri": "mongodb://u@h"}, "needs password_env"},

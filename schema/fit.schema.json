@@ -7719,7 +7719,7 @@
           "type": "string"
         },
         "hosts": {
-          "description": "The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers.",
+          "description": "The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers. The primary is found again after a failover.",
           "items": {
             "type": "string"
           },
@@ -7735,7 +7735,7 @@
         },
         "max_conns": {
           "default": 4,
-          "description": "The most connections open to the primary, shared by a job's parallel writers. 4 when left out or 0.",
+          "description": "The most connections open to the primary, the open cursors' among them, shared by a job's parallel readers or writers. 4 when left out or 0.",
           "maximum": 1000,
           "minimum": 0,
           "type": "integer"
@@ -7748,7 +7748,7 @@
           "type": "integer"
         },
         "password_env": {
-          "description": "The environment variable holding username's password, read when the pipeline loads.",
+          "description": "The environment variable holding the user's password, read when the pipeline loads; needs a user, in username or uri.",
           "type": "string"
         },
         "replica_set": {
@@ -7761,7 +7761,7 @@
         },
         "timeout": {
           "default": "60s",
-          "description": "How long one command, a bulk write of up to max_request_bytes, may take. 60s when left out or 0.",
+          "description": "How long one command may take, from sending it to the end of its answer: a batch of a cursor, a bulk write of up to the sink's max_request_bytes. 60s when left out or 0.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
@@ -7770,11 +7770,11 @@
           "type": "boolean"
         },
         "uri": {
-          "description": "The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts.",
+          "description": "The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts; the params below replace what it sets.",
           "type": "string"
         },
         "username": {
-          "description": "The user to authenticate as, with SCRAM-SHA-256 and password_env; no authentication when left out.",
+          "description": "The user to authenticate as, with SCRAM-SHA-256 and password_env, in place of a user in uri; no authentication when neither names one.",
           "type": "string"
         },
         "write_concern": {
@@ -8801,12 +8801,24 @@
     "sync.sources.mongo": {
       "additionalProperties": false,
       "properties": {
+        "auth_source": {
+          "description": "The database the user is defined in. admin when left out.",
+          "type": "string"
+        },
         "batch_size": {
           "default": 1000,
           "description": "The most documents, or changes, one batch of a cursor holds. 1000 when left out or 0.",
           "maximum": 100000,
           "minimum": 0,
           "type": "integer"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the servers' are checked against, in place of the system's roots, for a CA of its own; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, presented to servers that ask for one; with its key in it too, as MongoDB's tlsCertificateKeyFile, unless key_file is set. Needs tls.",
+          "type": "string"
         },
         "chunk_documents": {
           "default": 100000,
@@ -8820,6 +8832,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "connect_timeout": {
+          "default": "10s",
+          "description": "How long connecting to a server may take, its TLS, hello and authentication. 10s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
         },
         "database": {
           "description": "The database read. Every database but admin, config and local when left out.",
@@ -8845,14 +8863,40 @@
           ],
           "type": "string"
         },
+        "hosts": {
+          "description": "The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers. The primary is found again after a failover.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key, when cert_file does not hold it.",
+          "type": "string"
+        },
         "max_await": {
           "default": "1s",
           "description": "How long the server holds a request for changes while there are none, below timeout; also how long the last record of a transaction may wait to be known as its last. 1s when left out or 0.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "max_conns": {
+          "default": 4,
+          "description": "The most connections open to the primary, the open cursors' among them, shared by a job's parallel readers or writers. 4 when left out or 0.",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
         "password_env": {
-          "description": "The environment variable holding the password of uri's user, read when the pipeline loads; no authentication when left out.",
+          "description": "The environment variable holding the user's password, read when the pipeline loads; needs a user, in username or uri.",
+          "type": "string"
+        },
+        "replica_set": {
+          "description": "The replica set's name: a server of another set is not taken. Any set when left out.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the servers' certificates must have, and the TLS server name sent; each server's host when left out.",
           "type": "string"
         },
         "snapshot": {
@@ -8866,18 +8910,23 @@
         },
         "timeout": {
           "default": "60s",
-          "description": "How long one command may take, from sending it to the end of its answer. 60s when left out or 0.",
+          "description": "How long one command may take, from sending it to the end of its answer: a batch of a cursor, a bulk write of up to the sink's max_request_bytes. 60s when left out or 0.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "tls": {
+          "description": "Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. These TLS params replace the connection string's TLS options.",
+          "type": "boolean"
+        },
         "uri": {
-          "description": "The connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; no password (password_env holds it), and no mongodb+srv. The primary is found from the hosts and found again after a failover.",
+          "description": "The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts; the params below replace what it sets.",
+          "type": "string"
+        },
+        "username": {
+          "description": "The user to authenticate as, with SCRAM-SHA-256 and password_env, in place of a user in uri; no authentication when neither names one.",
           "type": "string"
         }
       },
-      "required": [
-        "uri"
-      ],
       "type": "object"
     },
     "sync.sources.postgres": {

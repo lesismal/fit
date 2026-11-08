@@ -4290,6 +4290,20 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   620 行，测试约 950 行；没有 I183b。
 - **缺口**：计划 I183 小节中的决定，待审查。目标的连接参数要在合并时与 I182 的合为一套。没有事务（I181 没有 session）。
 
+### I183b 一套 MongoDB 连接参数 — 已完成
+
+- **`sync/mongo/conn.go`**：`ConnParams`，源与目标 `mongo` 共用的一套连接参数（`uri` 或 `hosts`、`replica_set`、
+  `username`、`password_env`、`auth_source`、`tls`、`ca_file`、`cert_file`、`key_file`、`server_name`、
+  `connect_timeout`、`timeout`、`max_conns`），在两者中以相同标签平铺声明；`NewClient` 为两者检查参数；删除
+  `sinkconn.go`。源得到目标的参数；没有参数改名。目标的连接测试改用 `Ping`。
+- **文档**：两个 schema 章节（`sync_sources_mongo.md`、`sync_sinks_mongo.md`），重新生成的参考与模板，`schema-zh.js`
+  （去掉八条描述，新增六条）。
+- **测试**：`TestConnParamsShared`（三处声明一致，`conn()` 复制每个字段），`TestConnParamsSource`（源上的 hosts、用户、
+  TLS 文件与超时；保留 `socketTimeoutMS`）；无容器时 `syncmongo` 语句覆盖率 99.3%，在竞态检测器下运行。`test/sync` 的
+  `TestMongo*` 对 MongoDB 6、7 和 8 副本集（`test/sync/mongo.sh`，以 `i183b-*` 单独运行，端口 49700 起），源的 TLS 流测试
+  改用 `username`、`tls` 和 `ca_file`：全部通过。
+- **缺口**：计划 I183b 小节中的决定，待审查。
+
 ### I184 Kafka 客户端 — 已完成
 
 - **包 `sync/kafka/wire`**（`kafkawire`）：由引导 broker 构造的 `Client`，提供 `Metadata`、`Partitions`、`Produce`（acks 为

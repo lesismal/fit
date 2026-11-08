@@ -157,8 +157,13 @@ func TestMongoSourceStream(t *testing.T) {
 			mongoInsert(t, ctx, c, db, "b", mongowire.Doc("_id", 1, "v", "b1"), mongowire.Doc("_id", 2, "v", "b2"))
 
 			params := mongoSourceParams(t, uri, map[string]any{"database": db, "collections": []string{"b", "a"}, "batch_size": 7})
+			// The connection params the sink takes too (I183b): the user in
+			// username, TLS in tls and ca_file rather than in uri.
+			scheme, rest, _ := strings.Cut(params["uri"].(string), "://")
+			user, hosts, _ := strings.Cut(rest, "@")
+			params["uri"], params["username"] = scheme+"://"+hosts, user
 			if ca := os.Getenv("FIT_SYNC_MONGO_CA"); ca != "" {
-				params["uri"] = params["uri"].(string) + "&tls=true&tlsCAFile=" + ca
+				params["tls"], params["ca_file"] = true, ca
 			}
 			src := mongoSource(t, params)
 			if err := src.(fitsync.Tester).Test(ctx); err != nil {

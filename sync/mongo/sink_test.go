@@ -89,7 +89,7 @@ func TestSinkParams(t *testing.T) {
 		{map[string]any{"hosts": []string{"a,b"}}, "is not a host"},
 		{map[string]any{"uri": "mongodb://u@h", "username": "v", "password_env": "FIT_TEST_MONGO_PW"}, "names a user already"},
 		{map[string]any{"hosts": []string{"h"}, "username": "u"}, "needs password_env"},
-		{map[string]any{"hosts": []string{"h"}, "password_env": "FIT_TEST_MONGO_PW"}, "needs username"},
+		{map[string]any{"hosts": []string{"h"}, "password_env": "FIT_TEST_MONGO_PW"}, "needs a user"},
 		{map[string]any{"hosts": []string{"h"}, "username": "u", "password_env": "1x"}, "not an environment variable"},
 		{map[string]any{"hosts": []string{"h"}, "username": "u", "password_env": "FIT_TEST_MONGO_UNSET"}, "not set"},
 		{map[string]any{"hosts": []string{"h"}, "ca_file": cert}, "needs tls"},

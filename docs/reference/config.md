@@ -6582,10 +6582,14 @@ starts it again.
 `job.max_parallel` at a time, each resumed after its last `_id`. With `snapshot: "never"`, a job
 reads the change stream from its checkpoint until it is caught up.
 
-The connection: `uri` is a `mongodb://` connection string with the hosts, `replicaSet`,
-`authSource`, `tls=true` and `tlsCAFile` (the server's certificate is always checked),
-`tlsCertificateKeyFile` and the timeouts; the user is in `uri`, its password in the environment
-variable `password_env` (a password in `uri` is refused). `timeout` bounds each command.
+The connection takes the same params as the `mongo` sink's: the servers as `uri`, a `mongodb://`
+connection string (its hosts, `replicaSet`, `authSource`, `tls`, `tlsCAFile`,
+`tlsCertificateKeyFile`, the timeouts, `maxPoolSize`, `appName`), or as `hosts`; `replica_set`,
+`username`, `auth_source`, `tls` with `ca_file`, `cert_file`, `key_file` and `server_name`,
+`connect_timeout`, `timeout` and `max_conns` replace what the connection string sets. The user is
+in `uri` or `username`, its password in the environment variable `password_env` (a password in
+`uri` is refused); the servers' certificates are always checked. `timeout` bounds each command, and
+`max_await` must be below it.
 
 In a .conf file:
 
@@ -6651,9 +6655,20 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `uri` | string |  | Required. The connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; no password (password_env holds it), and no mongodb+srv. The primary is found from the hosts and found again after a failover. |
-| `password_env` | string |  | The environment variable holding the password of uri's user, read when the pipeline loads; no authentication when left out. |
-| `timeout` | duration | `"60s"` | How long one command may take, from sending it to the end of its answer. 60s when left out or 0. |
+| `uri` | string |  | The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts; the params below replace what it sets. |
+| `hosts` | list of string |  | The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers. The primary is found again after a failover. |
+| `replica_set` | string |  | The replica set's name: a server of another set is not taken. Any set when left out. |
+| `username` | string |  | The user to authenticate as, with SCRAM-SHA-256 and password_env, in place of a user in uri; no authentication when neither names one. |
+| `password_env` | string |  | The environment variable holding the user's password, read when the pipeline loads; needs a user, in username or uri. |
+| `auth_source` | string |  | The database the user is defined in. admin when left out. |
+| `tls` | boolean |  | Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. These TLS params replace the connection string's TLS options. |
+| `ca_file` | string |  | A PEM file of the certificates the servers' are checked against, in place of the system's roots, for a CA of its own; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, presented to servers that ask for one; with its key in it too, as MongoDB's tlsCertificateKeyFile, unless key_file is set. Needs tls. |
+| `key_file` | string |  | The PEM file of cert_file's private key, when cert_file does not hold it. |
+| `server_name` | string |  | The name the servers' certificates must have, and the TLS server name sent; each server's host when left out. |
+| `connect_timeout` | duration | `"10s"` | How long connecting to a server may take, its TLS, hello and authentication. 10s when left out or 0. |
+| `timeout` | duration | `"60s"` | How long one command may take, from sending it to the end of its answer: a batch of a cursor, a bulk write of up to the sink's max_request_bytes. 60s when left out or 0. |
+| `max_conns` | integer, 0 to 1000 | `4` | The most connections open to the primary, the open cursors' among them, shared by a job's parallel readers or writers. 4 when left out or 0. |
 | `database` | string |  | The database read. Every database but admin, config and local when left out. |
 | `collections` | list of string |  | The collections of database read. Every collection of it (not views, time series or system collections) when left out; needs database. |
 | `full_document` | string: `updateLookup`, `whenAvailable`, `required` | `"updateLookup"` | What an update's after is: updateLookup, the document as it is when the change is read (an update of a document deleted since is passed over: its delete follows); whenAvailable or required, its post-image, which the collection must record (changeStreamPreAndPostImages), passed over or an error when there is none. updateLookup when left out. |
@@ -7562,9 +7577,10 @@ unacknowledged writes (`w: 0`) are refused, as nothing could then be checkpointe
 (`job.max_parallel`) share the connections, at most `max_conns`. **Test connection** finds the
 primary, authenticates and sends `ping`.
 
-The password is never in `uri`: `password_env` names the variable holding it. `tls` with `ca_file`
-(and `cert_file` for a client certificate, its key in it or in `key_file`) replaces the connection
-string's TLS options; the servers' certificates are always checked.
+The connection takes the same params as the `mongo` source's. The password is never in `uri`:
+`password_env` names the variable holding it, the user being `username` or the one in `uri`. `tls`
+with `ca_file` (and `cert_file` for a client certificate, its key in it or in `key_file`) replaces
+the connection string's TLS options; the servers' certificates are always checked.
 
 In a .conf file:
 
@@ -7636,11 +7652,11 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `uri` | string |  | The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts. |
-| `hosts` | list of string |  | The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers. |
+| `uri` | string |  | The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], as the MongoDB drivers take it, with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts; the params below replace what it sets. |
+| `hosts` | list of string |  | The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers. The primary is found again after a failover. |
 | `replica_set` | string |  | The replica set's name: a server of another set is not taken. Any set when left out. |
-| `username` | string |  | The user to authenticate as, with SCRAM-SHA-256 and password_env; no authentication when left out. |
-| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `username` | string |  | The user to authenticate as, with SCRAM-SHA-256 and password_env, in place of a user in uri; no authentication when neither names one. |
+| `password_env` | string |  | The environment variable holding the user's password, read when the pipeline loads; needs a user, in username or uri. |
 | `auth_source` | string |  | The database the user is defined in. admin when left out. |
 | `tls` | boolean |  | Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. These TLS params replace the connection string's TLS options. |
 | `ca_file` | string |  | A PEM file of the certificates the servers' are checked against, in place of the system's roots, for a CA of its own; needs tls. |
@@ -7648,8 +7664,8 @@ In JSON:
 | `key_file` | string |  | The PEM file of cert_file's private key, when cert_file does not hold it. |
 | `server_name` | string |  | The name the servers' certificates must have, and the TLS server name sent; each server's host when left out. |
 | `connect_timeout` | duration | `"10s"` | How long connecting to a server may take, its TLS, hello and authentication. 10s when left out or 0. |
-| `timeout` | duration | `"60s"` | How long one command, a bulk write of up to max_request_bytes, may take. 60s when left out or 0. |
-| `max_conns` | integer, 0 to 1000 | `4` | The most connections open to the primary, shared by a job's parallel writers. 4 when left out or 0. |
+| `timeout` | duration | `"60s"` | How long one command may take, from sending it to the end of its answer: a batch of a cursor, a bulk write of up to the sink's max_request_bytes. 60s when left out or 0. |
+| `max_conns` | integer, 0 to 1000 | `4` | The most connections open to the primary, the open cursors' among them, shared by a job's parallel readers or writers. 4 when left out or 0. |
 | `database` | string |  | The database every record is written to. When left out, the record's namespace's part before its first '.', a namespace without one failing its record. |
 | `collection` | string |  | The collection every record is written to. When left out, the record's namespace after its first '.', or the whole namespace when it has none and database is set. |
 | `write_concern` | string |  | The write concern's w: majority, a number of members (1 or more; 0, unacknowledged writes, is refused), or a tag set's name. The server's default (majority on a replica set) when left out. |
