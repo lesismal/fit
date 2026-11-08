@@ -349,7 +349,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | todo |
 | I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | todo |
 | I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
-| I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | todo |
+| I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | done |
 | I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | todo |
 | I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | done |
 | I189 | Metrics, logs and dead letters, replayed from the Admin API | I188 | todo |
@@ -5401,6 +5401,67 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: interop with Redis 7 and Valkey in Docker; a stream copied across a kill loses
   nothing.
 - **Touches**: `sync/redis`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **A RESP client of sync's own, not shared storage's.** `tlsmgr/sharedstore` already speaks to
+   Redis, but its client is unexported, RESP2 only, reads replies two deep, has no pipelining and is
+   tied to `config.RedisStorage`; `sync/redis/wire` (package `wire`) is the plan's: RESP2 and RESP3
+   (every RESP3 type, attributes skipped, pushes dropped), `HELLO 3 AUTH user pass SETNAME`, falling
+   back to RESP2 with `AUTH` when the server does not know `HELLO`, `SELECT`, TLS, pipelining, a
+   context's end or deadline interrupting a blocked read (the connection is then broken and dialled
+   again), replies bounded (a string 64 MiB, 1<<20 elements and 256 MiB a reply, 8 deep).
+   `sharedstore` is left as it is, outside this item's package. Alternative: move `sharedstore` onto
+   `wire` in a follow-up, so that fit has one Redis client.
+2. **One connection each, on the pipeline's goroutine.** The source and the sink each hold one
+   blocking connection (Redis is a database: few long connections, not fib's engine), dialled at the
+   first use and again after it breaks; the sink is not a `ParallelSink`, so a job writes it through
+   one writer. Alternative: a small pool and `ParallelWrites`.
+3. **No consumer group.** The source reads with `XREAD` after the checkpoint's entry IDs, which are
+   the only cursor; nothing is acknowledged or removed on the server, and no group is made.
+   Alternative: `XREADGROUP` with `XACK` from `Confirmer`, for servers whose operators expect a
+   group's pending list.
+4. **The position is every stream's last ID**, `{"streams": {...}}`, on every record, so a restart
+   reads each stream on after the last entry the sinks have. A stream added to `streams` later
+   starts by `snapshot`; one removed is dropped from the position. Entries trimmed away before they
+   were read are not seen, and not detected. Stream keys must be UTF-8 (they are JSON in the
+   checkpoint). `snapshot: "never"` reads the last ID at each start without a checkpoint, as the
+   ClickHouse source reads its greatest cursor.
+5. **Exactly once into a stream by IDs, at least once otherwise.** `entry_id: "auto"` (the default)
+   lets the server pick IDs, so a replay adds entries again; `entry_id: "key"` takes the record's key
+   (its `id` field, or the key itself) as the ID, and the server's refusal of an ID at or below the
+   stream's last (`equal or smaller than the target stream top item`) counts as written: a stream
+   copied from the `redis` source holds every entry once, with its ID, across kills. It needs IDs
+   that grow per stream, as a stream's own do. Alternative: deduplication keys written with each
+   entry, or a Lua script.
+6. **The entry forms.** `form: "fields"`: the row's fields as text, maps and arrays as plain JSON,
+   nulls left out, a row of no field refused; the source reads values that are not UTF-8 as bytes,
+   and gives each entry the key `{"id": "<entry ID>"}` and the ID's milliseconds as its commit time.
+   `form: "record"`: one field named `record` (fixed, not a param) holding the canonical JSON; read
+   back, the record keeps its operation, key, namespace (unless the source's `namespace` is set),
+   rows and commit time, its transaction is dropped (the entries of one may not all be there), and
+   an entry that is not a record is read as fields rather than failing the source, which would
+   restart it for ever. `op_field` puts the operation in a field for `form: "fields"`; without it a
+   delete is written as its row, as an insert would be.
+7. **Keys.** `key` is a template of `{namespace}` and `{key}`, a key of several fields their values
+   joined by `:`, a record without a key refused; `value` `json` (the row's plain JSON, `SET`),
+   `record` (canonical JSON, `SET`) or `hash` (`MULTI`, `DEL`, `HSET`, `PEXPIRE`, `EXEC`, so that no
+   field of an earlier row stays and readers see no key half written); a delete is `DEL`; `ttl` is
+   `SET ... PX` or `PEXPIRE`. Stream params with `mode: "keys"` and key params with
+   `mode: "stream"` are refused.
+8. **Which server errors are retried.** `LOADING`, `OOM`, `READONLY`, `BUSY`, `TRYAGAIN`,
+   `MASTERDOWN`, `NOREPLICAS`, `CLUSTERDOWN`, `MOVED`, `ASK`, `NOAUTH`, `NOPERM`, `WRONGPASS`,
+   `MISCONF`, a connection's error and a timeout go to the pipeline's `retry`; any other error the
+   server answers a record's command with (`WRONGTYPE`, an ID refused) is the record's, for good, and
+   `on_error` takes it. A connection lost mid-pipeline fails the round trip's first record, those of
+   earlier round trips acknowledged.
+9. **Defaults and names.** `address` defaults to `127.0.0.1:6379`, as `acme.shared_storage.redis`
+   does; `password_env` without `username` authenticates as the default user; `protocol` 0 (auto),
+   2 or 3; the connection is named `fit-sync`; `count` 1000, `block` 5s (at least 1ms, never
+   `BLOCK 0`), `max_pipeline` 1000, `timeout` 10s; `snapshot` `initial` or `never`, as the
+   ClickHouse source's. A standalone server or a primary: no Redis Cluster or Sentinel.
+10. **The configuration table's `sync` row.** `docs/configuration*.md` had three `sync` rows, one
+    left by each merge of I169, I170 and I171; they are one row again, with Redis added.
 
 ### I187 S3 and compatibles as a source and a sink
 

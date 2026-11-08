@@ -5,16 +5,18 @@
 # queue of one, so that parallel bulks get 429s; ClickHouse, with a user
 # and password, over HTTP; MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and 11
 # (test/sync/mysql.sh, which says what they read); and PostgreSQL 13 to 17
-# with TLS, SCRAM and logical replication (test/sync/postgres.sh). The
-# containers are removed at the end; KEEP=1 keeps them, and a second run
-# reuses them.
+# with TLS, SCRAM and logical replication (test/sync/postgres.sh); and Redis 7, with an ACL user and a TLS port of
+# a CA made here, and Valkey 8, with the same user. The containers are
+# removed at the end; KEEP=1 keeps them, and a second run reuses them.
 #
 #   test/sync/run.sh [go test flags...]
 #
 # The tests read FIT_SYNC_ES_URL, FIT_SYNC_ES_CA, FIT_SYNC_ES_PASSWORD and
 # FIT_SYNC_OS_URL, FIT_SYNC_OS_CA, FIT_SYNC_OS_PASSWORD, and FIT_SYNC_CH_URL,
-# FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD, and FIT_SYNC_PG, FIT_SYNC_PG_CA_DIR,
-# FIT_SYNC_PG_USER, FIT_SYNC_PG_PASSWORD; without them they
+# FIT_SYNC_CH_USER, FIT_SYNC_CH_PASSWORD, FIT_SYNC_PG, FIT_SYNC_PG_CA_DIR,
+# FIT_SYNC_PG_USER, FIT_SYNC_PG_PASSWORD, and FIT_SYNC_REDIS_ADDR,
+# FIT_SYNC_REDIS_TLS_ADDR, FIT_SYNC_REDIS_CA, FIT_SYNC_VALKEY_ADDR,
+# FIT_SYNC_REDIS_USER, FIT_SYNC_REDIS_PASSWORD; without them they
 # skip, unless FIT_SYNC_INTEROP=required, which this script sets. The
 # source's snapshot test reads FIT_SYNC_SOURCE_DOCS documents, 100,000 when
 # unset (CI); the plan's million is
@@ -36,6 +38,11 @@ ES_PORT=${ES_PORT:-29200}
 OS_PORT=${OS_PORT:-29201}
 CH_IMAGE=${CH_IMAGE:-clickhouse/clickhouse-server:25.8}
 CH_PORT=${CH_PORT:-29202}
+REDIS_IMAGE=${REDIS_IMAGE:-redis:7-alpine}
+VALKEY_IMAGE=${VALKEY_IMAGE:-valkey/valkey:8-alpine}
+REDIS_PORT=${REDIS_PORT:-29386}
+REDIS_TLS_PORT=${REDIS_TLS_PORT:-29387}
+VALKEY_PORT=${VALKEY_PORT:-29388}
 PASSWORD='Fit-sync-1nterop!'
 CERTS=$(mktemp -d)
 . test/sync/postgres.sh
@@ -47,7 +54,7 @@ cleanup() {
 	mysql_cleanup
 	rm -rf "$CERTS"
 	if [ "${KEEP:-}" != 1 ]; then
-		docker rm -f fit-sync-es fit-sync-os fit-sync-ch $(pg_names) >/dev/null 2>&1 || true
+		docker rm -f fit-sync-es fit-sync-os fit-sync-ch fit-sync-redis fit-sync-valkey $(pg_names) >/dev/null 2>&1 || true
 		rm_mongos fit-sync
 	fi
 }
@@ -74,6 +81,26 @@ if ! docker inspect fit-sync-ch >/dev/null 2>&1; then
 	docker run -d --name fit-sync-ch -p "127.0.0.1:$CH_PORT:8123" \
 		-e CLICKHOUSE_USER=fit -e CLICKHOUSE_PASSWORD="$PASSWORD" \
 		--ulimit nofile=262144:262144 "$CH_IMAGE" >/dev/null
+fi
+
+# Redis's TLS port has a certificate for localhost of a CA made here; a
+# second run with KEEP=1 makes them again, and the container anew.
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 \
+	-subj /CN=fit-sync-test-ca -keyout "$CERTS/redis-ca.key" -out "$CERTS/redis-ca.pem" 2>/dev/null
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj /CN=localhost \
+	-keyout "$CERTS/redis.key" -out "$CERTS/redis.csr" 2>/dev/null
+printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' >"$CERTS/redis.ext"
+openssl x509 -req -in "$CERTS/redis.csr" -CA "$CERTS/redis-ca.pem" -CAkey "$CERTS/redis-ca.key" -CAcreateserial \
+	-days 2 -extfile "$CERTS/redis.ext" -out "$CERTS/redis.pem" 2>/dev/null
+chmod 644 "$CERTS"/redis*
+docker rm -f fit-sync-redis >/dev/null 2>&1 || true
+docker run -d --name fit-sync-redis -p "127.0.0.1:$REDIS_PORT:6379" -p "127.0.0.1:$REDIS_TLS_PORT:6380" \
+	-v "$CERTS:/certs:ro" "$REDIS_IMAGE" redis-server --port 6379 --tls-port 6380 \
+	--tls-cert-file /certs/redis.pem --tls-key-file /certs/redis.key --tls-ca-cert-file /certs/redis-ca.pem \
+	--tls-auth-clients no --user fit on ">$PASSWORD" '~*' '&*' '+@all' >/dev/null
+if ! docker inspect fit-sync-valkey >/dev/null 2>&1; then
+	docker run -d --name fit-sync-valkey -p "127.0.0.1:$VALKEY_PORT:6379" "$VALKEY_IMAGE" \
+		valkey-server --user fit on ">$PASSWORD" '~*' '&*' '+@all' >/dev/null
 fi
 
 # wait_for name user url ca: until the cluster answers its root.
@@ -119,8 +146,24 @@ set -f
 export $MONGO_ENV
 set +f
 
+for c in fit-sync-redis fit-sync-valkey; do
+	i=0
+	until docker exec "$c" sh -c 'redis-cli ping 2>/dev/null || valkey-cli ping' 2>/dev/null | grep -q PONG; do
+		i=$((i + 1))
+		if [ $i -gt 60 ]; then
+			echo "$c did not start:" >&2
+			docker logs --tail 50 "$c" >&2
+			exit 1
+		fi
+		sleep 1
+	done
+done
+
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \
 	FIT_SYNC_OS_URL="https://localhost:$OS_PORT" FIT_SYNC_OS_CA="$CERTS/os-ca.pem" FIT_SYNC_OS_PASSWORD="$PASSWORD" \
 	FIT_SYNC_CH_URL="http://localhost:$CH_PORT" FIT_SYNC_CH_USER=fit FIT_SYNC_CH_PASSWORD="$PASSWORD" \
+	FIT_SYNC_REDIS_ADDR="127.0.0.1:$REDIS_PORT" FIT_SYNC_REDIS_TLS_ADDR="127.0.0.1:$REDIS_TLS_PORT" \
+	FIT_SYNC_REDIS_CA="$CERTS/redis-ca.pem" FIT_SYNC_VALKEY_ADDR="127.0.0.1:$VALKEY_PORT" \
+	FIT_SYNC_REDIS_USER=fit FIT_SYNC_REDIS_PASSWORD="$PASSWORD" \
 	env $(pg_env) go test -race -count=1 "$@" ./test/sync

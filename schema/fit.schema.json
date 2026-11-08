@@ -7228,6 +7228,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "redis"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.redis"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "stdout"
               }
             }
@@ -7266,6 +7282,7 @@
             "file",
             "http",
             "memory",
+            "redis",
             "stdout",
             "wasm"
           ],
@@ -7604,6 +7621,130 @@
       },
       "type": "object"
     },
+    "sync.sinks.redis": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:6379",
+          "description": "The server's host and port, a standalone server or a primary (not Redis Cluster). 127.0.0.1:6379 when left out.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to a server that asks for one (tls-auth-clients); needs tls and key_file.",
+          "type": "string"
+        },
+        "db": {
+          "description": "The database selected. 0 when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entry_id": {
+          "default": "auto",
+          "description": "With mode stream, the entry's ID: auto, the server's (XADD *), so that a batch written again after a crash adds its entries again; key, the record's key (its id field, or the key itself), an ID as ms-seq as the source redis gives, so that a replay's entries, at or below the stream's last, are refused by the server and counted as written: a stream copied exactly once. auto when left out.",
+          "enum": [
+            "auto",
+            "key"
+          ],
+          "type": "string"
+        },
+        "form": {
+          "default": "fields",
+          "description": "With mode stream, what an entry holds: fields, the row's fields (after, or before for a delete), each value as text, maps and arrays as JSON, nulls left out; record, one field, record, holding the whole record in its canonical JSON, which the source redis reads back with every type, the operation and the key. fields when left out.",
+          "enum": [
+            "fields",
+            "record"
+          ],
+          "type": "string"
+        },
+        "key": {
+          "default": "{namespace}:{key}",
+          "description": "With mode keys, the key a record is written to: text with {namespace}, the record's namespace, and {key}, its key's text, a key of several fields their values joined by ':'. A record without a key fails. {namespace}:{key} when left out.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_len": {
+          "description": "With mode stream, trim each stream to about this many entries as they are added (XADD MAXLEN ~). Not trimmed when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_pipeline": {
+          "default": 1000,
+          "description": "The most commands sent in one round trip; a batch with more is sent in several, in order. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "default": "stream",
+          "description": "How records are written: stream, each an entry added to a stream with XADD; keys, each the value of a key of its own, set, replaced or deleted. stream when left out.",
+          "enum": [
+            "stream",
+            "keys"
+          ],
+          "type": "string"
+        },
+        "op_field": {
+          "description": "With mode stream and form fields, a field set to the record's operation (insert, update, delete, message) before the row's fields, so that a delete can be told from an insert. None when left out.",
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password, read when the pipeline loads; no authentication when left out.",
+          "type": "string"
+        },
+        "protocol": {
+          "description": "The RESP version spoken, 2 or 3. When left out, 3 if the server knows HELLO (Redis 6 and later, Valkey), 2 otherwise.",
+          "maximum": 3,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; address's host when left out.",
+          "type": "string"
+        },
+        "stream": {
+          "default": "{namespace}",
+          "description": "With mode stream, the stream's key: text with {namespace}, the record's namespace, and {key}, its key's text. {namespace} when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "How long connecting, and each round trip of a batch's commands, may take. 10s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the server's certificate checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "ttl": {
+          "description": "With mode keys, how long a key written lives (SET PX, PEXPIRE). For ever when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "username": {
+          "description": "The ACL user to authenticate as, with password_env; the default user when left out.",
+          "type": "string"
+        },
+        "value": {
+          "default": "json",
+          "description": "With mode keys, what a key holds: json, the row as a plain JSON object (SET); record, the whole record in its canonical JSON (SET); hash, the row's fields as a hash (HSET), each value as text, maps and arrays as JSON, nulls left out, the key deleted and set in one MULTI so that no field of an earlier row stays. A delete deletes the key (DEL). json when left out.",
+          "enum": [
+            "json",
+            "record",
+            "hash"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "sync.sinks.stdout": {
       "additionalProperties": false,
       "properties": {},
@@ -7738,6 +7879,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "redis"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.redis"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "wasm"
               }
             }
@@ -7760,6 +7917,7 @@
             "file",
             "generate",
             "http",
+            "redis",
             "wasm"
           ],
           "type": "string"
@@ -8142,6 +8300,107 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.sources.redis": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:6379",
+          "description": "The server's host and port, a standalone server or a primary (not Redis Cluster). 127.0.0.1:6379 when left out.",
+          "type": "string"
+        },
+        "block": {
+          "default": "5s",
+          "description": "How long one XREAD waits for new entries before asking again. 5s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to a server that asks for one (tls-auth-clients); needs tls and key_file.",
+          "type": "string"
+        },
+        "count": {
+          "default": 1000,
+          "description": "The most entries one XREAD reads of each stream. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "db": {
+          "description": "The database selected. 0 when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "form": {
+          "default": "fields",
+          "description": "What an entry is: fields, a message record whose row is the entry's fields, its key the entry's ID; record, the record held in its record field in canonical JSON, as the sink redis writes with form record, with its operation, key, namespace and rows (an entry without one is read as fields). fields when left out.",
+          "enum": [
+            "fields",
+            "record"
+          ],
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "The records' namespace. The stream's key when left out, or, for form record, the record's own.",
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password, read when the pipeline loads; no authentication when left out.",
+          "type": "string"
+        },
+        "protocol": {
+          "description": "The RESP version spoken, 2 or 3. When left out, 3 if the server knows HELLO (Redis 6 and later, Valkey), 2 otherwise.",
+          "maximum": 3,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; address's host when left out.",
+          "type": "string"
+        },
+        "snapshot": {
+          "default": "initial",
+          "description": "Where a pipeline without a checkpoint starts: initial, at each stream's first entry; never, after its last entry now, reading only what comes after. initial when left out.",
+          "enum": [
+            "initial",
+            "never"
+          ],
+          "type": "string"
+        },
+        "streams": {
+          "description": "The streams read, by their keys, together, in one XREAD.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "How long connecting, and each command but XREAD's wait, may take. 10s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the server's certificate checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "username": {
+          "description": "The ACL user to authenticate as, with password_env; the default user when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "streams"
+      ],
       "type": "object"
     },
     "sync.sources.wasm": {

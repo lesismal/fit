@@ -4319,6 +4319,33 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **不足**：计划 I170 一节中的决策，待审查。没有针对 ClickHouse 试 TLS；之后写入、游标值已被越过的行会漏掉（没有延迟窗口）；
   `snapshot: "never"` 在第一个检查点之前重启会再查一次。本项没有在 Linux 上运行，也没有在整个测试集的竞态检测下运行（留给合并时）。
 
+### I186 Redis 作为源与目标 — 已完成
+
+- **客户端**（`sync/redis/wire`，包 `wire`）：经 TCP 或 TLS 的 RESP2 与 RESP3；带 `AUTH` 与 `SETNAME` 的 `HELLO 3`，服务器
+  不认识 `HELLO` 时退回 RESP2 的 `AUTH`；`SELECT`；`Do` 与 `Pipeline`（一次往返，服务器的错误作为 `KindError` 的应答），
+  所有 RESP3 类型，跳过属性，丢弃推送；context 结束或到期时打断阻塞的读并让连接作废；应答有上限（`Limits`）。
+- **源 `redis`**（`sync/redis/source.go`，包 `syncredis`）：`streams` 在一次 `XREAD COUNT ... BLOCK ...` 中一起读取，从检查点
+  的条目 ID（`{"streams": {...}}`）之后，或从 `0-0`、最后一个条目开始（`snapshot`）；`form` 为 `fields`（条目字段组成的
+  `message`，键为条目 ID，提交时间为其毫秒数）或 `record`（目标写入的记录）；在作业中，不带 `BLOCK` 的 `XREAD` 读不到东西时
+  停止。不使用消费者组。
+- **目标 `redis`**（`sync/redis/sink.go`）：`mode: "stream"`，`XADD` 到 `stream`（`{namespace}`），`form` 为 `fields`（可带
+  `op_field`）或 `record`，`entry_id` 为 `auto` 或 `key`（重放的条目被服务器拒绝并算作已写入），`max_len`；`mode: "keys"`，
+  `key`（`{namespace}:{key}`），`value` 为 `json`、`record` 或 `hash`（在 `MULTI` 中），删除时 `DEL`，`ttl`；命令以 pipeline
+  发送，每次往返至多 `max_pipeline` 条；服务器的错误按其代码重试或视为永久。已在 `modules/standard` 中注册。
+- **文档**：schema 和参考（章节 `sync_sources_redis.md`、`sync_sinks_redis.md`，源和目标的表），模板，`schema-zh.js` 中的
+  中文描述，`docs/configuration*.md`（此前合并留下的三行 `sync` 重新合成一行），决定 036。
+- **测试**：`wire` 对假服务器：所有 RESP3 类型、属性与推送，pipeline，RESP3 握手、其回退和 RESP2，拒绝，上限和不是 RESP 的
+  应答，被取消和超时的阻塞读，校验证书的 TLS（覆盖率 99.6%）。`syncredis` 对进程内的假 Redis（流、字符串、哈希、`MULTI`，
+  RESP2 或 RESP3）：被拒绝的参数，各模式发出的命令，永久拒绝的记录，可重试与不可重试的服务器错误，被拒绝的哈希 `MULTI`，
+  源以 RESP3 和 RESP2 从检查点和从 `never` 开始，用 `BLOCK` 等待，格式错误的应答，以及经在每个崩溃点被杀的流水线复制一个流，
+  每个条目恰好一份（覆盖率 99.1%）。`test/sync/redis_test.go` 在 Docker 中对 Redis 7（带 ACL 用户和 TLS 端口）与 Valkey 8，
+  各以 RESP3 和 RESP2：在条目不断追加时复制一个流，流水线在随机点被杀，结果与源逐条相同；带 TTL 的 JSON、记录和哈希键，并
+  重放；记录经流往返；`snapshot: "never"`；以 ACL 用户走 TLS，错误的密码被拒绝。`test/sync/run.sh` 启动这两个服务器
+  （`fit-sync-redis`、`fit-sync-valkey`）。在 macOS 上于竞态检测器下运行；互通测试针对为此创建的 `fit-i186-*` 容器，而不是经
+  `run.sh`（其 Elasticsearch、OpenSearch 和 ClickHouse 容器正被使用）。
+- **与计划的差异**：没有遗漏；代码约 1,500 行，测试约 2,000 行，没有 I186b。
+- **缺口**：计划 I186 小节中的决定，待审查。不支持消费者组、Redis Cluster 和 Sentinel；源尚未读到就被修剪的条目不会被发现；
+  `tlsmgr/sharedstore` 仍用自己的 RESP2 客户端。
 ### I168 Elasticsearch 与 OpenSearch 作为目标 — 已完成
 
 - **目标 `elasticsearch`**（`sync/elasticsearch/sink.go`，包 `syncelastic`）：经 fib 异步 HTTP 客户端发送 `_bulk` NDJSON；

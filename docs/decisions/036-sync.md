@@ -293,6 +293,18 @@ The plan's I181 section lists them all; these change the record above.
 3. **A command may be sent twice.** The client sends a command once more to a new primary after a
    connection's error or a not-primary answer, without sessions; sync's idempotent writes are what
    make that safe.
+## Decisions made while building I186 (pending review)
+
+The plan's I186 section lists them all; these change the record above.
+
+1. **Sync has a RESP client of its own**, `sync/redis/wire` (RESP2 and RESP3, TLS, ACL users,
+   pipelining, bounded replies), rather than `tlsmgr/sharedstore`'s unexported RESP2 client; moving
+   `sharedstore` onto it is left for later.
+2. **A stream's checkpoint is the only cursor**: the `redis` source reads with `XREAD` from the last
+   entry IDs, makes no consumer group and acknowledges nothing on the server.
+3. **A sink may count a server's refusal of a duplicate as written**: with entry IDs from the keys,
+   the `redis` sink treats `XADD`'s refusal of an ID at or below the stream's last as an entry the
+   stream has, which makes a stream copy exactly once.
 
 ## Planning decisions (2026-11-08, pending review)
 

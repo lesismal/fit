@@ -339,7 +339,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | todo |
 | I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | todo |
 | I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | todo |
-| I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | todo |
+| I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | done |
 | I187 | S3 及兼容存储作为目标（滚动的对象）与源（按键顺序的对象） | I163 | todo |
 | I188 | Admin API 与 `fit sync`：状态、暂停、恢复、检查点、连接测试、试运行 | I163 | done |
 | I189 | 指标、日志与死信，可从 Admin API 重放 | I188 | todo |
@@ -3993,6 +3993,45 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   TTL，使用 pipeline。
 - **完成标准**：在 Docker 中与 Redis 7 和 Valkey 互通；一个 stream 在杀进程前后复制不丢数据。
 - **涉及**：`sync/redis`、`test/sync`、`docs`。
+
+**待审查的决定**（实现时做出，2026-11-08；在用户裁定之前有效）：
+
+1. **同步自己的 RESP 客户端，而不是共享存储的。** `tlsmgr/sharedstore` 已经能与 Redis 通信，但其客户端不导出、只支持 RESP2、
+   只读两层深的应答、没有 pipeline，且绑定 `config.RedisStorage`；`sync/redis/wire`（包 `wire`）是计划中的那个：RESP2 与
+   RESP3（所有 RESP3 类型，跳过属性，丢弃推送），`HELLO 3 AUTH user pass SETNAME`，服务器不认识 `HELLO` 时退回 RESP2 并用
+   `AUTH`，`SELECT`，TLS，pipeline，context 结束或到期时打断阻塞的读（此后连接作废并重新拨号），应答有上限（字符串 64 MiB，
+   每个应答 1<<20 个元素和 256 MiB，嵌套 8 层）。`sharedstore` 保持原样，它不在本项的包内。备选：后续把 `sharedstore` 改用
+   `wire`，让 fit 只有一个 Redis 客户端。
+2. **各一个连接，在流水线的 goroutine 上。** 源和目标各持有一个阻塞连接（Redis 是数据库：少量长连接，不用 fib 的引擎），首次
+   使用时拨号，断开后重拨；目标不是 `ParallelSink`，作业经一个写入者写它。备选：一个小连接池和 `ParallelWrites`。
+3. **不用消费者组。** 源用 `XREAD` 从检查点的条目 ID 之后读取，检查点是唯一的游标；服务器上不确认、不删除任何东西，也不建组。
+   备选：`XREADGROUP`，由 `Confirmer` 发 `XACK`，适合运维期望看到组的待处理列表的服务器。
+4. **位置是每个流的最后 ID**，`{"streams": {...}}`，每条记录都带，重启后每个流从目标已有的最后一个条目之后继续读。后来加到
+   `streams` 的流按 `snapshot` 开始；移除的流从位置中去掉。读到之前已被修剪掉的条目看不到，也不会被发现。流的键必须是 UTF-8
+   （在检查点里是 JSON）。没有检查点时 `snapshot: "never"` 每次启动都读取最后 ID，如同 ClickHouse 源读取最大游标值。
+5. **按 ID 恰好一次写入流，否则至少一次。** `entry_id: "auto"`（默认）由服务器选 ID，重放会再次追加条目；`entry_id: "key"`
+   以记录的键（其 `id` 字段，或键本身）为 ID，服务器拒绝不大于流最后 ID 的条目（`equal or smaller than the target stream top
+   item`）时算作已写入：从 `redis` 源复制的流在多次杀进程后仍每个条目恰好一份，ID 不变。这要求每个流的 ID 递增，如流自己的
+   ID。备选：每个条目附带写去重键，或用 Lua 脚本。
+6. **条目的形式。** `form: "fields"`：行的字段为文本，映射和数组为普通 JSON，略去 null，没有字段的行被拒绝；源把非 UTF-8
+   的值读成字节，给每个条目的键为 `{"id": "<条目 ID>"}`，提交时间为 ID 的毫秒数。`form: "record"`：一个名为 `record` 的字段
+   （固定，不是参数）存放规范 JSON；读回时记录保留其操作、键、命名空间（除非设置了源的 `namespace`）、行和提交时间，丢弃其
+   事务（一个事务的条目未必都在），不是记录的条目按 fields 读取，而不是让源失败——那样它会无休止地重启。`op_field` 在
+   `form: "fields"` 时把操作放进一个字段；没有它时，删除按其行写出，与插入无异。
+7. **键。** `key` 是 `{namespace}` 和 `{key}` 的模板，多字段的键以 `:` 连接各值，没有键的记录被拒绝；`value` 为 `json`（行
+   的普通 JSON，`SET`）、`record`（规范 JSON，`SET`）或 `hash`（`MULTI`、`DEL`、`HSET`、`PEXPIRE`、`EXEC`，不留下旧行的字段，
+   读者也看不到写了一半的键）；删除为 `DEL`；`ttl` 为 `SET ... PX` 或 `PEXPIRE`。`mode: "keys"` 时设置流的参数、
+   `mode: "stream"` 时设置键的参数都会被拒绝。
+8. **哪些服务器错误会重试。** `LOADING`、`OOM`、`READONLY`、`BUSY`、`TRYAGAIN`、`MASTERDOWN`、`NOREPLICAS`、`CLUSTERDOWN`、
+   `MOVED`、`ASK`、`NOAUTH`、`NOPERM`、`WRONGPASS`、`MISCONF`、连接错误和超时交给流水线的 `retry`；服务器对记录命令回的其他
+   错误（`WRONGTYPE`、被拒的 ID）属于该记录，是永久的，由 `on_error` 处理。pipeline 中途断开的连接让这次往返的第一条记录失败，
+   之前往返的记录已确认。
+9. **默认值与名称。** `address` 默认 `127.0.0.1:6379`，与 `acme.shared_storage.redis` 相同；只有 `password_env` 没有
+   `username` 时以默认用户认证；`protocol` 为 0（自动）、2 或 3；连接名为 `fit-sync`；`count` 1000，`block` 5s（至少
+   1ms，绝不 `BLOCK 0`），`max_pipeline` 1000，`timeout` 10s；`snapshot` 为 `initial` 或 `never`，与 ClickHouse 源相同。
+   单机服务器或主节点：不支持 Redis Cluster 或 Sentinel。
+10. **配置表中 `sync` 那一行。** `docs/configuration*.md` 有三行 `sync`，是 I169、I170、I171 各自合并时留下的；现在重新合成
+    一行，并加上 Redis。
 
 ### I187 S3 及兼容存储作为源与目标
 

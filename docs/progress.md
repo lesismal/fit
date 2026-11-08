@@ -6096,6 +6096,47 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   `snapshot: "never"` asks again on a restart before its first checkpoint. Not run on Linux or under
   the whole suite's race detector by this item (left to the merge).
 
+### I186 Redis as a source and a sink — done
+
+- **Client** (`sync/redis/wire`, package `wire`): RESP2 and RESP3 over TCP or TLS; `HELLO 3` with
+  `AUTH` and `SETNAME`, falling back to RESP2's `AUTH` when the server does not know `HELLO`;
+  `SELECT`; `Do` and `Pipeline` (one round trip, the server's errors as replies of `KindError`),
+  every RESP3 type, attributes skipped and pushes dropped; a context's end or deadline interrupts a
+  blocked read and breaks the connection; replies bounded (`Limits`).
+- **Source `redis`** (`sync/redis/source.go`, package `syncredis`): `streams` read together with
+  `XREAD COUNT ... BLOCK ...` after the checkpoint's entry IDs (`{"streams": {...}}`), or from `0-0`
+  or the last entry (`snapshot`); `form` `fields` (a `message` of the entry's fields, key the
+  entry's ID, commit time its milliseconds) or `record` (the record the sink wrote); in a job it
+  stops when an `XREAD` without `BLOCK` finds nothing. No consumer group.
+- **Sink `redis`** (`sync/redis/sink.go`): `mode: "stream"`, `XADD` to `stream` (`{namespace}`),
+  `form` `fields` (with `op_field`) or `record`, `entry_id` `auto` or `key` (a replay's entries
+  refused by the server and counted as written), `max_len`; `mode: "keys"`, `key`
+  (`{namespace}:{key}`), `value` `json`, `record` or `hash` (in a `MULTI`), `DEL` on a delete,
+  `ttl`; commands pipelined, `max_pipeline` per round trip; the server's errors retried or permanent
+  by their code. Registered in `modules/standard`.
+- **Docs**: the schema and reference (chapters `sync_sources_redis.md`, `sync_sinks_redis.md`, the
+  sources' and sinks' tables), the templates, the Chinese descriptions in `schema-zh.js`,
+  `docs/configuration*.md` (its three `sync` rows, left by earlier merges, one again), decision 036.
+- **Tests**: `wire` against a fake server: every RESP3 type, attributes and pushes, pipelines,
+  the handshake in RESP3, its fall back and RESP2, refusals, limits and replies that are not RESP,
+  a blocked read cancelled and timed out, TLS with a certificate checked (coverage 99.6%).
+  `syncredis` against an in-process fake Redis (streams, strings, hashes, `MULTI`, RESP2 or RESP3):
+  params refused, each mode's commands, records refused for good, server errors retried or not, a
+  hash's `MULTI` refused, the source in RESP3 and RESP2 from a checkpoint and from `never`, waiting
+  with `BLOCK`, malformed replies, and a stream copied through a pipeline killed at every crash
+  point, every entry once (coverage 99.1%). `test/sync/redis_test.go` against Redis 7 (with an ACL
+  user and a TLS port) and Valkey 8 in Docker, each in RESP3 and RESP2: a stream copied while
+  entries are added, the pipeline killed at random points, equal entry for entry with the source;
+  keys as JSON, records and hashes with a TTL, replayed; records round-tripped through a stream;
+  `snapshot: "never"`; TLS with an ACL user, and a wrong password refused. `test/sync/run.sh` starts
+  both servers (`fit-sync-redis`, `fit-sync-valkey`). Run under the race detector on macOS; the
+  interop tests against `fit-i186-*` containers made for the run, not through `run.sh` (whose
+  Elasticsearch, OpenSearch and ClickHouse containers were in use).
+- **Differs from the plan**: nothing left out; about 1,500 lines of code and 2,000 of tests, so no
+  I186b.
+- **Gaps**: the decisions in the plan's I186 section, pending review. No consumer groups, Redis
+  Cluster or Sentinel; trimmed entries a source had not read are not detected; `tlsmgr/sharedstore`
+  keeps its own RESP2 client.
 ### I168 Elasticsearch and OpenSearch as a sink — done
 
 - **Sink `elasticsearch`** (`sync/elasticsearch/sink.go`, package `syncelastic`): `_bulk` NDJSON

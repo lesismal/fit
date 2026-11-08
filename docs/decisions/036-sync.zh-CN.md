@@ -201,6 +201,15 @@ ClickHouse、Kafka、另一个数据库或 S3。每种基础设施都应既能�
 1. **数据库的 wire 客户端是阻塞连接**，基于 `net.Conn` 与 `crypto/tls`，每个在自己的 goroutine 上，而不是 fib 的异步连接：
    一问一答，COPY 和复制流需要阻塞写的背压，通道绑定需要 `crypto/tls` 看到的服务端证书。基于 HTTP 的系统仍经 fib 出去。
 2. **没有静默降级的 `sslmode`**：`disable`、`require`、`verify-ca`、`verify-full`（默认）；通道绑定默认 `prefer`。
+## 实现 I186 时做出的决定（待审阅）
+
+计划的 I186 一节列出了全部决定；以下几条改变了上面的记录。
+
+1. **同步有自己的 RESP 客户端**，`sync/redis/wire`（RESP2 与 RESP3、TLS、ACL 用户、pipeline、有上限的应答），而不用
+   `tlsmgr/sharedstore` 不导出的 RESP2 客户端；把 `sharedstore` 改用它留待以后。
+2. **流的检查点是唯一的游标**：`redis` 源从最后的条目 ID 起用 `XREAD` 读取，不建消费者组，也不在服务器上确认任何东西。
+3. **目标可以把服务器对重复的拒绝算作已写入**：以键为条目 ID 时，`redis` 目标把 `XADD` 对不大于流最后 ID 的拒绝视为流已有该
+   条目，这让流的复制恰好一次。
 
 ## 规划决定（2026-11-08，待审阅）
 
