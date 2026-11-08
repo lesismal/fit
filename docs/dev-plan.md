@@ -339,7 +339,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | todo |
 | I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | todo |
 | I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | todo |
-| I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | todo |
+| I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | done |
 | I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | done |
 | I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | todo |
 | I179 | The PostgreSQL snapshot from the slot's exported snapshot, an exact hand-over | I178 | todo |
@@ -5149,6 +5149,72 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: interop with MySQL 8.4 and TiDB in Docker: a MySQL-to-MySQL pipeline under a mixed
   write load ends equal by checksum, across replays and a kill.
 - **Touches**: `sync/mysql`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/mysql`, named `syncmysql`, which I174's source joins; the
+   connection's params (`address`, `username`, `password_env`, `database`, `tls`, `ca_file`,
+   `cert_file`, `key_file`, `server_name`, `tls_rsa`, `server_public_key_file`, `timeout`) are made
+   into `mysqlwire.Config` by one function both will share. `tls_rsa` answers I172's question 4: a
+   param that adds the `TLS_RSA_*` suites, off by default, for MySQL 5.7's image.
+2. **Upserts with `VALUES()`.** `INSERT ... ON DUPLICATE KEY UPDATE c=VALUES(c), ...` for every column
+   of the row: MySQL 8.0.20 and later deprecate `VALUES()` in favour of a row alias, which MySQL 5.7,
+   MariaDB and TiDB do not have, and the one form serves them all. Alternative: the alias on MySQL
+   8.0.19 and later.
+3. **Deletes by the record's key**, a map of columns without nulls (a key of one value, or with a
+   null, fails the record for good): `DELETE ... WHERE k IN (?, ...)`, or `(a, b) IN ((?, ?), ...)`
+   for a key of several columns, up to 1,000 keys a statement. An update whose key changed (its
+   `before` holding other values for the key's columns) deletes the row of the old key first.
+4. **A source transaction may be held open across batches.** With `transactions: "source"` a batch
+   that ends inside a source transaction leaves the server's transaction open and acknowledges its
+   records: the checkpoint never passes a transaction's end before every sink has its last record,
+   so a crash replays the whole transaction. The sink keeps what the open transaction holds, and a
+   new connection, after the old one fails, writes it again before the batch. `transactions:
+   "batch"` commits at a batch's last record that ends a source transaction, so that what it holds
+   open is a part of one source transaction only; otherwise the watermark could pass a source
+   transaction the server could still roll back. Alternative: commit at each batch's end, a source
+   transaction split across batches committed in parts.
+5. **Records without a transaction** (a snapshot's, or a source that has none) go in one of the
+   server's transactions per batch, or per run between source transactions, with `transactions:
+   "source"`.
+6. **Refusals.** A server's error whose SQLSTATE is of class 22 (data), 23 (constraints) or 42
+   (a table or column missing, a statement or access refused), or one of 1300, 1364, 1366, 1411 and
+   3140, fails a record for good; a multi-row statement refused (InnoDB and TiDB undo the statement
+   alone) is written again a row at a time to find the record at fault. What was written before it is
+   committed, even a part of a source transaction, and `on_error` takes the record; with `on_error:
+   "stop"` the pipeline replays the transaction from its checkpoint. Deadlocks (1213), lock waits
+   (1205), TiDB's conflicts (8002, 8022, 9007) and a connection's errors close the connection and the
+   batch is written again. Alternative: roll back the whole source transaction and fail its first
+   record.
+7. **`ddl: "stop"` fails the DDL record for good**, which `on_error` takes: a sink cannot stop a
+   pipeline whatever `on_error` says, so with `skip` or `dead_letter` the pipeline goes on past it.
+   `report` logs the namespace and the statement (its first 200 bytes) at info. Alternative: a way
+   for a sink to stop its pipeline, in `fitsync`.
+8. **TiDB** is told by its version (`-TiDB-`). The session sets `allow_auto_random_explicit_insert`,
+   so `AUTO_RANDOM` keys take the source's values; `max_transaction_bytes` is 16 MiB when left out
+   (TiDB's `txn-total-size-limit` is 100 MiB and counts indexes too), and a source transaction past
+   it is committed in parts with a warning rather than refused. Alternative: refuse such a
+   transaction, stopping the pipeline.
+9. **The session** sets `time_zone = '+00:00'` (times are written in UTC: a `TIMESTAMP` holds the
+   instant, a `DATETIME` the UTC wall clock) and adds `NO_AUTO_VALUE_ON_ZERO` to `sql_mode`, which
+   the interop test found: a key of 0 written to an `AUTO_INCREMENT` or `AUTO_RANDOM` column was
+   given a new value. Alternative: a `time_zone` param.
+10. **One connection, not a `ParallelSink`**: a job's snapshot goes through one writer. Alternative:
+    a connection per writer, for jobs.
+11. **Test connection** logs in on a connection of its own and runs `SELECT 1`.
+12. **Interop.** The plan's MySQL-to-MySQL pipeline needs I174's source; meanwhile a test source of
+    a mixed load (transactions of one to six inserts, updates, key changes and deletes over 300 keys,
+    0 among them) runs into each server through the runtime, killed at random points by the crash
+    hook and started again from its checkpoint, then replayed whole from no checkpoint: the table
+    (an `AUTO_INCREMENT` key, `AUTO_RANDOM` on TiDB, with `DECIMAL`, `DATETIME(6)`, `JSON` and
+    `VARBINARY` columns) ends equal, by a server-side checksum, to one the expected rows were
+    written to directly, with both `transactions` modes, on MySQL 5.7, 8.0 and 8.4, MariaDB 10.11
+    and 11, and TiDB v8.5.3. `test/sync/mysql.sh` starts TiDB beside them (`$MYSQL_PREFIX-tidb`,
+    `pingcap/tidb:v8.5.3`, `TIDB_PORT` 29217, root without a password or TLS; `TIDB=0` leaves it
+    out), so `test/sync/run.sh` and CI start it too; the tests read `FIT_SYNC_TIDB`. I174 adds the
+    MySQL-to-MySQL run.
+13. **Size**: about 790 lines of code, 1,000 of unit tests against a fake connection and a fake
+    server (98.1% of statements, no containers) and 300 of interop; nothing left, so no I176b.
 
 ### I177 A PostgreSQL client: connections, authentication and queries
 

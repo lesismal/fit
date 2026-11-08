@@ -13,12 +13,20 @@
 # without them they skip. MYSQL_PREFIX names the containers (fit-sync-my),
 # MYSQL_PORT is the first of five host ports (29210), MYSQL_SERVERS picks
 # some of them ("mysql57 mysql80 mysql84 mariadb1011 mariadb11").
+#
+# TiDB (TIDB_IMAGE, pingcap/tidb:v8.5.3, standalone on its own storage) runs
+# beside them as $MYSQL_PREFIX-tidb on TIDB_PORT (29217), root without a
+# password and without TLS, for the mysql sink's tests, which read
+# FIT_SYNC_TIDB (host:port); TIDB=0 leaves it out.
 
 MYSQL_PREFIX=${MYSQL_PREFIX:-fit-sync-my}
 MYSQL_PORT=${MYSQL_PORT:-29210}
 MYSQL_SERVERS=${MYSQL_SERVERS:-mysql57 mysql80 mysql84 mariadb1011 mariadb11}
 MYSQL_PASSWORD='Fit-sync-1nterop!'
 MYSQL_CERTS=${MYSQL_CERTS:-$(mktemp -d)}
+TIDB=${TIDB:-1}
+TIDB_IMAGE=${TIDB_IMAGE:-pingcap/tidb:v8.5.3}
+TIDB_PORT=${TIDB_PORT:-29217}
 
 # mysql_image name: the server's image and its options.
 mysql_image() {
@@ -93,11 +101,33 @@ mysql_start() {
 	FIT_SYNC_MYSQL_PASSWORD=$MYSQL_PASSWORD
 	FIT_SYNC_MYSQL_CA=$MYSQL_CERTS/ca.pem
 	export FIT_SYNC_MYSQL FIT_SYNC_MYSQL_PASSWORD FIT_SYNC_MYSQL_CA
+	[ "$TIDB" = 1 ] && tidb_start
+	return 0
+}
+
+tidb_start() {
+	name=$MYSQL_PREFIX-tidb
+	if ! docker inspect "$name" >/dev/null 2>&1; then
+		docker run -d --name "$name" -p "127.0.0.1:$TIDB_PORT:4000" "$TIDB_IMAGE" >/dev/null
+	fi
+	i=0
+	# The image has no client: its log says when it listens.
+	until docker logs "$name" 2>&1 | grep -q 'server is running MySQL protocol'; do
+		i=$((i + 1))
+		if [ $i -gt 180 ]; then
+			echo "$name did not start:" >&2
+			docker logs --tail 50 "$name" >&2
+			exit 1
+		fi
+		sleep 1
+	done
+	FIT_SYNC_TIDB=127.0.0.1:$TIDB_PORT
+	export FIT_SYNC_TIDB
 }
 
 mysql_cleanup() {
 	if [ "${KEEP:-}" != 1 ]; then
-		for s in $MYSQL_SERVERS; do
+		for s in $MYSQL_SERVERS tidb; do
 			docker rm -f "$MYSQL_PREFIX-$s" >/dev/null 2>&1 || true
 		done
 		rm -rf "$MYSQL_CERTS"

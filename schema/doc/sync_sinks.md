@@ -8,6 +8,7 @@ since what came after the checkpoint is written again after a crash.
 | [`elasticsearch`](#sync-sinks-elasticsearch) | Elasticsearch and OpenSearch, with `_bulk`: documents by `_id` from the key, per-item errors, 429s waited out |
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`http`](#sync-sinks-http) | Batches posted as NDJSON or a JSON array, with headers, authentication and an idempotency key, retried on 5xx and timeouts |
+| [`mysql`](#sync-sinks-mysql) | MySQL, MariaDB and TiDB: upserts (`INSERT ... ON DUPLICATE KEY UPDATE`) and deletes by key, multi-row statements per table, each source transaction as one of the server's |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`redis`](#sync-sinks-redis) | Redis and Valkey, pipelined: stream entries with `XADD` (IDs from the keys for an exact copy), or a key per record with `SET`, `HSET` and `DEL`, with a TTL |
 | [`s3`](#sync-sinks-s3) | S3 and compatibles (MinIO, SeaweedFS, Ceph, R2): each batch as objects of lines, named by its first record so a batch written again is the same object, gzipped if asked |

@@ -4161,6 +4161,30 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   700 行；没有剩余工作，因此没有 I172b。
 - **不足**：计划 I172 一节中的决策，待审查。不支持 MariaDB 的 `client_ed25519` 与 `parsec`；MySQL 5.7 的 TLS 需要调用方在
   `tls.Config` 中列出 `TLS_RSA_*` 套件；没有语句缓存、压缩和 `COM_STMT_SEND_LONG_DATA`；副本的命令归 I174。
+
+### I176 MySQL 与 TiDB 作为目标 — 已完成
+
+- **包 `sync/mysql`**（`syncmysql`），基于 `sync/mysql/wire` 的目标 `mysql`：insert、update 和 message 写成
+  `INSERT ... ON DUPLICATE KEY UPDATE`，delete 按键列删除（多列键用行构造器），键改变了的 update 先删除旧行；一批中同一张表、
+  同一组列的连续记录写成一条多行语句（`InsertRows`），delete 每条语句至多 1,000 个键。`transactions: "source"`（每个源事务
+  写成服务器的一个事务，跨批次保持打开直到其最后一条记录，旧连接出错时在新连接上重写）或 `"batch"`（多个源事务合成一个，在
+  批次中最后一条结束源事务的记录处提交）；`max_transaction_bytes`（对 TiDB 为 16 MiB）使超过它的事务提交，单个就超过它的源事务
+  分几部分提交。`ddl: "report"` 或 `"stop"`。服务器永久拒绝的记录通过逐行重写语句找出，单独失败，之前的记录已提交；死锁、
+  锁等待、TiDB 的冲突和断开的连接会重试。TiDB 按版本识别：其会话允许显式写入 `AUTO_RANDOM` 值。每个会话都以 UTC 写时间，并带
+  `NO_AUTO_VALUE_ON_ZERO`。设置 TLS 时必须使用，`tls_rsa` 供 MySQL 5.7 使用；连接测试（`fitsync.Tester`）登录并执行
+  `SELECT 1`。在 `modules/standard` 中注册。
+- **文档**：schema 和参考（章节 `sync_sinks_mysql.md`，目标的表），模板，`schema-zh.js`，配置说明中 sync 的一行。
+- **测试**：针对带事务的假连接（语句整体撤销，关闭连接即回滚）和供客户端拨号的假服务器的单元测试（98.1% 语句覆盖率，无容器）：
+  含改键的变更流在两种模式下、以多种批大小重放后收敛，跨批次的源事务在其结尾提交，事务打开时连接断开后重写，多行语句中和单独
+  的拒绝，目标无法写入的每种记录，DDL 的报告与停止，TiDB 的会话和按大小拆分的事务，每条语句处的失败，复合键，每种值类型，错误
+  分类，每个参数的检查。互通（`test/sync/mysql_sink_test.go`）：事务中的混合负载经运行时写入，在随机位置被杀并从检查点重启，再
+  整个重放，最终在 MySQL 5.7、8.0、8.4，MariaDB 10.11、11 和 TiDB v8.5.3 上、两种模式下与预期行按校验和相等；
+  `test/sync/mysql.sh`（现在也启动 TiDB）单独运行通过，含 I172 的测试，并创建和删除了它的容器。未在 Linux 上和完整测试套件中
+  运行（由合并时进行）。
+- **与计划的不同**：互通流水线的源是测试负载，而不是 MySQL：I174 的源尚不存在，MySQL 到 MySQL 的运行归 I174。约 790 行代码，
+  1,000 行单元测试和 300 行互通测试；没有 I176b。
+- **遗留**：计划中 I176 一节的决定，待评审。`ddl: "stop"` 只有在 `on_error: "stop"` 时才停止流水线；超过
+  `max_transaction_bytes` 的源事务，或有记录被拒的源事务，会部分提交；作业没有并行写入者。
 ### I177 PostgreSQL 客户端：连接、认证与查询 — 已完成
 
 - **包 `sync/postgres/wire`**（`pgwire`），基于 `net.Conn` 与 `crypto/tls` 的阻塞客户端，不引入驱动：以 `SSLRequest` 和

@@ -49,7 +49,7 @@ a config against it and more.
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -6983,6 +6983,7 @@ since what came after the checkpoint is written again after a crash.
 | [`elasticsearch`](#sync-sinks-elasticsearch) | Elasticsearch and OpenSearch, with `_bulk`: documents by `_id` from the key, per-item errors, 429s waited out |
 | [`file`](#sync-sinks-file) | Lines by a codec or a template, through fit's log file sink, rotated and kept as a log is |
 | [`http`](#sync-sinks-http) | Batches posted as NDJSON or a JSON array, with headers, authentication and an idempotency key, retried on 5xx and timeouts |
+| [`mysql`](#sync-sinks-mysql) | MySQL, MariaDB and TiDB: upserts (`INSERT ... ON DUPLICATE KEY UPDATE`) and deletes by key, multi-row statements per table, each source transaction as one of the server's |
 | [`memory`](#sync-sinks-memory) | Keeps the records in memory, bounded, for tests and trials |
 | [`redis`](#sync-sinks-redis) | Redis and Valkey, pipelined: stream entries with `XADD` (IDs from the keys for an exact copy), or a key per record with `SET`, `HSET` and `DEL`, with a TTL |
 | [`s3`](#sync-sinks-s3) | S3 and compatibles (MinIO, SeaweedFS, Ceph, R2): each batch as objects of lines, named by its first record so a batch written again is the same object, gzipped if asked |
@@ -7510,6 +7511,145 @@ In JSON:
 | `journal` | boolean |  | Ask for the writes to be in the journal before they are acknowledged (j: true). |
 | `write_timeout` | duration |  | How long the server waits for the write concern (wtimeout) before it answers with an error, which the pipeline retries; the writes stay. Without a limit when left out. |
 | `max_request_bytes` | integer, 0 to 41943040 | `8388608` | The most bytes of documents in one bulk write; a batch larger is sent in several. A document larger than 16 MiB fails its record. 8 MiB when left out or 0. |
+
+<a id="sync-sinks-mysql"></a>
+
+### `mysql`
+
+Writes records to MySQL, MariaDB or TiDB: inserts, updates and messages as INSERT ... ON DUPLICATE KEY UPDATE of the row, deletes as DELETE by the key's columns, each run of a batch's records for one table and one set of columns a multi-row statement; each source transaction is written as one of the server's (transactions: source), or several of them together (transactions: batch), so that the table never holds half of one. Writing the same records again leaves the same rows. DDL records are reported, or stop the pipeline (ddl: stop).
+
+Writes records to MySQL (5.7 and later), MariaDB (10.11 and later) or TiDB, through fit's own client
+of their protocol, on a connection of the pipeline's own, never on a fib worker. The tables are the
+user's: each needs a primary or unique key on the record's key columns.
+
+An insert, an update or a message is the row (`after`) written with `INSERT ... ON DUPLICATE KEY
+UPDATE`, every column set to the row's value; a delete is a `DELETE` by the key's columns (the
+record's `key`, a map of columns), and an update whose key changed deletes the row of the key it
+had (from `before`) first. Each run of a batch's records for one table and one set of columns is
+one statement of many rows, as many as the server's `max_allowed_packet` and 65,535 placeholders
+allow, and up to 1,000 keys a `DELETE`. Writing the same records again leaves the same rows, so a
+replay after a crash converges.
+
+`transactions: "source"` (the default) writes each source transaction as one transaction of the
+server's, committed at its last record, even when a batch ends inside it (the transaction is held
+open into the next batch), and the records without one, a snapshot's, of a batch together; so the
+table never holds half of a source transaction. `transactions: "batch"` groups several source
+transactions in one, committed at a batch's last record that ends one. Should the connection fail
+while a transaction is held open, what it held is written again on the next connection.
+`max_transaction_bytes` bounds a transaction: past it, it is committed at the next record that ends
+a source transaction, and a source transaction larger than that alone is committed in parts, with
+a warning. Against TiDB, whose transactions are bounded by `txn-total-size-limit`, it is 16 MiB when
+left out; the sink also lets the source's values into `AUTO_RANDOM` columns
+(`allow_auto_random_explicit_insert`).
+
+Values: numbers as they are, decimals as their text, strings and bytes, times in UTC (the session's
+`time_zone` is `+00:00`, so a `TIMESTAMP` holds the instant and a `DATETIME` the UTC wall clock),
+dates, and JSON, arrays and maps as JSON text. A value the server refuses for good (a constraint, a
+value too long, a table or column missing) fails its record, found by writing the statement's rows
+one at a time, and `on_error` takes it, those before it committed; a deadlock, a lock wait timed
+out, a conflict at commit or a connection lost is tried again by the pipeline's `retry`. `ddl`
+records are logged and not applied (`ddl: "report"`), or fail (`ddl: "stop"`), so that `on_error:
+"stop"` stops the pipeline before them, for a person to change the table.
+
+TLS, when `tls` is set, is required and verified. **Test connection** logs in and runs `SELECT 1`.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-copy {
+		source file { paths /var/log/shop/orders.ndjson; codec json }
+		transforms key { fields order_id }
+		sinks replica {
+			batch { max_records 500; max_wait 200ms }
+			sink mysql {
+				address db.internal:3306
+				username fit_sync
+				password_env MYSQL_SYNC_PASSWORD
+				tls true
+				ca_file /etc/fit/mysql-ca.pem
+				table shop.orders
+			}
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-copy
+      source:
+        module: file
+        params:
+          paths:
+            - /var/log/shop/orders.ndjson
+          codec:
+            module: json
+      transforms:
+        - module: key
+          params:
+            fields:
+              - order_id
+      sinks:
+        - name: replica
+          batch:
+            max_records: 500
+            max_wait: 200ms
+          sink:
+            module: mysql
+            params:
+              address: db.internal:3306
+              username: fit_sync
+              password_env: MYSQL_SYNC_PASSWORD
+              tls: true
+              ca_file: /etc/fit/mysql-ca.pem
+              table: shop.orders
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-copy",
+        "source": {"module": "file", "params": {"paths": ["/var/log/shop/orders.ndjson"], "codec": {"module": "json"}}},
+        "transforms": [{"module": "key", "params": {"fields": ["order_id"]}}],
+        "sinks": [{"name": "replica", "batch": {"max_records": 500, "max_wait": "200ms"},
+          "sink": {"module": "mysql", "params": {
+            "address": "db.internal:3306", "username": "fit_sync", "password_env": "MYSQL_SYNC_PASSWORD",
+            "tls": true, "ca_file": "/etc/fit/mysql-ca.pem", "table": "shop.orders"}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:3306"` | The server's host and port: MySQL 5.7 or later, MariaDB 10.11 or later, or TiDB. 127.0.0.1:3306 when left out. |
+| `username` | string |  | Required. The user to log in as, which needs INSERT, UPDATE and DELETE on the tables written. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
+| `database` | string |  | The database of a table named without one. |
+| `tls` | boolean |  | Connect over TLS, required: a server that does not offer it is refused, never spoken to in plain text. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; address's host when left out. |
+| `tls_rsa` | boolean |  | Offer TLS's RSA key exchange besides the default suites, for MySQL 5.7's image, which offers no other that Go has; needs tls. false when left out. |
+| `server_public_key_file` | string |  | A PEM file of the server's RSA public key, with which caching_sha2_password and sha256_password send the password without TLS. Without it and without TLS, a user of those plugins logs in only through the server's cache. |
+| `timeout` | duration | `"60s"` | How long connecting, and each wait for the server in a statement, may take. 60s when left out or 0. |
+| `table` | string | `"{namespace}"` | The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, with a primary or unique key on the record's key columns, which the upserts rely on. {namespace} when left out. |
+| `transactions` | string: `source`, `batch` | `"source"` | How records are grouped in the server's transactions: source, each source transaction as one, and the records without one (a snapshot's) of a batch together; batch, a batch's records up to the last that ends a source transaction in one, several source transactions together, and those after it, a part of one source transaction, in one held open into the next batch. Either way a source transaction is never committed in part, unless it is larger than max_transaction_bytes. source when left out. |
+| `ddl` | string: `report`, `stop` | `"report"` | What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes it, which with on_error stop stops the pipeline before it, for a person to change the table. report when left out. |
+| `max_transaction_bytes` | integer, 0 or more |  | The most bytes of values one of the server's transactions holds: past it, a transaction is committed at the next record that ends a source transaction, and a source transaction larger than this alone is committed in parts, with a warning. Against TiDB, whose transactions are bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and MariaDB. |
 
 <a id="sync-sinks-redis"></a>
 

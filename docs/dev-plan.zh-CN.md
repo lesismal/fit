@@ -329,7 +329,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | todo |
 | I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | todo |
 | I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | todo |
-| I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | todo |
+| I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | done |
 | I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | done |
 | I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | todo |
 | I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
@@ -3817,6 +3817,47 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 - **完成标准**：在 Docker 中与 MySQL 8.4 和 TiDB 互通：MySQL 到 MySQL 的流水线在混合写入负载下，经过重放和一次杀进程后，
   结束时校验和相同。
 - **涉及**：`sync/mysql`、`test/sync`、`docs`。
+
+**待评审的决定**（实现时做出，2026-11-08；在用户裁定前有效）：
+
+1. **放在哪里。** 包 `sync/mysql`，包名 `syncmysql`，I174 的源也放在这里；连接参数（`address`、`username`、`password_env`、
+   `database`、`tls`、`ca_file`、`cert_file`、`key_file`、`server_name`、`tls_rsa`、`server_public_key_file`、`timeout`）由一个
+   两者共用的函数转换成 `mysqlwire.Config`。`tls_rsa` 回答了 I172 的第 4 个问题：一个默认关闭的参数，加入 `TLS_RSA_*` 套件，
+   供 MySQL 5.7 的镜像使用。
+2. **用 `VALUES()` 做 upsert。** 对行的每一列写 `INSERT ... ON DUPLICATE KEY UPDATE c=VALUES(c), ...`：MySQL 8.0.20 起弃用
+   `VALUES()`，改用行别名，但 MySQL 5.7、MariaDB 和 TiDB 没有行别名，这一种写法对它们都适用。备选：在 MySQL 8.0.19 及以上用别名。
+3. **按记录的键删除**，键是不含 null 的列映射（单值键或含 null 的键使记录永久失败）：`DELETE ... WHERE k IN (?, ...)`，
+   多列键用 `(a, b) IN ((?, ?), ...)`，每条语句至多 1,000 个键。键改变了的 update（其 `before` 中键列的值不同）先删除旧键的行。
+4. **源事务可以跨批次保持打开。** `transactions: "source"` 下，一个在源事务中间结束的批次让服务器的事务保持打开，并确认其中
+   的记录：在所有目标都拿到事务的最后一条记录之前，检查点不会越过事务的结尾，所以崩溃后会重放整个事务。目标记住打开的事务
+   中有什么，旧连接出错后，新连接先把它们重写一遍，再写本批。`transactions: "batch"` 在批次中最后一条结束源事务的记录处提交，
+   使保持打开的部分只属于一个源事务；否则水位线可能越过一个服务器仍可能回滚的源事务。备选：每批结束时提交，跨批次的源事务
+   分几部分提交。
+5. **没有事务的记录**（快照的，或源本身没有事务）在 `transactions: "source"` 下每批（或两个源事务之间的每一段）放在服务器的
+   一个事务中。
+6. **拒绝。** SQLSTATE 属于 22 类（数据）、23 类（约束）或 42 类（表或列不存在、语句或访问被拒）的服务器错误，以及 1300、
+   1364、1366、1411、3140，使记录永久失败；多行语句被拒时（InnoDB 和 TiDB 只撤销该语句），逐行重写以找出出错的记录。它之前写入
+   的内容会提交，即使是源事务的一部分，该记录交由 `on_error` 处理；`on_error: "stop"` 时流水线从检查点重放该事务。死锁（1213）、
+   锁等待超时（1205）、TiDB 的冲突（8002、8022、9007）和连接错误会关闭连接，整批重写。备选：回滚整个源事务，并使其第一条记录失败。
+7. **`ddl: "stop"` 使 DDL 记录永久失败**，交由 `on_error` 处理：目标无法不顾 `on_error` 地停止流水线，所以 `skip` 或
+   `dead_letter` 时流水线会越过它继续。`report` 以 info 级别记录命名空间和语句（前 200 字节）。备选：在 `fitsync` 中给目标一个
+   停止流水线的办法。
+8. **TiDB** 按版本识别（`-TiDB-`）。会话设置 `allow_auto_random_explicit_insert`，使 `AUTO_RANDOM` 键接受源的值；
+   `max_transaction_bytes` 不设置时为 16 MiB（TiDB 的 `txn-total-size-limit` 为 100 MiB，且计入索引），超过它的源事务分几部分
+   提交并给出警告，而不是被拒绝。备选：拒绝这样的事务，停止流水线。
+9. **会话**设置 `time_zone = '+00:00'`（时间以 UTC 写入：`TIMESTAMP` 保存时刻，`DATETIME` 保存 UTC 的钟面时间），并在
+   `sql_mode` 中加入 `NO_AUTO_VALUE_ON_ZERO`，这是互通测试发现的：写入 `AUTO_INCREMENT` 或 `AUTO_RANDOM` 列的键 0 被赋了新值。
+   备选：一个 `time_zone` 参数。
+10. **一个连接，不是 `ParallelSink`**：作业的快照经一个写入者写入。备选：作业中每个写入者一个连接。
+11. **测试连接**在自己的连接上登录并执行 `SELECT 1`。
+12. **互通。** 计划中 MySQL 到 MySQL 的流水线需要 I174 的源；在此之前，一个产生混合负载的测试源（每个事务 1 到 6 个对 300 个
+    键（含 0）的 insert、update、改键和 delete）经运行时写入每台服务器，由崩溃钩子在随机位置杀掉并从检查点重启，然后在没有检查点
+    时整个重放：表（`AUTO_INCREMENT` 键，TiDB 上为 `AUTO_RANDOM`，含 `DECIMAL`、`DATETIME(6)`、`JSON` 和 `VARBINARY` 列）最终与
+    直接写入预期行的表按服务器端校验和相等，两种 `transactions` 模式，在 MySQL 5.7、8.0、8.4，MariaDB 10.11、11 和 TiDB v8.5.3
+    上。`test/sync/mysql.sh` 在它们旁边启动 TiDB（`$MYSQL_PREFIX-tidb`，`pingcap/tidb:v8.5.3`，`TIDB_PORT` 29217，root 无密码、
+    无 TLS；`TIDB=0` 不启动），因此 `test/sync/run.sh` 和 CI 也会启动它；测试读取 `FIT_SYNC_TIDB`。MySQL 到 MySQL 的运行由 I174 加上。
+13. **规模**：约 790 行代码，1,000 行针对假连接和假服务器的单元测试（98.1% 语句覆盖率，无容器），300 行互通测试；没有剩余工作，
+    因此没有 I176b。
 
 ### I177 PostgreSQL 客户端：连接、认证与查询
 
