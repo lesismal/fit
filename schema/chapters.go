@@ -54,7 +54,7 @@ var standardModules = map[string]struct{}{
 	"basic_auth": {}, "body_limit": {}, "cache": {}, "circuit_breaker": {}, "client_cert": {}, "compress": {},
 	"concurrency_limit": {}, "forward_auth": {}, "headers": {}, "jwt": {}, "rate_limit": {}, "redirect": {},
 	"rewrite": {}, "wasm": {}, "webrtc_proxy": {}, "whep": {}, "whip": {}, "sync_ingest": {},
-	"httpflv": {}, "hls": {}, "stream_whip": {}, "stream_whep": {},
+	"httpflv": {}, "hls": {}, "stream_whip": {}, "stream_whep": {}, "bt_stream": {},
 }
 
 // chapter is a chapter's text, and its examples: in JSON, from which the

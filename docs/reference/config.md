@@ -47,7 +47,7 @@ a config against it and more.
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
 - [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`bt_stream`](#http-handlers-bt_stream), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
@@ -4153,6 +4153,82 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 | [`respond`](#http-handlers-respond) | A fixed status, fields and body |
 | [`static`](#http-handlers-static) | Files from a directory |
 | [`sync_ingest`](#http-handlers-sync_ingest) | Records posted into a sync pipeline's `http` source, answered once its sinks have them |
+
+<a id="http-handlers-bt_stream"></a>
+
+### `bt_stream`
+
+Serves a file of a torrent of the bittorrent.client role with Range while it downloads, the ranges asked for first, and adds a torrent by magnet link on the fly.
+
+Serves a file of a torrent of the [`bittorrent.client`](#bittorrent) role over HTTP while it
+downloads, so that a browser or a player plays it as it streams in: `/bt/<info hash>/<file path>`
+is a file by its path as the torrent lists it, its name first, `/bt/<info hash>/<n>` its file of
+index `n`, and `/bt/<info hash>/` its largest file, after `prefix` (`/bt/` when left out). The
+info hash is the role's torrent ID. `Range` asks for a single range (`206`, `416` past the end),
+`HEAD` is answered, `Content-Type` comes from the file's extension, and the `ETag` from the
+torrent and the file, which never change. The pieces of the range asked for, and `readahead_bytes`
+past it, are fetched before all others; a read waits at most `read_timeout` for its piece (`504`
+before the response begins). At most `max_streams` responses stream at once (`503` past it), each
+read on a goroutine of its own and written only as fast as its client takes it. `auth` names a
+[`media_auth`](#media-auth) policy every request must satisfy with `play` on `bt/<info hash>`.
+With `magnet`, a request whose `magnet` query parameter is a magnet link of the torrent its path
+names adds the torrent when the role does not have it, if the request also has `publish` on
+`bt/<info hash>`: such torrents are temporary, download only the files streamed, are bounded by
+`max_temporary` and `max_temporary_bytes`, and are removed with their data `temporary_ttl` after
+their last stream ended. See [BitTorrent](../bittorrent.md#playing-a-file-while-it-downloads).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /bt/* }
+	handler bt_stream {
+		auth site
+		magnet true
+		max_streams 16
+		temporary_ttl 15m
+	}
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /bt/*
+handler:
+  module: bt_stream
+  params:
+    auth: site
+    magnet: true
+    max_streams: 16
+    temporary_ttl: 15m
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/bt/*"]},
+  "handler": {"module": "bt_stream", "params": {"auth": "site", "magnet": true, "max_streams": 16, "temporary_ttl": "15m"}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `prefix` | string | `"/bt/"` | The part of the path before a torrent's info hash: with /bt/, /bt/<info hash>/<file path> is a file of the torrent by its path as the torrent lists it, its name first, /bt/<info hash>/<n> its file of index n, and /bt/<info hash>/ its largest file. The info hash is the bittorrent.client role's torrent ID, 40 hex digits. /bt/ when left out. |
+| `auth` | string |  | The media_auth policy every request must satisfy, play on the stream bt/<info hash>: a bearer token, Basic, the token query parameter or the fit_media_token cookie, or, with the policy's url_signing, a URL signed for <prefix><info hash>/. Adding a torrent by magnet link takes publish on the same stream as well. Everyone may play when left out; magnet needs it. |
+| `max_streams` | integer, 0 or more | `32` | The most responses the handler streams at once, each with a goroutine of its own while it reads; past it a request is answered 503. At most 4096. 32 when left out or 0. |
+| `read_timeout` | duration | `"60s"` | How long a read waits for the piece it needs to arrive: past it a response not begun is answered 504, and one begun is cut short. 60s when left out. |
+| `readahead_bytes` | integer, 0 or more | `8388608` | How far past what a response reads the pieces are fetched before all others, nearest first. 64 KiB to 256 MiB. 8 MiB when left out or 0. |
+| `magnet` | boolean |  | Lets a request add the torrent its path names when the role does not have it, from the magnet link in its magnet query parameter, which must be of that torrent: /bt/<info hash>/?magnet=<link>, escaped. Such torrents are temporary: they download only the files streamed, are bounded by max_temporary and max_temporary_bytes, and are removed with their data temporary_ttl after their last stream ended, and when fit starts. Needs auth, whose publish on bt/<info hash> the request must have. Off when left out. |
+| `info_timeout` | duration | `"60s"` | How long a request waits for the info of a torrent added from a magnet link to arrive from peers; past it the answer is 504. 60s when left out. |
+| `max_temporary` | integer, 0 or more | `4` | The most temporary torrents, added by magnet link on the fly, the role holds at once; past it adding one is answered 503. At most 1000. 4 when left out or 0. |
+| `max_temporary_bytes` | integer, 0 or more | `17179869184` | The most bytes the temporary torrents may want of the disk together: a torrent whose files streamed would take it past this is answered 507, and removed when it was just added. 16 GiB when left out or 0. |
+| `temporary_ttl` | duration | `"10m"` | How long a temporary torrent stays after its last stream ended, for the next range a player asks: then it is removed with its data. At most 7 days. 10m when left out. |
+| `cache_control` | string |  | Sent as Cache-Control with every file. None when left out. |
+| `cors` | string |  | Sent as Access-Control-Allow-Origin, as "*", for players on other origins. None when left out. |
 
 <a id="http-handlers-fastcgi"></a>
 

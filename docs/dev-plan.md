@@ -367,7 +367,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I197 | The `bittorrent.client` role: config, the client on the shared engine, the state file in `data_dir`, restore and reload (decision 037) | I196 | done |
 | I198 | Adding torrents (magnet, file, URL, `watch_dir`), categories with a media library rescan, queueing, disk checks | I197 | todo |
 | I199 | `alt_speed` schedules, per-torrent limits, the role's `access`, `.p2p` and `.dat` blocklists in `access` for every module | I197 | todo |
-| I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | todo |
+| I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | done |
 | I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | todo |
 | I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | todo |
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | todo |
@@ -6565,6 +6565,90 @@ takes a short lock, so the queue drains, but a bound belongs in fib (a fib reque
 - **Done when**: a browser-style range request of a file still downloading is answered once its
   pieces arrive; slow readers, cut connections and a full stream bound are tested.
 - **Touches**: `bittorrent`, `handler`, `mediaauth`.
+- **Done** 2026-11-09: the route handler `bt_stream` (`handler/btstream`, in `modules/standard`):
+  `<prefix><info hash>/<file path>`, `/<n>` (file index) and `/` (the largest file), `GET` and
+  `HEAD`, a single `Range` (206, 416), `If-None-Match`/`If-Range` against an `ETag` of the torrent
+  and the file, `Content-Type` by extension, `Accept-Ranges`; read through fib's `Reader` on a
+  goroutine of the stream's own, at most `max_streams`, written with `WriteNoWait` and resumed by
+  `OnWritable`; `read_timeout`, `readahead_bytes`, `info_timeout`; `auth` (play on
+  `bt/<info hash>`); with `magnet`, adding by the `magnet` query parameter (publish needed),
+  temporary torrents bounded by `max_temporary` and `max_temporary_bytes`, downloading only the
+  files streamed, removed with their data `temporary_ttl` after their last stream and at the
+  role's start. Role hooks: `AddTemporary`, `SetTemporary`, `RemoveTemporary`, `TemporaryBytes`,
+  `SetFilePriorities`, `Status.Temporary`, `temporary` in `torrents.json`. Schema, reference,
+  templates, `schema-zh.js`, [BitTorrent](bittorrent.md#playing-a-file-while-it-downloads) in both
+  languages; `test/workers` names the handler's own `TestNoWorkerBlocks`. Tests (two roles on
+  loopback, DHT and LSD off, no trackers): a range of a file with no piece yet, answered once a
+  seeder is added; whole files by path, index and as the largest; suffix and open ranges, 416,
+  HEAD, 304, `If-Range`, several ranges; a 24 MiB file read by a client that stops (what is handed
+  to the connection settles far below the file, 768 KiB in a run on macOS, then the file arrives
+  whole); connections cut while
+  waiting for a piece and while streaming (the stream and its hold on the torrent end);
+  `max_streams` full; `read_timeout`; the role not running; the temporary lifecycle (401/403 for
+  adding without publish, a magnet link of another torrent, priorities, `max_temporary`, removal
+  with the data after the linger, added again), kept while another stream reads it,
+  `max_temporary_bytes`; play auth by header and query; `Drain`; ServeHTTP returning while its
+  stream waits; `parseRange`; the params' checks; the role's hooks, and temporary torrents removed
+  at the next start.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **URLs**: `<prefix><info hash>/<file path>` (the path as fib's `File.Path` gives it, the
+   torrent's name first), `<prefix><info hash>/<n>` for the file of index `n`, a path winning over
+   an index when a file is named with digits alone, and `<prefix><info hash>/` for the largest
+   file. Why: a player sees the file's name and extension, the index serves scripts, the largest
+   file is what a magnet link usually means. Alternatives: the index in a query (`?file=n`) or
+   under its own segment (`/i/<n>`); no largest-file form.
+2. **Adding on the fly is the `magnet` query parameter of a file's URL**, which must be a link of
+   the path's torrent (400 otherwise); the request then needs `publish` on `bt/<info hash>`
+   besides `play`, and `magnet` needs `auth` (a config without it is refused). Why: the URL a
+   player keeps works for every range whether or not the torrent is there yet; downloading from
+   the internet is a stronger right than playing. Alternatives: a path form
+   (`<prefix>magnet/<link>`); a separate add request, then plain URLs; play being enough; `magnet`
+   allowed without `auth`.
+3. **The bounded pool is a goroutine per stream, at most `max_streams`**, with no queue: past it
+   503. A goroutine waits for pieces (bounded by `read_timeout`) but never for the client: when
+   `WriteNoWait` reports the watermark passed it ends, and `OnWritable` starts another. Why: a
+   read can only block, and one at a time per stream is all a stream needs; a shared pool with a
+   queue would let one torrent's missing pieces delay other streams. Alternatives: a shared
+   `filepool` of fixed workers and a queue; a goroutine that also waits for the client.
+4. **`max_streams` counts a handler's own streams**, a route's, not shared across a reload: the
+   old config's streams end at its drain. Alternative: a count shared by engine and prefix.
+5. **A response begins with its first chunk**: a first read past `read_timeout` is a 504, a later
+   one cuts the response short of its `Content-Length`. Alternative: send the header at once, as
+   soon as the range is known.
+6. **Temporary torrents download only the files streamed** (the others priority 0, raised as
+   another is asked for); `max_temporary_bytes` counts what they want (fib's `Stats.Wanted`), and
+   past it the answer is **507** and a torrent just added is removed. Two torrents added at once
+   may both be refused near the bound. Alternatives: download whole torrents; count their total
+   length; check the disk's free space (I198's diskfree, when it lands).
+7. **Temporary torrents are marked in the role's state** (`temporary` in `torrents.json`) and
+   removed with their data when the role reads a state (start, a new `data_dir`). Why: otherwise a
+   restart would turn them into ordinary torrents that are never removed. Alternatives: not
+   persisted; kept across a restart with a new linger.
+8. **The linger is shared** by every `bt_stream` handler and across reloads, by role and torrent;
+   the `temporary_ttl` is that of the handler whose stream ended last; `RemoveTemporary` removes a
+   torrent only while it is still temporary, so one made ordinary (`SetTemporary(id, false)`)
+   stays; a stream that comes while its torrent is being removed waits, then adds it again or gets
+   404.
+9. **Several ranges are answered with the whole file** (200), not `multipart/byteranges`: players
+   ask for one range at a time. The `ETag` is strong, `"<info hash>-<index>"`; no
+   `Last-Modified`.
+10. **Defaults**: `max_streams` 32 (at most 4096), `read_timeout` 60s, `readahead_bytes` 8 MiB
+    (64 KiB to 256 MiB), `info_timeout` 60s, `max_temporary` 4 (at most 1000),
+    `max_temporary_bytes` 16 GiB, `temporary_ttl` 10m (at most 7 days); a chunk is 64 KiB, fib's
+    watermark.
+11. **Answers**: the role not running 503 (`Retry-After: 5`); `max_temporary` or `max_torrents`
+    reached 503 (`Retry-After: 30`); `magnet` off 403; a torrent the role has not got, without a
+    magnet link, 404; the torrent removed under a stream not begun 503.
+12. **`Content-Type` from a table of the handler's own** (video, audio, subtitles, pictures),
+    not Go's `mime`, which reads the system's files on first use.
+
+Open from it: adding a torrent already held as temporary through the API answers `ErrExists`;
+making it an ordinary torrent (`SetTemporary(id, false)`) belongs to I198/I203's add paths. fib's
+`Reader.Close` waits for a `Read` under way (both take its lock), so the handler cancels the read's
+context first; an interrupting `Close` would be a small fib request if another user needs it.
+Not run: the Linux race run, and the full suite (left to the main session).
 
 ### I201 The `bittorrent.tracker` role
 

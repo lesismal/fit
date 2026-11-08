@@ -6,8 +6,8 @@ fit 在网关旁运行一个 BitTorrent 客户端：`bittorrent.client` 角色�
 下载和做种，并在重启后保留种子（[决定 037](decisions/037-bittorrent.zh-CN.md)）。它就是 fib 的客户端
 （[fib 的 BitTorrent 文档](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)）：v1、v2 和混合种子，磁力链接，
 TCP 和 uTP，MSE 加密，DHT，对端交换，本地服务发现，HTTP 和 UDP tracker，以及 web seed。本页讲这个角色：配置、状态保存
-在哪里、重载改变什么，以及它的上限。按 URL 和 `watch_dir` 添加种子、分类与排队、时间表、边下边播、tracker、发布、Admin API
-和页面，随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
+在哪里、重载改变什么、它的上限，以及边下载边播放种子文件的 `bt_stream` 处理器。按 URL 和 `watch_dir` 添加种子、分类与
+排队、时间表、tracker、发布、Admin API 和页面，随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
 
 默认关闭：不写 `bittorrent.client` 时，fit 不打开 BitTorrent 端口，也不保存状态。
 
@@ -42,7 +42,7 @@ bittorrent {
 
 | 文件 | 内容 |
 | --- | --- |
-| `torrents.json` | 列表：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、文件优先级、是否暂停或顺序下载，以及添加时间 |
+| `torrents.json` | 列表：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、文件优先级、是否暂停或顺序下载、是否由 `bt_stream` 即时添加（`temporary`），以及添加时间 |
 | `torrents/<id>.torrent` | 其 .torrent 文件：添加时的字节，或磁力链接的种子从对端收到 info 后的元数据 |
 | `resume/<id>.resume` | 其续传数据（fib 的 `Torrent.ResumeData`）：已有的分片，以及每个文件的大小和修改时间 |
 
@@ -100,3 +100,68 @@ metainfo 拒绝含 `..`、`.`、空或含 `/` 的路径段，其文件存储把�
 `Pause`，`Resume`，`Remove`（可同时删除数据），`SetFilePriority`，`SetSequential`，`Save`，以及取得 fib 种子的 `Torrent`。
 设置了角色的控制台时，它目前只读地提供 `GET /api/torrents` 和 `GET /api/torrents/<id>`；显示该角色模块的任何控制台以
 `/api/m/bittorrent.client/torrents` 和 `/api/m/bittorrent.client/torrents/<id>` 提供它们。
+
+API 还为 `bt_stream` 的临时种子提供了钩子：`AddTemporary`（受调用者的 `max_temporary` 限制）、`SetTemporary`、
+`RemoveTemporary`（仅当仍是临时种子时，连同数据一起移除）、`TemporaryBytes` 和 `SetFilePriorities`（一次设置每个文件的
+优先级，只保存一次）。
+
+## 边下载边播放
+
+路由处理器 `bt_stream` 在种子下载期间通过 HTTP 提供该角色某个种子的文件，使浏览器的 `<video>` 或播放器能随数据到来而
+播放，并任意拖动：
+
+```json
+{
+  "media_auth": [{"name": "site", "tokens": [{"name": "player", "token": "a-long-random-token", "play": ["bt/*"], "publish": ["bt/*"]}]}],
+  "routes": [{"match": {"path": ["/bt/*"]}, "handler": {"module": "bt_stream", "params": {"auth": "site", "magnet": true}}}]
+}
+```
+
+| URL | 提供什么 |
+| --- | --- |
+| `/bt/<info hash>/<file path>` | 种子中按其列出的路径（以种子名称开头）指定的文件：`/bt/<hash>/Show/S01E01.mkv` |
+| `/bt/<info hash>/<n>` | info 字典文件列表中索引为 `n` 的文件（文件名只由数字组成时，路径优先于索引） |
+| `/bt/<info hash>/` | 其中最大的文件，即带一段样片和几张图片的种子里的影片 |
+
+info hash 即角色的种子 ID（v1 info hash，或截断的 v2 hash），40 位十六进制数字；`prefix` 可改变 `/bt/`。请求可以是
+`GET` 或 `HEAD`，带单个 `Range`（`206 Partial Content`，超出末尾时为 `416` 并带 `Content-Range: bytes */<size>`；多个范围
+或格式错误的范围按 RFC 9110 的许可以整个文件回答），以及针对 `ETag` 的 `If-None-Match` 和 `If-Range`；`ETag` 由种子和
+文件索引组成，因为种子的数据从不改变。`Content-Type` 按扩展名确定（视频、音频、字幕、图片，其他为
+`application/octet-stream`）；总是发送 `Accept-Ranges: bytes`；`cache_control` 和 `cors` 添加相应字段。
+
+**范围如何读取。** 每个响应通过 fib 的文件 `Reader` 读取：从其位置到其后 `readahead_bytes`（8 MiB）内的分块优先于其他
+所有分块下载，近者优先，因此所请求的范围最先下载；一次读取最多等待其分块 `read_timeout`（60s）。响应随第一个数据块
+开始，因此第一个分块始终不到的范围得到 `504`；之后中断的响应在达到 `Content-Length` 之前被关闭，客户端能察觉。仍在
+等待 info 的种子（磁力链接）最多等待 `info_timeout`（60s），之后为 `504`。
+
+**不阻塞任何 fib worker。** 读写状态文件的角色 API，以及等待分块并读盘的 `Reader`，都运行在流自己的 goroutine 上：最多
+`max_streams`（32）个，即处理器的有界池，超过时请求得到带 `Retry-After` 的 `503`。流每次读取 64 KiB，不等待地交给连接；
+当客户端排队的数据超过 fib 的水位线时，其 goroutine 结束，待客户端取走一半后由 `OnWritable` 重新启动：慢客户端只占用一个
+名额和大约两个数据块，从不占用一个等待它的 goroutine，每次这样的等待受 `limits` 的 `write_stall_timeout` 限制。客户端
+离开时其流立即结束，即使正在等待分块：其 reader 被关闭，名额被归还。被换下的配置在排空超时后结束其流。
+
+**授权。** 设置 `auth` 时，每个请求都必须在该 `media_auth` 策略下对 `bt/<info hash>` 有 `play` 权限：bearer token、
+Basic、`token` 查询参数、`fit_media_token` cookie，或在设置了 `url_signing` 时为 `<prefix><info hash>/` 签名的 URL。
+
+**即时通过磁力链接添加。** 设置 `magnet`（需要 `auth`）时，若请求的 `magnet` 查询参数是其路径所指种子的磁力链接，而角色
+没有该种子，且请求还对 `bt/<info hash>` 有 `publish` 权限，则添加该种子：
+`/bt/<hash>/?magnet=magnet%3A%3Fxt%3Durn%3Abtih%3A...`。链接必须属于路径中的种子（否则为 `400`）；对角色已有种子的请求
+照常播放。这样的种子是**临时的**：
+
+- 只下载被流式播放的文件：其他文件的优先级设为 0，请求到别的文件时再提高；
+- 同时最多持有 `max_temporary`（4）个（超过时为 `503`），合计最多占用 `max_temporary_bytes`（16 GiB）磁盘：若某个种子的
+  文件会使总量超过它，请求得到 `507`，刚添加的该种子会被移除；它们也计入角色的 `max_torrents`；
+- 最后一个流结束 `temporary_ttl`（10m）之后，除非期间又有流到来，它连同数据一起被移除：播放器在这段时间内请求下一个范围
+  时它仍在；
+- 角色启动时，会连同数据移除停止或崩溃时遗留的临时种子。
+
+| 参数 | 默认值 |
+| --- | --- |
+| `prefix` | `/bt/` |
+| `max_streams` | 32（最多 4096） |
+| `read_timeout` | 60s |
+| `readahead_bytes` | 8 MiB（64 KiB 到 256 MiB） |
+| `info_timeout` | 60s |
+| `max_temporary` | 4（最多 1000） |
+| `max_temporary_bytes` | 16 GiB |
+| `temporary_ttl` | 10m（最多 7 天） |

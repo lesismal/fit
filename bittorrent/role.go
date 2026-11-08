@@ -217,8 +217,9 @@ func (r *Role) start(cfg *config.BitTorrentClient) error {
 	r.client, r.limits, r.dataDir = c, limitsOf(cfg), cfg.DataDir
 	r.setRecords(recs)
 	r.restoreAll()
+	r.dropTemporaries()
 	if r.log != nil {
-		r.log.Infof("listening on %s, %d torrents", c.Addr(), len(recs))
+		r.log.Infof("listening on %s, %d torrents", c.Addr(), len(r.recs))
 	}
 	return nil
 }
@@ -257,6 +258,9 @@ func (r *Role) restart(cfg *config.BitTorrentClient) error {
 		r.setRecords(recs)
 	}
 	r.restoreAll()
+	if newDir {
+		r.dropTemporaries()
+	}
 	if r.log != nil {
 		r.log.Infof("a new client listening on %s, %d torrents", c.Addr(), len(r.recs))
 	}
@@ -383,6 +387,38 @@ func (r *Role) restore(rec *record, peers []string) error {
 	}
 	rec.t, rec.err, rec.genKnown = t, nil, false
 	return nil
+}
+
+// dropTemporaries removes, with their data, the torrents bt_stream added
+// on the fly that a stop or a crash left in a state just read: no stream
+// reads them any more. r.mu is held.
+func (r *Role) dropTemporaries() {
+	n := 0
+	for _, rec := range slices.Clone(r.recs) {
+		if !rec.temporary {
+			continue
+		}
+		if rec.t != nil {
+			if err := rec.t.Remove(true); err != nil && r.log != nil {
+				r.log.Warnf("temporary torrent %s: removing its data: %v", rec.id, err)
+			}
+			rec.t = nil
+		}
+		r.removeRecord(rec)
+		if err := removeFiles(r.dataDir, rec.id); err != nil && r.log != nil {
+			r.log.Warnf("temporary torrent %s: %v", rec.id, err)
+		}
+		n++
+	}
+	if n == 0 {
+		return
+	}
+	if err := saveList(r.dataDir, r.recs); err == nil {
+		r.listDirty = false
+	}
+	if r.log != nil {
+		r.log.Infof("removed %d temporary torrents left from before", n)
+	}
 }
 
 // closeClient closes the client, then saves every torrent's resume data,

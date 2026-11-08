@@ -357,7 +357,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I197 | `bittorrent.client` 角色：配置、跑在共享引擎上、`data_dir` 下的状态文件、恢复与 reload（决定 037） | I196 | done |
 | I198 | 添加任务（磁力链、文件、URL、`watch_dir`）、分类与媒体库重扫、排队、磁盘检查 | I197 | todo |
 | I199 | `alt_speed` 调度、单任务限制、角色的 `access`、`access` 读 `.p2p` 和 `.dat` 黑名单（所有模块可用） | I197 | todo |
-| I200 | `bt_stream`：经 HTTP Range 边下边播，允许按磁力链临时添加 | I197 | todo |
+| I200 | `bt_stream`：经 HTTP Range 边下边播，允许按磁力链临时添加 | I197 | done |
 | I201 | `bittorrent.tracker` 角色：HTTP 的 `bt_tracker`、UDP、私有 passkey、白名单、统计 | I196 | todo |
 | I202 | 把目录发布成带 web seed 的 hybrid 种子，跟随磁盘变化 | I197 | todo |
 | I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | todo |
@@ -4761,6 +4761,60 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
   因此优先下载；`max_streams`、读超时、预读上限；`media_auth`；允许按磁力链临时添加，有数量与磁盘上限，最后一个流结束后过期。
 - **完成标准**：对仍在下载的文件发出浏览器式的 Range 请求，在其 piece 到达后得到回应；慢读者、断连、流数已满都有测试。
 - **涉及**：`bittorrent`、`handler`、`mediaauth`。
+- **完成** 2026-11-09：路由处理器 `bt_stream`（`handler/btstream`，加入 `modules/standard`）：`<prefix><info hash>/<file path>`、
+  `/<n>`（文件索引）和 `/`（最大的文件），`GET` 和 `HEAD`，单个 `Range`（206、416），针对由种子和文件组成的 `ETag` 的
+  `If-None-Match`/`If-Range`，按扩展名的 `Content-Type`，`Accept-Ranges`；经 fib 的 `Reader` 在流自己的 goroutine 上读取，
+  最多 `max_streams` 个，用 `WriteNoWait` 写出、由 `OnWritable` 继续；`read_timeout`、`readahead_bytes`、`info_timeout`；
+  `auth`（对 `bt/<info hash>` 的 play）；设置 `magnet` 时按 `magnet` 查询参数添加（需要 publish），临时种子受 `max_temporary`
+  和 `max_temporary_bytes` 限制，只下载被播放的文件，在最后一个流结束 `temporary_ttl` 后以及角色启动时连同数据移除。角色的
+  钩子：`AddTemporary`、`SetTemporary`、`RemoveTemporary`、`TemporaryBytes`、`SetFilePriorities`、`Status.Temporary`，
+  `torrents.json` 中的 `temporary`。schema、参考、模板、`schema-zh.js`，中英文
+  [BitTorrent](bittorrent.zh-CN.md#边下载边播放) 文档；`test/workers` 指向该处理器自己的 `TestNoWorkerBlocks`。测试（两个角色
+  在回环上，关闭 DHT 和 LSD，没有 tracker）：对尚无任何分块的文件请求一个范围，加入做种方后得到回应；按路径、索引和最大
+  文件取整个文件；后缀范围和开放范围、416、HEAD、304、`If-Range`、多个范围；客户端停止读取的 24 MiB 文件（交给连接的数据
+  稳定在远小于文件的量，macOS 上一次运行为 768 KiB，之后文件完整到达）；等待分块时和流式发送时断开连接（流及其对种子的占用结束）；`max_streams` 已满；
+  `read_timeout`；角色未运行；临时种子的生命周期（无 publish 时添加得到 401/403、另一种子的磁力链接、优先级、
+  `max_temporary`、停留期后连同数据移除、再次添加），另一个流读取时保留，`max_temporary_bytes`；经请求头和查询参数的播放
+  授权；`Drain`；流等待时 ServeHTTP 已返回；`parseRange`；参数检查；角色的钩子，以及下次启动时移除临时种子。
+
+**待审查的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **URL**：`<prefix><info hash>/<file path>`（fib 的 `File.Path` 给出的路径，以种子名称开头），`<prefix><info hash>/<n>` 为
+   索引 `n` 的文件，文件名只由数字组成时路径优先于索引，`<prefix><info hash>/` 为最大的文件。原因：播放器能看到文件名和扩展名，
+   索引方便脚本，最大的文件通常就是磁力链接所指的内容。备选：索引放在查询参数（`?file=n`）或单独的路径段（`/i/<n>`）；不提供
+   最大文件的形式。
+2. **即时添加用文件 URL 的 `magnet` 查询参数**，它必须是路径中那个种子的链接（否则 400）；此时请求除 `play` 外还需要对
+   `bt/<info hash>` 的 `publish`，且 `magnet` 需要 `auth`（没有则拒绝配置）。原因：播放器保留的 URL 无论种子是否已在都对每个
+   范围有效；从互联网下载是比播放更强的权限。备选：路径形式（`<prefix>magnet/<link>`）；先单独请求添加，再用普通 URL；
+   play 即可添加；允许无 `auth` 的 `magnet`。
+3. **有界池是每个流一个 goroutine，最多 `max_streams` 个**，没有队列：超过时 503。goroutine 会等待分块（受 `read_timeout`
+   限制），但从不等待客户端：`WriteNoWait` 报告超过水位线时它结束，由 `OnWritable` 启动另一个。原因：读取只能阻塞，每个流同时
+   只需要一个；带队列的共享池会让某个种子缺失的分块拖慢其他流。备选：固定 worker 加队列的共享 `filepool`；也等待客户端的
+   goroutine。
+4. **`max_streams` 只计一个处理器（一条路由）自己的流**，重载时不共享：旧配置的流在其排空时结束。备选：按引擎和前缀共享的
+   计数。
+5. **响应随第一个数据块开始**：第一次读取超过 `read_timeout` 得到 504，之后的超时使响应在达到 `Content-Length` 前中断。
+   备选：一知道范围就立即发送响应头。
+6. **临时种子只下载被播放的文件**（其他文件优先级为 0，请求到时再提高）；`max_temporary_bytes` 计算它们想要的字节（fib 的
+   `Stats.Wanted`），超过时回答 **507**，刚添加的种子被移除。接近上限时同时添加的两个种子可能都被拒绝。备选：下载整个种子；
+   按总长度计算；检查磁盘剩余空间（I198 的 diskfree 落地后）。
+7. **临时种子在角色的状态中标记**（`torrents.json` 中的 `temporary`），角色读取状态时（启动、新的 `data_dir`）连同数据移除。
+   原因：否则重启会把它们变成永不移除的普通种子。备选：不持久化；重启后保留并重新计时。
+8. **停留计时是共享的**，所有 `bt_stream` 处理器之间、跨重载，按角色和种子；`temporary_ttl` 取最后结束的那个流所在处理器的值；
+   `RemoveTemporary` 只移除仍是临时的种子，因此被改为普通种子（`SetTemporary(id, false)`）的会保留；种子正被移除时到来的流
+   先等待，再重新添加或得到 404。
+9. **多个范围以整个文件回答**（200），而不是 `multipart/byteranges`：播放器每次只请求一个范围。`ETag` 是强校验的
+   `"<info hash>-<index>"`；没有 `Last-Modified`。
+10. **默认值**：`max_streams` 32（最多 4096），`read_timeout` 60s，`readahead_bytes` 8 MiB（64 KiB 到 256 MiB），
+    `info_timeout` 60s，`max_temporary` 4（最多 1000），`max_temporary_bytes` 16 GiB，`temporary_ttl` 10m（最多 7 天）；
+    数据块 64 KiB，即 fib 的水位线。
+11. **回答**：角色未运行 503（`Retry-After: 5`）；达到 `max_temporary` 或 `max_torrents` 503（`Retry-After: 30`）；`magnet`
+    关闭 403；角色没有且未带磁力链接的种子 404；尚未开始的流下种子被移除 503。
+12. **`Content-Type` 用处理器自己的表**（视频、音频、字幕、图片），而不是 Go 的 `mime`，后者首次使用时会读取系统文件。
+
+遗留：通过 API 添加一个已作为临时种子持有的种子会得到 `ErrExists`；把它变为普通种子（`SetTemporary(id, false)`）属于
+I198/I203 的添加路径。fib 的 `Reader.Close` 会等待进行中的 `Read`（两者取同一把锁），因此处理器先取消读取的 context；能打断
+读取的 `Close` 可在别的使用者需要时作为一个小的 fib 请求。未运行：Linux 上的 race 测试和全量测试（留给主会话）。
 
 ### I201 `bittorrent.tracker` 角色
 

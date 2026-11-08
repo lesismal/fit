@@ -73,6 +73,9 @@ type stateEntry struct {
 	Sequential bool      `json:"sequential,omitempty"`
 	Paused     bool      `json:"paused,omitempty"`
 	Added      time.Time `json:"added"`
+	// Temporary marks a torrent bt_stream added from a magnet link on the
+	// fly: removed with its data after its last stream, and at start.
+	Temporary bool `json:"temporary,omitempty"`
 }
 
 // record is a torrent of the role: what the state keeps of it, and the
@@ -86,6 +89,7 @@ type record struct {
 	sequential bool
 	paused     bool
 	added      time.Time
+	temporary  bool
 
 	// mi is the torrent's metainfo, nil for a magnet link's until its info
 	// arrives; torrentSaved says its .torrent file is written.
@@ -109,7 +113,7 @@ type record struct {
 
 func (r *record) entry() stateEntry {
 	return stateEntry{ID: r.id, Name: r.name, Magnet: r.magnet, Dir: r.dir, Priorities: r.priorities,
-		Sequential: r.sequential, Paused: r.paused, Added: r.added}
+		Sequential: r.sequential, Paused: r.paused, Added: r.added, Temporary: r.temporary}
 }
 
 // idOf returns the ID of a torrent of info hashes v1 and v2.
@@ -187,7 +191,7 @@ func loadState(dir string) ([]*record, error) {
 			return nil, fmt.Errorf("%w: %s: torrent %s has the directory %q, which is not absolute", ErrState, path, e.ID, e.Dir)
 		}
 		rec := &record{id: e.ID, name: e.Name, magnet: e.Magnet, dir: e.Dir, priorities: e.Priorities,
-			sequential: e.Sequential, paused: e.Paused, added: e.Added}
+			sequential: e.Sequential, paused: e.Paused, added: e.Added, temporary: e.Temporary}
 		rec.mi, rec.err = loadTorrent(dir, e.ID)
 		rec.torrentSaved = rec.mi != nil
 		if rec.mi == nil && rec.err == nil {

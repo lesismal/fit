@@ -32,6 +32,8 @@ var (
 	// ErrBadRequest is a request the API cannot take, as a link that is not
 	// a magnet link or bytes that are not a .torrent file.
 	ErrBadRequest = errors.New("bittorrent: bad request")
+	// ErrTooManyTemporary is an AddTemporary past its bound.
+	ErrTooManyTemporary = errors.New("bittorrent: as many temporary torrents as allowed are held already")
 	// ErrBroken is a torrent its state could not be added back with: it
 	// may only be removed.
 	ErrBroken = errors.New("bittorrent: the torrent could not be restored")
@@ -67,6 +69,9 @@ type Status struct {
 	Paused     bool      `json:"paused"`
 	Sequential bool      `json:"sequential"`
 	Added      time.Time `json:"added"`
+	// Temporary is a torrent bt_stream added on the fly, removed with its
+	// data after its last stream.
+	Temporary bool `json:"temporary,omitempty"`
 
 	Size         int64   `json:"size"`
 	Wanted       int64   `json:"wanted"`
@@ -99,7 +104,7 @@ type FileStatus struct {
 // status reports rec. r.mu is held.
 func (r *Role) status(rec *record, files bool) Status {
 	s := Status{ID: rec.id, Name: rec.name, Magnet: rec.magnet, Dir: rec.dir, Paused: rec.paused,
-		Sequential: rec.sequential, Added: rec.added}
+		Sequential: rec.sequential, Added: rec.added, Temporary: rec.temporary}
 	if rec.mi != nil {
 		if h := rec.mi.Info.InfoHashV1(); rec.mi.Info.HasV1() {
 			s.InfoHash = h.String()
@@ -151,7 +156,19 @@ func (r *Role) status(rec *record, files bool) Status {
 
 // Add adds a torrent from a magnet link or a .torrent file, downloading
 // into download_dir, and saves the list at once.
-func (r *Role) Add(req AddRequest) (Status, error) {
+func (r *Role) Add(req AddRequest) (Status, error) { return r.add(req, 0) }
+
+// AddTemporary adds a torrent as Add does, marked temporary, as bt_stream
+// adds one from a magnet link on the fly, unless max temporary torrents
+// are held already (ErrTooManyTemporary). A temporary torrent is removed
+// with its data by RemoveTemporary, which bt_stream calls once its last
+// stream has ended and lingered, and when a state is read, at start.
+func (r *Role) AddTemporary(req AddRequest, limit int) (Status, error) {
+	return r.add(req, max(limit, 1))
+}
+
+// add is Add, or AddTemporary when maxTemp is not 0.
+func (r *Role) add(req AddRequest, maxTemp int) (Status, error) {
 	if (req.Magnet == "") == (len(req.Torrent) == 0) {
 		return Status{}, fmt.Errorf("%w: give a magnet link or a .torrent file", ErrBadRequest)
 	}
@@ -197,6 +214,12 @@ func (r *Role) Add(req AddRequest) (Status, error) {
 	}
 	if len(r.recs) >= r.cfg.Torrents() {
 		return Status{}, ErrTooMany
+	}
+	if maxTemp > 0 {
+		if r.temporaries() >= maxTemp {
+			return Status{}, ErrTooManyTemporary
+		}
+		rec.temporary = true
 	}
 	dir, err := filepath.Abs(r.cfg.Downloads())
 	if err != nil {
@@ -364,6 +387,32 @@ func (r *Role) SetFilePriority(id string, i, priority int) error {
 	})
 }
 
+// SetFilePriorities sets the priorities of the files of the torrent id,
+// once its info is known, by their index in the info dictionary's file
+// list, one for each file, and saves the list once, as bt_stream does to
+// download only the files a temporary torrent streams.
+func (r *Role) SetFilePriorities(id string, priorities []int) error {
+	return r.change(id, func(rec *record) error {
+		info := rec.t.Info()
+		if info == nil {
+			return fmt.Errorf("%w: its info is not known yet", ErrBadRequest)
+		}
+		if n := len(info.FileList()); len(priorities) != n {
+			return fmt.Errorf("%w: %d priorities for %d files", ErrBadRequest, len(priorities), n)
+		}
+		for _, p := range priorities {
+			if p < fibbt.PriorityNone || p > fibbt.PriorityHigh {
+				return fmt.Errorf("%w: a priority is 0 to 7, not %d", ErrBadRequest, p)
+			}
+		}
+		for i, p := range priorities {
+			rec.t.SetFilePriority(i, p)
+		}
+		rec.priorities = slices.Clone(priorities)
+		return nil
+	})
+}
+
 // Remove removes the torrent id, and with deleteData its downloaded files,
 // and saves the list at once. A torrent that could not be restored is
 // removed from the list; its files, if any, only with deleteData once it
@@ -371,6 +420,11 @@ func (r *Role) SetFilePriority(id string, i, priority int) error {
 func (r *Role) Remove(id string, deleteData bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.removeLocked(id, deleteData)
+}
+
+// removeLocked is Remove. r.mu is held.
+func (r *Role) removeLocked(id string, deleteData bool) error {
 	rec := r.byID[id]
 	if rec == nil {
 		return ErrNotFound
@@ -395,6 +449,63 @@ func (r *Role) Remove(id string, deleteData bool) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// temporaries counts the temporary torrents. r.mu is held.
+func (r *Role) temporaries() int {
+	n := 0
+	for _, rec := range r.recs {
+		if rec.temporary {
+			n++
+		}
+	}
+	return n
+}
+
+// SetTemporary marks the torrent id temporary or, with on false, keeps it
+// as any other, and saves the list at once.
+func (r *Role) SetTemporary(id string, on bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec := r.byID[id]
+	if rec == nil {
+		return ErrNotFound
+	}
+	if rec.temporary == on {
+		return nil
+	}
+	rec.temporary = on
+	r.listDirty = true
+	if err := saveList(r.dataDir, r.recs); err != nil {
+		return fmt.Errorf("saving the state: %w", err)
+	}
+	r.listDirty = false
+	return nil
+}
+
+// RemoveTemporary removes the torrent id with its data when it is still
+// temporary, and reports whether it did.
+func (r *Role) RemoveTemporary(id string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec := r.byID[id]; rec == nil || !rec.temporary {
+		return false, nil
+	}
+	return true, r.removeLocked(id, true)
+}
+
+// TemporaryBytes returns the bytes the temporary torrents want, those
+// whose info is known: what they take on the disk once downloaded.
+func (r *Role) TemporaryBytes() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int64
+	for _, rec := range r.recs {
+		if rec.temporary && rec.t != nil && rec.t.Info() != nil {
+			n += rec.t.Stats().Wanted
+		}
+	}
+	return n
 }
 
 // Save saves what changed now, as the saver does every save_interval.

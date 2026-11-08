@@ -5117,6 +5117,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "bt_stream"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.bt_stream"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "fastcgi"
               }
             }
@@ -5374,6 +5390,7 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "bt_stream",
             "fastcgi",
             "forward_proxy",
             "hls",
@@ -5400,6 +5417,75 @@
       "required": [
         "module"
       ],
+      "type": "object"
+    },
+    "http.handlers.bt_stream": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "description": "The media_auth policy every request must satisfy, play on the stream bt/<info hash>: a bearer token, Basic, the token query parameter or the fit_media_token cookie, or, with the policy's url_signing, a URL signed for <prefix><info hash>/. Adding a torrent by magnet link takes publish on the same stream as well. Everyone may play when left out; magnet needs it.",
+          "type": "string"
+        },
+        "cache_control": {
+          "description": "Sent as Cache-Control with every file. None when left out.",
+          "type": "string"
+        },
+        "cors": {
+          "description": "Sent as Access-Control-Allow-Origin, as \"*\", for players on other origins. None when left out.",
+          "type": "string"
+        },
+        "info_timeout": {
+          "default": "60s",
+          "description": "How long a request waits for the info of a torrent added from a magnet link to arrive from peers; past it the answer is 504. 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "magnet": {
+          "description": "Lets a request add the torrent its path names when the role does not have it, from the magnet link in its magnet query parameter, which must be of that torrent: /bt/<info hash>/?magnet=<link>, escaped. Such torrents are temporary: they download only the files streamed, are bounded by max_temporary and max_temporary_bytes, and are removed with their data temporary_ttl after their last stream ended, and when fit starts. Needs auth, whose publish on bt/<info hash> the request must have. Off when left out.",
+          "type": "boolean"
+        },
+        "max_streams": {
+          "default": 32,
+          "description": "The most responses the handler streams at once, each with a goroutine of its own while it reads; past it a request is answered 503. At most 4096. 32 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_temporary": {
+          "default": 4,
+          "description": "The most temporary torrents, added by magnet link on the fly, the role holds at once; past it adding one is answered 503. At most 1000. 4 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_temporary_bytes": {
+          "default": 17179869184,
+          "description": "The most bytes the temporary torrents may want of the disk together: a torrent whose files streamed would take it past this is answered 507, and removed when it was just added. 16 GiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefix": {
+          "default": "/bt/",
+          "description": "The part of the path before a torrent's info hash: with /bt/, /bt/<info hash>/<file path> is a file of the torrent by its path as the torrent lists it, its name first, /bt/<info hash>/<n> its file of index n, and /bt/<info hash>/ its largest file. The info hash is the bittorrent.client role's torrent ID, 40 hex digits. /bt/ when left out.",
+          "type": "string"
+        },
+        "read_timeout": {
+          "default": "60s",
+          "description": "How long a read waits for the piece it needs to arrive: past it a response not begun is answered 504, and one begun is cut short. 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "readahead_bytes": {
+          "default": 8388608,
+          "description": "How far past what a response reads the pieces are fetched before all others, nearest first. 64 KiB to 256 MiB. 8 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "temporary_ttl": {
+          "default": "10m",
+          "description": "How long a temporary torrent stays after its last stream ended, for the next range a player asks: then it is removed with its data. At most 7 days. 10m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "http.handlers.fastcgi": {
