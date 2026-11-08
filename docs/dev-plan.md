@@ -4009,6 +4009,20 @@ Principles, in the order they bind:
    sockets and `OpenUDPPeer` (ICE's own peers) are not asked; a refused UDP peer is asked again for
    each datagram rather than remembered, so that a policy change takes effect at once and nothing
    grows with the peers refused.
+8. **The roles.** One `access` per role covers every socket it listens on: `streaming` (RTMP,
+   RTSP, SRT and its WebRTC port), `webrtc.turn`, `webrtc.media`, `webrtc.proxy`, `tunnel.hub`
+   (listeners and `console_socket`), `tunnel.proxy` (forwards and web proxies), `llm.hub`,
+   `llm.node` and `llm.proxy` (`listen`, and the proxy's `api`); not one per sub-listener.
+   `tunnel.node` has none, listening only for its pages. Each role sets its gate on every Apply,
+   since the global list may change while its member does not, and access is in no restart key.
+   The WebRTC ports shared through fib's `webrtc.Mux` needed `MuxConfig.Filter` (A74).
+9. **The Admin API, the console and the roles' pages.** `admin.access`, `admin.console.access`
+   and each role's `console.access`, before the global list, which applies to them too: a global
+   `allow` that leaves out 127.0.0.1 shuts local clients out of the Admin API, and the docs say to
+   set `admin.access`'s `allow` to `127.0.0.1` and `::1` to keep it. They follow every config
+   applied, though the rest of `admin` is read at start. An Admin API on a Unix socket is never
+   checked, and `admin.access` with one is a validation error. Alternative: the global list not
+   applying to the Admin API at all.
 
 ## Performance
 

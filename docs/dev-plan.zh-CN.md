@@ -3018,6 +3018,15 @@ fit 自身的日志和访问日志都会写文件，而今天的文件只打开�
    地址不公开。已写入参考文档。
 7. **fib 的 Filter（A73）。** 不计入 `Stats.ConnsRefused`（仍只计 `MaxConns`）；Unix 套接字与 `OpenUDPPeer`（ICE 自己的对端）
    不询问；被拒的 UDP 对端每个数据报都重新询问而不记住，策略变化即时生效，也不随被拒对端增长。
+8. **角色。** 每个角色一个 `access`，覆盖它监听的所有套接字：`streaming`（RTMP、RTSP、SRT 及其 WebRTC 端口）、
+   `webrtc.turn`、`webrtc.media`、`webrtc.proxy`、`tunnel.hub`（listeners 与 `console_socket`）、`tunnel.proxy`（forwards 与
+   web proxies）、`llm.hub`、`llm.node` 与 `llm.proxy`（`listen`，以及 proxy 的 `api`）；不按子监听分别设置。`tunnel.node`
+   只为其页面监听，因此没有。每个角色在每次 Apply 时都设置其 gate（全局名单可能在成员不变时变化），access 不进入任何重启判断。
+   经 fib 的 `webrtc.Mux` 共享的 WebRTC 端口需要 `MuxConfig.Filter`（A74）。
+9. **Admin API、控制台与角色页面。** `admin.access`、`admin.console.access` 与各角色的 `console.access` 先于全局名单决定，
+   全局名单同样作用于它们：全局 `allow` 不含 127.0.0.1 时，本机客户端也进不了 Admin API；文档建议把 `admin.access` 的 `allow`
+   设为 `127.0.0.1` 与 `::1` 以保留本机访问。它们随每次应用的配置生效，尽管 `admin` 的其余设置只在启动时读取。监听 Unix 套接字的
+   Admin API 从不检查，此时设置 `admin.access` 是校验错误。备选：全局名单完全不作用于 Admin API。
 
 ## 性能
 
