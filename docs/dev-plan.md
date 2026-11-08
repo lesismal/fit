@@ -5135,7 +5135,9 @@ track can place it); exactly-once into sinks with no transactions.
 3. **The source completes a table map.** A `TableMap`'s `Columns` are exported; what the optional
    metadata lacks (5.7, MariaDB's default `NO_LOG`, MySQL's `MINIMAL` without names) I174 fills in
    from `information_schema` (name, `Unsigned`, `Charset`, `EnumValues`, `SetValues`) before the rows
-   events after it are decoded; `TableMap.Metadata` says which pieces the server sent. The tests do the
+   events after it are decoded, in `Decoder.OnTableMap`, called with each table map before the rows
+   after it (also inside a transaction payload, whose rows are decoded in the same call);
+   `TableMap.Metadata` says which pieces the server sent. The tests do the
    same from the workload's description. Observed and followed: MySQL counts `YEAR` among the numeric
    columns of the signedness bitmap, and MariaDB counts `GEOMETRY` among the character columns of the
    charset metadata.
@@ -5149,10 +5151,13 @@ track can place it); exactly-once into sinks with no transactions.
    format (version, size, last required field, then field IDs and variable-length values; a UUID as 16
    integers; GNO and the logical clock zigzag-signed), worked out from MySQL's sources and checked
    against 8.4's binlog with a tagged transaction; the tagged previous-GTIDs format too.
-7. **Compression.** MariaDB's compressed query and rows events (zlib, standard library) are decoded;
-   MySQL's `Transaction_payload` is decoded when uncompressed, but ZSTD (MySQL's only compression) is
-   refused with `ErrUnsupported`, there being no ZSTD in fit: I174 should require
-   `binlog_transaction_compression=OFF`. Alternative: a ZSTD decoder written in fit.
+7. **Compression.** MariaDB's compressed query and rows events (zlib, standard library) and MySQL's
+   `Transaction_payload` (`binlog_transaction_compression`, ZSTD through
+   `github.com/klauspost/compress/zstd`, which fit already depends on for Kafka) are decoded; a
+   payload's events come out in `Payload.Events`, its uncompressed size bounded by `MaxEventSize`
+   (read as the stream gives it, the decoder's window and memory bounded the same). The interop
+   workload turns compression on for a transaction on MySQL 8.0. Alternative: payloads refused, with
+   `binlog_transaction_compression=OFF` required by I174.
 8. **Not decoded further** (`*Unknown`, the body's bytes): `Intvar`, `Rand`, `User_var`, `Stop`,
    `Incident`, `Ignorable`, `XA_prepare`, view changes, the v0 rows events. Refused: pre-5.0
    `DECIMAL`, MariaDB's pre-10.3 temporal format (`mysql56_temporal_format=OFF`), and an encrypted

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	fitsync "github.com/lesismal/fit/sync"
 )
 
@@ -378,10 +379,11 @@ func TestPayload(t *testing.T) {
 	rows := event(WriteRowsEventV2, rowsBody(3, true, false, 1, cat([]byte{0}, le(5, 4))), false)
 	xid := event(XIDEvent, le(9, 8), false)
 	inner := cat(tm, rows, xid)
-	head := func(size, comp int) []byte {
+	headN := func(size, comp, n int) []byte {
 		return cat([]byte{1}, lenenc(len(lenenc(size))), lenenc(size), []byte{2}, lenenc(len(lenenc(comp))), lenenc(comp),
-			[]byte{3}, lenenc(len(lenenc(len(inner)))), lenenc(len(inner)), []byte{0})
+			[]byte{3}, lenenc(len(lenenc(n))), lenenc(n), []byte{0})
 	}
+	head := func(size, comp int) []byte { return headN(size, comp, len(inner)) }
 	p := mustDecode(t, d, event(TransactionPayload, cat(head(len(inner), CompressionNone), inner), true)).Body.(*Payload)
 	if len(p.Events) != 3 || p.UncompressedSize != uint64(len(inner)) || p.Events[1].Body.(*Rows).Rows[0].After[0].AsInt() != 5 {
 		t.Fatalf("%+v", p)
@@ -389,7 +391,34 @@ func TestPayload(t *testing.T) {
 	if !d.checksum {
 		t.Fatal("checksums left off")
 	}
-	if _, err := d.Decode(event(TransactionPayload, cat(head(len(inner), CompressionZSTD), inner), true)); !errors.Is(err, ErrUnsupported) {
+	// ZSTD, as binlog_transaction_compression writes it.
+	zw, _ := zstd.NewWriter(nil)
+	z := zw.EncodeAll(inner, nil)
+	p = mustDecode(t, d, event(TransactionPayload, cat(head(len(z), CompressionZSTD), z), true)).Body.(*Payload)
+	if len(p.Events) != 3 || p.Compression != CompressionZSTD || p.Events[1].Body.(*Rows).Rows[0].After[0].AsInt() != 5 {
+		t.Fatalf("%+v", p)
+	}
+	if p := mustDecode(t, d, event(TransactionPayload, cat(headN(len(z), CompressionZSTD, 0), z), true)).Body.(*Payload); len(p.Events) != 3 {
+		t.Fatalf("%+v", p)
+	}
+	for name, c := range map[string]struct {
+		b   []byte
+		err error
+	}{
+		"type":      {cat(head(len(inner), 7), inner), ErrUnsupported},
+		"zstd":      {cat(head(len(inner), CompressionZSTD), inner), ErrMalformed},
+		"zstd size": {cat(headN(len(z), CompressionZSTD, len(inner)+1), z), ErrMalformed},
+		"too large": {cat(headN(len(z), CompressionZSTD, 1<<40), z), ErrTooLarge},
+	} {
+		if _, err := d.Decode(event(TransactionPayload, c.b, true)); !errors.Is(err, c.err) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// More than MaxEventSize uncompressed, without saying so.
+	big := zw.EncodeAll(make([]byte, 1<<20), nil)
+	small := newDecoder(t)
+	small.MaxEventSize = 64 << 10
+	if _, err := small.Decode(event(TransactionPayload, cat(headN(len(big), CompressionZSTD, 0), big), true)); !errors.Is(err, ErrTooLarge) {
 		t.Error(err)
 	}
 	for name, b := range map[string][]byte{

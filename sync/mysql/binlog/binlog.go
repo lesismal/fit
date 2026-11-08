@@ -220,6 +220,11 @@ type Decoder struct {
 	// Location is the zone of DATETIME values, which have none; nil is
 	// UTC. TIMESTAMP values are instants, in UTC.
 	Location *time.Location
+	// OnTableMap, when set, is called with each table map decoded, before
+	// any rows event after it: the place to complete its columns (see
+	// Column), also for the table maps inside a transaction payload, whose
+	// rows are decoded in the same Decode.
+	OnTableMap func(*TableMap)
 
 	fd       *FormatDescription
 	checksum bool

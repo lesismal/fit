@@ -3804,7 +3804,8 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
    `GEOMETRY` 与 `VECTOR` 为 `Bytes`。备选：`mysqlwire` 的类型，由 I174 映射。
 3. **由源补全 table map。** `TableMap` 的 `Columns` 是导出的；可选元数据缺少的部分（5.7、MariaDB 默认的 `NO_LOG`、MySQL 的
    `MINIMAL` 没有列名）由 I174 在解码其后的 rows 事件前从 `information_schema` 补上（名字、`Unsigned`、`Charset`、
-   `EnumValues`、`SetValues`）；`TableMap.Metadata` 说明服务端发送了哪些。测试按 workload 的描述做同样的事。观察到并遵循：
+   `EnumValues`、`SetValues`），在 `Decoder.OnTableMap` 中完成：每个 table map 解码后、其后的 rows 之前调用（transaction payload 内的
+   也一样，其 rows 在同一次调用中解码）；`TableMap.Metadata` 说明服务端发送了哪些。测试按 workload 的描述做同样的事。观察到并遵循：
    MySQL 在符号位图中把 `YEAR` 算作数值列，MariaDB 在字符集元数据中把 `GEOMETRY` 算作字符列。
 4. **校验和。** format description 指明时校验每个事件的 CRC32，description 自身也校验；`SetChecksum` 用于副本在其之前收到的
    事件（人造的 rotate）。
@@ -3813,9 +3814,10 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 6. **MySQL 8.3 的带标签 GTID 与 8.0.26 的 heartbeat v2** 按 MySQL 的序列化格式解码（版本、大小、最后必需字段，然后是字段 ID
    与变长值；UUID 为 16 个整数；GNO 与逻辑时钟为 zigzag 有符号），依据 MySQL 源码推出，并以 8.4 中带标签事务的 binlog 核对；
    带标签的 previous-GTIDs 格式也是如此。
-7. **压缩。** 解码 MariaDB 压缩的 query 与 rows 事件（zlib，标准库）；MySQL 的 `Transaction_payload` 在未压缩时解码，ZSTD
-   （MySQL 唯一的压缩）以 `ErrUnsupported` 拒绝，因为 fit 中没有 ZSTD：I174 应要求 `binlog_transaction_compression=OFF`。
-   备选：在 fit 中写一个 ZSTD 解码器。
+7. **压缩。** 解码 MariaDB 压缩的 query 与 rows 事件（zlib，标准库），以及 MySQL 的 `Transaction_payload`
+   （`binlog_transaction_compression`，ZSTD 经由 fit 已为 Kafka 依赖的 `github.com/klauspost/compress/zstd`）；payload 中的
+   事件放在 `Payload.Events`，解压后大小以 `MaxEventSize` 为上限（随流实际给出的数据读取，解码器的窗口与内存同样受限）。互通
+   workload 在 MySQL 8.0 上为一个事务开启压缩。备选：拒绝 payload，由 I174 要求 `binlog_transaction_compression=OFF`。
 8. **不进一步解码**（`*Unknown`，即事件体字节）：`Intvar`、`Rand`、`User_var`、`Stop`、`Incident`、`Ignorable`、`XA_prepare`、
    view change、v0 rows 事件。拒绝：5.0 之前的 `DECIMAL`、MariaDB 10.3 之前的时间格式（`mysql56_temporal_format=OFF`），以及
    加密的 MariaDB 文件（`Start_encryption`；副本收到的流已解密）。

@@ -177,6 +177,9 @@ func (d *Decoder) decodeTableMap(body []byte) (*TableMap, error) {
 		d.tables = map[uint64]*TableMap{}
 	}
 	d.tables[tm.TableID] = tm
+	if d.OnTableMap != nil {
+		d.OnTableMap(tm)
+	}
 	return tm, nil
 }
 

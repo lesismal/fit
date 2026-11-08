@@ -99,25 +99,24 @@ func (w *workload) decodeFile(t *testing.T, server string, file []byte) *decoded
 		t.Fatal(err)
 	}
 	out := &decoded{}
-	for {
-		ev, err := r.Next()
-		if errors.Is(err, io.EOF) {
-			break
+	r.OnTableMap = func(tm *binlog.TableMap) {
+		if tm.Schema == workloadDB {
+			w.complete(t, server, tm)
 		}
-		if err != nil {
-			t.Fatalf("%s: %v", server, err)
-		}
+	}
+	var walk func(ev *binlog.Event)
+	walk = func(ev *binlog.Event) {
 		out.events = append(out.events, ev)
 		switch b := ev.Body.(type) {
-		case *binlog.TableMap:
-			if b.Schema == workloadDB {
-				w.complete(t, server, b)
+		case *binlog.Payload:
+			for _, e := range b.Events {
+				walk(e)
 			}
 		case *binlog.Rows:
 			// Other tests may write to the server meanwhile (go test runs
 			// packages in parallel): only the workload's database counts.
 			if b.Table == nil || b.Table.Schema != workloadDB {
-				continue
+				return
 			}
 			names := make([]string, len(b.Table.Columns))
 			for i, c := range b.Table.Columns {
@@ -128,6 +127,16 @@ func (w *workload) decodeFile(t *testing.T, server string, file []byte) *decoded
 					before: row.Before, after: row.After})
 			}
 		}
+	}
+	for {
+		ev, err := r.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", server, err)
+		}
+		walk(ev)
 	}
 	return out
 }
@@ -331,6 +340,9 @@ func checkEvents(t *testing.T, server string, events []*binlog.Event) {
 	}
 	if strings.HasPrefix(server, "mysql8") && seen[binlog.PartialUpdateRowsEvent] == 0 {
 		t.Errorf("%s: no partial update events %v", server, seen)
+	}
+	if server == "mysql80" && seen[binlog.TransactionPayload] == 0 {
+		t.Errorf("%s: no transaction payload %v", server, seen)
 	}
 	if server == "mysql84" && !tagged {
 		t.Errorf("%s: no tagged GTID", server)

@@ -5858,7 +5858,7 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   a `Decoder` of whole events (format description, rotate, MySQL's GTIDs with 8.0's timestamps and
   versions, anonymous and 8.3's tagged ones, previous GTIDs tagged or not, query, rows query,
   table map with every piece of optional metadata, rows v1 and v2, partial JSON updates applied to the
-  before value, XID, heartbeat v1 and v2, an uncompressed transaction payload; MariaDB's GTID, GTID
+  before value, XID, heartbeat v1 and v2, transaction payloads uncompressed or ZSTD (`klauspost/compress`); MariaDB's GTID, GTID
   list, binlog checkpoint, annotate rows and compressed query and rows events), CRC32 checked, and a
   `Reader` of binlog files. Every column type to a `fitsync.Value`: integers signed or not, `FLOAT`,
   `DOUBLE`, `DECIMAL` to 65 digits, `DATE`, `DATETIME`, `TIMESTAMP` and `TIME` old and new with
@@ -5869,7 +5869,7 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Interop**: `test/sync/mysql.sh` starts the five servers with the binlog in row format, GTIDs on
   for MySQL and `LOAD_FILE` able to read it; `TestMySQLBinlogInterop` runs `testdata/workload.json`
   (every type, updates under `FULL` and `MINIMAL`, deletes, a transaction, partial JSON updates on
-  8.0 and 8.4, a DDL, MariaDB's compression, a tagged GTID on 8.4) and checks each server's binlog
+  8.0 and 8.4, a DDL, MariaDB's compression, a ZSTD transaction payload on 8.0, a tagged GTID on 8.4) and checks each server's binlog
   decodes to the workload's rows; `mysql.sh` and `run.sh` also run `./sync/mysql/binlog`.
 - **Tests**: the binlogs captured from MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and 11 in testdata
   decode to the rows written, with and without optional metadata; unit tests on built events (99.6%
@@ -5880,8 +5880,7 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   header). Interop with all five servers under the race detector, `test/sync/mysql.sh` alone with
   its own containers, the I172 and I176 MySQL tests passing with the servers' new options. Not run on
   Linux nor in the full suite (the merge's).
-- **Gaps**: the decisions in the plan's I173 section, pending review. ZSTD-compressed transaction
-  payloads are refused; `Intvar`, `Rand`, `User_var`, `XA_prepare` and the like are left as bytes;
+- **Gaps**: the decisions in the plan's I173 section, pending review. `Intvar`, `Rand`, `User_var`, `XA_prepare` and the like are left as bytes;
   MariaDB's pre-10.3 temporal format and encrypted files are refused; the replica protocol is I174's.
 
 ### I176 MySQL and TiDB as a sink — done

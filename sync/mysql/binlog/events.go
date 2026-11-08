@@ -5,10 +5,13 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // Rotate names the next binlog file and the position to read it from: at
@@ -438,6 +441,32 @@ func (d *Decoder) uncompress(b []byte) ([]byte, error) {
 	return out, nil
 }
 
+// unzstd uncompresses a transaction payload of n bytes (0 when the header
+// does not say): at most MaxEventSize, read as the stream gives it, not
+// as its header claims.
+func (d *Decoder) unzstd(b []byte, n uint64) ([]byte, error) {
+	if n > uint64(d.maxEvent()) {
+		return nil, fmt.Errorf("%w: a transaction payload of %d bytes uncompressed, past MaxEventSize %d", ErrTooLarge, n, d.maxEvent())
+	}
+	zr, err := zstd.NewReader(bytes.NewReader(b), zstd.WithDecoderConcurrency(1),
+		zstd.WithDecoderMaxMemory(uint64(d.maxEvent())), zstd.WithDecoderMaxWindow(uint64(d.maxEvent())))
+	if err != nil {
+		return nil, malformed("transaction payload: %v", err)
+	}
+	defer zr.Close()
+	out, err := io.ReadAll(io.LimitReader(zr, int64(d.maxEvent())+1))
+	if errors.Is(err, zstd.ErrDecoderSizeExceeded) || err == nil && len(out) > d.maxEvent() {
+		return nil, fmt.Errorf("%w: a transaction payload past MaxEventSize %d uncompressed", ErrTooLarge, d.maxEvent())
+	}
+	if err != nil {
+		return nil, malformed("transaction payload: %v", err)
+	}
+	if n != 0 && uint64(len(out)) != n {
+		return nil, malformed("transaction payload of %d bytes uncompressed says %d", len(out), n)
+	}
+	return out, nil
+}
+
 // Transaction compression types.
 const (
 	CompressionZSTD = 0
@@ -445,9 +474,8 @@ const (
 )
 
 // Payload is MySQL's Transaction_payload (binlog_transaction_compression):
-// a transaction's events in one. Events are decoded when the payload is
-// not compressed; a compressed one is refused, ZSTD not being written in
-// this package.
+// a transaction's events in one, compressed with ZSTD or not; Events are
+// those events, decoded. The payload uncompressed is at most MaxEventSize.
 type Payload struct {
 	Compression      uint64
 	UncompressedSize uint64
@@ -485,8 +513,15 @@ func (d *Decoder) decodePayload(body []byte) (*Payload, error) {
 	if size != uint64(len(data)) {
 		return nil, malformed("transaction payload of %d bytes says %d", len(data), size)
 	}
-	if p.Compression != CompressionNone {
-		return nil, fmt.Errorf("%w: a transaction payload compressed with type %d (binlog_transaction_compression must be OFF)", ErrUnsupported, p.Compression)
+	switch p.Compression {
+	case CompressionNone:
+	case CompressionZSTD:
+		var err error
+		if data, err = d.unzstd(data, p.UncompressedSize); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("%w: a transaction payload compressed with type %d", ErrUnsupported, p.Compression)
 	}
 	// The events inside carry no checksum of their own.
 	sum := d.checksum

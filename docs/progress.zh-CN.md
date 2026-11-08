@@ -4166,8 +4166,8 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 
 - **包 `sync/mysql/binlog`**（`binlog`），除标准库与 `sync` 外无依赖：解码完整事件的 `Decoder`（format description、rotate、
   带 8.0 时间戳与版本的 MySQL GTID、匿名 GTID 与 8.3 带标签的 GTID、带或不带标签的 previous GTIDs、query、rows query、带全部
-  可选元数据的 table map、v1 与 v2 rows、应用到前值上的 JSON 部分更新、XID、v1 与 v2 heartbeat、未压缩的 transaction
-  payload；MariaDB 的 GTID、GTID list、binlog checkpoint、annotate rows 以及压缩的 query 与 rows 事件），校验 CRC32；以及读取
+  可选元数据的 table map、v1 与 v2 rows、应用到前值上的 JSON 部分更新、XID、v1 与 v2 heartbeat、未压缩或 ZSTD 压缩（`klauspost/compress`）的
+  transaction payload；MariaDB 的 GTID、GTID list、binlog checkpoint、annotate rows 以及压缩的 query 与 rows 事件），校验 CRC32；以及读取
   binlog 文件的 `Reader`。每种列类型到 `fitsync.Value`：有无符号的整数、`FLOAT`、`DOUBLE`、最多 65 位的 `DECIMAL`、新旧两种带
   小数秒（含负值）与零日期的 `DATE`、`DATETIME`、`TIMESTAMP` 与 `TIME`、`YEAR`、`BIT`、`ENUM`、`SET`、按字符集区分的字符串、
   blob、`GEOMETRY`、`VECTOR` 以及 MySQL 的二进制 JSON（含 opaque 的 decimal、日期与时间）。
@@ -4175,14 +4175,14 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   不按头声称的长度。
 - **互通**：`test/sync/mysql.sh` 启动的五个服务端开启行格式 binlog，MySQL 开启 GTID，`LOAD_FILE` 能读到 binlog；
   `TestMySQLBinlogInterop` 执行 `testdata/workload.json`（每种类型、`FULL` 与 `MINIMAL` 下的 update、delete、一个事务、8.0 与
-  8.4 上的 JSON 部分更新、一个 DDL、MariaDB 的压缩、8.4 上一个带标签的 GTID），检查每个服务端的 binlog 解码为 workload 的行；
+  8.4 上的 JSON 部分更新、一个 DDL、MariaDB 的压缩、8.0 上的 ZSTD transaction payload、8.4 上一个带标签的 GTID），检查每个服务端的 binlog 解码为 workload 的行；
   `mysql.sh` 与 `run.sh` 也运行 `./sync/mysql/binlog`。
 - **测试**：testdata 中从 MySQL 5.7、8.0、8.4 与 MariaDB 10.11、11 采集的 binlog 解码为写入的行，有无可选元数据都覆盖；基于构造
   事件的单元测试（语句覆盖 99.6%，无容器）：每种事件及其畸形形式、校验和、每种值类型、JSON 各种形式与膨胀攻击、部分更新的路径、
   各项上限；`TestMutations`（每个采集事件逐字节改动并在每个长度截断）与 `FuzzReader`（不 panic，分配不超上限；模糊测试数分钟，
   发现并修复了一处超额分配：reader 按头部长度分配缓冲）。在竞态检测下与全部五个服务端互通，`test/sync/mysql.sh` 以自己的容器
   单独运行，I172 与 I176 的 MySQL 测试在服务端新选项下通过。没有在 Linux 上或整个测试集中运行（留给合并时）。
-- **不足**：计划 I173 一节中的决策，待审查。拒绝 ZSTD 压缩的 transaction payload；`Intvar`、`Rand`、`User_var`、`XA_prepare`
+- **不足**：计划 I173 一节中的决策，待审查。`Intvar`、`Rand`、`User_var`、`XA_prepare`
   等仅保留字节；拒绝 MariaDB 10.3 之前的时间格式与加密文件；副本协议归 I174。
 
 ### I176 MySQL 与 TiDB 作为目标 — 已完成
