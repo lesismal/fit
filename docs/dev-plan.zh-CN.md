@@ -336,7 +336,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | todo |
 | I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | done |
 | I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | todo |
-| I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | todo |
+| I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | done |
 | I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | done |
 | I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | todo |
 | I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | done |
@@ -3968,6 +3968,46 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   取自配置。
 - **完成标准**：MySQL 到 MongoDB、MongoDB 到 MongoDB 的流水线在重放后收敛。
 - **涉及**：`sync/mongo`、`test/sync`、`docs`。
+
+**待审查的决定**（实现时做出，2026-11-08；在用户裁定前有效）：
+
+1. **放在哪里。** 包 `sync/mongo`（`syncmongo`），与 I182 的源相邻：目标在 `sink.go`，其连接参数在 `sinkconn.go`（`uri` 或
+   `hosts`、`replica_set`、`username`、`password_env`、`auth_source`、`tls`、`ca_file`、`cert_file`、`key_file`、
+   `server_name`、`connect_timeout`、`timeout`、`max_conns`），像 I168 和 I186 一样平铺声明；它与 I182 同时开发，两套连接参数
+   在合并时合为一套。备选：在 `mongowire` 中只声明一次（I181 的决定 1）。
+2. **`uri` 中不放密码。** 含密码的连接字符串被拒绝；密码由 `password_env` 提供，与 fit 的所有凭据一样。设置了 `tls` 及其文件
+   时，它们代替字符串中的 TLS 选项；只有 `cert_file` 没有 `key_file` 时，它同时包含证书和私钥，如 MongoDB 的
+   `tlsCertificateKeyFile`。备选：用 `uri_env` 保存整个字符串。
+3. **`_id` 取自键。** 只有一个字段的键取该字段的值（`{"id": 7}` 得到 `_id: 7`，MongoDB 源的 `{"_id": ...}` 得到其值），多个
+   字段的键按顺序组成嵌入文档，标量键取其本身，带标记的值（`{"$oid": ...}`）取其 BSON 类型；没有键的记录取行中的 `_id`，两者都
+   没有的记录永久失败，键中有 null 字段的也是如此。行自身若有 `_id`，以键得到的为准。备选：`id_field` 参数，或像 I168 那样把
+   复合键拼成字符串。
+4. **upsert 即替换。** insert、update 和 message 写成 `update`，语句为 `{q: {_id}, u: <行，_id 在前>, upsert: true}`，整篇文档
+   被替换；delete 写成带 `limit: 1` 的 `delete`。不用 `$set` 只写改变的字段：所有源给出的都是整行（MongoDB 源使用
+   `updateLookup`）。DDL 被确认但不写；不是 map 的行永久失败。备选：为部分行提供 `$set` 模式。
+5. **无序写入，但每个键有序。** 一个批次中只发送每篇文档的最后一条记录（它覆盖之前的记录），因此每个集合的一条 `update` 和
+   一条 `delete` 中的语句涉及互不相同的文档，`ordered: false` 不会打乱同一键的顺序；命令按 `max_request_bytes`（8 MiB）和
+   100,000 条语句切分。某篇文档失败时，从该文档在批次中的第一条记录起，按互不相同文档组成的段依次重写，于是 `BatchError`
+   恰好指出失败的那条记录，它之前的每条记录都已写入。命令级错误（或其 write concern 的错误）指出最早未写入文档的第一条记录。
+   备选：有序 bulk write，逐条记录，每个批次都更慢。
+6. **错误。** 文档的写错误是永久的（校验器的 121、唯一索引的 11000、文档过大、错误的 `_id`），除非其代码表示可能会过去（写冲突、
+   主节点降级、中断、锁和时间限制）；命令级错误由流水线重试（认证、主节点丢失、带 `wtimeout` 的 `writeConcernError`），除非是
+   语句或集合本身的问题（代码 2、9、14、72、73、10334）。超过 16 MiB 的文档，或 `decimal128` 无法精确表示的小数，在发送之前
+   就失败。备选：未知代码视为暂时错误。
+7. **Write concern。** `write_concern` 即 `w`（`majority`、数字、标签集），`journal` 即 `j`，`write_timeout` 即 `wtimeout`；
+   不设置时用服务器的默认值（5.0 起副本集上为 majority）。拒绝 `w: 0`：不确认的写入无法做检查点。
+8. **文档写到哪里。** 命名空间 `db.collection` 同时给出两者（在第一个 `.` 处切分）；`database` 代替数据库（此时没有 `.` 的
+   命名空间即集合），`collection` 代替集合。名称只由服务器检查（代码 73，永久）。目标从不创建集合或索引：MongoDB 在第一次写入
+   时创建集合。备选：像 I186 那样的 `{namespace}` 模板。
+9. **没有事务。** 源的事务不被保留：每篇文档的写入是原子的，一个批次不是。事务需要 session，而 I181 不支持（其决定 8）。
+10. **`ParallelSink`**（作业的写入者共享客户端的连接池，`max_conns`，默认 4），以及 `Tester`：测试时查找主节点、认证并 ping。
+11. **互通。** `test/sync/mongo_sink_test.go`，基于 I181 的副本集（`test/sync/mongo.sh`，MongoDB 6、7 和 8）：100 个键的
+    3,000 次变更按随机批次写入，每批有时从更早的记录起重写，最终与变更所留下的状态一致；`generate` 各种类型的记录经在随机崩溃
+    点被杀的流水线、走 TLS 写入，最终与未被杀的一次运行相同；一个包含各种 BSON 类型（ObjectId、字符串和整数 `_id`、
+    `decimal128`、时间戳、UUID、正则表达式、最小和最大键、嵌套数组）的集合，以 `_id` 为键读成记录，经目标写两次，副本逐字节
+    相同；校验器的拒绝为永久错误；连接测试。MySQL 到 MongoDB 和 MongoDB 到 MongoDB 的*流水线*有待 I174 和 I182 的源；在那之前
+    由集合复制代替后者，I192 的矩阵将运行两者。备选：等这些源合并后再完成 I183。
+12. **规模**：代码约 620 行，测试约 950 行；没有遗留，没有 I183b。
 
 ### I184 Kafka 客户端
 
