@@ -320,7 +320,9 @@ jobs:
   # (I186), and MinIO and SeaweedFS (I187), and requires the interop tests to run rather than skip.
   sync-interop:
     name: Sync interop (Elasticsearch, OpenSearch, ClickHouse, databases, Kafka, Redis, S3)
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: its kernel (7.0) is one MongoDB 8 refuses to start
+    # on (SERVER-121912, TCMalloc's rseq use, fixed by kernel 7.0.14).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
