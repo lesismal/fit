@@ -283,6 +283,8 @@ func (s *server) run(args []string, resp3 bool) string {
 			return integer(-1)
 		}
 		return integer(ms)
+	case "PING":
+		return "+PONG\r\n"
 	}
 	return "-ERR unknown command '" + args[0] + "'\r\n"
 }

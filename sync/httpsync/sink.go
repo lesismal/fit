@@ -409,6 +409,52 @@ func (s *Sink) send(ctx context.Context, recs []*fitsync.Record, body []byte) er
 	return fitsync.Permanent(fmt.Errorf("%s answered %d: %s", s.url.Host, res.status, res.body))
 }
 
+// Test sends the URL a HEAD request, with the sink's headers and
+// credentials and no body, which by HTTP's rules changes nothing and which
+// no receiver takes as a batch (I188b). It passes when the endpoint
+// answers 2xx, or 4xx other than 401, 403 and 407: an ingest endpoint
+// routing only its method may answer HEAD 404 or 405, which still says
+// that the host, its TLS and the path's server are there. A redirect fails
+// it, as it fails a write; so do 5xx and a connection's or TLS's error.
+func (s *Sink) Test(ctx context.Context) error {
+	cl, err := s.httpClient()
+	if err != nil {
+		return err
+	}
+	// The URL was parsed by Provision, so the request is made.
+	req, _ := stdhttp.NewRequestWithContext(ctx, stdhttp.MethodHead, s.url.String(), nil)
+	for k, v := range s.header {
+		req.Header[k] = v
+	}
+	if s.auth != "" {
+		req.Header.Set("Authorization", s.auth)
+	}
+	done := make(chan error, 1)
+	var status int
+	cl.Do(req, func(r *fibhttp.ClientResponse, e error) {
+		if e == nil {
+			status = r.StatusCode
+		}
+		done <- e
+	})
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	switch {
+	case err != nil:
+		return fmt.Errorf("%s: %w", s.url.Host, err)
+	case status == stdhttp.StatusUnauthorized, status == stdhttp.StatusForbidden, status == stdhttp.StatusProxyAuthRequired:
+		return fmt.Errorf("%s answered HEAD %d: the credentials are refused", s.url.Host, status)
+	case status >= 300 && status < 400:
+		return fmt.Errorf("%s answered HEAD %d: a redirect, which the sink does not follow", s.url.Host, status)
+	case status >= 500:
+		return fmt.Errorf("%s answered HEAD %d", s.url.Host, status)
+	}
+	return nil
+}
+
 // clip returns the start of an answer's body, for an error.
 func clip(b []byte) []byte {
 	const n = 300

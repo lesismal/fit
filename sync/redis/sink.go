@@ -161,6 +161,11 @@ func (s *Sink) Provision(ctx *module.Context) error {
 // Cleanup closes the connection.
 func (s *Sink) Cleanup() { s.conn.close() }
 
+// Test connects, authenticates and selects the database on a connection of
+// its own, and PINGs. It writes nothing, so whether the user may write the
+// keys is not known before the first batch.
+func (s *Sink) Test(ctx context.Context) error { return s.conn.test(ctx) }
+
 // keyText is a record's key as text: a map's values' joined by ':'.
 func keyText(k fitsync.Value) (string, error) {
 	switch k.Kind() {

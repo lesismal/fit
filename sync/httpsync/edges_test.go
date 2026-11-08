@@ -356,3 +356,53 @@ func TestSinkInJob(t *testing.T) {
 	var _ fitsync.ParallelSink = (*Sink)(nil)
 	(&Sink{}).ParallelWrites()
 }
+
+// TestConnTest sends HEAD with the headers and credentials and no body,
+// passing on 2xx and on 4xx but those refusing credentials; the source has
+// nothing to test.
+func TestConnTest(t *testing.T) {
+	ctx := context.Background()
+	if err := (&Source{}).Test(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rv := newReceiver(t)
+	t.Setenv("FIT_TEST_HTTP_TOKEN", "tok")
+	s := loadSink(t, fmt.Sprintf(`{"url": %q, "headers": {"X-Tenant": "t1"}, "bearer_token_env": "FIT_TEST_HTTP_TOKEN"}`, rv.srv.URL))
+	for _, c := range []struct {
+		status int
+		want   string
+	}{
+		{200, ""}, {405, ""}, {404, ""},
+		{401, "answered HEAD 401: the credentials are refused"},
+		{403, "answered HEAD 403"},
+		{407, "answered HEAD 407"},
+		{302, "a redirect"},
+		{503, "answered HEAD 503"},
+	} {
+		rv.mu.Lock()
+		rv.answer = func(int) int { return c.status }
+		rv.mu.Unlock()
+		err := s.Test(ctx)
+		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%d: %v, want %q", c.status, err, c.want)
+		}
+	}
+	for _, r := range rv.requests() {
+		if r.method != http.MethodHead || len(r.body) != 0 || r.key != "" || r.auth != "Bearer tok" || r.tenant != "t1" {
+			t.Fatalf("sent %+v", r)
+		}
+	}
+	rv.mu.Lock()
+	rv.answer, rv.stall = nil, func(int) bool { return true }
+	rv.mu.Unlock()
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	if err := s.Test(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("stalled: %v", err)
+	}
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	if err := loadSink(t, fmt.Sprintf(`{"url": %q}`, down.URL)).Test(ctx); err == nil || !strings.Contains(err.Error(), strings.TrimPrefix(down.URL, "http://")) {
+		t.Errorf("down: %v", err)
+	}
+}

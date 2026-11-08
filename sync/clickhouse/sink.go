@@ -129,6 +129,11 @@ func (s *Sink) Provision(ctx *module.Context) error {
 // at once.
 func (s *Sink) ParallelWrites() {}
 
+// Test runs SELECT 1 with the sink's credentials and database. It writes
+// nothing, so whether they may insert into the tables is not known before
+// the first batch.
+func (s *Sink) Test(ctx context.Context) error { return s.conn.Test(ctx) }
+
 // Cleanup closes the client.
 func (s *Sink) Cleanup() {
 	if s.conn != nil {

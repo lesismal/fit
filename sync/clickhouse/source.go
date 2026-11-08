@@ -111,6 +111,16 @@ func (s *Source) Provision(ctx *module.Context) error {
 	return errs
 }
 
+// Test runs SELECT 1, then the table or query with LIMIT 0, which reads no
+// rows but needs it to be there and the right to select from it.
+func (s *Source) Test(ctx context.Context) error {
+	if err := s.conn.Test(ctx); err != nil {
+		return err
+	}
+	_, err := s.conn.Do(ctx, s.query("SELECT * FROM ("+s.inner+") LIMIT 0"), nil)
+	return err
+}
+
 // Cleanup closes the client.
 func (s *Source) Cleanup() {
 	if s.conn != nil {

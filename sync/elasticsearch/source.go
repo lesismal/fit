@@ -552,6 +552,17 @@ func (s *Source) drain(ctx context.Context, pos *position, emit func(*fitsync.Re
 	return nil
 }
 
+// Test asks the cluster's root endpoint, then counts index's documents,
+// which needs the right to read them; an index or pattern that matches
+// none passes, as the source reads it as empty.
+func (s *Source) Test(ctx context.Context) error {
+	if err := s.conn.Test(ctx); err != nil {
+		return err
+	}
+	_, err := s.count(ctx)
+	return err
+}
+
 // count returns how many documents the indices hold.
 func (s *Source) count(ctx context.Context) (int64, error) {
 	resp, err := s.call(ctx, stdhttp.MethodGet, "/"+s.Index+"/_count", "", nil)

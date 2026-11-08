@@ -82,6 +82,13 @@ func (s *Source) Provision(ctx *module.Context) error {
 	return err
 }
 
+// Test lists one key under prefix, as the source lists them: the endpoint
+// answers, the bucket is there, and the credentials may list it.
+func (s *Source) Test(ctx context.Context) error {
+	_, _, err := s.conn.List(ctx, s.Prefix, "", "", 1)
+	return err
+}
+
 // Cleanup closes the client and lets the codec go.
 func (s *Source) Cleanup() {
 	if s.conn != nil {

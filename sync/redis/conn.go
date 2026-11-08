@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"net"
 	"os"
 	"regexp"
@@ -123,6 +124,27 @@ func (c *conn) get(ctx context.Context) (*wire.Conn, error) {
 	}
 	c.c = wc
 	return wc, nil
+}
+
+// test dials a connection of its own, since the module's belongs to its
+// pipeline's goroutine: the dial says HELLO, authenticates and selects the
+// database; then PING, and the connection is closed (I188b).
+func (c *conn) test(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, c.opts.DialTimeout)
+	defer cancel()
+	wc, err := wire.Dial(ctx, c.opts)
+	if err != nil {
+		return err
+	}
+	defer wc.Close()
+	v, err := wc.Do(ctx, "PING")
+	if err != nil {
+		return err
+	}
+	if err := v.Err(); err != nil {
+		return fmt.Errorf("PING: %w", err)
+	}
+	return nil
 }
 
 func (c *conn) close() {

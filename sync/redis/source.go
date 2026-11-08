@@ -81,6 +81,10 @@ func (s *Source) Provision(ctx *module.Context) error {
 // Cleanup closes the connection.
 func (s *Source) Cleanup() { s.conn.close() }
 
+// Test connects, authenticates and selects the database on a connection of
+// its own, and PINGs.
+func (s *Source) Test(ctx context.Context) error { return s.conn.test(ctx) }
+
 func (s *Source) count() int {
 	if s.Count <= 0 {
 		return DefaultCount

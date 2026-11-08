@@ -6174,6 +6174,26 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   Elasticsearch, ClickHouse, HTTP, WASM) are not written, so their tests say `tested: false`.
 - **Gaps**: the decisions in the plan's I188 section, pending review. A pause is not kept across a
   restart of fit; the lag is the lag of acknowledgement, not behind the source's head (I189).
+
+### I188b Connection tests for the earlier connectors — done
+
+- **Tests of the connections** (`fitsync.Tester`): `elasticsearch` asks the root endpoint afresh
+  (`Conn.Test`), the source also `/_count`s its index (404 passes); `clickhouse` runs `SELECT 1` in
+  its database (`Conn.Test`), the source also its table or query with `LIMIT 0`; `redis` dials a
+  connection of its own (HELLO, AUTH, SELECT) and PINGs; `s3` lists one key, under the source's
+  prefix, the sink passing an `AccessDenied`; `file` (`sync/file/conntest.go`) checks the source's
+  glob roots list and its matched files open, and the sink's path opens for appending, or its
+  directory takes a new file made and removed at once; the `http` sink sends `HEAD` with its headers
+  and credentials, passing 2xx and 4xx but 401/403/407; the `http` source passes at once.
+- **Not done**: `wasm` source and sink, which reach what the plugin alone knows (plan, decision 8).
+- **Docs**: the plan's I188b section.
+- **Tests**: each connector's test passing and failing against the package's fakes (refused
+  credentials, a missing database, table, bucket or directory, unreadable and read-only files, a
+  stalled endpoint, a closed server). Coverage of the new code 100% but the client's own-engine
+  error; the six packages under the race detector; staticcheck and vet clean.
+- **Gaps**: the decisions in the plan's I188b section, pending review; no interop run against the
+  real servers (the tests in `test/sync` do not call `Test` yet).
+
 ### I187 S3 and compatibles as a source and a sink — done
 
 - **SigV4 and the connection** (`sync/s3/sigv4.go`, `client.go`, package `syncs3`): `Signer`, AWS

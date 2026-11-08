@@ -300,6 +300,19 @@ func (c *Conn) Info(ctx context.Context) (*Info, error) {
 	if info != nil {
 		return info, nil
 	}
+	return c.root(ctx)
+}
+
+// Test asks the root endpoint again, whatever was asked before: the
+// cluster answers, the credentials are taken, and it is Elasticsearch or
+// OpenSearch (I188b).
+func (c *Conn) Test(ctx context.Context) error {
+	_, err := c.root(ctx)
+	return err
+}
+
+// root asks the cluster what it is, and keeps the answer for Info.
+func (c *Conn) root(ctx context.Context) (*Info, error) {
 	resp, err := c.Do(ctx, stdhttp.MethodGet, "/", "", nil, "")
 	if err != nil {
 		return nil, err
@@ -320,7 +333,7 @@ func (c *Conn) Info(ctx context.Context) (*Info, error) {
 	if err := json.Unmarshal(resp.Body, &root); err != nil || root.Version.Number == "" {
 		return nil, fmt.Errorf("the root endpoint's answer is not Elasticsearch's or OpenSearch's: %s", clip(resp.Body))
 	}
-	info = &Info{Distribution: "elasticsearch", Version: root.Version.Number}
+	info := &Info{Distribution: "elasticsearch", Version: root.Version.Number}
 	if root.Version.Distribution == "opensearch" {
 		info.Distribution = "opensearch"
 	}

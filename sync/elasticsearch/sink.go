@@ -107,6 +107,11 @@ func (s *Sink) Provision(ctx *module.Context) error {
 // at once.
 func (s *Sink) ParallelWrites() {}
 
+// Test asks the cluster's root endpoint, with the sink's credentials. It
+// writes nothing, so whether they may write to the indices is not known
+// before the first bulk.
+func (s *Sink) Test(ctx context.Context) error { return s.conn.Test(ctx) }
+
 // Cleanup closes the client.
 func (s *Sink) Cleanup() {
 	if s.conn != nil {
