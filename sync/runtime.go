@@ -34,14 +34,20 @@ func init() {
 			if engine == nil {
 				engine = h.Engine
 			}
-			return &role{rt: NewRuntime(Options{Log: h.Log, StopTimeout: h.DrainTimeout(), Engine: engine})}, nil
+			r := &role{rt: NewRuntime(Options{Log: h.Log, StopTimeout: h.DrainTimeout(), Engine: engine}), engine: engine}
+			Register(engine, r.rt)
+			return r, nil
 		},
 		Check: func(c *config.Config) error { return Check(c.Sync) },
 	})
 }
 
-// role runs the config's pipelines.
-type role struct{ rt *Runtime }
+// role runs the config's pipelines; the Admin API finds its runtime by
+// engine.
+type role struct {
+	rt     *Runtime
+	engine *fib.Engine
+}
 
 func (r *role) Apply(member any) error {
 	s, ok := member.(*config.Sync)
@@ -51,7 +57,10 @@ func (r *role) Apply(member any) error {
 	return r.rt.Apply(s)
 }
 
-func (r *role) Stop(ctx context.Context) { r.rt.Close(ctx) }
+func (r *role) Stop(ctx context.Context) {
+	Unregister(r.engine, r.rt)
+	r.rt.Close(ctx)
+}
 
 // Check loads every module s names, which checks their params, and lets
 // them go.
@@ -275,23 +284,66 @@ func (rt *Runtime) stopPipe(ctx context.Context, p *pipe) {
 	p.modules.cleanup()
 }
 
-// Status is a pipeline's state.
+// Status is a pipeline's state, as the Admin API shows it.
 type Status struct {
-	Name string
-	// State is starting, running, retrying (its source failed, and it
-	// starts again after a backoff), finished (its source ended, all
-	// written), stopped (on_error stop, a dead letter not written, or a
-	// source failing past RunPipeline's attempts), scheduled (a job
-	// waiting for its schedule's next time) or killed (by a crash hook).
-	State string
-	// Err is the last error, if any.
-	Err string
+	Name string `json:"name"`
+	// State is starting, running, paused (running, its source held by
+	// Pause), retrying (its source failed, and it starts again after a
+	// backoff), finished (its source ended, all written), stopped
+	// (on_error stop, a dead letter not written, or a source failing past
+	// RunPipeline's attempts), scheduled (a job waiting for its schedule's
+	// next time) or killed (by a crash hook).
+	State string `json:"state"`
+	// Paused says Pause holds the source, whatever the state.
+	Paused bool `json:"paused,omitempty"`
+	// Err is the last error, if any, and ErrAt when it came.
+	Err   string    `json:"error,omitempty"`
+	ErrAt time.Time `json:"error_at,omitzero"`
+	// Errors counts the errors since the pipeline started: writes that
+	// failed (each attempt), records a transform failed, dead letters not
+	// written, and the source's failures.
+	Errors int64 `json:"errors"`
 	// Checkpoint is the position last saved.
-	Checkpoint Position
+	Checkpoint Position `json:"-"`
 	// Job is the progress of a pipeline of mode once, nil for others.
-	Job *Progress
+	Job *Progress `json:"job,omitempty"`
 	// Next is when a scheduled job starts next, while it waits.
-	Next time.Time
+	Next time.Time `json:"next,omitzero"`
+	// Queue is what the queue holds now: records read and not yet
+	// acknowledged by every sink, and its bounds.
+	Queue QueueStatus `json:"queue"`
+	// Read counts the source's records read since the pipeline started,
+	// Acknowledged those every sink acknowledged (one on_error took
+	// among them), Failed those on_error took. Records read again after a
+	// restart count again.
+	Read         int64 `json:"read"`
+	Acknowledged int64 `json:"acknowledged"`
+	Failed       int64 `json:"failed"`
+	// Throughput is the records acknowledged per second, over the last
+	// ten seconds.
+	Throughput float64 `json:"throughput"`
+	// LastCommit is the commit time of the last record acknowledged that
+	// has one, and LagSeconds how long after it that record was
+	// acknowledged: none when the source's records carry no commit time.
+	LastCommit time.Time `json:"last_commit,omitzero"`
+	LagSeconds float64   `json:"lag_seconds,omitempty"`
+}
+
+// QueueStatus is a pipeline's queue, as Status shows it.
+type QueueStatus struct {
+	Records    int   `json:"records"`
+	Bytes      int64 `json:"bytes"`
+	MaxRecords int   `json:"max_records"`
+	MaxBytes   int64 `json:"max_bytes"`
+}
+
+// MarshalJSON writes the checkpoint as the JSON it is.
+func (s Status) MarshalJSON() ([]byte, error) {
+	type plain Status
+	return json.Marshal(struct {
+		plain
+		Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
+	}{plain(s), json.RawMessage(s.Checkpoint)})
 }
 
 // Status returns every pipeline's state, by name.
@@ -337,18 +389,26 @@ type pipe struct {
 	job   *Progress
 	cur   *run
 	next  time.Time
+	errAt time.Time
+
+	// The rest is the Admin API's (control.go): the pipeline paused, the
+	// next loop forced to run a job at once, and the counters Status shows.
+	pause pauseGate
+	force bool
+	meter meter
 }
 
 // status returns the pipeline's state, its job's progress as of now.
 func (p *pipe) status() Status {
 	p.mu.Lock()
-	st := Status{Name: p.cfg.Name, State: p.state, Err: p.err, Checkpoint: p.saved}
+	st := Status{Name: p.cfg.Name, State: p.state, Err: p.err, ErrAt: p.errAt, Checkpoint: p.saved}
 	if st.State == "scheduled" {
 		st.Next = p.next
 	}
 	cur := p.cur
 	p.mu.Unlock()
 	st.Job = p.progress(cur, nil, false)
+	p.fill(&st, cur)
 	return st
 }
 
@@ -366,6 +426,7 @@ func (p *pipe) setState(state string, err error) {
 	p.state = state
 	if err != nil {
 		p.err = err.Error()
+		p.errAt = time.Now()
 	}
 	p.mu.Unlock()
 }
@@ -385,8 +446,8 @@ func (p *pipe) loop() {
 	if p.rt.oneRun || !p.cfg.Once() {
 		sched = nil
 	}
-	again := p.rt.oneRun
-	if sched != nil && !p.interrupted() {
+	again := p.rt.oneRun || p.force
+	if sched != nil && !p.force && !p.interrupted() {
 		if !p.wait() {
 			return
 		}
@@ -450,6 +511,7 @@ func (p *pipe) runOnce(again bool) outcome {
 				return out
 			}
 		}
+		p.noteErr(err)
 		if n := p.rt.opts.SourceAttempts; n > 0 && attempt >= n {
 			p.setState("stopped", err)
 			log.Errorf("pipeline %s stopped after %d attempts: %v", p.cfg.Name, attempt, err)

@@ -33,6 +33,23 @@ restarts; `job.schedule`, in cron's five fields, starts it again, a new job each
 run is still going. `fit sync run <pipeline> --once` runs one on its own from the command line and
 exits with its result.
 
+The Admin API shows and steers the running pipelines, and so does the console under
+`/api/m/admin/`: `GET /sync/pipelines` and `/sync/pipelines/{name}` give each one's state, its
+checkpoint, its queue against its bounds, the records read, acknowledged and failed, the throughput,
+the lag from a record's commit time to its acknowledgement, and its errors with the last.
+`POST /sync/pipelines/{name}` with `{"action": "pause"}` holds the source while what it read is
+written and the checkpoint saved; `resume` lets it go on, and starts again a pipeline stopped on an
+error; `snapshot` reads the source again from its start. `.../checkpoint` is the checkpoint file,
+set with `PUT {"position"}` and removed with `DELETE`, the pipeline restarted from there; a change
+that would skip or replay records (another position, a reset or a snapshot while there is a
+checkpoint) is answered 409 unless it says `confirm`. `POST .../test` tests the connections of the
+connectors that have a test, and `POST .../dry-run` reads the first records (`limit`, 10, within
+`timeout`, 5s) from the checkpoint or, with `"from": "start"`, the source's start, through the
+transforms, and returns them with what each became, writing nothing and saving no position;
+`POST /sync/test` and `/sync/dry-run` do the same for a pipeline's config not applied yet,
+`{"pipeline": {...}}`. `fit sync status`, `pause`, `resume`, `snapshot`, `checkpoint`, `test` and
+`dry-run` call these through the Admin API the bootstrap config names, as `fit token` does.
+
 ```json
 {
   "sync": {

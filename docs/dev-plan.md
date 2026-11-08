@@ -351,7 +351,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
 | I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | todo |
 | I187 | S3 and compatibles as a sink (rolled objects) and a source (objects in key order) | I163 | todo |
-| I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | todo |
+| I188 | The Admin API and `fit sync`: state, pause, resume, checkpoints, connection tests, dry runs | I163 | done |
 | I189 | Metrics, logs and dead letters, replayed from the Admin API | I188 | todo |
 | I190 | The workbench's Sync pages, and the assistant's tools for sync | I188, I189, I123 | todo |
 | I191 | Exactly once into MySQL, TiDB and PostgreSQL: the checkpoint written in the sink's transaction | I176, I180 | todo |
@@ -5197,6 +5197,75 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: every endpoint has tests, through the console too; a dry run leaves the checkpoint
   and the sinks as they were; pause holds the source and keeps the checkpoint.
 - **Touches**: `sync`, `admin`, `cli`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **The Admin API finds the runtime by engine**, as it finds the streaming role's channels:
+   `fitsync.Register(engine, rt)` when the role starts, `Lookup(s.configs.env.Engine)` in the
+   handlers; `app.Manager` is unchanged. Alternative: a `Role(id)` accessor on `app.Manager`.
+2. **The endpoints.** `GET /sync/pipelines` and `/sync/pipelines/{name}`; actions as the channels'
+   are, `POST /sync/pipelines/{name}` with `{"action": "pause" | "resume" | "snapshot", "confirm"}`;
+   `GET`, `PUT` (`{"position", "confirm"}`) and `DELETE` (`?confirm=1`, a query since a DELETE has
+   no body) `/sync/pipelines/{name}/checkpoint`; `POST .../test` and `.../dry-run`; and `POST
+   /sync/test` and `/sync/dry-run` with `{"pipeline": {...}}`, a pipeline's config not applied, for
+   I190's editor, which need no running role. The console serves them as every endpoint, under
+   `/api/m/admin/`, each change logged with its user. `/node` lists the capability `sync`.
+3. **What needs `confirm`.** Positions are the sources' own and opaque, so whether a move skips or
+   replays cannot be told: any change of the checkpoint needs `confirm`, a set to another position
+   than the saved one, and a reset or a snapshot while there is a checkpoint; without it the answer
+   is 409 with the checkpoint as it is. Setting the same position, and a reset or snapshot with no
+   checkpoint, need none. Alternative: a source interface comparing positions, to ask only for skips.
+4. **A new snapshot is the checkpoint removed and the pipeline restarted at once**: the source
+   starts as its params say (a database's snapshot, then its changes), and a job starts anew,
+   whatever its schedule. A **reset** is the same, except that a scheduled job waits for its next
+   time. There is no incremental snapshot alongside a running stream, as Debezium's signals do;
+   a `Snapshotter` interface for the database sources can add one. Alternative: snapshot only for
+   jobs.
+5. **Setting the checkpoint** stops the pipeline first (it writes what it holds and saves its
+   checkpoint), writes the position, compacted, through the same temporary-file-and-rename save,
+   and restarts it. The position is in the form `GET .../checkpoint` shows, a chunked job's in the
+   job's form; a job's progress is kept, its `finished` cleared, so the job goes on from the
+   position at once. A `null` or empty position is refused: that is a reset.
+6. **Pause holds `Emit`**: the source waits at its next record, what it read is still written and
+   the checkpoint still saved, so a paused pipeline's checkpoint comes to cover all it read. The
+   state shows `paused` in place of `running`, and `paused: true` in any state. A pause is the
+   runtime's, not the config's: it survives the pipeline's own restarts (its source failing, a
+   control) and a reload that leaves the pipeline as it is, not a reload that changes it or fit
+   restarting. An `http` source's requests wait while paused, until `sync_ingest`'s timeout answers
+   503. Alternative: pause kept in the config, or in the checkpoint file.
+7. **Resume also starts again a pipeline that stopped** (on_error `stop`, a dead letter not written)
+   or was killed, from its checkpoint, so that a fixed sink needs no reload.
+8. **Connection tests are an optional interface**, `fitsync.Tester` (`Test(ctx) error`), on a
+   source or sink; `generate`, `memory` and `stdout` pass at once; a connector without it is
+   reported `tested: false` with a pointer to the dry run, and does not fail the test. The running
+   pipeline's own modules are tested, since loading a second instance of some (the file sink, one per
+   path) is refused, with the runtime's lock held so that a reload does not let them go meanwhile;
+   bounded by 10s. `file`, `elasticsearch`, `clickhouse`, `http` and `wasm` do not implement it yet
+   (left for their owners; see below). Alternative: a test that loads every module anew.
+9. **A dry run loads the source and transforms anew** (no sink), runs the source with `Once` from
+   the checkpoint (or from its start with `"from": "start"`; a chunked job's checkpoint, which is
+   the job's, reads from the start), takes up to `limit` records (10, at most 1,000), 4 MiB, or what
+   comes within `timeout` (5s, at most 1m), puts them through the transforms, and answers each
+   source record's canonical JSON with what it became or the transform's error, and whether the
+   source ended, timed out or failed. Nothing is acknowledged, confirmed or saved. The source runs
+   as pipeline `<name>#dry-run`, so that one found by its pipeline's name (the `http` source) does not
+   take the running one's place; one that does not return within 5s of being stopped is answered
+   without, and let go when it returns.
+10. **Status's counters** are the pipeline's since the runtime started it: records read,
+    acknowledged and failed, errors (failed write attempts, records a transform failed, dead letters
+    not written, source failures) with the last and its time, the queue against its bounds, the
+    throughput over the last ten seconds, and the lag as how long after its commit time the last
+    acknowledged record was acknowledged. The lag behind the source's head (a slot's bytes, a
+    topic's offsets) is I189's. `Status` gains JSON names; its checkpoint is written as the JSON it
+    is.
+11. **`fit sync status|pause|resume|snapshot|checkpoint|test|dry-run`** go through the Admin API
+    the bootstrap config names, with `-c`, `-timeout` (90s), `-json` and the TLS flags, as `fit token`
+    does; `snapshot` is added to the plan's list. The dry run's wait is `-wait`, since `-timeout` is
+    the request's. `fit sync test` exits 1 when a test failed, every command 1 when the API refuses
+    (a 409 with a hint to give `-confirm`), 2 when used wrongly.
+12. **Size**: about 1,600 lines of code with their comments (sync 930, admin 360, cli 340) and 910
+    of tests; nothing of the plan is left out, but the connectors' `Test` methods (point 8) are
+    left to I188b or to the connectors' own iterations.
 
 ### I189 Metrics, logs and dead letters
 

@@ -41,6 +41,8 @@ type entry struct {
 	boundary bool
 	// failed is set once on_error took one of what it became.
 	failed bool
+	// commit is the record's commit time, for the lag Status shows.
+	commit time.Time
 }
 
 type item struct {
@@ -163,6 +165,9 @@ func (r *run) fail(err error) {
 func (r *run) emit(rec *Record) error {
 	size := rec.Size()
 	limRecords, limBytes := r.p.cfg.Records(), r.p.cfg.Bytes()
+	if !r.p.held(r.srcCtx) {
+		return errStopped
+	}
 	r.mu.Lock()
 	for r.inRecords > 0 && (r.inRecords+1 > limRecords || r.inBytes+int64(size) > limBytes) {
 		r.mu.Unlock()
@@ -179,7 +184,8 @@ func (r *run) emit(rec *Record) error {
 	}
 	rec.seq, rec.made = r.next, false
 	r.next++
-	r.pending = append(r.pending, entry{left: -1, size: size, pos: rec.Position, boundary: rec.boundary()})
+	r.pending = append(r.pending, entry{left: -1, size: size, pos: rec.Position, boundary: rec.boundary(), commit: rec.CommitTime})
+	r.p.meter.read.Add(1)
 	r.read++
 	r.inRecords++
 	r.inBytes += int64(size)
@@ -196,7 +202,8 @@ func (r *run) emit(rec *Record) error {
 // their room, and moves the mark to the last of them that ends a
 // transaction. r.mu is held.
 func (r *run) advance() {
-	freed := false
+	freed, n, nFailed := false, int64(0), int64(0)
+	var commit time.Time
 	for len(r.pending) > 0 && r.pending[0].left == 0 {
 		e := r.pending[0]
 		r.pending[0] = entry{}
@@ -205,8 +212,13 @@ func (r *run) advance() {
 		r.inRecords--
 		r.inBytes -= int64(e.size)
 		r.done++
+		n++
 		if e.failed {
 			r.failed++
+			nFailed++
+		}
+		if !e.commit.IsZero() {
+			commit = e.commit
 		}
 		if e.boundary && e.pos != nil {
 			r.mark, r.dirty = e.pos, true
@@ -216,6 +228,7 @@ func (r *run) advance() {
 		freed = true
 	}
 	if freed {
+		r.p.meter.passed(n, nFailed, commit)
 		notify(r.space)
 	}
 }
@@ -286,6 +299,7 @@ func (r *run) dispatch() {
 			outs := c.outs[start:k]
 			if err := c.errs[i]; err != nil {
 				t := c.where[i]
+				r.p.noteErr(err)
 				if !r.failedOn(rec, err, fmt.Sprintf("transform %d (%s)", t, cfg.Transforms[t].Module), 1) {
 					c.done()
 					return
@@ -361,6 +375,7 @@ func (r *run) deadLetter(rec *Record, cause error, where string, attempts int) b
 		if r.ctx.Err() != nil {
 			return false
 		}
+		r.p.noteErr(fmt.Errorf("dead_letter sink %s: %w", r.p.cfg.DeadLetter.Name, err))
 		if n >= r.p.cfg.Attempts() {
 			r.fail(fmt.Errorf("dead_letter sink %s: %w; the record had failed at %s: %v", r.p.cfg.DeadLetter.Name, err, where, cause))
 			return false
@@ -476,6 +491,7 @@ func (s *sinkRun) write(batch []item, recs []*Record) bool {
 		if r.ctx.Err() != nil {
 			return false
 		}
+		r.p.noteErr(fmt.Errorf("sink %s: %w", s.name, err))
 		if attempt < cfg.Attempts() && !IsPermanent(err) {
 			r.p.rt.opts.Log.Debugf("pipeline %s: sink %s: attempt %d failed: %v", cfg.Name, s.name, attempt, err)
 			if !r.sleep(cfg.Backoff(attempt)) {

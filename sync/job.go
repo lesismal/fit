@@ -76,9 +76,10 @@ func (p *pipe) start(again bool) (Position, error) {
 		// split goes on unsplit.
 		if c, ok := p.src.(Chunker); ok && from == nil {
 			ctx, cancel := context.WithCancel(context.Background())
+			stopping := p.stopping // a restart (control.go) makes another once the loop ends
 			go func() {
 				select {
-				case <-p.stopping:
+				case <-stopping:
 					cancel()
 				case <-ctx.Done():
 				}

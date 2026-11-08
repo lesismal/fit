@@ -157,6 +157,9 @@ fit validate -c fit.yaml -c conf.d
 像 cron 任务或脚本那样，在它结束时退出：`--once` 即使其 `mode` 为 `stream` 也把它作为批处理作业运行，源能拆分快照时按块读取。
 之前已完成的作业重新开始，被中断的作业从其检查点继续，也不等待其 `job.schedule`。它打印作业读取、写入和失败的记录数；
 每条记录都已写入时退出码为 0，有记录失败（`on_error` 为 `skip` 或 `dead_letter`）时为 3 并给出失败数，流水线停止或作业被中断时为 1。
+`fit sync status -c fit.conf` 经 Admin API 向运行中的 fit 查询其流水线的状态、检查点、计数、吞吐和延迟；`fit sync pause` 与 `resume`
+让流水线的源停下和继续，`snapshot` 从头重新读取源，`checkpoint` 查看、设置（`-set`）或重置（`-reset`）其检查点，会跳过或重放
+记录的改动需要 `-confirm`，`test` 测试其连接器的连接，`dry-run` 打印前几条记录经过变换后的样子，不写入任何东西。
 
 ## 一个地址，一个服务器
 
