@@ -1,0 +1,20 @@
+/* The Sync pages (sync/sync.js, I190): the pipelines' sparklines, a pipeline's stats, a dry run's records. The rest is
+   core/ui.css and the config form's config.css.
+
+   同步页面（sync/sync.js，I190）：管道的迷你走势图、单个管道的统计与试运行的记录。其余样式见 core/ui.css 与配置表单的
+   config.css。 */
+
+.sy-spark { display: inline-block; vertical-align: middle; color: var(--primary); }
+.sy-trend { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sy-bad { color: var(--danger); font-weight: 600; }
+.sy-clip { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sy-meter { min-width: 120px; }
+.sy-meter .meter__top span:empty { display: none; }
+.sy-error { white-space: pre-wrap; word-break: break-word; }
+.sy-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.sy-form { gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.sy-rec { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+@media (max-width: 960px) { .sy-rec { grid-template-columns: minmax(0, 1fr); } }
+.sy-rec__col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sy-pre { max-height: 280px; overflow: auto; margin: 0; font-size: 12px; }
+.sy-name { white-space: nowrap; }

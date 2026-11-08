@@ -53,6 +53,7 @@
     ['a.logs', 'Send lines of fit\'s own log, redacted', '发送 fit 自身日志的行（已脱敏）'],
     ['a.access', 'Send lines of the access log, redacted', '发送访问日志的行（已脱敏）'],
     ['a.subjects', 'Send playback sessions\' subjects as they are, not hashed', '原样发送播放会话的主体（不做哈希）'],
+    ['a.records', 'Send the records of sync dry runs and dead letters as they are, not as kinds', '原样发送同步试运行与死信中的记录（而不只是类型）'],
     ['a.redact', 'More to redact', '额外脱敏'], ['a.redactHint', 'Regular expressions, one per line; keys, hashes, tokens and private keys always are.', '正则表达式，每行一个；密钥、哈希、令牌与私钥始终会被脱敏。'],
     ['u.default', 'Level of users not listed', '未列出用户的级别'], ['u.user', 'User', '用户'], ['u.level', 'Level', '级别'],
     ['u.inherit', 'default ({level})', '默认（{level}）'],
@@ -399,6 +400,7 @@
             check(t('a.logs'), D.send_logs, function (on) { setOrDelete(D, 'send_logs', on || undefined); changed(); }),
             check(t('a.access'), D.send_access_log, function (on) { setOrDelete(D, 'send_access_log', on || undefined); changed(); }),
             check(t('a.subjects'), D.send_subjects, function (on) { setOrDelete(D, 'send_subjects', on || undefined); changed(); }),
+            check(t('a.records'), D.send_records, function (on) { setOrDelete(D, 'send_records', on || undefined); changed(); }),
             UI.field(t('a.redact'), redact, t('a.redactHint')));
         }
 

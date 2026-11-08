@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="cluster/templates.css">
   <link rel="stylesheet" href="cluster/alerts.css">
   <link rel="stylesheet" href="cluster/insight.css">
+  <link rel="stylesheet" href="sync/sync.css">
   <script src="core/ui.js"></script>
 </head>
 <body>
@@ -39,6 +40,10 @@
   <script src="gateway/media.js"></script>
   <!-- The gateway's features on pages of their own: streaming, media auth, WebRTC, the tunnel and LLM roles. / 网关功能各自成页：流媒体、媒体认证、WebRTC、隧道与 LLM 角色。 -->
   <script src="gateway/features.js"></script>
+  <!-- The Sync menu: the sync role's pipelines, their state, lag and throughput, a pipeline's editor made from the schema with
+       Test connection and Dry run, its checkpoint and its dead letters (I190). /
+       同步菜单：sync 角色的管道、状态、延迟与吞吐，由 schema 生成的管道编辑器（含测试连接与试运行）、检查点与死信（I190）。 -->
+  <script src="sync/sync.js"></script>
   <!-- The consistency check: what fit runs compared with the config it runs from. / 一致性检查：运行状态与配置的比较。 -->
   <script src="gateway/check.js"></script>
   <!-- The logs: the files fit's log and the access log write, and their rotation and retention. / 日志：fit 日志与访问日志的文件及其切割与保留。 -->

@@ -838,6 +838,7 @@ window.FitSchemaZh = {
 "Let the tools hand lines of fit's own log to the model, redacted. Off by default.": "允许工具把 fit 自身日志的行（脱敏后）交给模型。默认关闭。",
 "Let the tools hand lines of the access log to the model, redacted. Off by default.": "允许工具把访问日志的行（脱敏后）交给模型。默认关闭。",
 "Let the media tools hand playback sessions' subjects to the model as they are. Off by default: each subject is replaced by a hash of it, the same for one subject while fit runs, which the propose tools take back.": "允许媒体工具把播放会话的主体（subject）原样交给模型。默认关闭：每个主体以其哈希代替，fit 运行期间同一主体的哈希不变，提案工具可据此还原。",
+"Let the sync tools hand the records of dry runs and dead letters to the model as they are. Off by default: each value of a record's key and rows is replaced by its kind, so that the model sees namespaces, operations, fields and errors, not what the fields hold.": "允许同步工具把试运行与死信中的记录原样交给模型。默认关闭：记录的键与行中的每个值都替换为其类型，模型只能看到命名空间、操作、字段与错误，看不到字段的内容。",
 "Regular expressions (Go's syntax) whose matches are replaced in everything the tools hand a model, beside the keys, hashes, tokens and private keys that always are.": "正则表达式（Go 语法）：工具交给模型的所有内容中与之匹配的部分会被替换；密钥、哈希、令牌与私钥则始终会被替换。",
 "A console user's name.": "控制台用户的名称。",
 "What the user may have the assistant do: off, read, edit, propose or apply, each including the ones before it.": "该用户可以让助手做什么：off、read、edit、propose 或 apply，每一级都包含之前各级。",
