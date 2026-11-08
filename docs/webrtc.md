@@ -533,6 +533,16 @@ Link: <turn:turn.example.com:3478>; rel="ice-server"; username="1767225600:fit-5
 fit's TURN server relays to the media port as to any peer: when the port is on its own `relay_ip`,
 `allowed_peers` lists it with its port, as `10.0.0.5:8189`.
 
+### Peer addresses
+
+`webrtc.media.access` is the port's [access](reference/config.md#access): allow and deny lists of
+the peer addresses it serves, deciding before the global `access`. The datagrams of a refused
+address are dropped before they reach a PeerConnection, so its ICE checks go unanswered and its
+session ends at `connect_timeout`; the `whip` and `whep` routes go by their own `access`, so a peer
+must pass both. A reload applies a change of it, or of the global access, to the next new address,
+keeping the port and its sessions. Its list files are watched, and a change applies the config
+again.
+
 ### Limits
 
 | Field | Default | Bounds |
@@ -838,9 +848,7 @@ media servers: `max_relays` bounds both.
 the peer addresses it relays, deciding before the global `access`. The datagrams of a refused
 address are dropped before anything else looks at them. A reload applies a change of it, or of
 the global access, to the next new address, keeping the port, its sessions and the addresses
-relayed. Its list files are watched, and a change applies the config again. `webrtc.media` takes
-no access of its own yet (fib's Mux takes no filter, request A74): the `access` of the `whip` and
-`whep` routes decides who may open a session on it.
+relayed. Its list files are watched, and a change applies the config again.
 
 ### ICE restarts, consent and a peer that moves
 

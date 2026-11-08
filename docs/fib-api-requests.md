@@ -79,7 +79,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` | 1, 11 | I131–I134 (032) |
 | A70 | TURN relays that never share a port of the range | done, fib `856ad5b` | 11 | I162 |
 | A72 | A segment's tracks begin at its keyframe | done, fib `e4e10c0` | 11 | I134, I136 |
-| A74 | `webrtc.MuxConfig.Filter`: a Mux that refuses peers at their first datagram | requested | 11 | access on WebRTC ports |
+| A74 | `webrtc.MuxConfig.Filter`: a Mux that refuses peers at their first datagram | done, fib `f957983` | 11 | access on WebRTC ports |
 
 ## Evidence
 
@@ -2421,9 +2421,9 @@ between frames presented one after the other (at most 0.2s).
 
 ## A74: A Mux that refuses peers at their first datagram
 
-**Status.** Requested on 2026-11-08, from the client-address access of the roles. Not done yet. No
-stopgap in fit: the access of the `whip`, `whep`, `stream_whip` and `stream_whep` routes decides who
-may open a session, and the WebRTC ports of `streaming` and `webrtc.media` check no address.
+**Status.** Requested on 2026-11-08, from the client-address access of the roles. Done in fib at
+`f957983`, on `8de0a75` (`Binding.Filter`), made by fit's session per
+[rule 15](rules.md#7-when-fib-falls-short); fit moves to that commit.
 
 **Problem.** fit decides a role's access where fib accepts a peer, with `fib.Binding.Filter`, before
 a Connection is made: the `streaming` role's RTMP, RTSP and SRT listeners, `webrtc.turn`'s and
@@ -2441,3 +2441,7 @@ dropped before a Connection is made.
 **How fit uses it.** `streaming` and `webrtc.media` set `Filter: gate.Allows` in their `MuxConfig`,
 the gate set by every Apply as the other roles' are, and `webrtc.media` takes an `access` of its own.
 
+**As built.** As suggested: `MuxConfig.Filter`, passed as the Mux binding's `Filter`; addresses the
+Mux opens itself with `Engine.OpenUDPPeer` are not asked. fib covers it with a test of its own.
+`streaming`'s WebRTC port and `webrtc.media` pass their gates, and `webrtc.media` has an `access`
+(`TestMediaAccess`, and the WebRTC port in `streaming`'s `TestAccess`).

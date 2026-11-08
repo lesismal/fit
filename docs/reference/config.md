@@ -294,7 +294,7 @@ Also at `webrtc.turn.tls.certificates[]`.
 
 ### `listeners[].access`
 
-Also at `routes[].access`, `services[].access`, `access`, `webrtc.turn.access`, `webrtc.proxy.access`, `streaming.access`.
+Also at `routes[].access`, `services[].access`, `access`, `webrtc.turn.access`, `webrtc.media.access`, `webrtc.proxy.access`, `streaming.access`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1197,10 +1197,9 @@ PROXY header names, never `X-Forwarded-For`'s. A change applies to connections a
 start after it.
 
 The roles that listen on sockets of their own decide at accept too: `streaming` on its RTMP, RTSP
-and SRT listeners, `webrtc.turn` on all three of its, and `webrtc.proxy` on its port. A reload sets
-their policy again, the global access with it, without starting a listener again. The WebRTC ports
-of `streaming` and `webrtc.media` check none yet: the access of their `whip` and `whep` routes
-decides who opens a session there.
+and SRT listeners and its WebRTC port, `webrtc.turn` on all three of its, and `webrtc.media` and
+`webrtc.proxy` on their ports. A reload sets their policy again, the global access with it, without
+starting a listener again.
 
 A list file has an address or prefix on each line, with blank lines and what follows `#` or `;`
 left out; it is read when the config is applied, and the config applied again when it changes.
@@ -2864,6 +2863,7 @@ In JSON:
 | --- | --- | --- | --- |
 | `listen` | string |  | Required. The UDP address every peer's media reaches fit at, one port all PeerConnections share, as in ":8189". A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change starts the media server again, ending its sessions. |
 | `public_ips` | list of string |  | The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT, or a load balancer that forwards the port unchanged. A change starts the media server again. |
+| `access` | [object](#config-access) |  | The peer addresses the port serves, deciding before the global access: the datagrams of an address it refuses are dropped, so its ICE checks go unanswered. A change applies to the next new address, without starting the media server again; the sessions and addresses served are kept. |
 | `ice_servers` | list of [object](#config-iceserver) |  | STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's side needs none, as it is an ICE lite agent on its own address. |
 | `turn_urls` | list of string |  | URLs of fit's own TURN server, webrtc.turn, as peers reach it, as in "turn:turn.example.com:3478": each answer's Link headers carry them with time-limited credentials made from webrtc.turn's secret, which must be set. |
 | `turn_credential_ttl` | duration | `"1h"` | How long the TURN credentials an answer carries are good for. 1h when left out. |
@@ -3311,7 +3311,7 @@ In JSON:
 | `rtsp` | [object](#config-streamrtsp) |  | Take and play streams over RTSP 1.0 with interleaved RTP (RTP/AVP/TCP), as rtsp://host/app/stream. None when left out. |
 | `srt` | [object](#config-streamsrt) |  | Take and play streams over SRT, MPEG-TS on UDP, the stream named by the caller's stream ID. None when left out. |
 | `webrtc` | [object](#config-streamwebrtc) |  | The UDP port the PeerConnections of the stream_whip and stream_whep handlers share, which publish into the hub with WHIP and play from it with WHEP. Routes with those handlers answer 503 without it. None when left out. |
-| `access` | [object](#config-access) |  | The client addresses the rtmp, rtsp and srt listeners serve, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams of an srt caller it refuses are dropped. A change applies to the next connection and caller, without starting a listener again; those connected are kept. The webrtc port does not check it yet: the access of the stream_whip and stream_whep routes decides who may open a session there. |
+| `access` | [object](#config-access) |  | The client addresses the rtmp, rtsp, srt and webrtc listeners serve, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams of an srt caller or webrtc peer it refuses are dropped. A change applies to the next connection and peer, without starting a listener again; those connected are kept. |
 | `channels` | list of [object](#config-streamchannel) |  | Channels: items of a media_library played into the hub as live streams, in order, shuffled, looped or on a schedule, paced by their timestamps, which run on from one item to the next; every egress plays them under its auth. A reload changes a channel in place, from its next item. At most 256. None when left out. |
 | `push` | list of [object](#config-streampush) |  | Outside RTMP or SRT servers, as a CDN's ingest, that streams of the hub are relayed to, each reconnected with backoff when it drops; a channel's own push lists its own. A reload keeps a target whose stream and url are unchanged connected. At most 256 in all. None when left out. |
 

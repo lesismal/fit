@@ -27,13 +27,12 @@
 // outside RTMP and SRT servers.
 //
 // The role's access decides which client addresses its RTMP, RTSP and SRT
-// listeners serve, asked by fib as it accepts a connection or meets a new
-// SRT peer (fib.Binding.Filter), before a Connection is made. Its policy,
+// listeners and its WebRTC port serve, asked by fib as it accepts a
+// connection or meets a new UDP peer (fib.Binding.Filter, and the Mux's
+// MuxConfig.Filter), before a Connection is made. Its policy,
 // the role's own list and then the global one, is set again by every
 // Apply, for the global access may change when the member does not; the
-// connections and peers already served are not asked again. The WebRTC
-// port does not check it yet: fib's webrtc.Mux takes no filter (fit's fib
-// request A74).
+// connections and peers already served are not asked again.
 //
 // A reload changes in place what it can: each listener's auth, the access,
 // and the channels and push targets. A change of any other field of a
@@ -124,8 +123,8 @@ type Server struct {
 	host   *app.Host
 	log    *logs.Logger
 
-	// access is the policy the RTMP, RTSP and SRT bindings' Filter asks,
-	// set by every Apply.
+	// access is the policy the RTMP, RTSP, SRT and WebRTC bindings' Filter
+	// asks, set by every Apply.
 	access access.Gate
 
 	// auth is each listener's policy, swapped whole by every Apply.

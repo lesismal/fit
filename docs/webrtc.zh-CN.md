@@ -460,6 +460,13 @@ Link: <turn:turn.example.com:3478>; rel="ice-server"; username="1767225600:fit-5
 
 fit 的 TURN 服务器像对待任何对端一样中继到媒体端口：端口在它自己的 `relay_ip` 上时，`allowed_peers` 要带端口列出它，如 `10.0.0.5:8189`。
 
+### 对端地址
+
+`webrtc.media.access` 是该端口的 [access](reference/config.md#access)：允许和拒绝的对端地址列表，先于全局的 `access`
+决定。被拒绝地址的数据报在到达 PeerConnection 之前就被丢弃，因此其 ICE 检查得不到应答，会话在 `connect_timeout` 时结束；
+`whip` 和 `whep` 路由按它们自己的 `access` 判定，对端须两者都通过。重载时它或全局 access 的变化作用于之后的新地址，端口和
+会话都保留。它的列表文件会被监视，变化时重新应用配置。
+
 ### 上限
 
 | 字段 | 默认值 | 限制 |
@@ -707,8 +714,7 @@ fit 在任何媒体服务器看到 offer 之前，按其路径的最后一段检
 
 `webrtc.proxy.access` 是该端口的 [access](reference/config.md#access)：允许和拒绝的对端地址列表，先于全局的 `access`
 决定。被拒绝地址的数据报在任何处理之前就被丢弃。重载时它或全局 access 的变化作用于之后的新地址，端口、会话和正在中继的
-地址都保留。它的列表文件会被监视，变化时重新应用配置。`webrtc.media` 暂时没有自己的 access（fib 的 Mux 还不接受过滤器，
-见请求 A74）：由 `whip` 和 `whep` 路由的 `access` 决定谁能在其上建立会话。
+地址都保留。它的列表文件会被监视，变化时重新应用配置。
 
 ### ICE 重启、consent 与迁移的对端
 

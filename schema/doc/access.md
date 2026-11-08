@@ -24,10 +24,9 @@ PROXY header names, never `X-Forwarded-For`'s. A change applies to connections a
 start after it.
 
 The roles that listen on sockets of their own decide at accept too: `streaming` on its RTMP, RTSP
-and SRT listeners, `webrtc.turn` on all three of its, and `webrtc.proxy` on its port. A reload sets
-their policy again, the global access with it, without starting a listener again. The WebRTC ports
-of `streaming` and `webrtc.media` check none yet: the access of their `whip` and `whep` routes
-decides who opens a session there.
+and SRT listeners and its WebRTC port, `webrtc.turn` on all three of its, and `webrtc.media` and
+`webrtc.proxy` on their ports. A reload sets their policy again, the global access with it, without
+starting a listener again.
 
 A list file has an address or prefix on each line, with blank lines and what follows `#` or `;`
 left out; it is read when the config is applied, and the config applied again when it changes.

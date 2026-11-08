@@ -3355,7 +3355,7 @@
       "properties": {
         "access": {
           "$ref": "#/$defs/config.Access",
-          "description": "The client addresses the rtmp, rtsp and srt listeners serve, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams of an srt caller it refuses are dropped. A change applies to the next connection and caller, without starting a listener again; those connected are kept. The webrtc port does not check it yet: the access of the stream_whip and stream_whep routes decides who may open a session there."
+          "description": "The client addresses the rtmp, rtsp, srt and webrtc listeners serve, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams of an srt caller or webrtc peer it refuses are dropped. A change applies to the next connection and peer, without starting a listener again; those connected are kept."
         },
         "channels": {
           "description": "Channels: items of a media_library played into the hub as live streams, in order, shuffled, looped or on a schedule, paced by their timestamps, which run on from one item to the next; every egress plays them under its auth. A reload changes a channel in place, from its next item. At most 256. None when left out.",
@@ -4461,6 +4461,10 @@
     "config.WebRTCMedia": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The peer addresses the port serves, deciding before the global access: the datagrams of an address it refuses are dropped, so its ICE checks go unanswered. A change applies to the next new address, without starting the media server again; the sessions and addresses served are kept."
+        },
         "codecs": {
           "default": [
             "opus",

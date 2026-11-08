@@ -57,6 +57,7 @@ var MediaCodecs = []string{"opus", "VP8", "VP9", "H264", "AV1"}
 type WebRTCMedia struct {
 	Listen             string      `json:"listen" fit:"required" doc:"The UDP address every peer's media reaches fit at, one port all PeerConnections share, as in \":8189\". A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change starts the media server again, ending its sessions."`
 	PublicIPs          []string    `json:"public_ips,omitempty" doc:"The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT, or a load balancer that forwards the port unchanged. A change starts the media server again."`
+	Access             *Access     `json:"access,omitempty" doc:"The peer addresses the port serves, deciding before the global access: the datagrams of an address it refuses are dropped, so its ICE checks go unanswered. A change applies to the next new address, without starting the media server again; the sessions and addresses served are kept."`
 	ICEServers         []ICEServer `json:"ice_servers,omitempty" doc:"STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's side needs none, as it is an ICE lite agent on its own address."`
 	TURNURLs           []string    `json:"turn_urls,omitempty" doc:"URLs of fit's own TURN server, webrtc.turn, as peers reach it, as in \"turn:turn.example.com:3478\": each answer's Link headers carry them with time-limited credentials made from webrtc.turn's secret, which must be set."`
 	TURNCredentialTTL  Duration    `json:"turn_credential_ttl,omitempty" default:"\"1h\"" doc:"How long the TURN credentials an answer carries are good for. 1h when left out."`
@@ -458,6 +459,7 @@ func (c *Config) checkMedia(add func(Value, string, ...any)) {
 		add(m.At.Field("listen"), "%s", msg)
 	}
 	checkPublicIPs(m.At.Field("public_ips"), m.PublicIPs, add)
+	m.Access.check(add)
 	checkICEServers(m.At.Field("ice_servers"), m.ICEServers, add)
 	for i, u := range m.TURNURLs {
 		if !iceURL(u) || !strings.HasPrefix(strings.ToLower(u), "turn") {

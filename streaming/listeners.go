@@ -374,7 +374,9 @@ func (s *Server) applyWebRTC(cfg *config.StreamWebRTC) error {
 	}
 	start := func(c *config.StreamWebRTC) func() (*rtcListener, error) {
 		return func() (*rtcListener, error) {
-			mc := webrtc.MuxConfig{Addr: c.Listen}
+			// A peer address the role's access refuses is dropped at its
+			// first datagram.
+			mc := webrtc.MuxConfig{Addr: c.Listen, Filter: s.access.Allows}
 			for _, p := range c.PublicIPs {
 				a, err := netip.ParseAddr(p)
 				if err != nil {

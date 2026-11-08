@@ -265,12 +265,13 @@ func TestLogConfig(t *testing.T) {
 	}
 }
 
-// The access of the streaming role, webrtc.turn and webrtc.proxy is checked
+// The access of the streaming role, webrtc.turn, webrtc.media and webrtc.proxy is checked
 // as a listener's is.
 func TestRoleAccessChecked(t *testing.T) {
 	for doc, want := range map[string]string{
 		`{"streaming": {"rtmp": {"listen": ":1935"}, "access": {"deny": ["nope"]}}}`:                                                              `streaming.access.deny[0]`,
 		`{"webrtc": {"turn": {"listen": [":3478"], "realm": "r", "secret": "s", "relay_ip": "127.0.0.1", "access": {"allow": ["10.0.0.0/33"]}}}}`: `webrtc.turn.access.allow[0]`,
+		`{"webrtc": {"media": {"listen": ":8189", "access": {"deny": ["::1/129"]}}}}`:                                                             `webrtc.media.access.deny[0]`,
 		`{"webrtc": {"proxy": {"listen": ":8190", "access": {"deny_files": [" "]}}}}`:                                                             `webrtc.proxy.access.deny_files[0]: the path is empty`,
 	} {
 		_, err := Load([]byte(doc))
