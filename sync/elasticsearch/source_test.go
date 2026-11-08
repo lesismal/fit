@@ -39,6 +39,9 @@ type fakeSearch struct {
 	sizes      []int
 	// fail answers a request with a status instead, when not 0.
 	fail func(r *http.Request) int
+	// answer answers a request with a status and a body instead, when the
+	// status is not 0.
+	answer func(r *http.Request) (int, string)
 	// shardFailed answers searches with a shard failed.
 	shardFailed bool
 	// expire makes every point in time gone.
@@ -96,6 +99,13 @@ func (f *fakeSearch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if f.fail != nil {
 		if st := f.fail(r); st != 0 {
 			http.Error(w, `{"error": "made to fail"}`, st)
+			return
+		}
+	}
+	if f.answer != nil {
+		if st, body := f.answer(r); st != 0 {
+			w.WriteHeader(st)
+			fmt.Fprint(w, body)
 			return
 		}
 	}
@@ -264,15 +274,15 @@ func (f *fakeSearch) search(w http.ResponseWriter, r *http.Request) {
 		sv, _ := json.Marshal(x.sort)
 		hits = append(hits, fmt.Sprintf(`{"_index": "idx", "_id": %q, "_version": %d, "_source": %s, "sort": [%s]}`, x.d.id, x.d.version, x.d.source(), sv))
 	}
-	failed := 0
+	failed, failures := 0, ""
 	if f.shardFailed {
-		failed = 1
+		failed, failures = 1, `, "failures": [{"shard": 0, "reason": {"type": "made_to_fail"}}]`
 	}
 	pit := ""
 	if q.Pit != nil {
 		pit = fmt.Sprintf(`"pit_id": %q, `, q.Pit.ID)
 	}
-	fmt.Fprintf(w, `{%s"timed_out": false, "_shards": {"failed": %d}, "hits": {"hits": [%s]}}`, pit, failed, strings.Join(hits, ","))
+	fmt.Fprintf(w, `{%s"timed_out": false, "_shards": {"failed": %d%s}, "hits": {"hits": [%s]}}`, pit, failed, failures, strings.Join(hits, ","))
 }
 
 // fscroll is a scroll's documents not read yet.
@@ -668,7 +678,7 @@ func TestSourceErrors(t *testing.T) {
 	f.Put("a", 1, "")
 	f.shardFailed = true
 	s := loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx"}`, f.srv.URL))
-	if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), "failed on 1 shards") {
+	if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), "failed on 1 shards") || !strings.Contains(err.Error(), "made_to_fail") {
 		t.Errorf("a shard failed: %v", err)
 	}
 	f.shardFailed = false
@@ -840,5 +850,288 @@ func TestSourceChunks(t *testing.T) {
 				t.Errorf("a cursor's job split: %v %v", plan, err)
 			}
 		})
+	}
+}
+
+// TestSourceMapping learns the cursor's type from the mapping: a cursor no
+// index maps yet is polled as a long, asked again at every poll; a mapping
+// the source cannot poll by fails the run.
+func TestSourceMapping(t *testing.T) {
+	f := newSearch(t, false)
+	for i := range 3 {
+		f.Put(fmt.Sprintf("d%d", i), int64(i+1), "")
+	}
+	mapping, asked := "", 0
+	f.answer = func(r *http.Request) (int, string) {
+		if !strings.HasSuffix(r.URL.Path, "/_mapping/field/n") {
+			return 0, ""
+		}
+		asked++
+		if mapping == "" {
+			return 404, `{}`
+		}
+		st, body, _ := strings.Cut(mapping, " ")
+		n, _ := strconv.Atoi(st)
+		return n, body
+	}
+	s := loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx", "cursor": "n", "snapshot": "none", "timeout": "30s"}`, f.srv.URL))
+	g, err := run(s, nil, 0)
+	if err != nil || !slices.Equal(g.ids(), []string{"d2"}) || asked != 2 || s.ctype != "" {
+		t.Fatalf("unmapped: %v, %v, the mapping asked %d times", err, g.ids(), asked)
+	}
+	if !strings.Contains(fmt.Sprint(s.sortBy("asc")), "unmapped_type:long") {
+		t.Errorf("sort %v", s.sortBy("asc"))
+	}
+	for _, c := range []struct{ mapping, want string }{
+		{`500 {"error": "boom"}`, "the cursor's mapping: 500"},
+		{`200 nope`, "the cursor's mapping: invalid"},
+		{`200 {"idx": {"mappings": {"n": {"mapping": {"n": {"type": "text"}}}}}}`, "a date, date_nanos, a number or keyword is needed"},
+		{`200 {"a": {"mappings": {"n": {"mapping": {"n": {"type": "long"}}}}}, "b": {"mappings": {"n": {"mapping": {"n": {"type": "date"}}}}}}`, "in one index and a"},
+	} {
+		mapping = c.mapping
+		if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", c.mapping, err, c.want)
+		}
+	}
+}
+
+// TestSourceRunFails fails a run at each of its steps: none leaves a point
+// in time open, and an emit refused stops the run where it is.
+func TestSourceRunFails(t *testing.T) {
+	f := newSearch(t, false)
+	for i := range 20 {
+		f.Put(fmt.Sprintf("d%02d", i), int64(i), "")
+	}
+	s := loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx", "page_size": 6}`, f.srv.URL))
+	if _, err := run(s, fitsync.Position("nope"), 0); err == nil || !strings.Contains(err.Error(), "the checkpoint nope") {
+		t.Errorf("a bad checkpoint: %v", err)
+	}
+	// Refused within the snapshot, and at its last record.
+	for _, stop := range []int{5, 19} {
+		g, err := run(s, nil, stop)
+		if err != nil || len(g.recs) != stop || g.last != nil {
+			t.Errorf("stopped at %d: %v, %d records, position %s", stop, err, len(g.recs), g.last)
+		}
+	}
+	// A search's answer the source cannot read.
+	bad := ""
+	f.answer = func(r *http.Request) (int, string) {
+		if r.URL.Path == "/_search" && bad != "" {
+			return 200, bad
+		}
+		return 0, ""
+	}
+	for body, want := range map[string]string{
+		`nope`: "a search's answer",
+		`{"_shards": {"failed": 0}, "hits": {"hits": [{"_index": "idx", "_id": "a", "_source": {}}]}}`: "without its sort values",
+	} {
+		bad = body
+		if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", body, err, want)
+		}
+	}
+	bad = ""
+	// The cluster busy until the run's context ends.
+	f.fail = func(r *http.Request) int {
+		if r.URL.Path == "/_search" {
+			return 429
+		}
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := s.Run(ctx, &fitsync.Run{Once: true, Emit: func(*fitsync.Record) error { return nil }}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("busy: %v", err)
+	}
+	f.fail = nil
+	// The root endpoint failing, and a point in time refused.
+	f.answer = func(r *http.Request) (int, string) {
+		if r.URL.Path == "/" {
+			return 500, "down"
+		}
+		return 0, ""
+	}
+	s = loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx"}`, f.srv.URL))
+	if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), "root endpoint answered 500") {
+		t.Errorf("root: %v", err)
+	}
+	f.answer = nil
+	f.fail = func(r *http.Request) int {
+		if r.URL.Path == "/idx/_pit" {
+			return 500
+		}
+		return 0
+	}
+	if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), "opening a point in time of idx: 500") {
+		t.Errorf("a point in time refused: %v", err)
+	}
+	f.fail = nil
+	if f.open != f.closed {
+		t.Errorf("%d points in time opened, %d closed", f.open, f.closed)
+	}
+}
+
+// TestSourceEmptyPattern reads an OpenSearch pattern matching no index,
+// whose point in time OpenSearch refuses: an empty snapshot.
+func TestSourceEmptyPattern(t *testing.T) {
+	f := newSearch(t, true)
+	f.fail = func(r *http.Request) int {
+		if strings.HasSuffix(r.URL.Path, "/_search/point_in_time") || strings.HasSuffix(r.URL.Path, "/_count") {
+			return 404
+		}
+		return 0
+	}
+	s := loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx"}`, f.srv.URL))
+	if g, err := run(s, nil, 0); err != nil || len(g.recs) != 0 {
+		t.Errorf("%v, %d records", err, len(g.recs))
+	}
+	f.fail = func(r *http.Request) int {
+		if strings.HasSuffix(r.URL.Path, "/_count") {
+			return 500
+		}
+		return 0
+	}
+	if _, err := s.Chunks(context.Background()); err == nil || !strings.Contains(err.Error(), "counting idx: 500") {
+		t.Errorf("a count refused: %v", err)
+	}
+}
+
+// TestSourcePollFails fails polls, and stops a stream between them.
+func TestSourcePollFails(t *testing.T) {
+	f := newSearch(t, false)
+	for i := range 10 {
+		f.Put(fmt.Sprintf("d%d", i), int64(i), "")
+	}
+	params := fmt.Sprintf(`{"urls": [%q], "index": "idx", "cursor": "n", "snapshot": "cursor", "page_size": 2, "poll_interval": "1h"}`, f.srv.URL)
+	s := loadSource(t, params)
+	if g, err := run(s, nil, 1); err != nil || len(g.recs) != 1 || g.last != nil {
+		t.Errorf("an emit refused: %v, %d records, position %s", err, len(g.recs), g.last)
+	}
+	// The second search, a poll, answers a document without sort values.
+	searches := 0
+	f.answer = func(r *http.Request) (int, string) {
+		if r.URL.Path != "/idx/_search" {
+			return 0, ""
+		}
+		if searches++; searches == 2 {
+			return 200, `{"_shards": {"failed": 0}, "hits": {"hits": [{"_index": "idx", "_id": "a", "_source": {}}]}}`
+		}
+		return 0, ""
+	}
+	if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), "without its sort values") {
+		t.Errorf("no sort values: %v", err)
+	}
+	f.answer = nil
+	f.fail = func(r *http.Request) int {
+		if r.URL.Path == "/idx/_search" {
+			return 500
+		}
+		return 0
+	}
+	if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), "answered 500") {
+		t.Errorf("a poll refused: %v", err)
+	}
+	s = loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx", "cursor": "n", "snapshot": "none"}`, f.srv.URL))
+	if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), "answered 500") {
+		t.Errorf("the highest value refused: %v", err)
+	}
+	f.fail = nil
+	// No document has the cursor yet: polling starts from its lowest.
+	empty := newSearch(t, false)
+	s = loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx", "cursor": "n", "snapshot": "none"}`, empty.srv.URL))
+	if g, err := run(s, nil, 0); err != nil || len(g.recs) != 0 {
+		t.Errorf("empty: %v, %d records", err, len(g.recs))
+	}
+	// A stream waits poll_interval once it has read everything (a page
+	// short of page_size), until its context ends.
+	s = loadSource(t, strings.Replace(params, `"page_size": 2`, `"page_size": 3`, 1))
+	ctx, cancel := context.WithCancel(context.Background())
+	n := 0
+	err := s.Run(ctx, &fitsync.Run{Emit: func(*fitsync.Record) error {
+		if n++; n == 10 {
+			cancel()
+		}
+		return nil
+	}})
+	if !errors.Is(err, context.Canceled) || n != 10 {
+		t.Errorf("%v after %d records", err, n)
+	}
+}
+
+// TestSourceDrainEdges reads values shared by more documents than a
+// position keeps: exactly as many (nothing left to drain), a drain refused
+// part way, and a drain's search failing.
+func TestSourceDrainEdges(t *testing.T) {
+	old := maxEqualIDs
+	maxEqualIDs = 5
+	t.Cleanup(func() { maxEqualIDs = old })
+	f := newSearch(t, false)
+	for i := range 5 {
+		f.Put(fmt.Sprintf("d%02d", i), 7, "")
+	}
+	s := loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx", "cursor": "n", "snapshot": "cursor", "page_size": 5}`, f.srv.URL))
+	if g, err := run(s, nil, 0); err != nil || len(g.recs) != 5 || f.open != 1 {
+		t.Errorf("five at one value: %v, %d records, %d points in time", err, len(g.recs), f.open)
+	}
+	for i := 5; i < 12; i++ {
+		f.Put(fmt.Sprintf("d%02d", i), 7, "")
+	}
+	if g, err := run(s, nil, 7); err != nil || len(g.recs) != 7 {
+		t.Errorf("a drain refused: %v, %d records", err, len(g.recs))
+	}
+	f.fail = func(r *http.Request) int {
+		if r.URL.Path == "/_search" {
+			return 500
+		}
+		return 0
+	}
+	if _, err := run(s, nil, 0); err == nil || !strings.Contains(err.Error(), "answered 500") {
+		t.Errorf("a drain's search refused: %v", err)
+	}
+	if f.open != f.closed {
+		t.Errorf("%d points in time opened, %d closed", f.open, f.closed)
+	}
+}
+
+// TestSourceChunkEdges plans chunks of uneven sizes and of the default
+// size, and fails chunks part way.
+func TestSourceChunkEdges(t *testing.T) {
+	f := newSearch(t, false)
+	for i := range 1001 {
+		f.Put(fmt.Sprintf("d%04d", i), int64(i), "")
+	}
+	plan, err := loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx", "chunk_documents": 300}`, f.srv.URL)).Chunks(context.Background())
+	if err != nil || len(plan) != 4 || plan[0].Rows != 251 || plan[1].Rows != 250 {
+		t.Fatalf("%v: %+v", err, plan)
+	}
+	s := loadSource(t, fmt.Sprintf(`{"urls": [%q], "index": "idx", "page_size": 100}`, f.srv.URL))
+	if plan, err = s.Chunks(context.Background()); err != nil || len(plan) != 1 || plan[0].Rows != 1001 {
+		t.Fatalf("by default: %v: %+v", err, plan)
+	}
+	n := 0
+	if err := s.ReadChunk(context.Background(), plan[0], nil, func(*fitsync.Record) error { n++; return nil }); err != nil || n != 1001 {
+		t.Errorf("one slice, the whole index: %v, %d records", err, n)
+	}
+	errStop := errors.New("stop")
+	if err := s.ReadChunk(context.Background(), plan[0], nil, func(*fitsync.Record) error { return errStop }); !errors.Is(err, errStop) || len(f.scrolls) != 0 {
+		t.Errorf("an emit refused: %v, %d scrolls left", err, len(f.scrolls))
+	}
+	f.fail = func(r *http.Request) int {
+		if r.URL.Query().Get("scroll") != "" {
+			return 500
+		}
+		return 0
+	}
+	if err := s.ReadChunk(context.Background(), plan[0], nil, nil); err == nil || !strings.Contains(err.Error(), "answered 500") {
+		t.Errorf("a scroll refused: %v", err)
+	}
+	f.fail = func(r *http.Request) int {
+		if strings.HasSuffix(r.URL.Path, "/_count") {
+			return 404
+		}
+		return 0
+	}
+	if plan, err := s.Chunks(context.Background()); err != nil || len(plan) != 1 || plan[0].Rows != 0 {
+		t.Errorf("no index: %v: %+v", err, plan)
 	}
 }
