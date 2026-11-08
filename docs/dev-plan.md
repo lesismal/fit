@@ -333,7 +333,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I196.
 | I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | done |
 | I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | done |
 | I169 | Elasticsearch and OpenSearch as a source: a point-in-time snapshot, then a cursor polled | I168 | done |
-| I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | todo |
+| I170 | ClickHouse as a sink (deduplication tokens, `ReplacingMergeTree`) and a source (a cursor polled) | I163 | done |
 | I171 | HTTP as a source (`sync_ingest`, answered once the sinks have the records) and a sink | I163 | done |
 | I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | todo |
 | I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | todo |
@@ -4812,6 +4812,96 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: interop with ClickHouse in Docker; a batch sent twice is stored once; the final state
   after replays is right with `FINAL`; the source resumes from its cursor.
 - **Touches**: `sync/clickhouse`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/clickhouse` (`syncclickhouse`): the sink, the source and a
+   `Conn` of their own (URLs with failover, basic authentication, TLS, `database`, the role's engine
+   or one of its own, as I168's), which reads ClickHouse's error code from
+   `X-ClickHouse-Exception-Code`. The connection's params are declared by each connector, flat, as
+   I168's. Alternative: one HTTP connection package shared with `sync/elasticsearch`.
+2. **What a row is.** An insert, update or message is its row (`after`, or `before` when `after` is
+   null) as plain JSON (`fitsync.AppendPlain`: numbers bare, decimals as numbers, bytes in base64,
+   times in RFC 3339, read with `date_time_input_format=best_effort`, JSON values as objects, which
+   ClickHouse reads into a `String` column), plus `_version` (`version_column`) and `_deleted`
+   (`deleted_column`, 0). A delete with `deletes: "flag"` is the row as it was (`before`), or the
+   key's fields when there is none, with `_deleted` 1. DDL is acknowledged and not written. The
+   sink never makes or alters a table: the docs show the `ReplacingMergeTree(_version, _deleted)`
+   to make. `plain: true` writes rows without the two columns, for append-only tables.
+   Alternative: make the table from the first record's types.
+3. **The version** is the commit time in Unix nanoseconds, or `version_field`'s value (a uint, a
+   non-negative int, or a time in nanoseconds); the time of the write only when the source gives no
+   commit time. It must come from the record, not from the clock: with deduplication, a replay can
+   write an older change of a key again under a new token while a later batch it had written is
+   dropped as a duplicate, and a clock version would make the older change win. Two changes of one
+   key with the same version leave the one inserted last (a binlog's commit times are seconds), which
+   is what `version_field` is for. Alternative: a version from the position, which is not a number
+   for every source.
+4. **The deduplication token** is `fit-` and 40 hex digits of a SHA-256 of the table, the first and
+   last records' positions and the count; a record without a position is placed by the nearest one
+   before it (`+n`), or after it (`-n`), and a run with no position at all is sent without a token.
+   A batch is one `INSERT` per run of consecutive records for one table, bounded by
+   `max_request_bytes` (8 MiB), each with its own token. The token works on a replicated table and
+   on a plain `MergeTree` only with `non_replicated_deduplication_window` set, which the docs and the
+   `table` param's description say; the sink does not check. Alternative: a hash of every record's
+   position, which a batch cut differently would also change.
+5. **Lightweight deletes turn deduplication off.** With `deletes: "delete"` each run of deletes is
+   one `DELETE FROM t WHERE (k1 = v1 AND k2 = v2) OR ...` (at most 128 KiB, below `max_query_size`),
+   in order between the inserts, and the inserts are sent with `insert_deduplicate=0`: a `DELETE`
+   written again by a replay removes the row a later insert had written, and a deduplicated insert
+   would not bring it back. The interop test found it (162 rows for 180). A replay therefore stores
+   rows again, which a `ReplacingMergeTree` folds. Keys are compared with `=` to literals (numbers
+   bare, strings quoted, times through `parseDateTime64BestEffort`, dates through `toDate`, null by
+   `IS NULL`), since ClickHouse refuses an `IN` of tuples whose literal types differ from the
+   columns'. Alternative: `IN` with typed query parameters, which needs the key's column types.
+6. **Errors.** A data error that names a row (`(at row N)`) fails that record for good
+   (`fitsync.Permanent`), and the rows before it in its insert are sent again alone, with a token of
+   their own, so only it fails, as I168's bad document; a data error that names no row (a parse,
+   conversion or type error code) fails the run's first record for good. Every other error (an
+   unknown table or column, authentication, too many parts, a 5xx, the connection) is retried by the
+   pipeline, so records are not skipped while a table is being made. The sink does not retry within
+   a write: ClickHouse has no per-row 429. Alternative: an unknown table or column as permanent.
+7. **`settings`**, a map sent with every query, for `async_insert` and the like; the connector's
+   own names (`query`, `database`, `insert_deduplication_token`, `insert_deduplicate`, `param_*`)
+   are refused. Alternative: no settings, or named params for the common ones.
+8. **The source reads by keyset.** It reads `SELECT * FROM (<table or query>) WHERE (cursor, key)
+   > (...) ORDER BY cursor, key LIMIT page_rows`, with the bounds as query parameters of the
+   columns' own types and their values as `toString` writes them, so that any type round-trips
+   exactly (no float or time formatting of fit's own). The position is `{"after": [{"t": "<type>",
+   "v": "<text>"}, ...]}`, the order's columns of the last row read. `key` is required, not read
+   from `system.tables`; a query must have the key's and the cursor's columns and no `ORDER BY`,
+   `LIMIT` or `FORMAT` of its own. Alternative: the table's sorting key by default.
+9. **Rows are inserts** (polling cannot tell an insert from an update; sinks write both as
+   upserts), or deletes when `deleted_column` is true or non-zero, so a table the sink wrote reads
+   back with `deleted_column: "_deleted"`; a row deleted from ClickHouse is not seen. A `DateTime`
+   cursor is the records' commit time. Values are typed by the column's type (`ToValue`): 128- and
+   256-bit integers as decimals, `Map`, `Tuple` and `JSON` as JSON. Alternative: `update` for rows
+   read after the snapshot.
+10. **Late rows are missed.** A row written later with a cursor value at or below one already read
+    (two inserts whose parts become visible out of cursor order, a clock behind) is not seen; the
+    docs say the cursor must grow, as `DEFAULT now64()`. Alternative: a `poll_lag`, reading only
+    rows older than a delay.
+11. **`snapshot: "never"`** asks for the greatest cursor value when a pipeline without a checkpoint
+    starts; a restart before the first record is checkpointed asks again, missing rows written in
+    between. Alternative: a way for a source to save its starting position at once.
+12. **Without a cursor** the source reads once by the key and ends, in a stream too, which stops the
+    pipeline. Alternative: refuse a stream without a cursor.
+13. **I167's `Chunker`.** With `chunk_rows`, a job plans chunks of the key: `count()`, then each
+    chunk's `lo` found by `ORDER BY key LIMIT 1 OFFSET chunk_rows` from the one before's, a query a
+    chunk, whose sort needs memory for `chunk_rows` keys at most and reads in order when the key is
+    the table's sorting key; `lo` and `hi` are the same bounds as the position's. A chunk is read by
+    the key in pages; the next job plans again from the start (I167's decision 6). Without
+    `chunk_rows` a job reads by the cursor and the next one goes on after it. Alternative: one
+    query with `row_number()` over the whole key, which sorts every key at once.
+14. **Interop.** `test/sync/run.sh` also starts `clickhouse/clickhouse-server:25.8` (`fit-sync-ch`,
+    port 29202, a user `fit` with a password, over HTTP), and the tests (`test/sync/clickhouse_test.go`)
+    read `FIT_SYNC_CH_URL`, `FIT_SYNC_CH_USER` and `FIT_SYNC_CH_PASSWORD`, skipping without them;
+    CI's `sync-interop` job runs them with the others. TLS is not tried against ClickHouse (its TLS
+    needs a config file of its own in the container); the code is I168's. Alternative: a container
+    with TLS.
+15. **`ParallelSink`**, as I168's: a job gives the sink `job.max_parallel` writers, a key to one.
+16. **Size**: about 1,000 lines of code and 500 of tests, within the plan's size with the docs;
+    nothing is left, so there is no I170b.
 
 ### I171 HTTP as a source and a sink
 

@@ -245,6 +245,20 @@ The plan's I171 section lists them all; these change the record above.
 4. **An HTTP sink's idempotency key** covers the request's records' positions and its body, since
    most records carry no position; a resend carries the same key, a replay batched otherwise
    another.
+## Decisions made while building I170 (pending review)
+
+The plan's I170 section lists them all; these change the record above.
+
+1. **Versions come from the record, not the clock.** A sink that keeps a key's last state by a
+   version (ClickHouse's `ReplacingMergeTree`) takes it from the commit time or a field of the row,
+   since with deduplication a replay may write an older change again under a new token while a
+   later batch is dropped, and a clock version would make the older change win.
+2. **Deduplication and replayed deletes do not mix.** Where a sink writes deletes as statements
+   (ClickHouse's lightweight `DELETE`), its inserts are not deduplicated: a delete replayed would
+   remove a row that a deduplicated insert would not bring back.
+3. **A source polled by a cursor reads by keyset**, `(cursor, key) > (last)`, with the last row's
+   values as the position, so rows that share a cursor value are read once each, and in a job its
+   snapshot splits by ranges of the key (`Chunker`).
 
 ## Planning decisions (2026-11-08, pending review)
 
