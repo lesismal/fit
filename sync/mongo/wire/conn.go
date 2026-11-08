@@ -127,7 +127,7 @@ func dialHello(ctx context.Context, addr string, o *Options) (*Conn, error) {
 	d := net.Dialer{KeepAlive: 30 * time.Second}
 	nc, err := d.DialContext(dctx, "tcp", addr)
 	if err != nil {
-		return nil, &NetError{Addr: addr, Err: err}
+		return nil, &NetError{Addr: addr, Err: ctxErr(ctx, err)}
 	}
 	if tc, ok := nc.(*net.TCPConn); ok {
 		_ = tc.SetNoDelay(true)
@@ -142,7 +142,7 @@ func dialHello(ctx context.Context, addr string, o *Options) (*Conn, error) {
 		tc := tls.Client(nc, cfg)
 		if err := tc.HandshakeContext(dctx); err != nil {
 			nc.Close()
-			return nil, &NetError{Addr: addr, Err: err}
+			return nil, &NetError{Addr: addr, Err: ctxErr(ctx, err)}
 		}
 		nc = tc
 	}
@@ -222,17 +222,31 @@ func (c *Conn) Close() error {
 
 // fail closes the connection for err and returns err as a NetError.
 func (c *Conn) fail(ctx context.Context, err error) error {
-	if cerr := ctx.Err(); cerr != nil {
-		err = fmt.Errorf("%w (%v)", cerr, err)
-	} else if d, ok := ctx.Deadline(); ok && !time.Now().Before(d) {
-		// The socket's deadline, the context's, ran out before the
-		// context's own timer said so.
-		err = fmt.Errorf("%w (%v)", context.DeadlineExceeded, err)
-	}
-	ne := &NetError{Addr: c.addr, Err: err}
+	ne := &NetError{Addr: c.addr, Err: ctxErr(ctx, err)}
 	c.err = ne
 	c.nc.Close()
 	return ne
+}
+
+// ctxDone returns ctx's error, or DeadlineExceeded once its deadline has
+// passed: a socket's or a dial's deadline, the context's, can run out
+// before the context's own timer says so. nil while ctx goes on.
+func ctxDone(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if d, ok := ctx.Deadline(); ok && !time.Now().Before(d) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// ctxErr returns err wrapped in ctx's error when ctx has ended.
+func ctxErr(ctx context.Context, err error) error {
+	if cerr := ctxDone(ctx); cerr != nil {
+		return fmt.Errorf("%w (%v)", cerr, err)
+	}
+	return err
 }
 
 // Run sends cmd to database db, with the document sequences seqs, and

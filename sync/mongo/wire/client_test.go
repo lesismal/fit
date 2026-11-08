@@ -353,6 +353,13 @@ func TestTimeoutsAndBadAnswers(t *testing.T) {
 		t.Fatalf("hang: %v", err)
 	}
 	c.o.Timeout = time.Hour
+	// A connection is made first, so that the deadline cuts the round
+	// trip; one that cuts the dial or the hello is the same error (below).
+	mode.Store("")
+	if _, err := c.Run(ctx, "x", D{{"ping", 1}}); err != nil {
+		t.Fatal(err)
+	}
+	mode.Store("hang")
 	dctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	_, err := c.Run(dctx, "x", D{{"ping", 1}})
 	cancel()
@@ -383,6 +390,43 @@ func TestTimeoutsAndBadAnswers(t *testing.T) {
 	}
 	if _, err := c.Run(ctx, "x", D{{"ping", struct{}{}}}); err == nil {
 		t.Error("an unwritable command sent")
+	}
+}
+
+// TestDeadlineWhileFinding checks that a context's end while the primary
+// is looked for (a dial, a hello that is never answered) is the context's
+// error, whichever timer saw it first.
+func TestDeadlineWhileFinding(t *testing.T) {
+	ctx := hang(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() { // accepts, and never answers
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	c := newClient(t, Options{Hosts: []string{ln.Addr().String()}})
+	dctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	_, err = c.Run(dctx, "x", D{{"ping", 1}})
+	cancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("deadline: %v", err)
+	}
+	// The selection timeout's end is not the caller's.
+	c2 := newClient(t, Options{Hosts: []string{ln.Addr().String()}, ConnectTimeout: 50 * time.Millisecond, ServerSelectionTimeout: 200 * time.Millisecond})
+	_, err = c2.Run(ctx, "x", D{{"ping", 1}})
+	if err == nil || errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "no primary found (within") {
+		t.Fatalf("selection timeout: %v", err)
+	}
+	if err := ctxErr(ctx, errors.New("x")); err.Error() != "x" {
+		t.Error(err)
 	}
 }
 
