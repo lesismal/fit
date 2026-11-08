@@ -45,7 +45,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "run":
-	case "status", "pause", "resume", "snapshot", "checkpoint", "test", "dry-run":
+	case "status", "pause", "resume", "snapshot", "checkpoint", "test", "dry-run", "dead-letters":
 		return syncAdmin(args[0], args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, syncAdminUsage)

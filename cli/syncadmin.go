@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -37,6 +38,16 @@ See and steer the pipelines of a running fit, through its Admin API:
 	fit sync dry-run [-limit N] [-wait D] [-from-start] <pipeline>
 	                                       read its first records through its
 	                                       transforms, writing nothing
+	fit sync dead-letters [-after ID] [-limit N] <pipeline>
+	                                       list the dead letters its dead_letters
+	                                       sink keeps
+	fit sync dead-letters -replay [-all] <pipeline> [ID...]
+	                                       write them, or every one, to the
+	                                       sinks they failed at again, and drop
+	                                       those written; the pipeline stops
+	                                       meanwhile and starts again after
+	fit sync dead-letters -drop [-all] <pipeline> [ID...]
+	                                       drop them, or every one
 
 A change of the checkpoint that would skip or replay records is refused
 without -confirm. Every command takes -c, the bootstrap config whose admin
@@ -90,6 +101,7 @@ func (f *syncFlags) api(stderr io.Writer) (*checkAPI, bool) {
 func syncAdmin(cmd string, args []string, stdout, stderr io.Writer) int {
 	f := newSyncFlags(cmd, stderr)
 	confirm, set, reset, limit, wait, fromStart := new(bool), new(string), new(bool), new(int), new(time.Duration), new(bool)
+	after, replay, drop, all := new(uint64), new(bool), new(bool), new(bool)
 	switch cmd {
 	case "snapshot":
 		f.fs.BoolVar(confirm, "confirm", false, "read the source again although the sinks have its records")
@@ -101,6 +113,12 @@ func syncAdmin(cmd string, args []string, stdout, stderr io.Writer) int {
 		f.fs.IntVar(limit, "limit", 0, fmt.Sprintf("how many source records to read (%d when 0, at most %d)", fitsync.DefaultDryRunRecords, fitsync.MaxDryRunRecords))
 		f.fs.DurationVar(wait, "wait", 0, fmt.Sprintf("how long to wait for them (%s when 0, at most %s)", fitsync.DefaultDryRunTimeout, fitsync.MaxDryRunTimeout))
 		f.fs.BoolVar(fromStart, "from-start", false, "read from where the source starts, not from the checkpoint")
+	case "dead-letters":
+		f.fs.Uint64Var(after, "after", 0, "list the dead letters after this id")
+		f.fs.IntVar(limit, "limit", 0, fmt.Sprintf("how many to list (%d when 0, at most %d)", fitsync.DefaultDeadLetterPage, fitsync.MaxDeadLetterPage))
+		f.fs.BoolVar(replay, "replay", false, "replay the dead letters named, or every one with -all")
+		f.fs.BoolVar(drop, "drop", false, "drop the dead letters named, or every one with -all")
+		f.fs.BoolVar(all, "all", false, "with -replay or -drop, every dead letter")
 	}
 	var names []string
 	for rest := args; ; {
@@ -113,7 +131,28 @@ func syncAdmin(cmd string, args []string, stdout, stderr io.Writer) int {
 		names = append(names, f.fs.Arg(0))
 		rest = f.fs.Args()[1:]
 	}
+	var ids []uint64
+	if cmd == "dead-letters" && len(names) > 1 {
+		for _, a := range names[1:] {
+			id, err := strconv.ParseUint(a, 10, 64)
+			if err != nil {
+				fmt.Fprintf(stderr, "fit sync dead-letters: %q is not a dead letter's id\n", a)
+				return 2
+			}
+			ids = append(ids, id)
+		}
+		names = names[:1]
+	}
 	switch {
+	case *replay && *drop:
+		fmt.Fprintf(stderr, "fit sync dead-letters: give -replay or -drop, not both\n")
+		return 2
+	case (*replay || *drop) && *all == (len(ids) > 0):
+		fmt.Fprintf(stderr, "fit sync dead-letters: name the dead letters by their ids, or give -all\n")
+		return 2
+	case !*replay && !*drop && (*all || len(ids) > 0):
+		fmt.Fprintf(stderr, "fit sync dead-letters: ids and -all go with -replay or -drop\n")
+		return 2
 	case len(names) > 1, len(names) == 0 && cmd != "status":
 		fmt.Fprintf(stderr, "fit sync %s: name one pipeline\n", cmd)
 		return 2
@@ -163,6 +202,32 @@ func syncAdmin(cmd string, args []string, stdout, stderr io.Writer) int {
 			b["from"] = "start"
 		}
 		body = b
+	case "dead-letters":
+		path += "/dead-letters"
+		q := url.Values{}
+		switch {
+		case *replay:
+			method, path = http.MethodPost, path+"/replay"
+			body = map[string]any{"ids": ids, "all": *all}
+		case *drop:
+			method = http.MethodDelete
+			if *all {
+				q.Set("all", "1")
+			}
+			for _, id := range ids {
+				q.Add("id", strconv.FormatUint(id, 10))
+			}
+		default:
+			if *after > 0 {
+				q.Set("after", strconv.FormatUint(*after, 10))
+			}
+			if *limit > 0 {
+				q.Set("limit", strconv.Itoa(*limit))
+			}
+		}
+		if len(q) > 0 {
+			path += "?" + q.Encode()
+		}
 	}
 	var data []byte
 	if body != nil {
@@ -241,6 +306,8 @@ func printSync(cmd string, out []byte, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "fit sync test: a connection test failed")
 			return 1
 		}
+	case "dead-letters":
+		return printDeadLetters(out, stdout, stderr)
 	case "dry-run":
 		var d fitsync.DryRun
 		_ = json.Unmarshal(out, &d)
@@ -310,6 +377,19 @@ func printSyncStatus(w io.Writer, raw []byte) {
 	if s.LagSeconds > 0 {
 		fmt.Fprintf(w, "lag        %s, last commit %s\n", lagText(s.LagSeconds), s.LastCommit.Format(time.RFC3339))
 	}
+	if l := s.SourceLag; l != nil {
+		fmt.Fprintf(w, "behind     %d %s, as of %s\n", l.Behind, l.Unit, l.At.Format(time.RFC3339))
+	}
+	for _, k := range s.Sinks {
+		fmt.Fprintf(w, "sink %-5s %d records, %d bytes in %d batches; %d errors, %d retries, %d failed\n", k.Name, k.Records, k.Bytes, k.Batches, k.Errors, k.Retries, k.Failed)
+	}
+	if d := s.DeadLetters; d != nil {
+		fmt.Fprintf(w, "dead       %d written, %d not written, %d replayed", d.Written, d.NotWritten, d.Replayed)
+		if st := d.Store; st != nil {
+			fmt.Fprintf(w, "; %d kept of %d", st.Kept, st.MaxRecords)
+		}
+		fmt.Fprintln(w)
+	}
 	if j := s.Job; j != nil {
 		fmt.Fprintf(w, "job        %d read, %d written, %d failed", j.Read, j.Written, j.Failed)
 		if len(j.Chunks) > 0 {
@@ -326,4 +406,45 @@ func printSyncStatus(w io.Writer, raw []byte) {
 	if s.Errors > 0 || s.Err != "" {
 		fmt.Fprintf(w, "errors     %d, the last: %s\n", s.Errors, strings.TrimSpace(s.Err))
 	}
+}
+
+// printDeadLetters prints a list of dead letters, a replay's result or a
+// drop's.
+func printDeadLetters(out []byte, stdout, stderr io.Writer) int {
+	var a struct {
+		Letters  []fitsync.DeadLetter     `json:"letters"`
+		Store    *fitsync.DeadLetterStore `json:"store"`
+		More     bool                     `json:"more"`
+		Replayed []uint64                 `json:"replayed"`
+		Failed   []fitsync.ReplayFailure  `json:"failed"`
+		Dropped  *int                     `json:"dropped"`
+	}
+	_ = json.Unmarshal(out, &a)
+	switch {
+	case a.Dropped != nil:
+		fmt.Fprintf(stdout, "%d dead letters dropped\n", *a.Dropped)
+	case a.Store != nil:
+		tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(tw, "ID\tSAVED\tAT\tATTEMPTS\tERROR")
+		for _, l := range a.Letters {
+			fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\n", l.ID, l.Saved.Format(time.RFC3339), l.At, l.Attempts, strings.TrimSpace(l.Error))
+			fmt.Fprintf(tw, "\t%s\n", l.Record)
+		}
+		_ = tw.Flush()
+		s := a.Store
+		more := ""
+		if a.More {
+			more = "; more after the last, with -after"
+		}
+		fmt.Fprintf(stdout, "%d dead letters kept (%d of %d bytes, at most %d) in %s%s\n", s.Kept, s.Bytes, s.MaxBytes, s.MaxRecords, s.Path, more)
+	default:
+		fmt.Fprintf(stdout, "%d dead letters replayed and dropped\n", len(a.Replayed))
+		for _, f := range a.Failed {
+			fmt.Fprintf(stderr, "dead letter %d kept: %s\n", f.ID, f.Err)
+		}
+		if len(a.Failed) > 0 {
+			return 1
+		}
+	}
+	return 0
 }

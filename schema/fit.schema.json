@@ -7164,6 +7164,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "dead_letters"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.dead_letters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "elasticsearch"
               }
             }
@@ -7342,6 +7358,7 @@
           "description": "The module's name within its namespace.",
           "enum": [
             "clickhouse",
+            "dead_letters",
             "elasticsearch",
             "file",
             "http",
@@ -7459,6 +7476,37 @@
       "required": [
         "urls"
       ],
+      "type": "object"
+    },
+    "sync.sinks.dead_letters": {
+      "additionalProperties": false,
+      "properties": {
+        "max_bytes": {
+          "default": 67108864,
+          "description": "The most bytes of dead letters kept, as their lines in the file. 64 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_records": {
+          "default": 10000,
+          "description": "The most dead letters kept. 10000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "The file the dead letters are kept in, a JSON line each, a relative path being under the sync's state_dir; <state_dir>/<pipeline>.dead_letters.jsonl when left out. Two pipelines may not share one.",
+          "type": "string"
+        },
+        "when_full": {
+          "default": "refuse",
+          "description": "What a dead letter that does not fit does: refuse fails its write, so that after its attempts the pipeline stops, its checkpoint before the record, and nothing is lost; drop_oldest drops the oldest dead letters to make room, counting them. refuse when left out.",
+          "enum": [
+            "refuse",
+            "drop_oldest"
+          ],
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "sync.sinks.elasticsearch": {

@@ -49,7 +49,7 @@ a config against it and more.
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -3647,6 +3647,25 @@ transforms, and returns them with what each became, writing nothing and saving n
 `POST /sync/test` and `/sync/dry-run` do the same for a pipeline's config not applied yet,
 `{"pipeline": {...}}`. `fit sync status`, `pause`, `resume`, `snapshot`, `checkpoint`, `test` and
 `dry-run` call these through the Admin API the bootstrap config names, as `fit token` does.
+
+The Admin API's `/metrics` carries each pipeline's as `fit_sync_*`: its state, the records and
+bytes read, acknowledged and failed, the errors, the queue against its bounds, the lag from commit
+time to acknowledgement (`fit_sync_lag_seconds`) and behind the source's server
+(`fit_sync_source_lag`, in the source's unit: a PostgreSQL slot's bytes of WAL, for sources that
+tell it), and per sink the records and bytes written, the batches, errors, retries and records
+failed (`fit_sync_sink_*`), and the dead letters written, not written, replayed, kept and dropped;
+the status shows the same. The `sync` logger says when a pipeline starts, runs, waits for its
+schedule, stops or is paused, and its errors at most once each 10s, counting those held back. With
+`on_error: "dead_letter"`, the `dead_letters` sink keeps each dead letter, with the record, its
+error, where it failed and its attempts, in `<state_dir>/<pipeline>.dead_letters.jsonl`, bounded
+(10,000 letters, 64 MiB; when full a letter is refused, and the pipeline stops, unless
+`when_full: "drop_oldest"`). `GET /sync/pipelines/{name}/dead-letters` lists them; `POST
+.../dead-letters/replay` with `{"ids": [...]}` or `{"all": true}` stops the pipeline, writes each
+record to the sink it failed at (through the transforms first, to every sink, when a transform
+failed it), drops those written, keeps and reports those failing again, and starts the pipeline
+again; `DELETE .../dead-letters?id=...` or `?all=1` drops them. `fit sync dead-letters` lists,
+`-replay` and `-drop` do the rest. A replay writes a record as it was, over any later change of its
+key the sink has.
 
 In a .conf file:
 
@@ -7255,6 +7274,19 @@ In JSON:
 | `deleted_column` | string | `"_deleted"` | The UInt8 column set to 1 for a delete and 0 otherwise, a ReplacingMergeTree's is_deleted. _deleted when left out. |
 | `deletes` | string: `flag`, `delete`, `ignore` | `"flag"` | How deletes are written: flag, as a row with the deleted column set to 1; delete, as a lightweight DELETE of the key's rows, run in order between the inserts, which are then not deduplicated (a DELETE written again would remove a row a deduplicated insert would not bring back), so a replay stores rows again and the table is best a ReplacingMergeTree; ignore, not at all. flag when left out. |
 | `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one INSERT's rows; a batch larger is sent in several, in order, each with a token of its own, and a row larger fails its record. 8 MiB when left out or 0. |
+
+<a id="sync-sinks-dead_letters"></a>
+
+### `dead_letters`
+
+Keeps a pipeline's dead letters in a file of its state_dir, bounded by max_records and max_bytes, each with the record, its error, where it failed and the attempts made, so that the Admin API and fit sync dead-letters list them, replay them to the sinks once the cause is fixed, and drop them. Only a pipeline's dead_letter sink.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | string |  | The file the dead letters are kept in, a JSON line each, a relative path being under the sync's state_dir; <state_dir>/<pipeline>.dead_letters.jsonl when left out. Two pipelines may not share one. |
+| `max_records` | integer, 0 or more | `10000` | The most dead letters kept. 10000 when left out or 0. |
+| `max_bytes` | integer, 0 or more | `67108864` | The most bytes of dead letters kept, as their lines in the file. 64 MiB when left out or 0. |
+| `when_full` | string: `refuse`, `drop_oldest` | `"refuse"` | What a dead letter that does not fit does: refuse fails its write, so that after its attempts the pipeline stops, its checkpoint before the record, and nothing is lost; drop_oldest drops the oldest dead letters to make room, counting them. refuse when left out. |
 
 <a id="sync-sinks-elasticsearch"></a>
 

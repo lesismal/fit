@@ -342,7 +342,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | done |
 | I187 | S3 及兼容存储作为目标（滚动的对象）与源（按键顺序的对象） | I163 | done |
 | I188 | Admin API 与 `fit sync`：状态、暂停、恢复、检查点、连接测试、试运行 | I163 | done |
-| I189 | 指标、日志与死信，可从 Admin API 重放 | I188 | todo |
+| I189 | 指标、日志与死信，可从 Admin API 重放 | I188 | done |
 | I190 | workbench 的 Sync 页面，以及助手的同步工具 | I188, I189, I123 | todo |
 | I191 | 写入 MySQL、TiDB 和 PostgreSQL 时恰好一次：检查点写在目标的事务中 | I176, I180 | todo |
 | I192 | CI 中的互通与恢复矩阵 | I176, I180, I183, I185 | todo |
@@ -4407,6 +4407,38 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   的文件写入器中，含记录、错误和尝试次数，可从 Admin API 重放。
 - **完成标准**：每个指标都有测试检查；修复原因后重放的死信恰好到达目标一次。
 - **涉及**：`sync`、`observe`、`admin`、`docs`。
+
+**待审查的决策**（实现时做出，2026-11-09；在用户裁定之前有效）：
+
+1. **死信是一个目标模块 `dead_letters`**，作为 `dead_letter` 目标使用（I163 的决策 3 不变）：每封死信是
+   `<state_dir>/<pipeline>.dead_letters.jsonl` 中的一行 JSON（`path` 可另指，相对路径位于 `state_dir` 下），在写入被确认前同步到磁盘；
+   删除也各记一行，被删的超过保留的加 1 MiB 时压缩文件。运行时在创建流水线时告诉它状态目录和流水线名；同一文件的两个目标（重载交替时）
+   共用它。它不能出现在流水线的 `sinks` 中。其他目标仍可作 `dead_letter`，但只有 `dead_letters` 能列出和重放。备选：只要 `on_error`
+   为 `dead_letter`，就由运行时自己保存。
+2. **上限**：`max_records` 10,000，`max_bytes` 64 MiB；`when_full` 为 `refuse`（默认：写入失败，尝试用完后流水线停在该记录之前，
+   不丢数据）或 `drop_oldest`（计入 `fit_sync_dead_letters_dropped_total`）。大于 `max_bytes` 的死信永久失败。备选：默认丢弃最旧的。
+3. **重放会先停止流水线**（写完手中的记录并保存检查点），在请求的 goroutine 上自己写入死信，再重新启动流水线，与 `SetCheckpoint`
+   一样，这样重放是每个目标唯一的写入者，运行时的队列和水位都不变；已停止的流水线也会像 `Resume` 一样重新启动。目标写失败的记录只写到
+   该目标，按变换后的样子（死信的 `at` 为 `sink <name>`）；变换失败的记录重新经过变换，再写到每个目标。写入按目标的 `batch` 上限分批，
+   按 `retry` 重试；仍失败、目标已不存在或不含记录的死信保留并报告，写成功的删除。已完成作业的死信也能重放。备选：把重放的记录放进运行中
+   流水线的队列、不停止，这需要分发器按记录路由。
+4. **重放按记录原样写入**：同一键后来已到达目标的变更会被覆盖；文档中已说明。备选：键有更新的记录时拒绝重放，但 fit 无从得知。
+5. **指标**通过角色的 `app.Metered` 从 `Runtime.Status` 取得，与其他角色一样（`fit_sync_*`，标签 `pipeline`，`fit_sync_sink_*` 另有
+   `sink`）；计数器自流水线启动起累计（改变它的重载会从 0 开始，正如 Prometheus 对重启的预期）。字节数是队列估算的记录大小，不是线上
+   字节。目标的 `batches` 是尝试的写入次数，`errors` 是失败的，`retries` 是重试的，`failed` 是最终仍失败的记录。没有吞吐量 gauge：
+   对计数器取 `rate()` 即可。状态（`GET /sync/pipelines/{name}`）新增 `read_bytes`、`sinks`、`source_lag` 和 `dead_letters`。
+   备选：批写入耗时的直方图。
+6. **落后于源服务器的延迟**由源自己告知：得知时调用 `Run.ReportLag(behind, unit)`，或实现 `Lagger`（`Lag() int64`，单位为字节，
+   除非有 `LagUnit()` 另说），每次取状态或抓取指标时询问；postgres 源的 `Lag`（其 slot 的 WAL）已经这样读取，无需改动它。MySQL 的
+   binlog 字节数和 Kafka 落后的 offset 留给这些源的负责人。备选：运行时自己查询服务器。
+7. **日志**：流水线每次运行的开始（从检查点或从头）、调度的下次时间、被杀、暂停、恢复、完成与停止都会记录；目标的尝试失败、变换失败、
+   被跳过的记录、写入与未写入的死信是警告，每条流水线每 10 秒最多一行，下一行说明压下了多少（目标尝试失败原先是 debug 行）。备选：
+   按错误消息分别限速。
+8. **端点**：`GET /sync/pipelines/{name}/dead-letters?after=&limit=`（100，最多 1,000，从旧到新，还有更多时带 `more`），
+   `POST .../dead-letters/replay`，带 `{"ids"}` 或 `{"all": true}`，`DELETE .../dead-letters?id=..&id=..` 或 `?all=1`；
+   `dead_letter` 目标不是 `dead_letters` 时为 404。`fit sync dead-letters [-after] [-limit]`，`-replay` 和 `-drop` 带 id 或
+   `-all`；重放后仍有保留的死信时退出码为 1。
+9. **规模**：代码约 1,000 行（sync 760、admin 110、cli 150），测试约 900 行。
 
 ### I190 workbench 的 Sync 页面
 

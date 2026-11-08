@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // The namespaces of sync's modules.
@@ -57,6 +58,35 @@ type Run struct {
 	// source that takes records in from elsewhere, as the http source from
 	// a route's sync_ingest handler, is found.
 	Pipeline string
+	// Lag, when not nil, keeps how far behind its server's head the source
+	// is, for the pipeline's status and metrics; a source calls ReportLag,
+	// which spares it the nil check.
+	Lag func(SourceLag)
+}
+
+// SourceLag is how far behind its server's head a source is: a PostgreSQL
+// slot's or a binlog's bytes, a Kafka partition's offsets. It is the
+// source's own count, in its own Unit, as of At.
+type SourceLag struct {
+	Behind int64     `json:"behind"`
+	Unit   string    `json:"unit"`
+	At     time.Time `json:"at"`
+}
+
+// The units of SourceLag.
+const (
+	LagBytes   = "bytes"
+	LagOffsets = "offsets"
+)
+
+// ReportLag tells the pipeline the source is behind its server's head by
+// behind, in unit (LagBytes, LagOffsets), as it learns it: from a
+// keepalive, a fetch's high watermark. It must not block, and does nothing
+// in a dry run.
+func (r *Run) ReportLag(behind int64, unit string) {
+	if r.Lag != nil {
+		r.Lag(SourceLag{Behind: max(behind, 0), Unit: unit, At: time.Now()})
+	}
 }
 
 // Confirmer is a Source told of each checkpoint once it is saved, as a

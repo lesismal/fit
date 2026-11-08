@@ -464,6 +464,7 @@ func (p *pipe) wait() bool {
 	p.mu.Lock()
 	p.next, p.state = next, "scheduled"
 	p.mu.Unlock()
+	p.rt.opts.Log.Infof("pipeline %s waits for its schedule: it runs next at %s", p.cfg.Name, next.Format(time.RFC3339))
 	c, stop := clock.After(next.Sub(now))
 	select {
 	case <-c:

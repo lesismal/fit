@@ -202,6 +202,7 @@ func testSyncEndpoints(t *testing.T, call syncCaller, cs *Configs) {
 func TestSyncAPI(t *testing.T) {
 	f := startEnv(t, doc("x"), &config.Admin{}, runtime.Env{Metrics: observe.NewMetrics(), Engine: testEngine(t)})
 	testSyncEndpoints(t, apiCaller(t, f), f.configs)
+	testSyncDeadLetters(t, apiCaller(t, f), f.configs)
 	for _, r := range []struct{ method, path string }{{"PUT", "/sync/pipelines/job/checkpoint"}, {"POST", "/sync/pipelines/job/dry-run"}} {
 		req, _ := http.NewRequest(r.method, f.api+r.path, strings.NewReader(`{}`))
 		req.Header.Set("Content-Type", "text/plain")
@@ -229,6 +230,7 @@ func TestSyncConsole(t *testing.T) {
 		return code, got
 	}
 	testSyncEndpoints(t, call, f.configs)
+	testSyncDeadLetters(t, call, f.configs)
 	if !f.logged(`"ada": POST /sync/pipelines/live: 200`) {
 		t.Errorf("the action is not logged: %q", f.logLines())
 	}

@@ -184,7 +184,11 @@ func load(p *config.SyncPipeline, env *module.Env) (*modules, error) {
 		return k
 	}
 	for i := range p.Sinks {
-		m.sinks = append(m.sinks, sink(&p.Sinks[i]))
+		k := sink(&p.Sinks[i])
+		if _, ok := k.(*DeadLetters); ok {
+			errs = append(errs, p.Sinks[i].Sink.At.Field("module").Errorf("dead_letters is only a pipeline's dead_letter sink"))
+		}
+		m.sinks = append(m.sinks, k)
 	}
 	if p.DeadLetter != nil {
 		m.dl = sink(p.DeadLetter)
@@ -327,6 +331,16 @@ type Status struct {
 	// acknowledged: none when the source's records carry no commit time.
 	LastCommit time.Time `json:"last_commit,omitzero"`
 	LagSeconds float64   `json:"lag_seconds,omitempty"`
+	// ReadBytes is the size of the records read, as the queue reckons it.
+	ReadBytes int64 `json:"read_bytes"`
+	// SourceLag is how far behind its server's head the source last said
+	// it is, for sources that tell it.
+	SourceLag *SourceLag `json:"source_lag,omitempty"`
+	// Sinks are what each sink did, in the config's order.
+	Sinks []SinkStatus `json:"sinks,omitempty"`
+	// DeadLetters are what became of the dead letters, with a dead_letter
+	// sink.
+	DeadLetters *DeadLetterStatus `json:"dead_letters,omitempty"`
 }
 
 // QueueStatus is a pipeline's queue, as Status shows it.
@@ -396,6 +410,10 @@ type pipe struct {
 	pause pauseGate
 	force bool
 	meter meter
+	// sinkMeters count what each sink does, and errLog limits the error
+	// lines (metrics.go).
+	sinkMeters []sinkMeter
+	errLog     errLog
 }
 
 // status returns the pipeline's state, its job's progress as of now.
@@ -415,6 +433,10 @@ func (p *pipe) status() Status {
 func (rt *Runtime) newPipe(dir string, cfg *config.SyncPipeline, m *modules) *pipe {
 	p := &pipe{modules: m, rt: rt, cfg: cfg, key: key(dir, cfg), stopping: make(chan struct{}), done: make(chan struct{}), state: "starting"}
 	p.store = &store{dir: dir, name: cfg.Name}
+	p.sinkMeters = make([]sinkMeter, len(cfg.Sinks))
+	if d, ok := m.dl.(*DeadLetters); ok {
+		d.bind(dir, cfg.Name)
+	}
 	if h := rt.opts.Crash; h != nil {
 		p.store.crash = func(pt Point) bool { return h(cfg.Name, pt) }
 	}
@@ -483,6 +505,11 @@ func (p *pipe) runOnce(again bool) outcome {
 		if err == nil {
 			p.noteSaved(from)
 			p.setState("running", nil)
+			if from != nil {
+				log.Infof("pipeline %s runs from its checkpoint %s", p.cfg.Name, from)
+			} else {
+				log.Infof("pipeline %s runs from where its source starts", p.cfg.Name)
+			}
 			r := newRun(p)
 			p.mu.Lock()
 			p.cur = r
@@ -504,6 +531,7 @@ func (p *pipe) runOnce(again bool) outcome {
 				return out
 			case outKilled:
 				p.setState("killed", nil)
+				log.Warnf("pipeline %s was killed", p.cfg.Name)
 				return out
 			case outFailed:
 				p.setState("stopped", err)

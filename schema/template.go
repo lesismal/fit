@@ -153,7 +153,7 @@ var templateExamples = map[string]string{
 	"strip_prefix": `["/api"]`, "add_prefix": `"/v2"`, "path": `"/etc/fit/plugins/filter.wasm"`,
 	"config": `"{}"`, "vm_config": `"{}"`, "value": `"..."`,
 	"address": `"127.0.0.1:9000"`, "root": `"/srv/www"`, "env": `{"APP_ENV": "prod"}`,
-	"body": `"hello from fit\n"`, "respond.body": `"hello from fit\n"`, "respond.headers": `{"Cache-Control": "no-store"}`,
+	"dead_letters.path": `"errors.dead_letters.jsonl"`, "body": `"hello from fit\n"`, "respond.body": `"hello from fit\n"`, "respond.headers": `{"Cache-Control": "no-store"}`,
 	"failover": `"app-backup"`, "host_header": `"app.internal"`, "timeout": `"30s"`,
 	"default_ttl": `"10m"`, "stale_while_revalidate": `"1m"`, "stale_if_error": `"1h"`,
 	"slow_threshold": `"2s"`, "statuses": `[502, 503, 504]`,
