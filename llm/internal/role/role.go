@@ -13,11 +13,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"runtime/debug"
 	"sync"
 	"time"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/app/workbench"
@@ -76,6 +78,10 @@ type Base struct {
 	module *console.Module
 	// tokens issues and revokes the listener's link tokens.
 	tokens *linktoken.Manager
+	// gate is the access the role's listeners take connections by: the
+	// member's own, then the global one. ApplyAccess sets it on every
+	// Apply; the bindings' Filter, Allows, asks it.
+	gate access.Gate
 
 	mu         sync.Mutex
 	id, name   string
@@ -105,7 +111,7 @@ func New(h *app.Host, spec Spec) *Base {
 	host, _ := os.Hostname()
 	b := &Base{Spec: spec, H: h, Log: h.Log, Router: mesh.NewRouter(), Pool: pool.New(Workers, Queue),
 		started: time.Now().Unix(), hostname: host}
-	b.Mesh = mesh.New(mesh.Options{Self: b.Self, AcceptRoles: config.LLMPeerRoles(spec.Role), Engine: h.Engine, Log: h.Log}, b.Router)
+	b.Mesh = mesh.New(mesh.Options{Self: b.Self, AcceptRoles: config.LLMPeerRoles(spec.Role), Engine: h.Engine, Log: h.Log, Filter: b.Allows}, b.Router)
 	mesh.RegisterAdmin(b.Router, b.Mesh, b.EditMesh)
 	b.registerSettings()
 	b.setupTokens()
@@ -424,13 +430,34 @@ func dialReq(p config.LLMPeer) model.DialReq {
 }
 
 // ListenCertFiles is the certificate and key files l has its listener read,
-// which fit run's -watch-certs has applied again when they change.
-func ListenCertFiles(l *config.LLMListen) []string {
+// and the list files of the role's own access a, which fit run's
+// -watch-certs has applied again when they change.
+func ListenCertFiles(l *config.LLMListen, a *config.Access) []string {
+	out := access.Files(a)
 	if l == nil || l.CertFile == "" {
-		return nil
+		return out
 	}
-	return []string{l.CertFile, l.KeyFile}
+	return append(out, l.CertFile, l.KeyFile)
 }
+
+// ApplyAccess compiles a, the role's own access, and has the role's
+// listeners go by it, then by the global access, for the connections they
+// accept from now on; those open stay. A role calls it first in every
+// Apply, its member changed or not, for the global access may have
+// changed; its error fails the Apply, and the role goes on by the access it
+// had.
+func (b *Base) ApplyAccess(a *config.Access) error {
+	p, err := b.H.Access(a)
+	if err != nil {
+		return fmt.Errorf("access: %w", err)
+	}
+	b.gate.Set(p)
+	return nil
+}
+
+// Allows reports whether the role's access serves peer: the Filter of the
+// role's bindings.
+func (b *Base) Allows(peer netip.AddrPort) bool { return b.gate.Allows(peer) }
 
 // selfSigned gives a self_signed listener without a certificate one: made
 // once, used at once, and kept so that it outlives a restart and the pins of

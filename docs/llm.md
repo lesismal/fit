@@ -52,6 +52,7 @@ examples are JSON; the same fields work in a .conf or YAML config. The
 | `name` | string | the host's name | The name the role shows its peers: up to 64 characters, no control characters, no spaces around it. |
 | `console` | object | none | The role's web pages. See [The pages](#the-pages). |
 | `listen` | object | none | Where the role takes links from its peers. |
+| `access` | object | none: the global `access` decides | `{allow, deny, allow_files, deny_files}`: the client addresses `listen`, and a proxy's `api`, take connections from, deciding before the global [`access`](reference/config.md#access); a connection refused is closed as it is accepted. It is set again on every apply, the member changed or not, without listening anew; links already open stay. Its files are watched as certificate files are. Not the role's pages. |
 | `tokens` | array | none | The tokens the role's listener issued, which its peers link with: `{id, name, hash, created_at, expires_at, note, members}`, at most 1,024. Made by the pages, the Admin API and `fit token`, not by hand. See [Tokens](#tokens). |
 | `peers` | array | none | The peers the role dials and keeps linked to; at most 64. |
 | `limits` | object | the defaults | Bounds on the role's links. |
@@ -455,10 +456,11 @@ The roles link over a mesh of WebSocket connections.
 
 ### Transport and authentication
 
-A role with `listen` adds a binding on the listeners' engine at `listen.address`. It upgrades only
-`/ws`; any other path is refused with 403. A dialer connects to `wss://<address>/ws` when its peer
-has a `pin` or a `ca_file`, and to `ws://<address>/ws` otherwise, which only a loopback address
-allows; the whole dial, TLS and authentication included, is bounded by 10 seconds.
+A role with `listen` adds a binding on the listeners' engine at `listen.address`, which closes a
+connection from an address the role's `access`, then the global one, refuses as it accepts it. It
+upgrades only `/ws`; any other path is refused with 403. A dialer connects to `wss://<address>/ws`
+when its peer has a `pin` or a `ca_file`, and to `ws://<address>/ws` otherwise, which only a
+loopback address allows; the whole dial, TLS and authentication included, is bounded by 10 seconds.
 
 Off loopback, links go over TLS 1.3, served by fib's TLS, whose handshake takes no worker while it
 waits. The dialer checks the listener's certificate: by its `pin`, the SHA-256 of the certificate,

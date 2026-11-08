@@ -86,7 +86,7 @@ func (wsTransport) Listen(engine *fib.Engine, addr string, o transport.ListenOpt
 	path := u.Path
 	switch u.Scheme {
 	case "ws":
-		return transport.ListenFib(engine, u.Host, NewServer(transport.FibHandler(open), path), func(hostport string) string { return "ws://" + hostport + path })
+		return transport.ListenFib(engine, u.Host, NewServer(transport.FibHandler(open), path), o.Filter, func(hostport string) string { return "ws://" + hostport + path })
 	case "wss":
 		if o.Cert == nil {
 			return nil, errors.New("wss: a listener needs a certificate")
@@ -94,7 +94,7 @@ func (wsTransport) Listen(engine *fib.Engine, addr string, o transport.ListenOpt
 		s := &Server{path: path, tls: true}
 		s.inner = transport.FibHandlerVia(open, s.framesOf)
 		h := fibtls.NewServer(transport.ServerTLSConfig(*o.Cert, ALPN), s)
-		return transport.ListenFib(engine, u.Host, h, func(hostport string) string { return "wss://" + hostport + path })
+		return transport.ListenFib(engine, u.Host, h, o.Filter, func(hostport string) string { return "wss://" + hostport + path })
 	}
 	return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// and wss:// are", u.Scheme)
 }

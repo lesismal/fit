@@ -20,6 +20,7 @@ import (
 
 	fibhttp "github.com/lesismal/fib/http"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/llm/internal/mesh"
@@ -39,7 +40,8 @@ func init() {
 			return c.LLM.Node
 		},
 		New:       func(h *app.Host) (app.Role, error) { return New(h), nil },
-		CertFiles: func(c *config.Config) []string { return role.ListenCertFiles(c.LLM.Node.Listen) },
+		Check:     func(c *config.Config) error { return access.Check(c.LLM.Node.Access) },
+		CertFiles: func(c *config.Config) []string { return role.ListenCertFiles(c.LLM.Node.Listen, c.LLM.Node.Access) },
 	})
 }
 
@@ -141,6 +143,9 @@ func (n *Node) Apply(member any) error {
 	m, ok := member.(*config.LLMNode)
 	if !ok || m == nil {
 		return errors.New("llm.node: no member")
+	}
+	if err := n.ApplyAccess(m.Access); err != nil {
+		return err
 	}
 	models := make([]model.Model, 0, len(m.Models))
 	for _, c := range m.Models {

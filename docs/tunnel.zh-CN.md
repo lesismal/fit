@@ -111,6 +111,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | `password` | 无：只接受令牌注册 | 已弃用：所有节点和 proxy 都可用来注册的密码，以 HMAC 证明知道它，从不发送。本版本仍接受，有成员使用时页面会给出警告；下一版本将拒绝 |
 | `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密，从而认证每个帧；节点和 proxy 需要相同的密码。用令牌注册的链路由令牌与它经 HKDF 派生密钥 |
 | `listeners` | 无：由页面添加 | `{protocol: tls\|wss\|quic\|tcp\|ws, address, path, cert_file, key_file}`；ws 或 wss 监听的路径默认为 `/tunnel`，只有它们有路径。地址不是回环地址（`127.0.0.0/8`、`::1`、`localhost`；主机留空即所有地址）的 `tcp` 或 `ws` 监听，除非设置了 `body_password`，否则会被拒绝（见[链路靠什么保护](#链路靠什么保护)）。tls、wss 或 quic 监听出示其 `cert_file` 与 `key_file` 中的证书（每次应用成员时读取，磁盘上的文件变化时再次读取：`fit run -watch-certs`，默认开启），没有时出示 hub 自己的证书（见下） |
+| `access` | 无：由全局 `access` 决定 | `{allow, deny, allow_files, deny_files}`：监听和 `console_socket` 接受哪些客户端地址，先于全局 [`access`](reference/config.md#access) 决定；被拒绝的连接在接受时即关闭，quic 监听丢弃来自被拒绝地址的数据报。改动作用于之后的新连接，不重新监听；已打开的连接保留。不包括控制台页面 |
 | `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供 proxy 的 `web_proxies` 使用，任何路径都应答；需要 `console`，不设密码时用 hub 的密码，`max_conns` 默认 32。10 秒内没有证明知道密码的 WebSocket 会被关闭，同一 IP 地址至多有 `max_conns` 的四分之一处于这种状态 |
 | `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；进行中的握手超过 `max_handshakes` 的一半后，客户端须先以 QUIC Retry 证明自己的地址才能开始握手。`cert` 和 `key` 是 hub 自己的证书，没有 `cert_file` 的 tls、wss 和 quic 监听出示它；二者须同时设置。这样的监听需要证书而没有设置时，hub 生成自签名证书并保存：有 `admin.store` 时写入这里；否则保存在配置旁、按配置命名的文件中，权限 0600（`fit.json` 旁的 `fit.tunnel.hub.pem`，或配置目录中的同名文件） |
 | `register_timeout` | 10s | 一条链路注册的时限 |
@@ -141,6 +142,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | `name`、`meta`、`hubs` | | 同节点 |
 | `forwards` | 无 | `{listen, node, service, hub}`：不指定 `hub` 时，隧道分散到所有有这个节点的 hub，到节点路径更快的 hub 分得更多 |
 | `web_proxies` | 无 | `{name, listen, url, password, max_conns}`：经 hub 的 `console_socket` 在本地提供它的控制台，`url` 是它的 `ws://host:port/`；`max_conns` 默认 32 |
+| `access` | 无：由全局 `access` 决定 | 同 hub，作用于 `forwards` 和 `web_proxies` 接受的连接。节点除控制台外不监听任何地址，因此没有这个字段 |
 | `open_timeout` | 20s | 打开一条隧道（经 hub 到服务）的时限 |
 | `idle_timeout` | 2h | 同节点 |
 | `max_tunnels` | 4096 | 同时打开的隧道数；超出时新接受的连接立即关闭 |
@@ -337,6 +339,8 @@ hub 的控制台在无法直接访问的地方，可以经加密 WebSocket 访�
   角色的连接。
 - 角色切换到新成员时保留没有变化的部分：hub 的链路，设置未变的 hub 对应的节点或 proxy 链路，同一地址上
   的转发。
+- `access`（角色自己的和全局的）在每次应用时重新设置，无论角色的成员是否变化，都不会重新打开监听；已打开的
+  连接不会再次检查。它的 `allow_files` 和 `deny_files` 像证书文件一样被监视。
 - 无法监听的监听器或转发仍保留在配置中，在页面上显示错误，并在下一份配置时重试。
 - 每种资源都有上限：hub 的 `max_links`、`max_links_per_peer`、`max_peers` 和 `max_tunnels`，每条链路
   64 条隧道，各角色的 `max_tunnels` 和 `idle_timeout`，链路和隧道上的 TCP keep-alive，握手完成后在握手

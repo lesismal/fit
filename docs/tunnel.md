@@ -118,6 +118,7 @@ there, and shows the token itself once, for the node's or proxy's `token` (see
 | `password` | none: only tokens register | deprecated: a password every node and proxy may register with, proven with an HMAC, never sent. Taken in this release, with a warning on the pages while a member uses it; refused in the next |
 | `body_password` | none | AES-256-GCM on every frame's body, which authenticates every frame; nodes and proxies need the same. A link that registers with a token keys it from the token and this by HKDF |
 | `listeners` | none: the pages add them | `{protocol: tls\|wss\|quic\|tcp\|ws, address, path, cert_file, key_file}`; a ws or wss listener's path is `/tunnel` by default, and only those have one. A `tcp` or `ws` listener on an address that is not a loopback one (`127.0.0.0/8`, `::1`, `localhost`; an empty host is every address) is refused unless `body_password` is set (see [What protects a link](#what-protects-a-link)). A tls, wss or quic listener presents the certificate of its `cert_file` and `key_file`, read each time the member is applied and again when they change on disk (`fit run -watch-certs`, on by default), or the hub's own (below) |
+| `access` | none: the global `access` decides | `{allow, deny, allow_files, deny_files}`: the client addresses the listeners and `console_socket` take, deciding before the global [`access`](reference/config.md#access); a connection refused is closed as it is accepted, and a quic listener drops the datagrams of an address refused. A change applies to new connections without listening anew; those open stay. Not the console's pages |
 | `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for proxies' `web_proxies`, answering on any path; it needs `console`, its password is the hub's when left out, and `max_conns` is 32. A WebSocket that has not proven the password within 10s is closed, and one IP address may have a quarter of `max_conns` open that have not |
 | `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; past half of `max_handshakes`, a client proves its address with a QUIC Retry before its handshake starts. `cert` and `key` are the hub's own certificate, which its tls, wss and quic listeners without `cert_file` present; they go together. When such a listener needs one and none is set, the hub makes a self-signed one and keeps it: here, with `admin.store`; or else in a file beside the config, mode 0600, named after it (`fit.tunnel.hub.pem` beside `fit.json`, or in a directory of configs) |
 | `register_timeout` | 10s | how long a link may take to register |
@@ -148,6 +149,7 @@ there, and shows the token itself once, for the node's or proxy's `token` (see
 | `name`, `meta`, `hubs` | | as a node's |
 | `forwards` | none | `{listen, node, service, hub}`: without `hub`, the tunnels spread over every hub that has the node, more of them through the hubs whose path to the node is faster |
 | `web_proxies` | none | `{name, listen, url, password, max_conns}`: a hub's console served locally through its `console_socket`, whose `ws://host:port/` is `url`; `max_conns` is 32 |
+| `access` | none: the global `access` decides | as a hub's, for the connections `forwards` and `web_proxies` accept. A node listens on nothing but its console, so it has none |
 | `open_timeout` | 20s | the opening of a tunnel, through the hub to the service |
 | `idle_timeout` | 2h | as a node's |
 | `max_tunnels` | 4096 | the tunnels open at once; a connection past it is closed as it is accepted |
@@ -398,6 +400,9 @@ password; the console's own login still applies.
   included, and the gateway's `limits` apply to the roles' connections too.
 - A role moves to a new member without dropping what is unchanged: a hub's links, a node's or
   proxy's links to a hub whose settings are the same, a forward on the same address.
+- `access`, a role's own and the global one, is set again on every apply, the role's member changed
+  or not, without a listener opened anew; a connection already open is not checked again. Its
+  `allow_files` and `deny_files` are watched as certificate files are.
 - A listener or forward that cannot listen is kept in the config, shown on the pages with its
   error, and tried again with the next config.
 - Every resource is bounded: the hub's `max_links`, `max_links_per_peer`, `max_peers` and

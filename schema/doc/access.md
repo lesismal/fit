@@ -23,6 +23,12 @@ takes PROXY headers, decides later instead: a refused HTTP request is answered `
 PROXY header names, never `X-Forwarded-For`'s. A change applies to connections and udp sessions that
 start after it.
 
+The roles that listen, `tunnel.hub`, `tunnel.proxy`, `llm.hub`, `llm.node` and `llm.proxy`, each
+take an `access` of their own for every socket the role listens on (a hub's listeners and
+`console_socket`, a proxy's `forwards` and `web_proxies`, an LLM role's `listen` and a proxy's
+`api`), refusing at accept; it and the global one are set again each time the config is applied,
+without listening anew. The roles' console pages are not gated yet.
+
 A list file has an address or prefix on each line, with blank lines and what follows `#` or `;`
 left out; it is read when the config is applied, and the config applied again when it changes.
 An allow list on a listener that obtains certificates with ACME's HTTP-01 or TLS-ALPN-01 challenges

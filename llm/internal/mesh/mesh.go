@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"net/netip"
 	"slices"
 	"sort"
 	"strings"
@@ -88,6 +89,13 @@ type Options struct {
 	Engine *fib.Engine
 	// Log is where the mesh says what it does; nil says nothing.
 	Log *logs.Logger
+	// Filter, when not nil, is the listener binding's fib.Binding.Filter,
+	// asked of every connection it accepts before it costs anything: false
+	// closes it. The role's access gate, whose policy changes without the
+	// listener starting again.
+	// Filter 非 nil 时作为监听绑定的 fib.Binding.Filter，在每个接受的连接产生任何开销前询问：
+	// 返回 false 即关闭。它是角色的访问控制 gate，其策略变化时监听无需重启。
+	Filter func(netip.AddrPort) bool
 }
 
 // log writes msg and its key-value pairs at level.

@@ -94,7 +94,7 @@ func (relay) Listen(engine *fib.Engine, addr string, o transport.ListenOptions, 
 	if err = bindcheck.Free("udp", hostport); err != nil {
 		return nil, err
 	}
-	if l.index, err = engine.AddBinding(fib.Binding{Network: "udp", Addr: hostport, Handler: l}); err != nil {
+	if l.index, err = engine.AddBinding(fib.Binding{Network: "udp", Addr: hostport, Handler: l, Filter: o.Filter}); err != nil {
 		return nil, err
 	}
 	return l, nil

@@ -121,6 +121,23 @@ func Compile(a *config.Access, files map[string][sha256.Size]byte) (*List, error
 	return l, nil
 }
 
+// Check compiles a and returns why it does not compile, reading its files:
+// what a role's app.Info.Check runs on its own access.
+func Check(a *config.Access) error {
+	_, err := Compile(a, nil)
+	return err
+}
+
+// Files returns a's list files, allow_files then deny_files: what a role's
+// app.Info.CertFiles adds, for the config to be applied again when one
+// changes. nil for a nil a.
+func Files(a *config.Access) []string {
+	if a == nil {
+		return nil
+	}
+	return append(slices.Clone(a.AllowFiles), a.DenyFiles...)
+}
+
 // ReadFile reads a list file: an IP address or CIDR prefix on each line,
 // with blank lines and what follows a '#' or ';' left out, as the lists
 // published for firewalls are written. It returns the file's SHA-256 too.

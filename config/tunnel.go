@@ -72,6 +72,7 @@ type TunnelHub struct {
 	Tokens               []LinkToken          `json:"tokens,omitempty" doc:"The tokens the hub issued, which nodes and proxies register with in place of the password: each its own credential, kept as a hash, with an optional expiry. The hub's pages, its Admin API module and fit token make, list, change and revoke them; not written by hand."`
 	BodyPassword         string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. A link registered with a token derives its keys from the token and this, by HKDF; one with the password, from the password's PBKDF2. It applies to the links that open after it changes."`
 	Listeners            []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. A tcp or ws listener on an address that is not a loopback one needs body_password: use tls, wss or quic there. None when left out: the console's pages add them."`
+	Access               *Access              `json:"access,omitempty" doc:"The client addresses the hub's listeners and its console_socket take, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams a quic listener gets from an address it refuses are dropped. A change applies to the connections that open from then on, without listening anew; those already open stay. Not its console's pages."`
 	ConsoleSocket        *TunnelConsoleSocket `json:"console_socket,omitempty" doc:"An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."`
 	QUIC                 *TunnelHubQUIC       `json:"quic,omitempty" doc:"The hub's certificate, which its tls, wss and quic listeners present unless they have cert_file, and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a listener needs one and none is set."`
 	RegisterTimeout      Duration             `json:"register_timeout,omitempty" default:"\"10s\"" doc:"How long a link may take to register once it is open; it is closed past it. 10s when left out."`
@@ -152,6 +153,7 @@ type TunnelProxy struct {
 	Hubs        []TunnelUplink    `json:"hubs,omitempty" doc:"The hubs the proxy links to and registers with. None when left out: the console's pages add them."`
 	Forwards    []TunnelForward   `json:"forwards,omitempty" doc:"Local addresses whose connections are tunneled to a node's service."`
 	WebProxies  []TunnelWebProxy  `json:"web_proxies,omitempty" doc:"Local addresses that serve a hub's console pages through its encrypted console_socket."`
+	Access      *Access           `json:"access,omitempty" doc:"The client addresses the proxy's forwards and web_proxies take, deciding before the global access: a connection it refuses is closed as soon as it is accepted. A change applies to the connections that open from then on, without listening anew; those already open stay. Not its console's pages."`
 	OpenTimeout Duration          `json:"open_timeout,omitempty" default:"\"20s\"" doc:"How long the opening of a tunnel may take, through the hub to the node and on to the service. 20s when left out."`
 	IdleTimeout Duration          `json:"idle_timeout,omitempty" default:"\"2h\"" doc:"How long a tunnel may carry nothing either way before it is closed. 2h when left out."`
 	MaxTunnels  int               `json:"max_tunnels,omitempty" min:"0" default:"4096" doc:"The most tunnels open at once, over every forward; a connection past it is closed as soon as it is accepted. 4096 when left out or 0."`
@@ -513,6 +515,7 @@ func (c *Config) checkTunnel(add func(Value, string, ...any)) {
 
 func checkTunnelHub(s *TunnelHub, add func(Value, string, ...any)) {
 	checkRoleConsole(s.Console, add)
+	s.Access.check(add)
 	if msg := checkTunnelName(s.Name); msg != "" {
 		add(s.At.Field("name"), "%s", msg)
 	}
@@ -635,6 +638,7 @@ func checkTunnelUplinks(ups []TunnelUplink, at Value, add func(Value, string, ..
 
 func checkTunnelProxy(cl *TunnelProxy, add func(Value, string, ...any)) {
 	checkRoleConsole(cl.Console, add)
+	cl.Access.check(add)
 	if msg := checkTunnelName(cl.Name); msg != "" {
 		add(cl.At.Field("name"), "%s", msg)
 	}

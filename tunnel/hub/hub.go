@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/certpin"
@@ -64,15 +65,16 @@ func init() {
 			return c.Tunnel.Hub
 		},
 		New:       func(h *app.Host) (app.Role, error) { return New(h), nil },
+		Check:     func(c *config.Config) error { return access.Check(c.Tunnel.Hub.Access) },
 		CertFiles: func(c *config.Config) []string { return certFiles(c.Tunnel.Hub) },
 	})
 }
 
-// certFiles is the certificate and key files of cfg's listeners, which each
-// Apply reads, and fit run's -watch-certs has applied again when they
-// change.
+// certFiles is the certificate and key files of cfg's listeners, and its
+// access's list files, which each Apply reads, and fit run's -watch-certs
+// has applied again when they change.
 func certFiles(cfg *config.TunnelHub) []string {
-	var out []string
+	out := access.Files(cfg.Access)
 	for _, l := range cfg.Listeners {
 		if l.CertFile != "" && config.TunnelTakesTLS(l.Protocol) {
 			out = append(out, l.CertFile, l.KeyFile)
@@ -213,6 +215,10 @@ type Hub struct {
 	manage *linktoken.Manager
 
 	set atomic.Pointer[settings]
+	// gate is the access the listeners and the console socket take
+	// connections by: the member's own, then the global one. Each Apply
+	// sets it; the bindings' Filter asks it.
+	gate access.Gate
 
 	// amu is held for a whole Apply or Stop, and guards what they change.
 	amu       sync.Mutex
@@ -334,6 +340,14 @@ func (s *Hub) Apply(member any) error {
 	if s.stopped {
 		return app.ErrStopped
 	}
+	// The access first: a list that does not compile fails the Apply
+	// before anything changes. Set on every Apply, kept listeners or not,
+	// for the global access may have changed when the member has not;
+	// only the connections that open from now on are checked.
+	policy, err := s.h.Access(cfg.Access)
+	if err != nil {
+		return fmt.Errorf("access: %w", err)
+	}
 	first := !s.started
 	next := &settings{cfg: cfg, name: cfg.HubName()}
 	if cfg.BodyPassword != "" {
@@ -373,6 +387,7 @@ func (s *Hub) Apply(member any) error {
 		return err
 	}
 	s.set.Store(next)
+	s.gate.Set(policy)
 
 	var errs []error
 	if err := s.console.Apply(cfg.Console); err != nil {
@@ -563,7 +578,7 @@ func (s *Hub) applyListeners(want []config.TunnelListener) []error {
 			continue
 		}
 		q := s.settings().cfg.QUIC
-		o := transport.ListenOptions{Cert: certs[i].cert, Log: s.log,
+		o := transport.ListenOptions{Cert: certs[i].cert, Log: s.log, Filter: s.gate.Allows,
 			QUIC: transport.QUIC{IdleTimeout: q.Idle(), KeepAlive: q.Ping(), HandshakeTimeout: q.Handshake(), MaxHandshakes: q.Handshakes(), MaxConns: s.settings().cfg.Links()}}
 		tl, err := transport.Listen(s.h.Engine, lc.URL(), o, s.accept)
 		if err != nil {

@@ -83,7 +83,7 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 		m.lerr = err.Error()
 		return Errorf(model.CodeInternal, "%s", m.lerr)
 	}
-	i, err := m.opts.Engine.AddBinding(fib.Binding{Addr: cfg.Addr, Handler: l})
+	i, err := m.opts.Engine.AddBinding(fib.Binding{Addr: cfg.Addr, Handler: l, Filter: opts.Filter})
 	if err != nil {
 		m.lerr = "listen " + cfg.Addr + ": " + err.Error()
 		return Errorf(model.CodeInternal, "%s", m.lerr)
