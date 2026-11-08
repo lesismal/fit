@@ -4225,6 +4225,25 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **与计划的差异**：没有遗漏；没有 I182b。
 - **缺口**：计划 I182 小节中的决定，待审查。尚未读到记录的管道没有检查点（决定 11）。不会自行重新快照；没有对分片集群试过。
   本项没有在 Linux 上或在整个套件下运行（留给合并时）。
+### I183 MongoDB 作为目标 — 已完成
+
+- **目标 `mongo`**（`sync/mongo/sink.go`，包 `syncmongo`）：经 I181 的客户端做无序 bulk write；insert、update 和 message 写成
+  按 `_id` 替换的 upsert，delete 按 `_id` 删除，DDL 被确认但不写；`_id` 取自键（单字段取其值，多字段组成文档，带标记的
+  ObjectId 即 ObjectId）或行中的 `_id`；数据库和集合取自命名空间 `db.collection`，或 `database` 和 `collection`；一个批次中
+  只发送每篇文档的最后一条记录，每个集合一条 `update` 和一条 `delete`，按 `max_request_bytes` 切分；某篇文档失败时，从其第一条
+  记录起按互不相同文档组成的段重写，以准确指出失败的记录；写错误按代码视为永久或重试；`write_concern`、`journal`、
+  `write_timeout`；实现 `ParallelSink` 和 `Tester`（在主节点上 ping）。连接参数在 `sync/mongo/sinkconn.go`（不含密码的
+  `uri` 或 `hosts`、`password_env`、TLS 文件）。已在 `modules/standard` 中注册。
+- **文档**：schema 和参考（章节 `sync_sinks_mongo.md`），模板，`schema-zh.js` 中的中文描述，`docs/configuration*.md` 的
+  `sync` 一行。
+- **测试**：`syncmongo` 对进程内的假 MongoDB（OP_MSG 文档序列，按 `_id` 执行 update 和 delete，写错误、命令错误、write
+  concern 错误、关闭的连接）：被拒绝的参数，写入并重放的文档，写入目标，发送前被拒绝的记录，分段找出失败的文档，命令切分，
+  来自 `generate` 的流水线（覆盖率 98.6%）。`test/sync/mongo_sink_test.go` 对 MongoDB 6、7 和 8 副本集
+  （`test/sync/mongo.sh`）：带重放的随机变更收敛，在随机点被杀、走 TLS 的流水线与未被杀的一次相同，包含各种 BSON 类型的集合
+  逐字节复制，校验器的拒绝为永久错误，连接测试。在 macOS 上于竞态检测器下运行，针对为此创建的 `i183-mongo*` 容器。
+- **与计划的差异**：MySQL 到 MongoDB 和 MongoDB 到 MongoDB 的流水线有待 I174 和 I182 的源；经目标复制集合代替后者。代码约
+  620 行，测试约 950 行；没有 I183b。
+- **缺口**：计划 I183 小节中的决定，待审查。目标的连接参数要在合并时与 I182 的合为一套。没有事务（I181 没有 session）。
 
 ### I184 Kafka 客户端 — 已完成
 

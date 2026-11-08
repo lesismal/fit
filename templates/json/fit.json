@@ -8024,6 +8024,119 @@
                 // "max_records": 100000,
               // },
 
+              // // Or mongo, with every one of its params:
+              // // Writes records to MongoDB (6, 7 and 8), a replica set's primary, a standalone server or a
+              // // mongos, as unordered bulk writes: inserts, updates and messages as upserts that replace the
+              // // document whose _id the record's key makes with the row, deletes as deletes by that _id, into
+              // // the database and collection the namespace (db.collection) or database and collection name; a
+              // // replay converges. A document the server refuses (a validator, a unique index, a document too
+              // // large) fails its record, which on_error takes, those before it written; other errors are
+              // // retried by the pipeline.
+              // "module": "mongo",
+              // "params": {
+                // // The servers as a connection string,
+                // // mongodb://[user@]host1[:port1][,host2...][/authdb][?options], with the options replicaSet,
+                // // authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile,
+                // // connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any
+                // // other is refused, and so is a password in it: password_env holds it. mongodb+srv is not
+                // // read. uri or hosts.
+                // // string.
+                // "uri": "/verify",
+
+                // // The servers to find the primary from, host or host:port (27017 when left out), in place of
+                // // uri: a replica set's members (the others are learned from them), a standalone server, or
+                // // mongos routers.
+                // // list of string.
+                // "hosts": [],
+
+                // // The replica set's name: a server of another set is not taken. Any set when left out.
+                // // string.
+                // "replica_set": "",
+
+                // // The user to authenticate as, with SCRAM-SHA-256 and password_env; no authentication when
+                // // left out.
+                // // string.
+                // "username": "fit",
+
+                // // The environment variable holding username's password, read when the pipeline loads.
+                // // string.
+                // "password_env": "",
+
+                // // The database the user is defined in. admin when left out.
+                // // string.
+                // "auth_source": "",
+
+                // // Connect over TLS, the servers' certificates checked against the system's roots or ca_file's;
+                // // the check cannot be turned off. These TLS params replace the connection string's TLS
+                // // options.
+                // // boolean.
+                // "tls": true,
+
+                // // A PEM file of the certificates the servers' are checked against, in place of the system's
+                // // roots, for a CA of its own; needs tls.
+                // // string.
+                // "ca_file": "/etc/fit/ca.pem",
+
+                // // A PEM file of a client certificate, presented to servers that ask for one; with its key in
+                // // it too, as MongoDB's tlsCertificateKeyFile, unless key_file is set. Needs tls.
+                // // string.
+                // "cert_file": "/etc/fit/example.com.pem",
+
+                // // The PEM file of cert_file's private key, when cert_file does not hold it.
+                // // string.
+                // "key_file": "/etc/fit/example.com.key",
+
+                // // The name the servers' certificates must have, and the TLS server name sent; each server's
+                // // host when left out.
+                // // string.
+                // "server_name": "",
+
+                // // How long connecting to a server may take, its TLS, hello and authentication. 10s when left
+                // // out or 0.
+                // // duration, as "1.5s" or "2m"; default "10s".
+                // "connect_timeout": "10s",
+
+                // // How long one command, a bulk write of up to max_request_bytes, may take. 60s when left out
+                // // or 0.
+                // // duration, as "1.5s" or "2m"; default "60s".
+                // "timeout": "60s",
+
+                // // The most connections open to the primary, shared by a job's parallel writers. 4 when left
+                // // out or 0.
+                // // integer, 0 to 1000; default 4.
+                // "max_conns": 4,
+
+                // // The database every record is written to. When left out, the record's namespace's part before
+                // // its first '.', a namespace without one failing its record.
+                // // string.
+                // "database": "",
+
+                // // The collection every record is written to. When left out, the record's namespace after its
+                // // first '.', or the whole namespace when it has none and database is set.
+                // // string.
+                // "collection": "",
+
+                // // The write concern's w: majority, a number of members (1 or more; 0, unacknowledged writes,
+                // // is refused), or a tag set's name. The server's default (majority on a replica set) when left
+                // // out.
+                // // string.
+                // "write_concern": "",
+
+                // // Ask for the writes to be in the journal before they are acknowledged (j: true).
+                // // boolean.
+                // "journal": true,
+
+                // // How long the server waits for the write concern (wtimeout) before it answers with an error,
+                // // which the pipeline retries; the writes stay. Without a limit when left out.
+                // // duration, as "1.5s" or "2m".
+                // "write_timeout": "10s",
+
+                // // The most bytes of documents in one bulk write; a batch larger is sent in several. A document
+                // // larger than 16 MiB fails its record. 8 MiB when left out or 0.
+                // // integer, 0 to 41943040; default 8388608.
+                // "max_request_bytes": 8388608,
+              // },
+
               // // Or redis, with every one of its params:
               // // Writes records to Redis or Valkey, pipelined: with mode stream, each record an entry added
               // // to a stream named from its namespace with XADD, its fields the row's (form fields) or the
@@ -8902,6 +9015,119 @@
               // // left out or 0.
               // // integer, 0 or more; default 100000.
               // "max_records": 100000,
+            // },
+
+            // // Or mongo, with every one of its params:
+            // // Writes records to MongoDB (6, 7 and 8), a replica set's primary, a standalone server or a
+            // // mongos, as unordered bulk writes: inserts, updates and messages as upserts that replace the
+            // // document whose _id the record's key makes with the row, deletes as deletes by that _id, into
+            // // the database and collection the namespace (db.collection) or database and collection name; a
+            // // replay converges. A document the server refuses (a validator, a unique index, a document too
+            // // large) fails its record, which on_error takes, those before it written; other errors are
+            // // retried by the pipeline.
+            // "module": "mongo",
+            // "params": {
+              // // The servers as a connection string,
+              // // mongodb://[user@]host1[:port1][,host2...][/authdb][?options], with the options replicaSet,
+              // // authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile,
+              // // connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any
+              // // other is refused, and so is a password in it: password_env holds it. mongodb+srv is not
+              // // read. uri or hosts.
+              // // string.
+              // "uri": "/verify",
+
+              // // The servers to find the primary from, host or host:port (27017 when left out), in place of
+              // // uri: a replica set's members (the others are learned from them), a standalone server, or
+              // // mongos routers.
+              // // list of string.
+              // "hosts": [],
+
+              // // The replica set's name: a server of another set is not taken. Any set when left out.
+              // // string.
+              // "replica_set": "",
+
+              // // The user to authenticate as, with SCRAM-SHA-256 and password_env; no authentication when
+              // // left out.
+              // // string.
+              // "username": "fit",
+
+              // // The environment variable holding username's password, read when the pipeline loads.
+              // // string.
+              // "password_env": "",
+
+              // // The database the user is defined in. admin when left out.
+              // // string.
+              // "auth_source": "",
+
+              // // Connect over TLS, the servers' certificates checked against the system's roots or ca_file's;
+              // // the check cannot be turned off. These TLS params replace the connection string's TLS
+              // // options.
+              // // boolean.
+              // "tls": true,
+
+              // // A PEM file of the certificates the servers' are checked against, in place of the system's
+              // // roots, for a CA of its own; needs tls.
+              // // string.
+              // "ca_file": "/etc/fit/ca.pem",
+
+              // // A PEM file of a client certificate, presented to servers that ask for one; with its key in
+              // // it too, as MongoDB's tlsCertificateKeyFile, unless key_file is set. Needs tls.
+              // // string.
+              // "cert_file": "/etc/fit/example.com.pem",
+
+              // // The PEM file of cert_file's private key, when cert_file does not hold it.
+              // // string.
+              // "key_file": "/etc/fit/example.com.key",
+
+              // // The name the servers' certificates must have, and the TLS server name sent; each server's
+              // // host when left out.
+              // // string.
+              // "server_name": "",
+
+              // // How long connecting to a server may take, its TLS, hello and authentication. 10s when left
+              // // out or 0.
+              // // duration, as "1.5s" or "2m"; default "10s".
+              // "connect_timeout": "10s",
+
+              // // How long one command, a bulk write of up to max_request_bytes, may take. 60s when left out
+              // // or 0.
+              // // duration, as "1.5s" or "2m"; default "60s".
+              // "timeout": "60s",
+
+              // // The most connections open to the primary, shared by a job's parallel writers. 4 when left
+              // // out or 0.
+              // // integer, 0 to 1000; default 4.
+              // "max_conns": 4,
+
+              // // The database every record is written to. When left out, the record's namespace's part before
+              // // its first '.', a namespace without one failing its record.
+              // // string.
+              // "database": "",
+
+              // // The collection every record is written to. When left out, the record's namespace after its
+              // // first '.', or the whole namespace when it has none and database is set.
+              // // string.
+              // "collection": "",
+
+              // // The write concern's w: majority, a number of members (1 or more; 0, unacknowledged writes,
+              // // is refused), or a tag set's name. The server's default (majority on a replica set) when left
+              // // out.
+              // // string.
+              // "write_concern": "",
+
+              // // Ask for the writes to be in the journal before they are acknowledged (j: true).
+              // // boolean.
+              // "journal": true,
+
+              // // How long the server waits for the write concern (wtimeout) before it answers with an error,
+              // // which the pipeline retries; the writes stay. Without a limit when left out.
+              // // duration, as "1.5s" or "2m".
+              // "write_timeout": "10s",
+
+              // // The most bytes of documents in one bulk write; a batch larger is sent in several. A document
+              // // larger than 16 MiB fails its record. 8 MiB when left out or 0.
+              // // integer, 0 to 41943040; default 8388608.
+              // "max_request_bytes": 8388608,
             // },
 
             // // Or redis, with every one of its params:

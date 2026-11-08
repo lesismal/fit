@@ -346,7 +346,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I180 | PostgreSQL as a sink: `ON CONFLICT` upserts, deletes, `COPY` for snapshots | I177 | todo |
 | I181 | A MongoDB client: BSON, `OP_MSG`, the primary found, SCRAM-SHA-256, TLS | I163 | done |
 | I182 | MongoDB as a source: change streams from a resume token, a snapshot by `_id` | I181 | done |
-| I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | todo |
+| I183 | MongoDB as a sink: bulk upserts and deletes by `_id` | I181 | done |
 | I184 | A Kafka client: metadata, produce, fetch, offsets, every compression, SASL, TLS | I163 | done |
 | I185 | Kafka as a source and a sink, offsets in fit's checkpoint; TiDB through TiCDC | I184, I176 | todo |
 | I186 | Redis as a source (streams) and a sink (streams or keys) | I163 | done |
@@ -5433,6 +5433,68 @@ track can place it); exactly-once into sinks with no transactions.
   per-document errors read, write concern from the config.
 - **Done when**: MySQL-to-MongoDB and MongoDB-to-MongoDB pipelines converge across replays.
 - **Touches**: `sync/mongo`, `test/sync`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-08; each stands until the user rules on it):
+
+1. **Where it lives.** Package `sync/mongo` (`syncmongo`), beside I182's source: the sink in
+   `sink.go` and its connection params in `sinkconn.go` (`uri` or `hosts`, `replica_set`,
+   `username`, `password_env`, `auth_source`, `tls`, `ca_file`, `cert_file`, `key_file`,
+   `server_name`, `connect_timeout`, `timeout`, `max_conns`), declared flat as I168's and I186's;
+   built while I182 was built beside it, so the two sets of connection params are to be made one
+   at the merge. Alternative: the params declared once in `mongowire` (I181's decision 1).
+2. **No password in `uri`.** A connection string holding one is refused; `password_env` holds it, as
+   every credential in fit. `tls` and its files, when set, replace the string's TLS options; a
+   `cert_file` without `key_file` holds both, as MongoDB's `tlsCertificateKeyFile`. Alternative: a
+   `uri_env` holding the whole string.
+3. **The `_id` from the key.** A key of one field is that field's value (`{"id": 7}` gives `_id: 7`,
+   a MongoDB source's `{"_id": ...}` its value), a key of several fields an embedded document of them
+   in their order, a scalar key itself, a tagged value (`{"$oid": ...}`) its BSON type; a record
+   without a key takes its row's `_id`, and one with neither fails for good, as does a key with a
+   null field. The row's own `_id`, if any, is replaced by the key's. Alternative: an `id_field`
+   param, or a compound key joined into a string as I168's `_id`.
+4. **Upserts replace.** An insert, update or message is `update` with `{q: {_id}, u: <row, _id
+   first>, upsert: true}`, the whole document replaced; a delete is `delete` with `limit: 1`. No
+   `$set` of the changed fields: every source gives whole rows (a MongoDB source with
+   `updateLookup`). DDL is acknowledged and not written; a row that is not a map fails for good.
+   Alternative: a `$set` mode for partial rows.
+5. **Unordered, yet in order per key.** Within a batch only each document's last record is sent (it
+   covers the earlier ones, whose effect it replaces), so the statements of one `update` and one
+   `delete` per collection touch distinct documents and `ordered: false` cannot reorder a key;
+   commands are cut at `max_request_bytes` (8 MiB) and 100,000 statements. When a document fails,
+   the batch is written again from that document's first record in runs of distinct documents, in
+   order, so the `BatchError` names the exact record that fails and every record before it is
+   written. A command's error (or its write concern's) names the first record of the earliest
+   document not written. Alternative: ordered bulk writes, record by record, slower on every batch.
+6. **Errors.** A write error of a document is permanent (a validator's 121, a unique index's 11000,
+   a document too large, a bad `_id`), unless its code says it may pass (a write conflict, a primary
+   stepping down, interruptions, lock and time limits); a command's error is retried by the pipeline
+   (authentication, a lost primary, a `writeConcernError` with `wtimeout`) unless it is the
+   statements' or the collection's fault (codes 2, 9, 14, 72, 73, 10334). A document over 16 MiB,
+   or a decimal that a `decimal128` cannot hold exactly, fails before anything is sent. Alternative:
+   an unknown code as transient.
+7. **Write concern.** `write_concern` is `w` (`majority`, a number, a tag set), `journal` is `j`,
+   `write_timeout` is `wtimeout`; left out, the server's default (majority on a replica set since
+   5.0). `w: 0` is refused: an unacknowledged write cannot be checkpointed.
+8. **Where documents go.** The namespace `db.collection` names both (split at its first `.`);
+   `database` replaces the database (a namespace without `.` is then the collection), `collection`
+   replaces the collection. Names are not checked beyond what the server refuses (code 73,
+   permanent). The sink never creates collections or indexes: MongoDB creates a collection at its
+   first write. Alternative: templates as I186's `{namespace}`.
+9. **No transactions.** The source's transactions are not kept: each document's write is atomic, a
+   batch is not. A transaction would need sessions, which I181 does not speak (its decision 8).
+10. **A `ParallelSink`** (a job's writers share the client's pool, `max_conns`, 4), and a `Tester`
+    whose test finds the primary, authenticates and pings it.
+11. **Interop.** `test/sync/mongo_sink_test.go`, on I181's replica sets (`test/sync/mongo.sh`,
+    MongoDB 6, 7 and 8): 3,000 changes of 100 keys written in random batches, each sometimes written
+    again from an earlier record, ending as the changes leave them; `generate`'s records of every
+    type through a pipeline killed at random crash points, over TLS, ending equal to a run without
+    kills; a collection of every BSON type (ObjectId, string and int `_id`s, `decimal128`,
+    timestamps, UUIDs, regular expressions, min and max keys, nested arrays) read as records with
+    the key `_id` and written through the sink twice, the copy byte for byte the same; a validator's
+    refusal permanent; the connection test. MySQL-to-MongoDB and MongoDB-to-MongoDB *pipelines*
+    wait on I174's and I182's sources; the collection copy stands in for the second until then, and
+    I192's matrix is to run both. Alternative: hold I183 until those sources are merged.
+12. **Size**: about 620 lines of code and 950 of tests; nothing is left, no I183b.
 
 ### I184 A Kafka client
 

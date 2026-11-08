@@ -49,7 +49,7 @@ a config against it and more.
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`mongo`](#sync-sources-mongo), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`csv`](#sync-codecs-csv), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`wasm`](#sync-codecs-wasm)
 
@@ -7379,6 +7379,137 @@ Keeps the records written in memory, in a store named by store, up to max_record
 | --- | --- | --- | --- |
 | `store` | string | `"default"` | The store's name: sinks naming the same store write into it. default when left out. |
 | `max_records` | integer, 0 or more | `100000` | The most records the store keeps; a write past it fails, as a full disk would. 100000 when left out or 0. |
+
+<a id="sync-sinks-mongo"></a>
+
+### `mongo`
+
+Writes records to MongoDB (6, 7 and 8), a replica set's primary, a standalone server or a mongos, as unordered bulk writes: inserts, updates and messages as upserts that replace the document whose _id the record's key makes with the row, deletes as deletes by that _id, into the database and collection the namespace (db.collection) or database and collection name; a replay converges. A document the server refuses (a validator, a unique index, a document too large) fails its record, which on_error takes, those before it written; other errors are retried by the pipeline.
+
+Writes records to MongoDB 6, 7 or 8 (4.2 and later are spoken) as unordered bulk writes, on the
+primary of a replica set, a standalone server or a `mongos`, found from `uri` or `hosts` and found
+again when it changes.
+
+Each record writes the document whose `_id` its key makes: a key of one field is that field's value
+(`{"id": 7}` gives `_id: 7`, a MongoDB source's `{"_id": ObjectId}` its ObjectId), a key of several
+fields a document of them in their order, any other key itself; a record without a key takes its
+row's `_id`. An insert, an update or a message replaces that document with its row (`after`), `_id`
+first, inserting it when there is none (an upsert); a delete deletes it. DDL records are skipped. A
+record goes to the database and collection its namespace names, `db.collection`; `database` and
+`collection` replace either. Values are written as I181's client writes them: ints as 64-bit
+integers, decimals as `decimal128` (exactly, or the record fails), times and dates as UTC datetimes
+to the millisecond, JSON as documents, and the tagged values a MongoDB source gives (`{"$oid": ...}`
+and the like) as their BSON types, so a collection copied to another is the same documents.
+
+Within a batch only each document's last record is sent, since it covers the earlier ones: the
+upserts of a collection go in one `update` and its deletes in one `delete`, each `ordered: false`,
+cut at `max_request_bytes`. Writing the same records again leaves the same documents, so a replay
+after a crash converges. A document the server refuses (a validator, a unique index, a document over
+16 MiB, an `_id` that cannot be one) fails its record, which `on_error` takes, the records before it
+written; the batch is then written again in order to find that record. A write conflict, a primary
+stepping down, a lost connection, a failed authentication or a write concern not met (`wtimeout`)
+is tried again by the pipeline's `retry`. Transactions of the source are not kept: each document's
+write is atomic, a batch is not.
+
+`write_concern`, `journal` and `write_timeout` set the write concern sent with every write;
+unacknowledged writes (`w: 0`) are refused, as nothing could then be checkpointed. A job's writers
+(`job.max_parallel`) share the connections, at most `max_conns`. **Test connection** finds the
+primary, authenticates and sends `ping`.
+
+The password is never in `uri`: `password_env` names the variable holding it. `tls` with `ca_file`
+(and `cert_file` for a client certificate, its key in it or in `key_file`) replaces the connection
+string's TLS options; the servers' certificates are always checked.
+
+In a .conf file:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-mongo {
+		source generate { records 1000 }
+		sinks mongo {
+			sink mongo {
+				uri mongodb://db1:27017,db2:27017,db3:27017/?replicaSet=rs0
+				username fit
+				password_env MONGO_PASSWORD
+				tls true
+				ca_file /etc/fit/mongo-ca.pem
+				database shop
+				write_concern majority
+			}
+		}
+	}
+}
+```
+
+In YAML:
+
+```yaml
+sync:
+  state_dir: /var/lib/fit/sync
+  pipelines:
+    - name: orders-to-mongo
+      source:
+        module: generate
+        params:
+          records: 1000
+      sinks:
+        - name: mongo
+          sink:
+            module: mongo
+            params:
+              uri: mongodb://db1:27017,db2:27017,db3:27017/?replicaSet=rs0
+              username: fit
+              password_env: MONGO_PASSWORD
+              tls: true
+              ca_file: /etc/fit/mongo-ca.pem
+              database: shop
+              write_concern: majority
+```
+
+In JSON:
+
+```json
+{
+  "sync": {
+    "state_dir": "/var/lib/fit/sync",
+    "pipelines": [
+      {
+        "name": "orders-to-mongo",
+        "source": {"module": "generate", "params": {"records": 1000}},
+        "sinks": [{"name": "mongo", "sink": {"module": "mongo", "params": {
+          "uri": "mongodb://db1:27017,db2:27017,db3:27017/?replicaSet=rs0",
+          "username": "fit", "password_env": "MONGO_PASSWORD",
+          "tls": true, "ca_file": "/etc/fit/mongo-ca.pem",
+          "database": "shop", "write_concern": "majority"}}}]
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `uri` | string |  | The servers as a connection string, mongodb://[user@]host1[:port1][,host2...][/authdb][?options], with the options replicaSet, authSource, authMechanism (SCRAM-SHA-256), tls, tlsCAFile, tlsCertificateKeyFile, connectTimeoutMS, socketTimeoutMS, serverSelectionTimeoutMS, maxPoolSize and appName; any other is refused, and so is a password in it: password_env holds it. mongodb+srv is not read. uri or hosts. |
+| `hosts` | list of string |  | The servers to find the primary from, host or host:port (27017 when left out), in place of uri: a replica set's members (the others are learned from them), a standalone server, or mongos routers. |
+| `replica_set` | string |  | The replica set's name: a server of another set is not taken. Any set when left out. |
+| `username` | string |  | The user to authenticate as, with SCRAM-SHA-256 and password_env; no authentication when left out. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `auth_source` | string |  | The database the user is defined in. admin when left out. |
+| `tls` | boolean |  | Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. These TLS params replace the connection string's TLS options. |
+| `ca_file` | string |  | A PEM file of the certificates the servers' are checked against, in place of the system's roots, for a CA of its own; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, presented to servers that ask for one; with its key in it too, as MongoDB's tlsCertificateKeyFile, unless key_file is set. Needs tls. |
+| `key_file` | string |  | The PEM file of cert_file's private key, when cert_file does not hold it. |
+| `server_name` | string |  | The name the servers' certificates must have, and the TLS server name sent; each server's host when left out. |
+| `connect_timeout` | duration | `"10s"` | How long connecting to a server may take, its TLS, hello and authentication. 10s when left out or 0. |
+| `timeout` | duration | `"60s"` | How long one command, a bulk write of up to max_request_bytes, may take. 60s when left out or 0. |
+| `max_conns` | integer, 0 to 1000 | `4` | The most connections open to the primary, shared by a job's parallel writers. 4 when left out or 0. |
+| `database` | string |  | The database every record is written to. When left out, the record's namespace's part before its first '.', a namespace without one failing its record. |
+| `collection` | string |  | The collection every record is written to. When left out, the record's namespace after its first '.', or the whole namespace when it has none and database is set. |
+| `write_concern` | string |  | The write concern's w: majority, a number of members (1 or more; 0, unacknowledged writes, is refused), or a tag set's name. The server's default (majority on a replica set) when left out. |
+| `journal` | boolean |  | Ask for the writes to be in the journal before they are acknowledged (j: true). |
+| `write_timeout` | duration |  | How long the server waits for the write concern (wtimeout) before it answers with an error, which the pipeline retries; the writes stay. Without a limit when left out. |
+| `max_request_bytes` | integer, 0 to 41943040 | `8388608` | The most bytes of documents in one bulk write; a batch larger is sent in several. A document larger than 16 MiB fails its record. 8 MiB when left out or 0. |
 
 <a id="sync-sinks-redis"></a>
 

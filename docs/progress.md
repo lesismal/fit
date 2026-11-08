@@ -5948,6 +5948,35 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I182 section, pending review. A pipeline that has read no
   record has no checkpoint (decision 11). No re-snapshot on its own; not tried against a sharded
   cluster. Not run on Linux or under the whole suite by this item (left to the merge).
+### I183 MongoDB as a sink — done
+
+- **Sink `mongo`** (`sync/mongo/sink.go`, package `syncmongo`): unordered bulk writes through I181's
+  client; inserts, updates and messages as replacement upserts by `_id`, deletes by `_id`, DDL
+  acknowledged and not written; the `_id` from the key (one field's value, several fields as a
+  document, a tagged ObjectId as one) or the row's `_id`; the database and collection from the
+  namespace `db.collection`, or `database` and `collection`; only each document's last record of a
+  batch sent, one `update` and one `delete` per collection, cut at `max_request_bytes`; on a
+  document's failure, the batch written again from its first record in runs of distinct documents to
+  name the exact record; write errors permanent or retried by code; `write_concern`, `journal`,
+  `write_timeout`; a `ParallelSink` and a `Tester` (ping on the primary). Connection params in
+  `sync/mongo/sinkconn.go` (`uri` without a password, or `hosts`, `password_env`, TLS files).
+  Registered in `modules/standard`.
+- **Docs**: the schema and reference (chapter `sync_sinks_mongo.md`), the templates, the Chinese
+  descriptions in `schema-zh.js`, `docs/configuration*.md`'s `sync` row.
+- **Tests**: `syncmongo` against an in-process fake MongoDB (OP_MSG document sequences, updates and
+  deletes applied by `_id`, write errors, command errors, write concern errors, a closed
+  connection): params refused, documents written and replayed, targets, records refused before
+  sending, a failing document found in runs, commands cut, a pipeline from `generate` (coverage
+  98.6%). `test/sync/mongo_sink_test.go` against MongoDB 6, 7 and 8 replica sets
+  (`test/sync/mongo.sh`): random changes with replays converging, a pipeline killed at random points
+  over TLS equal to one not killed, a collection of every BSON type copied byte for byte, a
+  validator's refusal permanent, the connection test. Run under the race detector on macOS, against
+  `i183-mongo*` containers made for the run.
+- **Differs from the plan**: MySQL-to-MongoDB and MongoDB-to-MongoDB pipelines wait on I174's and
+  I182's sources; a collection copied through the sink stands in for the second. About 620 lines of
+  code and 950 of tests; no I183b.
+- **Gaps**: the decisions in the plan's I183 section, pending review. The sink's connection params
+  are to be made one with I182's at the merge. No transactions (no sessions in I181).
 
 ### I184 A Kafka client — done
 
