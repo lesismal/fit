@@ -21,7 +21,16 @@ workbench, metrics and dead letters, and running pipelines. The
 [fit-examples](https://github.com/lesismal/fit-examples) repository has
 [files to Elasticsearch](https://github.com/lesismal/fit-examples/tree/main/sync-files-to-elasticsearch),
 [MySQL to PostgreSQL](https://github.com/lesismal/fit-examples/tree/main/sync-mysql-to-postgres),
-[PostgreSQL to Kafka](https://github.com/lesismal/fit-examples/tree/main/sync-postgres-to-kafka) and
+[PostgreSQL to Kafka](https://github.com/lesismal/fit-examples/tree/main/sync-postgres-to-kafka),
+[RabbitMQ to Kafka](https://github.com/lesismal/fit-examples/tree/main/sync-rabbitmq-to-kafka),
+[PostgreSQL to NATS](https://github.com/lesismal/fit-examples/tree/main/sync-postgres-to-nats),
+[Pulsar to Elasticsearch](https://github.com/lesismal/fit-examples/tree/main/sync-pulsar-to-elasticsearch),
+[MQTT to InfluxDB](https://github.com/lesismal/fit-examples/tree/main/sync-mqtt-to-influxdb),
+[MQTT to TDengine](https://github.com/lesismal/fit-examples/tree/main/sync-mqtt-to-tdengine),
+[SQL Server to Kafka](https://github.com/lesismal/fit-examples/tree/main/sync-mssql-to-kafka),
+[MySQL to Doris](https://github.com/lesismal/fit-examples/tree/main/sync-mysql-to-doris),
+[files to Loki](https://github.com/lesismal/fit-examples/tree/main/sync-files-to-loki),
+[PostgreSQL to vector databases](https://github.com/lesismal/fit-examples/tree/main/sync-postgres-to-vectors) and
 [a WASM transform](https://github.com/lesismal/fit-examples/tree/main/sync-wasm-transform).
 
 ## A first pipeline
@@ -1543,7 +1552,10 @@ before `sync_ingest`. The users a pipeline logs in as need only the rights in th
 `test/sync/run.sh` starts the servers in Docker and runs the connectors' interop tests against them:
 Elasticsearch 8 and OpenSearch 2, ClickHouse 25.8, MySQL 5.7, 8.0 and 8.4, MariaDB 10.11 and 11, TiDB
 (standalone, and a cluster of PD, TiKV, TiDB and TiCDC), PostgreSQL 13 to 17, MongoDB 6, 7 and 8 (replica
-sets), Kafka 3.9 and Redpanda, Redis 7 and Valkey 8, MinIO and SeaweedFS. Each test kills its pipelines at
+sets), Kafka 3.9 and Redpanda, Redis 7 and Valkey 8, MinIO and SeaweedFS; the second round's RabbitMQ
+3.13 and 4.1, NATS 2.10 and 2.11 (clusters of three), Pulsar 3 and 4, Mosquitto 2 and EMQX 5, SQL Server
+2019 and 2022, Doris 2.1 and StarRocks 3.4, Loki 3.5, the OpenTelemetry Collector, InfluxDB 2.7 and 3
+Core, TDengine 3.3, Qdrant 1.15 and Milvus 2.5. Each test kills its pipelines at
 random points and checks the sink against the source at the end; `test/sync/exactly_once_test.go`
 counts every row written, to check exactly once.
 
@@ -1551,7 +1563,9 @@ counts every row written, to check exactly once.
 into one fixed set of sinks at once: PostgreSQL 17, MySQL 8.4, MongoDB 8, Elasticsearch, ClickHouse
 (the sink's defaults: a `ReplacingMergeTree(_version, _deleted)` versioned by commit time, deletes
 flagged) and Redis (a key per row). The sources are PostgreSQL, MySQL and MariaDB, MongoDB, TiDB through TiCDC, and Debezium's events
-in Kafka. Each starts with a table of rows (its snapshot), then a mixed load of inserts, updates,
+in Kafka; and the second round's: Debezium's events in RabbitMQ, NATS JetStream, Pulsar and MQTT (the
+key built from the id, which their messages carry no key of), SQL Server through CDC, and Doris polled
+by a cursor column (its deletes a deleted flag). Each starts with a table of rows (its snapshot), then a mixed load of inserts, updates,
 deletes, key changes, NULLs and transactions of several changes is written while the pipeline is
 killed at random crash points again and again, the first time before its first checkpoint, with rows
 in the sinks; at the end every sink must hold the source's rows,
@@ -1567,10 +1581,23 @@ Servers come in families, each a CI job of its own, run in parallel (`SYNC_FAMIL
 | `mongo` | MongoDB 6, 7 and 8 | `TestMongo*` |
 | `kafka` | Kafka (three brokers), Redpanda | `TestKafka*` |
 | `tidb` | PD, TiKV, TiDB, TiCDC, on Kafka; PostgreSQL 17 | `TestTiDB*` |
+| `mq` | RabbitMQ 3.13 and 4.1, NATS 2.10 and 2.11, Pulsar 3 and 4, Mosquitto 2, EMQX 5 | `TestRabbitMQ*`, `TestNATS*`, `TestPulsar*`, `TestMQTT*` |
+| `mssql` | SQL Server 2022 and 2019 (SQL Server Agent, CDC and change tracking on) | `TestMSSQL*` |
+| `olap` | Doris 2.1 (a frontend and a backend), StarRocks 3.4 | `TestDoris*` |
+| `obs` | Loki, the OpenTelemetry Collector, InfluxDB 2 and 3, TDengine, Qdrant, Milvus; PostgreSQL 17 and Mosquitto | `TestLoki*`, `TestOTLP*`, `TestInfluxDB*`, `TestTDengine*`, `TestQdrant*`, `TestMilvus*`, `TestEmbed*` |
 | `matrix` | one of each: PostgreSQL 17, MySQL 8.4, MongoDB 8, Elasticsearch, ClickHouse, Redis, Kafka, TiDB with TiCDC | `TestMatrix`, every source once |
+| `matrix-mq` | the matrix's sinks; RabbitMQ 4.1, NATS 2.11, Pulsar 4, Mosquitto | `TestMatrix`, the queues' sources |
+| `matrix-db` | the matrix's sinks; SQL Server 2022, Doris | `TestMatrix`, SQL Server's and Doris's sources |
+
+`matrix-mq` and `matrix-db` are `SYNC_FAMILIES=matrix` with `MATRIX_SERVERS` naming `mq`, or `mssql` and
+`olap`: a second round's family named runs its sources alone. In `obs`, `TestEmbedPostgresAcrossKills`
+runs the matrix's PostgreSQL source through `embed` into Qdrant and Milvus, and `TestInfluxDBFromMQTT`
+is the IoT pipeline, MQTT to InfluxDB, both across kills.
 
 The workflow `sync-matrix.yml` runs the matrix whole every night, a job per source on every server of
-its kind (PostgreSQL 13 to 17, MySQL 5.7 to MariaDB 11, MongoDB 6 to 8, TiDB, Kafka and Redpanda),
+its kind (PostgreSQL 13 to 17, MySQL 5.7 to MariaDB 11, MongoDB 6 to 8, TiDB, Kafka and Redpanda,
+RabbitMQ 3.13 and 4.1, NATS 2.10 and 2.11, Pulsar 3 and 4, Mosquitto and EMQX, SQL Server 2019 and 2022,
+Doris),
 with a larger load and more kills (`FIT_SYNC_MATRIX=full`). To run them locally:
 
 ```sh
@@ -1584,34 +1611,14 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 `SYNC_PREFIX` and the `*_PORT` variables the script lists run a second set beside the first; `KEEP=1`
 keeps the containers for the next run.
 
-The second round's servers have scripts of their own until they join the families (I222):
-`test/sync/mssql.sh` starts SQL Server 2022 and 2019 (with SQL Server Agent, CDC and change tracking on
-a database `fit_sync`; amd64 images, emulated on arm64), and `test/sync/mqtt.sh` Mosquitto 2 and EMQX 5:
+Each family's servers have a script of their own, which `run.sh` calls and which runs alone as well:
+`eval "$(test/sync/<script>.sh up)"` starts them and prints the variables the tests read, `down` removes
+them. `mq` is `rabbitmq.sh`, `nats.sh`, `pulsar.sh` and `mqtt.sh` (`MQ_SYSTEMS` picks some), `mssql` is
+`mssql.sh` (amd64 images, emulated on arm64), `olap` is `olap.sh` (Doris takes its ports as they are:
+one set at a time), and `obs` is `obs.sh`, which also runs its tests alone:
 
 ```sh
+SYNC_FAMILIES="mq obs" test/sync/run.sh -v
 eval "$(test/sync/mssql.sh up)" && go test ./test/sync -run 'TestMSSQL' -v
-eval "$(test/sync/mqtt.sh up)" && go test ./test/sync -run 'TestMQTT' -v
+test/sync/obs.sh -v
 ```
-
-`test/sync/olap.sh` starts Doris 2.1 (a frontend and a backend) and StarRocks 3.4 for `TestDoris*`,
-until CI's families take it (I222):
-
-```sh
-eval "$(test/sync/olap.sh up)"
-go test ./test/sync -run 'TestDoris' -v
-test/sync/olap.sh down
-```
-
-`test/sync/obs.sh` starts Loki 3.5, the OpenTelemetry Collector, InfluxDB 2.7 and 3 Core, TDengine 3.3, Qdrant 1.15 and Milvus 2.5
-(standalone) and runs their tests (`TestLoki*`, `TestOTLP*`, `TestInfluxDB*`, `TestTDengine*`, `TestQdrant*`, `TestMilvus*`,
-`TestEmbed*`): each sink's writes replayed from the middle and from the start converge, a record the
-server refuses fails alone, and a pipeline through `embed` (against a fake embeddings API) into Qdrant
-and Milvus, killed at random points, ends with every row and its vector, the deletes gone; files sent
-to Loki and to the Collector through pipelines killed at random points arrive, every line.
-`eval "$(test/sync/obs.sh up)"` starts them and prints their variables instead, `down` removes them.
-
-RabbitMQ, NATS JetStream and Pulsar have scripts of their own, not yet a family of `run.sh` (I222 adds
-them as `mq`): `eval "$(test/sync/rabbitmq.sh up)"` starts RabbitMQ 3.13 and 4.1 (a user, a TLS listener
-of a CA the script makes) for `TestRabbitMQ*`; `eval "$(test/sync/nats.sh up)"` nats-server 2.10 and
-2.11, three JetStream nodes each, for `TestNATS*`; `eval "$(test/sync/pulsar.sh up)"` Pulsar 3.0 and 4.0
-standalone with deduplication on, for `TestPulsar*`. Each takes `down` to remove them.

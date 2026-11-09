@@ -359,9 +359,9 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I217 | SQL Server 作为目标：`MERGE` upsert、删除、批量导入，检查点写在目标中实现精确一次 | I215, I191 | todo |
 | I218 | Doris 与 StarRocks 作为目标（带 label 的 Stream Load、删除标记）与源（按游标轮询） | I172 | done |
 | I219 | Loki 与 OpenTelemetry 日志作为目标（push API、OTLP/HTTP），文件到它们并对比 Promtail | I166 | done |
-| I220 | InfluxDB（line protocol）与 TDengine（schemaless）作为目标；MQTT 到 InfluxDB 端到端 | I214 | 目标已完成；MQTT 端到端待做 |
+| I220 | InfluxDB（line protocol）与 TDengine（schemaless）作为目标；MQTT 到 InfluxDB 端到端 | I214 | done |
 | I221 | Milvus 与 Qdrant 作为目标，按键 upsert 与删除，配 `embed` 变换 | I163 | done |
-| I222 | 第二批进入恢复矩阵、CI 互通分组、基准测试与文档 | I211–I221 | todo |
+| I222 | 第二批进入恢复矩阵、CI 互通分组、基准测试与文档 | I211–I221 | done（CI 与基准主机的运行待做） |
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
 | **BitTorrent** | | | |
@@ -5572,8 +5572,8 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
   408/429/5xx 重试、被拒请求中的记录逐条重写以找出被拒的那条）和模板（`sync/internal/tmpl`）；连接测试；针对假服务的单元测试
   （influxdb 99.0%、tdengine 98.6%、fibrest 98.8%、tmpl 100%）；在 Docker 中与 InfluxDB 2.7（API v2 与 v1）、InfluxDB 3 Core
   和 TDengine 3.3.6 互通（`test/sync/tsdb_test.go`，由 `test/sync/obs.sh` 运行）：一批写入后再从中间、从头各写一次，每个点只留
-  一个且为最后的值，类型不对的点在其记录处单独失败；中英文指南中的章节。**未完成**：MQTT（I214）到 InfluxDB 端到端，待 I214
-  合并后做。
+  一个且为最后的值，类型不对的点在其记录处单独失败；中英文指南中的章节。2026-11-10 亦完成 MQTT（I214）到 InfluxDB 端到端：`TestInfluxDBFromMQTT`（`test/sync/iot_test.go`，`obs` 族带
+  Mosquitto）：QoS 1 的 JSON 读数由源的会话保留，经在随机时刻被杀的流水线，每条成为一个数据点。
 
 **待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
 
@@ -5610,7 +5610,8 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
   98.0%、milvus 96.7%、embed 99.1%、vecutil 100%）；在 Docker 中与 Qdrant 1.15 和 Milvus 2.5.17 standalone 互通
   （`test/sync/vector_test.go`）：重放的写入收敛，删除到达两者，维数不对的向量在其记录处单独失败，generate 的插入、更新与删除经
   `embed`（测试中的假 embeddings API）写入两者，在随机时刻多次 kill 后，每一行都在且带有其文本的向量，删除的都已不在；中英文
-  指南中的章节。**未完成**：以 PostgreSQL 作为该流水线的源并跨 kill，随 I222 的矩阵（带 PostgreSQL 的 `obs` 分组）完成。
+  指南中的章节。以 PostgreSQL 作为该流水线的源并跨 kill 随 I222 完成：`TestEmbedPostgresAcrossKills`，矩阵的 PostgreSQL
+  源与负载经 `embed` 写入两者。
 
 **待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
 
@@ -5643,6 +5644,40 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：CI 的任务全部通过；基准主机的运行写成报告（规则 24）；指南与示例能加载（`TestConfigExamples`、fit-examples
   的 validate）。
 - **涉及**：`test/sync`、`.github/workflows`、`bench/sync`、`docs`、fit-examples。
+- **完成** 2026-11-10，主会话负责的运行除外（CI 任务、基准主机的计划与报告）：矩阵的第二批（`test/sync/matrix2_test.go`）：
+  RabbitMQ、NATS JetStream、Pulsar 与 MQTT 中的 Debezium 事件，经 CDC 读取的 SQL Server，按游标轮询的 Doris，各自跨 kill
+  写入六个目标；`obs` 中的 `TestEmbedPostgresAcrossKills`（PostgreSQL 经 `embed` 写入 Qdrant 与 Milvus）与
+  `TestInfluxDBFromMQTT`；`run.sh` 的 `mq`、`mssql`、`olap`、`obs` 族，调用各脚本（`up` 与 `down`），矩阵的服务器与源由
+  `MATRIX_SERVERS` 选择（各一台，`MQ_SYSTEMS`），各脚本端口错开以便多族同时运行；CI 的 `sync-interop` 增加 `mq`、`mssql`、
+  `olap`、`obs`、`matrix-mq`、`matrix-db`，每晚的 `sync-matrix.yml` 为每个新源在其同类的每台服务器上各一个任务；测试工具的
+  `rabbitmq-kafka` 与 `mqtt-kafka` 场景（对比带 Apache Camel 连接器 4.14.5 的 Kafka Connect）与 `mssql-kafka` 场景（对比
+  Debezium 的 SQL Server 连接器），syncbench 为它们增加的源，以及计划的 S6（文件到 Loki，对比 Promtail）到 S9 及其权重；
+  `docs/sync.md`（中英文）与 fit-examples 的九个示例（分支 `sync-round2`）。本机运行过：整个 `obs` 族，除 RabbitMQ 外的 `mq`，
+  矩阵中 NATS、Pulsar、MQTT、SQL Server 与 Doris 的源；RabbitMQ 的容器在这台 Mac 上带脚本的挂载无法启动（`.erlang.cookie:
+  eacces`），所以其测试与矩阵运行首先在 CI 上进行。顺带修复：`TestNATSStreamAcrossKills` 在其随机源上的竞争，以及
+  `TestLokiFilesAcrossKills` 把重放的行计入所等待的行数。
+
+**待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **矩阵中的队列携带 Debezium 事件**，与 Kafka 的运行相同，键由 `key` 变换从 id 构造（它们的消息没有编解码器能读的键）；
+   每个源的负载写在一个队列、流、主题或 MQTT 主题上，所以同一键的变更保持顺序。备选：普通 JSON 行、不经信封（那样就没有删除）。
+2. **矩阵中的 Doris 软删除**：删除设置 `deleted` 标记（源的 `deleted_column`）并增加游标 `ver`；改键为一次删除加一次插入；
+   该标记在写入目标前由 `fields` 变换去掉；不用多语句事务（Doris 的事务只支持插入）。
+3. **CI 把第二批的矩阵作为另外两个任务运行**（`matrix-mq`、`matrix-db`），各自带六个目标的服务器与每种源一台，而不是放进第一批的
+   任务——那样带上 SQL Server、Doris 与 Pulsar 会超出一台 runner 的容量。`MATRIX_SERVERS` 中写上第二批的族时只运行其源；
+   第一批的源留在 `matrix` 中。
+4. **端口错开**：NATS 29440、MQTT 29450、Pulsar 29540（原先都占 29420 或 29500），并以 `NATS_VERSIONS`、`PULSAR_VERSIONS`、
+   `RABBITMQ_IMAGES`、`EMQX`、`MSSQL_VERSIONS`、`OLAP` 让矩阵各启动一台；`FIT_SYNC_INTEROP=required` 下 `natsClusters` 与
+   `pulsarServers` 现在至少需要一台，而不是两台都要。
+5. **`obs` 族为其两条流水线的测试启动 PostgreSQL 17 与 Mosquitto**，而不是让它们自成一族。
+6. **RabbitMQ 与 MQTT 的对手用 Apache Camel 的 Kafka 连接器**（Apache 2.0），装在 Debezium 的 Kafka Connect 镜像中，安装包以
+   sha256 固定；Confluent 的 RabbitMQ 与 MQTT 连接器是商业许可，Lenses 的部分需要许可证密钥。它们尚未试跑：基准主机的首次运行
+   可能需要调整其配置（`configs/connect/*.json`，kamelet 的属性名）。Mosquitto 的队列不设上限（`max_queued_messages 0`），
+   让暂停的对手的消息等着它。
+7. **为基准调整 SQL Server 的捕获作业**（每秒一次，每次扫描 5000 个事务，100 次扫描），使 CDC 的捕获不成为任何一方的瓶颈；
+   两者读同样的变更表。
+8. **计划的权重**：S1 20%、S2 15%、S3 15%、S4 10%、S5 15%、S6 5%、S7 7%、S8 6%、S9 7%：第一批保留四分之三，大致维持原有比例。
+9. **fit-examples 的九个示例需要带第二批的 fit**（fit 推送后 `go.mod` 移到那个提交）；本机经指向本工作树的 `go.work` 验证。
 
 **待审查的决策**（规划时做出，2026-11-10；在用户裁定前有效）：
 

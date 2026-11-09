@@ -369,9 +369,9 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I217 | SQL Server as a sink: `MERGE` upserts, deletes, bulk load, exactly once with the checkpoint in the sink | I215, I191 | todo |
 | I218 | Doris and StarRocks as a sink (Stream Load with labels, the delete sign) and a source (a cursor polled) | I172 | done |
 | I219 | Loki and OpenTelemetry logs as sinks (push API, OTLP/HTTP), files to them against Promtail | I166 | done |
-| I220 | InfluxDB (line protocol) and TDengine (schemaless) as sinks; MQTT to InfluxDB end to end | I214 | sinks done; MQTT end to end todo |
+| I220 | InfluxDB (line protocol) and TDengine (schemaless) as sinks; MQTT to InfluxDB end to end | I214 | done |
 | I221 | Milvus and Qdrant as sinks, upserts and deletes by key, with an `embed` transform | I163 | done |
-| I222 | The second round in the recovery matrix, CI's interop families, the benchmarks and the docs | I211–I221 | todo |
+| I222 | The second round in the recovery matrix, CI's interop families, the benchmarks and the docs | I211–I221 | done (CI and the benchmark host's run to do) |
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 | **BitTorrent** | | | |
@@ -7809,7 +7809,9 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
   and v1), InfluxDB 3 Core and TDengine 3.3.6 in Docker (`test/sync/tsdb_test.go`, run by
   `test/sync/obs.sh`): a batch written, then again from its middle and from its start, leaves each
   point once with its last value, and a point of the wrong type fails alone at its record; the guide's
-  sections in both languages. **Open**: MQTT (I214) to InfluxDB end to end, after I214 merges.
+  sections in both languages. **Done** 2026-11-10 too: MQTT (I214) to InfluxDB end to end,
+  `TestInfluxDBFromMQTT` (`test/sync/iot_test.go`, the `obs` family with Mosquitto): JSON readings at
+  QoS 1, kept by the source's session, through a pipeline killed at random points, each one point.
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
@@ -7860,8 +7862,9 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
   (`test/sync/vector_test.go`): writes replayed converge, deletes reach both, a vector of the wrong
   size fails alone at its record, and generate's inserts, updates and deletes through `embed` (a fake
   embeddings API in the test) into both, killed at random points, end with every row and the vector
-  of its text, the deletes gone; the guide's sections in both languages. **Open**: PostgreSQL as the
-  source of that pipeline across kills, with I222's matrix (the `obs` family with a PostgreSQL).
+  of its text, the deletes gone; the guide's sections in both languages. PostgreSQL as the source of
+  that pipeline across kills came with I222: `TestEmbedPostgresAcrossKills`, the matrix's PostgreSQL
+  source and load through `embed` into both.
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
@@ -7905,6 +7908,55 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 - **Done when**: CI's jobs green; a benchmark host run in a report (rule 24); the guide and examples
   load (`TestConfigExamples`, fit-examples' validate).
 - **Touches**: `test/sync`, `.github/workflows`, `bench/sync`, `docs`, fit-examples.
+- **Done** 2026-11-10, but for the runs the main session makes (CI's jobs, the benchmark host's plan
+  and its report): the matrix's second round (`test/sync/matrix2_test.go`): Debezium's events in
+  RabbitMQ, NATS JetStream, Pulsar and MQTT, SQL Server through CDC, Doris polled by a cursor, each
+  against the six sinks across kills, and `TestEmbedPostgresAcrossKills` (PostgreSQL through `embed`
+  into Qdrant and Milvus) and `TestInfluxDBFromMQTT` in `obs`; `run.sh`'s families `mq`, `mssql`,
+  `olap` and `obs`, calling the scripts (`up` and `down`), the matrix's servers and sources picked by
+  `MATRIX_SERVERS` (one server each, `MQ_SYSTEMS`), every script's ports apart so that families run
+  together; CI's `sync-interop` gains `mq`, `mssql`, `olap`, `obs`, `matrix-mq` and `matrix-db`, the
+  nightly `sync-matrix.yml` a job per new source on every server of its kind; the harness's scenarios
+  `rabbitmq-kafka` and `mqtt-kafka` (against Kafka Connect with Apache Camel's connectors 4.14.5) and
+  `mssql-kafka` (against Debezium's SQL Server connector), syncbench's sources for them, and the plan's
+  S6 (files to Loki, against Promtail) to S9, with their weights; `docs/sync.md` (both languages) and
+  nine examples in fit-examples (branch `sync-round2`). Run here: the `obs` family whole, `mq` but
+  RabbitMQ, the matrix's NATS, Pulsar, MQTT, SQL Server and Doris sources; RabbitMQ's containers do not
+  start on this Mac (`.erlang.cookie: eacces` with the script's mounts), so its tests and matrix run
+  are CI's first. Fixed on the way: `TestNATSStreamAcrossKills` raced on its random source, and
+  `TestLokiFilesAcrossKills` counted replayed lines towards the lines it waited for.
+
+**Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **The queues in the matrix carry Debezium's events**, as Kafka's run does, the key built from the
+   id by a `key` transform (their messages have no key the codec reads); each source's load on one
+   queue, stream, topic or MQTT topic, so a key's changes keep their order. Alternative: plain JSON
+   rows and an `envelope`-free path (no deletes then).
+2. **Doris in the matrix soft-deletes**: deletes set a `deleted` flag (the source's `deleted_column`)
+   and bump `ver`, the cursor; a key change is a delete and an insert; the flag is dropped by a
+   `fields` transform before the sinks; no multi-statement transactions (Doris's are insert-only).
+3. **CI runs the second round's matrix as two more jobs** (`matrix-mq`, `matrix-db`), each with the
+   six sinks' servers and one server of each source, rather than in the first round's job, which would
+   not fit a runner with SQL Server, Doris and Pulsar beside the rest. A second round's family named in
+   `MATRIX_SERVERS` runs its sources alone; the first round's stay in `matrix`.
+4. **Ports moved apart**: NATS 29440, MQTT 29450, Pulsar 29540 (they all took 29420 or 29500), and
+   `NATS_VERSIONS`, `PULSAR_VERSIONS`, `RABBITMQ_IMAGES`, `EMQX`, `MSSQL_VERSIONS`, `OLAP` let the
+   matrix start one of each; `natsClusters` and `pulsarServers` now require one server at least, not
+   both, under `FIT_SYNC_INTEROP=required`.
+5. **The `obs` family starts PostgreSQL 17 and Mosquitto** for its two pipelines' tests rather than
+   making them a family of their own.
+6. **The movers for RabbitMQ and MQTT are Apache Camel's Kafka connectors** (Apache 2.0) in Debezium's
+   Kafka Connect image, the packages pinned by sha256; Confluent's RabbitMQ and MQTT connectors are
+   under a commercial licence, and Lenses's need a licence key for some. They are untried: the
+   benchmark host's first run may need their configs adjusted (`configs/connect/*.json`, the kamelets'
+   property names). Mosquitto keeps an unbounded queue (`max_queued_messages 0`), so that a paused
+   mover's messages wait for it.
+7. **SQL Server's capture job is tuned for the benchmark** (every second, 5,000 transactions a scan,
+   100 scans), so that CDC's capture does not bound either mover; both read the same change tables.
+8. **The plan's weights**: S1 20%, S2 15%, S3 15%, S4 10%, S5 15%, S6 5%, S7 7%, S8 6%, S9 7%: the
+   first round's keep three quarters, in their old proportions roughly.
+9. **fit-examples' nine examples need fit with the second round** (`go.mod` moves to that commit
+   when fit is pushed); they were validated here through a `go.work` naming this worktree.
 
 **Decisions pending review** (made while planning, 2026-11-10; each stands until the user rules on it):
 
