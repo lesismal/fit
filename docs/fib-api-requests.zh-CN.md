@@ -84,6 +84,13 @@
 | A77 | BitTorrent 运行时可改的限制与单任务限制 | 已完成，fib `1f1d2e7` | 11 | I196、I199 |
 | A78 | `bittorrent.Config.Filter`：按地址拒绝 peer | 已完成，fib `1f1d2e7` | 11 | I196、I199 |
 | A79 | BitTorrent 客户端跑在调用者的引擎上 | 已完成，fib `1f1d2e7` | 11 | I196、I197 |
+| A80 | 事件队列有界 | 已提出 | 11 | I197 |
+| A81 | 以完整状态添加种子（seed 模式） | 已提出 | — | I202 |
+| A82 | Builder 只保留一个 piece 的叶子哈希，并可按 context 停止 | 已提出 | 11 | I202 |
+| A83 | Reader.Close 中断进行中的 Read | 已提出 | 1、10 | I200 |
+| A84 | 磁力链添加的 hybrid 种子的 piece layer | 已提出 | — | I196 |
+| A85 | tracker Store 可列出种子、可原地修改上限 | 已提出 | 11 | I201 |
+| A86 | 做种方不宣告“下载完成” | 已提出 | — | I201 |
 
 ## 证据
 
@@ -1937,3 +1944,73 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 **fit 如何使用。** `bittorrent.client` 角色跑在 fit 的引擎上，受其 `limits` 约束（I197）。
 
 **实现。** `Config.SharedEngine`：客户端把 TCP 和 UDP 绑定加到调用者正在运行的引擎上，在其上建 HTTP 客户端，`Close` 时移除自己的绑定（`ShutdownBinding`）并关闭自己拨出的连接，引擎继续运行。不需要改 core。
+
+## A80：事件队列有界
+
+**状态。** 2026-11-09 由 I197（BitTorrent 路线）提出；尚未实现。
+
+**问题。** `bittorrent.Client` 把 `Config.OnEvent` 收到的事件放在一个无界切片里；处理慢一点或一阵 piece 事件就让它无限增长。
+
+**建议的 API。** 有界（`Config.EventQueue`），并说明超出时的行为：先合并或丢弃 piece 事件，保留状态变化，并计数丢弃的事件。
+
+**fit 如何使用。** 角色的事件处理（I197）和 SSE 流（I203）。
+
+## A81：以完整状态添加种子（seed 模式）
+
+**状态。** 2026-11-09 由 I202（BitTorrent 路线）提出；尚未实现。
+
+**问题。** 刚由磁盘文件生成的种子被哈希两次：`metainfo.Builder` 一次，客户端初始校验又一次，因为无法告诉客户端存储里已有全部 piece。
+
+**建议的 API。** `AddOptions.Seed`：信任存储是完整的（如 libtorrent 的 seed 模式），每个 piece 首次上传时校验或报告哈希失败；或由 `Builder` 结果生成续传数据。
+
+**fit 如何使用。** 发布目录（I202）：发布的文件只哈希一次。
+
+## A82：Builder 只保留一个 piece 的叶子哈希，并可按 context 停止
+
+**状态。** 2026-11-09 由 I202（BitTorrent 路线）提出；尚未实现。
+
+**问题。** `metainfo.Builder` 在 v2 文件结束前保留每个 16 KiB 叶子哈希：size/512 字节，1 TiB 文件要 2 GiB；而且只能靠让读失败来取消。
+
+**建议的 API。** 每个 piece 完成时把叶子折叠成该 piece 的子树根；提供 `BuildContext(ctx, ...)`。
+
+**fit 如何使用。** 发布（I202）：每次构建内存有界，配置变化时立即停止构建。
+
+## A83：Reader.Close 中断进行中的 Read
+
+**状态。** 2026-11-09 由 I200（BitTorrent 路线）提出；尚未实现。
+
+**问题。** `bittorrent.Reader.Close` 会等待正在进行的 `Read`（两者用同一把锁）；客户端已离开的流要等一个不再需要的 piece，除非先取消 context。
+
+**建议的 API。** Close 取消进行中的读并立即返回。
+
+**fit 如何使用。** `bt_stream`（I200）关闭客户端已离开的 reader。
+
+## A84：磁力链添加的 hybrid 种子的 piece layer
+
+**状态。** 2026-11-09 由 I196（BitTorrent 路线）提出；尚未实现。
+
+**问题。** fib 文档说客户端在 hybrid 磁力链下载完成后计算 v2 piece layer，但 `Torrent.computeLayers` 从未被调用：这样的种子做种时无法应答 v2 对端的哈希请求。
+
+**建议的 API。** 下载完成时（以及校验完整数据时）在磁盘池上计算 layer，并测试纯 v2 对端从它获取哈希。
+
+**fit 如何使用。** 向 v2 对端做种由磁力链添加的 hybrid 种子。
+
+## A85：tracker Store 可列出种子、可原地修改上限
+
+**状态。** 2026-11-09 由 I201（BitTorrent 路线）提出；尚未实现。
+
+**问题。** `tracker.MemoryStore` 无法列出它保存的种子，上限和 peer TTL 在创建时固定，重载修改它们时 swarm 从空开始。
+
+**建议的 API。** `MemoryStore.Range(func(InfoHash, Stats) bool)` 与 `MemoryStore.SetConfig(MemoryStoreConfig)`。
+
+**fit 如何使用。** 公开 tracker 的统计，以及保留 swarm 的重载（I201、I203）。
+
+## A86：做种方不宣告“下载完成”
+
+**状态。** 2026-11-09 由 I201（BitTorrent 路线）提出；尚未实现。
+
+**问题。** 客户端在做种方校验数据时宣告 `started`，校验结束时宣告 `completed`，于是 tracker 把每个做种方都算作一次完成的下载。
+
+**建议的 API。** 只在下载完成时宣告 `completed`，添加时就已完整的数据不宣告。
+
+**fit 如何使用。** fit 的 tracker 及其他 tracker 统计正确。
