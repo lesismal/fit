@@ -490,9 +490,28 @@ func (s *Source) ReadChunk(ctx context.Context, ch fitsync.Chunk, from fitsync.P
 		return fmt.Errorf("mysql: the chunk's table %s is not read any more", ch.Namespace)
 	}
 	t := tables[i]
+	head := snapPosHead(t.ns())
 	return s.readRange(ctx, c, t, after, lo, hi, func(rec *fitsync.Record) error {
-		kb, _ := rec.Key.MarshalJSON()
-		rec.Position, _ = json.Marshal(snapPos{Table: t.ns(), Key: kb})
+		rec.Position = appendSnapPos(head, rec.Key)
 		return emit(rec)
 	})
+}
+
+// snapPosHead is the start of a snapshot position's JSON for the table
+// ns, which appendSnapPos ends with a record's key.
+func snapPosHead(ns string) []byte {
+	return fitsync.AppendJSONString([]byte(`{"table":`), ns)
+}
+
+// appendSnapPos is json.Marshal(snapPos{Table, Key}) for the table whose
+// head snapPosHead made, made by hand: a job's every record carries one,
+// and encoding/json's reflection was a twentieth of a copy's CPU.
+func appendSnapPos(head []byte, key fitsync.Value) fitsync.Position {
+	pos := make([]byte, len(head), len(head)+64)
+	copy(pos, head)
+	withKey, err := key.AppendJSON(append(pos, `,"key":`...))
+	if err != nil {
+		return append(pos, '}')
+	}
+	return append(withKey, '}')
 }

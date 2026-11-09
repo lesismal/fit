@@ -69,8 +69,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/fsb/bin/fit ./cmd/fit
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/fsb/bin/syncbench ./bench/sync/syncbench
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/fsb/bin/benchreport ./bench/cmd/benchreport
 $host "mkdir -p $dir/bench"
-tar cf - bench/sync bench/cmd | $host "tar xf - -C $dir"
-tar cf - -C /tmp/fsb bin | $host "tar xf - -C $dir"
+COPYFILE_DISABLE=1 tar cf - bench/sync bench/cmd | $host "tar xf - -C $dir"
+COPYFILE_DISABLE=1 tar cf - -C /tmp/fsb bin | $host "tar xf - -C $dir"
 
 # there: the plan, in the background, holding the bench lock
 $host "cd $dir && FIT_REV=$(git rev-parse --short HEAD) BIN=$dir/bin BENCHREPORT=$dir/bin/benchreport \

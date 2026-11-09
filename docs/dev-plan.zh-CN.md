@@ -4975,6 +4975,27 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
    PostgreSQL→Kafka 排空时 CPU 很低，Canal 与 Debezium 的 Elasticsearch 路径不到 1,000 行/秒且 CPU 很低，均需在主机
    规模下查看后再下结论。
 
+**主机的首次运行**（2026-11-09，`bench/results/sync-2026-11-09`；Ryzen 7 7800X3D，16 线程，Docker 29.1.3）及其结果：
+
+- **Canal 的 mysql-es 在 Linux 上每轮都失败**：其 client adapter 拒绝了整个 `es7` 适配器（SnakeYAML 报
+  “unacceptable code point”），因而什么都没写。测试工具挂载的是 `configs/canal/es7` 整个目录，而 adapter 会加载其中每个
+  文件：用 macOS `tar` 复制到主机时，`items.yml` 旁多了一个 AppleDouble 文件 `._items.yml`。已修复：镜像（现为
+  `fit-syncbench/canal-adapter:1.1.8-2`）删去发布包自带的示例映射，run.sh 只挂载 `items.yml`；README 中的复制命令改为
+  `COPYFILE_DISABLE=1 tar`。已在 Docker Desktop 上复查。
+- **fit 的批量复制（S5）以 0.84 核达到 13.98 万行/秒，DataX 以 0.47 核达到 17.3 万**（fit 46 MiB，DataX 432）。CPU
+  profile（`s5-mysql-batch/profiles-r*`）：`encoding/json.Marshal` 占 14.5%（每条记录都用反射序列化快照位置，7.5%；
+  规范 JSON 的字符串写入函数 `appendString` 每个字符串都经过 `json.Marshal`，4%）；mysql sink 的 `InsertRows` 为每批
+  准备语句占 12.9%，其中解析服务器发来的 4,000 个参数定义（1,000 行 × 4 列，无人读取）占 11%；GC 约 24%，多半由此而来。
+  已修复并附测试与基准：协议客户端的 `Prepare` 读取参数定义而不解析（`skipColumns`；准备 4,000 个参数的语句分配由
+  2.18 MB 降至 0.42 MB，余下为假服务器所致）；快照位置手工写出（`appendSnapPos`，由 239 ns、6 次分配降至 31 ns、1 次，
+  与 `json.Marshal` 逐字节相同）；`appendString` 对纯 ASCII 直接写出（8 ns，无分配），其余仍走 `json.Marshal`，输出不变
+  （导出为 `fitsync.AppendJSONString`）。未做、待评审：在同一连接上跨批缓存 InsertRows 的预备语句，可省去准备的往返与
+  服务器的工作，但会改变客户端“不留下打开的语句”的约定。
+- **发现但未修复**：S3（MySQL 到 Kafka）中 Debezium 编码器以 map 构建信封再用 `encoding/json` 序列化，占 fit CPU 的
+  35%（`kafka.(*Debezium).Encode`）；手写编码器是下一个值得处理的开销，归 kafka 连接器的负责人。
+- 需在主机上重跑：`s2-mysql-es`（Canal）与 `s5-mysql-batch`（fit 的修复）；其余项目保留。所有流与文件项目的延迟列均已
+  填写，批量项目按设计没有延迟列。
+
 ### I194 同步的文档与示例
 
 - **做什么**：`docs/sync.md` 及其中文版：概念、每个连接器的设置、保证，以及每个源对服务端的要求（binlog 设置、复制用户的权限、

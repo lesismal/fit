@@ -74,7 +74,7 @@ CANAL_IMAGE=${CANAL_IMAGE:-canal/canal-server:v1.1.8}
 DEBEZIUM_IMAGE=${DEBEZIUM_IMAGE:-quay.io/debezium/connect:3.0.8.Final}
 JRE_IMAGE=${JRE_IMAGE:-eclipse-temurin:8u452-b09-jre-jammy}
 # Built here from the pinned images and the pinned downloads below.
-ADAPTER_IMAGE=fit-syncbench/canal-adapter:1.1.8
+ADAPTER_IMAGE=fit-syncbench/canal-adapter:1.1.8-2
 DATAX_IMAGE=fit-syncbench/datax:202309
 CONNECT_ES_IMAGE=fit-syncbench/connect-es:3.0.8-14.1.2
 
@@ -368,7 +368,7 @@ mover_up() {
 			# shellcheck disable=SC2086
 			run_d canal-adapter --cpuset-cpus "$MOVER_CPUS" \
 				-v "$here/configs/canal/application.yml:/opt/canal-adapter/conf/application.yml:ro" \
-				-v "$here/configs/canal/es7:/opt/canal-adapter/conf/es7:ro" "$ADAPTER_IMAGE"
+				-v "$here/configs/canal/es7/items.yml:/opt/canal-adapter/conf/es7/items.yml:ro" "$ADAPTER_IMAGE"
 			containers=$containers,$PREFIX-canal-adapter
 		fi
 		;;
