@@ -19,8 +19,10 @@ import (
 
 // The client's state, in data_dir:
 //
-//	torrents.json          the list: each torrent's source, directory,
-//	                       file priorities and whether it is paused
+//	torrents.json          the list, in queue order: each torrent's source,
+//	                       directory, category, own limits, file
+//	                       priorities, whether it is paused and whether
+//	                       it completed; and the alternative rates' mode
 //	torrents/<id>.torrent  its .torrent file, once its info is known
 //	resume/<id>.resume     its resume data (fib's Torrent.ResumeData)
 //
@@ -54,8 +56,11 @@ const (
 
 // stateDoc is torrents.json.
 type stateDoc struct {
-	Version  int          `json:"version"`
-	Saved    time.Time    `json:"saved"`
+	Version int       `json:"version"`
+	Saved   time.Time `json:"saved"`
+	// AltSpeed is the API's say on the alternative rates: "on", "off", or
+	// "" for their schedules.
+	AltSpeed string       `json:"alt_speed,omitempty"`
 	Torrents []stateEntry `json:"torrents"`
 }
 
@@ -73,6 +78,13 @@ type stateEntry struct {
 	Sequential bool      `json:"sequential,omitempty"`
 	Paused     bool      `json:"paused,omitempty"`
 	Added      time.Time `json:"added"`
+	// Category is the category it was added in or moved to, if any.
+	Category string `json:"category,omitempty"`
+	// Limits are its own limits, over its category's.
+	Limits *TorrentLimits `json:"limits,omitempty"`
+	// Completed says it had every piece it wants when last looked at, so
+	// that a restart does not take it for a new completion.
+	Completed bool `json:"completed,omitempty"`
 }
 
 // record is a torrent of the role: what the state keeps of it, and the
@@ -86,6 +98,18 @@ type record struct {
 	sequential bool
 	paused     bool
 	added      time.Time
+	category   string
+	limits     TorrentLimits
+	completed  bool
+
+	// held is why the role keeps the torrent paused, when it does, beside
+	// paused (the API's or its seed limit's): holdStart until the role's
+	// next look at the queue, holdQueue past max_active_downloads or
+	// max_active_seeds, holdDisk short of disk space, with holdMsg.
+	held    hold
+	holdMsg string
+	// applied are the fib limits last given its torrent.
+	applied fibbt.TorrentLimits
 
 	// mi is the torrent's metainfo, nil for a magnet link's until its info
 	// arrives; torrentSaved says its .torrent file is written.
@@ -108,8 +132,13 @@ type record struct {
 }
 
 func (r *record) entry() stateEntry {
-	return stateEntry{ID: r.id, Name: r.name, Magnet: r.magnet, Dir: r.dir, Priorities: r.priorities,
-		Sequential: r.sequential, Paused: r.paused, Added: r.added}
+	e := stateEntry{ID: r.id, Name: r.name, Magnet: r.magnet, Dir: r.dir, Priorities: r.priorities,
+		Sequential: r.sequential, Paused: r.paused, Added: r.added, Category: r.category, Completed: r.completed}
+	if !r.limits.IsZero() {
+		l := r.limits
+		e.Limits = &l
+	}
+	return e
 }
 
 // idOf returns the ID of a torrent of info hashes v1 and v2.
@@ -142,12 +171,12 @@ func parseID(id string) ([20]byte, bool) {
 var ErrState = errors.New("bittorrent: the state cannot be read")
 
 // loadState reads the state in dir: the records, in the order of the list,
-// none when there is no state yet. The temporary files a crash left are
+// none when there is no state yet, and the alternative rates' mode. The temporary files a crash left are
 // removed. A list that does not read, is larger than MaxStateBytes, is of
 // a later version or lists more than MaxBTTorrents torrents is an error
 // wrapping ErrState. A torrent whose own files do not read is kept with
 // its error, so that it stays listed until removed.
-func loadState(dir string) ([]*record, error) {
+func loadState(dir string) ([]*record, string, error) {
 	for _, d := range []string{dir, filepath.Join(dir, torrentDir), filepath.Join(dir, resumeDir)} {
 		if olds, _ := filepath.Glob(filepath.Join(d, ".*.tmp-*")); len(olds) > 0 {
 			for _, o := range olds {
@@ -158,36 +187,44 @@ func loadState(dir string) ([]*record, error) {
 	path := filepath.Join(dir, stateFile)
 	data, err := readBounded(path, MaxStateBytes)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, "", nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrState, path, err)
+		return nil, "", fmt.Errorf("%w: %s: %w", ErrState, path, err)
 	}
 	var doc stateDoc
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrState, path, err)
+		return nil, "", fmt.Errorf("%w: %s: %w", ErrState, path, err)
 	}
 	if doc.Version < 1 || doc.Version > StateVersion {
-		return nil, fmt.Errorf("%w: %s is of version %d, which this fit does not read", ErrState, path, doc.Version)
+		return nil, "", fmt.Errorf("%w: %s is of version %d, which this fit does not read", ErrState, path, doc.Version)
 	}
 	if len(doc.Torrents) > config.MaxBTTorrents {
-		return nil, fmt.Errorf("%w: %s lists %d torrents, more than %d", ErrState, path, len(doc.Torrents), config.MaxBTTorrents)
+		return nil, "", fmt.Errorf("%w: %s lists %d torrents, more than %d", ErrState, path, len(doc.Torrents), config.MaxBTTorrents)
+	}
+	switch doc.AltSpeed {
+	case "", AltSpeedOn, AltSpeedOff:
+	default:
+		return nil, "", fmt.Errorf("%w: %s: alt_speed is %q, not on, off or empty", ErrState, path, doc.AltSpeed)
 	}
 	recs := make([]*record, 0, len(doc.Torrents))
 	seen := map[string]bool{}
 	for i, e := range doc.Torrents {
 		if _, ok := parseID(e.ID); !ok {
-			return nil, fmt.Errorf("%w: %s: torrent %d has the ID %q, not 40 lowercase hex digits", ErrState, path, i, e.ID)
+			return nil, "", fmt.Errorf("%w: %s: torrent %d has the ID %q, not 40 lowercase hex digits", ErrState, path, i, e.ID)
 		}
 		if seen[e.ID] {
-			return nil, fmt.Errorf("%w: %s lists %s twice", ErrState, path, e.ID)
+			return nil, "", fmt.Errorf("%w: %s lists %s twice", ErrState, path, e.ID)
 		}
 		seen[e.ID] = true
 		if !filepath.IsAbs(e.Dir) {
-			return nil, fmt.Errorf("%w: %s: torrent %s has the directory %q, which is not absolute", ErrState, path, e.ID, e.Dir)
+			return nil, "", fmt.Errorf("%w: %s: torrent %s has the directory %q, which is not absolute", ErrState, path, e.ID, e.Dir)
 		}
 		rec := &record{id: e.ID, name: e.Name, magnet: e.Magnet, dir: e.Dir, priorities: e.Priorities,
-			sequential: e.Sequential, paused: e.Paused, added: e.Added}
+			sequential: e.Sequential, paused: e.Paused, added: e.Added, category: e.Category, completed: e.Completed}
+		if e.Limits != nil {
+			rec.limits = *e.Limits
+		}
 		rec.mi, rec.err = loadTorrent(dir, e.ID)
 		rec.torrentSaved = rec.mi != nil
 		if rec.mi == nil && rec.err == nil {
@@ -204,7 +241,7 @@ func loadState(dir string) ([]*record, error) {
 		}
 		recs = append(recs, rec)
 	}
-	return recs, nil
+	return recs, doc.AltSpeed, nil
 }
 
 // loadTorrent reads the .torrent file of id, nil when there is none.
@@ -246,9 +283,9 @@ func readBounded(path string, max int64) ([]byte, error) {
 	return data, nil
 }
 
-// saveList writes torrents.json with recs.
-func saveList(dir string, recs []*record) error {
-	doc := stateDoc{Version: StateVersion, Saved: time.Now().UTC(), Torrents: make([]stateEntry, 0, len(recs))}
+// saveList writes torrents.json with recs and the alternative rates' mode.
+func saveList(dir string, recs []*record, altSpeed string) error {
+	doc := stateDoc{Version: StateVersion, Saved: time.Now().UTC(), AltSpeed: altSpeed, Torrents: make([]stateEntry, 0, len(recs))}
 	for _, r := range recs {
 		doc.Torrents = append(doc.Torrents, r.entry())
 	}
