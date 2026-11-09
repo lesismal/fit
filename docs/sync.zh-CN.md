@@ -332,7 +332,8 @@ sync {
 `transactions batch` 把多个源事务合在一起。`ddl report`（默认）记录 DDL 记录而不执行；`ddl stop` 让它们失败，使
 `on_error stop` 停下流水线，等人去修改表。`checkpoint sink` 提供[恰好一次](#投递保证)。写 TiDB 时，事务受
 `max_transaction_bytes`（16 MiB）限制，`AUTO_RANDOM` 列接受源的值。表由你创建，每张表在记录的键列上要有主键或唯一键；
-会话的时区为 UTC。
+会话的时区为 UTC。行以文本语句写入，值写成按会话 `sql_mode` 转义的字面量（每条语句一次往返）；作业中
+`job.max_parallel` 个写入者各有自己的连接。
 
 `mysql` 源作为副本跟随 MySQL 5.7 及以后或 MariaDB 10.11 及以后，以自己的 `server_id` 注册；启动时检查 binlog 已开启
 （`log_bin`）、`binlog_format = ROW` 且 `binlog_row_image = FULL`。`tables`（`db.table` 的通配符，省略时为系统库之外的

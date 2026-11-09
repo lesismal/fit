@@ -181,6 +181,84 @@ func TestJobResumesByChunk(t *testing.T) {
 	t.Logf("%d chunks of %d done at the kill, %d records written before it, %d twice", ndone, len(done), firstRun, again)
 }
 
+// TestJobLanesByReader: a parallel sink's writer gets the records of one
+// reader of the chunks, runs of a chunk's keys in order, not keys hashed
+// from across the table.
+func TestJobLanesByReader(t *testing.T) {
+	dir := t.TempDir()
+	name := t.Name()
+	c := counterStore(name, 20000)
+	var mu sync.Mutex
+	lanes := map[int]int{}
+	var bad []string
+	c.hook = func(batch []*Record) error {
+		mu.Lock()
+		defer mu.Unlock()
+		for i, r := range batch {
+			lanes[r.lane]++
+			if i == 0 {
+				continue
+			}
+			p := batch[i-1]
+			if r.lane != p.lane || keyID(r) != keyID(p)+1 && keyID(r)%500 != 0 {
+				bad = append(bad, fmt.Sprintf("%d (lane %d) after %d (lane %d)", keyID(r), r.lane, keyID(p), p.lane))
+			}
+		}
+		return nil
+	}
+	pipeline := fmt.Sprintf(`{"name": "j", "mode": "once", "job": {"max_parallel": 4},
+		"source": {"module": "generate", "params": {"records": 20000, "chunk_records": 500}},
+		"sinks": [{"name": "c", "sink": {"module": "counter", "params": {"store": %q}}, "batch": {"max_records": 200, "max_wait": "1ms"}}]}`, name)
+	st, err := RunPipeline(context.Background(), syncConfig(t, dir, pipeline), "j", Options{})
+	if err != nil || st.State != "finished" || st.Job.Written != 20000 {
+		t.Fatalf("%v %+v", err, st)
+	}
+	if len(bad) > 0 || len(lanes) != 4 || lanes[0] != 0 {
+		t.Fatalf("lanes %v; out of a run: %v", lanes, bad[:min(len(bad), 5)])
+	}
+	for i, n := range c.n {
+		if n != 1 {
+			t.Fatalf("id %d written %d times", i, n)
+		}
+	}
+}
+
+// TestQueueFullWritesHead: a queue smaller than a batch, and a max_wait
+// past any test, still finishes: once the source waits for room, the writer
+// holding the oldest record writes its batch unfilled, with one writer and
+// with a job's four.
+func TestQueueFullWritesHead(t *testing.T) {
+	for _, parallel := range []int{1, 4} {
+		t.Run(fmt.Sprint(parallel), func(t *testing.T) {
+			dir := t.TempDir()
+			name := t.Name()
+			c := counterStore(name, 5000)
+			pipeline := fmt.Sprintf(`{"name": "j", "mode": "once", "job": {"max_parallel": %d}, "queue": {"max_records": 100},
+				"source": {"module": "generate", "params": {"records": 5000, "chunk_records": 250}},
+				"sinks": [{"name": "c", "sink": {"module": "counter", "params": {"store": %q}}, "batch": {"max_records": 1000, "max_wait": "1h"}}]}`, parallel, name)
+			done := make(chan error, 1)
+			go func() {
+				st, err := RunPipeline(context.Background(), syncConfig(t, dir, pipeline), "j", Options{})
+				if err == nil && st.State != "finished" {
+					err = fmt.Errorf("%+v", st)
+				}
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(2 * time.Minute): // a hang guard
+				t.Fatal("the job waits for its batches to fill")
+			}
+			if c.written.Load() != 5000 {
+				t.Fatalf("%d written", c.written.Load())
+			}
+		})
+	}
+}
+
 // TestJobProgressAndFailures runs a chunked job whose sink fails some
 // records, skipped by on_error: the progress counts them, and a finished
 // job is not run again until asked.

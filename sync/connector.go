@@ -140,8 +140,12 @@ type Sink interface {
 }
 
 // ParallelSink is a Sink whose Write may be called on several goroutines at
-// once: a job's sink implementing it gets job.max_parallel writers, each
-// record going to the writer its key hashes to, so that a key is never
+// once: a job's sink implementing it gets job.max_parallel writers. A
+// record read from a chunk goes to the writer of the reader that read it,
+// so that a writer's batches hold runs of one chunk's keys, as a table's
+// key order has them, rather than keys from across the table, which
+// contend for the same pages in a B-tree's sink; any other record goes to
+// the writer its key hashes to. Either way a key read once is never
 // written out of order.
 type ParallelSink interface {
 	Sink

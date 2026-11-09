@@ -90,6 +90,12 @@ type Record struct {
 	// made says a transform made r, with Clone, so that the transforms
 	// after it may change it in place.
 	made bool
+	// lane, when not 0, is the reader of a job's chunks that read r, plus
+	// one: its records, and the records transforms make of them, go to
+	// the writer of that number of each ParallelSink, in place of their
+	// key's hash, so that a writer's batches hold runs of the keys of the
+	// chunk read rather than keys from across the table.
+	lane int
 }
 
 // boundary reports whether the source can resume after r: r ends a

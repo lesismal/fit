@@ -164,11 +164,12 @@ func paramOf(v fitsync.Value) any {
 	return v.Text()
 }
 
-// keyOf is a row's key, the map of its key's columns.
-func (t *snapTable) keyOf(row []fitsync.Value) fitsync.Value {
+// keyOf is a row's key, the map of its key's columns, row being the
+// row's columns in the table's order.
+func (t *snapTable) keyOf(row []fitsync.Field) fitsync.Value {
 	f := make([]fitsync.Field, len(t.key))
 	for i, j := range t.key {
-		f[i] = fitsync.Field{Name: t.info.cols[j].name, Value: row[j]}
+		f[i] = row[j]
 	}
 	return fitsync.Map(f...)
 }
@@ -179,6 +180,7 @@ func (t *snapTable) keyOf(row []fitsync.Value) fitsync.Value {
 // snapshot, handing each row's record to each.
 func (s *Source) readRange(ctx context.Context, c srcConn, t *snapTable, after, lo, hi *fitsync.Value, each func(*fitsync.Record) error) error {
 	order := t.cols(t.key)
+	ns := t.ns()
 	for {
 		var where []string
 		var args []any
@@ -215,20 +217,19 @@ func (s *Source) readRange(ctx context.Context, c srcConn, t *snapTable, after, 
 		if err != nil {
 			return fmt.Errorf("mysql: reading %s: %w", t.ns(), err)
 		}
+		var none mysqlwire.Column
 		for _, r := range rows {
-			vals := make([]fitsync.Value, len(r))
 			f := make([]fitsync.Field, len(r))
 			for i, v := range r {
-				var col mysqlwire.Column
+				col := &none
 				if i < len(cols) {
-					col = cols[i]
+					col = &cols[i]
 				}
-				vals[i] = wireValue(&col, v)
-				f[i] = fitsync.Field{Name: t.info.cols[i].name, Value: vals[i]}
+				f[i] = fitsync.Field{Name: t.info.cols[i].name, Value: wireValue(col, v)}
 			}
-			key := t.keyOf(vals)
+			key := t.keyOf(f)
 			after = &key
-			rec := &fitsync.Record{Source: "mysql", Namespace: t.ns(), Op: fitsync.OpInsert, Key: key, After: fitsync.Map(f...)}
+			rec := &fitsync.Record{Source: "mysql", Namespace: ns, Op: fitsync.OpInsert, Key: key, After: fitsync.Map(f...)}
 			if err := each(rec); err != nil {
 				return err
 			}

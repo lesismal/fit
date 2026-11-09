@@ -381,7 +381,8 @@ source transaction as one of the server's, held open across batches when a batch
 `checkpoint sink` gives [exactly once](#delivery-guarantees). Against TiDB, transactions are bounded
 by `max_transaction_bytes` (16 MiB) and `AUTO_RANDOM` columns take the source's values. The tables
 are yours, each with a primary or unique key on the record's key columns; the session's time zone is
-UTC.
+UTC. The rows go as text statements, their values as literals escaped for the session's `sql_mode`
+(one round trip a statement); in a job each of `job.max_parallel` writers has a connection of its own.
 
 The `mysql` source follows MySQL 5.7 and later or MariaDB 10.11 and later as a replica, registered
 with its own `server_id`; it checks when it starts that the binlog is on (`log_bin`), in

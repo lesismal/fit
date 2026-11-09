@@ -40,10 +40,25 @@ type fakeDB struct {
 }
 
 type fakeConn struct {
-	db     *fakeDB
-	work   map[string]map[string]map[string]any
-	broken error
-	closed bool
+	db   *fakeDB
+	work map[string]map[string]map[string]any
+	// touched are the keys the transaction wrote, by table, which its
+	// commit writes to the committed rows, so that connections' commits
+	// do not undo one another's.
+	touched map[string]map[string]bool
+	broken  error
+	closed  bool
+}
+
+// touch notes that the transaction open wrote table's key k.
+func (c *fakeConn) touch(table, k string) {
+	if c.work == nil {
+		return
+	}
+	if c.touched[table] == nil {
+		c.touched[table] = map[string]bool{}
+	}
+	c.touched[table][k] = true
 }
 
 var errBroken = errors.New("fake: connection broken")
@@ -174,12 +189,21 @@ func (c *fakeConn) Exec(ctx context.Context, q string, args ...any) (mysqlwire.R
 	}
 	switch {
 	case q == "START TRANSACTION":
-		c.work = clone(c.db.data)
+		c.work, c.touched = clone(c.db.data), map[string]map[string]bool{}
 	case q == "COMMIT":
-		if c.work != nil {
-			c.db.data = c.work
+		for table, keys := range c.touched {
+			if c.db.data[table] == nil {
+				c.db.data[table] = map[string]map[string]any{}
+			}
+			for k := range keys {
+				if r, ok := c.work[table][k]; ok {
+					c.db.data[table][k] = r
+				} else {
+					delete(c.db.data[table], k)
+				}
+			}
 		}
-		c.work = nil
+		c.work, c.touched = nil, nil
 	case strings.HasPrefix(q, "SET ") || q == "SELECT 1":
 	case strings.HasPrefix(q, "CREATE TABLE IF NOT EXISTS "):
 		table := strings.ReplaceAll(strings.Fields(q)[5], "`", "")
@@ -204,6 +228,7 @@ func (c *fakeConn) Exec(ctx context.Context, q string, args ...any) (mysqlwire.R
 			k := c.keyOf(table, row)
 			if _, ok := tabs[table][k]; ok {
 				delete(tabs[table], k)
+				c.touch(table, k)
 				n++
 			}
 		}
@@ -272,13 +297,23 @@ func (c *fakeConn) InsertRows(ctx context.Context, head string, rows [][]any, ta
 		}
 		k := c.keyOf(table, row)
 		if old := tabs[table][k]; old != nil {
-			maps.Copy(old, row)
-			row = old
+			row = maps.Clone(old)
+			maps.Copy(row, r2m(cols, r))
 		}
 		tabs[table][k] = row
+		c.touch(table, k)
 	}
 	done()
 	return mysqlwire.Result{AffectedRows: uint64(len(rows))}, nil
+}
+
+// r2m is a row's values by their columns.
+func r2m(cols []string, r []any) map[string]any {
+	m := map[string]any{}
+	for i, col := range cols {
+		m[col] = r[i]
+	}
+	return m
 }
 
 // loadSink loads a mysql sink with params, cleaned up with the test.
