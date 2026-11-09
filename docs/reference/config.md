@@ -49,8 +49,8 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mysql`](#sync-sources-mysql), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mqtt`](#sync-sources-mqtt), [`mysql`](#sync-sources-mysql), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mqtt`](#sync-sinks-mqtt), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`canal_json`](#sync-codecs-canal_json), [`csv`](#sync-codecs-csv), [`debezium`](#sync-codecs-debezium), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`raw`](#sync-codecs-raw), [`ticdc_simple`](#sync-codecs-ticdc_simple), [`wasm`](#sync-codecs-wasm)
 
@@ -7519,6 +7519,35 @@ In JSON:
 | `max_await` | duration | `"1s"` | How long the server holds a request for changes while there are none, below timeout; also how long the last record of a transaction may wait to be known as its last. 1s when left out or 0. |
 | `chunk_documents` | integer, 0 or more | `100000` | In a job (mode once), the documents a chunk of the snapshot is reckoned to hold: each collection is split into as many ranges of _id as its count needs, from a sample of _ids, read job.max_parallel at a time. 100000 when left out or 0. |
 
+<a id="sync-sources-mqtt"></a>
+
+### `mqtt`
+
+Subscribes to MQTT topic filters, of version 3.1.1 or 5, in a persistent session of its client ID, which the broker keeps while fit is away, with the messages of QoS 1 and 2 sent to it. A message of QoS 1 or 2 is acknowledged (PUBACK, PUBREC) only once every sink has its records, in the order the messages came, so the broker sends again, after a restart, those a pipeline stopped or killed had not written: at least once into the sinks, and a QoS 2 message is taken once in a connection. Each message is a record whose namespace is its topic, unless namespace sets one, and whose key is the topic, unless the codec sets one: its after holds the topic, payload, QoS, retain and MQTT 5 properties when no codec is named. The checkpoint holds nothing to resume from: the session is the position. In a job (mode once) it reads until no message comes for idle, then ends once the sinks have what it read.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `servers` | list of string |  | Required. The brokers, host:port each (1883, or 8883 with tls), tried in turn until one takes the connection: the nodes of one cluster, which share the session. |
+| `client_id` | string |  | Required. The client ID, which names the session the broker keeps: one pipeline's, and no other client's, since a second connection of it takes the session over. |
+| `version` | string: `3.1.1`, `5` | `"5"` | The MQTT version spoken: 3.1.1 or 5. 5 when left out. |
+| `username` | string |  | The user name sent in CONNECT. |
+| `password_env` | string |  | The environment variable holding the password sent in CONNECT, read when the pipeline loads. |
+| `tls` | boolean |  | Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the brokers' certificates must have; each broker's host when left out. |
+| `timeout` | duration | `"30s"` | How long connecting, the broker's answers to CONNECT and SUBSCRIBE, and each write may take. 30s when left out or 0. |
+| `keep_alive` | duration | `"60s"` | The keep-alive told to the broker: fit pings it every half of it, and takes a ping not answered within it as the connection lost. At most 65535s; a broker of version 5 may set its own. 60s when left out or 0. |
+| `topics` | list of string |  | Required. The topic filters subscribed to, + standing for a level and # for the levels under one, as sensors/+/temperature or devices/#; a shared subscription, $share/group/filter, splits the messages among the clients of the group. |
+| `qos` | integer, 0 to 2 | `1` | The most QoS the broker sends the topics' messages at: 0, at most once, lost when fit is away; 1, at least once, kept in the session and sent again until acknowledged; 2, as 1, and taken once in a connection. 1 when left out. |
+| `session_expiry` | duration | `"24h"` | How long a broker of version 5 keeps the session, and the messages for it, while fit is not connected; a broker may hold it shorter (EMQX's session_expiry_interval). In 3.1.1 the broker's own setting (Mosquitto's persistent_client_expiration). 24h when left out or 0. |
+| `receive_maximum` | integer, 0 to 65535 | `128` | The most messages of QoS 1 and 2 a broker of version 5 sends before fit acknowledges them, and the most messages read and not yet handed to the pipeline. Since a message is acknowledged once the sinks have it, keep it above the sinks' batch.max_records; brokers bound it too (EMQX's max_inflight, Mosquitto's max_inflight_messages). 128 when left out or 0. |
+| `max_packet_size` | integer, 0 to 268435455 | `1048576` | The most bytes of a packet fit takes, told to a broker of version 5, which then drops a message larger for fit; a larger packet ends the connection. 1048576 when left out or 0. |
+| `codec` | [codec](#sync codecs) |  | What makes records of a message's payload, as json for a JSON object. When left out, a message record whose after holds topic, payload (bytes), qos, retain, and those of the MQTT 5 properties the message has: content_type, response_topic, correlation_data and user_properties (a map, a name sent more than once an array of its values). |
+| `namespace` | string |  | The records' namespace. The codec's, or the topic, when left out. |
+| `idle` | duration | `"5s"` | In a job (mode once), how long without a message ends the reading: the source ends once the sinks have every message it read. 5s when left out or 0. |
+
 <a id="sync-sources-mysql"></a>
 
 ### `mysql`
@@ -8978,6 +9007,36 @@ In JSON:
 | `journal` | boolean |  | Ask for the writes to be in the journal before they are acknowledged (j: true). |
 | `write_timeout` | duration |  | How long the server waits for the write concern (wtimeout) before it answers with an error, which the pipeline retries; the writes stay. Without a limit when left out. |
 | `max_request_bytes` | integer, 0 to 41943040 | `8388608` | The most bytes of documents in one bulk write; a batch larger is sent in several. A document larger than 16 MiB fails its record. 8 MiB when left out or 0. |
+
+<a id="sync-sinks-mqtt"></a>
+
+### `mqtt`
+
+Publishes each record to an MQTT broker, of version 3.1.1 or 5, as a message of the topic topic's template makes of its namespace and key, at a QoS, retained or not, its payload what the codec makes of the record (when none is named, after's payload field, or the record's canonical JSON). A batch's messages go out in order, at most max_inflight unacknowledged at once, and the batch is written once the broker has acknowledged each (PUBACK for QoS 1, PUBCOMP for QoS 2). A delete, retained, is an empty retained message, which clears the topic's. Delivery is at least once: a batch written again after a crash, or a publish whose acknowledgement was lost, publishes its messages again.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `servers` | list of string |  | Required. The brokers, host:port each (1883, or 8883 with tls), tried in turn until one takes the connection. |
+| `client_id` | string |  | The client ID, in a clean session of its own; fit-sync- and random letters when left out. |
+| `version` | string: `3.1.1`, `5` | `"5"` | The MQTT version spoken: 3.1.1 or 5. 5 when left out. |
+| `username` | string |  | The user name sent in CONNECT. |
+| `password_env` | string |  | The environment variable holding the password sent in CONNECT, read when the pipeline loads. |
+| `tls` | boolean |  | Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the brokers' certificates must have; each broker's host when left out. |
+| `timeout` | duration | `"30s"` | How long connecting, the broker's answer to CONNECT, and each write may take. 30s when left out or 0. |
+| `keep_alive` | duration | `"60s"` | The keep-alive told to the broker: fit pings it every half of it, and takes a ping not answered within it as the connection lost. At most 65535s; a broker of version 5 may set its own. 60s when left out or 0. |
+| `max_packet_size` | integer, 0 to 268435455 | `1048576` | The most bytes of a packet fit takes from the broker. A message larger than the broker takes (its Maximum Packet Size, in version 5) fails, at once. 1048576 when left out or 0. |
+| `topic` | string | `"{namespace}"` | The topic a record goes to: text with {namespace}, the record's namespace, and {key}, its key's text (a route transform can map namespaces first). A record whose topic is empty or holds + or # fails. {namespace} when left out. |
+| `qos` | integer, 0 to 2 | `1` | The QoS messages are published at: 0, sent and not acknowledged, so a message the connection loses is lost; 1, acknowledged (PUBACK); 2, acknowledged once handed on (PUBCOMP). 1 when left out. |
+| `retain` | boolean |  | Publish retained messages: the broker keeps each topic's last, for clients that subscribe later, and a delete clears it. |
+| `codec` | [codec](#sync codecs) |  | What makes a message's payload of a record, as json for a JSON object. When left out, after's (or before's) payload field, its bytes or text as they are, or the record's canonical JSON when it has none; and, in version 5, the field content_type, and the map user_properties, become the message's properties, so that the source mqtt's records are published as they were read. |
+| `message_expiry` | duration |  | In version 5, how long the broker keeps a message for a subscriber not connected, rounded up to seconds. None when left out. |
+| `content_type` | string |  | In version 5, the messages' content type, as application/json. |
+| `user_properties` | object of string |  | In version 5, user properties every message carries, in the order of their names. |
+| `max_inflight` | integer, 0 to 65535 | `64` | The most messages of QoS 1 and 2 published and not yet acknowledged; lowered to the broker's receive maximum in version 5. 64 when left out or 0. |
 
 <a id="sync-sinks-mysql"></a>
 

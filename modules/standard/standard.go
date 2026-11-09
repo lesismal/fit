@@ -31,6 +31,7 @@ import (
 	_ "github.com/lesismal/fit/sync/httpsync"
 	_ "github.com/lesismal/fit/sync/kafka"
 	_ "github.com/lesismal/fit/sync/mongo"
+	_ "github.com/lesismal/fit/sync/mqtt"
 	_ "github.com/lesismal/fit/sync/mysql"
 	_ "github.com/lesismal/fit/sync/postgres"
 	_ "github.com/lesismal/fit/sync/postgres/sink"

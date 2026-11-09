@@ -8231,6 +8231,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "mqtt"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.mqtt"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "mysql"
               }
             }
@@ -8336,6 +8352,7 @@
             "kafka",
             "memory",
             "mongo",
+            "mqtt",
             "mysql",
             "postgres",
             "redis",
@@ -8927,6 +8944,125 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.sinks.mqtt": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file.",
+          "type": "string"
+        },
+        "client_id": {
+          "description": "The client ID, in a clean session of its own; fit-sync- and random letters when left out.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a message's payload of a record, as json for a JSON object. When left out, after's (or before's) payload field, its bytes or text as they are, or the record's canonical JSON when it has none; and, in version 5, the field content_type, and the map user_properties, become the message's properties, so that the source mqtt's records are published as they were read."
+        },
+        "content_type": {
+          "description": "In version 5, the messages' content type, as application/json.",
+          "type": "string"
+        },
+        "keep_alive": {
+          "default": "60s",
+          "description": "The keep-alive told to the broker: fit pings it every half of it, and takes a ping not answered within it as the connection lost. At most 65535s; a broker of version 5 may set its own. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_inflight": {
+          "default": 64,
+          "description": "The most messages of QoS 1 and 2 published and not yet acknowledged; lowered to the broker's receive maximum in version 5. 64 when left out or 0.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_packet_size": {
+          "default": 1048576,
+          "description": "The most bytes of a packet fit takes from the broker. A message larger than the broker takes (its Maximum Packet Size, in version 5) fails, at once. 1048576 when left out or 0.",
+          "maximum": 268435455,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message_expiry": {
+          "description": "In version 5, how long the broker keeps a message for a subscriber not connected, rounded up to seconds. None when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password sent in CONNECT, read when the pipeline loads.",
+          "type": "string"
+        },
+        "qos": {
+          "default": 1,
+          "description": "The QoS messages are published at: 0, sent and not acknowledged, so a message the connection loses is lost; 1, acknowledged (PUBACK); 2, acknowledged once handed on (PUBCOMP). 1 when left out.",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retain": {
+          "description": "Publish retained messages: the broker keeps each topic's last, for clients that subscribe later, and a delete clears it.",
+          "type": "boolean"
+        },
+        "server_name": {
+          "description": "The name the brokers' certificates must have; each broker's host when left out.",
+          "type": "string"
+        },
+        "servers": {
+          "description": "The brokers, host:port each (1883, or 8883 with tls), tried in turn until one takes the connection.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting, the broker's answer to CONNECT, and each write may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "topic": {
+          "default": "{namespace}",
+          "description": "The topic a record goes to: text with {namespace}, the record's namespace, and {key}, its key's text (a route transform can map namespaces first). A record whose topic is empty or holds + or # fails. {namespace} when left out.",
+          "type": "string"
+        },
+        "user_properties": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "In version 5, user properties every message carries, in the order of their names.",
+          "type": "object"
+        },
+        "username": {
+          "description": "The user name sent in CONNECT.",
+          "type": "string"
+        },
+        "version": {
+          "default": "5",
+          "description": "The MQTT version spoken: 3.1.1 or 5. 5 when left out.",
+          "enum": [
+            "3.1.1",
+            "5"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "servers"
+      ],
       "type": "object"
     },
     "sync.sinks.mysql": {
@@ -9524,6 +9660,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "mqtt"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.mqtt"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "mysql"
               }
             }
@@ -9628,6 +9780,7 @@
             "http",
             "kafka",
             "mongo",
+            "mqtt",
             "mysql",
             "postgres",
             "redis",
@@ -10270,6 +10423,125 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.sources.mqtt": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs tls and key_file.",
+          "type": "string"
+        },
+        "client_id": {
+          "description": "The client ID, which names the session the broker keeps: one pipeline's, and no other client's, since a second connection of it takes the session over.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a message's payload, as json for a JSON object. When left out, a message record whose after holds topic, payload (bytes), qos, retain, and those of the MQTT 5 properties the message has: content_type, response_topic, correlation_data and user_properties (a map, a name sent more than once an array of its values)."
+        },
+        "idle": {
+          "default": "5s",
+          "description": "In a job (mode once), how long without a message ends the reading: the source ends once the sinks have every message it read. 5s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "keep_alive": {
+          "default": "60s",
+          "description": "The keep-alive told to the broker: fit pings it every half of it, and takes a ping not answered within it as the connection lost. At most 65535s; a broker of version 5 may set its own. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_packet_size": {
+          "default": 1048576,
+          "description": "The most bytes of a packet fit takes, told to a broker of version 5, which then drops a message larger for fit; a larger packet ends the connection. 1048576 when left out or 0.",
+          "maximum": 268435455,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "namespace": {
+          "description": "The records' namespace. The codec's, or the topic, when left out.",
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password sent in CONNECT, read when the pipeline loads.",
+          "type": "string"
+        },
+        "qos": {
+          "default": 1,
+          "description": "The most QoS the broker sends the topics' messages at: 0, at most once, lost when fit is away; 1, at least once, kept in the session and sent again until acknowledged; 2, as 1, and taken once in a connection. 1 when left out.",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "receive_maximum": {
+          "default": 128,
+          "description": "The most messages of QoS 1 and 2 a broker of version 5 sends before fit acknowledges them, and the most messages read and not yet handed to the pipeline. Since a message is acknowledged once the sinks have it, keep it above the sinks' batch.max_records; brokers bound it too (EMQX's max_inflight, Mosquitto's max_inflight_messages). 128 when left out or 0.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "server_name": {
+          "description": "The name the brokers' certificates must have; each broker's host when left out.",
+          "type": "string"
+        },
+        "servers": {
+          "description": "The brokers, host:port each (1883, or 8883 with tls), tried in turn until one takes the connection: the nodes of one cluster, which share the session.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "session_expiry": {
+          "default": "24h",
+          "description": "How long a broker of version 5 keeps the session, and the messages for it, while fit is not connected; a broker may hold it shorter (EMQX's session_expiry_interval). In 3.1.1 the broker's own setting (Mosquitto's persistent_client_expiration). 24h when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting, the broker's answers to CONNECT and SUBSCRIBE, and each write may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "topics": {
+          "description": "The topic filters subscribed to, + standing for a level and # for the levels under one, as sensors/+/temperature or devices/#; a shared subscription, $share/group/filter, splits the messages among the clients of the group.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "The user name sent in CONNECT.",
+          "type": "string"
+        },
+        "version": {
+          "default": "5",
+          "description": "The MQTT version spoken: 3.1.1 or 5. 5 when left out.",
+          "enum": [
+            "3.1.1",
+            "5"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "servers",
+        "client_id",
+        "topics"
+      ],
       "type": "object"
     },
     "sync.sources.mysql": {
