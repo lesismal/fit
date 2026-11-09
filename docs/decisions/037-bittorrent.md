@@ -79,3 +79,8 @@ its own. By rules 15 and 19 these are added to fib first (A75–A79), not worked
   `media_auth` by default and bounded in number and disk.
 - Interop tests follow fib's (libtorrent and anacrolix in containers); throughput and CPU
   benchmarks run on the benchmark host only.
+- **A test-only dependency** (I205, rule 14): `test/btinterop`, a module of its own as
+  `test/mcpsdk` is, requires `github.com/anacrolix/torrent` (MPL-2.0) and what it pulls in, for the
+  interop tests and the benchmark's baseline (`btbench`); nothing of fit's imports it, so fit's own
+  `go.mod` gains nothing. libtorrent is used through Ubuntu's `python3-libtorrent` package in CI and
+  a container, never linked.

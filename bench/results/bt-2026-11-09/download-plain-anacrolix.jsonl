@@ -1,0 +1,3 @@
+{"scenario":"download","impl":"anacrolix","mse":false,"peers":4,"bytes":1073741824,"seconds":0.985310521,"mib_per_sec":1039.2662801983822,"cpu_seconds":2.23,"cpu_percent":226.32459031663987,"cpu_seconds_per_gib":2.23,"peak_rss_mib":1050.4375}
+{"scenario":"download","impl":"anacrolix","mse":false,"peers":4,"bytes":1073741824,"seconds":0.985385936,"mib_per_sec":1039.1867415489478,"cpu_seconds":2.07,"cpu_percent":210.0699760748361,"cpu_seconds_per_gib":2.07,"peak_rss_mib":1050.48046875}
+{"scenario":"download","impl":"anacrolix","mse":false,"peers":4,"bytes":1073741824,"seconds":1.060138507,"mib_per_sec":965.9115231062916,"cpu_seconds":2.39,"cpu_percent":225.4422402562536,"cpu_seconds_per_gib":2.39,"peak_rss_mib":1049.9609375}

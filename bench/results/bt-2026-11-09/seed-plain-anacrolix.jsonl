@@ -1,0 +1,3 @@
+{"scenario":"seed","impl":"anacrolix","mse":false,"peers":4,"bytes":1073741824,"seconds":3.685547573,"mib_per_sec":1111.368099005678,"cpu_seconds":4.88,"cpu_percent":132.40908992059835,"cpu_seconds_per_gib":1.22,"peak_rss_mib":1057.7421875}
+{"scenario":"seed","impl":"anacrolix","mse":false,"peers":4,"bytes":1073741824,"seconds":3.688911991,"mib_per_sec":1110.3544920543484,"cpu_seconds":4.9,"cpu_percent":132.83049343423605,"cpu_seconds_per_gib":1.225,"peak_rss_mib":1057.68359375}
+{"scenario":"seed","impl":"anacrolix","mse":false,"peers":4,"bytes":1073741824,"seconds":3.699072134,"mib_per_sec":1107.304710917,"cpu_seconds":4.95,"cpu_percent":133.81734177341673,"cpu_seconds_per_gib":1.2375,"peak_rss_mib":1057.11328125}

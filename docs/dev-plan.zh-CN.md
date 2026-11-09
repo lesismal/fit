@@ -362,7 +362,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I202 | 把目录发布成带 web seed 的 hybrid 种子，跟随磁盘变化 | I197 | done |
 | I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | done |
 | I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | done |
-| I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | todo |
+| I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | done |
 | I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
 | I207 | （第二阶段）集群共享的 tracker Store | I201 | todo |
 | I208 | （第二阶段）RSS 自动下载 | I198 | todo |
@@ -5448,6 +5448,68 @@ race 测试与完整测试套件（留给主会话）。
 - **做什么**：fit 的客户端和 tracker 在容器里与 libtorrent、anacrolix 互通（沿用 fib 的互通方式）；负载下的磁盘满、重启和 reload；
   吞吐与 CPU 只在基准主机上测；`docs/bittorrent*.md`、参考文档、fit-examples 中的示例。
 - **涉及**：`test`、`bench`、`docs`、fit-examples。
+- **完成** 2026-11-09（分支 `bt-i205`；fit-examples 分支 `bittorrent-example`）：
+  - **互通**：`test/btinterop`，一个独立模块（anacrolix/torrent 1.61 和 fib 的 metainfo 生成器；决定 037 涵盖这一依赖），其测试
+    从检出的代码构建 fit 并运行，经 Admin API 操控，对手是测试进程中的 anacrolix 和经 `libtorrent_peer.py` 的 libtorrent-rasterbar
+    2.0.11（`FIT_LIBTORRENT=1`）；`run.sh` 在 docker 中运行全部，CI 的 `bittorrent-interop` 任务在 runner 上用 Ubuntu 的
+    python3-libtorrent 和 cgo 运行。46 个用例全部通过：fit 从两者下载并向两者做种（v1、混合，以及与 libtorrent 的 v2；.torrent
+    文件和磁力链接；TCP 和 uTP；MSE 关闭、优先和要求 RC4；对端的传输和加密经 Admin API 检查）；私有 tracker 经 HTTP（令牌的
+    passkey）和 UDP（Admin API 给出的用户 passkey，BEP 41），用于 anacrolix 和 libtorrent 的 swarm，fit 自己的客户端也在其中，
+    未知 passkey 被拒绝；`bt_stream` 在从 anacrolix 下载 24 MiB 文件的同时播放它（中间的 Range 在种子下载到 8% 时得到应答），
+    以及按磁力链接即时添加；只用发布条目的 web seed（fit 的 `static` 路由），`per_file` 和 `whole_dir` 由 libtorrent 下载，
+    `whole_dir` 由 anacrolix 下载。
+  - **故障测试**（`bittorrent/failure_test.go`），与 I197–I203 的并列：下载中磁盘写满（写入返回 ENOSPC 而空闲空间检查仍认为
+    有空间：错误出现在状态中，块被重新请求；随后检查使其暂停；然后完成，没有哈希失败）；三个下载进行到一半时停止并重启
+    （每个分片不读取即再次拥有，然后完成）；下载中改变 `listen`（分片保留，不读取，完成）；唯一的做种方在一个分片的块中途被
+    切断，然后恢复；两个做种方之一在分片中途停滞（约 2s 内从另一个完成下载，远早于 fib 60s 的 snub）。
+  - **基准**在基准主机上：`bench/bt.sh`、`bench/bt/host.sh`、`bench/bt/summary.py` 和 `test/btinterop/btbench`；一个 1 GiB
+    的种子放在 `/dev/shm`，被测客户端用 4 个 CPU，四个 fib 对端用另外 8 个，fit 与 anacrolix 和单独的 fib 客户端对比，明文和
+    RC4，3 轮交替运行；结果在 `bench/results/bt-2026-11-09`（中位数）。向 4 个下载方做种时 fit 明文 1688 MiB/s（anacrolix 1110），
+    每 GiB 0.60 CPU 秒（1.23），RC4 933（744），峰值 RSS 46–56 MiB（anacrolix 约 1050）。从 4 个做种方下载时 fit 明文 705 MiB/s
+    （anacrolix 1039，单独的 fib 478），RC4 553（759、363），每字节 CPU 与 anacrolix 相同，4 个 CPU 用了不到 2 个：受 fib 的
+    种子锁限制（见下）。
+  - **文档**：中英文两版的 [BitTorrent](bittorrent.zh-CN.md)：四部分的概览，包含所有部分的配置（经 `fit validate` 验证），
+    合并重复的状态行，新增互通、性能、限制与安全三节；配置概览的行和 README 的文档列表，中英文两版。**示例**：fit-examples
+    的 `bittorrent/`（带分类、`alt_speed`、`watch_dir` 和发布条目的客户端，私有 tracker，`bt_tracker`、`bt_publish`、`static`、
+    带 `magnet` 的 `bt_stream`，Admin API），列入其 README；fit-examples 固定的版本已经包含这些角色。
+
+**待审查的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **互通测试经 Admin API 驱动 fit 二进制**，与 test/mcpsdk 相同，而不是在进程内运行角色：它们检查的是用户运行的东西，
+   模块不需要 `replace` fit，同一套工具也用于基准。模块只为测试种子按 fit 的版本依赖 fib。备选：进程内运行角色，加
+   `replace github.com/lesismal/fit => ../..`。
+2. **anacrolix 用例在该模块的每次 `go test` 中运行；libtorrent 用例需要 `FIT_LIBTORRENT=1`**，与 fib 相同；CI 两者都运行，
+   带 `-race`，在 25 分钟内。该模块不在 fit 主模块的 `go test ./...` 中（独立模块）。
+3. **互通传输以 2 MiB/s 运行**（fit 自己的 `limits`），使一个用例持续的秒数足以经 Admin API 看到其对端，而 Admin API 只列出
+   已连接的对端。备选：每个对端连接时发一个事件。
+4. **其他客户端的缺陷在测试中绕开并记录，暂未向上游修复**：anacrolix 把 v2/混合的单文件种子当作目录（其 web seed 拒绝不以
+   `/` 结尾的 URL，因此 anacrolix 不获取 `per_file` 的 web seed，并在文件名下面寻找文件），其 web seed 跳过较短的最后一个
+   分片，1.61 在 announce 它所校验的混合种子时 panic；与它一起的用例使用 v1 或 `whole_dir`。备选：报告给 anacrolix，在修复前
+   跳过这些用例。
+5. **基准的对照是 anacrolix，另加单独的 fib 客户端**；基准主机上没有安装 libtorrent，经其 Python 绑定测量会把 Python 也测进去。
+   另一端是 fib 的客户端（其做种方取用第一个的续传数据，不做校验）；数据放在 `/dev/shm`，不测磁盘；1 GiB，v1，1 MiB 分片，
+   TCP；CPU 和峰值 RSS 取自 `/proc`。不是计划报告：没有分数和排名（规则 24 针对完整计划）。主机的 LLM 服务保持运行
+   （空闲；13 GiB 空闲内存），这是用户的偏好。
+6. **btbench 放在 test/btinterop 中**（`btbench/`），即已有 anacrolix 的模块，而不在 `bench/`（其 Go 代码属于 fit 的模块）。
+   它等待 fit 的 `pieces_have` 而不是 `complete`，后者由角色在管理器每秒的查看中设置（见遗留）。
+7. **故障测试用存储包装和空闲空间函数模拟磁盘写满**，而不是 tmpfs 或 loop 设备（需要 root，仅限 Linux）；被切断和停滞的
+   对端经测试自己的 TCP 中继模拟。
+8. **文档的配置示例是带占位符的 .conf**（不用 `${...}`），其中的 tracker 为公开，使发布的种子不携带 passkey；安全说明解释原因。
+
+遗留：
+
+- **fib：种子的下载受其锁限制**（待提的 fib 请求）：每收到一个块都要取 `Torrent.mu` 并补充该对端的请求，`nextRequest`/`pickPiece`
+  用 `math/rand` 扫描分片（在单独 fib 从 4 个做种方下载 1 GiB 的 profile 中占 CPU 的 24%，`pickPiece` 21%），且每个 16 KiB
+  块各是一次 `pwrite`（30%）。建议：对端预留一个分片并请求其各块而不再重新挑选，在其流水线低于 reqq 的一半时补充；
+  最稀有优先改用在 have/bitfield 时更新的桶，而不是扫描；在磁盘池上按分片或按连续段写块（`pwritev`）。fit 无需改 API 即可
+  获得下载速率的提升。
+- **单独的 fib 在其自己的引擎上下载速率只有 fit 的 0.68**：值得在 fib 中看看不带 `SharedEngine` 创建的客户端的引擎默认值。
+- **fit：`Status.Complete` 最多滞后一秒**（管理器的查看，I198 的决定 10）：轮询完成的 API 客户端要等它；在查询时由 fib 的
+  种子计算，只要计数仍由管理器负责，就不会把一次完成计两次。
+- 向上游报告上述 anacrolix 缺陷。fit-examples 的 `bittorrent/` 用静态令牌把发布的种子 announce 到其私有 tracker，每个下载者
+  因此共用该令牌（其注释称该令牌为占位符；文档的安全说明建议发布到公开的 tracker）。
+- 未运行：完整的 `go test -race ./...` 和 Linux 上的 race 测试（留给主会话）；互通测试在 docker（Linux）中运行，anacrolix 的
+  用例也在 macOS 上运行过。
 
 ### I206 （第二阶段）集群与 BitTorrent 分发
 

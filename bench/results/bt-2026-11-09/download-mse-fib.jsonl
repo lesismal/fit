@@ -1,0 +1,3 @@
+{"scenario":"download","impl":"fib","mse":true,"peers":4,"bytes":1073741824,"seconds":2.786737086,"mib_per_sec":367.4548292138385,"cpu_seconds":3.89,"cpu_percent":139.58977398846014,"cpu_seconds_per_gib":3.89,"peak_rss_mib":128.59375}
+{"scenario":"download","impl":"fib","mse":true,"peers":4,"bytes":1073741824,"seconds":2.817934737,"mib_per_sec":363.3866982633388,"cpu_seconds":3.85,"cpu_percent":136.62488167127486,"cpu_seconds_per_gib":3.85,"peak_rss_mib":158.3671875}
+{"scenario":"download","impl":"fib","mse":true,"peers":4,"bytes":1073741824,"seconds":2.8671071489999997,"mib_per_sec":357.15442318127333,"cpu_seconds":3.85,"cpu_percent":134.28169230936547,"cpu_seconds_per_gib":3.85,"peak_rss_mib":152.42578125}
