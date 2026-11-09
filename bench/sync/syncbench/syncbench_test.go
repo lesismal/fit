@@ -353,6 +353,51 @@ func TestESCounter(t *testing.T) {
 	}
 }
 
+func TestLokiCounter(t *testing.T) {
+	ctx := context.Background()
+	var answer atomic.Value
+	answer.Store("200 # HELP loki_distributor_lines_received_total The total number of lines received.\n" +
+		"loki_distributor_lines_received_total{tenant=\"a\"} 12\nloki_distributor_lines_received_total{tenant=\"b\"} 3e+00\nother 7\n")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metrics" {
+			w.WriteHeader(404)
+			return
+		}
+		code, body, _ := strings.Cut(answer.Load().(string), " ")
+		var n int
+		fmt.Sscan(code, &n)
+		w.WriteHeader(n)
+		io.WriteString(w, body)
+	}))
+	defer srv.Close()
+	c, err := openCounter(ctx, opts(t, "prepare", "-scenario", "files-loki", "-loki", srv.URL+"/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.close()
+	if n, err := c.count(ctx); n != 15 || err != nil {
+		t.Errorf("count: %d, %v", n, err)
+	}
+	answer.Store("200 nothing\n")
+	if n, err := c.count(ctx); n != 0 || err != nil {
+		t.Errorf("none: %d, %v", n, err)
+	}
+	for _, a := range []string{"500 broken", "200 loki_distributor_lines_received_total x"} {
+		answer.Store(a)
+		if _, err := c.count(ctx); err == nil {
+			t.Errorf("%s: no error", a)
+		}
+	}
+	bad := &lokiCounter{client: http.DefaultClient, url: "http://127.0.0.1:1/metrics"}
+	if _, err := bad.count(ctx); err == nil {
+		t.Error("refused: no error")
+	}
+	bad.url = ":"
+	if _, err := bad.count(ctx); err == nil {
+		t.Error("a bad URL: no error")
+	}
+}
+
 func TestKafkaCounters(t *testing.T) {
 	ctx := ctxT(t)
 	k := newFakeKafka(t)

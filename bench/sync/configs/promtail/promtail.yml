@@ -1,0 +1,25 @@
+# Promtail in the sync benchmark's files-loki scenario: the files' lines, as
+# they are, into Loki, as fit's config does (configs/fit/files-loki.conf):
+# one stream, labelled job=bench, batches of 1 MiB sent after at most 1s
+# (Promtail's defaults, and fit's max_request_bytes and batch max_wait),
+# snappy protobuf as both send it. Promtail looks for new lines every 250ms
+# by default, as fit does (its poll_interval). No pipeline stage parses a
+# line, and no rate limit reads them.
+server:
+  disable: true
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    batchwait: 1s
+    batchsize: 1048576
+
+scrape_configs:
+  - job_name: bench
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: bench
+          __path__: /data/in/*.log

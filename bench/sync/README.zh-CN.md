@@ -10,6 +10,7 @@ Docker 中运行，面对使用相同固定镜像与设置的全新服务器，�
 | 场景 | 源 → 目标 | 搬运者 |
 | --- | --- | --- |
 | `files` | 文件中的行（`LINE_BYTES`、`FILES`）→ 一个文件 | fit（`file` → `file`）、Filebeat 8.17.4（`filestream` → `output.file`） |
+| `files-loki` | 文件中的行 → Loki 3.5 | fit（`file` → `loki`）、Promtail 3.5.5（Filebeat 没有 Loki 输出） |
 | `mysql-es` | MySQL 8.0 的 binlog → Elasticsearch 7.17 | fit、Canal 1.1.8（canal-server + client adapter `es7`）、Debezium 3.0.8（MySQL 连接器 → Kafka → Confluent Elasticsearch sink 14.1.2，同一个 Kafka Connect） |
 | `mysql-kafka` | MySQL 8.0 的 binlog → Kafka 3.9 | fit（Debezium 信封）、Canal 1.1.8（Kafka 模式，flat message）、Debezium 3.0.8（无 schema 的 JSON） |
 | `pg-kafka` | PostgreSQL 17 的逻辑复制 → Kafka 3.9 | fit、Debezium 3.0.8（`pgoutput`） |
@@ -62,7 +63,7 @@ bench/sync/plan.sh 2026-11-09           # 整个计划：每个场景 3 轮，�
 - 通过 Admin API 保存 fit 的 CPU profile（从排空开始 10 秒）与堆 profile（结束时）。
 - `merge` 将一个项目的多轮合并，取每个搬运者按吞吐的中位轮，附带离散度与失败。
 
-对齐的设置（Filebeat 的轮询与刷新等待、Kafka 信封与分区、批量的并行度与批大小、无 TLS、放宽的持久化、JVM 堆
+对齐的设置（Filebeat 的轮询与刷新等待、Promtail 与 fit 推送 Loki 的批大小与等待、Kafka 信封与分区、批量的并行度与批大小、无 TLS、放宽的持久化、JVM 堆
 保持镜像默认）以及 arm64（Apple M4）上 Java 的 SVE 问题，见英文版说明。
 
 ## 报告

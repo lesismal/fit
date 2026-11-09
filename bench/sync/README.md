@@ -11,6 +11,7 @@ where it writes them.
 | Scenario | Source → sink | Movers |
 | --- | --- | --- |
 | `files` | lines in files (`LINE_BYTES`, `FILES`) → one file | fit (`file` → `file`), Filebeat 8.17.4 (`filestream` → `output.file`) |
+| `files-loki` | lines in files → Loki 3.5 | fit (`file` → `loki`), Promtail 3.5.5 (Filebeat has no Loki output) |
 | `mysql-es` | MySQL 8.0's binlog → Elasticsearch 7.17 | fit (`mysql` → `elasticsearch`), Canal 1.1.8 (canal-server + client adapter `es7`), Debezium 3.0.8 (MySQL connector → Kafka → Confluent's Elasticsearch sink 14.1.2, in one Kafka Connect) |
 | `mysql-kafka` | MySQL 8.0's binlog → Kafka 3.9 | fit (`mysql` → `kafka`, Debezium's envelope), Canal 1.1.8 (canal-server in Kafka mode, flat messages), Debezium 3.0.8 (MySQL connector, JSON without schemas) |
 | `pg-kafka` | PostgreSQL 17's logical replication → Kafka 3.9 | fit (`postgres` → `kafka`), Debezium 3.0.8 (PostgreSQL connector, `pgoutput`) |
@@ -114,7 +115,8 @@ with the Docker socket mounted:
 - `merge` puts the rounds of an item into one results file, each mover's median round by
   throughput, with the rounds' spread and any failures.
 
-Where the sink is counted: the files sink's lines; Elasticsearch's `_count`; Kafka's offsets (a
+Where the sink is counted: the files sink's lines; the lines Loki's distributor took
+(`loki_distributor_lines_received_total`, from its `/metrics`); Elasticsearch's `_count`; Kafka's offsets (a
 message a row for fit and Debezium), or, for Canal's flat messages, which hold a transaction's rows
 each, the rows in their `data`; the target table's `COUNT(*)`.
 
@@ -124,6 +126,10 @@ Each mover runs with its defaults but where the comparison needs the same:
 
 - Filebeat looks for new lines every 250ms (fit's `poll_interval`) and its queue flushes after 1s
   (fit's batch `max_wait`), not after up to 10s each, so that their lags compare.
+- Promtail and fit push to Loki in snappy protobuf, requests of up to 1 MiB of lines sent after at
+  most 1s (Promtail's defaults, fit's `max_request_bytes` and `max_wait`), the lines as they are,
+  labelled `job=bench` (Promtail adds each file's `filename`); Loki's rate limits are raised past
+  what either reaches (`configs/loki/loki.yaml`).
 - fit writes Debezium's envelope to Kafka (`codec debezium`), as Debezium does; Canal its flat
   messages; every topic one partition, made on first write.
 - The batch: four readers and writers each (DataX's `channel`, fit's `job.max_parallel`), batches of
