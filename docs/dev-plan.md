@@ -6699,20 +6699,40 @@ review:
 4. **Kills** as the per-connector tests have them: the crash hook at a random point and count, the
    first run killed for sure, then a run to the end.
 5. **Found by the matrix: a source of a snapshot and a stream killed before its first checkpoint
-   loses changes.** PostgreSQL, MySQL and MongoDB, started again without a checkpoint, take a new
-   snapshot and stream from it, so the changes between the two runs are never read; a row the first
-   run wrote to the sinks and that was deleted meanwhile stays in them for good (seen in every sink,
-   a few rows a run). The matrix kills these sources the first time only once a checkpoint is saved
-   (`settle`), and `FIT_SYNC_MATRIX_EARLY=1` kills them before, which fails today. A fix (a pipeline
-   that ran before streaming from the earliest position its server kept, the slot's confirmed LSN, or
-   the runtime saving a position before the first record) belongs to the sources' items, for review.
-   Alternative: the matrix failing on it until then.
-6. **Found by the matrix: ClickHouse's defaults lose to a snapshot.** Versions by commit time (the
-   default) are the write time for a snapshot's rows, which have none, so a row read again after a
-   kill outranks the later changes replayed after it; flagged deletes (the default) need a version a
-   delete of only the key does not have. The matrix's ClickHouse sink has `version_field: "ver"` and
-   `deletes: "delete"`. Alternative: snapshot records carrying the snapshot's time, for the sources'
-   items to decide.
+   lost changes.** PostgreSQL, MySQL and MongoDB (and TiDB, of the same shape), started again without
+   a checkpoint, took a new snapshot and streamed from it, so the changes between the two runs were
+   never read; a row the first run wrote to the sinks and that was deleted meanwhile stayed in them
+   for good (seen in every sink, a few rows a run). **Fixed** (2026-11-09) by the runtime saving the
+   source's start: `fitsync.Run.SaveStart(p)`, small and additive in package sync (a `Run.Start` func
+   the runtime fills for pipelines that are not jobs, none in a dry run), by which a source with no
+   checkpoint gives, before its first record, the position a run started again resumes from; the
+   runtime saves it as the checkpoint at once (through the crash points `checkpoint_written` and
+   `checkpoint_saved`, without telling a `Confirmer`). PostgreSQL gives its snapshot's state with no
+   chunk done at the exported point, so a restart reads every table again from a new snapshot and
+   streams from the first point (the path a checkpoint inside a snapshot already took, its slot never
+   confirmed past that point); MySQL its binlog start with an empty snapshot position; MongoDB its
+   start token with the snapshot not begun; TiDB its snapshot's TSO, read again at the same TSO
+   (within `tidb_gc_life_time`, or the run fails with the existing "older than the GC safe point").
+   The stream replayed over a newer snapshot converges in sinks writing by key, each key's last
+   change coming last. The matrix kills every source's first run before its first checkpoint (that
+   run's `checkpoint_interval` an hour, killed at a random write), `settle` and
+   `FIT_SYNC_MATRIX_EARLY` gone; with `SaveStart` disabled it fails, with it it passes.
+   Alternatives: each source streaming from the earliest position its server kept (PostgreSQL's
+   slot's confirmed LSN holds only for a slot that outlives the run, and MySQL and MongoDB keep no
+   such mark: the oldest binlog or oplog entry would replay far too much, or be gone); the source
+   saving nothing until a record is acknowledged (the bug).
+6. **Found by the matrix: ClickHouse's defaults lost to a snapshot.** Versions by commit time (the
+   default) were the write time for a record without one, a snapshot's row, so a row read again
+   after a kill outranked the earlier-committed changes replayed after it. **Fixed** (2026-11-09):
+   such a record is version 0, below any change; rows of one version keep the one written last, as
+   `ReplacingMergeTree` does, so a source with no commit times at all is still written as it comes.
+   Flagged deletes already carried their commit time's version: the "no version" seen was
+   `version_field`'s, which a delete of only the key lacks. The matrix's ClickHouse sink is the
+   default now (`ReplacingMergeTree(_version, _deleted)`, flagged deletes, read with `FINAL`). Left:
+   ties at one version (a transaction changing a key twice, MariaDB's commit seconds) are ordered by
+   write, which a deduplicated replay can get wrong; `version_field` stays for those. Alternatives:
+   versions from positions (not comparable across a source's kinds of position), snapshot records
+   carrying the snapshot's time (only TiDB's have one; PostgreSQL's exported point has none).
 7. **No Docker Compose file**: the servers are started by `test/sync/run.sh` and its helpers, as every
    interop test's already are, now by family (`SYNC_FAMILIES`: search, mysql, postgres, mongo, kafka,
    tidb, matrix), each family a CI job of its own on its own runner, in parallel, with `-timeout` and
@@ -6727,8 +6747,8 @@ review:
    runner's 65,536 and TiDB gave up on it; TiKV gets `--ulimit nofile=1048576`, TiDB and TiCDC
    `--restart on-failure`.
 10. **Size**: about 1,100 lines of test, run.sh reorganized by family (about 150 lines changed), small
-    additions to `kafka.sh` (`REDPANDA=0`), `mongo.sh` (`MONGO_VERSIONS`) and `tidb.sh`; nothing left
-    but decisions 5 and 6, so no I192b.
+    additions to `kafka.sh` (`REDPANDA=0`), `mongo.sh` (`MONGO_VERSIONS`) and `tidb.sh`; decisions 5 and 6
+    fixed after, so no I192b.
 
 ### I193 Benchmarks
 

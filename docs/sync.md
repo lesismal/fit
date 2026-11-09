@@ -285,7 +285,10 @@ and `view_index_metadata`.
 The sink inserts each run of a batch's records for one table with `INSERT ... FORMAT JSONEachRow`, and
 an `insert_deduplication_token` made from the run, so the same records written again are dropped by
 the server. Updates and deletes become rows of a `ReplacingMergeTree(_version, _deleted)` ordered by
-the key, which, read with `FINAL`, holds each key's last state. The table is yours:
+the key, which, read with `FINAL`, holds each key's last state. A row's version is its commit time,
+in Unix nanoseconds, or `version_field`'s value; a record without a commit time, a snapshot's row, is
+version 0, so that it never outranks a change, and rows of one version keep the one written last. The
+table is yours:
 
 ```sql
 CREATE TABLE shop.orders (id UInt64, status String, total Decimal(12, 2),
@@ -1005,11 +1008,12 @@ counts every row written, to check exactly once.
 
 **The interoperability and recovery matrix** (`TestMatrix`, `test/sync/matrix_test.go`) runs each source
 into one fixed set of sinks at once: PostgreSQL 17, MySQL 8.4, MongoDB 8, Elasticsearch, ClickHouse
-(a `ReplacingMergeTree` versioned by a column of the row, deletes as `DELETE`s) and Redis (a key per
-row). The sources are PostgreSQL, MySQL and MariaDB, MongoDB, TiDB through TiCDC, and Debezium's events
+(the sink's defaults: a `ReplacingMergeTree(_version, _deleted)` versioned by commit time, deletes
+flagged) and Redis (a key per row). The sources are PostgreSQL, MySQL and MariaDB, MongoDB, TiDB through TiCDC, and Debezium's events
 in Kafka. Each starts with a table of rows (its snapshot), then a mixed load of inserts, updates,
 deletes, key changes, NULLs and transactions of several changes is written while the pipeline is
-killed at random crash points again and again; at the end every sink must hold the source's rows,
+killed at random crash points again and again, the first time before its first checkpoint, with rows
+in the sinks; at the end every sink must hold the source's rows,
 row for row, or the test names the rows missing, extra or different in each.
 
 Servers come in families, each a CI job of its own, run in parallel (`SYNC_FAMILIES`):

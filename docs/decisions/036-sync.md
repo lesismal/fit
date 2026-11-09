@@ -372,6 +372,22 @@ The plan's I185 section lists them all; these change the record above.
 3. **A source that reads TiDB's changes from Kafka takes TiDB's snapshot at a TSO first**, and
    drops the changes committed at or before it; the changefeed must predate the snapshot.
 
+## Decisions made fixing what I192's matrix found (pending review)
+
+The plan's I192 section lists them (decisions 5 and 6); these change the record above.
+
+1. **A source's start is the checkpoint before its first record.** `Run.SaveStart(p)` (the runtime
+   fills `Run.Start` for pipelines that are not jobs) saves, at once and before any record, the
+   position a run started again resumes from, when the pipeline has no checkpoint. A source of a
+   snapshot then a stream gives its stream's start with the snapshot not begun (PostgreSQL the
+   exported point with no chunk done, MySQL the binlog position, MongoDB the start token, TiDB the
+   snapshot's TSO), so a run killed before its first checkpoint reads the snapshot again and replays
+   the stream from that start over it, rather than streaming from a later start and losing the
+   changes between. It goes through the crash points `checkpoint_written` and `checkpoint_saved`;
+   `Confirmer` sources are not told it.
+2. **A sink versioning rows by commit time gives a record without one the lowest version** (the
+   ClickHouse sink: 0), so that a snapshot's row read again never outranks a change.
+
 ## Planning decisions (2026-11-08, pending review)
 
 1. **Protocols written in fit, no drivers.** Alternative: go-mysql, pgx, the MongoDB driver and
