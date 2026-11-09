@@ -218,12 +218,12 @@ func TestListenChangeMidDownload(t *testing.T) {
 	}
 	waitFor(t, "a few pieces", func() bool { return tor.Stats().PiecesHave >= 4 })
 	old := l.Client()
+	had := tor.Stats().PiecesHave
 	reads := rc.total()
 
-	port := freePort(t)
-	if err := l.Apply(member(t, strings.Replace(js, `"127.0.0.1:0"`, `"127.0.0.1:`+strconv.Itoa(port)+`"`, 1))); err != nil {
-		t.Fatal(err)
-	}
+	port := applyOnFreePort(t, l, func(port int) string {
+		return strings.Replace(js, `"127.0.0.1:0"`, `"127.0.0.1:`+strconv.Itoa(port)+`"`, 1)
+	})
 	if l.Client() == old || int(l.Addr().Port()) != port {
 		t.Fatalf("no new client on port %d: %v", port, l.Addr())
 	}
@@ -231,6 +231,9 @@ func TestListenChangeMidDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Its first check, which takes the resume data, over: the pieces are
+	// back (a torrent restored paused shows as paused meanwhile).
+	waitFor(t, "the torrent's pieces on the new client", func() bool { return ntor.Stats().PiecesHave >= had })
 	waitFor(t, "the torrent on the new client", func() bool {
 		st := get(t, l, id)
 		return st.State != "checking" && st.Held == ""
