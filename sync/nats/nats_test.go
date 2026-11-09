@@ -479,12 +479,12 @@ func TestSourceLostDelivery(t *testing.T) {
 		switch len(seqs) {
 		case 1:
 			c.Fetch(ctx, "S", "C", natswire.FetchRequest{Batch: 1, NoWait: true})
-			go func() {
+			go func(ctx context.Context) { // ctx is taken again below
 				waitFor(func() bool { return srv.MoveLeader("S", "C") > 0 })
 				if pa, err := c.PublishJS("s.a", nil, []byte("6")); err == nil {
 					pa.Wait(ctx)
 				}
-			}()
+			}(ctx)
 		case 3:
 			cancel()
 		}
