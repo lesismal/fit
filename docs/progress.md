@@ -5810,6 +5810,26 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   pending review.
 
 
+### I165b WASM sync plugins, the rest — done
+
+- **TinyGo and Rust plugins in the tests and CI**: every `TestSync*` runs the Go, TinyGo and Rust
+  plugins (`plugin/wasm/guests_test.go`, the Rust crate `fit-guest`'s plugin in
+  `plugin/wasm/testdata/rust`), each in the binary and the JSON form; a CI job installs TinyGo
+  0.44.0 and Rust 1.99.0 (`wasm32-wasip1`); without the toolchains those subtests skip.
+- **A binary record form**: a plugin that exports `fit_sync_form` gets batches in a binary form
+  and hands records back many at once (`records_emit`); the host decodes them with 0.2
+  allocations a record (was 209), taking parts handed back unchanged from the input; JSON-only
+  plugins work as before. The Go SDK's `guest.Value` and the Rust crate's default feature speak it.
+- **The benchmark host's run** (2026-11-09, [`bench/results/sync-2026-11-09/wasm`](../bench/results/sync-2026-11-09/wasm/bench.txt)):
+  built-in 109 ns a record; binary form, one instance / four: Go 3.38 / 1.15 µs, TinyGo 1.73 µs /
+  647 ns, Rust 1.64 µs / 590 ns; JSON form 32.7 to 55.6 µs on one. Four instances are 5.4 to 10.5
+  times the built-in, not within the plan's 20%; the gap is explained (the plugin's own work in its
+  memory) and accepted, pending review (decisions 13 and 14).
+- **Examples** in fit-examples: `sync-wasm-transform`, `sync-wasm-codec`, `sync-wasm-source` and
+  `sync-wasm-sink`, each running with fit alone.
+- **Gaps**: the decisions in the plan's I165b section, pending review; no Rust example in
+  fit-examples (its CI builds Go only).
+
 ### I192 fixes: a source's start saved, ClickHouse's snapshot versions — done
 
 - **A source of a snapshot then a stream no longer loses changes when killed before its first

@@ -328,7 +328,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I210.
 | I163 | Decision 036; `sync`: the record model, pipelines (source, transforms, sinks, `stream` or `once`), a bounded queue, batches, acknowledgements to a watermark that never splits a transaction, the checkpoint file, retries and `on_error` | I04 | done |
 | I164 | Built-in transforms: `filter`, `route`, `fields`, `key`, `cast`, `mask`, `envelope` | I163 | done |
 | I165 | WASM plugins for sync: transforms, codecs, and source and sink connectors on fit's HTTP client and timers; the guest SDKs | I163 | done |
-| I165b | WASM sync plugins, the rest: the benchmark host's run and a binary record form if it asks; TinyGo and Rust plugins built and run in the tests; examples in fit-examples | I165 | todo |
+| I165b | WASM sync plugins, the rest: the benchmark host's run and a binary record form if it asks; TinyGo and Rust plugins built and run in the tests; examples in fit-examples | I165 | done |
 | I166 | Files as a source (tail and globs, rotation and truncation followed, multiline) and a sink (through I155's file sink) | I163, I155 | done |
 | I167 | Batch jobs as DataX runs them: chunked parallel snapshots resumed by chunk, `fit sync run --once`, schedules | I163 | done |
 | I168 | Elasticsearch and OpenSearch as a sink: `_bulk` by `_id`, per-item errors, 429 backed off | I163 | done |
@@ -4551,6 +4551,17 @@ since the local numbers already asked for it; pending review as the rest):
     mark for "this value as it came" so a guest copies nothing it did not change, would narrow it;
     a plugin that sees every record is unlikely to come within 20% of a built-in that clones a
     record and looks up a map. The benchmark host's run decides.
+14. **The benchmark host's run (2026-11-09), and the gap accepted.** On the benchmark host
+    (Ryzen 7 7800X3D, Linux 7.0, Go 1.27.3, TinyGo 0.44.0, Rust 1.99.0, the container pinned to
+    eight CPUs), mean of five runs a record, one instance / four: built-in 109 ns; binary form
+    Go 3.38 / 1.15 µs, TinyGo 1.73 µs / 647 ns, Rust 1.64 µs / 590 ns, 0.18 to 0.21 host
+    allocations a record; JSON form Go 55.6 / 16.3 µs, TinyGo 43.2 / 13.3 µs, Rust 32.7 / 9.4 µs,
+    209 allocations. The binary form is 15 to 28 times the JSON form; four instances are 5.4
+    (Rust) to 10.5 (Go) times the built-in, not within 20%, for decision 13's reasons. The gap is
+    accepted as explained rather than closed: plugins are for what the built-in transforms cannot
+    do, and a pipeline that needs their throughput runs more instances. The run and its output
+    are in [`bench/results/sync-2026-11-09/wasm`](../bench/results/sync-2026-11-09/wasm/bench.txt).
+    Alternative: a guest-side "unchanged" mark next, to cut the copy back.
 
 ### I166 Files as a source and a sink
 

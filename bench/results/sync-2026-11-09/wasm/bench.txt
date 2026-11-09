@@ -1,0 +1,78 @@
+tinygo version 0.44.0 linux/amd64 (using go version go1.27.3 and LLVM version 22.1.4)
+rustc 1.99.0 (b940084d7 2026-09-28)
+go: downloading github.com/lesismal/fib v1.7.3-0.20261109030556-e633fc2ea1d4
+go: downloading github.com/tetratelabs/wazero v1.12.0
+go: downloading golang.org/x/crypto v0.58.0
+go: downloading golang.org/x/sys v0.49.0
+tests-ok
+goos: linux
+goarch: amd64
+pkg: github.com/lesismal/fit/plugin/wasm
+cpu: AMD Ryzen 7 7800X3D 8-Core Processor           
+BenchmarkSyncTransform/builtin-8         	   82562	     28384 ns/op	         1.001 allocs/record	       110.9 ns/record	  114692 B/op	     256 allocs/op
+BenchmarkSyncTransform/builtin-8         	   89756	     27855 ns/op	         1.001 allocs/record	       108.8 ns/record	  114692 B/op	     256 allocs/op
+BenchmarkSyncTransform/builtin-8         	   85665	     27984 ns/op	         1.001 allocs/record	       109.3 ns/record	  114692 B/op	     256 allocs/op
+BenchmarkSyncTransform/builtin-8         	   85351	     28100 ns/op	         1.001 allocs/record	       109.8 ns/record	  114692 B/op	     256 allocs/op
+BenchmarkSyncTransform/builtin-8         	   81086	     27696 ns/op	         1.001 allocs/record	       108.2 ns/record	  114692 B/op	     256 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-1-8         	    2738	    864344 ns/op	         0.1847 allocs/record	      3376 ns/record	  173568 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-1-8         	    2647	    861085 ns/op	         0.1841 allocs/record	      3364 ns/record	  173569 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-1-8         	    2680	    879556 ns/op	         0.1841 allocs/record	      3436 ns/record	  173543 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-1-8         	    2752	    858042 ns/op	         0.1841 allocs/record	      3352 ns/record	  173492 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-1-8         	    2732	    860058 ns/op	         0.1842 allocs/record	      3360 ns/record	  173515 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-4-8         	    8098	    296055 ns/op	         0.2822 allocs/record	      1156 ns/record	  177518 B/op	      72 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-4-8         	    7578	    315446 ns/op	         0.2873 allocs/record	      1232 ns/record	  177867 B/op	      73 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-4-8         	    8457	    283339 ns/op	         0.2789 allocs/record	      1107 ns/record	  177246 B/op	      71 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-4-8         	    8347	    286766 ns/op	         0.2799 allocs/record	      1120 ns/record	  177335 B/op	      71 allocs/op
+BenchmarkSyncTransform/wasm-go-binary-4-8         	    8394	    285949 ns/op	         0.2794 allocs/record	      1117 ns/record	  177270 B/op	      71 allocs/op
+BenchmarkSyncTransform/wasm-go-json-1-8           	     168	  14266084 ns/op	       208.7 allocs/record	     55727 ns/record	 2335343 B/op	   53422 allocs/op
+BenchmarkSyncTransform/wasm-go-json-1-8           	     169	  14268742 ns/op	       208.7 allocs/record	     55737 ns/record	 2334238 B/op	   53421 allocs/op
+BenchmarkSyncTransform/wasm-go-json-1-8           	     169	  14190166 ns/op	       208.7 allocs/record	     55430 ns/record	 2334243 B/op	   53422 allocs/op
+BenchmarkSyncTransform/wasm-go-json-1-8           	     169	  14212281 ns/op	       208.7 allocs/record	     55517 ns/record	 2334234 B/op	   53421 allocs/op
+BenchmarkSyncTransform/wasm-go-json-1-8           	     169	  14277421 ns/op	       208.7 allocs/record	     55771 ns/record	 2334227 B/op	   53421 allocs/op
+BenchmarkSyncTransform/wasm-go-json-4-8           	     568	   4172146 ns/op	       209.8 allocs/record	     16297 ns/record	 2410190 B/op	   53698 allocs/op
+BenchmarkSyncTransform/wasm-go-json-4-8           	     555	   4172422 ns/op	       209.8 allocs/record	     16299 ns/record	 2415996 B/op	   53704 allocs/op
+BenchmarkSyncTransform/wasm-go-json-4-8           	     573	   4178624 ns/op	       209.8 allocs/record	     16323 ns/record	 2408027 B/op	   53696 allocs/op
+BenchmarkSyncTransform/wasm-go-json-4-8           	     568	   4185022 ns/op	       209.8 allocs/record	     16348 ns/record	 2410175 B/op	   53698 allocs/op
+BenchmarkSyncTransform/wasm-go-json-4-8           	     574	   4142176 ns/op	       209.7 allocs/record	     16180 ns/record	 2407566 B/op	   53695 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-1-8     	    5259	    440469 ns/op	         0.1847 allocs/record	      1721 ns/record	  171785 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-1-8     	    5044	    440063 ns/op	         0.1847 allocs/record	      1719 ns/record	  171803 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-1-8     	    5094	    441955 ns/op	         0.1845 allocs/record	      1726 ns/record	  171795 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-1-8     	    5354	    443822 ns/op	         0.1845 allocs/record	      1734 ns/record	  171800 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-1-8     	    5156	    443072 ns/op	         0.1848 allocs/record	      1731 ns/record	  171775 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-4-8     	   14402	    166103 ns/op	         0.2084 allocs/record	       648.8 ns/record	  172034 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-4-8     	   14478	    165867 ns/op	         0.2082 allocs/record	       647.9 ns/record	  171984 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-4-8     	   14572	    164718 ns/op	         0.2083 allocs/record	       643.4 ns/record	  171976 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-4-8     	   14458	    166769 ns/op	         0.2082 allocs/record	       651.4 ns/record	  171981 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-binary-4-8     	   14510	    165222 ns/op	         0.2082 allocs/record	       645.4 ns/record	  171983 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-1-8       	     214	  11087414 ns/op	       208.7 allocs/record	     43310 ns/record	 2167665 B/op	   53423 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-1-8       	     216	  11048290 ns/op	       208.7 allocs/record	     43157 ns/record	 2167574 B/op	   53423 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-1-8       	     216	  11041289 ns/op	       208.7 allocs/record	     43130 ns/record	 2167587 B/op	   53423 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-1-8       	     217	  11021858 ns/op	       208.7 allocs/record	     43054 ns/record	 2167557 B/op	   53423 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-1-8       	     216	  11052055 ns/op	       208.7 allocs/record	     43172 ns/record	 2167503 B/op	   53422 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-4-8       	     675	   3574092 ns/op	       208.7 allocs/record	     13961 ns/record	 2167772 B/op	   53431 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-4-8       	     712	   3349543 ns/op	       208.7 allocs/record	     13084 ns/record	 2167867 B/op	   53431 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-4-8       	     714	   3342684 ns/op	       208.7 allocs/record	     13057 ns/record	 2167639 B/op	   53431 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-4-8       	     720	   3340508 ns/op	       208.7 allocs/record	     13049 ns/record	 2167596 B/op	   53431 allocs/op
+BenchmarkSyncTransform/wasm-tinygo-json-4-8       	     705	   3395132 ns/op	       208.7 allocs/record	     13262 ns/record	 2167479 B/op	   53431 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-1-8       	    5514	    418703 ns/op	         0.1842 allocs/record	      1636 ns/record	  171923 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-1-8       	    5445	    421589 ns/op	         0.1841 allocs/record	      1647 ns/record	  171925 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-1-8       	    5536	    419598 ns/op	         0.1841 allocs/record	      1639 ns/record	  171906 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-1-8       	    5559	    423571 ns/op	         0.1842 allocs/record	      1655 ns/record	  171921 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-1-8       	    5576	    421138 ns/op	         0.1841 allocs/record	      1645 ns/record	  171930 B/op	      47 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-4-8       	   15996	    150367 ns/op	         0.2082 allocs/record	       587.4 ns/record	  172379 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-4-8       	   15998	    149681 ns/op	         0.2082 allocs/record	       584.7 ns/record	  172361 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-4-8       	   15938	    151275 ns/op	         0.2081 allocs/record	       590.9 ns/record	  172375 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-4-8       	   15811	    152063 ns/op	         0.2082 allocs/record	       594.0 ns/record	  172372 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-rust-binary-4-8       	   15685	    152027 ns/op	         0.2081 allocs/record	       593.9 ns/record	  172372 B/op	      53 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-1-8         	     283	   8393194 ns/op	       208.7 allocs/record	     32786 ns/record	 2169540 B/op	   53422 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-1-8         	     282	   8383688 ns/op	       208.7 allocs/record	     32749 ns/record	 2169580 B/op	   53423 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-1-8         	     284	   8327879 ns/op	       208.7 allocs/record	     32531 ns/record	 2169519 B/op	   53422 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-1-8         	     289	   8362554 ns/op	       208.7 allocs/record	     32666 ns/record	 2169445 B/op	   53423 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-1-8         	     288	   8336172 ns/op	       208.7 allocs/record	     32563 ns/record	 2169441 B/op	   53423 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-4-8         	     961	   2428376 ns/op	       208.7 allocs/record	      9486 ns/record	 2172738 B/op	   53430 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-4-8         	     979	   2411996 ns/op	       208.7 allocs/record	      9422 ns/record	 2172531 B/op	   53430 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-4-8         	     987	   2393969 ns/op	       208.7 allocs/record	      9351 ns/record	 2172621 B/op	   53430 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-4-8         	    1010	   2362331 ns/op	       208.7 allocs/record	      9228 ns/record	 2172388 B/op	   53430 allocs/op
+BenchmarkSyncTransform/wasm-rust-json-4-8         	     998	   2389889 ns/op	       208.7 allocs/record	      9336 ns/record	 2172355 B/op	   53430 allocs/op
+PASS
+ok  	github.com/lesismal/fit/plugin/wasm	160.462s

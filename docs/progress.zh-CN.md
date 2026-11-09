@@ -4132,6 +4132,22 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I165b 同步 WASM 插件的其余部分 — 已完成
+
+- **测试与 CI 中的 TinyGo 和 Rust 插件**：每个 `TestSync*` 都运行 Go、TinyGo 和 Rust 插件（`plugin/wasm/guests_test.go`，
+  Rust crate `fit-guest` 的插件在 `plugin/wasm/testdata/rust`），每种都以二进制和 JSON 两种形式运行；一个 CI 任务安装
+  TinyGo 0.44.0 与 Rust 1.99.0（`wasm32-wasip1`）；没有工具链时这些子测试跳过。
+- **二进制记录形式**：导出 `fit_sync_form` 的插件以二进制形式收到批，并一次交回多条记录（`records_emit`）；宿主解码每条
+  记录 0.2 次分配（原为 209），原样交回的部分直接取自输入；只用 JSON 的插件照旧可用。Go SDK 的 `guest.Value` 与 Rust
+  crate 的默认 feature 支持它。
+- **压测主机的运行**（2026-11-09，[`bench/results/sync-2026-11-09/wasm`](../bench/results/sync-2026-11-09/wasm/bench.txt)）：
+  内置每条 109 ns；二进制形式，单实例 / 四实例：Go 3.38 / 1.15 µs、TinyGo 1.73 µs / 647 ns、Rust 1.64 µs / 590 ns；JSON
+  形式单实例 32.7 到 55.6 µs。四实例是内置的 5.4 到 10.5 倍，不在计划的 20% 以内；差距已解释（插件在自己内存中的工作）
+  并接受，待审查（决定 13 与 14）。
+- **示例**在 fit-examples：`sync-wasm-transform`、`sync-wasm-codec`、`sync-wasm-source` 和 `sync-wasm-sink`，都只需 fit
+  即可运行。
+- **不足**：计划 I165b 一节中的决策，待审查；fit-examples 中没有 Rust 示例（其 CI 只构建 Go）。
+
 ### I192 的修复：保存源的起点、ClickHouse 快照行的版本 — 已完成
 
 - **先快照后流的源在第一个检查点之前被杀不再丢变更**（I192 的决定 5）：`fitsync.Run.SaveStart`，没有检查点的源用它在第一条
