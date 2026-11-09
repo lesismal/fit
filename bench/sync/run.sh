@@ -162,7 +162,9 @@ cpu_split() {
 cleanup() {
 	[ "${KEEP:-}" = 1 ] && return
 	ids=$(docker ps -aq --filter "label=$LABEL")
-	[ -n "$ids" ] && docker rm -f $ids >/dev/null 2>&1
+	# -v: with the anonymous volumes their images declare (Kafka's,
+	# RabbitMQ's, SQL Server's, ...), which would be left behind.
+	[ -n "$ids" ] && docker rm -f -v $ids >/dev/null 2>&1
 	vols=$(docker volume ls -q --filter "label=$LABEL")
 	[ -n "$vols" ] && docker volume rm $vols >/dev/null 2>&1
 	docker network rm "$NET" >/dev/null 2>&1 || true
