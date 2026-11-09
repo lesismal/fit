@@ -113,6 +113,10 @@ type Manager struct {
 	ro rolloutsState
 	// al is the alerts and the drift reads (alerts.go, I147).
 	al alertsState
+	// btv is the members' BitTorrent view, and dist the distributions
+	// (btview.go, distribute.go, I206).
+	btv  btViewState
+	dist distState
 
 	// admins are admin.cluster.admins, the console users who are
 	// cluster-wide admins whatever the roles say (roles.go).
@@ -211,6 +215,7 @@ func (m *Manager) Close() {
 		m.waitOps(closeWait)
 		m.waitSyncs(closeWait)
 		m.waitRollouts(closeWait)
+		m.waitDists(closeWait)
 		ended := make(chan struct{})
 		go func() { wg.Wait(); close(ended) }()
 		select {
@@ -621,6 +626,7 @@ func (m *Manager) routes(api *console.API) {
 	m.templateRoutes(rt)
 	m.alertRoutes(rt)
 	m.insightRoutes(rt)
+	m.btRoutes(rt)
 }
 
 func (m *Manager) list(r *console.Request) {
@@ -682,7 +688,7 @@ func (m *Manager) answer(r *console.Request, status int, v any, err error) {
 		_ = r.JSON(403, forbiddenBody{Error: fb.Error(), Kind: KindForbidden, ErrForbidden: fb})
 	case errors.As(err, &fe):
 		_ = r.JSON(400, fe)
-	case errors.As(err, &nf), errors.As(err, new(errNoGroup)), errors.As(err, new(errNoTemplate)), errors.As(err, new(errNoRollout)):
+	case errors.As(err, &nf), errors.As(err, new(errNoGroup)), errors.As(err, new(errNoTemplate)), errors.As(err, new(errNoRollout)), errors.As(err, new(errNoDist)):
 		_ = console.Error(r.Context, 404, err.Error())
 	case errors.As(err, new(errBusy)):
 		_ = console.Error(r.Context, 429, err.Error())

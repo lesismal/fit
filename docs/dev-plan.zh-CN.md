@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I210。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I211。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -363,10 +363,11 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | done |
 | I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | done |
 | I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | done |
-| I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
-| I207 | （第二阶段）集群共享的 tracker Store | I201 | todo |
-| I208 | （第二阶段）RSS 自动下载 | I198 | todo |
+| I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | done |
+| I207 | （第二阶段）集群共享的 tracker Store | I201 | done |
+| I208 | （第二阶段）RSS 自动下载 | I198 | done |
 | I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
+| I210 | 客户端角色用上 fib A87–A88：`/trackers` 显示各 tracker 的 announce 状态、peer 来源与 Web 种子状态，就地重新校验 | I203、I204 | done |
 
 ## M0 基础
 
@@ -5536,7 +5537,11 @@ I198/I203 的添加路径。fib 的 `Reader.Close` 会等待进行中的 `Read`�
 5. **`recheck` 把种子从 fib 客户端移除（保留文件），再不带续传数据重新加入**（续传文件被删除，校验中崩溃也会重新校验），
    因为 fib 无法重新校验运行中的种子；其连接和 fib 的计数从头开始，队列位置、优先级、限制和暂停保留。已提为 fib 请求 A88。
    备选：在 fib 有 `Torrent.Recheck` 之前应答 501。
+   **I210 已改**：重新校验改用 fib 的 `Torrent.Recheck`（A88）就地进行：不再移除，连接与计数保留，状态显示 `checking`；
+   续传数据仍在开始时删除，校验结束后重新保存。
 6. **`/trackers` 列出 .torrent 文件或磁力链接中的 tracker**（带 tier）和 web seed，不含 announce 状态：fib 不公开（fib 请求 A87）。
+   **I210 已改**：`/trackers` 从 fib 的 `Torrent.Trackers`、`Sources` 与 `WebSeeds`（A87）给出各 tracker 的 announce 状态、
+   peer 来源与 Web 种子状态；`web_seeds` 改为对象。
 7. **慢的事件订阅者被断开，而不是被跳过事件**：每个流 256 个事件的缓冲；填满时收到 `event: lagged` 并被关闭，用
    `Last-Event-ID` 重连，从角色保留的最近 1024 个事件重放；有缺口，或 ID 超过最后一个（fit 重启过：ID 每次启动从 1 开始）时，
    流以 `event: reset` 开头。最多 32 个流（503），每 15s 一行注释，角色停止或 Admin API 关闭时发 `end`。**不可配置**，因此
@@ -5695,16 +5700,181 @@ race 测试与完整测试套件（留给主会话）。
 
 - **做什么**：集群汇总各成员的任务和速率；经私有种子加直连 peer，把大文件（llm 节点的模型、发布包）分发到一组成员，与 rollout 配合。
 - **涉及**：`cluster`、`bittorrent`、`app/workbench`。
+- **完成** 2026-11-09（分支 `bt-i206`）：**视图**（`cluster/btview.go`）：成员的 Admin API 新增 `GET /bittorrent/summary`
+  （`admin/btsummary.go`，能力 `bittorrent.summary`）：两个角色的简短汇总，无论是否运行都返回 200（客户端是否运行、接受对端的地址、
+  按状态统计的种子、速率、字节数、对端、错误、发布条目；tracker 的统计）。管理端按需读取各成员（`Manager.BitTorrent`），经
+  `Manager.Call` 同时最多 `max_concurrency` 个，一次读取 2 秒内共用、进行中的读取会被加入；离线及没有该能力的成员不请求。
+  `GET /api/m/cluster/bittorrent`（任何角色）与管理端 Admin API 的 `GET /cluster/bittorrent`。**分发**（`cluster/distribute.go`）：
+  从源成员的私有发布条目（I202）到分组的成员或所选成员；管理端读取源的摘要、条目与 `.torrent` 文件（私有，≤1 TiB）、各目标的摘要，
+  让每个目标以源和其他目标为 `peers` 把种子添加到某分类（地址为客户端监听的地址，否则为成员 URL 的主机，否则为 `peer_hosts`），
+  每 2 秒跟进进度（完成、错误、被删除、停滞），结束时从它添加过种子的目标上删除该种子（完整的保留文件，否则删除；`keep_seeding`
+  让完整的继续做种）；取消；审计条目 `bt.distribute`；`POST`/`GET /api/m/cluster/distributions`、`GET .../<id>`、
+  `POST .../<id>/cancel`，Admin API 的 `/cluster/` 下同样提供。**页面**：集群 → BitTorrent（`app/workbench/web/cluster/bittorrent.js`）：
+  统计块、成员表（“打开”经节点切换器进入成员自己的 BitTorrent 页面）、分发列表、新建分发、分发页及取消；概览卡片
+  （`FitCluster.overviewCard`，`shared.js` 的新扩展点）。**助手**：`cluster_bittorrent`；读取工具的 `member` 参数现在可以读到成员的
+  BitTorrent 读取接口（`memberPaths` 原先缺少它们，带 `member` 的 `bt_*` 会被拒绝），但从不触及 passkey、事件或写操作。文档：
+  [集群](cluster.zh-CN.md#bittorrent成员的种子与分发)与 [BitTorrent](bittorrent.zh-CN.md#集群中)，中英文。测试：基于假成员的视图
+  （合计、没有角色的成员、按能力与按 404 判断的旧成员、离线、TTL 与合并的读取、截断）、助手的读取与成员路径、Admin API、角色
+  （查看者被拒、分组的操作员只能对其成员）；本机回环上进程内 fit 之间的分发（3 MiB 文件逐字节传到两个目标，第三个没有客户端的目标
+  单独失败；再经模块以 `keep_seeding` 分发；再次时被采用）、取消（种子与数据被删除）、停滞、`peer_hosts` 只给主机、源非私有、
+  没有条目或种子、没有客户端、`StartDist` 的各种拒绝（字段、64 个目标、同时 2 个、忙碌的目标、准备中取消）、保留列表、对端地址；
+  有无角色时的 `GET /bittorrent/summary`。
+
+**待审阅的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **分发是独立的资源，而非发布（rollout）的一种步骤**：发布应用配置，带演练、闸门与回滚，下载都不需要；按操作的方式建模（内存中
+   保留最近 16 个，结束时记入审计日志），不修改配置因此不占用成员阻挡发布或操作；一个成员同时只是一个分发的目标。备选：发布步骤；
+   保存在 store 中跨重启。
+2. **源是私有的发布条目（I202），而非一次性构建**：发布条目已用种子模式构建、可跨重启并跟随磁盘，因此管理端不必给角色增加构建路径
+   （不改 `bittorrent/`）；非私有的条目被拒绝（`not_private`）。条目列出的 tracker 允许（运维自己的私有 tracker）。备选：
+   `Role.Share(path)`，在线程池上一次性构建，成员需要异步任务 API。
+3. **“配置的目标目录”即目标上的分类**（或其 `download_dir`）：角色的添加 API 没有自己的目录参数，分类就是配置中的目录。备选：
+   在配置允许的根目录内的 `AddRequest.Dir`。
+4. **对端地址**：目标客户端监听的地址（若为具体地址），否则为其成员 URL 的主机加客户端端口，否则为请求中的 `peer_hosts`（连出成员
+   需要）。源与其他每个目标都是每个目标的对端（最多 65 个）。备选：用成员标签给出其 BitTorrent 主机。
+5. **结束时**：从分发添加过种子的目标上删除该种子，完整的保留文件、不完整的（失败、取消、停滞）删除；`keep_seeding` 让完整的继续
+   做种；已有该种子的目标被采用、跟进、从不删除；从不触碰源的发布条目。备选：所有种子都保留做种。
+6. **上限**：64 个目标、同时 2 个、保留 16 个、1 TiB、停滞超时 10 分钟（1 秒–24 小时）、每 2 秒读取进度；均为常量，不加配置。
+   备选：`admin.cluster.distributions`。
+7. **视图按需读取，而非由轮询器读取**，缓存 2 秒并合并并发读取，任何角色可读；不占用读取名额（`MaxReads`），因为同时只有一次扇出。
+   备选：随每次轮询读取摘要并保存在成员状态中。
+8. **角色**：开始与取消都需要在源和每个目标上是操作员（与操作相同）。
+9. **管理端重启会忘记进行中的分发**；目标保留已下载的内容与种子（角色不会跨重启保留其对端）。
+
+遗留：成员的 `AddRequest.Peers` 不跨重启保存，分发中途重启的目标没有对端而停滞（角色可将其存入 `torrents.json`）；`fit cluster`
+尚无 `bt`/`distribute` 命令（Admin API 已提供）；`.torrent` 文件受 `max_response_bytes` 限制（默认 4 MiB；小分片的 1 TiB 混合种子
+会超出）。未发现 fib 的缺口。未运行：Linux 上的 race、完整测试、浏览器中的页面。
+
+**I206 之后修复（主会话，2026-11-09）：** 角色把种子添加时给的 peer（`AddRequest.Peers`）保存在 `torrents.json` 中，最多 128 个、
+每个最长 256 字节，并在每次启动时再交给它，这样分发途中重启的目标能重新找到它的 peer（`TestPeersKeptAcrossRestart`）。
 
 ### I207 （第二阶段）集群共享的 tracker Store
 
 - **做什么**：基于 fit 共享存储（redis、etcd）的 `tracker.Store`，让多个成员上的 tracker 如同一个。
 - **涉及**：`bittorrent`、fit 的共享存储。
+- **已完成** 2026-11-09（分支 `bt-i207`）：包 `bittorrent/tracker/sharedstore`（`store.go`、`redis.go`），一个 fib
+  `tracker.Store`，并有 `MemoryStore` 的 `Range`、`SetConfig`、`Config`、`Torrents` 和 `Peers`。每个实例立即从自己的 fib
+  `MemoryStore` 应答；存储自己的一个 goroutine 完成每次 Redis 往返（`request_timeout`）：announce 进入有界队列（按 peer
+  与种子合并，完成标记在后来的 announce 中保留），以 Lua 脚本流水线写入，以 Redis 的时钟为准（做种者和下载者存于按过期时间
+  排序的有序集合，地址存于哈希，另有完成次数、按最晚过期时间计分的种子索引和 peer 计数，每次改动都由脚本完成）；每个被服务
+  种子的共享 swarm 随机样本（`ZRANDMEMBER`）及计数每 `refresh` 读取一次；announce 先以样本中的 peer、再以本实例的 peer
+  应答（做种者只得到下载者，不含自己，跳过过期的），计数各取较大者；上限在 Redis 中对所有实例合计执行；每分钟清扫 peer 已
+  全部过期的种子；`Range` 经第二个连接用 `ZSCAN`（Redis 无法读取时为本实例的种子）。配置 `bittorrent.tracker.store`
+  （`redis` 与 acme 的 `RedisStorage` 同形，`prefix`、`request_timeout`、`refresh`、`queue`、`cache_torrents`、
+  `cache_peers`）及其检查（Redis 的检查与 `acme.shared_storage` 共用为 `checkRedisStorage`）；角色经接口持有存储，块变化
+  时新建存储（在其他改动之前，坏的 TLS 文件使角色保持原样），变化和停止时关闭；`Stats.Store` 与
+  `fit_bittorrent_tracker_store_*` 指标。schema、参考、模板、`schema-zh.js`；两种语言的 [BitTorrent](bittorrent.zh-CN.md)
+  tracker 一节、指标和重载。测试：存储的各情形（两个实例互见 peer、做种者得到下载者、跨实例的 scrape 与完成次数、停止；共享
+  上限与 SetConfig 调高；过期与清扫；跨实例 Range 与提前停止；地址族与 numwant；Redis 不可达时从内存应答、排队、恢复后写入）
+  分别对 Docker 中的真实 Redis（`redis:8.2.2`，无 Docker 时跳过，同 `tlsmgr/sharedstore`）和假实现运行；队列、重新入队、
+  缓存上限与淘汰、合并、过时样本、失败的写入、超过一轮的写入量；TLS 文件；地址编码与样本解析；两个引擎上的两个 tracker 角色
+  共享一个 Redis，经 fib 的客户端走 HTTP 和 UDP（peer、scrape、统计、列表、指标、重载到新前缀和内存）；不可达的存储从内存
+  应答，坏的 TLS 文件使重载失败；配置检查。运行：`bittorrent/tracker/...`、`config` 的 `go test -race`；
+  `go test ./schema/ ./app/workbench/ ./docs/ ./test/workers/`；vet、gofmt。
+
+**待评审的决定**（构建时作出，2026-11-09；在用户裁定前有效）：
+
+1. **从内存应答，在后台共享**，而不是每个请求询问 Redis：fib 的 `Server` 在 worker 上调用 `Store.Announce` 并须在返回前
+   得到应答，在那里往返 Redis 会阻塞 worker（规则 1）。代价：实例在 `refresh` 内得知其他实例的 peer，尚未服务过的种子第一次
+   announce 只得到本实例的 peer。备选：fib 提供异步 `Store`（见下），再每个 announce 询问 Redis。
+2. **只支持 Redis**：etcd 和 Consul 是共识存储，每次 announce 都是一次 Raft 写入，不适合每个客户端每个间隔都写的 peer 表；
+   存储的 `backend` 接口为其他种类留有余地。`store` 采用与 `acme.shared_storage.redis` 同形的 `redis { ... }`（同一个
+   `RedisStorage` 类型），而不是引用 acme 的块。备选：带租约的 etcd。
+3. **Redis 不可达：退回内存，从不拒绝**：以本实例的 peer 和不超过三个 refresh 的样本应答，有界排队，Redis 恢复后写入；
+   退避 100ms 起加倍到 `refresh`，最多 10s。备选：拒绝 announce，那样 Redis 一停整个 tracker 集群都停。
+4. **上限沿用 tracker 自己的，作用两次**：作用于每个实例的内存，也作用于 Redis 中所有实例的合计（`max_torrents` 对索引、
+   `max_peers_per_torrent` 对 swarm、`max_peers` 对计数）；超出的 announce 应答但不共享（计为被拒）。共享存储没有单独的上限。
+   备选：`store` 中设单独字段。
+5. **Lua 脚本以 Redis 的时钟（`TIME`）为准**，每次写入带上它在 fit 队列中的时长，各实例时钟不必一致；键从不自行过期（使
+   peer 计数保持准确），由 announce 和每个实例每分钟一次的清扫（至多 4096 个种子）移除，因此没有 tracker 运行时键会滞留；
+   Redis 的 `maxmemory-policy` 须为 `noeviction`。需要 Redis 6.2（`ZRANDMEMBER`）；不支持 Redis Cluster（一个种子的键没有
+   hash tag）。备选：`PEXPIRE` 的键加近似计数。
+6. **只为在本实例 announce 或 scrape 过的种子取样本**（`cache_torrents` 4096；仅凭 scrape 最多占四分之三；`peer_ttl` 内未用
+   即移出），每个样本 `cache_peers`（100）个做种者和同样多的下载者。备选：集群所有种子的样本，内存和 Redis 开销随集群规模增长。
+7. **先给样本中的 peer，再给本实例的**，使应答是整个集群的样本；计数按字段取本实例与样本中较大者。备选：按本实例在 swarm
+   中的占比混合。
+8. **`store` 块变化时新建存储**，本实例的 swarm 在内存中重新开始（客户端在其间隔内再次 announce），排队的写入放弃；更短的
+   `peer_ttl` 在 Redis 中只作用于新写入（已共享的 peer 保留原过期时间），不同于 fib 在内存中的 `SetConfig`。备选：沿用内存存储。
+9. **有存储时 `Stats` 的种子和 peer 是共享存储的**（本实例的在 `store.local_*`），`ListTorrents` 从 Redis 列出所有实例的种子；
+   工作台的 Tracker 页面和助手的 `bt_tracker_stats` 未改动（照旧显示总数；JSON 中有 `store`）。
+10. **复用 sync 的 RESP 客户端（`sync/redis/wire`）**，而非 tlsmgr/sharedstore 私有的那个，因其有流水线和应答上限；用 RESP2。
+
+由此留下：要提交给 fib 的请求——**异步 `Store` API**（如 `AnnounceAsync(a StoreAnnounce, done func(StoreResult, error))` 与
+`ScrapeAsync`，Server 保留 HTTP context，或稍后应答 UDP 数据报，在 `done` 中回复），使共享存储能每个 announce 询问 Redis，
+消除首次 announce 的缺口；退一步，**`StoreResult.Interval`**（存储在应答不完整时请客户端早些再来）。工作台页面可以显示
+`store`（可达、排队、丢弃）。无基准测试：tracker 不在网关热路径上（规则 21）。
 
 ### I208 （第二阶段）RSS 自动下载
 
 - **做什么**：按计划轮询订阅源，用规则（模式、分类、大小上限、剧集去重）添加任务；订阅源、条目和历史都有上限。
 - **涉及**：`bittorrent`。
+- **完成** 2026-11-09（分支 `bt-i208`）：配置 `bittorrent.client.rss`（`config/bittorrent_rss.go`）：`feeds`（name、url、
+  interval、enabled、max_items、headers、headers_env）、`rules`（name、feeds、patterns、exclude、category、paused、min_size、
+  max_size、episodes、max_per_poll、enabled）、`history_size`、`max_feed_bytes`、`timeout`，及其检查。角色（`bittorrent/rss.go`、
+  `rss_parse.go`、`rss_rules.go`、`rss_state.go`）：RSS 自己的 goroutine 每个 tick 启动到期的轮询，最多同时 4 个，每次轮询在
+  自己的 goroutine 上；订阅源用 fib 的异步 HTTP 客户端下载（独立的客户端，受 `max_feed_bytes` 约束），带 `ETag` 和
+  `Last-Modified` 条件请求，`timeout` 内完成，最多 5 次重定向到 http(s)；用 `encoding/xml` 读取（RSS 2.0、1.0、Atom；torrent
+  命名空间、附件、info hash；UTF-8 和 ISO-8859-1），各项有界（条目、标题、ID、URL、磁力链接）；Apply 时编译的规则挑选条目，
+  经 `Add` 或 `addURL` 添加（`AddURL` 内部现在带 context，停止时结束轮询中的下载）；每个条目连同结果记在 `data_dir/rss.json`
+  中（每个订阅源、每条规则的集数都有上限，每次轮询后和停止时原子写入），开关也在其中。API：`RSS`、`RSSItems`、`PollFeed`、
+  `SetFeedEnabled`、`SetRuleEnabled`。事件 `rss_added`；指标 `fit_bittorrent_rss_polls_total{feed,result}`、
+  `fit_bittorrent_rss_items_added_total`、`fit_bittorrent_rss_items_failed_total`。Admin API（`admin/btrss.go`）：
+  `GET /bittorrent/rss`、`GET /bittorrent/rss/items`、`POST /bittorrent/rss/feeds/{name}/poll`、`PUT /bittorrent/rss/feeds/{name}`
+  与 `.../rules/{name}`。`fit bt rss [ls] | items | poll | enable | disable | reset [-rule]`（`cli/bt_rss.go`）。工作台的
+  BitTorrent 菜单新增 **RSS**（订阅源带开关和“立即轮询”，规则带开关，最近条目可按订阅源与结果筛选并链接到添加的种子；事件中
+  的 `rss_added`），中英文。助手的读工具 `bt_rss`（订阅源 URL 只给出 scheme、主机和最后一段，略去条目 ID），管理端的成员也可用。
+  schema、模板、参考（及其中文章节行）、`schema-zh.js`、两种语言的 [BitTorrent](bittorrent.zh-CN.md#rss-自动下载) 和
+  [控制台](console.zh-CN.md)。测试：解析（各种来源的 RSS、Atom、RDF、ISO-8859-1、上限、格式错误、不是订阅源、未知字符集）、
+  集数键、规则（通配符、`re:`、排除、大小、订阅源）、对本地服务器的轮询（磁力与 .torrent 附件条目按规则的分类与暂停添加、一集
+  的第二种画质被略去、未匹配和超大条目、发送 headers 与 headers_env、事件、指标、`If-None-Match` 与 304、变化的订阅源只添加新
+  条目）、`max_per_poll` 留下其余且不发条件请求、`max_torrents` 把条目留到以后、历史、集数与开关跨重启保留、超过 `history_size`
+  遗忘最旧条目、坏的 `rss.json` 被移到一旁、坏订阅源（超过 `max_feed_bytes`、格式错误、HTML、500、重定向循环、重定向到 ftp、
+  从不应答的服务器、截断正文的服务器；跟随正常重定向）、.torrent URL 在 3 次轮询后放弃、坏种子立即放弃、假时钟上的计划（第一次
+  轮询、间隔前不轮询、关闭时不轮询、重新打开后再轮询）、重载删除订阅源与规则及其历史、轮询进行中拒绝另一次、停止结束等待服务器
+  的轮询；配置检查；Admin API（每个接口及其错误，无角色时 404）；`fit bt rss`（请求、输出、拒绝、用法错误）；助手工具（没有
+  机密到达模型）；页面的词条与接口。
+
+**待评审的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **模式是对整个标题的不区分大小写的通配符**（`*` 任意一串、`?` 一个字符，其余按字面），**或 `re:` 加 Go 正则表达式，在标题
+   任意位置找到即可**。字段名为 `patterns` 而非 `include`：`include` 是 `.conf` 格式的指令，无法在其中写出。备选：只用正则；
+   子串匹配（qBittorrent 的“必须包含”）。
+2. **剧集**：`S01E02`（以及 `S1E2`、`S01.E02`，范围 `S01E02E03`、`S01E02-03`、`S01E02-E03`，范围终点至多比起点大 50，使
+   `S01E02-1080p` 不算范围）、`1x02`，以及日期 `YYYY-MM-DD`/`YYYY.MM.DD`/`YYYY MM DD`；键为节目名（集数之前的标题，小写，标点
+   变空格，去掉开头的 `[组]`/`(组)`/`【组】` 标签）加集数，**按规则区分**；一集的第一个条目胜出，因此 repack 和 proper 不再
+   下载；没有集数的标题（整季包、电影）只按 ID 区分。已持有的种子（`exists`）也记下其集数。每条规则记住 10000 集。备选：按
+   客户端而非按规则；接受之后的 PROPER/REPACK；qBittorrent 智能过滤的集数列表语法。
+3. **按顺序第一条订阅源、模式和大小界限都满足的规则挑中条目**；大小界限是匹配的一部分，因此对前一条规则过大的条目可被后一条
+   规则挑中。条目大小取 torrent 命名空间的 `contentLength`，否则网站的 `size`（`1.5 GiB`），否则附件的 `length`；**大小未知的
+   通过**。备选：规则有界限时拒绝未知大小；所有匹配的规则。
+4. **读到的每个条目都记为已见**，包括未匹配的，因此之后添加的规则不会回看已见条目；**新订阅源的第一次轮询把整个文档当作新的**
+   （受 `max_per_poll` 约束），与 qBittorrent 相同。备选：只记被挑中的条目；订阅源选项在第一次轮询时跳过存量；遗忘订阅源历史的
+   API。
+5. **留到以后的条目不记住，也不保留订阅源的校验器**：超过 `max_per_poll`，或添加可能稍后成功（`max_torrents`、`ErrBusy`、客户端
+   未运行、停止），使下次轮询读取整个订阅源而不是 304。下载失败的 .torrent URL 在 3 次轮询中重试（`attempts`），坏种子或坏链接
+   立即放弃。
+6. **来源顺序**：磁力链接（torrent 命名空间、附件或链接），然后 .torrent 附件的 URL，然后单独的 info hash（加标题做成磁力
+   链接），然后条目的链接（若是网页，会因不是种子而失败）。URL 按 I198 的 `AddURL` 添加，共用其同时 4 个下载。
+7. **默认值与上限**：interval 15m（至少 1m）、max_items 200（最多 1000）、history_size 1000（最多 10000，至少为每个订阅源的
+   max_items）、max_feed_bytes 4 MiB（最多 32 MiB）、timeout 30s、max_per_poll 5（最多 100）、100 个订阅源、200 条规则、32 个
+   512 字节的模式、16 个请求头、同时 4 次轮询（不可配置）、标题 1 KiB、ID 1 KiB（超过则取哈希）、URL 8 KiB。
+8. **机密**：`headers`（字面值）和 `headers_env`（每次轮询读取的环境变量）；`GET /config` 不做遮盖，按配置显示订阅源 URL 和
+   字面请求头。角色的状态给出去掉用户信息和查询串的订阅源 URL；助手得到 scheme、主机和最后一段路径，不给条目 ID。**不做内部地址
+   防护**，与 I198 的决定 3 一致：URL 是运维者的配置。
+9. **字符集**：UTF-8、ASCII 和 ISO-8859-1，不引入依赖（fit 没有 `golang.org/x/text`）；其他字符集使轮询失败。XML 宽松读取
+   （HTML 实体，非严格）。
+10. **`rss.json` 与 `torrents.json` 分开**，有自己的锁（在角色的锁之后获取）和 goroutine，不用管理器的（轮询要等 HTTP）。无法
+    读取的 **移到一旁成为 `rss.json.bad`，角色从一无所见开始**，而不是像 `torrents.json` 那样拒绝启动：受影响的只是重复添加，
+    `exists` 会拦下。配置中不再有的订阅源和规则在下次保存时遗忘。计数（轮询、错误、添加）不持久化；规则的 `added` 持久化。
+11. **开关**：Admin API 对订阅源或规则设置的 `enabled` 一直有效，保存在 `rss.json` 中，直到用 `null` 改回；强制轮询对已停用的
+    订阅源也有效；正在轮询的订阅源再次轮询为 **409**，带 `Retry-After`；没有该订阅源或规则为 404。
+12. **页面**：BitTorrent 菜单中的 RSS 页，每 10s 读取一次；“立即轮询”等待轮询完成。`fit bt rss poll` 在轮询结果为错误时以 1
+    退出。
+13. `TestChatSummarizes` 的窗口因 `bt_rss` 的描述从 6200 增至 6500 token。
+
+遗留：RSS 页未在浏览器中检查（其词条与接口有测试）；附件的 `length` 有时是 .torrent 文件的大小而非内容大小，此时大小界限会
+误读（有 `contentLength` 或 `size` 的订阅源无此问题）；没有智能过滤的集数列表或“N 天内忽略”；不支持 gzip（fib 的客户端不解压，
+因此 fit 不发送 `Accept-Encoding`）。未运行：Linux 上的 race 测试和全量测试（留给主会话）。
 
 ### I209 各角色用上 fib A80–A86 新增的能力
 
@@ -5763,3 +5933,63 @@ race 测试与完整测试套件（留给主会话）。
 由此遗留：A84（磁力链添加的 hybrid 种子的 piece layer）和 A86（做种方不宣告 `completed`）经由客户端生效，fit 无需改动，但 fit
 本身未测试；一个纯 v2 对端从 fit 做种的磁力链 hybrid 种子获取哈希的互通用例可覆盖 A84。未运行：Linux 上的 race 测试和完整测试
 （留给主会话）。
+
+### I210 客户端角色用上 fib A87–A88 新增的能力
+
+- **原因**：I203 留下两个权宜之计（其决定 5 与 6）：重新校验把种子从 fib 客户端移除再加入，断开连接、清零计数；`/trackers`
+  只列出 .torrent 文件或磁力链接中的内容，没有 announce 状态。fib A87（`Torrent.Trackers`、`Sources`、`WebSeeds`）与 A88
+  （`Torrent.Recheck`）已在 fib `4c6780e` 完成；fit 在 `404da7e` 上。
+- **要做**：`Role.Recheck` 改用 `Torrent.Recheck`（不移除；连接与计数保留；状态显示 `checking`；之后保存续传数据）；
+  `/trackers`（Admin API、控制台、页面、助手）显示各 tracker 的状态（上次与下次 announce、错误或警告、失败次数、peer、做种数、
+  下载数、完成数、间隔）、peer 来源与 Web 种子状态，助手照旧隐去 URL。
+- **完成标准**：重新校验保持 peer 连接与计数，被损坏的文件失去分片并重新下载；trackers 接口显示正常应答、拒绝与无法连接的
+  tracker；隐去规则成立；页面为所显示内容提供文案；两种语言的文档。
+- **涉及**：`bittorrent`、`admin`、`assistant`、`app/workbench`、`docs`。
+- **已完成** 2026-11-09（分支 `bt-i210`）：**重新校验**（`bittorrent/inspect.go`）：`Role.Recheck` 就地调用 `Torrent.Recheck`，
+  删除续传数据文件并忘掉为新客户端保留的副本（校验期间重启或替换客户端都会再次完整校验），标记待保存，保存器在 fib 给出续传
+  数据后写入（校验期间会出错）；清除为该种子保留的存储错误；立即发布进入 `checking` 的状态变化。fib 拒绝（种子处于错误状态或
+  正被移除）为 `ErrCannotCheck`，在 Admin API 上为 409。指标统计不再让该种子的计数从头开始。**Tracker**：`Role.Trackers` 返回
+  `Trackers{Trackers, Sources, WebSeeds}`：每个 tracker 有 `url`、`tier` 及其 announce 状态（`updating`、`last_announce`、
+  `next_announce`、`error`、`refused`、`warning`、`fails`、以秒计的 `interval` 与 `min_interval`、`peers`、`seeders`、
+  `leechers`、`downloaded`（未知为 -1）、`scraped`），hybrid 种子的 v2 哈希在 `v2` 中；按名称列出来源（`tracker`、`dht`、
+  `pex`、`lsd`、`manual`、`other`）及 `enabled`、`candidates`、`connected`；HTTP(S) Web 种子及 `active`、`fails`、`dropped`、
+  `error`、`next_try`。不在 fib 客户端中的种子（损坏的）列出其元信息或磁力链接中的 tracker 与 Web 种子，状态未知。Admin API
+  原样应答（`admin/bittorrent.go`）；控制台照常转发。**页面**（`app/workbench/web/bittorrent/bittorrent.js`）：Tracker 标签页
+  每 4 秒重新读取，显示各 tracker 的状态标记、错误或警告、失败次数、上次与下次 announce、间隔、peer 与计数，hybrid 种子的 v2
+  哈希另列一表，以及 peer 来源与 Web 种子状态；重新校验的确认说明 peer 保持连接；助手的“功能”页更新 `bt_torrent` 的文案。
+  **助手**（`assistant/tools_bittorrent.go`）：`bt_torrent` 给出 tracker 状态、来源与 Web 种子状态；tracker 的 URL 仍只保留
+  协议、主机与路径最后一段，Web 种子的去掉用户与查询；错误与警告中的每个 URL 都按 tracker 的方式显示，tracker 或 Web 种子自身
+  URL 中可能是秘密的部分（用户、最后一段之前的路径、长度不少于 6 的查询值）替换为 `[redacted]`；运行较早 fit 的成员（Web 种子
+  为纯 URL）仍可读取。集群的成员路径已允许 `/trackers`，无需改动。文档：[BitTorrent](bittorrent.zh-CN.md)（Admin API 的重新校验
+  与 `/trackers` 行、Tracker 标签页、助手工具与隐去规则），两种语言；[fib-api-requests](fib-api-requests.zh-CN.md) 中 A87 与 A88
+  标为已使用；I203 的决定 5 与 6 注明已改。测试：被重新校验（读取放慢）的做种方处于 `checking`、续传数据已删除，之后以同一个 fib
+  任务继续做种，下载方仍连接（地址与 ID 相同），上传计数不减，无哈希失败，续传数据重新写入，下载方以正确内容完成；文件被改了
+  两个字节的下载方在重新校验后失去两个分片并从做种方重新下载，文件随后正确；本地 fib tracker 上三个层级的 tracker：正常应答的
+  （间隔 3600，1 个做种者，0 个下载者，scrape 得到 0 次完成，约一小时后下次 announce，两个哈希都如此）、拒绝的（`refused` 及
+  原因）、无法连接的（有错误、非 `refused`、计数为 -1）；来源（tracker 启用、DHT 未启用、手动启用）；暂停时没有下次 announce；
+  应答 404 的 Web 种子及其错误与失败次数；磁力链接在 info 到来前的 tracker 与 Web 种子；Admin API 的结构（无法连接的 tracker
+  的状态、`v2`、六个来源、无 Web 种子）与 `ErrCannotCheck` 的 409；`bt_torrent` 在新结构下（状态照给，URL 与错误中没有
+  passkey，Web 种子错误中没有用户与查询）与较早成员的结构下；`redactText` 的用例；页面的文案与字段。运行：`bittorrent`、`admin`、
+  `assistant` 的 `go test -race`；`go test ./schema/ ./app/workbench/ ./docs/ ./test/workers/`；vet、gofmt。
+
+**待审决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **`web_seeds` 改为对象**（`{"url", "active", "fails", "dropped", "error", "next_try"}`），而不是 URL 列表旁另附状态，这改变了
+   Admin API 的结构；页面与助手两种结构都能读（运行较早 fit 的集群成员）。理由：每种东西一个列表，与 `trackers` 一致。备选：
+   `web_seeds` 保持为 URL，另加 `web_seed_state`。
+2. **hybrid 种子的 v2 announce 是每个 tracker 中的 `v2` 对象**，与 fib 一致，页面只在 hybrid 种子时另列一表。备选：每个 URL 与
+   哈希一行。
+3. **时间用 RFC 3339，为零时省略；间隔为整秒；未知计数为 -1**，与 fib 一致。`refused` 只在 tracker 自己拒绝时（`*tracker.Error`）
+   设置，让页面区分“被拒绝”与“无应答”。备选：时长用 Go 的纳秒，与 Admin API 其他限制一致。
+4. **重新校验开始时仍删除续传数据文件**（并忘掉内存中的副本），校验期间崩溃或换了客户端都会再次完整校验；fib 给出续传数据后由
+   保存器重新写入。理由：fib 的 `ResumeData` 在校验期间出错，旧文件会信任校验可能失败的分片。备选：保留旧文件（崩溃后会信任
+   未再校验的分片）。
+5. **fib 拒绝重新校验时应答 409**（`ErrCannotCheck`），与损坏的种子一样：是调用方可以改变的状态（先恢复它）。备选：400。
+6. **Tracker 标签页每 4 秒轮询**（列表间隔的两倍，与“文件”一致），此前只读取一次。备选：只提供刷新按钮。
+7. **助手按模式隐去错误与警告**：其中每个 URL 按 tracker URL 处理，tracker 或 Web 种子自身 URL 中可能是秘密的部分（用户、最后
+   一段之前的路径、查询值）长度不少于 6 时替换，免得短的截断普通词语。错误文本中短于 6 的秘密会漏过（passkey 远长于此）。
+   备选：助手的应答中去掉错误与警告。
+8. **不在 fib 客户端中的种子（损坏的）应答其元信息中的列表，状态未知、没有来源**，而不是 409，与之前一致。
+
+由此遗留：fit 中没有；运行较早 fit 的集群成员以旧结构应答 `/trackers`，助手能读（已测试），页面能显示（Web 种子没有状态）。
+未运行：Linux 上的 race 测试和完整测试（留给主会话）。

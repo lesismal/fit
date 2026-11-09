@@ -49,7 +49,7 @@ type metricsSnap struct {
 // category's totals. r.mu is held.
 func (r *Role) accountLocked(rec *record, st *fibbt.Stats) {
 	if rec.t != rec.acctT {
-		// Another torrent of fib's (a new client, a recheck): its counts
+		// Another torrent of fib's (a new client, a restore): its counts
 		// start at zero.
 		rec.acctT, rec.acctDown, rec.acctUp, rec.acctFails = rec.t, 0, 0, 0
 	}
@@ -192,6 +192,7 @@ func (r *Role) WriteMetrics(w observe.MetricWriter) {
 	w.Sample("fit_bittorrent_events_dropped_total", float64(r.clientDropped.Load()))
 	w.Family("fit_bittorrent_event_subscribers_dropped_total", "counter", "Subscribers to the role's events dropped for not taking them fast enough.")
 	w.Sample("fit_bittorrent_event_subscribers_dropped_total", float64(r.events.dropped.Load()))
+	r.rss.writeMetrics(w)
 	pubs := r.Publishing(nil)
 	if len(pubs) > 0 {
 		w.Family("fit_bittorrent_published_torrents", "gauge", "Torrents a publish entry seeds, or has built and cannot seed.")

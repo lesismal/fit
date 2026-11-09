@@ -93,10 +93,14 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A84 | Piece layers for a hybrid torrent added from a magnet link | done, fib `ecdcec0` | — | I196 |
 | A85 | A tracker store that lists its torrents and changes its bounds in place | done, fib `ecdcec0` | 11 | I201 |
 | A86 | A seed does not announce a completed download | done, fib `ecdcec0` | — | I201 |
-| A87 | A BitTorrent torrent's trackers and their announces | requested | — | I203 |
-| A88 | Checking a running torrent's data again | requested | — | I203 |
-| A89 | One torrent's download not held back by its lock and its picker | requested | 11 | I205 |
-| A90 | The defaults of a client's own engine | requested | — | I205 |
+| A87 | A BitTorrent torrent's trackers and their announces | done, fib `404da7e` | — | I203 |
+| A88 | Checking a running torrent's data again | done, fib `404da7e` | — | I203 |
+| A89 | One torrent's download not held back by its lock and its picker | done, fib `404da7e` | 11 | I205 |
+| A90 | The defaults of a client's own engine | done, fib `404da7e` | — | I205 |
+| A91 | An asynchronous tracker store | requested | 1 | I207 |
+| A92 | A store's answer that sets its own interval | requested | — | I207 |
+| A93 | Response decompression in the HTTP client | requested | — | I208 |
+| A94 | A response size limit per request | requested | 11 | I208 |
 
 ## Evidence
 
@@ -2655,8 +2659,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A87: A torrent's trackers and their announces
 
-**Status.** Requested on 2026-11-09, from I203; not done. fit reports the trackers a torrent's
-.torrent file or magnet link lists, without their state, meanwhile.
+**Status.** Requested on 2026-11-09, from I203; done in fib at `4c6780e` (`Torrent.Trackers`, `Sources`, `WebSeeds`), made by fit's session; fit is on `404da7e` and uses it since I210. Before I210 fit reported the trackers a torrent's .torrent file or magnet link lists, without their state.
 
 **Problem.** The Admin API's `/bittorrent/torrents/<id>/trackers` and the pages (I204) should show
 each tracker's last announce, its result or error, the seeders and leechers it reported and when
@@ -2672,11 +2675,16 @@ and DHT, PEX and LSD as their own sources with the peers each found.
 **How fit uses it.** `Role.Trackers` returns it in place of the metainfo's list, and the Admin API
 and the pages show it as it is.
 
+**Used** (I210): `Role.Trackers` answers each tracker's announces from `Torrent.Trackers` (a
+hybrid's v2 hash in `v2`, a refusal told apart from a failure by `*tracker.Error`), the peer
+sources from `Sources` and the web seeds' state from `WebSeeds`; the Admin API's `/trackers`, the
+console, the Trackers tab and the assistant's `bt_torrent` (URLs redacted, and the URLs and
+secrets in errors) show them. Tested with an answering, a refusing and an unreachable fib tracker
+and a web seed answering 404.
+
 ## A88: Checking a running torrent's data again
 
-**Status.** Requested on 2026-11-09, from I203; not done. fit's `Role.Recheck` takes the torrent
-out of the client (`Remove(false)`) and adds it again without resume data meanwhile, which drops
-its connections and fib's counts of what it downloaded and uploaded.
+**Status.** Requested on 2026-11-09, from I203; done in fib at `4c6780e` (`Torrent.Recheck`), made by fit's session; fit is on `404da7e` and uses it since I210. Before I210 fit's `Role.Recheck` took the torrent out of the client (`Remove(false)`) and added it again without resume data, which dropped its connections and fib's counts of what it downloaded and uploaded.
 
 **Problem.** A recheck (qBittorrent's "Force recheck") is needed after files were changed or
 restored behind the client's back. fib checks data only when a torrent is added.
@@ -2688,9 +2696,15 @@ running), keeping its peers, counters and limits; an `EventChecked` at the end.
 **How fit uses it.** `Role.Recheck` calls it, and the Admin API's `{"action": "recheck"}` and
 `fit bt` keep their meaning.
 
+**Used** (I210): `Role.Recheck` calls `Torrent.Recheck` on the torrent in place, removing its
+resume data at the start (a restart during the check checks again) and saving it anew once fib
+gives it after the check; fib's refusal (a torrent in its error state) is a 409. Tested: a seed
+keeps its leecher connected, its torrent and its upload counter while checking; a leecher whose
+file was changed loses two pieces and downloads them again.
+
 ## A89: One torrent's download not held back by its lock and its picker
 
-**Status.** Requested on 2026-11-09, from I205 (the BitTorrent track's benchmarks); not made yet.
+**Status.** Requested on 2026-11-09, from I205 (the BitTorrent track's benchmarks); done in fib at `4c6780e` (with `404da7e` for a test), made by fit's session; fit is on `404da7e`.
 
 **Problem.** On the benchmark host fib's client downloads one torrent from 4 seeders at 478 MiB/s (fit's role 705 MiB/s, anacrolix 1039 MiB/s) on under 2 of 4 CPUs: every block received takes `Torrent.mu` and refills that peer's requests; `nextRequest`/`pickPiece` scan the pieces with `math/rand` (24% of CPU, `pickPiece` 21%); each 16 KiB block is a `pwrite` of its own (30%).
 
@@ -2700,10 +2714,50 @@ running), keeping its peers, counters and limits; an `EventChecked` at the end.
 
 ## A90: The defaults of a client's own engine
 
-**Status.** Requested on 2026-11-09, from I205 (the BitTorrent track's benchmarks); not made yet.
+**Status.** Requested on 2026-11-09, from I205 (the BitTorrent track's benchmarks); done in fib at `4c6780e` (with `404da7e` for a test), made by fit's session; fit is on `404da7e`.
 
 **Problem.** fib's client made without `Config.SharedEngine` downloads at 0.68 of the rate of the same client on fit's shared engine on the benchmark host; its own engine's defaults were not profiled.
 
 **Suggested API.** Review the defaults `NewClient` gives the engine it makes (pollers, task pool, read buffers) against the shared engine's, and document or change them.
 
 **How fit uses it.** None directly (fit uses `SharedEngine`); other users of fib's client.
+
+## A91: An asynchronous tracker store
+
+**Status.** Requested on 2026-11-09, from I207 (the BitTorrent track); not made yet.
+
+**Problem.** fib's tracker `Server` calls `Store.Announce` and `Scrape` on the fib worker that read the request, so a store shared through Redis can never ask it per announce: fit's shared store answers from local memory and shares in the background, and the first announce of a torrent on an instance gets only that instance's peers.
+
+**Suggested API.** `AnnounceAsync(a StoreAnnounce, done func(StoreResult, error))` and `ScrapeAsync`, the Server retaining the HTTP Context (or keeping the UDP peer) and answering from `done`.
+
+**How fit uses it.** The shared tracker store (I207) asks Redis per announce, closing the first-announce gap.
+
+## A92: A store's answer that sets its own interval
+
+**Status.** Requested on 2026-11-09, from I207 (the BitTorrent track); not made yet.
+
+**Problem.** A store whose answer was partial (a shared store's first announce on an instance) cannot ask the client to come back sooner.
+
+**Suggested API.** `StoreResult.Interval` (and `MinInterval`), overriding the Server's for that answer.
+
+**How fit uses it.** The shared tracker store asks clients whose answer was partial to announce again within a refresh.
+
+## A93: Response decompression in the HTTP client
+
+**Status.** Requested on 2026-11-09, from I208 (the BitTorrent track); not made yet.
+
+**Problem.** fib's HTTP client does not decompress responses, so fit's RSS polls send no Accept-Encoding and feeds come uncompressed.
+
+**Suggested API.** Opt-in `Accept-Encoding: gzip` with transparent, size-bounded decompression (the limit applying to the decompressed body).
+
+**How fit uses it.** RSS polls (I208) and .torrent downloads take less bandwidth.
+
+## A94: A response size limit per request
+
+**Status.** Requested on 2026-11-09, from I208 (the BitTorrent track); not made yet.
+
+**Problem.** `MaxResponseBodyBytes` is the client's, not a request's, so RSS keeps a client of its own beside the one for .torrent URLs.
+
+**Suggested API.** A per-request limit (on the request or its options) under the client's.
+
+**How fit uses it.** One HTTP client for the BitTorrent role's fetches.

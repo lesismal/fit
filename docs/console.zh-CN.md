@@ -661,6 +661,7 @@ fit 内置 18 个技能，嵌入在二进制中：`explain`、`route-builder`、
 | `bt_torrents` | `read` | 种子的简要信息（状态、保持原因、错误、进度、大小、速率、peer、分享率、剩余时间），可按状态、分类与名称筛选（50 个，最多 200 个），并附备用速率 |
 | `bt_torrent` | `read` | 种子的状态、前 100 个文件及其优先级、前 50 个 peer，以及其 tracker 与 Web 种子 |
 | `bt_tracker_stats` | `read` | tracker 的总计与按原因统计的拒绝，以及前 50 个种子的 swarm（白名单中的，或公开 tracker 按 info hash 排序的） |
+| `bt_rss` | `read` | RSS 自动下载的订阅源（上次轮询、结果、计数）与规则，以及最近见过的条目；订阅源 URL 只给出 scheme、主机和最后一段路径 |
 | `bt_add_propose` | `propose` | 按磁力链接或 .torrent URL 添加种子，可指定分类、暂停或顺序下载 |
 | `bt_pause_propose` | `propose` | 按 ID 暂停种子（最多 100 个） |
 | `bt_resume_propose` | `propose` | 按 ID 恢复种子（最多 100 个） |

@@ -89,3 +89,6 @@ a.cl-chip:hover { background: var(--primary-soft); color: var(--primary); }
 .cl-diff__del { background: var(--danger-soft); }
 .cl-diff__hunk { color: var(--primary); }
 .cl-diff__file { color: var(--muted); }
+/* I206: the Overview's BitTorrent card, and the targets picked in a new distribution. / I206：概览的 BitTorrent 卡片与新建分发中选择的目标。 */
+.cl-ovcards { display: grid; gap: 12px; }
+.cl-picks { display: flex; flex-wrap: wrap; gap: 4px 16px; max-height: 220px; overflow: auto; }

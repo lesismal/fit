@@ -130,21 +130,7 @@ func checkSharedStorage(s *SharedStorage, add func(Value, string, ...any)) {
 		add(s.At.Field("lock_ttl"), "%s is too short: at least 10s, which Consul's sessions need, and more than a renewal takes", s.LockTTL.Std())
 	}
 	if r := s.Redis; r != nil {
-		if r.Address != "" {
-			if _, _, err := net.SplitHostPort(r.Address); err != nil {
-				add(r.At.Field("address"), "%q is not a host and port", r.Address)
-			}
-		}
-		if r.Username != "" && r.PasswordFile == "" {
-			add(r.At.Field("username"), "username needs password_file")
-		}
-		if !r.TLS && r.CAFile != "" {
-			add(r.At.Field("ca_file"), "ca_file needs tls")
-		}
-		if !r.TLS && r.CertFile != "" {
-			add(r.At.Field("cert_file"), "cert_file needs tls")
-		}
-		checkTLSFiles(r.At, r.CertFile, r.KeyFile, add)
+		checkRedisStorage(r, add)
 	}
 	if e := s.Etcd; e != nil {
 		for i, ep := range e.Endpoints {
@@ -162,4 +148,24 @@ func checkSharedStorage(s *SharedStorage, add func(Value, string, ...any)) {
 		checkEndpoint(c.At.Field("endpoint"), c.Endpoint, add)
 		checkTLSFiles(c.At, c.CertFile, c.KeyFile, add)
 	}
+}
+
+// checkRedisStorage checks a Redis server's settings, of a shared storage or
+// of the tracker's shared store.
+func checkRedisStorage(r *RedisStorage, add func(Value, string, ...any)) {
+	if r.Address != "" {
+		if _, _, err := net.SplitHostPort(r.Address); err != nil {
+			add(r.At.Field("address"), "%q is not a host and port", r.Address)
+		}
+	}
+	if r.Username != "" && r.PasswordFile == "" {
+		add(r.At.Field("username"), "username needs password_file")
+	}
+	if !r.TLS && r.CAFile != "" {
+		add(r.At.Field("ca_file"), "ca_file needs tls")
+	}
+	if !r.TLS && r.CertFile != "" {
+		add(r.At.Field("cert_file"), "cert_file needs tls")
+	}
+	checkTLSFiles(r.At, r.CertFile, r.KeyFile, add)
 }

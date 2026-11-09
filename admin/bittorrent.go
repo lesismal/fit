@@ -51,7 +51,8 @@ import (
 //	                                            its files
 //	GET    /bittorrent/torrents/{id}/files      its files
 //	GET    /bittorrent/torrents/{id}/peers      the peers connected
-//	GET    /bittorrent/torrents/{id}/trackers   its trackers and web seeds
+//	GET    /bittorrent/torrents/{id}/trackers   its trackers and their announces,
+//	                                            its peer sources and web seeds
 //	GET    /bittorrent/alt_speed                the alternative rates; PUT
 //	                                            {"mode": "auto" | "on" | "off"}
 //	GET    /bittorrent/publish                  the publish entries and their
@@ -120,7 +121,7 @@ func btError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, bittorrent.ErrNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, bittorrent.ErrExists), errors.Is(err, bittorrent.ErrBroken):
+	case errors.Is(err, bittorrent.ErrExists), errors.Is(err, bittorrent.ErrBroken), errors.Is(err, bittorrent.ErrCannotCheck):
 		status = http.StatusConflict
 	case errors.Is(err, bittorrent.ErrTooMany), errors.Is(err, bittorrent.ErrTooManyTemporary):
 		status = http.StatusTooManyRequests
@@ -672,12 +673,12 @@ func (s *Server) btTrackers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	trackers, seeds, err := role.Trackers(id)
+	tr, err := role.Trackers(id)
 	if err != nil {
 		btError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"trackers": trackers, "web_seeds": seeds})
+	writeJSON(w, http.StatusOK, tr)
 }
 
 // btAltSpeed answers GET /bittorrent/alt_speed.

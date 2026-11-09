@@ -11,7 +11,7 @@ go 1.27.3
 require (
 	github.com/anacrolix/generics v0.1.1-0.20251125230353-15d98d46693b
 	github.com/anacrolix/torrent v1.61.0
-	github.com/lesismal/fib v1.7.3-0.20261109030556-e633fc2ea1d4
+	github.com/lesismal/fib v1.7.3-0.20261109095835-134bf2c4bfb6
 	golang.org/x/time v0.14.0
 )
 

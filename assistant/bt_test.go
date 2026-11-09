@@ -39,6 +39,9 @@ type fakeBT struct {
 	held    map[string]bool // torrents the client holds
 	temp    map[string]bool // torrents bt_stream added on the fly
 	changes []string
+	// oldTrackers answers /trackers as a fit before I210 does: no state,
+	// web seeds as bare URLs.
+	oldTrackers bool
 }
 
 func newFakeBT() *fakeBT {
@@ -137,10 +140,28 @@ func (f *fakeBT) handler(next http.Handler) http.Handler {
 		}
 	})
 	mux.HandleFunc("GET /bittorrent/torrents/{id}/trackers", func(w http.ResponseWriter, r *http.Request) {
-		if gate(w, r) {
+		if !gate(w, r) {
+			return
+		}
+		f.mu.Lock()
+		old := f.oldTrackers
+		f.mu.Unlock()
+		if old {
 			answer(w, 200, `{"trackers": [{"url": "https://tracker.example/`+btPasskey+`/announce", "tier": 0}, {"url": "udp://open.example:1337", "tier": 1},
 				{"url": "::bad", "tier": 2}], "web_seeds": ["https://u:p@seed.example/files/sintel.mkv?token=`+btPasskey+`"]}`)
+			return
 		}
+		answer(w, 200, `{"trackers": [
+			{"url": "https://tracker.example/`+btPasskey+`/announce", "tier": 0, "updating": false, "last_announce": "2026-11-09T10:00:00Z",
+			 "error": "Get \"https://tracker.example/`+btPasskey+`/announce?info_hash=x&passkey=`+btPasskey+`\": dial tcp: connection refused", "fails": 3,
+			 "interval": 0, "min_interval": 0, "peers": 0, "seeders": -1, "leechers": -1, "downloaded": -1,
+			 "v2": {"updating": false, "error": "tracker refused: unregistered torrent `+btPasskey+`", "refused": true, "fails": 1, "seeders": -1, "leechers": -1, "downloaded": -1}},
+			{"url": "udp://open.example:1337", "tier": 1, "updating": false, "last_announce": "2026-11-09T10:00:00Z", "next_announce": "2026-11-09T10:30:00Z",
+			 "warning": "be nice", "fails": 0, "interval": 1800, "min_interval": 60, "peers": 12, "seeders": 40, "leechers": 7, "downloaded": 900},
+			{"url": "::bad", "tier": 2, "fails": 0, "seeders": -1, "leechers": -1, "downloaded": -1}],
+			"sources": [{"source": "tracker", "enabled": true, "candidates": 12, "connected": 3}, {"source": "dht", "enabled": false, "candidates": 0, "connected": 0}],
+			"web_seeds": [{"url": "https://u:p@seed.example/files/sintel.mkv?token=`+btPasskey+`", "active": 0, "fails": 2, "dropped": false,
+			 "error": "GET https://seed.example/files/sintel.mkv?token=`+btPasskey+`: 404 Not Found", "next_try": "2026-11-09T10:01:00Z"}]}`)
 	})
 	mux.HandleFunc("GET /bittorrent/alt_speed", func(w http.ResponseWriter, r *http.Request) {
 		if gate(w, r) {
@@ -155,6 +176,18 @@ func (f *fakeBT) handler(next http.Handler) http.Handler {
 	mux.HandleFunc("GET /bittorrent/tracker/torrents", func(w http.ResponseWriter, r *http.Request) {
 		if gate(w, r) {
 			answer(w, 200, `{"torrents": [{"info_hash": "`+btSintel+`", "seeders": 3, "leechers": 2, "completed": 7, "tracked": true}], "total": 2, "offset": 0}`)
+		}
+	})
+	mux.HandleFunc("GET /bittorrent/rss", func(w http.ResponseWriter, r *http.Request) {
+		if gate(w, r) {
+			answer(w, 200, `{"configured": true, "feeds": [{"name": "shows", "url": "https://rss.example/feeds/`+btPasskey+`/shows.xml", "enabled": true,
+				"interval": 900000000000, "last_result": "ok", "seen": 3, "added": 1}], "rules": [{"name": "s", "enabled": true, "category": "films", "added": 1}]}`)
+		}
+	})
+	mux.HandleFunc("GET /bittorrent/rss/items", func(w http.ResponseWriter, r *http.Request) {
+		if gate(w, r) {
+			answer(w, 200, `{"items": [{"feed": "shows", "key": "https://rss.example/dl/`+btPasskey+`", "title": "Show S01E01", "outcome": "added", "rule": "s",
+				"torrent": "`+btSintel+`"}], "total": 3}`)
 		}
 	})
 	mux.Handle("/", next)
@@ -214,20 +247,66 @@ func TestBTToolsRead(t *testing.T) {
 		FilesTotal int              `json:"files_total"`
 		Peers      []map[string]any `json:"peers"`
 		PeersTotal int              `json:"peers_total"`
-		Trackers   []struct{ URL string }
-		WebSeeds   []string `json:"web_seeds"`
+		Trackers   []struct {
+			URL      string
+			Error    string
+			Fails    int
+			Seeders  int
+			Interval int
+			Warning  string
+			V2       *struct {
+				Error   string
+				Refused bool
+			}
+		}
+		WebSeeds []struct {
+			URL   string
+			Error string
+			Fails int
+		} `json:"web_seeds"`
+		Sources []struct {
+			Source    string
+			Connected int
+		}
 	}
 	if err := json.Unmarshal([]byte(out), &one); err != nil || one.Status["ratio"] != 1.5 || one.Status["files"] != nil || len(one.Files) != 100 ||
 		one.FilesTotal != 120 || len(one.Peers) != 50 || one.PeersTotal != 60 || one.Peers[0]["id"] != nil || one.Peers[0]["client"] != "Transmission 4.0" {
 		t.Fatalf("%v %s", err, out)
 	}
 	if one.Trackers[0].URL != "https://tracker.example/[redacted]/announce" || one.Trackers[1].URL != "udp://open.example:1337" ||
-		one.Trackers[2].URL != "[redacted]" || one.WebSeeds[0] != "https://seed.example/files/sintel.mkv" {
+		one.Trackers[2].URL != "[redacted]" || one.WebSeeds[0].URL != "https://seed.example/files/sintel.mkv" {
 		t.Errorf("%+v %v", one.Trackers, one.WebSeeds)
 	}
-	if strings.Contains(out, btPasskey) || strings.Contains(out, "magnet:") {
+	// The trackers' state (I210) passes, their errors without the passkey.
+	tr0, tr1 := one.Trackers[0], one.Trackers[1]
+	if tr0.Fails != 3 || tr0.Seeders != -1 || !strings.Contains(tr0.Error, "https://tracker.example/[redacted]/announce") ||
+		!strings.Contains(tr0.Error, "connection refused") || tr0.V2 == nil || !tr0.V2.Refused || !strings.Contains(tr0.V2.Error, "unregistered torrent [redacted]") {
+		t.Errorf("%+v", tr0)
+	}
+	if tr1.Interval != 1800 || tr1.Seeders != 40 || tr1.Warning != "be nice" {
+		t.Errorf("%+v", tr1)
+	}
+	if w := one.WebSeeds[0]; w.Fails != 2 || w.Error != "GET https://seed.example/[redacted]/sintel.mkv: 404 Not Found" {
+		t.Errorf("%+v", w)
+	}
+	if len(one.Sources) != 2 || one.Sources[0].Source != "tracker" || one.Sources[0].Connected != 3 {
+		t.Errorf("%+v", one.Sources)
+	}
+	if strings.Contains(out, btPasskey) || strings.Contains(out, "magnet:") || strings.Contains(out, "u:p@") {
 		t.Errorf("a passkey reaches the model: %s", out)
 	}
+	// A member running a fit before I210: web seeds as bare URLs.
+	bt.mu.Lock()
+	bt.oldTrackers = true
+	bt.mu.Unlock()
+	out = mustRun(t, a, "bt_torrent", `{"torrent": "`+btSintel+`"}`)
+	if !strings.Contains(out, `"web_seeds":["https://seed.example/files/sintel.mkv"]`) || !strings.Contains(out, `"url":"https://tracker.example/[redacted]/announce"`) ||
+		strings.Contains(out, btPasskey) {
+		t.Errorf("an earlier member's trackers: %s", out)
+	}
+	bt.mu.Lock()
+	bt.oldTrackers = false
+	bt.mu.Unlock()
 	wantErr(t, a, "bt_torrent", `{"torrent": "xyz"}`, "torrent is a torrent's ID")
 	wantErr(t, a, "bt_torrent", `{"torrent": "`+btNew+`"}`, "no such torrent")
 	wantErr(t, a, "bt_torrent", `[`, "not what the tool takes")
@@ -243,10 +322,23 @@ func TestBTToolsRead(t *testing.T) {
 		t.Error(got)
 	}
 
+	out = mustRun(t, a, "bt_rss", `{"feed": "shows", "outcome": "added", "items": 5}`)
+	if !strings.Contains(out, `"url":"https://rss.example/[redacted]/shows.xml"`) || !strings.Contains(out, `"title":"Show S01E01"`) ||
+		!strings.Contains(out, `"items_total":3`) || !strings.Contains(out, `"rules":[{"name":"s"`) || strings.Contains(out, btPasskey) {
+		t.Error(out)
+	}
+	if got := bt.last(); got != "GET /bittorrent/rss/items?feed=shows&limit=5&outcome=added" {
+		t.Error(got)
+	}
+	if out := mustRun(t, a, "bt_rss", `{"items": 0}`); strings.Contains(out, `"items"`) || bt.last() != "GET /bittorrent/rss" {
+		t.Error(out, bt.last())
+	}
+	wantErr(t, a, "bt_rss", `{"items": 101}`, "items is 0 to 100")
+
 	bt.mu.Lock()
 	bt.down = true
 	bt.mu.Unlock()
-	for _, c := range [][2]string{{"bt_torrents", `{}`}, {"bt_torrent", `{"torrent": "` + btSintel + `"}`}, {"bt_tracker_stats", `{}`}} {
+	for _, c := range [][2]string{{"bt_torrents", `{}`}, {"bt_torrent", `{"torrent": "` + btSintel + `"}`}, {"bt_tracker_stats", `{}`}, {"bt_rss", `{}`}} {
 		wantErr(t, a, c[0], c[1], "does not run here")
 	}
 	if len(bt.changed()) != 0 {
@@ -440,7 +532,7 @@ func TestBTToolsServed(t *testing.T) {
 		return out
 	}
 	read, propose := names(config.AssistantRead), names(config.AssistantPropose)
-	for _, n := range []string{"bt_torrents", "bt_torrent", "bt_tracker_stats"} {
+	for _, n := range []string{"bt_torrents", "bt_torrent", "bt_tracker_stats", "bt_rss"} {
 		if !slices.Contains(read, n) || !slices.Contains(memberTools, n) {
 			t.Errorf("read lacks %s", n)
 		}
@@ -466,6 +558,20 @@ func TestBTHelpers(t *testing.T) {
 	}
 	if got := webSeedURL("x"); got != "[redacted]" {
 		t.Error(got)
+	}
+	// An error's or a warning's text: its URLs as trackerURL gives them,
+	// the secret parts of the tracker's URL wherever they are.
+	for _, c := range []struct{ text, raw, want string }{
+		{"Get \"http://t.example/abcdef123/announce?x=1\": EOF", "http://t.example/abcdef123/announce", "Get \"http://t.example/[redacted]/announce\": EOF"},
+		{"passkey abcdef123 unknown", "http://t.example/abcdef123/announce", "passkey [redacted] unknown"},
+		{"bad token qwerty99.", "http://t.example/a?token=qwerty99", "bad token [redacted]."},
+		{"user alice:secret1 refused", "http://alice:secret1@t.example/a", "user [redacted] refused"},
+		{"see udp://t.example:80/x, then", "::bad", "see udp://t.example:80/x, then"},
+		{"short ab refused", "http://t.example/ab/announce", "short ab refused"},
+	} {
+		if got := redactText(c.text, c.raw); got != c.want {
+			t.Errorf("%q: %q, want %q", c.text, got, c.want)
+		}
 	}
 	if _, err := btSourceID("magnet:?xt=urn:btmh:1220" + strings.Repeat("ab", 32)); err != nil {
 		t.Error(err)

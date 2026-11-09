@@ -285,7 +285,7 @@ func TestChatTokensSpentInLoop(t *testing.T) {
 // the calls after it carry the summary instead of the turns.
 func TestChatSummarizes(t *testing.T) {
 	// The window holds the system prompt and the read tools, with some room.
-	const window = 6200
+	const window = 6500
 	long := strings.Repeat("The upstream api has backends in three zones. ", 60)
 	var summaries int
 	var mu sync.Mutex

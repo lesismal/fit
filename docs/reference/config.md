@@ -45,7 +45,7 @@ a config against it and more.
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
-- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits), [`bittorrent.client.categories[]`](#config-bittorrentcategory), [`bittorrent.client.categories[].limits`](#config-bittorrenttorrentlimits), [`bittorrent.client.alt_speed`](#config-bittorrentaltspeed), [`bittorrent.client.alt_speed.schedules[]`](#config-bittorrentschedule), [`bittorrent.client.publish[]`](#config-bittorrentpublish), [`bittorrent.tracker`](#config-bittorrenttracker)
+- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits), [`bittorrent.client.categories[]`](#config-bittorrentcategory), [`bittorrent.client.categories[].limits`](#config-bittorrenttorrentlimits), [`bittorrent.client.alt_speed`](#config-bittorrentaltspeed), [`bittorrent.client.alt_speed.schedules[]`](#config-bittorrentschedule), [`bittorrent.client.rss`](#config-bittorrentrss), [`bittorrent.client.rss.feeds[]`](#config-bittorrentrssfeed), [`bittorrent.client.rss.rules[]`](#config-bittorrentrssrule), [`bittorrent.client.publish[]`](#config-bittorrentpublish), [`bittorrent.tracker`](#config-bittorrenttracker), [`bittorrent.tracker.store`](#config-bittorrenttrackerstore)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
@@ -1989,6 +1989,8 @@ In JSON:
 
 ### `acme.shared_storage.redis`
 
+Also at `bittorrent.tracker.store.redis`.
+
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string | `"127.0.0.1:6379"` | The server's host and port. 127.0.0.1:6379 when left out. |
@@ -3885,6 +3887,23 @@ of `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers` or `disk_q
 a new client, the torrents saved from the old one and added to the new one without a check. A new
 `data_dir` starts from that directory's state, as a restart would.
 
+`rss` downloads from RSS 2.0 (and 1.0) and Atom feeds: each of `feeds` is polled every `interval`
+(15m, at least 1m) on a goroutine of the role's, at most 4 at once, with fib's asynchronous HTTP
+client, sending back the `ETag` and `Last-Modified` it answered (304 costs nothing more), at most
+`max_feed_bytes` (4 MiB), within `timeout` (30s), at most 5 redirects; `headers` and `headers_env`
+(values read from environment variables) go with its requests, and its URL comes from the config
+alone. At most `max_items` items of a feed are read; each new one goes to the first of `rules` whose
+`feeds`, `patterns` and `exclude` (case-insensitive globs over the whole title, or `re:` and
+a regular expression) and `min_size` and `max_size` (from `torrent:contentLength` or the enclosure's
+length; unknown passes) it meets, which adds its torrent from its magnet link, else its .torrent
+enclosure or link (as a .torrent URL is added), in the rule's `category`, `paused` if it says, at
+most `max_per_poll` (5) a poll; with `episodes`, an episode (S01E02, 1x02 or a date) of a show the
+rule added already is left out. Every item is remembered as seen in `data_dir/rss.json`, at most
+`history_size` (1000) a feed, across restarts, with the episodes each rule added and the Admin
+API's toggles; items left for later (by `max_per_poll`, or an add that may pass, as `max_torrents`)
+are read again at the next poll, and an item whose .torrent file cannot be downloaded is tried at 3
+polls. A reload applies `rss` in place.
+
 `publish` entries publish directories: each file of `dir` (mode `per_file`), or the whole directory
 (mode `whole_dir`), is built into a hybrid torrent, with `web_seed` (the URL of a static route of `dir`)
 as its web seed, `announce` as its trackers and `private` if set, on `max_hashing` goroutines of the
@@ -3904,15 +3923,20 @@ at most 32 MiB), `/bittorrent/torrents/{id}` gives one with its files, pauses, r
 (`POST {"action"}`), changes its priorities, category, limits and queue position (`PATCH`) and
 removes it (`DELETE`, `?delete_data=1`); `.../files`, `.../peers` and `.../trackers`;
 `/bittorrent/alt_speed` reads and sets the alternative rates; `/bittorrent/publish` the publish
-entries, and `.../{name}/torrents/{id}` a published torrent's .torrent file; `/bittorrent/tracker/stats`, `.../torrents` and `.../passkey` the tracker's.
+entries, and `.../{name}/torrents/{id}` a published torrent's .torrent file; `/bittorrent/rss` the
+RSS feeds (their last poll and result) and rules, `.../items` the items seen, `POST
+.../feeds/{name}/poll` polls a feed now, `PUT .../feeds/{name}` and `.../rules/{name}` turn one on
+or off; `/bittorrent/tracker/stats`, `.../torrents` and `.../passkey` the tracker's.
 `GET /bittorrent/events` streams the client's events as server-sent events (torrents added, removed,
-completed, failing or changing state, peers banned, seed limits, the alternative rates), with
+completed, failing or changing state, peers banned, seed limits, the alternative rates, torrents
+an RSS rule added), with
 `Last-Event-ID` to catch up, 32 streams at most, a slow one disconnected after 256 events waiting;
 on the Admin API's address, and on a route of the console's own, `/api/m/admin/bittorrent/events`,
-which the workbench's BitTorrent pages read to show torrents as they change. `fit bt ls`, `add`, `info`, `pause`, `resume`, `rm`, `limit`
-and `alt` call these through the Admin API the bootstrap config names, as `fit sync` does. The
+which the workbench's BitTorrent pages read to show torrents as they change. `fit bt ls`, `add`, `info`, `pause`, `resume`, `rm`, `limit`,
+`alt` and `rss` call these through the Admin API the bootstrap config names, as `fit sync` does. The
 Admin API's `/metrics` carries the client's as `fit_bittorrent_*` (bytes, rates, peers and hash
-failures by category, torrents by category and state, bans, the alternative rates) and the
+failures by category, torrents by category and state, bans, the alternative rates, RSS polls and
+items added by feed) and the
 tracker's as `fit_bittorrent_tracker_*` (torrents, peers, announces, scrapes, refusals by reason).
 
 `bittorrent.tracker` is a BitTorrent tracker on fib's tracker, one a process: HTTP and HTTPS
@@ -3925,8 +3949,12 @@ of the policy's tokens or a user's passkey (derived from the policy's secret and
 read on the console's `/api/passkey?user=`), whose grant must play `bittorrent/<info hash>`.
 With `allow` or `allow_files`, only the info hashes listed are tracked; the files are read again
 when they change. A reload changes the allow-list, `auth`, `access` and `console` in place; the
-interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms; the store's bounds and
-`peer_ttl` start them empty. See [decision 037](../decisions/037-bittorrent.md) and
+interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms, and so do the store's
+bounds and `peer_ttl`, changed in place. With a `store` block, the trackers of several instances
+share their swarms through Redis and answer as one: each answers from its own memory at once, and a
+goroutine of the store's own writes its announces to Redis and reads samples of the shared swarms
+every `refresh`, so an instance learns of another's peers within a refresh; while Redis cannot be
+reached it answers from memory. See [decision 037](../decisions/037-bittorrent.md) and
 [BitTorrent](../bittorrent.md).
 
 In a .conf file:
@@ -3953,6 +3981,15 @@ bittorrent {
 		alt_speed {
 			upload_rate 131072
 			schedules { days weekdays; from 08:00; to 18:00 }
+		}
+		rss {
+			feeds shows { url https://example.com/rss; interval 15m }
+			rules show {
+				patterns "*Show Name*1080p*"
+				exclude *hevc*
+				category iso
+				episodes true
+			}
 		}
 		access { deny 10.0.0.0/8; deny_files /etc/fit/level1.p2p }
 		publish releases {
@@ -4005,6 +4042,19 @@ bittorrent:
             - weekdays
           from: 08:00
           to: 18:00
+    rss:
+      feeds:
+        - name: shows
+          url: https://example.com/rss
+          interval: 15m
+      rules:
+        - name: show
+          patterns:
+            - '*Show Name*1080p*'
+          exclude:
+            - '*hevc*'
+          category: iso
+          episodes: true
     access:
       deny:
         - 10.0.0.0/8
@@ -4065,6 +4115,10 @@ In JSON:
       },
       "categories": [{"name": "iso", "dir": "/srv/iso", "limits": {"seed_ratio": -1}}],
       "alt_speed": {"upload_rate": 131072, "schedules": [{"days": ["weekdays"], "from": "08:00", "to": "18:00"}]},
+      "rss": {
+        "feeds": [{"name": "shows", "url": "https://example.com/rss", "interval": "15m"}],
+        "rules": [{"name": "show", "patterns": ["*Show Name*1080p*"], "exclude": ["*hevc*"], "category": "iso", "episodes": true}]
+      },
       "access": {"deny": ["10.0.0.0/8"], "deny_files": ["/etc/fit/level1.p2p"]},
       "publish": [{
         "name": "releases",
@@ -4122,6 +4176,7 @@ In JSON:
 | `alt_speed` | [object](#config-bittorrentaltspeed) |  | Alternative rates, in place of limits' upload_rate and download_rate while one of their schedules holds, or while the API turns them on. None when left out. |
 | `access` | [object](#config-access) |  | The peer addresses the client deals with, deciding before the global access: a peer it refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and are not asked about. A change applies at once, closing the connected peers it now refuses. Every address when left out, unless the global access says otherwise. |
 | `console` | [object](#config-roleconsole) |  | The client's web pages; none when left out. |
+| `rss` | [object](#config-bittorrentrss) |  | RSS auto-download: feeds polled on their intervals, and rules adding the torrents of the items they pick (magnet links, .torrent enclosures or links) in a category, with size bounds and each episode once. What was seen is kept in data_dir/rss.json. A change applies in place. None when left out. |
 | `publish` | list of [object](#config-bittorrentpublish) |  | Directories the client publishes: each built into hybrid torrents, a torrent of each file or one of the whole directory, on goroutines of its own, and seeded where the files are, the .torrent files and magnet links served by the bt_publish handler. Each follows the disk: a file added gets a torrent, and one changed or removed stops its torrent, a changed one getting a new torrent. The torrents are kept in data_dir/publish/<name>/, so that a restart neither builds nor checks a file that did not change. None when left out. |
 
 <a id="config-bittorrentlimits"></a>
@@ -4188,6 +4243,50 @@ In JSON:
 | `from` | string |  | Required. The time the range begins at, HH:MM, 00:00 to 23:59. |
 | `to` | string |  | Required. The time the range ends at, HH:MM, 00:01 to 24:00, not included: one earlier than from runs past midnight, as 22:00 to 06:00. It may not equal from. |
 
+<a id="config-bittorrentrss"></a>
+
+### `bittorrent.client.rss`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `feeds` | list of [object](#config-bittorrentrssfeed) |  | The feeds polled, RSS 2.0 (or 1.0) and Atom, each on its own interval. Their URLs come from the config alone. At most 100. |
+| `rules` | list of [object](#config-bittorrentrssrule) |  | The rules that pick the items whose torrents are added, tried in order: an item is added by the first rule whose feeds, patterns and size bounds it meets; an item no rule picks is only remembered as seen. At most 200. |
+| `history_size` | integer, 0 to 10000 | `1000` | How many items of each feed are remembered as seen, in data_dir/rss.json, so that an item is handled once, across restarts; the oldest are forgotten first. At least each feed's max_items. 1000 when left out or 0. |
+| `max_feed_bytes` | integer, 0 to 33554432 | `4194304` | The most bytes of a feed downloaded: a larger one fails its poll. 4 MiB when left out or 0, at most 32 MiB. |
+| `timeout` | duration | `"30s"` | How long a feed's download may take in all: connecting, redirects (at most 5) and the body. 30s when left out. |
+
+<a id="config-bittorrentrssfeed"></a>
+
+### `bittorrent.client.rss.feeds[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The feed's name, which the rules, the Admin API and data_dir/rss.json know it by. Letters, digits, '_', '.' and '-'. |
+| `url` | string |  | Required. The feed's http or https URL. Redirects are followed, at most 5. A private tracker's passkey may be in it: the Admin API and the pages show it without its user and query. |
+| `interval` | duration | `"15m"` | How often the feed is polled, at least 1m; the server's ETag and Last-Modified are sent back, so that an unchanged feed answers 304 and costs nothing more. 15m when left out. |
+| `enabled` | boolean | `true` | Poll the feed. On when left out. The Admin API may turn it off or on, which data_dir keeps until it is turned back. |
+| `max_items` | integer, 0 to 1000 | `200` | The most items of the feed read at a poll, the first in the document; the rest are left out. 200 when left out or 0. |
+| `headers` | object of string |  | Headers sent with the feed's requests, as a cookie a site wants. Not Host or the body's framing. A secret is better named by headers_env. |
+| `headers_env` | object of string |  | Headers sent with the feed's requests whose values are read from environment variables at each poll, by the header's name: {"Authorization": "FEED_AUTH"}. A variable not set sends no header. |
+
+<a id="config-bittorrentrssrule"></a>
+
+### `bittorrent.client.rss.rules[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The rule's name, which the Admin API and data_dir/rss.json know it by. Letters, digits, '_', '.' and '-'. |
+| `feeds` | list of string |  | The feeds whose items the rule looks at, by name. Every feed when left out. |
+| `patterns` | list of string |  | Patterns an item's title must match one of, in any case: a glob matching the whole title, where * matches any run of characters and ? one, as *Show Name*1080p*; or, after re:, a regular expression (Go's syntax) found anywhere in it, as re:S0[1-3]E\d+. Every title when left out. At most 32. |
+| `exclude` | list of string |  | Patterns, as patterns writes them, of titles the rule leaves out, as *720p* or re:(?:cam\|ts)\b. None when left out. At most 32. |
+| `category` | string |  | The category the torrents are added in, one of categories. None, download_dir, when left out. |
+| `paused` | boolean |  | Add the torrents paused. |
+| `min_size` | integer, 0 or more |  | The least size of an item's content, in bytes, from its torrent:contentLength, or its enclosure's length. An item whose size the feed does not give passes. No bound when left out or 0. |
+| `max_size` | integer, 0 or more |  | The most size of an item's content, in bytes, as min_size reads it. No bound when left out or 0. |
+| `episodes` | boolean |  | Add each episode once: an item whose title names an episode (S01E02, 1x02, or a date, as 2026-11-09) the rule has added already, of a show of the same name (the title before the episode), is left out, as another quality or a repack of it. Without an episode in the title, an item is told only by its own ID. |
+| `max_per_poll` | integer, 0 to 100 | `5` | The most torrents the rule adds at one poll of a feed; the items past it are left for the next poll. 5 when left out or 0. |
+| `enabled` | boolean | `true` | Use the rule. On when left out. The Admin API may turn it off or on, which data_dir keeps until it is turned back. |
+
 <a id="config-bittorrentpublish"></a>
 
 ### `bittorrent.client.publish[]`
@@ -4228,6 +4327,21 @@ In JSON:
 | `allow_files` | list of string |  | Files of more allowed info hashes: one on each line, as allow has them, with blank lines and what follows # left out. Read when the config is applied, and read again when one changes; each at most 64 MiB, and at most 1048576 info hashes in all. |
 | `access` | [object](#config-access) |  | The client addresses the tracker serves, deciding before the global access: a UDP datagram from an address it refuses is dropped before a connection is made, and an HTTP announce or scrape through bt_tracker from one is answered with a failure reason. A change applies at once. Every address when left out, unless the global access says otherwise. |
 | `console` | [object](#config-roleconsole) |  | The tracker's web pages: its statistics, read-only. None when left out. |
+| `store` | [object](#config-bittorrenttrackerstore) |  | A store of the swarms that the trackers of several fit instances share, so that they answer as one tracker: each keeps its own peers in memory, as without it, and shares them through the store, answering an announce with peers of every instance and a scrape with the counts of all. Each instance's swarms alone, in its memory, when left out. A change of it, or adding or removing it, makes a new store: this instance's swarms start anew in memory (clients announce again within their interval), the shared ones staying in the store. The bounds max_torrents, max_peers_per_torrent and max_peers apply to the shared store too, to all instances' peers together. |
+
+<a id="config-bittorrenttrackerstore"></a>
+
+### `bittorrent.tracker.store`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `redis` | [object](#config-redisstorage) |  | Share the swarms through Redis 6.2 or later (or Valkey), a standalone server or a primary (not Redis Cluster), with Lua scripts, each announce one script run, on Redis's clock. Its maxmemory-policy must not evict keys (noeviction): the store bounds them instead. |
+| `prefix` | string | `"fit/bittorrent/tracker/"` | What the store's keys start with, as fit/bittorrent/tracker/t/<info hash>/s; the trackers that answer as one share it. fit/bittorrent/tracker/ when left out. |
+| `request_timeout` | duration | `"2s"` | How long each round trip to the store may take, connecting included; past it the store counts as unreachable, and is tried again after a back-off. 2s when left out. |
+| `refresh` | duration | `"5s"` | How often the peers of the torrents this instance serves are read from the store again, and so how late an instance learns of another's peers. Read peers are used for three times this, then only the instance's own. 5s when left out; at least 100ms, and shorter than interval. |
+| `queue` | integer, 0 to 1048576 | `65536` | The most announces waiting to be written to the store, one per peer and torrent, a later announce of a peer taking its earlier one's place; past it announces are still answered but not shared, and counted as dropped. 65536 when left out or 0. |
+| `cache_torrents` | integer, 0 to 1048576 | `4096` | The most torrents whose shared peers this instance keeps a sample of; a torrent past it is answered with this instance's own peers. A torrent leaves when nobody has announced or scraped it here for peer_ttl; scrapes alone may fill three quarters. 4096 when left out or 0. |
+| `cache_peers` | integer, 0 to 1000 | `100` | How many seeders and how many leechers of a torrent's shared peers, picked at random, each sample keeps, about 60 bytes each; announces get peers from it. 100 when left out or 0. |
 
 <a id="providers"></a>
 

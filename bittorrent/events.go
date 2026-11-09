@@ -49,6 +49,9 @@ const (
 	// of the stream is missing; a torrent's numbers are read again from
 	// its status. At most one a second.
 	EventDropped = "events_dropped"
+	// EventRSSAdded: an RSS rule (Rule) added a torrent from an item
+	// (Title) of a feed (Feed); an EventAdded came before it.
+	EventRSSAdded = "rss_added"
 )
 
 // EventQueue bounds the client's events waiting for the role's handler,
@@ -98,6 +101,11 @@ type Event struct {
 	DataDeleted bool `json:"data_deleted,omitempty"`
 	// Dropped is how many client events an EventDropped stands for.
 	Dropped int64 `json:"dropped,omitempty"`
+	// Feed, Rule and Title are the feed, the rule and the item's title of
+	// an EventRSSAdded.
+	Feed  string `json:"feed,omitempty"`
+	Rule  string `json:"rule,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 // hub keeps the last events and hands new ones to the subscribers.
@@ -249,6 +257,8 @@ func (r *Role) event(e Event) {
 			r.log.Infof("peer %s banned: %s", e.Peer, e.Error)
 		case EventSeedLimit:
 			r.log.Infof("torrent %s (%s) reached its seed limit and paused", e.Torrent, e.Name)
+		case EventRSSAdded:
+			r.log.Infof("rss feed %s, rule %s: %q added as torrent %s", e.Feed, e.Rule, e.Title, e.Torrent)
 		case EventDropped:
 			r.log.Debugf("the client dropped %d piece and peer events, its queue full", e.Dropped)
 		}

@@ -387,3 +387,30 @@ func TestStalledPeerMidPiece(t *testing.T) {
 		t.Fatalf("%d pieces failed their hash", st.HashFails)
 	}
 }
+
+// TestPeersKeptAcrossRestart: the peers a torrent was added with are kept
+// in the state file and given to it again at the next start, which a
+// private torrent of a cluster's distribution, with no other source of
+// peers, needs (I206). Discovery is off here, so they are its only way.
+func TestPeersKeptAcrossRestart(t *testing.T) {
+	e := startEngine(t)
+	src := t.TempDir()
+	torrent, data := payload(t, src, "p.bin", 1<<20)
+	s, id := seeder(t, e, src, torrent, "")
+	ldata, ldl := t.TempDir(), t.TempDir()
+	slow := clientJSON(ldata, ldl, `"limits": {"download_rate": 131072}`)
+	l := startRole(t, e, slow, nil)
+	if _, err := l.Add(AddRequest{Torrent: torrent, Peers: []string{peerAddr(s)}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "a piece before the stop", func() bool {
+		tor, err := l.Torrent(id)
+		return err == nil && tor.Stats().PiecesHave > 0
+	})
+	l.Stop(context.Background())
+
+	fast := clientJSON(ldata, ldl, "")
+	l2 := startRole(t, e, fast, nil)
+	waitDone(t, l2, id)
+	sameFile(t, filepath.Join(ldl, "p.bin"), data)
+}

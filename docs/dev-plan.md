@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I210.
+Status: `todo`, `doing` or `done`. The next free iteration number is I211.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -373,10 +373,11 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I210.
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | done |
 | I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | done |
 | I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | done |
-| I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
-| I207 | (second phase) A tracker store the cluster shares | I201 | todo |
-| I208 | (second phase) RSS auto-download | I198 | todo |
+| I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | done |
+| I207 | (second phase) A tracker store the cluster shares | I201 | done |
+| I208 | (second phase) RSS auto-download | I198 | done |
 | I209 | The roles use fib A80–A86: publishing hashes once and builds stop on a context, a public tracker's torrents listed and its bounds changed in place, the client's event queue bounded | I201, I202, I203 | done |
+| I210 | The client role uses fib A87–A88: each tracker's announces, the peer sources and the web seeds' state on `/trackers`, a recheck in place | I203, I204 | done |
 
 ## M0, foundations
 
@@ -7784,8 +7785,14 @@ Open from it (fib, reported, not worked around):
    has no recheck of a running torrent; its connections and fib's counters start again, its place,
    priorities, limits and pause stay. Filed as fib request A88. Alternative: answer 501 until fib
    has `Torrent.Recheck`.
+   **Changed by I210**: the recheck runs in place with fib's `Torrent.Recheck` (A88): no removal,
+   connections and counters kept, the state `checking`; the resume data is still removed at the
+   start and saved again after the check.
 6. **`/trackers` lists what the .torrent file or magnet link names**, with tiers, and the web
    seeds, no announce state: fib exposes none (fib request A87).
+   **Changed by I210**: `/trackers` answers each tracker's announces, the peer sources and the web
+   seeds' state from fib's `Torrent.Trackers`, `Sources` and `WebSeeds` (A87); `web_seeds` became
+   objects.
 7. **Slow event subscribers are disconnected, not skipped**: a buffer of 256 events per stream; one
    that fills gets `event: lagged` and is closed, to reconnect with `Last-Event-ID`, replayed from
    the last 1024 events the role keeps; a gap, or an ID past the last (fit restarted: IDs count
@@ -8018,18 +8025,276 @@ Open from it:
   node's model, a release) to a group of members over a private torrent with direct peers, beside
   rollouts.
 - **Touches**: `cluster`, `bittorrent`, `app/workbench`.
+- **Done** 2026-11-09 (branch `bt-i206`): **The view** (`cluster/btview.go`): a member's Admin API gains
+  `GET /bittorrent/summary` (`admin/btsummary.go`, capability `bittorrent.summary`): both roles in one
+  small answer, 200 whether they run or not (client running, the address it takes peers on, torrents by
+  state, rates, bytes, peers, errors, publish entries; the tracker's stats). The manager reads every
+  member's on demand (`Manager.BitTorrent`), at most `max_concurrency` at once through `Manager.Call`,
+  one read serving every request for 2 s and a read under way joined; down members and those without
+  the capability are not asked. `GET /api/m/cluster/bittorrent` (any role) and `GET
+  /cluster/bittorrent` on the manager's Admin API. **Distributions** (`cluster/distribute.go`): from a
+  source member's private publish entry (I202) to a group's members or members picked; the manager
+  reads the source's summary, entry and `.torrent` file (private, ≤1 TiB), each target's summary, has
+  each target add the torrent into a category with the source and the other targets as `peers` (the
+  address a client listens on, else the member URL's host, else `peer_hosts`), follows progress every
+  2 s (done, error, removed, stalled), and at the end removes the torrent from the targets it added it
+  on (files kept when whole, removed otherwise; `keep_seeding` keeps the whole ones seeding); cancel;
+  the audit entry `bt.distribute`; `POST`/`GET /api/m/cluster/distributions`, `GET .../<id>`, `POST
+  .../<id>/cancel`, and the same under `/cluster/` on the Admin API. **Pages**: Cluster → BitTorrent
+  (`app/workbench/web/cluster/bittorrent.js`): tiles, the members' table with Open into each member's
+  BitTorrent pages through the node switcher, the distributions, New distribution, a distribution's
+  page with Cancel; an Overview card (`FitCluster.overviewCard`, a new extension point in
+  `shared.js`). **Assistant**: `cluster_bittorrent`; the read tools' `member` argument now reaches a
+  member's BitTorrent reads (`memberPaths` lacked them, so `bt_*` with `member` was refused), never
+  passkeys, events or writes. Docs: [cluster](cluster.md#bittorrent-the-members-torrents-and-distributions)
+  and [BitTorrent](bittorrent.md#in-a-cluster) in both languages. Tests: the view over fake members
+  (sums, a member without the roles, older by capabilities and by 404, down, the TTL and joined reads,
+  clipping), the assistant's read and member paths, the Admin API, roles (viewer refused, operator of a
+  group only for its members); distributions between in-process fits on loopback (a 3 MiB file to two
+  targets byte for byte with a third target without the client failing alone, then with
+  `keep_seeding` through the module, then adopted), cancel (torrent and data removed), a stall, by host
+  in `peer_hosts`, a source not private, without the entry or torrent, without a client, every
+  refusal of `StartDist` (fields, 64 targets, 2 at once, a busy target, cancel while preparing), the
+  kept list, peer addresses; `GET /bittorrent/summary` without and with the roles.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **A distribution is a resource of its own, not a rollout step**: rollouts apply configs with dry
+   runs, gates and rollbacks, none of which a download has; it is modelled as operations are (in
+   memory, the last 16, and in the audit log at its end), and holds no member against rollouts or
+   operations (it changes no config); a member is the target of one distribution at a time.
+   Alternatives: a rollout step kind; kept in the store across restarts.
+2. **The source is a private publish entry (I202), not a one-off build**: publish entries already
+   build with Seed mode, survive restarts and follow the disk, so the manager adds no build path to the
+   role (no change to `bittorrent/`); an entry not private is refused (`not_private`). Trackers the
+   entry names are allowed (a private tracker of the operator's own). Alternative: `Role.Share(path)`,
+   a one-off build on a pool, needing an async job API on the member.
+3. **"A configured target directory" is a category on the targets** (or their `download_dir`): the
+   role's add API has no directory of its own, and categories are the config's directories.
+   Alternative: an `AddRequest.Dir` within roots the config allows.
+4. **Peer addresses**: the address a target's client listens on when specific, else its member URL's
+   host with the client's port, else `peer_hosts` from the request (needed for linked members). The
+   source and every other target are each target's peers (at most 65). Alternative: a member label
+   for its BitTorrent host.
+5. **The end**: the torrent leaves the targets the distribution added it on, files kept when whole
+   and removed when not (failed, cancelled, stalled); `keep_seeding` leaves whole ones seeding; a
+   target that had the torrent already is adopted, followed and never removed; the source's publish
+   entry is never touched. Alternative: leave every torrent seeding.
+6. **Bounds**: 64 targets, 2 at once, 16 kept, 1 TiB, a stall timeout of 10 min (1 s–24 h), progress
+   read every 2 s; constants, no config. Alternative: `admin.cluster.distributions`.
+7. **The view is read on demand, not by the poller**, cached 2 s and single-flighted, any role; no
+   read slot (`MaxReads`) is taken since one fan-out runs at a time. Alternative: poll the summary with
+   each member's poll and keep it in its state.
+8. **Roles**: operator on the source and every target, to start and cancel (as operations).
+9. **A manager restart forgets distributions under way**; targets keep what they downloaded and the
+   torrent (whose peers are not kept by the role across a restart).
+
+Open from it: a member's `AddRequest.Peers` are not kept across its restart, so a target restarted
+mid-distribution has no peers and stalls (the role could keep them in `torrents.json`); `fit cluster`
+has no `bt`/`distribute` commands yet (the Admin API serves them); the `.torrent` file is bounded by
+`max_response_bytes` (4 MiB by default; a 1 TiB hybrid torrent with small pieces exceeds it). No fib
+gap found. Not run: the Linux race run, the full suite, the pages in a browser.
+
+**Fixed after I206 (main session, 2026-11-09):** the role keeps the peers a torrent was added with
+(`AddRequest.Peers`) in `torrents.json`, at most 128 of up to 256 bytes each, and gives them to it
+again at each start, so a target restarted during a distribution finds its peers again
+(`TestPeersKeptAcrossRestart`).
 
 ### I207 (second phase) A tracker store the cluster shares
 
 - **Do**: a `tracker.Store` on fit's shared storage (redis, etcd), so trackers on several members
   answer as one.
 - **Touches**: `bittorrent`, fit's shared storage.
+- **Done** 2026-11-09 (branch `bt-i207`): package `bittorrent/tracker/sharedstore` (`store.go`,
+  `redis.go`), a fib `tracker.Store` with `MemoryStore`'s `Range`, `SetConfig`, `Config`, `Torrents`
+  and `Peers`. Each instance answers from its own fib `MemoryStore` at once; one goroutine of the
+  store's own does every Redis round trip (`request_timeout`): announces queued (bounded, coalesced by
+  peer and torrent, a completion kept through later announces) and written as pipelined Lua scripts
+  on Redis's clock (seeders and leechers in sorted sets by expiry, addresses in a hash, the completed
+  count, an index of torrents scored by their latest expiry, a peers counter, every change by a
+  script); a random sample (`ZRANDMEMBER`) of each served torrent's shared swarm and its counts read
+  every `refresh`; an announce answered with the sample's peers then the instance's own (a seeder
+  gets leechers only, never itself, expired ones skipped), counts the larger of each; the bounds
+  enforced in Redis for all instances together; a sweep every minute of torrents whose peers all
+  expired; `Range` through `ZSCAN` on a second connection (the instance's own torrents while Redis
+  cannot be read). Config `bittorrent.tracker.store` (`redis` with acme's `RedisStorage` shape,
+  `prefix`, `request_timeout`, `refresh`, `queue`, `cache_torrents`, `cache_peers`) with checks
+  (Redis's checks shared with `acme.shared_storage` as `checkRedisStorage`); the role keeps its store
+  behind an interface, makes a new store when the block changes (before anything else, so a bad TLS
+  file leaves the role as it was), closes it on change and stop; `Stats.Store` and
+  `fit_bittorrent_tracker_store_*` metrics. Schema, reference, templates, `schema-zh.js`;
+  [BitTorrent](bittorrent.md)'s tracker section, metrics and reloads in both languages. Tests: the
+  store's cases (two instances seeing each other's peers, seeders getting leechers, scrapes and
+  completed counts across, stops; the shared bounds and SetConfig raising them; expiry and sweeping;
+  Range across instances and stopping; address families and numwant; Redis unreachable: answered
+  from memory, queued, written once back) against a real Redis in Docker (`redis:8.2.2`, skipped
+  without Docker, as `tlsmgr/sharedstore`'s) and against a fake; the queue, requeue, cache bounds and
+  eviction, the merge, stale samples, failed writes, more writes than a cycle takes; the TLS files;
+  the address codec and sample parsing; two tracker roles on two engines sharing one Redis through
+  fib's clients over HTTP and UDP (peers, scrape, statistics, list, metrics, reloads to a new prefix
+  and to memory); an unreachable store answering from memory, a bad TLS file refusing the reload;
+  the config's checks. Run: `go test -race` of `bittorrent/tracker/...`, `config`;
+  `go test ./schema/ ./app/workbench/ ./docs/ ./test/workers/`; vet, gofmt.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **Answer from memory, share in the background** rather than ask Redis on each request: fib's
+   `Server` calls `Store.Announce` on the worker and needs the answer before it returns, so a Redis
+   round trip there would block a worker (rule 1). Cost: an instance learns of others' peers within
+   `refresh`, and the first announce of a torrent it has not served yet gets only its own peers.
+   Alternatives: an asynchronous `Store` in fib (filed below), then ask Redis per announce.
+2. **Redis only**: etcd and Consul are consensus stores, each announce would be a Raft write, unfit
+   for a peer table written by every client every interval; the store's `backend` interface leaves
+   room for another kind. `store` takes `redis { ... }` in the shape of `acme.shared_storage.redis`
+   (one `RedisStorage` type), not a reference to acme's block. Alternative: etcd with leases.
+3. **Unreachable Redis: fall back to memory, never refuse**: announces are answered from the
+   instance's own peers and samples younger than three refreshes, queued (bounded) and written when
+   Redis is back; back-off 100ms doubling to `refresh`, at most 10s. Alternative: refuse announces,
+   which would take a whole tracker cluster down with Redis.
+4. **The bounds are the tracker's own, applied twice**: to each instance's memory, and to Redis for
+   all instances together (`max_torrents` the index, `max_peers_per_torrent` a swarm, `max_peers` a
+   counter); past them an announce is answered but not shared (counted as refused). No separate
+   bounds for the shared store. Alternative: their own fields in `store`.
+5. **Lua scripts on Redis's clock (`TIME`)**, each write carrying its age in fit's queue, so
+   instances' clocks need not agree; keys never expire of themselves (so the peers counter stays
+   true), removed by announces and a sweep each instance runs every minute (up to 4096 torrents),
+   which means keys linger while no tracker runs; Redis's `maxmemory-policy` must be `noeviction`.
+   Needs Redis 6.2 (`ZRANDMEMBER`); no Redis Cluster (keys of a torrent are not hash-tagged).
+   Alternative: keys with `PEXPIRE` and an approximate counter.
+6. **Samples only for torrents announced or scraped on the instance** (`cache_torrents`, 4096;
+   scrapes alone fill at most three quarters; an entry leaves after `peer_ttl` unused), each of
+   `cache_peers` (100) seeders and as many leechers. Alternative: samples of every torrent in the
+   cluster, at memory and Redis cost in the cluster's size.
+7. **Peers from the sample first, then the instance's own**, so an answer is a sample of the whole
+   cluster; counts are the larger of the instance's and the sample's, per field. Alternative: mix in
+   proportion to the instance's share of the swarm.
+8. **A change of the `store` block makes a new store**, the instance's swarms starting anew in memory
+   (clients announce again within their interval) and the queued writes let go; a shorter `peer_ttl`
+   applies to new writes only in Redis (the peers already shared keep their expiry), unlike fib's
+   `SetConfig` in memory. Alternative: carry the memory store over.
+9. **`Stats`' torrents and peers are the shared storage's** with a store (the instance's in
+   `store.local_*`), and `ListTorrents` lists every instance's torrents from Redis; the workbench's
+   Tracker page and the assistant's `bt_tracker_stats` are not changed (they show the totals as
+   before; `store` is in the JSON).
+10. **sync's RESP client (`sync/redis/wire`) is reused** rather than tlsmgr/sharedstore's private one,
+    for its pipelining and reply limits; RESP2.
+
+Open from it: fib requests to file — **an asynchronous `Store` API** (say
+`AnnounceAsync(a StoreAnnounce, done func(StoreResult, error))` and `ScrapeAsync`, the Server
+retaining the HTTP context, or answering the UDP datagram later, and replying from `done`), which
+would let a shared store ask Redis per announce, ending the first-announce gap; and, short of that,
+**`StoreResult.Interval`** (a store asking a client to come back sooner when its answer was
+partial). The workbench pages could show `store` (reachable, queued, dropped). No benchmark: the
+tracker is off the gateway's hot path (rule 21's control plane / data plane off the hot path).
 
 ### I208 (second phase) RSS auto-download
 
 - **Do**: feeds polled on a schedule, rules (patterns, categories, size bounds, episode
   deduplication) adding torrents; bounded feeds, items and history.
 - **Touches**: `bittorrent`.
+- **Done** 2026-11-09 (branch `bt-i208`): config `bittorrent.client.rss` (`config/bittorrent_rss.go`):
+  `feeds` (name, url, interval, enabled, max_items, headers, headers_env), `rules` (name, feeds,
+  patterns, exclude, category, paused, min_size, max_size, episodes, max_per_poll, enabled),
+  `history_size`, `max_feed_bytes`, `timeout`, with their checks. The role (`bittorrent/rss.go`,
+  `rss_parse.go`, `rss_rules.go`, `rss_state.go`): a goroutine of the RSS's own starts the polls due
+  every tick, at most 4 at once, each on a goroutine of its own; a feed is downloaded with fib's
+  asynchronous HTTP client (a client of its own, bounded by `max_feed_bytes`), conditionally with
+  its `ETag` and `Last-Modified`, within `timeout`, at most 5 redirects to http(s); read with
+  `encoding/xml` (RSS 2.0, 1.0, Atom; torrent namespace, enclosures, info hashes; UTF-8 and
+  ISO-8859-1), bounded (items, titles, IDs, URLs, magnet links); the rules compiled at Apply pick
+  items, which are added by `Add` or by `addURL` (`AddURL` now takes a context inside, so that a
+  stop ends a poll's download); every item remembered with its outcome in `data_dir/rss.json`
+  (bounded per feed, episodes per rule, written atomically after each poll and at stop), the
+  toggles too. API: `RSS`, `RSSItems`, `PollFeed`, `SetFeedEnabled`, `SetRuleEnabled`. Events
+  `rss_added`; metrics `fit_bittorrent_rss_polls_total{feed,result}`,
+  `fit_bittorrent_rss_items_added_total`, `fit_bittorrent_rss_items_failed_total`. Admin API
+  (`admin/btrss.go`): `GET /bittorrent/rss`, `GET /bittorrent/rss/items`,
+  `POST /bittorrent/rss/feeds/{name}/poll`, `PUT /bittorrent/rss/feeds/{name}` and
+  `.../rules/{name}`. `fit bt rss [ls] | items | poll | enable | disable | reset [-rule]`
+  (`cli/bt_rss.go`). The workbench's BitTorrent menu gains **RSS** (feeds with switches and Poll
+  now, rules with switches, recent items filtered by feed and outcome, linking to the torrents
+  added; `rss_added` in the events), English and Chinese. The assistant's read tool `bt_rss` (a
+  feed's URL as scheme, host and last element, item IDs left out), on a manager's members too.
+  Schema, templates, the reference (and its Chinese chapter row), `schema-zh.js`,
+  [BitTorrent](bittorrent.md#rss-auto-download) and [the console](console.md#bittorrent) in both
+  languages. Tests: parsing (RSS with every source kind, Atom, RDF, ISO-8859-1, bounds, malformed,
+  not a feed, an unknown charset), episode keys, rules (globs, `re:`, exclude, sizes, feeds), polls
+  against a local server (magnet and .torrent enclosure items added in the rule's category and
+  pause, an episode's second quality left out, unmatched and oversized items, headers and
+  headers_env sent, the event, the metrics, `If-None-Match` and a 304, a changed feed adding only
+  the new item), `max_per_poll` with the rest left and no conditional request, `max_torrents`
+  leaving an item for later, history, episodes and toggles across a restart, the oldest items
+  forgotten past `history_size`, a bad `rss.json` moved aside, bad feeds (past `max_feed_bytes`,
+  malformed, HTML, 500, a redirect loop, a redirect to ftp, a server that never answers, one that
+  cuts the body; a redirect followed), a .torrent URL failing at 3 polls and a bad one at once, the
+  schedule on a fake clock (first poll, none before the interval, none while off, again once back),
+  a reload dropping feeds and rules and their history, a poll refused while one runs, a stop ending
+  a poll waiting on a server; config checks; the Admin API (each endpoint and its errors, 404
+  without the role); `fit bt rss` (requests, output, refusals, usage errors); the assistant's tool
+  (nothing secret reaches the model); the pages' words and endpoints.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **Patterns are case-insensitive globs over the whole title** (`*` any run, `?` one character,
+   everything else literal), **or `re:` and a Go regular expression found anywhere** in it. The
+   field is `patterns`, not `include`: `include` is a directive of the `.conf` format and could not
+   be written there. Alternatives: regular expressions only; substring matching (qBittorrent's
+   "must contain").
+2. **Episodes**: `S01E02` (also `S1E2`, `S01.E02`, ranges `S01E02E03`, `S01E02-03`, `S01E02-E03`,
+   a range's end at most 50 past its start so that `S01E02-1080p` is no range), `1x02`, and dates
+   `YYYY-MM-DD`/`YYYY.MM.DD`/`YYYY MM DD`; the key is the show (the title before the episode, lower
+   case, punctuation made spaces, leading `[group]`/`(group)`/`【group】` tags dropped) and the
+   episode, **per rule**; the first item of an episode wins, so repacks and propers are not
+   downloaded again; a title without an episode (season packs, films) is told only by its ID.
+   A torrent held already (`exists`) also marks its episode. A rule remembers 10000 episodes.
+   Alternatives: per client rather than per rule; take a later PROPER/REPACK; qBittorrent's smart
+   filter's own syntax for episode lists in the rule.
+3. **The first rule, in order, whose feeds, patterns and size bounds hold picks an item**; the size
+   bounds are part of matching, so a later rule may take an item too large for an earlier one. An
+   item's size is the torrent namespace's `contentLength`, else a site's `size` (`1.5 GiB`), else
+   the enclosure's `length`; **an unknown size passes**. Alternatives: refuse unknown sizes when a
+   rule has bounds; every matching rule.
+4. **Every item read is remembered as seen**, unmatched ones included, so a rule added later does
+   not look back at items seen before; **a new feed's first poll treats its whole document as new**
+   (bounded by `max_per_poll`), as qBittorrent does. Alternatives: remember only picked items; a
+   feed option to skip the backlog at its first poll; an API to forget a feed's history.
+5. **Items left for later are not remembered and the feed's validators are not kept**: past
+   `max_per_poll`, or an add that may pass (`max_torrents`, `ErrBusy`, the client down, a stop), so
+   the next poll reads the whole feed rather than a 304. A .torrent URL that fails to download is
+   tried at 3 polls (`attempts`), a bad torrent or link given up at once.
+6. **Source order**: a magnet link (torrent namespace, enclosure or link), then a .torrent
+   enclosure's URL, then an info hash alone (made a magnet link with the title), then the item's
+   link (which fails as not a torrent when it is a web page). URLs are added as I198's `AddURL`
+   adds them, sharing its 4 downloads at once.
+7. **Defaults and bounds**: interval 15m (at least 1m), max_items 200 (at most 1000), history_size
+   1000 (at most 10000, at least each feed's max_items), max_feed_bytes 4 MiB (at most 32 MiB),
+   timeout 30s, max_per_poll 5 (at most 100), 100 feeds, 200 rules, 32 patterns of 512 bytes, 16
+   headers, 4 polls at once (not configurable), titles 1 KiB, IDs 1 KiB (hashed past), URLs 8 KiB.
+8. **Secrets**: `headers` (literal) and `headers_env` (environment variables read at each poll);
+   no redaction of `GET /config`, which shows the feed URL and literal headers as the config has
+   them. The role's status gives a feed's URL without user and query; the assistant scheme, host and
+   last path element, and no item IDs. **No internal-address guard**, as I198's decision 3: the
+   URLs are the operator's config.
+9. **Charsets**: UTF-8, ASCII and ISO-8859-1, no dependency (`golang.org/x/text` is not in fit);
+   another charset fails the poll. The XML is read leniently (HTML entities, not strict).
+10. **`rss.json` apart from `torrents.json`**, with its own lock (taken after the role's) and
+    goroutine, not the manager's (a poll waits for HTTP). One that does not read is **moved aside as
+    `rss.json.bad` and the role starts with nothing seen**, rather than refusing to start as
+    `torrents.json` does: only re-adds are at stake, which `exists` catches. The feeds and rules the
+    config no longer names are forgotten at the next save. Counters (polls, errors, added) are not
+    persisted; a rule's `added` is.
+11. **Toggles**: the Admin API's `enabled` for a feed or rule stands, kept in `rss.json`, until set
+    back with `null`; a forced poll works on a disabled feed; a poll of a feed being polled is
+    **409** with `Retry-After`; no such feed or rule 404.
+12. **The pages**: an RSS page in the BitTorrent menu, read every 10s; Poll now waits for the
+    poll. `fit bt rss poll` exits 1 when the poll's result is an error.
+13. `TestChatSummarizes`'s window grew from 6200 to 6500 tokens for `bt_rss`'s description.
+
+Open from it: no browser check of the RSS page (its words and endpoints are tested); an enclosure's
+`length` is sometimes the .torrent file's size rather than the content's, which size bounds then
+misread (a feed with `contentLength` or `size` is right); no smart-filter episode lists or
+"ignore for N days"; no gzip (fib's client does not decompress, so fit sends no
+`Accept-Encoding`). Not run: the Linux race run and the full suite (left to the main session).
 
 ### I209 The roles use what fib A80–A86 added
 
@@ -8119,3 +8384,96 @@ Open from it: A84 (piece layers of a hybrid added by magnet link) and A86 (no `c
 work through the client with no change in fit and are not tested in fit itself; an interop case of
 a v2-only peer fetching hashes from a fit seed of a magnet-added hybrid would cover A84. Not run: the
 Linux race run and the full suite (left to the main session).
+
+### I210 The client role uses what fib A87–A88 added
+
+- **Why**: I203 left two stopgaps (its decisions 5 and 6): a recheck took the torrent out of fib's
+  client and added it again, dropping its connections and counters, and `/trackers` listed only
+  what the .torrent file or magnet link names, with no announce state. fib A87
+  (`Torrent.Trackers`, `Sources`, `WebSeeds`) and A88 (`Torrent.Recheck`) are done at fib
+  `4c6780e`; fit is on `404da7e`.
+- **Do**: `Role.Recheck` uses `Torrent.Recheck` (no removal; connections and counters kept; the
+  state shows `checking`; resume data saved after); `/trackers` (Admin API, console, pages,
+  assistant) shows each tracker's state (last and next announce, error or warning, fails, peers,
+  seeders, leechers, downloaded, interval), the peer sources and the web seeds' state, URLs
+  redacted for the assistant as before.
+- **Done when**: a recheck keeps peers connected and counters, a corrupted file loses pieces and
+  downloads them again; the trackers endpoint shows an answering, a refusing and an unreachable
+  tracker; redaction holds; the pages word what they show; docs in both languages.
+- **Touches**: `bittorrent`, `admin`, `assistant`, `app/workbench`, `docs`.
+- **Done** 2026-11-09 (branch `bt-i210`): **Recheck** (`bittorrent/inspect.go`): `Role.Recheck`
+  calls `Torrent.Recheck` on the torrent in place, removes its resume data file and forgets the
+  copy kept for a new client (so that a restart or a client replaced during the check checks it all
+  again), marks it to be saved, and the saver writes it once fib gives it (it errs while checking);
+  the storage error kept for the torrent is cleared; the state change to `checking` is published at
+  once. fib's refusal (a torrent in its error state, or being removed) is `ErrCannotCheck`, a 409 on
+  the Admin API. The metrics' accounting no longer starts the torrent's counts again. **Trackers**:
+  `Role.Trackers` returns `Trackers{Trackers, Sources, WebSeeds}`: each tracker with `url`, `tier`
+  and its announces (`updating`, `last_announce`, `next_announce`, `error`, `refused`, `warning`,
+  `fails`, `interval` and `min_interval` in seconds, `peers`, `seeders`, `leechers`, `downloaded`,
+  -1 unknown, `scraped`), a hybrid's v2 hash in `v2`; the sources by name (`tracker`, `dht`,
+  `pex`, `lsd`, `manual`, `other`) with `enabled`, `candidates` and `connected`; the HTTP(S) web
+  seeds with `active`, `fails`, `dropped`, `error`, `next_try`. A torrent not in fib's client
+  (broken) lists its metainfo's or magnet link's trackers and web seeds, their state unknown. The
+  Admin API answers it as it is (`admin/bittorrent.go`); the console passes it on. **Pages**
+  (`app/workbench/web/bittorrent/bittorrent.js`): the Trackers tab is read again every 4 seconds
+  and shows each tracker's state badge, error or warning, fails, last and next announce, interval,
+  peers and counts, a table for a hybrid's v2 hash, the peer sources and the web seeds' state; the
+  recheck's confirm says the peers stay; the assistant's Functions page words `bt_torrent` anew.
+  **Assistant** (`assistant/tools_bittorrent.go`): `bt_torrent` passes the trackers' state,
+  sources and web seeds' state; a tracker's URL stays scheme, host and last path element, a web
+  seed's loses user and query, and in errors and warnings every URL is shown as a tracker's and the
+  secret parts of the tracker's or web seed's own URL (user, path elements before the last, query
+  values of 6 characters or more) are `[redacted]`; a member running an earlier fit (web seeds as
+  bare URLs) still reads. The cluster's member paths already allow `/trackers`; nothing changes
+  there. Docs: [BitTorrent](bittorrent.md#the-admin-api) (the Admin API's recheck and `/trackers`
+  rows, the Trackers tab, the assistant's tool and redaction) in both languages; A87 and A88 marked
+  used in [fib-api-requests](fib-api-requests.md#a87-a-torrents-trackers-and-their-announces);
+  I203's decisions 5 and 6 noted as changed. Tests: a seed rechecked (reads slowed) is `checking`,
+  its resume data gone, then seeding with the same fib torrent, its leecher still connected (same
+  address and ID), its upload counter not lower, no hash failure, its resume data written again,
+  and the leecher finishing with the right bytes; a leecher whose file had two bytes changed loses
+  two pieces on a recheck and downloads them again from the seed, the file right after; trackers of
+  three tiers on local fib trackers: one answering (interval 3600, 1 seeder, 0 leechers, 0
+  downloaded from its scrape, next announce in about an hour, under both hashes), one refusing
+  (`refused`, its reason), one unreachable (an error, not `refused`, counts -1); the sources (the
+  tracker on, DHT off, manual on); no next announce while paused; a web seed answering 404 with its
+  error and fails; a magnet link's trackers and web seeds before its info; the Admin API's shape
+  (an unreachable tracker's state, `v2`, six sources, no web seeds) and `ErrCannotCheck`'s 409;
+  `bt_torrent` with the new shape (state passed, passkeys gone from URLs and errors, user and query
+  gone from a web seed's error) and with an earlier member's; `redactText`'s cases; the pages'
+  words and fields. Run: `go test -race` of `bittorrent`, `admin`, `assistant`; `go test ./schema/
+  ./app/workbench/ ./docs/ ./test/workers/`; vet, gofmt.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **`web_seeds` became objects** (`{"url", "active", "fails", "dropped", "error", "next_try"}`)
+   rather than a list of URLs with the state beside it, a change of the Admin API's shape; the
+   pages and the assistant read both shapes (a cluster member running an earlier fit). Why: one
+   list per thing, as `trackers`. Alternative: keep `web_seeds` as URLs and add `web_seed_state`.
+2. **A hybrid's v2 announces are a `v2` object in each tracker**, as fib gives them, and the pages
+   show them in a second table only for a hybrid. Alternative: one row per URL and hash.
+3. **Times are RFC 3339 and absent when zero; intervals in whole seconds; counts -1 when not
+   known**, as fib. `refused` is set only for a tracker's own refusal (`*tracker.Error`), so the
+   pages tell "refused" from "not answering". Alternative: durations as Go's nanoseconds, as the
+   rest of the Admin API's limits.
+4. **The resume data file is still removed at a recheck's start** (and the in-memory copy
+   forgotten), so a crash or a new client during the check checks it all again; it is written
+   again by the saver once fib gives it. Why: fib's `ResumeData` errs during the check, and the
+   old file would trust pieces the check may fail. Alternative: keep the old file (a crash then
+   trusts pieces never checked again).
+5. **fib's refusal of a recheck is 409** (`ErrCannotCheck`), as a broken torrent's: a state that
+   the caller can change (resume it). Alternative: 400.
+6. **The Trackers tab polls every 4 seconds** (twice the list's interval, as Files), where it was
+   read once. Alternative: a refresh button only.
+7. **The assistant redacts errors and warnings by pattern**: every URL in them as a tracker's URL,
+   and the parts of the tracker's or web seed's own URL that may be secret (user, path elements
+   before the last, query values) when 6 characters or more, so that short ones do not cut ordinary
+   words. A secret shorter than 6 in an error's text would pass (passkeys are far longer).
+   Alternative: drop errors and warnings from the assistant's answer.
+8. **A torrent not in fib's client (broken) answers its metainfo's list with the state unknown and
+   no sources**, rather than 409, as before.
+
+Open from it: nothing in fit; a cluster member running an earlier fit answers `/trackers` in the
+old shape, which the assistant reads (tested) and the pages show (web seeds without state). Not
+run: the Linux race run and the full suite (left to the main session).

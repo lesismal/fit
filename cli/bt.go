@@ -41,6 +41,16 @@ See and steer a running fit's BitTorrent client, through its Admin API:
 	fit bt alt [auto | on | off]           show the alternative rates, or turn
 	                                       them on or off whatever their
 	                                       schedules say, or back to them
+	fit bt rss [ls]                        the RSS feeds (last poll, result,
+	                                       items seen and added) and rules
+	fit bt rss items [-feed F] [-outcome O] [-limit N]
+	                                       the items seen, the newest first
+	fit bt rss poll <feed>...              poll feeds now (exits 1 when a
+	                                       poll fails)
+	fit bt rss enable|disable|reset [-rule] <name>...
+	                                       turn feeds (rules with -rule) on
+	                                       or off whatever the config says,
+	                                       or back to the config
 
 A <torrent> is its ID (its info hash), a unique start of it, or its name.
 A RATE is bytes per second, with K, M or G (KiB, MiB, GiB) after it if
@@ -153,7 +163,7 @@ func runBT(args []string, stdout, stderr io.Writer) int {
 	}
 	cmd := args[0]
 	switch cmd {
-	case "ls", "add", "info", "pause", "resume", "rm", "limit", "alt":
+	case "ls", "add", "info", "pause", "resume", "rm", "limit", "alt", "rss":
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, btUsage)
 		return 0
@@ -170,8 +180,11 @@ func runBT(args []string, stdout, stderr io.Writer) int {
 		conns, slots           int
 		ratio                  float64
 		seedTime               string
+		rss                    btRSSFlags
 	)
 	switch cmd {
+	case "rss":
+		rss.add(f)
 	case "ls":
 		f.fs.StringVar(&state, "state", "", "only torrents in these states, with commas: "+strings.Join(bittorrent.States, ", "))
 		f.fs.StringVar(&category, "category", "", "only torrents of this category")
@@ -198,6 +211,8 @@ func runBT(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch {
+	case cmd == "rss" && !checkRSSArgs(names, &rss, stderr):
+		return 2
 	case cmd == "ls" && len(names) > 0:
 		fmt.Fprintln(stderr, "fit bt ls: takes no arguments; filter with -state, -category and -q")
 		return 2
@@ -210,7 +225,7 @@ func runBT(args []string, stdout, stderr io.Writer) int {
 	case (cmd == "info" || cmd == "limit") && len(names) != 1:
 		fmt.Fprintf(stderr, "fit bt %s: name one torrent\n", cmd)
 		return 2
-	case cmd != "ls" && cmd != "alt" && len(names) == 0:
+	case cmd != "ls" && cmd != "alt" && cmd != "rss" && len(names) == 0:
 		fmt.Fprintf(stderr, "fit bt %s: name a torrent\n", cmd)
 		return 2
 	case cmd == "limit" && clear && (up.set || down.set || conns != 0 || slots != 0 || ratio != 0 || seedTime != ""):
@@ -265,6 +280,8 @@ func runBT(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "add":
 		return b.add(names, category, paused, sequential, up, down)
+	case "rss":
+		return b.rss(names, &rss)
 	case "alt":
 		method, body := http.MethodGet, []byte(nil)
 		if len(names) == 1 {

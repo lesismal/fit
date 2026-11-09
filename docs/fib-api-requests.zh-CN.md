@@ -91,10 +91,14 @@
 | A84 | 磁力链添加的 hybrid 种子的 piece layer | 已完成，fib `ecdcec0` | — | I196 |
 | A85 | tracker Store 可列出种子、可原地修改上限 | 已完成，fib `ecdcec0` | 11 | I201 |
 | A86 | 做种方不宣告“下载完成” | 已完成，fib `ecdcec0` | — | I201 |
-| A87 | BitTorrent 任务的 tracker 及其 announce 状态 | 已提出 | — | I203 |
-| A88 | 重新校验运行中任务的数据 | 已提出 | — | I203 |
-| A89 | 单个种子的下载不受其锁和选块器限制 | 已提出 | 11 | I205 |
-| A90 | 客户端自建引擎的默认配置 | 已提出 | — | I205 |
+| A87 | BitTorrent 任务的 tracker 及其 announce 状态 | 已完成，fib `404da7e` | — | I203 |
+| A88 | 重新校验运行中任务的数据 | 已完成，fib `404da7e` | — | I203 |
+| A89 | 单个种子的下载不受其锁和选块器限制 | 已完成，fib `404da7e` | 11 | I205 |
+| A90 | 客户端自建引擎的默认配置 | 已完成，fib `404da7e` | — | I205 |
+| A91 | 异步的 tracker Store | 已提出 | 1 | I207 |
+| A92 | Store 的应答可设定自己的间隔 | 已提出 | — | I207 |
+| A93 | HTTP 客户端解压响应 | 已提出 | — | I208 |
+| A94 | 按请求设定响应大小上限 | 已提出 | 11 | I208 |
 
 ## 证据
 
@@ -2035,7 +2039,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A87：任务的 tracker 及其 announce 状态
 
-**状态。** 2026-11-09 由 I203 提出；未完成。在此之前，fit 只报告任务的 .torrent 文件或磁力链接列出的 tracker，不含其状态。
+**状态。** 2026-11-09 由 I203 提出；已在 fib 的 `4c6780e` 完成（`Torrent.Trackers`、`Sources`、`WebSeeds`），由 fit 的会话实现；fit 已在 `404da7e` 上，自 I210 起使用它。I210 之前，fit 只报告任务的 .torrent 文件或磁力链接列出的 tracker，不含其状态。
 
 **问题。** Admin API 的 `/bittorrent/torrents/<id>/trackers` 和页面（I204）应当像 qBittorrent、Transmission 那样显示每个 tracker 上次 announce 的时间、结果或错误、它报告的做种数与下载数，以及下次 announce 的时间。fib 的 `Torrent` 在 announce 循环（`announceLoop`、`tracker.Tiers`）里保有这些信息，却一项也不公开；磁力链接的 info 或 PEX 之后带来的 tracker 也看不到。
 
@@ -2043,9 +2047,11 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 **fit 如何使用。** `Role.Trackers` 改为返回它，Admin API 和页面原样显示。
 
+**使用情况**（I210）：`Role.Trackers` 从 `Torrent.Trackers` 给出各 tracker 的 announce 状态（hybrid 种子的 v2 哈希在 `v2` 中，以 `*tracker.Error` 区分拒绝与失败），从 `Sources` 给出 peer 来源，从 `WebSeeds` 给出 Web 种子的状态；Admin API 的 `/trackers`、控制台、Tracker 标签页与助手的 `bt_torrent`（URL 照旧隐去，错误中的 URL 与秘密也隐去）显示它们。测试用了正常应答、拒绝与无法连接的 fib tracker，以及应答 404 的 Web 种子。
+
 ## A88：重新校验运行中任务的数据
 
-**状态。** 2026-11-09 由 I203 提出；未完成。在此之前，fit 的 `Role.Recheck` 把任务从客户端移除（`Remove(false)`），再不带续传数据重新加入，这会断开它的连接，并清零 fib 对其下载、上传量的计数。
+**状态。** 2026-11-09 由 I203 提出；已在 fib 的 `4c6780e` 完成（`Torrent.Recheck`），由 fit 的会话实现；fit 已在 `404da7e` 上，自 I210 起使用它。I210 之前，fit 的 `Role.Recheck` 把任务从客户端移除（`Remove(false)`），再不带续传数据重新加入，这会断开它的连接，并清零 fib 对其下载、上传量的计数。
 
 **问题。** 文件在客户端不知情时被改动或恢复后，需要重新校验（qBittorrent 的“强制重新校验”）。fib 只在加入任务时校验数据。
 
@@ -2053,9 +2059,11 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 **fit 如何使用。** `Role.Recheck` 调用它，Admin API 的 `{"action": "recheck"}` 和 `fit bt` 含义不变。
 
+**使用情况**（I210）：`Role.Recheck` 就地调用 `Torrent.Recheck`，开始时删除其续传数据（校验期间重启会再次校验），校验结束、fib 给出续传数据后重新保存；fib 拒绝（种子处于错误状态）时应答 409。测试：做种方校验期间保持与下载方的连接、同一个任务及其上传计数；文件被改动的下载方失去两个分片并重新下载。
+
 ## A89：单个种子的下载不受其锁和选块器限制
 
-**状态。** 2026-11-09 由 I205（BitTorrent 路线的基准）提出；尚未实现。
+**状态。** 2026-11-09 由 I205（BitTorrent 路线的基准）提出；已在 fib 的 `4c6780e` 完成（`404da7e` 修了一个测试），由 fit 的会话实现；fit 已在 `404da7e` 上。
 
 **问题。** 在基准主机上，fib 客户端从 4 个做种方下载一个种子为 478 MiB/s（fit 的角色 705 MiB/s，anacrolix 1039 MiB/s），用不满 4 个 CPU 中的 2 个：每收到一个块都要取 `Torrent.mu` 并为该 peer 补请求；`nextRequest`/`pickPiece` 用 `math/rand` 扫描 piece（占 CPU 24%，`pickPiece` 21%）；每个 16 KiB 块单独一次 `pwrite`（30%）。
 
@@ -2065,10 +2073,50 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A90：客户端自建引擎的默认配置
 
-**状态。** 2026-11-09 由 I205（BitTorrent 路线的基准）提出；尚未实现。
+**状态。** 2026-11-09 由 I205（BitTorrent 路线的基准）提出；已在 fib 的 `4c6780e` 完成（`404da7e` 修了一个测试），由 fit 的会话实现；fit 已在 `404da7e` 上。
 
 **问题。** 在基准主机上，不设 `Config.SharedEngine` 的 fib 客户端下载速率只有同一客户端在 fit 共享引擎上的 0.68；其自建引擎的默认配置尚未分析。
 
 **建议的 API。** 对照共享引擎，检查 `NewClient` 给自建引擎的默认配置（poller、任务池、读缓冲），写入文档或修改。
 
 **fit 如何使用。** fit 不直接使用（fit 用 `SharedEngine`）；惠及 fib 客户端的其他使用者。
+
+## A91：异步的 tracker Store
+
+**状态。** 2026-11-09 由 I207（BitTorrent 路线）提出；尚未实现。
+
+**问题。** fib 的 tracker `Server` 在读到请求的 fib worker 上调用 `Store.Announce` 与 `Scrape`，因此经 Redis 共享的 Store 不能每次 announce 都去查：fit 的共享 Store 先从本地内存应答、在后台共享，某实例上一个种子的第一次 announce 只拿到该实例自己的 peer。
+
+**建议的 API。** `AnnounceAsync(a StoreAnnounce, done func(StoreResult, error))` 与 `ScrapeAsync`，Server 保留 HTTP Context（或保留 UDP peer），在 `done` 中应答。
+
+**fit 如何使用。** 共享 tracker Store（I207）每次 announce 都查 Redis，消除第一次 announce 的缺口。
+
+## A92：Store 的应答可设定自己的间隔
+
+**状态。** 2026-11-09 由 I207（BitTorrent 路线）提出；尚未实现。
+
+**问题。** 应答不完整的 Store（共享 Store 在某实例上的第一次 announce）无法让客户端早点再来。
+
+**建议的 API。** `StoreResult.Interval`（以及 `MinInterval`），覆盖 Server 对这次应答的间隔。
+
+**fit 如何使用。** 共享 tracker Store 让应答不完整的客户端在一个刷新周期内再次 announce。
+
+## A93：HTTP 客户端解压响应
+
+**状态。** 2026-11-09 由 I208（BitTorrent 路线）提出；尚未实现。
+
+**问题。** fib 的 HTTP 客户端不解压响应，所以 fit 的 RSS 轮询不发 Accept-Encoding，订阅源未压缩传输。
+
+**建议的 API。** 可选的 `Accept-Encoding: gzip`，透明解压，并对解压后的大小设限。
+
+**fit 如何使用。** RSS 轮询（I208）和 .torrent 下载更省带宽。
+
+## A94：按请求设定响应大小上限
+
+**状态。** 2026-11-09 由 I208（BitTorrent 路线）提出；尚未实现。
+
+**问题。** `MaxResponseBodyBytes` 属于客户端而非单个请求，所以 RSS 在 .torrent URL 的客户端之外另用一个客户端。
+
+**建议的 API。** 按请求的上限（在请求或其选项上），不超过客户端的上限。
+
+**fit 如何使用。** BitTorrent 角色的各种抓取共用一个 HTTP 客户端。

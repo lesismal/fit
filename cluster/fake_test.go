@@ -77,6 +77,10 @@ type fakeMember struct {
 	purges []string
 	zones  []string
 	opFail int
+	// bt answers GET /bittorrent/summary when set (I206), and btReads
+	// counts the reads of it.
+	bt      string
+	btReads int
 }
 
 // fakeVersion is a config a fake member applied.
@@ -238,6 +242,19 @@ func (f *fakeMember) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.serveOps(w, r, path) {
+		return
+	}
+	if path == "/bittorrent/summary" {
+		f.mu.Lock()
+		bt := f.bt
+		f.btReads++
+		f.mu.Unlock()
+		if bt == "" {
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":"no such endpoint"}`))
+			return
+		}
+		_, _ = w.Write([]byte(bt))
 		return
 	}
 	switch path {

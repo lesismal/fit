@@ -159,7 +159,14 @@ const DryRunHeader = "Fit-Dry-Run"
 //	                            /bittorrent/events its events as
 //	                            server-sent events; /bittorrent/tracker/
 //	                            stats, .../torrents and .../passkey the
-//	                            tracker's (bittorrent.go, btevents.go)
+//	                            tracker's (bittorrent.go, btevents.go);
+//	                            /bittorrent/summary both roles in one
+//	                            small answer, for a manager (btsummary.go)
+//	                            /bittorrent/rss the RSS feeds and rules,
+//	                            .../items the items seen, POST .../feeds/
+//	                            <name>/poll polls one, PUT .../feeds/<name>
+//	                            and .../rules/<name> turn them on or off
+//	                            (btrss.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //	GET    /debug/pprof/        Go's runtime profiles, as net/http/pprof
@@ -384,6 +391,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /sync/pipelines/{name}/dead-letters", s.syncDeadLetters)
 	mux.HandleFunc("POST /sync/pipelines/{name}/dead-letters/replay", s.syncReplay)
 	mux.HandleFunc("DELETE /sync/pipelines/{name}/dead-letters", s.syncDropDeadLetters)
+	mux.HandleFunc("GET /bittorrent/summary", s.btSummary)
 	mux.HandleFunc("GET /bittorrent/torrents", s.btTorrents)
 	mux.HandleFunc("POST /bittorrent/torrents", s.btAdd)
 	mux.HandleFunc("GET /bittorrent/torrents/{id}", s.btTorrent)
@@ -399,6 +407,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /bittorrent/publish/{name}", s.btPublish)
 	mux.HandleFunc("GET /bittorrent/publish/{name}/torrents/{id}", s.btPublishedTorrent)
 	mux.HandleFunc("GET /bittorrent/events", s.btEvents)
+	mux.HandleFunc("GET /bittorrent/rss", s.btRSS)
+	mux.HandleFunc("GET /bittorrent/rss/items", s.btRSSItems)
+	mux.HandleFunc("POST /bittorrent/rss/feeds/{name}/poll", s.btRSSPoll)
+	mux.HandleFunc("PUT /bittorrent/rss/feeds/{name}", s.btRSSToggle(false))
+	mux.HandleFunc("PUT /bittorrent/rss/rules/{name}", s.btRSSToggle(true))
 	mux.HandleFunc("GET /bittorrent/tracker/stats", s.btTrackerStats)
 	mux.HandleFunc("GET /bittorrent/tracker/torrents", s.btTrackerTorrents)
 	mux.HandleFunc("GET /bittorrent/tracker/torrents/{hash}", s.btTrackerTorrent)

@@ -25,7 +25,7 @@ func TestBitTorrentWords(t *testing.T) {
 	ph := regexp.MustCompile(`\{[a-z]+\}`)
 	// Keys built at run time: a state's, a hold's, an event's, a
 	// priority's, a refusal's, the alternative rates' mode, a tab's.
-	dynamic := []string{"s.", "held.", "ev.", "prio.", "k.ref.", "alt."}
+	dynamic := []string{"s.", "held.", "ev.", "prio.", "k.ref.", "alt.", "o.", "res.", "src."}
 	for k, w := range words {
 		if w[0] == "" || w[1] == "" {
 			t.Errorf("%s: %q %q", k, w[0], w[1])
@@ -56,8 +56,18 @@ func TestBitTorrentWords(t *testing.T) {
 	for _, s := range []string{"starting", "queued", "disk"} {
 		need = append(need, "held."+s)
 	}
-	for _, s := range []string{"added", "removed", "state", "completed", "error", "peer_banned", "seed_limit", "alt_speed", "events_dropped", "reset"} {
+	for _, s := range []string{"added", "removed", "state", "completed", "error", "peer_banned", "seed_limit", "alt_speed", "events_dropped", "reset", "rss_added"} {
 		need = append(need, "ev."+s)
+	}
+	for _, o := range []string{"added", "exists", "duplicate", "unmatched", "no_source", "failed"} {
+		need = append(need, "o."+o)
+	}
+	for _, r := range []string{"ok", "not_modified", "error"} {
+		need = append(need, "res."+r)
+	}
+	// Every peer source fib's Torrent.Sources names (I210).
+	for _, s := range []string{"tracker", "dht", "pex", "lsd", "manual", "other"} {
+		need = append(need, "src."+s)
 	}
 	need = append(need, "prio.0", "prio.1", "prio.4", "prio.7", "alt.auto", "alt.on", "alt.off", "k.ref.unregistered", "k.ref.passkey", "k.ref.access")
 	for _, k := range need {
@@ -70,7 +80,10 @@ func TestBitTorrentWords(t *testing.T) {
 		"'/bittorrent/alt_speed'", "'/bittorrent/publish'", "'/torrents/'", "'/bittorrent/tracker/stats'", "'/bittorrent/tracker/torrents?offset='",
 		"'/bittorrent/tracker/passkey?user='", "'/bittorrent/events'", "'Last-Event-ID'", "action: 'recheck'", "'?delete_data=1'",
 		"{ action: action }", "'application/x-bittorrent'", "priorities:", "queue_position:", "sequential:", "limits: null", "category:",
-		"members: ['bittorrent']", "C.section('bittorrent')"} {
+		"members: ['bittorrent']", "C.section('bittorrent')",
+		"r.sources", "r.web_seeds", "x.v2", "a.last_announce", "a.next_announce", "a.refused", "a.warning", "a.fails", "a.interval",
+		"a.seeders", "a.leechers", "a.downloaded", "x.candidates", "x.connected", "x.next_try", "x.dropped",
+		"'/bittorrent/rss'", "'/bittorrent/rss/items?'", "'/bittorrent/rss/feeds/'", "'/poll'", "'/bittorrent/rss/' + kind", "{ enabled: v }"} {
 		if !strings.Contains(src, ep) {
 			t.Errorf("bittorrent/bittorrent.js does not use %s", ep)
 		}
@@ -85,7 +98,7 @@ func TestBitTorrentAssistantWords(t *testing.T) {
 	if !strings.Contains(string(fn), "'g.bittorrent'") {
 		t.Error("functions.js has no words for the group bittorrent")
 	}
-	for _, n := range []string{"bt_torrents", "bt_torrent", "bt_tracker_stats", "bt_add_propose", "bt_pause_propose", "bt_resume_propose"} {
+	for _, n := range []string{"bt_torrents", "bt_torrent", "bt_tracker_stats", "bt_rss", "bt_add_propose", "bt_pause_propose", "bt_resume_propose"} {
 		if !strings.Contains(string(fn), "'t."+n+"'") {
 			t.Errorf("functions.js has no words for %s", n)
 		}

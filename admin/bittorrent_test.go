@@ -160,6 +160,8 @@ func TestBitTorrentWithoutRoles(t *testing.T) {
 		{"PUT", "/bittorrent/alt_speed", `{"mode": "on"}`}, {"GET", "/bittorrent/publish", ""}, {"GET", "/bittorrent/events", ""},
 		{"GET", "/bittorrent/tracker/stats", ""}, {"GET", "/bittorrent/tracker/torrents", ""},
 		{"GET", "/bittorrent/tracker/torrents/" + id, ""}, {"GET", "/bittorrent/tracker/passkey?user=a", ""},
+		{"GET", "/bittorrent/rss", ""}, {"GET", "/bittorrent/rss/items", ""}, {"POST", "/bittorrent/rss/feeds/a/poll", ""},
+		{"PUT", "/bittorrent/rss/feeds/a", `{"enabled": false}`}, {"PUT", "/bittorrent/rss/rules/a", `{"enabled": false}`},
 	} {
 		v := f.json(t, r.method, r.path, r.body, http.StatusNotFound)
 		if !strings.Contains(v["error"].(string), "does not run here") {
@@ -378,6 +380,24 @@ func TestBitTorrentTorrents(t *testing.T) {
 		v["trackers"].([]any)[0].(map[string]any)["url"] != "udp://tracker.example:6969/announce" {
 		t.Fatalf("trackers %v", v)
 	}
+	// Each tracker's announces (I210): a hybrid's v2 hash too, its sources
+	// in fib's order, no web seeds.
+	waitFor("the tracker tried", func() bool {
+		v := f.json(t, "GET", "/bittorrent/torrents/"+idA+"/trackers", "", http.StatusOK)
+		tr := v["trackers"].([]any)[0].(map[string]any)
+		return tr["fails"].(float64) > 0 && tr["error"] != nil && tr["updating"] == false
+	})
+	v = f.json(t, "GET", "/bittorrent/torrents/"+idA+"/trackers", "", http.StatusOK)
+	tr0 := v["trackers"].([]any)[0].(map[string]any)
+	if tr0["tier"] != 0.0 || tr0["seeders"] != -1.0 || tr0["last_announce"] == nil || tr0["refused"] != nil || tr0["v2"] == nil {
+		t.Fatalf("an unreachable tracker %v", tr0)
+	}
+	if srcs := v["sources"].([]any); len(srcs) != 6 || srcs[0].(map[string]any)["source"] != "tracker" || srcs[0].(map[string]any)["enabled"] != true {
+		t.Fatalf("sources %v", v["sources"])
+	}
+	if ws, ok := v["web_seeds"].([]any); !ok || len(ws) != 0 {
+		t.Fatalf("web seeds %v", v["web_seeds"])
+	}
 	if v := f.json(t, "GET", "/bittorrent/torrents/"+hash+"/trackers", "", http.StatusOK); len(v["trackers"].([]any)) != 1 {
 		t.Fatalf("a magnet's trackers %v", v)
 	}
@@ -501,7 +521,7 @@ func TestBitTorrentAltSpeedPublishTracker(t *testing.T) {
 // TestBTErrorStatus maps each of the role's errors to its status.
 func TestBTErrorStatus(t *testing.T) {
 	for err, want := range map[error]int{
-		bittorrent.ErrNotFound: 404, bittorrent.ErrExists: 409, bittorrent.ErrBroken: 409, bittorrent.ErrTooMany: 429,
+		bittorrent.ErrNotFound: 404, bittorrent.ErrExists: 409, bittorrent.ErrBroken: 409, bittorrent.ErrCannotCheck: 409, bittorrent.ErrTooMany: 429,
 		bittorrent.ErrTooManyTemporary: 429, bittorrent.ErrBusy: 503, bittorrent.ErrTooManySubscribers: 503,
 		bittorrent.ErrNotRunning: 503, tracker.ErrNotRunning: 503, bittorrent.ErrBadRequest: 400,
 		fmt.Errorf("%w: x", bittorrent.ErrFetch): 502, errors.New("disk"): 500,

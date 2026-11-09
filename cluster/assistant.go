@@ -785,7 +785,8 @@ func (a *AssistantAPI) Logs(ctx context.Context, user, group string, nodes []str
 // memberPaths are the Admin API's paths a read tool's member argument
 // reaches: what the read tools read, never tokens, logs' files or
 // anything that writes.
-var memberPaths = regexp.MustCompile(`^/(config|config/effective|config/check|versions|versions/[0-9]+|status|metrics|cache|node|schema|media/(library|auth|stats)(/.*)?|streaming/(channels|push)(/.*)?)$`)
+var memberPaths = regexp.MustCompile(`^/(config|config/effective|config/check|versions|versions/[0-9]+|status|metrics|cache|node|schema|media/(library|auth|stats)(/.*)?|streaming/(channels|push)(/.*)?|` +
+	`bittorrent/(summary|alt_speed|torrents|torrents/[0-9a-fA-F]{40,64}(/(files|peers|trackers))?|publish(/[^/]+)?|tracker/(stats|torrents(/[0-9a-fA-F]{40,64})?)))$`)
 
 // memberPosts are the POSTs that only convert, which config_get makes.
 var memberPosts = []string{"/config/render", "/config/parse"}

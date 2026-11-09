@@ -25,6 +25,15 @@ func TestBitTorrentTrackerChecks(t *testing.T) {
 		{tracker(`{"max_peers_per_torrent": 70000}`), "max_peers_per_torrent"},
 		{tracker(`{"access": {"allow": ["nope"]}}`), "nope"},
 		{tracker(`{"console": {"address": ":0", "users": []}}`), "user"},
+		{tracker(`{"store": {}}`), "set redis: the one kind of shared tracker store"},
+		{tracker(`{"store": {"redis": {"address": "nope"}}}`), "is not a host and port"},
+		{tracker(`{"store": {"redis": {"username": "u"}}}`), "username needs password_file"},
+		{tracker(`{"store": {"redis": {"ca_file": "ca.pem"}}}`), "ca_file needs tls"},
+		{tracker(`{"store": {"redis": {}, "refresh": "10ms"}}`), "10ms is too short"},
+		{tracker(`{"interval": "5m", "store": {"redis": {}, "refresh": "5m"}}`), "is not shorter than the interval"},
+		{tracker(`{"store": {"redis": {}, "request_timeout": "2m"}}`), "at most 1m"},
+		{tracker(`{"store": {"redis": {}, "queue": 2000000}}`), "queue"},
+		{tracker(`{"store": {"redis": {}, "cache_peers": 1001}}`), "cache_peers"},
 	} {
 		_, err := Load([]byte(bad.doc))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {
@@ -49,6 +58,18 @@ func TestBitTorrentTrackerChecks(t *testing.T) {
 	}
 	if h, ok := ParseInfoHash(" " + h64 + " "); !ok || h[0] != 0xcd || h[19] != 0xcd {
 		t.Fatalf("v2 hash %x %v", h, ok)
+	}
+	st := &BitTorrentTrackerStore{}
+	if st.KeyPrefix() != DefaultBTTrackerStorePrefix || st.Timeout() != 2*time.Second || st.RefreshOr() != 5*time.Second ||
+		st.QueueOr() != 65536 || st.Torrents() != 4096 || st.Peers() != 100 {
+		t.Fatalf("store defaults %+v", st)
+	}
+	st = &BitTorrentTrackerStore{Prefix: "p/", RequestTimeout: Duration(time.Second), Refresh: Duration(time.Second), Queue: 1, CacheTorrents: 2, CachePeers: 3}
+	if st.KeyPrefix() != "p/" || st.Timeout() != time.Second || st.RefreshOr() != time.Second || st.QueueOr() != 1 || st.Torrents() != 2 || st.Peers() != 3 {
+		t.Fatalf("store settings %+v", st)
+	}
+	if _, err := Load([]byte(`{"bittorrent": {"tracker": {"store": {"redis": {"address": "10.0.0.1:6379"}, "refresh": "1s"}}}}`)); err != nil {
+		t.Fatal(err)
 	}
 	var nilTracker *BitTorrentTracker
 	if nilTracker.Files() != nil {
