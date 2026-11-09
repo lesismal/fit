@@ -9,8 +9,8 @@
 #   test/sync/pulsar.sh down             remove them
 #
 # PREFIX names the containers (fit-sync-); PULSAR_PORT is the first of the
-# host ports (29500: 29500 and 29501 the brokers, 29510 and 29511 their web
-# services). The tests read FIT_SYNC_PULSAR_3_URL, FIT_SYNC_PULSAR_3_ADMIN,
+# host ports (29540: 29540 and 29541 the brokers, 29550 and 29551 their web
+# services); PULSAR_VERSIONS picks the servers ("3 4"). The tests read FIT_SYNC_PULSAR_3_URL, FIT_SYNC_PULSAR_3_ADMIN,
 # FIT_SYNC_PULSAR_4_URL and FIT_SYNC_PULSAR_4_ADMIN.
 set -eu
 cd "$(dirname "$0")/../.."
@@ -18,7 +18,8 @@ cd "$(dirname "$0")/../.."
 PREFIX=${PREFIX:-fit-sync-}
 PULSAR3_IMAGE=${PULSAR3_IMAGE:-apachepulsar/pulsar:3.0.11}
 PULSAR4_IMAGE=${PULSAR4_IMAGE:-apachepulsar/pulsar:4.0.5}
-PULSAR_PORT=${PULSAR_PORT:-29500}
+PULSAR_PORT=${PULSAR_PORT:-29540}
+PULSAR_VERSIONS=${PULSAR_VERSIONS:-3 4}
 
 if [ "${1:-}" = down ]; then
 	docker rm -f "${PREFIX}pulsar3" "${PREFIX}pulsar4" >/dev/null 2>&1 || true
@@ -39,11 +40,15 @@ start() {
 	fi
 }
 
-start "${PREFIX}pulsar3" "$PULSAR3_IMAGE" "$PULSAR_PORT" $((PULSAR_PORT + 10))
-start "${PREFIX}pulsar4" "$PULSAR4_IMAGE" $((PULSAR_PORT + 1)) $((PULSAR_PORT + 11))
+for v in $PULSAR_VERSIONS; do
+	o=$((v - 3))
+	eval "image=\$PULSAR${v}_IMAGE"
+	start "${PREFIX}pulsar$v" "$image" $((PULSAR_PORT + o)) $((PULSAR_PORT + 10 + o))
+done
 
 # Ready once the admin API lists public's namespaces (default among them).
-for web in $((PULSAR_PORT + 10)) $((PULSAR_PORT + 11)); do
+for v in $PULSAR_VERSIONS; do
+	web=$((PULSAR_PORT + 7 + v))
 	i=0
 	until curl -fsS "http://127.0.0.1:$web/admin/v2/namespaces/public" 2>/dev/null | grep -q default; do
 		i=$((i + 1))
@@ -55,7 +60,7 @@ for web in $((PULSAR_PORT + 10)) $((PULSAR_PORT + 11)); do
 	done
 done
 
-echo "export FIT_SYNC_PULSAR_3_URL=pulsar://127.0.0.1:$PULSAR_PORT"
-echo "export FIT_SYNC_PULSAR_3_ADMIN=http://127.0.0.1:$((PULSAR_PORT + 10))"
-echo "export FIT_SYNC_PULSAR_4_URL=pulsar://127.0.0.1:$((PULSAR_PORT + 1))"
-echo "export FIT_SYNC_PULSAR_4_ADMIN=http://127.0.0.1:$((PULSAR_PORT + 11))"
+for v in $PULSAR_VERSIONS; do
+	echo "export FIT_SYNC_PULSAR_${v}_URL=pulsar://127.0.0.1:$((PULSAR_PORT + v - 3))"
+	echo "export FIT_SYNC_PULSAR_${v}_ADMIN=http://127.0.0.1:$((PULSAR_PORT + 7 + v))"
+done

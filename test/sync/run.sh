@@ -50,18 +50,39 @@
 #   tidb      TiDB with TiCDC (test/sync/tidb.sh), on Kafka (without
 #             Redpanda), and PostgreSQL 17, which the test writes into:
 #             TestTiDB*
+#   mq        RabbitMQ 3.13 and 4.1, NATS 2.10 and 2.11 (clusters of
+#             three), Pulsar 3 and 4, Mosquitto 2 and EMQX 5
+#             (test/sync/rabbitmq.sh, nats.sh, pulsar.sh, mqtt.sh):
+#             TestRabbitMQ*, TestNATS*, TestPulsar*, TestMQTT*
+#   mssql     SQL Server 2022 and 2019 (test/sync/mssql.sh): TestMSSQL*
+#   olap      Doris 2.1 and StarRocks 3.4 (test/sync/olap.sh): TestDoris*
+#   obs       Loki, the OpenTelemetry Collector, InfluxDB 2 and 3,
+#             TDengine 3, Qdrant and Milvus (test/sync/obs.sh), with
+#             PostgreSQL 17 and Mosquitto, which two of its tests read
+#             from: TestLoki*, TestOTLP*, TestInfluxDB*, TestTDengine*,
+#             TestQdrant*, TestMilvus*, TestEmbed*
 #   matrix    the interoperability and recovery matrix (I192, TestMatrix,
 #             test/sync/matrix_test.go): with no other family named, one
 #             server of each kind (PostgreSQL 17, MySQL 8.4, MongoDB 8,
 #             Elasticsearch, ClickHouse, Redis, Kafka, TiDB with TiCDC),
 #             without OpenSearch, Valkey, S3, Redpanda (REDPANDA=1 adds
 #             it) or TiDB alone; MATRIX_SERVERS names the families whose
-#             servers start (all six), PG_VERSIONS, MYSQL_SERVERS and
-#             MONGO_VERSIONS their versions. Named with other families,
-#             their servers and tests, whole.
+#             servers start ("search mysql postgres mongo kafka tidb";
+#             the sinks' four are always there), PG_VERSIONS, MYSQL_SERVERS
+#             and MONGO_VERSIONS their versions, and the sources run are
+#             those of its families (FIT_SYNC_MATRIX_SOURCES, when unset:
+#             mq is rabbitmq, nats, pulsar and mqtt, mssql is mssql, olap
+#             is doris; with one of those named, the first round's
+#             sources are left out), each on one server: RabbitMQ 4.1, NATS 2.11,
+#             Pulsar 4, Mosquitto, SQL Server 2022, Doris. CI runs it
+#             three times: the first round's sources, mq's, and mssql's
+#             and olap's. MQ_SYSTEMS (rabbitmq nats pulsar mqtt) picks mq's
+#             servers, the matrix's those its sources name. Named with other families, their servers and
+#             tests, whole.
 #
 #   SYNC_FAMILIES=postgres test/sync/run.sh -v
 #   SYNC_FAMILIES=matrix test/sync/run.sh -v
+#   SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo mq" test/sync/run.sh -v
 #   SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" \
 #     PG_VERSIONS="13 14 15 16 17" FIT_SYNC_MATRIX=full \
 #     FIT_SYNC_MATRIX_SOURCES=postgres test/sync/run.sh -v
@@ -70,7 +91,9 @@
 # run beside the first with ports of its own (ES_PORT, OS_PORT, CH_PORT,
 # REDIS_PORT, REDIS_TLS_PORT, VALKEY_PORT, MINIO_PORT, SEAWEED_PORT,
 # MYSQL_PORT, TIDB_PORT, PG_PORT, MONGO_PORT, KAFKA_PORT, REDPANDA_PORT,
-# TIDB_CDC_PORT).
+# TIDB_CDC_PORT, RABBITMQ_PORT, NATS_PORT, PULSAR_PORT, MQTT_PORT,
+# MSSQL_PORT, and obs.sh's; olap's Doris takes fixed ports, so one set at a
+# time).
 set -eu
 cd "$(dirname "$0")/../.."
 
@@ -79,7 +102,7 @@ SYNC_FAMILIES=${SYNC_FAMILIES:-}
 RUN=
 LIGHT=0
 if [ -z "$SYNC_FAMILIES" ]; then
-	SYNC_FAMILIES="search mysql postgres mongo kafka tidb"
+	SYNC_FAMILIES="search mysql postgres mongo kafka tidb mq mssql olap obs"
 else
 	for f in $SYNC_FAMILIES; do
 		case $f in
@@ -89,6 +112,10 @@ else
 		mongo) RUN="$RUN|Mongo" ;;
 		kafka) RUN="$RUN|Kafka" ;;
 		tidb) RUN="$RUN|TiDB" ;;
+		mq) RUN="$RUN|RabbitMQ|NATS|Pulsar|MQTT" ;;
+		mssql) RUN="$RUN|MSSQL" ;;
+		olap) RUN="$RUN|Doris" ;;
+		obs) RUN="$RUN|Loki|OTLP|InfluxDB|TDengine|Qdrant|Milvus|Embed" ;;
 		matrix) RUN="$RUN|Matrix" ;;
 		*)
 			echo "SYNC_FAMILIES: no family $f" >&2
@@ -104,14 +131,53 @@ else
 		MYSQL_SERVERS=${MYSQL_SERVERS:-mysql84}
 		MONGO_VERSIONS=${MONGO_VERSIONS:-8}
 		TIDB=${TIDB:-0}
+		# The sinks' servers are always there; one server of each source.
+		for f in mongo postgres mysql search; do
+			case " $SYNC_FAMILIES " in *" $f "*) ;; *) SYNC_FAMILIES="$f $SYNC_FAMILIES" ;; esac
+		done
+		RABBITMQ_IMAGES=${RABBITMQ_IMAGES:-4.1=rabbitmq:4.1}
+		NATS_VERSIONS=${NATS_VERSIONS:-211}
+		PULSAR_VERSIONS=${PULSAR_VERSIONS:-4}
+		EMQX=${EMQX:-0}
+		MSSQL_VERSIONS=${MSSQL_VERSIONS:-2022}
+		OLAP=${OLAP:-doris}
+		if [ -z "${FIT_SYNC_MATRIX_SOURCES:-}" ]; then
+			# With a second round's family named, its sources alone: the
+			# first round's run in the matrix of their own.
+			round2=0
+			for f in $SYNC_FAMILIES; do
+				case $f in mq | mssql | olap) round2=1 ;; esac
+			done
+			for f in $SYNC_FAMILIES; do
+				case $round2:$f in
+				1:mysql | 1:postgres | 1:mongo | 1:kafka | 1:tidb) ;;
+				*:mysql | *:postgres | *:mongo | *:kafka | *:tidb | *:mssql) FIT_SYNC_MATRIX_SOURCES="${FIT_SYNC_MATRIX_SOURCES:-} ${f#*:}" ;;
+				*:mq) FIT_SYNC_MATRIX_SOURCES="${FIT_SYNC_MATRIX_SOURCES:-} rabbitmq nats pulsar mqtt" ;;
+				*:olap) FIT_SYNC_MATRIX_SOURCES="${FIT_SYNC_MATRIX_SOURCES:-} doris" ;;
+				esac
+			done
+			export FIT_SYNC_MATRIX_SOURCES
+		fi
+		# The queues the sources name, of mq's four.
+		MQ_SYSTEMS=
+		for q in rabbitmq nats pulsar mqtt; do
+			case " $(echo "$FIT_SYNC_MATRIX_SOURCES" | tr ',' ' ') " in *" $q "*) MQ_SYSTEMS="$MQ_SYSTEMS $q" ;; esac
+		done
 	fi
 fi
+MQ_SYSTEMS=${MQ_SYSTEMS:-rabbitmq nats pulsar mqtt}
+mq_has() {
+	case " $MQ_SYSTEMS " in *" $1 "*) return 0 ;; esac
+	return 1
+}
+export RABBITMQ_IMAGES NATS_VERSIONS PULSAR_VERSIONS EMQX MSSQL_VERSIONS OLAP
 has() {
 	case " $SYNC_FAMILIES " in *" $1 "*) return 0 ;; esac
 	return 1
 }
-# The tidb family's test writes into a PostgreSQL.
-if has tidb && ! has postgres; then
+# The tidb family's test writes into a PostgreSQL, and two of obs's read
+# from one (and from Mosquitto, below).
+if { has tidb || has obs; } && ! has postgres; then
 	SYNC_FAMILIES="$SYNC_FAMILIES postgres"
 	PG_VERSIONS=${PG_VERSIONS:-17}
 fi
@@ -159,6 +225,15 @@ cleanup() {
 			test/sync/tidb.sh down
 			test/sync/kafka.sh down
 		fi
+		if has mq; then
+			test/sync/rabbitmq.sh down
+			test/sync/nats.sh down
+			test/sync/pulsar.sh down
+		fi
+		if has mq || has obs; then test/sync/mqtt.sh down; fi
+		if has mssql; then test/sync/mssql.sh down; fi
+		if has olap; then test/sync/olap.sh down; fi
+		if has obs; then test/sync/obs.sh down; fi
 	fi
 }
 trap cleanup EXIT
@@ -332,6 +407,26 @@ if has tidb; then
 	# (test/sync/tidb.sh); its failure ends the run.
 	TIDB_ENV=$(test/sync/tidb.sh up)
 	eval "$TIDB_ENV"
+fi
+
+# The second round's servers (I222), each family's script printing the
+# environment its tests read; a script that fails ends the run.
+if has mq; then
+	if mq_has rabbitmq; then eval "$(test/sync/rabbitmq.sh up)"; fi
+	if mq_has nats; then eval "$(test/sync/nats.sh up)"; fi
+	if mq_has pulsar; then eval "$(test/sync/pulsar.sh up)"; fi
+fi
+if { has mq && mq_has mqtt; } || has obs; then
+	# obs's MQTT to InfluxDB test needs Mosquitto alone.
+	if ! has mq; then EMQX=0; fi
+	eval "$(EMQX=${EMQX:-1} test/sync/mqtt.sh up)"
+fi
+if has mssql; then eval "$(test/sync/mssql.sh up)"; fi
+if has olap; then eval "$(test/sync/olap.sh up)"; fi
+if has obs; then
+	export OBS_PREFIX=${OBS_PREFIX:-$SYNC_PREFIX-obs}
+	eval "$(test/sync/obs.sh up)"
+	export FIT_SYNC_OBS=1
 fi
 
 PKGS=./test/sync
