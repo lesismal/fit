@@ -43,7 +43,19 @@ const (
 	// EventAltSpeed: the alternative rates started (State "on") or stopped
 	// ("off") holding; it has no torrent.
 	EventAltSpeed = "alt_speed"
+	// EventDropped: the client dropped Dropped of its piece and peer
+	// events since the last look, its queue for the role being full; it
+	// has no torrent. The role publishes none of those events, so nothing
+	// of the stream is missing; a torrent's numbers are read again from
+	// its status. At most one a second.
+	EventDropped = "events_dropped"
 )
+
+// EventQueue bounds the client's events waiting for the role's handler,
+// fib's Config.EventQueue: past it fib drops piece and peer events, never
+// the others the role publishes. The handler takes a short lock and
+// returns, so the queue fills only in a burst.
+const EventQueue = fibbt.DefaultEventQueue
 
 // The bounds of the events.
 const (
@@ -84,6 +96,8 @@ type Event struct {
 	Peer string `json:"peer,omitempty"`
 	// DataDeleted says an EventRemoved deleted the torrent's files.
 	DataDeleted bool `json:"data_deleted,omitempty"`
+	// Dropped is how many client events an EventDropped stands for.
+	Dropped int64 `json:"dropped,omitempty"`
 }
 
 // hub keeps the last events and hands new ones to the subscribers.
@@ -235,6 +249,8 @@ func (r *Role) event(e Event) {
 			r.log.Infof("peer %s banned: %s", e.Peer, e.Error)
 		case EventSeedLimit:
 			r.log.Infof("torrent %s (%s) reached its seed limit and paused", e.Torrent, e.Name)
+		case EventDropped:
+			r.log.Debugf("the client dropped %d piece and peer events, its queue full", e.Dropped)
 		}
 	}
 	r.events.emit(e)
@@ -266,8 +282,11 @@ func (r *Role) stateLocked(rec *record) (string, string) {
 }
 
 // noteStatesLocked publishes the state changes of the torrents since the
-// last look. r.mu is held.
+// last look, and the client events dropped since. r.mu is held.
 func (r *Role) noteStatesLocked() {
+	if n := r.dropPending.Swap(0); n > 0 {
+		r.event(Event{Type: EventDropped, Dropped: n})
+	}
 	for _, rec := range r.recs {
 		s, why := r.stateLocked(rec)
 		if rec.lastState == s {

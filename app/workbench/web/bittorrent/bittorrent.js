@@ -80,7 +80,8 @@
     // events / 事件
     ['ev.added', 'added', '已添加'], ['ev.removed', 'removed', '已删除'], ['ev.state', 'state', '状态'], ['ev.completed', 'completed', '已完成'],
     ['ev.error', 'storage error', '存储错误'], ['ev.peer_banned', 'peer banned', 'peer 被封禁'], ['ev.seed_limit', 'seed limit', '做种上限'],
-    ['ev.alt_speed', 'alternative rates', '备用速率'], ['ev.reset', 'events missed: the list is read again', '错过了事件：已重新读取列表'],
+    ['ev.alt_speed', 'alternative rates', '备用速率'], ['ev.events_dropped', 'client events dropped', '客户端事件被丢弃'],
+    ['ev.droppedN', '{n} piece and peer events; the list is read again', '{n} 个分块与 peer 事件；已重新读取列表'], ['ev.reset', 'events missed: the list is read again', '错过了事件：已重新读取列表'],
     ['ev.doneToast', '{name} completed.', '{name} 已完成。'], ['ev.errToast', '{name}: {error}', '{name}：{error}'],
     ['ev.fromTo', '{from} → {to}', '{from} → {to}'], ['ev.dataDeleted', 'with its data', '连同数据'],
     // the add dialog / 添加对话框
@@ -125,8 +126,10 @@
     ['k.torrents', 'Torrents', '种子'], ['k.peers', 'Peers', 'Peer'], ['k.announces', 'Announces', 'Announce'], ['k.scrapes', 'Scrapes', 'Scrape'],
     ['k.refused', 'Refused', '拒绝'], ['k.access', 'Who may announce', '谁可以 announce'], ['k.private', 'Private', '私有'], ['k.public', 'Public', '公开'], ['k.allowedN', '{n} info hashes', '{n} 个 info hash'], ['k.noList', 'none: every torrent', '无：接受所有种子'], ['k.udp', 'UDP', 'UDP'],
     ['k.of', '{n} of {max}', '{n} / {max}'], ['k.ref.unregistered', 'not in the allow-list', '不在白名单中'], ['k.ref.passkey', 'bad passkey', 'passkey 无效'],
-    ['k.ref.access', 'refused by access', '被访问控制拒绝'], ['k.swarms', 'Swarms of the allow-list', '白名单中种子的 swarm'],
-    ['k.swarmsNote', 'A public tracker cannot list the torrents it tracks; the allow-list\'s are listed.', '公开 tracker 无法列出其跟踪的种子；此处列出白名单中的种子。'],
+    ['k.ref.access', 'refused by access', '被访问控制拒绝'], ['k.swarms', 'Swarms', 'Swarm'],
+    ['k.swarmsAllow', 'The allow-list\'s torrents, tracked or not.', '白名单中的种子，无论是否正在跟踪。'],
+    ['k.swarmsStore', 'The torrents the tracker has peers of, by info hash.', 'tracker 当前有 peer 的种子，按 info hash 排序。'],
+    ['k.swarmsNone', 'No torrent has peers yet.', '尚无种子有 peer。'],
     ['k.hash', 'Info hash', 'Info hash'], ['k.seeders', 'Seeders', '做种者'], ['k.leechers', 'Leechers', '下载者'], ['k.completed', 'Completed', '已完成'],
     ['k.tracked', 'Tracked', '已跟踪'], ['k.prev', 'Previous', '上一页'], ['k.next', 'Next', '下一页'],
     ['k.passkey', 'A user\'s passkey', '用户的 passkey'], ['k.user', 'User', '用户'], ['k.lookup', 'Look up', '查询'],
@@ -412,7 +415,8 @@
           if (!events.length) { UI.mount(evBox, h('div.small.muted', t('l.noEvents'))); return; }
           UI.mount(evBox, h('ul.bt-events', events.map(function (e) {
             var what = e.type === 'state' ? t('ev.fromTo', { from: stateWord(e.previous || '?'), to: stateWord(e.state || '?') })
-              : e.type === 'alt_speed' ? t('alt.' + (e.state || 'off')) : e.type === 'removed' && e.data_deleted ? t('ev.dataDeleted') : '';
+              : e.type === 'alt_speed' ? t('alt.' + (e.state || 'off')) : e.type === 'removed' && e.data_deleted ? t('ev.dataDeleted')
+              : e.type === 'events_dropped' ? t('ev.droppedN', { n: e.dropped || 0 }) : '';
             return h('li', h('span.small.muted', UI.fmtTime(unix(e.time)).slice(11)), ' ',
               UI.badge(t('ev.' + e.type) === 'ev.' + e.type ? e.type : t('ev.' + e.type), e.type === 'error' ? 'danger' : e.type === 'completed' ? 'ok' : ''), ' ',
               e.torrent ? h('a', { href: '#/' + ID + '/torrent/' + enc(e.torrent) }, e.name || e.torrent.slice(0, 12)) : null,
@@ -752,12 +756,13 @@
           return api('GET', '/bittorrent/tracker/torrents?offset=' + offset + '&limit=' + SWARMS).then(function (r) {
             if (!document.body.contains(swarmBox)) return;
             var list = r.torrents || [];
-            if (!list.length && !offset) { UI.mount(swarmBox, UI.card(t('k.swarms'), h('div.small.muted', t('k.swarmsNote')))); return; }
+            var note = t(r.source === 'allow_list' ? 'k.swarmsAllow' : 'k.swarmsStore');
+            if (!list.length && !offset) { UI.mount(swarmBox, UI.card(t('k.swarms'), h('div.small.muted', r.source === 'allow_list' ? note : t('k.swarmsNone')))); return; }
             var prev = UI.btn(t('k.prev'), null, function () { offset = Math.max(0, offset - SWARMS); loadSwarms(); }, 'sm');
             var next = UI.btn(t('k.next'), null, function () { offset += SWARMS; loadSwarms(); }, 'sm');
             prev.disabled = offset === 0;
             next.disabled = offset + list.length >= (r.total || 0);
-            UI.mount(swarmBox, UI.card(t('k.swarms'), h('div.stack', h('div.small.muted', t('k.swarmsNote')), UI.table([
+            UI.mount(swarmBox, UI.card(t('k.swarms'), h('div.stack', h('div.small.muted', note), UI.table([
               { label: t('k.hash'), render: function (x) { return h('code', x.info_hash); } },
               { label: t('k.seeders'), cls: 'bt-num', render: function (x) { return String(x.seeders); } },
               { label: t('k.leechers'), cls: 'bt-num', render: function (x) { return String(x.leechers); } },

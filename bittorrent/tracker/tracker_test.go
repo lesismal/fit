@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -103,8 +105,9 @@ func TestAnnounceScrapeHTTPAndUDP(t *testing.T) {
 	if err != nil || st.Torrents != 1 || st.Peers != 2 || st.Announces != 5 || st.Scrapes != 2 || st.Private || st.UDP == "" {
 		t.Fatalf("stats %+v %v", st, err)
 	}
-	// Without an allow-list, Torrents lists none.
-	if list, total, err := r.Torrents(0, 0); err != nil || len(list) != 0 || total != 0 {
+	// Without an allow-list, Torrents lists the store's.
+	if list, total, err := r.Torrents(0, 0); err != nil || len(list) != 1 || total != 1 || list[0].Seeders != 2 ||
+		list[0].Completed != 1 || !list[0].Tracked || list[0].InfoHash != h.String() {
 		t.Fatalf("torrents %v %d %v", list, total, err)
 	}
 	// A path that is neither an announce nor a scrape.
@@ -196,7 +199,8 @@ func TestAccess(t *testing.T) {
 
 // TestReloadInPlace changes the config of a running tracker: the interval
 // keeps the swarms, a new listen moves UDP, a taken port leaves the one
-// before, and new store bounds start the swarms anew.
+// before, and new store bounds and peer_ttl keep the swarms (A85's
+// SetConfig).
 func TestReloadInPlace(t *testing.T) {
 	e := startEngine(t)
 	r := startRole(t, e, load(t, `{"listen": "127.0.0.1:0"}`, ""))
@@ -253,7 +257,7 @@ func TestReloadInPlace(t *testing.T) {
 		t.Fatalf("on the new port: %+v", resp)
 	}
 
-	// No UDP, then a new store.
+	// No UDP, then new store bounds: the swarm stays.
 	if err := apply(`{"interval": "5m"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -263,11 +267,118 @@ func TestReloadInPlace(t *testing.T) {
 	if ts, _ := r.Torrent(h); ts.Leechers != 3 {
 		t.Fatalf("swarm lost with UDP: %+v", ts)
 	}
-	if err := apply(`{"interval": "5m", "max_torrents": 10}`); err != nil {
+	store := r.cur.Load().store
+	if err := apply(`{"interval": "5m", "max_torrents": 1, "max_peers_per_torrent": 3, "peer_ttl": "1h"}`); err != nil {
 		t.Fatal(err)
 	}
-	if ts, _ := r.Torrent(h); ts.Tracked {
-		t.Fatalf("a new store kept the swarm: %+v", ts)
+	if r.cur.Load().store != store {
+		t.Fatal("a new store")
+	}
+	if ts, _ := r.Torrent(h); ts.Leechers != 3 {
+		t.Fatalf("the swarm was not kept: %+v", ts)
+	}
+	if c := store.Config(); c.MaxTorrents != 1 || c.MaxPeersPerTorrent != 3 || c.PeerTTL != time.Hour {
+		t.Fatalf("store config %+v", c)
+	}
+	if st, _ := r.Stats(); st.MaxTorrents != 1 {
+		t.Fatalf("stats %+v", st)
+	}
+	// Lowered bounds drop nothing, and refuse what is past them.
+	_, err = announce(t, cl, hu, hashOf("other"), 9, 100, fibtracker.EventStarted)
+	refusedWith(t, err, "tracker is full")
+	mustAnnounce(t, cl, hu, h, 4, 100, fibtracker.EventStarted)
+	if ts, _ := r.Torrent(h); ts.Leechers != 3 {
+		t.Fatalf("a peer past max_peers_per_torrent kept: %+v", ts)
+	}
+	// Both the bounds and the interval: the same store, a new server.
+	srv := r.cur.Load().srv
+	if err := apply(`{"interval": "6m", "max_torrents": 10}`); err != nil {
+		t.Fatal(err)
+	}
+	if cur := r.cur.Load(); cur.store != store || cur.srv == srv {
+		t.Fatal("the store was replaced or the server kept")
+	}
+	resp = mustAnnounce(t, cl, hu, hashOf("other"), 9, 100, fibtracker.EventStarted)
+	if resp.Interval != 6*time.Minute {
+		t.Fatalf("after the interval and bounds changed: %+v", resp)
+	}
+	// A shorter peer_ttl expires the peers kept past it.
+	if err := apply(`{"interval": "1s", "max_torrents": 10, "peer_ttl": "2s"}`); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the peers to expire", func() bool { ts, _ := r.Torrent(h); return !ts.Tracked })
+}
+
+// TestPublicList lists a public tracker's torrents by info hash, paged by
+// offset and by after, through the role and its console.
+func TestPublicList(t *testing.T) {
+	e := startEngine(t)
+	r := startRole(t, e, load(t, `{"console": {"address": "127.0.0.1:0", "users": [{"username": "admin", "password_hash": "`+hashPassword(t, "console-password")+`"}]}}`, ""))
+	cl := newClient(t, e, time.Second, 8)
+	u := serveHTTP(t, e) + "/announce"
+	var hashes []string
+	for i := range 25 {
+		h := hashOf("public-" + strconv.Itoa(i))
+		hashes = append(hashes, h.String())
+		mustAnnounce(t, cl, u, h, i+1, int64(i%2)*100, fibtracker.EventStarted)
+	}
+	slices.Sort(hashes)
+	l, err := r.ListTorrents(0, 10, nil)
+	if err != nil || l.Source != SourceStore || l.Total != 25 || len(l.Torrents) != 10 || l.Next != hashes[9] {
+		t.Fatalf("first page %+v %v", l, err)
+	}
+	for i, ts := range l.Torrents {
+		if ts.InfoHash != hashes[i] || !ts.Tracked || ts.Seeders+ts.Leechers != 1 {
+			t.Fatalf("page %+v", l.Torrents)
+		}
+	}
+	l, _ = r.ListTorrents(20, 10, nil)
+	if len(l.Torrents) != 5 || l.Torrents[0].InfoHash != hashes[20] || l.Next != "" {
+		t.Fatalf("last page by offset %+v", l)
+	}
+	l, _ = r.ListTorrents(100, 10, nil)
+	if len(l.Torrents) != 0 || l.Total != 25 {
+		t.Fatalf("past the end %+v", l)
+	}
+	// By after: every torrent once, in order.
+	var got []string
+	var after *metainfo.InfoHash
+	for range 10 {
+		l, err := r.ListTorrents(0, 7, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ts := range l.Torrents {
+			got = append(got, ts.InfoHash)
+		}
+		if l.Next == "" {
+			break
+		}
+		h, _ := config.ParseInfoHash(l.Next)
+		ih := metainfo.InfoHash(h)
+		after = &ih
+	}
+	if !slices.Equal(got, hashes) {
+		t.Fatalf("paged by after %v, want %v", got, hashes)
+	}
+	// The console's route.
+	get := login(t, r.console.URL(), "admin", "console-password")
+	if body := get("/api/torrents?limit=2&after=" + hashes[0]); !strings.Contains(body, hashes[1]) || !strings.Contains(body, `"next":"`+hashes[2]+`"`) ||
+		strings.Contains(body, `"info_hash":"`+hashes[0]) || !strings.Contains(body, `"source":"store"`) {
+		t.Fatalf("console: %s", body)
+	}
+	if body := get("/api/torrents?after=zz"); !strings.Contains(body, "not an info hash") {
+		t.Fatalf("console: %s", body)
+	}
+	// With an allow-list, after is refused.
+	if err := r.Apply(load(t, `{"allow": ["`+hashes[0]+`"]}`, "").BitTorrent.Tracker); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ListTorrents(0, 1, after); !errors.Is(err, ErrAfterAllowList) {
+		t.Fatalf("after with an allow-list: %v", err)
+	}
+	if l, _ := r.ListTorrents(0, 0, nil); l.Source != SourceAllowList || l.Total != 1 {
+		t.Fatalf("allow-list %+v", l)
 	}
 }
 
