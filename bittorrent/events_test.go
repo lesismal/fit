@@ -318,10 +318,15 @@ func TestPeersTrackersRecheck(t *testing.T) {
 			t.Fatal("the resume data is still there during the check")
 		}
 	}
+	// A recheck keeps the pieces had, only no longer trusted, so HaveAll
+	// holds all through it: its end is the state leaving checking.
 	waitFor(t, "the check again", func() bool {
-		tor, err := r.Torrent(st.ID)
-		return err == nil && tor.HaveAll()
+		s, err := r.Get(st.ID)
+		return err == nil && s.State != "checking"
 	})
+	if tor, err := r.Torrent(st.ID); err != nil || !tor.HaveAll() {
+		t.Fatalf("after the recheck: %v", err)
+	}
 	if rc.total() <= before {
 		t.Fatal("a recheck read nothing")
 	}
