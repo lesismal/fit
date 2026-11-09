@@ -192,8 +192,9 @@ func TestRoleEvents(t *testing.T) {
 		t.Fatalf("added %+v", added)
 	}
 	// Completed and the state change to seeding, in either order: a fast
-	// download may report one before the other.
-	completed, seeding := false, false
+	// download may report one before the other. One done before the added
+	// event took its state has no change to seeding: added says seeding.
+	completed, seeding := false, added.State == "seeding"
 	w.wait("completed and seeding", func(e Event) bool {
 		completed = completed || (e.Type == EventCompleted && e.Torrent == st.ID)
 		seeding = seeding || (e.Type == EventState && e.State == "seeding" && e.Previous != "")
@@ -318,10 +319,15 @@ func TestPeersTrackersRecheck(t *testing.T) {
 			t.Fatal("the resume data is still there during the check")
 		}
 	}
+	// A recheck keeps the pieces had, only no longer trusted, so HaveAll
+	// holds all through it: its end is the state leaving checking.
 	waitFor(t, "the check again", func() bool {
-		tor, err := r.Torrent(st.ID)
-		return err == nil && tor.HaveAll()
+		s, err := r.Get(st.ID)
+		return err == nil && s.State != "checking"
 	})
+	if tor, err := r.Torrent(st.ID); err != nil || !tor.HaveAll() {
+		t.Fatalf("after the recheck: %v", err)
+	}
 	if rc.total() <= before {
 		t.Fatal("a recheck read nothing")
 	}

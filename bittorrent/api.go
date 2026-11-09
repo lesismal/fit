@@ -172,11 +172,12 @@ func (r *Role) status(rec *record, files bool, pos int) Status {
 	} else {
 		s.Error = r.lastStorageErr(rec.id)
 	}
-	if s.InfoHash == "" && !t.InfoHash().IsZero() {
-		s.InfoHash = t.InfoHash().String()
+	v1, v2 := torrentHashes(t, rec.magnet)
+	if s.InfoHash == "" && !v1.IsZero() {
+		s.InfoHash = v1.String()
 	}
-	if s.InfoHashV2 == "" && !t.InfoHashV2().IsZero() {
-		s.InfoHashV2 = t.InfoHashV2().String()
+	if s.InfoHashV2 == "" && !v2.IsZero() {
+		s.InfoHashV2 = v2.String()
 	}
 	if s.Name == "" {
 		s.Name = t.Name()
@@ -192,6 +193,29 @@ func (r *Role) status(rec *record, files bool, pos int) Status {
 		}
 	}
 	return s
+}
+
+// torrentHashes returns t's info hashes: its info dictionary's once it
+// has one, else the magnet link's it was added from, which are all it
+// knows until then. fib's InfoHash and InfoHashV2 are not read: they are
+// not guarded, and the info arriving from a peer sets them (a magnet link
+// of one hash of a hybrid torrent learns the other).
+func torrentHashes(t *fibbt.Torrent, magnet string) (metainfo.InfoHash, metainfo.InfoHashV2) {
+	if info := t.Info(); info != nil {
+		var v1 metainfo.InfoHash
+		var v2 metainfo.InfoHashV2
+		if info.HasV1() {
+			v1 = info.InfoHashV1()
+		}
+		if info.HasV2() {
+			v2 = info.InfoHashV2()
+		}
+		return v1, v2
+	}
+	if m, err := metainfo.ParseMagnet(magnet); err == nil {
+		return m.InfoHash, m.InfoHashV2
+	}
+	return metainfo.InfoHash{}, metainfo.InfoHashV2{}
 }
 
 // Add adds a torrent from a magnet link or a .torrent file, downloading
@@ -620,7 +644,7 @@ func (r *Role) removeLocked(id string, deleteData bool) error {
 		if err := rec.t.Remove(deleteData); err != nil {
 			errs = append(errs, fmt.Errorf("removing its data: %w", err))
 		}
-		rec.t = nil
+		r.setTorrent(rec, nil)
 	}
 	r.removeRecord(rec)
 	r.evMu.Lock()
