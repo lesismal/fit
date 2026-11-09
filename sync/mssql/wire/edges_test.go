@@ -370,12 +370,12 @@ func TestTokenEdges(t *testing.T) {
 		{tokEnvChange, 3, 0, envDatabase, 5, 0},  // its value cut
 		{tokEnvChange, 3, 0, envCollation, 5, 0}, // its bytes cut
 		{tokError, 2, 0, 1, 2},                   // too short
-		append([]byte{tokError, 10, 0}, 1, 0, 0, 0, 1, 16, 9, 0, 0, 0), // its text cut
-		append([]byte{tokError, 9, 0}, 1, 0, 0, 0, 1, 16, 0, 0, 3),     // its server cut
+		append([]byte{tokError, 10, 0}, 1, 0, 0, 0, 1, 16, 9, 0, 0, 0),               // its text cut
+		append([]byte{tokError, 9, 0}, 1, 0, 0, 0, 1, 16, 0, 0, 3),                   // its server cut
 		append(append([]byte{tokError, 12, 0}, 1, 0, 0, 0, 1, 16, 0, 0, 0, 0), 0, 0), // its line cut
 		append(tColMeta(col)[:3], 0, 0, 0, 0, 0, 0, 0x99),                            // an unknown type
-		append(rv[:12], 0x99),                                                        // a return value of an unknown type
-		append(append(rv[:12], TypeIntN, 4, 3), 1, 2, 3),                              // a value of the wrong size
+		append(rv[:12], 0x99),                            // a return value of an unknown type
+		append(append(rv[:12], TypeIntN, 4, 3), 1, 2, 3), // a value of the wrong size
 		append(tColMeta(Column{Name: "s", Type: TypeIntN, Size: 4}), tokRow, 3, 1, 2, 3), // a row value of the wrong size
 	} {
 		if _, err := run(t, bad); err == nil {

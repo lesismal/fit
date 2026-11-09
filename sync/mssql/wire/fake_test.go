@@ -44,9 +44,9 @@ type fake struct {
 }
 
 type session struct {
-	f  *fake
-	nc net.Conn
-	rd io.Reader
+	f   *fake
+	nc  net.Conn
+	rd  io.Reader
 	wmu sync.Mutex
 }
 
@@ -351,7 +351,9 @@ func tMessage(tok byte, num int32, class byte, msg string) []byte {
 	return append(b, m...)
 }
 
-func tError(tok byte, num int32, class byte, msg string) []byte { return tMessage(tok, num, class, msg) }
+func tError(tok byte, num int32, class byte, msg string) []byte {
+	return tMessage(tok, num, class, msg)
+}
 
 func tInfo(num int32, msg string) []byte { return tMessage(tokInfo, num, 0, msg) }
 

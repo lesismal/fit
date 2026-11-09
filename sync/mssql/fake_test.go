@@ -38,8 +38,8 @@ type fake struct {
 	ctVersion int64
 	minValid  int64
 	// fail fails the queries holding a key, once each when once.
-	fail    map[string]error
-	once    bool
+	fail map[string]error
+	once bool
 	// skip lets that many of a failing key's queries pass first.
 	skip map[string]int
 	// noDB answers sys.databases with no row.
