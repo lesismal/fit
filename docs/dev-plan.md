@@ -370,7 +370,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | done |
 | I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | done |
 | I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | done |
-| I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | todo |
+| I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | done |
 | I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | todo |
 | I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | todo |
 | I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
@@ -7164,6 +7164,105 @@ Open from it (fib, reported, not worked around):
   limits), its files, peers and trackers, `/bittorrent/tracker/stats`, an SSE stream of events;
   `fit bt add|ls|info|pause|resume|rm|limit`; metrics by category and state; events in fit's log.
 - **Touches**: `bittorrent`, `admin`, `cli`, `observe`.
+- **Done** 2026-11-09: the Admin API's `/bittorrent/...` (`admin/bittorrent.go`): torrents listed
+  (filters `state`, `category`, `q`, paged), added from a magnet link, a URL or a .torrent file
+  (JSON with base64, `application/x-bittorrent`, or a form read part by part, 32 MiB), one with its
+  files, actions (`pause`, `resume`, `recheck`), `PATCH` (paused, sequential, category, limits,
+  queue position, priorities), `DELETE` with `delete_data`, `.../files`, `.../peers`,
+  `.../trackers`, `/bittorrent/alt_speed` (GET, PUT), `/bittorrent/publish[/<name>]`, the
+  tracker's `stats`, `torrents[/<hash>]` and `passkey`; the role's errors mapped to statuses; the
+  capability `bittorrent` in `/node`. The event stream `GET /bittorrent/events`
+  (`admin/btevents.go`) on the role's events (`bittorrent/events.go`: added, removed, state,
+  completed, error, peer_banned, seed_limit, alt_speed; a hub of 32 subscribers with 256-event
+  buffers, the last 1024 kept for `Last-Event-ID`, `reset`, `lagged`, `end`, heartbeats), the
+  events in the `bittorrent` log. The role's API gains `Peers`, `Trackers`, `Recheck` and
+  `Subscribe` (`bittorrent/inspect.go`), and `Add` keeps a torrent `bt_stream` added on the fly.
+  Metrics (`bittorrent/metrics.go`, `bittorrent/tracker/metrics.go`, both roles `app.Metered`):
+  bytes, rates, peers, seeders and hash failures by category, torrents by category and state,
+  bans, the alternative rates, the event subscribers, published torrents; the tracker's torrents,
+  peers, bounds, announces, scrapes and refusals. `fit bt ls|add|info|pause|resume|rm|limit|alt`
+  (`cli/bt.go`). Docs: [BitTorrent](bittorrent.md#the-admin-api) (Admin API, events, `fit bt`,
+  metrics) in both languages, the reference's chapter, fib requests A87 (a torrent's trackers and
+  their announces) and A88 (an in-place recheck). Tests: every endpoint without the roles (404),
+  behind the token (401), each way of adding and its errors (duplicate, bad link, none or two
+  sources, bad JSON, a bad scheme, a URL that fails, an unknown category, bad limits, not a
+  torrent, unsupported types, a bad form, a form field and a file past their bounds with and
+  without `Content-Length`, too many parts, `max_torrents`), the list's filters and pages and their
+  errors, a torrent by ID in either case, files, peers, trackers (from a .torrent file and a magnet
+  link), actions and their errors, `PATCH` and its errors, removal with and without the data, the
+  alternative rates, publish, the tracker's endpoints, the error-to-status table, the console
+  (login, an add logged, the stream's 501); the stream: an add's events, heartbeats, a replay from
+  `Last-Event-ID`, `reset`, a bad ID, 32 subscribers and a 503, a closed stream freeing its slot, a
+  client reading nothing while 40000 events come dropped with `lagged`, `end` when the role stops;
+  the hub's bounds; the role's events through a download, a pause, the alternative rates, a ban, a
+  seed limit, a storage error and a removal, in the log, with a replay and the end at stop; peers
+  between two roles, trackers and web seeds of a magnet link, a recheck reading the data again;
+  metrics by category outliving a removal and a stop, bans and the alternative rates; the
+  tracker's metrics; `fit bt`'s commands, requests and output, ID prefixes and names, refusals and
+  usage errors.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **No pool for the role's API in the Admin API**: each call runs on the request's goroutine,
+   net/http's on the Admin API and the console's bounded pool behind the console, as the sync and
+   media endpoints do; neither is a fib worker, and `admin.max_conns` bounds them. Alternative: a
+   pool of the role's own for its API.
+2. **Statuses**: no such torrent 404, the role not running here 404, bad input 400, added already
+   or broken 409, `max_torrents` (and `max_temporary`) **429**, too many URL downloads or event
+   streams and the client not running **503** with `Retry-After: 5`, a URL that fails 502. Why:
+   429 says the caller asked for more than it may hold; 503 is a state that passes. Alternatives:
+   `max_torrents` 409 or 507; the role not running here 503.
+3. **Adding takes three bodies**: JSON (the file in base64), the raw file as
+   `application/x-bittorrent` with the options in the query, and `multipart/form-data`, read part by
+   part; a .torrent file is bounded by **32 MiB**, as one by URL (not fib's 128 MiB), a form's other
+   fields by 64 KiB, 16 parts. Answered `201` with `Location`. Alternatives: fib's bound;
+   `max_config_bytes`; JSON only.
+4. **`PATCH` is not atomic**: its changes are made in a fixed order (paused, sequential, category,
+   limits, queue position, priorities), each saved, and the first that fails is answered with those
+   before it kept; the limits are parsed before any change. Why: the role's API has no
+   transaction. Alternative: check every field first against a status, then apply.
+5. **`recheck` removes the torrent from fib's client, keeping its files, and adds it again without
+   resume data** (whose file is removed, so that a crash during the check checks again), since fib
+   has no recheck of a running torrent; its connections and fib's counters start again, its place,
+   priorities, limits and pause stay. Filed as fib request A88. Alternative: answer 501 until fib
+   has `Torrent.Recheck`.
+6. **`/trackers` lists what the .torrent file or magnet link names**, with tiers, and the web
+   seeds, no announce state: fib exposes none (fib request A87).
+7. **Slow event subscribers are disconnected, not skipped**: a buffer of 256 events per stream; one
+   that fills gets `event: lagged` and is closed, to reconnect with `Last-Event-ID`, replayed from
+   the last 1024 events the role keeps; a gap, or an ID past the last (fit restarted: IDs count
+   from 1 at each start), begins the stream with `event: reset`. At most 32 streams (503), a
+   comment every 15s, `end` when the role stops or the Admin API shuts down. **Not configurable**,
+   so no schema change. Why: a stream that silently misses events shows a wrong state; a reconnect
+   with replay loses nothing in the common case. Alternatives: drop the oldest events and mark the
+   gap; config for the bounds.
+8. **The event stream is served on the Admin API's own address only**: the console's proxy answers
+   whole responses (its recorder), so it answers 501 there. I204's pages need a streaming console
+   route (on fib, with `OnWritable`), or poll. Alternative: build that route now.
+9. **State changes are noticed by the manager's look every second**, and at once after the API's
+   changes, by comparing each torrent's status state with the last one published, since fib's
+   events do not say when a torrent starts downloading, seeding or checking. Events are published
+   on the API's, the manager's and fib's event goroutine, never waiting.
+10. **Adding a torrent `bt_stream` added on the fly keeps it** as an ordinary torrent as it is
+    (category, limits and pause of the request not applied), answering its status, rather than 409
+    (I200's open point). Alternative: apply the request's options too.
+11. **Metrics**: the role adds fib's per-torrent counts to totals by category each look (and before
+    a removal, a recheck or a client closing), so counters outlive torrents but start at zero when
+    fit starts (not persisted, as I197's decision 9); `category=""` for none and no separate
+    total; a scrape reads a snapshot without the role's lock; bans are client-wide; the tracker's
+    are its `Stats`. Alternative: keep totals in `torrents.json`.
+12. **Logs**: added, removed, bans and seed limits at info, state changes at debug; completions,
+    storage errors and the alternative rates keep their earlier lines (info, error, info).
+13. **`fit bt`**: a torrent is named by its info hash, a unique start of its ID of at least 4
+    digits, or its name, resolved through the list; rates take `K`, `M`, `G` (binary); a file is
+    sent raw unless `-up`/`-down` ask for JSON; a refusal of one torrent exits 1 after the rest are
+    tried. No `peers` or `events` commands. Alternatives: IDs only; `fit bt events`.
+14. **A user's passkey is on the Admin API** (`/bittorrent/tracker/passkey?user=`), behind its
+    token, beside the role's console. The list's page is 1000 torrents by default, 10000 at most.
+
+Open from it: fib requests A87 and A88; the
+console's streaming route for the pages (I204); event and metric counters are not persisted. Not
+run: the Linux race run and the full suite (left to the main session).
 
 ### I204 The workbench's BitTorrent pages
 

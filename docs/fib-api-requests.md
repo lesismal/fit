@@ -93,6 +93,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A84 | Piece layers for a hybrid torrent added from a magnet link | requested | — | I196 |
 | A85 | A tracker store that lists its torrents and changes its bounds in place | requested | 11 | I201 |
 | A86 | A seed does not announce a completed download | requested | — | I201 |
+| A87 | A BitTorrent torrent's trackers and their announces | requested | — | I203 |
+| A88 | Checking a running torrent's data again | requested | — | I203 |
 
 ## Evidence
 
@@ -2634,3 +2636,39 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 **Suggested API.** Announce `completed` only when a download finishes, never for data that was complete when added.
 
 **How fit uses it.** Correct statistics on fit's tracker and others.
+
+## A87: A torrent's trackers and their announces
+
+**Status.** Requested on 2026-11-09, from I203; not done. fit reports the trackers a torrent's
+.torrent file or magnet link lists, without their state, meanwhile.
+
+**Problem.** The Admin API's `/bittorrent/torrents/<id>/trackers` and the pages (I204) should show
+each tracker's last announce, its result or error, the seeders and leechers it reported and when
+it announces next, as qBittorrent and Transmission do. fib's `Torrent` keeps this in its announce
+loops (`announceLoop`, `tracker.Tiers`) and exposes none of it; the trackers a magnet link's info
+or PEX brought in later are not visible either.
+
+**Suggested API.** `Torrent.Trackers() []TrackerInfo`, one per URL in tier order: `URL`, `Tier`,
+`Last` (time), `Next` (time), `Err` (the last failure or warning message), `Seeders`, `Leechers`,
+`Downloaded` (from the last announce or scrape), and `Updating` while an announce is under way;
+and DHT, PEX and LSD as their own sources with the peers each found.
+
+**How fit uses it.** `Role.Trackers` returns it in place of the metainfo's list, and the Admin API
+and the pages show it as it is.
+
+## A88: Checking a running torrent's data again
+
+**Status.** Requested on 2026-11-09, from I203; not done. fit's `Role.Recheck` takes the torrent
+out of the client (`Remove(false)`) and adds it again without resume data meanwhile, which drops
+its connections and fib's counts of what it downloaded and uploaded.
+
+**Problem.** A recheck (qBittorrent's "Force recheck") is needed after files were changed or
+restored behind the client's back. fib checks data only when a torrent is added.
+
+**Suggested API.** `Torrent.Recheck()`: pause the torrent's requests, forget the pieces had, run
+the initial check again on the disk pool (`StateChecking`), then go on as it was (paused or
+running), keeping its peers, counters and limits; an `EventChecked` at the end.
+
+**How fit uses it.** `Role.Recheck` calls it, and the Admin API's `{"action": "recheck"}` and
+`fit bt` keep their meaning.
+

@@ -38,6 +38,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fib"
@@ -161,12 +162,20 @@ type Role struct {
 	// while calling the client, whose event goroutine takes it.
 	evMu       sync.Mutex
 	storageErr map[string]string
+
+	// events are the role's events (events.go); banned counts the peers
+	// the clients banned; acct are the categories' counters, guarded by
+	// mu, and snap the metrics a scrape writes (metrics.go).
+	events *hub
+	banned atomic.Uint64
+	acct   map[string]*catTotals
+	snap   atomic.Pointer[metricsSnap]
 }
 
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Role {
 	r := &Role{host: h, engine: h.Engine, key: h.Upstream, log: h.Log, byID: map[string]*record{},
-		storageErr: map[string]string{}, now: time.Now, diskFree: medialib.DiskFree, tick: defaultTick,
+		storageErr: map[string]string{}, events: newHub(), acct: map[string]*catTotals{}, now: time.Now, diskFree: medialib.DiskFree, tick: defaultTick,
 		fetchSem: make(chan struct{}, MaxURLFetches), watchSeen: map[string]stamp{}, watchLast: map[string]string{}}
 	r.rescan = r.rescanLibrary
 	if r.key == nil {
@@ -365,6 +374,19 @@ func (r *Role) newClient(cfg *config.BitTorrentClient) (*fibbt.Client, error) {
 // until a piece passes its check again. It must not take r.mu, which is
 // held while a client is closed.
 func (r *Role) onEvent(e fibbt.Event) {
+	if e.Type == fibbt.EventPeerBanned {
+		r.banned.Add(1)
+		peer := e.Peer.String()
+		if e.Peer.Port() == 0 {
+			peer = e.Peer.Addr().String()
+		}
+		why := ""
+		if e.Err != nil {
+			why = e.Err.Error()
+		}
+		r.event(Event{Type: EventPeerBanned, Peer: peer, Error: why})
+		return
+	}
 	if e.Torrent == nil {
 		return
 	}
@@ -382,9 +404,14 @@ func (r *Role) onEvent(e fibbt.Event) {
 		changed := r.storageErr[id] != msg
 		r.storageErr[id] = msg
 		r.evMu.Unlock()
-		if changed && r.log != nil {
-			r.log.Errorf("torrent %s: %s", e.Torrent.Name(), msg)
+		if changed {
+			if r.log != nil {
+				r.log.Errorf("torrent %s: %s", e.Torrent.Name(), msg)
+			}
+			r.event(Event{Type: EventError, Torrent: id, Name: e.Torrent.Name(), Error: msg})
 		}
+	case fibbt.EventSeedLimit:
+		r.event(Event{Type: EventSeedLimit, Torrent: idOf(e.Torrent.InfoHash(), e.Torrent.InfoHashV2()), Name: e.Torrent.Name()})
 	case fibbt.EventPieceVerified, fibbt.EventCompleted, fibbt.EventStateChanged:
 		id := idOf(e.Torrent.InfoHash(), e.Torrent.InfoHashV2())
 		r.evMu.Lock()
@@ -497,6 +524,8 @@ func (r *Role) closeClient() {
 	if r.client == nil {
 		return
 	}
+	// What the torrents counted, before fib forgets it.
+	r.accountAllLocked()
 	_ = r.client.Close()
 	r.client = nil
 	r.pub.detachAll()
@@ -531,6 +560,7 @@ func (r *Role) Stop(ctx context.Context) {
 		r.httpc = nil
 	}
 	r.closeClient()
+	r.events.close()
 	r.console.Stop(ctx)
 	rolesMu.Lock()
 	if roles[r.key] == r {

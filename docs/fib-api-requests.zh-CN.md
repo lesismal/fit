@@ -91,6 +91,8 @@
 | A84 | 磁力链添加的 hybrid 种子的 piece layer | 已提出 | — | I196 |
 | A85 | tracker Store 可列出种子、可原地修改上限 | 已提出 | 11 | I201 |
 | A86 | 做种方不宣告“下载完成” | 已提出 | — | I201 |
+| A87 | BitTorrent 任务的 tracker 及其 announce 状态 | 已提出 | — | I203 |
+| A88 | 重新校验运行中任务的数据 | 已提出 | — | I203 |
 
 ## 证据
 
@@ -2014,3 +2016,24 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 **建议的 API。** 只在下载完成时宣告 `completed`，添加时就已完整的数据不宣告。
 
 **fit 如何使用。** fit 的 tracker 及其他 tracker 统计正确。
+
+## A87：任务的 tracker 及其 announce 状态
+
+**状态。** 2026-11-09 由 I203 提出；未完成。在此之前，fit 只报告任务的 .torrent 文件或磁力链接列出的 tracker，不含其状态。
+
+**问题。** Admin API 的 `/bittorrent/torrents/<id>/trackers` 和页面（I204）应当像 qBittorrent、Transmission 那样显示每个 tracker 上次 announce 的时间、结果或错误、它报告的做种数与下载数，以及下次 announce 的时间。fib 的 `Torrent` 在 announce 循环（`announceLoop`、`tracker.Tiers`）里保有这些信息，却一项也不公开；磁力链接的 info 或 PEX 之后带来的 tracker 也看不到。
+
+**建议的 API。** `Torrent.Trackers() []TrackerInfo`，按 tier 顺序每个 URL 一项：`URL`、`Tier`、`Last`（时间）、`Next`（时间）、`Err`（上次的失败或警告信息）、`Seeders`、`Leechers`、`Downloaded`（来自上次 announce 或 scrape），announce 进行中时 `Updating` 为真；DHT、PEX 和 LSD 作为各自的来源，附上各自找到的 peer 数。
+
+**fit 如何使用。** `Role.Trackers` 改为返回它，Admin API 和页面原样显示。
+
+## A88：重新校验运行中任务的数据
+
+**状态。** 2026-11-09 由 I203 提出；未完成。在此之前，fit 的 `Role.Recheck` 把任务从客户端移除（`Remove(false)`），再不带续传数据重新加入，这会断开它的连接，并清零 fib 对其下载、上传量的计数。
+
+**问题。** 文件在客户端不知情时被改动或恢复后，需要重新校验（qBittorrent 的“强制重新校验”）。fib 只在加入任务时校验数据。
+
+**建议的 API。** `Torrent.Recheck()`：暂停任务的请求，忘掉已有的分块，在磁盘池上重跑初始校验（`StateChecking`），然后按原状态继续（暂停或运行），保留 peer、计数和限制；结束时发出 `EventChecked`。
+
+**fit 如何使用。** `Role.Recheck` 调用它，Admin API 的 `{"action": "recheck"}` 和 `fit bt` 含义不变。
+

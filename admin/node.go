@@ -93,6 +93,8 @@ const (
 	CapMedia = "media"
 	// CapSync: the sync role's pipelines, /sync/....
 	CapSync = "sync"
+	// CapBitTorrent: the BitTorrent roles' endpoints, /bittorrent/....
+	CapBitTorrent = "bittorrent"
 	// CapSchema: GET /schema, the JSON Schema of the config this fit
 	// takes, whose digest is schema_digest.
 	CapSchema = "schema"
@@ -314,7 +316,7 @@ type nodeBody struct {
 // capabilities lists what this fit's Admin API offers, sorted.
 func (cs *Configs) capabilities() []string {
 	caps := []string{CapNode, CapIfMatch, CapDryRun, CapText, CapEffective, CapDrift, CapVersions, CapTransfer,
-		CapReload, CapStatus, CapMetrics, CapCache, CapCachePrefix, CapLogs, CapLogsRecent, CapTokens, CapMedia, CapSchema, CapManaged, CapSync}
+		CapReload, CapStatus, CapMetrics, CapCache, CapCachePrefix, CapLogs, CapLogsRecent, CapTokens, CapMedia, CapSchema, CapManaged, CapSync, CapBitTorrent}
 	if cs.Sealer() != nil {
 		caps = append(caps, CapStore)
 	}

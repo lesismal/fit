@@ -40,6 +40,9 @@ Commands:
 	           [-c config]... [--once] <pipeline>); and a running fit's
 	           pipelines, through its Admin API: status, pause, resume,
 	           snapshot, checkpoint, test and dry-run
+	bt         a running fit's BitTorrent client, through its Admin API: list,
+	           add, inspect, pause, resume and remove torrents, set their
+	           limits and switch the alternative rates
 	store     export or import the config kept encrypted in admin.store
 	cluster    a manager's members, groups, diffs, metrics, certificates and
 	           logs, and its rollouts started, followed and aborted, through
@@ -86,6 +89,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSync(args[1:], stdout, stderr)
 	case "cluster":
 		return runCluster(args[1:], stdout, stderr)
+	case "bt":
+		return runBT(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
