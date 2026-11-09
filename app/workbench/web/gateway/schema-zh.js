@@ -1472,7 +1472,7 @@ window.FitSchemaZh = {
 "Send requests gzipped. On when left out.": "以 gzip 压缩发送请求。不设置时开启。",
 "The row's fields whose text is embedded, joined by separator in this order; a field missing or null is left out. A record with none of them passes without a vector.": "要嵌入其文本的行字段，按此顺序以 separator 连接；缺失或为 null 的字段跳过。这些字段都没有的记录不加向量直接通过。",
 "The user, with password_env, sent as the token user:password.": "用户，与 password_env 一起以令牌 user:password 发送。",
-"Qdrant's REST endpoint, as http://qdrant:6333. fib's client does not follow redirects.": "Qdrant 的 REST 端点，如 http://qdrant:6333。fib 的客户端不跟随重定向。"
+"Qdrant's REST endpoint, as http://qdrant:6333. fib's client does not follow redirects.": "Qdrant 的 REST 端点，如 http://qdrant:6333。fib 的客户端不跟随重定向。",
 "Publish messages as transient (delivery mode 1), which a classic queue keeps in memory alone; persistent when left out. Quorum and stream queues keep every message on disk.": "以 transient（投递模式 1）发布消息，经典队列只把它留在内存中；不写时为持久。仲裁队列与流队列把每条消息都存在磁盘上。",
 "How many deliveries of each queue may be unacknowledged at once (basic.qos): bounds what the broker sends ahead of the sinks. 1000 when left out or 0.": "每个队列可同时未确认的投递数（basic.qos）：限制代理领先目标发送的量。不写或为 0 时为 1000。",
 "How long connecting and each answer, the broker's receipt of a batch among them, may take. 30s when left out or 0.": "连接以及每次应答（包括代理对一批的回执）可用的时长。不写或为 0 时为 30s。",
