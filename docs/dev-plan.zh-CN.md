@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I211。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I223。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -350,6 +350,18 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I192 | CI 中的互通与恢复矩阵 | I176, I180, I183, I185 | done |
 | I193 | 对比 Filebeat、Canal、Debezium 和 DataX 的基准测试 | I192 | done |
 | I194 | 同步的文档与示例 | I190 | done |
+| I211 | RabbitMQ 作为源（队列与 stream 队列，目标拿到后确认）与目标（publisher confirms） | I163 | todo |
+| I212 | NATS JetStream 作为源（持久 pull consumer，序号存入检查点）与目标（`Nats-Msg-Id` 去重） | I163 | todo |
+| I213 | Apache Pulsar 作为源（按消息 ID 的 reader，或订阅）与目标（序列号与代理去重） | I163 | todo |
+| I214 | MQTT 3.1.1 与 5 作为源（持久会话，QoS 1/2 在目标拿到后确认）与目标 | I163 | todo |
+| I215 | SQL Server 客户端：TDS 7.4、TLS、SQL 认证、带类型参数的 RPC、批量导入、取消 | I163 | todo |
+| I216 | SQL Server 作为源：按 LSN 读 CDC 变更表，不加锁的快照在其 LSN 处衔接 | I215 | todo |
+| I217 | SQL Server 作为目标：`MERGE` upsert、删除、批量导入，检查点写在目标中实现精确一次 | I215, I191 | todo |
+| I218 | Doris 与 StarRocks 作为目标（带 label 的 Stream Load、删除标记）与源（按游标轮询） | I172 | todo |
+| I219 | Loki 与 OpenTelemetry 日志作为目标（push API、OTLP/HTTP），文件到它们并对比 Promtail | I166 | todo |
+| I220 | InfluxDB（line protocol）与 TDengine（schemaless）作为目标；MQTT 到 InfluxDB 端到端 | I214 | todo |
+| I221 | Milvus 与 Qdrant 作为目标，按键 upsert 与删除，配 `embed` 变换 | I163 | todo |
+| I222 | 第二批进入恢复矩阵、CI 互通分组、基准测试与文档 | I211–I221 | todo |
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
 | **BitTorrent** | | | |
@@ -5124,6 +5136,145 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
    Elasticsearch、MongoDB 和 Kafka 不需要 schema。
 10. **顺序：** 先做核心、变换、WASM 和文件（I163–I167），然后是基于 HTTP 的系统（I168–I171，借助 fib 的客户端成本低），然后是
     数据库（I172–I183），然后是 Kafka、Redis 和 S3，最后是运维。同意，还是先做数据库？
+
+### 同步：第二批连接器（2026-11-10 规划）
+
+用户于 2026-11-10 从清单中选定：四种消息队列（RabbitMQ、NATS JetStream、Pulsar、MQTT）、SQL Server、Doris 与
+StarRocks、日志投递（Loki、OpenTelemetry 日志）、时序库（InfluxDB、TDengine）与向量数据库（Milvus、Qdrant）。本次未选：
+Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、带 Schema Registry 的 Avro、syslog 与 GELF。
+每一项沿用第一批的规则：协议在 fit 中实现（`sync/*/wire`，不引入驱动，决策 036 第 1 条），数据库与消息代理的客户端在各自
+的 goroutine 上，基于 HTTP 的系统用 fib 的异步客户端，至少一次写入幂等的目标，用 `fitsync.Tester` 做连接测试，用针对假
+服务端的单元测试满足 98% 的覆盖率门槛，在 Docker 中做互通并归入 `sync-interop` 自己的一组，每一节记录待审查的决策。
+
+### I211 RabbitMQ 作为源与目标
+
+- **做**：AMQP 0-9-1 客户端（`sync/rabbitmq/wire`）：连接与信道协商、TLS、PLAIN 与 EXTERNAL 认证、心跳、流控、
+  `basic.qos`、`basic.consume`、`basic.ack` 与 `nack`、publisher confirms，帧大小有界。源 `rabbitmq`：以预取消费一个或多个
+  队列，每条投递在所有目标都拿到后才确认（源的位置在代理处：检查点中不存，重启后未确认的消息被重新投递），记录中带头部与
+  路由键；支持 quorum 队列与 stream 队列（stream 队列的偏移存入检查点）。目标 `rabbitmq`：按路由键模板发布到交换机，持久化，
+  一批在代理确认后才被确认，消息 ID 取自记录的位置。
+- **完成标准**：在 Docker 中与 RabbitMQ 3.13 和 4.x 互通；跨多次 kill 消费完一个队列不丢消息；stream 队列从其偏移续读；
+  publisher confirms 在代理收到前一直持有这一批。
+- **涉及**：`sync/rabbitmq`、`test/sync`、`docs`。
+
+### I212 NATS JetStream 作为源与目标
+
+- **做**：NATS 客户端（`sync/nats/wire`）：文本协议、TLS、令牌、用户名与密码、NKey 与 JWT 凭据，在集群各服务器间重连；
+  经其 JSON 主题调用 JetStream API。源 `nats`：持久的 pull consumer（可按需创建），消息在目标拿到后确认，流序号存入记录与
+  检查点（consumer 丢失或重建时从检查点的序号开始）；也支持核心 NATS 主题，至多一次，用于遥测。目标 `nats`：JetStream 发布，
+  `Nats-Msg-Id` 取自记录的位置，使流的去重窗口丢弃重发的一批；可选核心发布。
+- **完成标准**：在 Docker 中与 nats-server 2.10 和 2.11（三节点集群）互通；跨多次 kill 和服务器重启复制一个流后两边相同；
+  重发的一批只存一次。
+- **涉及**：`sync/nats`、`test/sync`、`docs`。
+
+### I213 Apache Pulsar 作为源与目标
+
+- **做**：Pulsar 客户端（`sync/pulsar/wire`）：二进制协议（其 protobuf 命令手工编码）、topic 查找与分区 topic、TLS 与令牌
+  认证、批量、压缩（LZ4、zstd、zlib、snappy）。源 `pulsar`：按检查点中的消息 ID 对每个分区用 reader 读取（无需订阅状态），
+  或按配置用持久订阅，在目标拿到后做累积确认。目标 `pulsar`：producer 的序列号取自记录的位置，配合代理去重，按键路由分区，
+  批量发送。
+- **完成标准**：在 Docker 中与 Pulsar 3.x 和 4.x standalone 互通；跨多次 kill 复制一个分区 topic 后两边相同；开启去重时重发
+  的一批只存一次。
+- **涉及**：`sync/pulsar`、`test/sync`、`docs`。
+
+### I214 MQTT 作为源与目标
+
+- **做**：支持 3.1.1 与 5 的 MQTT 客户端（`sync/mqtt/wire`）：TLS、用户名与密码、keep-alive、持久会话、QoS 0、1、2、主题
+  过滤器、MQTT 5 属性（用户属性、消息过期、主题别名）。源 `mqtt`：以持久会话订阅，QoS 1 与 2 的消息在目标拿到后才确认
+  （`PUBACK`、`PUBCOMP`），主题作为命名空间，载荷经编解码器解析。目标 `mqtt`：按 QoS 发布到主题模板，可选 retain，在途消息
+  数有界。
+- **完成标准**：在 Docker 中与 EMQX 5 和 Mosquitto 2 互通；fit 被 kill 期间发布的 QoS 1 消息在其重启后全部投递；QoS 2 每条
+  只投递一次。
+- **涉及**：`sync/mqtt`、`test/sync`、`docs`。
+
+### I215 SQL Server 客户端：TDS、认证与查询
+
+- **做**：包 `sync/mssql/wire`：TDS 7.4 prelogin、TLS（按 SQL Server 在 TDS 内部的协商方式）、SQL 认证、批与 RPC 调用
+  （带类型参数的 `sp_executesql`）、包含各种列类型的结果集（包括 `datetime2`、`datetimeoffset`、`decimal`、
+  `uniqueidentifier`、`varbinary(max)`、`xml`、`nvarchar(max)` 的 PLP 流）、批量导入（`INSERT BULK`）、事务、取消（attention
+  包）、每次调用都有超时。
+- **完成标准**：在 Docker 中与 SQL Server 2019 和 2022（Linux 镜像）互通：每种类型往返一致；被取消的查询在服务端被取消；
+  服务端在结果中途关闭连接时返回错误而不是挂起。
+- **涉及**：`sync/mssql/wire`、`test/sync`。
+
+### I216 SQL Server 作为源
+
+- **做**：源 `mssql`：按 LSN 轮询 SQL Server 的 CDC 变更表（`cdc.fn_cdc_get_all_changes_*`），每个事务的变更放在一起，LSN
+  存入检查点；对每张被捕获的表不加锁按键读取快照（启用了快照隔离时使用它），并像 I175 一样在快照前读到的 LSN 处衔接；经
+  `cdc.ddl_history` 看到 DDL；检查数据库与表是否开启 CDC，错误中给出开启的 SQL。可选更轻量的 change tracking（只有键，再
+  读回行）。
+- **完成标准**：与 SQL Server 2019 和 2022 互通：在写入下读取快照并继续读取变更，跨多次 kill 后与源相同；新加入 CDC 的表
+  会被读取。
+- **涉及**：`sync/mssql`、`test/sync`、`docs`。
+
+### I217 SQL Server 作为目标
+
+- **做**：目标 `mssql`：按键用 `MERGE`（或按配置先 `UPDATE` 再 `INSERT`）upsert，按键删除，每批一个事务或保留源的事务，
+  快照用批量导入，检查点写在目标的事务中以实现精确一次（同 I191）。
+- **完成标准**：互通：MySQL 到 SQL Server、SQL Server 到 SQL Server 的流水线在随机位置被 kill 后结果相同；
+  `checkpoint: sink` 时精确一次成立。
+- **涉及**：`sync/mssql`、`test/sync`、`docs`。
+
+### I218 Doris 与 StarRocks 作为目标与源
+
+- **做**：目标 `doris`（也用于 StarRocks）：用 fib 的客户端经 HTTP 做 Stream Load，JSON 或 CSV 请求体，label 取自批的位置，
+  重发的一批会以已导入被拒绝；删除经 unique 模型的删除标记（`__DORIS_DELETE_SIGN__`，StarRocks 的 `__op`），可选部分列更新，
+  跟随 frontend 到 backend 的重定向。源 `doris`：经 MySQL 协议（I172 的客户端）按查询读快照并按游标列轮询，与 I170 对
+  ClickHouse 的做法相同。
+- **完成标准**：在 Docker 中与 Doris 2.1 或 3.0 和 StarRocks 3.x 互通；重发的一批只导入一次；重放 upsert 与删除后行正确。
+- **涉及**：`sync/doris`、`test/sync`、`docs`。
+
+### I219 Loki 与 OpenTelemetry 日志作为目标
+
+- **做**：目标 `loki`：push API（`/loki/api/v1/push`，JSON，或 snappy 压缩的 protobuf），按模板生成标签确定流（基数有界：
+  只取配置的字段作标签），行经编解码器生成，按租户设置 `X-Scope-OrgID`，按 Loki 的规则处理乱序。目标 `otlp_logs`：OTLP/HTTP
+  日志记录（protobuf），资源与日志属性由记录映射，复用 fit 追踪导出已有的部分。两者都批量发送，遇 429 与 5xx 重试。
+- **完成标准**：在 Docker 中与 Loki 3 和 OpenTelemetry Collector 互通；跨多次 kill 把文件送到 Loki 和 OTLP 不丢数据；在 I193
+  的测试工具中与 Filebeat 并列做基准测试。
+- **涉及**：`sync/loki`、`sync/otlp`、`test/sync`、`bench/sync`、`docs`。
+
+### I220 InfluxDB 与 TDengine 作为目标
+
+- **做**：目标 `influxdb`：以 line protocol 写入 InfluxDB 2 的 `/api/v2/write`（可选 3 的 `/api/v3/write_lp`、1.x 的
+  `/write`），measurement、tag 与 field 按配置从记录映射，时间戳取自字段或提交时间，设置精度，gzip 压缩。目标 `tdengine`：
+  经 TDengine 的 REST 接口写 schemaless line protocol（或用 SQL `INSERT`，按模板确定超级表与子表）。写入按序列与时间幂等。
+- **完成标准**：在 Docker 中与 InfluxDB 2、3 和 TDengine 3 互通；同一批写两次每个点只存一次；以 MQTT（I214）到 InfluxDB 作为
+  端到端的物联网流水线。
+- **涉及**：`sync/influxdb`、`sync/tdengine`、`test/sync`、`docs`。
+
+### I221 向量数据库作为目标：Milvus 与 Qdrant
+
+- **做**：目标 `qdrant`：经 Qdrant 的 REST API 按由键稳定导出的 ID（UUID 或整数）upsert 点，向量取自字段，其余作为 payload，
+  按 ID 删除；目标 `milvus`：经 Milvus 2.4+ 的 REST v2 API 按主键 upsert 与删除。变换 `embed` 通过兼容 OpenAI 的 embeddings
+  API（fit 自己的 `llm` 代理或任意端点）从文本字段计算向量，批量调用，按内容哈希缓存，失败按 `on_error` 处理。
+- **完成标准**：在 Docker 中与 Qdrant 1.x 和 Milvus 2.4+（standalone）互通；带 embedding 复制 PostgreSQL 的行，跨多次 kill
+  后两者结果相同；删除到达两者。
+- **涉及**：`sync/qdrant`、`sync/milvus`、`sync/transforms`、`test/sync`、`docs`。
+
+### I222 第二批进入矩阵、基准测试与文档
+
+- **做**：新连接器进入 I192 的恢复矩阵（可作源的：RabbitMQ、NATS、Pulsar、MQTT、SQL Server、Doris），并进入 CI 的
+  `sync-interop` 分组（`mq` 任务含 RabbitMQ、NATS、Pulsar 与 MQTT，`mssql` 任务，`olap` 任务含 Doris 与 StarRocks，`obs`
+  任务含 Loki、OpenTelemetry、InfluxDB、TDengine、Qdrant 与 Milvus）；I193 的测试工具在有常用对手的地方增加场景（RabbitMQ
+  与 MQTT 到 Kafka 对比 Kafka Connect 的连接器，SQL Server 到 Kafka 对比 Debezium，文件到 Loki 对比 Promtail）；
+  `docs/sync.md` 与 fit-examples 的示例覆盖每个连接器。
+- **完成标准**：CI 的任务全部通过；基准主机的运行写成报告（规则 24）；指南与示例能加载（`TestConfigExamples`、fit-examples
+  的 validate）。
+- **涉及**：`test/sync`、`.github/workflows`、`bench/sync`、`docs`、fit-examples。
+
+**待审查的决策**（规划时做出，2026-11-10；在用户裁定前有效）：
+
+1. **每种协议都在 fit 中实现，与第一批相同**：AMQP 0-9-1、NATS、Pulsar 的二进制协议（手工编码 protobuf）、MQTT、TDS。
+   备选：用驱动（amqp091-go、nats.go、pulsar-client-go、paho、go-mssqldb）——工作量更小，但违反决策 036 第 1 条，且依赖树
+   很大（尤其是 pulsar-client-go）。
+2. **位置由代理自己保存的（RabbitMQ 队列、NATS consumer、Pulsar 订阅、MQTT 会话）只在目标拿到后才确认**，fit 的检查点中
+   不存；代理有偏移的（RabbitMQ stream 队列、JetStream 序号、Pulsar 消息 ID）也存入检查点，使丢失的 consumer 不会丢失位置。
+3. **SQL Server 经其 CDC 变更表，而不是读取事务日志**；日志格式没有文档。可选更轻量的 change tracking。
+4. **Doris 与 StarRocks 共用一个连接器**，用 `flavor` 参数区分，因为 Stream Load 与 unique 模型的删除标记只是名字不同。
+5. **向量目标配一个 `embed` 变换**调用 embeddings API，使从数据库到向量库的流水线无需别的组件；配置了 fit 自己的 `llm` 代理时
+   默认使用它。
+6. **顺序**：I211–I214（各队列，彼此独立），I215 之后是 I216 与 I217（SQL Server），I218 到 I221（基于 HTTP 的目标，独立且
+   成本低），然后 I222。队列与 HTTP 目标可以像第一批一样并行开发。
 
 ## BitTorrent：下载与做种、tracker、发布
 

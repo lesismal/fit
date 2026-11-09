@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I211.
+Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -360,6 +360,18 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I211.
 | I192 | The interoperability and recovery matrix in CI | I176, I180, I183, I185 | done |
 | I193 | Benchmarks against Filebeat, Canal, Debezium and DataX | I192 | done |
 | I194 | Sync's documentation and examples | I190 | done |
+| I211 | RabbitMQ as a source (queues and stream queues, acknowledged after the sinks) and a sink (publisher confirms) | I163 | todo |
+| I212 | NATS JetStream as a source (a durable pull consumer, the sequence in the checkpoint) and a sink (`Nats-Msg-Id` deduplication) | I163 | todo |
+| I213 | Apache Pulsar as a source (readers from message IDs, or a subscription) and a sink (sequence IDs, broker deduplication) | I163 | todo |
+| I214 | MQTT 3.1.1 and 5 as a source (persistent sessions, QoS 1/2 acknowledged after the sinks) and a sink | I163 | todo |
+| I215 | A SQL Server client: TDS 7.4, TLS, SQL authentication, RPC with typed parameters, bulk load, cancellation | I163 | todo |
+| I216 | SQL Server as a source: CDC change tables by LSN, a snapshot without locks handed over at its LSN | I215 | todo |
+| I217 | SQL Server as a sink: `MERGE` upserts, deletes, bulk load, exactly once with the checkpoint in the sink | I215, I191 | todo |
+| I218 | Doris and StarRocks as a sink (Stream Load with labels, the delete sign) and a source (a cursor polled) | I172 | todo |
+| I219 | Loki and OpenTelemetry logs as sinks (push API, OTLP/HTTP), files to them against Promtail | I166 | todo |
+| I220 | InfluxDB (line protocol) and TDengine (schemaless) as sinks; MQTT to InfluxDB end to end | I214 | todo |
+| I221 | Milvus and Qdrant as sinks, upserts and deletes by key, with an `embed` transform | I163 | todo |
+| I222 | The second round in the recovery matrix, CI's interop families, the benchmarks and the docs | I211–I221 | todo |
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 | **BitTorrent** | | | |
@@ -7155,6 +7167,182 @@ Made while planning; each stands until the user rules on it, and I163 writes the
 10. **Order:** core, transforms, WASM and files first (I163–I167), then the HTTP-based systems
     (I168–I171, cheap with fib's client), then the databases (I172–I183), then Kafka, Redis and S3,
     then operations. Agreed, or databases first?
+
+### Sync, the second round of connectors (planned 2026-11-10)
+
+The user chose these from a list on 2026-11-10: four message queues (RabbitMQ, NATS JetStream,
+Pulsar, MQTT), SQL Server, Doris and StarRocks, log shipping (Loki, OpenTelemetry logs), time series
+(InfluxDB, TDengine) and vector databases (Milvus, Qdrant). Not chosen this time: Oracle, Cassandra
+and ScyllaDB, DynamoDB, Iceberg, Snowflake and BigQuery, Avro with a schema registry, syslog and
+GELF. Every item follows the first round's rules: protocols written in fit (`sync/*/wire`, no
+drivers, decision 036 item 1), database and broker clients on goroutines of their own, HTTP-based
+systems on fib's asynchronous client, at least once into idempotent sinks, `fitsync.Tester` for
+connection tests, unit tests against fakes for the 98% coverage floor, interop in Docker in its own
+`sync-interop` family, and decisions pending review in each section.
+
+### I211 RabbitMQ as a source and a sink
+
+- **Do**: an AMQP 0-9-1 client (`sync/rabbitmq/wire`): connection and channel negotiation, TLS,
+  PLAIN and EXTERNAL auth, heartbeats, flow control, `basic.qos`, `basic.consume`, `basic.ack` and
+  `nack`, publisher confirms, frames bounded. Source `rabbitmq`: one or more queues consumed with a
+  prefetch, each delivery acknowledged only once every sink has it (the source's position is the
+  broker's: nothing in the checkpoint, unacknowledged messages redelivered after a restart), headers
+  and the routing key in the record; quorum and stream queues (a stream queue's offset in the
+  checkpoint). Sink `rabbitmq`: publish to an exchange with a routing key template, persistent, a
+  batch confirmed before it is acknowledged, a message ID from the record's position.
+- **Done when**: interop with RabbitMQ 3.13 and 4.x in Docker; a queue drained across kills loses
+  nothing; a stream queue resumes from its offset; publisher confirms hold a batch until the broker
+  has it.
+- **Touches**: `sync/rabbitmq`, `test/sync`, `docs`.
+
+### I212 NATS JetStream as a source and a sink
+
+- **Do**: a NATS client (`sync/nats/wire`): the text protocol, TLS, token, user and password, NKey
+  and JWT credentials, reconnects across a cluster's servers; the JetStream API over its JSON
+  subjects. Source `nats`: a durable pull consumer (created if asked) whose messages are acknowledged
+  once the sinks have them, the stream sequence in the record and the checkpoint (a consumer lost or
+  recreated starts from the checkpoint's sequence); core NATS subjects too, at most once, for
+  telemetry. Sink `nats`: JetStream publish with `Nats-Msg-Id` from the record's position, so the
+  stream's duplicate window drops a batch sent again; core publish as an option.
+- **Done when**: interop with nats-server 2.10 and 2.11 (a three-node cluster) in Docker; a stream
+  copied across kills and a server restart ends equal; a batch sent twice is stored once.
+- **Touches**: `sync/nats`, `test/sync`, `docs`.
+
+### I213 Apache Pulsar as a source and a sink
+
+- **Do**: a Pulsar client (`sync/pulsar/wire`): the binary protocol (its protobuf commands encoded by
+  hand), topic lookup and partitioned topics, TLS and token auth, batches, compression (LZ4, zstd,
+  zlib, snappy). Source `pulsar`: a reader over each partition from the message IDs in the
+  checkpoint (no subscription state needed), or a durable subscription acknowledged cumulatively
+  after the sinks, as configured. Sink `pulsar`: a producer with sequence IDs from the record's
+  position and broker deduplication, the key for partition routing, batched.
+- **Done when**: interop with Pulsar 3.x and 4.x standalone in Docker; a partitioned topic copied
+  across kills ends equal; a batch sent twice is stored once with deduplication on.
+- **Touches**: `sync/pulsar`, `test/sync`, `docs`.
+
+### I214 MQTT as a source and a sink
+
+- **Do**: an MQTT client (`sync/mqtt/wire`) for 3.1.1 and 5: TLS, user and password, keep-alive,
+  persistent sessions, QoS 0, 1 and 2, topic filters, MQTT 5 properties (user properties, message
+  expiry, topic aliases). Source `mqtt`: subscriptions with a persistent session, QoS 1 and 2
+  messages acknowledged (`PUBACK`, `PUBCOMP`) only once the sinks have them, the topic as the
+  namespace, payloads through a codec. Sink `mqtt`: publish to a topic template at a QoS, retain as
+  an option, in-flight messages bounded.
+- **Done when**: interop with EMQX 5 and Mosquitto 2 in Docker; QoS 1 messages published while fit
+  is killed are all delivered after its restart; QoS 2 delivers each once.
+- **Touches**: `sync/mqtt`, `test/sync`, `docs`.
+
+### I215 A SQL Server client: TDS, authentication and queries
+
+- **Do**: package `sync/mssql/wire`: TDS 7.4 prelogin, TLS (as SQL Server negotiates it inside
+  TDS), SQL authentication, batches and RPC calls (`sp_executesql` with typed parameters), result
+  sets with every column type (including `datetime2`, `datetimeoffset`, `decimal`, `uniqueidentifier`,
+  `varbinary(max)`, `xml`, `nvarchar(max)` PLP streams), bulk load (`INSERT BULK`), transactions,
+  cancellation (attention packets), timeouts on every call.
+- **Done when**: interop with SQL Server 2019 and 2022 (Linux images) in Docker: every type
+  round-trips; a cancelled query is cancelled on the server; a server closing mid-result is an error,
+  not a hang.
+- **Touches**: `sync/mssql/wire`, `test/sync`.
+
+### I216 SQL Server as a source
+
+- **Do**: source `mssql`: changes from SQL Server's CDC change tables (`cdc.fn_cdc_get_all_changes_*`)
+  polled by LSN, each transaction's changes together, the LSN in the checkpoint; a snapshot of each
+  captured table read by key without locks (snapshot isolation where enabled) and handed over at the
+  LSN read before it, as I175 does; DDL seen through `cdc.ddl_history`; a check that CDC is on for the
+  database and tables, with the SQL to turn it on in the error. Change tracking as a lighter option
+  (keys only, rows read back).
+- **Done when**: interop with SQL Server 2019 and 2022: a snapshot under writes and the stream after
+  it end equal to the source across kills; a table added to CDC is picked up.
+- **Touches**: `sync/mssql`, `test/sync`, `docs`.
+
+### I217 SQL Server as a sink
+
+- **Do**: sink `mssql`: upserts by key with `MERGE` (or `UPDATE` then `INSERT`, as configured),
+  deletes by key, a batch per transaction or the source's transactions kept, bulk load for snapshots,
+  the checkpoint in the sink's transaction for exactly once (as I191).
+- **Done when**: interop: MySQL to SQL Server and SQL Server to SQL Server pipelines killed at random
+  points end equal; exactly once holds with `checkpoint: sink`.
+- **Touches**: `sync/mssql`, `test/sync`, `docs`.
+
+### I218 Doris and StarRocks as a sink and a source
+
+- **Do**: sink `doris` (also for StarRocks): Stream Load over HTTP on fib's client, JSON or CSV
+  bodies, a label from the batch's positions so a batch sent again is refused as already loaded,
+  deletes through the unique model's delete sign (`__DORIS_DELETE_SIGN__`, StarRocks's `__op`),
+  partial column updates as an option, the frontend's redirect to a backend followed. Source `doris`:
+  a snapshot by query and polling by a cursor column over the MySQL protocol (I172's client), as
+  I170 does for ClickHouse.
+- **Done when**: interop with Doris 2.1 or 3.0 and StarRocks 3.x in Docker; a batch sent twice is
+  loaded once; upserts and deletes replayed end with the right rows.
+- **Touches**: `sync/doris`, `test/sync`, `docs`.
+
+### I219 Loki and OpenTelemetry logs as sinks
+
+- **Do**: sink `loki`: the push API (`/loki/api/v1/push`, JSON, or protobuf with snappy), streams
+  keyed by labels from a template (bounded cardinality: labels from configured fields only), lines
+  from a codec, per-tenant `X-Scope-OrgID`, out-of-order handling as Loki allows. Sink `otlp_logs`:
+  OTLP/HTTP log records (protobuf), resource and log attributes mapped from the record, reusing what
+  fit's tracing export already sends. Both batched, retried on 429 and 5xx.
+- **Done when**: interop with Loki 3 and the OpenTelemetry Collector in Docker; files to Loki and to
+  OTLP across kills lose nothing; a benchmark beside Filebeat's in I193's harness.
+- **Touches**: `sync/loki`, `sync/otlp`, `test/sync`, `bench/sync`, `docs`.
+
+### I220 InfluxDB and TDengine as sinks
+
+- **Do**: sink `influxdb`: line protocol written to InfluxDB 2's `/api/v2/write` (and 3's
+  `/api/v3/write_lp`, 1.x's `/write` as options), the measurement, tags and fields mapped from the
+  record by configuration, the timestamp from a field or the commit time, precision set, gzip.
+  Sink `tdengine`: schemaless line protocol over TDengine's REST interface (or SQL `INSERT` with
+  super tables and subtables from a template). Writes are idempotent by series and time.
+- **Done when**: interop with InfluxDB 2 and 3 and TDengine 3 in Docker; a batch written twice leaves
+  each point once; MQTT (I214) to InfluxDB as the end-to-end IoT pipeline.
+- **Touches**: `sync/influxdb`, `sync/tdengine`, `test/sync`, `docs`.
+
+### I221 Vector databases as sinks: Milvus and Qdrant
+
+- **Do**: sink `qdrant`: points upserted by an ID from the key (a UUID or integer derived stably),
+  vectors from a field, the rest as payload, deletes by ID, over Qdrant's REST API; sink `milvus`:
+  upserts and deletes by primary key over Milvus 2.4+'s REST v2 API. A transform `embed` computes a
+  vector from text fields through an OpenAI-compatible embeddings API (fit's own `llm` proxy or any
+  endpoint), batched, cached by content hash, its failures handled by `on_error`.
+- **Done when**: interop with Qdrant 1.x and Milvus 2.4+ (standalone) in Docker; PostgreSQL rows
+  copied with embeddings across kills end equal in both; deletes reach both.
+- **Touches**: `sync/qdrant`, `sync/milvus`, `sync/transforms`, `test/sync`, `docs`.
+
+### I222 The second round in the matrix, the benchmarks and the docs
+
+- **Do**: the new connectors in I192's recovery matrix (as sources where they are: RabbitMQ, NATS,
+  Pulsar, MQTT, SQL Server, Doris) and in CI's `sync-interop` families (a `mq` job for RabbitMQ, NATS,
+  Pulsar and MQTT, an `mssql` job, an `olap` job for Doris and StarRocks, an `obs` job for Loki,
+  OpenTelemetry, InfluxDB, TDengine, Qdrant and Milvus); I193's harness gains scenarios against
+  the usual movers where there are any (RabbitMQ and MQTT to Kafka against Kafka Connect's, SQL
+  Server to Kafka against Debezium, files to Loki against Promtail); `docs/sync.md` and the examples
+  in fit-examples cover each connector.
+- **Done when**: CI's jobs green; a benchmark host run in a report (rule 24); the guide and examples
+  load (`TestConfigExamples`, fit-examples' validate).
+- **Touches**: `test/sync`, `.github/workflows`, `bench/sync`, `docs`, fit-examples.
+
+**Decisions pending review** (made while planning, 2026-11-10; each stands until the user rules on it):
+
+1. **Every protocol written in fit, as in the first round**: AMQP 0-9-1, NATS, Pulsar's binary
+   protocol (protobuf by hand), MQTT, TDS. Alternative: drivers (amqp091-go, nats.go, pulsar-client-go,
+   paho, go-mssqldb) — less work, against decision 036 item 1 and with large dependency trees
+   (pulsar-client-go especially).
+2. **Brokers whose position is their own (RabbitMQ queues, NATS consumers, Pulsar subscriptions,
+   MQTT sessions) acknowledge only after the sinks**, and keep nothing in fit's checkpoint; where the
+   broker has an offset (RabbitMQ stream queues, JetStream sequences, Pulsar message IDs) it is in the
+   checkpoint too, so a lost consumer does not lose the place.
+3. **SQL Server through its CDC tables, not by reading its transaction log**; the log's format is
+   undocumented. Change tracking as the lighter option.
+4. **Doris and StarRocks share one connector** with a `flavor` param, since Stream Load and the
+   unique model's delete sign differ only in names.
+5. **The vector sinks get an `embed` transform** that calls an embeddings API, so a pipeline from a
+   database to a vector store needs nothing else; fit's own `llm` proxy is the default endpoint when
+   configured.
+6. **Order**: I211–I214 (the queues, each independent), I215 then I216 and I217 (SQL Server), I218
+   to I221 (the HTTP-based sinks, independent and cheap), then I222. The queues and the HTTP sinks can
+   be built in parallel, as the first round's were.
 
 ## BitTorrent: downloading and seeding, a tracker, publishing
 
