@@ -4132,6 +4132,24 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I192 的修复：保存源的起点、ClickHouse 快照行的版本 — 已完成
+
+- **先快照后流的源在第一个检查点之前被杀不再丢变更**（I192 的决定 5）：`fitsync.Run.SaveStart`，没有检查点的源用它在第一条
+  记录之前把重启时应当继续的位置交给运行时，运行时立即保存为检查点。PostgreSQL 给出导出点上、没有完成任何块的快照状态，MySQL
+  给出 binlog 起点，MongoDB 给出起始令牌，TiDB 给出快照的 TSO：在第一个检查点之前被杀的运行会重读快照，并从第一次的起点把流
+  重放在它之上。
+- **ClickHouse 默认的版本不再敌不过快照**（决定 6）：没有提交时间的记录版本为 0，低于任何变更；schema 的描述随之更新（两种语言）。
+- **矩阵**在每个源的第一次运行的第一个检查点之前、目标中已有行时杀掉它（去掉 `settle` 和 `FIT_SYNC_MATRIX_EARLY`），ClickHouse
+  用目标的默认值写入（去掉 `version_field` 和 `deletes: delete`）；决定 036 增加这两条规则。
+- **测试**：每部分都有针对假服务器的单元测试（`sync` 的 `SaveStart` 测试：保存起点、从它重启、在写入时或之前被杀、保存失败、
+  作业中没有；每个源在第一条记录前保存起点、从它运行、起点未保存），`-race`，不用容器：sync 95.7%（新代码全部覆盖）、
+  postgres 97.5%、mysql 96.6%、mongo 99.3%、tidb 96.7%、clickhouse 97.9%。在 macOS（Docker Desktop，14 CPU）上：
+  `SYNC_FAMILIES=matrix` 早杀，五个源，4 次运行（20 个子测试）全部通过；禁用 `SaveStart` 时 PostgreSQL、MySQL 和 MongoDB 9 次
+  全部失败（目标中留下 1 到 12 个已删除的行），TiDB 通过；postgres（32 秒）、mongo（90 秒）、mysql（307 秒）和 tidb（144 秒）
+  族以及 `TestClickHouse*` 通过。
+- **缺口**：计划 I192 一节的决定 5 和 6 以及决定 036，待审查；ClickHouse 同一版本的平局按写入顺序保留，被去重的重放可能弄错顺序
+  （这些情况仍用 `version_field`）；TiDB 的起点只在 `tidb_gc_life_time` 之内有效。
+
 ### I192 互通与恢复矩阵 — 已完成
 
 - **`TestMatrix`**（`test/sync/matrix_test.go`）：每个源（PostgreSQL、MySQL 和 MariaDB、MongoDB、经 TiCDC 的 TiDB、Kafka 中的

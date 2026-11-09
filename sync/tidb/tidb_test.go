@@ -258,6 +258,42 @@ func TestSnapshotThenChanges(t *testing.T) {
 	}
 }
 
+// TestSnapshotSavesStart: the snapshot's timestamp, none of it read, is
+// saved before the first record; a run from it reads the snapshot again at
+// that timestamp. A start not saved fails the run.
+func TestSnapshotSavesStart(t *testing.T) {
+	db := &fakeDB{ts: "1000"}
+	for i := range int64(3) {
+		db.rows = append(db.rows, row(i+1))
+	}
+	s := newSource(t, map[string]any{"tables": []string{"d.t"}, "time_zone": "UTC"}, db, &fakeStream{})
+	stop := errors.New("the sink failed")
+	var starts []string
+	err := s.Run(context.Background(), &fitsync.Run{
+		Start: func(p fitsync.Position) error { starts = append(starts, string(p)); return nil },
+		Emit: func(*fitsync.Record) error {
+			if len(starts) != 1 {
+				t.Error("a record before the start was saved")
+			}
+			return stop
+		},
+	})
+	if err != stop || len(starts) != 1 || starts[0] != `{"ts":1000,"snapshot":{"table":0}}` {
+		t.Fatal(err, starts)
+	}
+	db.ts, db.queries = "2000", nil
+	recs, err := run(t, s, fitsync.Position(starts[0]), 0)
+	if err != nil || len(recs) != 3 || !strings.Contains(strings.Join(db.queries, ";"), "SET @@tidb_snapshot = '1000'") {
+		t.Fatalf("%v %d %v", err, len(recs), db.queries)
+	}
+	broke := errors.New("the disk is full")
+	err = s.Run(context.Background(), &fitsync.Run{Start: func(fitsync.Position) error { return broke },
+		Emit: func(*fitsync.Record) error { t.Error("a record"); return nil }})
+	if err != broke {
+		t.Fatal(err)
+	}
+}
+
 func TestSimpleAndNever(t *testing.T) {
 	db := &fakeDB{ts: "5"}
 	st := &fakeStream{}

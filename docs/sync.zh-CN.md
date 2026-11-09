@@ -244,7 +244,9 @@ sync {
 
 目标对一批中属于同一张表的每段记录执行一次 `INSERT ... FORMAT JSONEachRow`，带由这段记录生成的
 `insert_deduplication_token`，所以相同的记录再写一次会被服务器丢弃。更新和删除写成按键排序的
-`ReplacingMergeTree(_version, _deleted)` 的行，用 `FINAL` 读取时得到每个键的最后状态。表由你创建：
+`ReplacingMergeTree(_version, _deleted)` 的行，用 `FINAL` 读取时得到每个键的最后状态。行的版本是它的提交时间
+（Unix 纳秒），或 `version_field` 的值；没有提交时间的记录（快照的行）版本为 0，因此永远不会压过变更，同一版本的行保留最后
+写入的。表由你创建：
 
 ```sql
 CREATE TABLE shop.orders (id UInt64, status String, total Decimal(12, 2),
@@ -888,9 +890,9 @@ PostgreSQL 13 到 17、MongoDB 6、7 和 8（副本集）、Kafka 3.9 和 Redpan
 在随机时刻杀掉流水线，并在最后把目标与源比较；`test/sync/exactly_once_test.go` 统计写入的每一行，以检查恰好一次。
 
 **互操作与恢复矩阵**（`TestMatrix`，`test/sync/matrix_test.go`）让每个源同时写入一组固定的目标：PostgreSQL 17、MySQL 8.4、
-MongoDB 8、Elasticsearch、ClickHouse（按行中一列做版本的 `ReplacingMergeTree`，删除用 `DELETE`）和 Redis（每行一个键）。
+MongoDB 8、Elasticsearch、ClickHouse（目标的默认值：按提交时间做版本的 `ReplacingMergeTree(_version, _deleted)`，删除用标记）和 Redis（每行一个键）。
 源有 PostgreSQL、MySQL 和 MariaDB、MongoDB、经 TiCDC 的 TiDB，以及 Kafka 中的 Debezium 事件。每个源先有一张表的行（它的
-快照），然后写入插入、更新、删除、改键、NULL 和多变更事务组成的混合负载，同时流水线在随机的崩溃点被一次次杀掉；最后每个
+快照），然后写入插入、更新、删除、改键、NULL 和多变更事务组成的混合负载，同时流水线在随机的崩溃点被一次次杀掉，第一次在它的第一个检查点之前、目标中已有行时；最后每个
 目标都必须逐行与源相同，否则测试列出每个目标中缺少、多出或不同的行。
 
 服务器按族划分，每族是 CI 中一个单独的任务，并行运行（`SYNC_FAMILIES`）：

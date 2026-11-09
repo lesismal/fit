@@ -5810,6 +5810,31 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   pending review.
 
 
+### I192 fixes: a source's start saved, ClickHouse's snapshot versions — done
+
+- **A source of a snapshot then a stream no longer loses changes when killed before its first
+  checkpoint** (I192's decision 5): `fitsync.Run.SaveStart`, by which a source with no checkpoint
+  gives the runtime, before its first record, the position a restart resumes from, saved as the
+  checkpoint at once. PostgreSQL gives its snapshot's state at the exported point with no chunk done,
+  MySQL its binlog start, MongoDB its start token, TiDB its snapshot's TSO: a run killed before its
+  first checkpoint reads the snapshot again and replays the stream from the first start over it.
+- **ClickHouse's default versions no longer lose to a snapshot** (decision 6): a record without a
+  commit time is version 0, below any change; the schema's descriptions say so (both languages).
+- **The matrix** kills every source's first run before its first checkpoint, with rows in the sinks
+  (`settle` and `FIT_SYNC_MATRIX_EARLY` gone), and writes ClickHouse with the sink's defaults
+  (`version_field` and `deletes: delete` gone); decision 036 gains both rules.
+- **Tests**: unit tests against fakes for each part (`sync`'s `SaveStart` tests: the start saved,
+  a restart from it, killed writing it or before it, a save failing, none in jobs; each source's
+  start before its first record, a run from it, a start not saved), `-race`, without containers:
+  sync 95.7% (the new code covered whole), postgres 97.5%, mysql 96.6%, mongo 99.3%, tidb 96.7%,
+  clickhouse 97.9%. On macOS (Docker Desktop, 14 CPUs): `SYNC_FAMILIES=matrix` with early kills, all
+  five sources, 4 runs (20 subtests) passing; with `SaveStart` disabled, PostgreSQL, MySQL and MongoDB
+  failed 9 of 9 (1 to 12 deleted rows left in the sinks), TiDB passed; the postgres (32 s), mongo
+  (90 s), mysql (307 s) and tidb (144 s) families and `TestClickHouse*` passing.
+- **Gaps**: decisions 5 and 6 in the plan's I192 section and decision 036, pending review; ties at
+  one ClickHouse version are kept by write order, which a deduplicated replay can misorder
+  (`version_field` stays for them); TiDB's start holds only within `tidb_gc_life_time`.
+
 ### I192 The interoperability and recovery matrix — done
 
 - **`TestMatrix`** (`test/sync/matrix_test.go`): each source (PostgreSQL, MySQL and MariaDB, MongoDB,
