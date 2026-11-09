@@ -7328,6 +7328,20 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
     at the same position; the `kafka` and `pulsar` sources write every partition's place in each
     position, as the run interleaved them, so a NATS stream fed by them stores replayed records again
     (at least once). The fix is for `RecordIDs` and those sources together (I213's decision 1).
+13. **Found in CI on sync2 (2026-11-10): a consumer fit makes is made again when it delivered messages
+    the run never read.** `TestNATSStreamAcrossKills` lost 236 of 20,000 messages on nats-2.10 (19764
+    copied); locally about one run in ten lost 46 to 1,631, on both versions. Not `RecordIDs`: every
+    lost message was emitted or delivered, never published, and IDs of origins do not collide. Two
+    paths, both ending in a later message acknowledged under ack all, which acknowledged the lost ones:
+    (a) a run starting after a node's restart read the consumer's info from a leader whose state was
+    behind (nothing pending, delivered at the floor), kept the consumer, and was then delivered from
+    where the killed run had stopped; (b) a pull answered 409 by a leader's move after the consumer
+    had delivered to it, the consumer found again and read on past them. Every delivery, redeliveries
+    too, raises the consumer sequence (checked on 2.10 and 2.11), so the source now checks each
+    delivery follows the last it took, from the info's when it makes or finds the consumer at start,
+    and makes the consumer again from the floor at a gap, or when found again after a 409 with a
+    delivered sequence not its own. Alternatives: ack policy explicit (decision 2's alternative);
+    trusting the info (what failed).
     **Fixed** 2026-11-10 (branch `fix-recordid`, I213's decisions 1 and 10-13): a record carries an
     `Origin` its source sets, the same however the run interleaves partitions, and `RecordIDs` names it
     by that before its position; the `kafka` and `pulsar` sources set it, and so does `nats` (stream

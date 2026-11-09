@@ -135,6 +135,9 @@ func TestNATSStreamAcrossKills(t *testing.T) {
 	for _, n := range natsClusters(t) {
 		t.Run(n.name, func(t *testing.T) {
 			seed := uint64(time.Now().UnixNano())
+			if v, err := strconv.ParseUint(os.Getenv("FIT_SYNC_SEED"), 10, 64); err == nil {
+				seed = v
+			}
 			t.Logf("seed %d", seed)
 			rnd := rand.New(rand.NewPCG(seed, 11))
 			c := n.client(t)
@@ -182,17 +185,18 @@ func TestNATSStreamAcrossKills(t *testing.T) {
 				t.Fatalf("docker restart: %v", err)
 			}
 			got := natsRead(t, c, dst)
-			if len(got) != total {
-				t.Fatalf("%d messages in the copy, not %d", len(got), total)
-			}
 			seen := map[string]bool{}
 			for _, d := range got {
 				seen[d] = true
 			}
+			var missing []string
 			for _, d := range want {
 				if !seen[d] {
-					t.Fatalf("%s is not in the copy", d)
+					missing = append(missing, d)
 				}
+			}
+			if len(got) != total || len(missing) > 0 {
+				t.Fatalf("%d messages in the copy, not %d; %d missing: %v", len(got), total, len(missing), missing[:min(len(missing), 40)])
 			}
 			t.Logf("%d messages copied once across %d kills", total, kills)
 		})

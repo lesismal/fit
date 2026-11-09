@@ -433,6 +433,91 @@ func TestSourceJob(t *testing.T) {
 	}
 }
 
+// A delivery of a consumer fit makes that the run never reads (a pull's
+// answer lost to a reconnect, a run killed after a consumer's info read
+// during a leader's move said nothing was delivered) shows as a gap in the
+// consumer sequence: the consumer is made again from what the sinks have,
+// rather than a later message emitted and acknowledged under ack all,
+// which would acknowledge the lost one unread.
+func TestSourceLostDelivery(t *testing.T) {
+	srv := server(t, natstest.Options{})
+	srv.AddStream("S", "s.>")
+	publish(t, srv, "s.a", nil, "1", "2", "3")
+	c, _ := natswire.Dial(context.Background(), natswire.Config{Servers: []string{srv.Addr()}})
+	defer c.Close()
+	s := source(t, srv, map[string]any{"create_consumer": true, "batch": 1, "max_wait": "20ms"})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var seqs []uint64
+	err := s.Run(ctx, &fitsync.Run{Emit: func(r *fitsync.Record) error {
+		seqs = append(seqs, seqOf(t, r.Position))
+		s.Acknowledged(r.Position)
+		if len(seqs) == 1 {
+			// Delivered to someone else: lost to this run.
+			if msgs, err := c.Fetch(ctx, "S", "C", natswire.FetchRequest{Batch: 1, NoWait: true}); err != nil || len(msgs) != 1 {
+				t.Error(err, msgs)
+			}
+		}
+		if len(seqs) == 3 {
+			cancel()
+		}
+		return nil
+	}})
+	if !errors.Is(err, context.Canceled) || fmt.Sprint(seqs) != "[1 2 3]" {
+		t.Fatal(err, seqs)
+	}
+	// A pull answered 409 by a leader's move, the consumer kept, after it
+	// delivered to someone else: the consumer is made again too.
+	publish(t, srv, "s.a", nil, "4", "5")
+	s = source(t, srv, map[string]any{"create_consumer": true, "batch": 1, "max_wait": "5s"})
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	seqs = nil
+	err = s.Run(ctx, &fitsync.Run{From: fitsync.Position(`{"stream":"S","seq":3}`), Emit: func(r *fitsync.Record) error {
+		seqs = append(seqs, seqOf(t, r.Position))
+		s.Acknowledged(r.Position)
+		switch len(seqs) {
+		case 1:
+			c.Fetch(ctx, "S", "C", natswire.FetchRequest{Batch: 1, NoWait: true})
+			go func() {
+				waitFor(func() bool { return srv.MoveLeader("S", "C") > 0 })
+				if pa, err := c.PublishJS("s.a", nil, []byte("6")); err == nil {
+					pa.Wait(ctx)
+				}
+			}()
+		case 3:
+			cancel()
+		}
+		return nil
+	}})
+	if !errors.Is(err, context.Canceled) || fmt.Sprint(seqs) != "[4 5 6]" {
+		t.Fatal(err, seqs)
+	}
+	// The consumer cannot be made again: the run ends with the error.
+	publish(t, srv, "s.a", nil, "7", "8")
+	s = source(t, srv, map[string]any{"create_consumer": true, "batch": 1, "max_wait": "20ms", "timeout": "300ms"})
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	n := 0
+	err = s.Run(ctx, &fitsync.Run{From: fitsync.Position(`{"stream":"S","seq":6}`), Emit: func(r *fitsync.Record) error {
+		if n++; n == 1 {
+			c.Fetch(ctx, "S", "C", natswire.FetchRequest{Batch: 1, NoWait: true})
+			publish(t, srv, "s.a", nil, "9")
+			srv.SetHook(func(op, subject string) natstest.Action {
+				if strings.HasPrefix(subject, "$JS.API.CONSUMER.DELETE") {
+					return natstest.Fatal
+				}
+				return natstest.Normal
+			})
+		}
+		return nil
+	}})
+	srv.SetHook(nil)
+	if err == nil || !strings.Contains(err.Error(), "consumer C of S") || n != 1 {
+		t.Fatal(err, n)
+	}
+}
+
 func TestSourceConsumerLost(t *testing.T) {
 	srv := server(t, natstest.Options{})
 	srv.AddStream("S", "s.>")

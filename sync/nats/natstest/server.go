@@ -481,10 +481,22 @@ func (s *Server) Pending(stream, name string) (int, uint64) {
 
 // RemoveConsumer deletes a consumer, answering its waiting pulls 409.
 func (s *Server) RemoveConsumer(stream, name string) {
+	s.end(stream, name, true, "Consumer Deleted")
+}
+
+// MoveLeader answers a consumer's waiting pulls 409 as a leader's move does,
+// the consumer kept, and returns how many there were.
+func (s *Server) MoveLeader(stream, name string) int {
+	return s.end(stream, name, false, "Leadership Change")
+}
+
+func (s *Server) end(stream, name string, remove bool, why string) int {
 	s.mu.Lock()
 	st := s.streams[stream]
 	c := st.consumers[name]
-	delete(st.consumers, name)
+	if remove {
+		delete(st.consumers, name)
+	}
 	var waiting []*pull
 	if c != nil {
 		waiting, c.waiting = c.waiting, nil
@@ -496,8 +508,9 @@ func (s *Server) RemoveConsumer(stream, name string) {
 	}
 	s.mu.Unlock()
 	for _, p := range waiting {
-		s.status(p.reply, 409, "Consumer Deleted")
+		s.status(p.reply, 409, why)
 	}
+	return len(waiting)
 }
 
 func (s *Server) streamOf(subject string) *Stream {
