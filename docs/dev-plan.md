@@ -371,7 +371,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | done |
 | I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | done |
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | done |
-| I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | todo |
+| I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | done |
 | I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | todo |
 | I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
 | I207 | (second phase) A tracker store the cluster shares | I201 | todo |
@@ -7270,6 +7270,94 @@ run: the Linux race run and the full suite (left to the main session).
   add dialog, the tracker's page, publishing's page; schema descriptions in `schema-zh.js`; the AI
   assistant's functions (list, add, pause) under its approval rules.
 - **Touches**: `app/workbench`, `assistant`.
+- **Done** 2026-11-09: a **BitTorrent** menu (`app/workbench/web/bittorrent/`, after Sync):
+  Torrents (state, why held, size, a progress bar, rates, time left, ratio, peers, category;
+  filtered by state, category and name through the Admin API; picked torrents paused, resumed or
+  removed with or without their data; Add torrent by magnet link, .torrent file sent raw, or URL,
+  with category, paused, sequential; the client's recent events), a torrent's Overview (numbers,
+  pieces had, hashes, directory, magnet link; category, queue position, sequential and its own
+  limits edited in place beside those in force; pause, resume, recheck, remove), Files (priorities
+  one by one or for the files picked), Peers and Trackers; the alternative rates (auto, on, off) in
+  the client pages' top bar; Tracker (totals against bounds, refusals by reason, the allow-list's
+  swarms paged, a user's passkey looked up for a private tracker); Publishing (entries, problems,
+  torrents with a .torrent download and the magnet link); BitTorrent config. English and Chinese.
+  Live updates: the console's own route `GET /api/m/admin/bittorrent/events` (`admin/btconsole.go`),
+  the role's stream written on fib's connection (the worker subscribes and writes the start, a
+  goroutine of the stream's own writes with `WriteNoWait` and waits for `OnWritable` past the
+  watermark, at most 30s), with `Last-Event-ID`, the role's 32 subscribers bounding it; the pages
+  read it beside a poll every 2s for rates, and poll only where it cannot stream. A new Admin API
+  endpoint `GET /bittorrent/publish/<name>/torrents/<id>` serves a published .torrent file.
+  `schema-zh.js` already had every BitTorrent description (I197–I203 added them; the test passes).
+  The assistant (`assistant/tools_bittorrent.go`, `proposals_bt.go`): read tools `bt_torrents`,
+  `bt_torrent`, `bt_tracker_stats` (no magnet link, trackers by scheme, host and last element, web
+  seeds without user or query, no peer IDs, no passkey), and propose tools `bt_add_propose`,
+  `bt_pause_propose`, `bt_resume_propose`, whose steps join the proposal's media steps, checked on
+  what runs now and applied after the config by the person who confirms; a group `bittorrent` on
+  the Functions page, words for the proposals' cards, the system prompt, `member` on a manager.
+  Docs: [BitTorrent](bittorrent.md#the-pages) (the pages, the assistant, the console's stream, the
+  .torrent endpoint), [the console](console.md#bittorrent) (the pages and the tools), the reference's
+  chapter, in both languages. Tests: `admin` (the console's stream behind a session, an add's
+  events, heartbeats, replay by `Last-Event-ID` and `?after`, reset, a bad ID, 404 without the role,
+  the bound of 32 and 503 with `Retry-After`, a slot freed, a client reading nothing dropped with
+  `lagged`, `end` when the role stops; the .torrent endpoint and its 404s), `assistant` (each read
+  tool, its arguments and errors, the role not running, nothing secret in the results; the propose
+  tools in a chat and over MCP, applied in order as the person, with a config change, a torrent gone,
+  a failure making the outcome `partial`; every check refusing a step; the levels and groups),
+  `app/workbench` (every word in both languages and used, every state, hold, event and priority
+  worded, the endpoints the pages call, the assistant's tools worded). Checked in the browser
+  pane against a local fit: list, add, live events, resume, remove with data, a torrent's overview
+  and limits, alternative rates, tracker, publishing and its .torrent download, config, in English
+  and Chinese.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **Live updates by a streaming console route, and a poll**: the console serves the event stream on
+   a route of its own on fib's connection, rather than the pages polling alone, since events say at
+   once what a poll says late (a completion, an error, a ban); the list is still read every 2s for
+   rates and progress, which no event carries. Alternatives: poll only; a streaming mode of the
+   console's proxy for every endpoint.
+2. **The console's stream waits at most 30s for a client past the watermark** (`btStall`), then is
+   cut; it shares the role's 32 subscribers with the Admin API's stream. Not configurable.
+   Alternatives: a bound of the console's own; the console's `write_stall_timeout`.
+3. **Through a manager's node switcher the pages poll only**: its pass-through answers whole
+   responses. Alternative: a streaming pass-through in `cluster`.
+4. **One module, `bittorrent`, on the server module `admin`**, shown wherever `admin.console` is (as
+   Sync), each page saying when its role does not run, with a link to BitTorrent config; the role's
+   own `console` serves only its read-only routes, without these pages. Alternatives: a module per
+   role, shown only while it runs; pages on the role's own console.
+5. **The alternative rates are in the top bar of the client's pages** (Torrents and a torrent), not
+   of every page. Alternative: a `topbar` on every page.
+6. **The assistant's writes are propose tools** (add, pause, resume), whose steps join the
+   proposal's media steps (`MediaAction`, `media` in the view and the apply's answer): checked on
+   what runs now, applied by a person whose level is apply after the second confirm, as the media
+   steps are. No tool removes, rechecks or limits a torrent: those stay the person's, on the pages.
+   Alternatives: a `bittorrent` member of its own in the view; `bt_remove_propose` and the like.
+7. **What reaches the model**: no magnet link, trackers as scheme, host and last path element (a
+   private tracker's passkey sits in the path), web seeds without user or query, peers without IDs,
+   no passkey (the Tracker page reads them for the person); peers' addresses go as they are, as the
+   media tools send addresses. Alternative: hash the peers' addresses as playback subjects are.
+8. **Ratio is uploaded over size**, as `seed_ratio` counts it, and the time left is what it wants at
+   its present rate while it downloads, both computed by the pages and the tools, not the role.
+   Alternative: uploaded over downloaded (qBittorrent's).
+9. **Pieces are shown as had of all, with a bar**, not as a map: the role's status gives the counts
+   only. Alternative: a piece map from fib's `Torrent.HavePiece` in the role's API (open).
+10. **A published torrent's .torrent file comes from a new Admin API endpoint**,
+    `GET /bittorrent/publish/<name>/torrents/<id>`, read from the role's snapshot, rather than a link
+    to a `bt_publish` route, which the config may not have and which is served on a listener's origin.
+    Published torrents are seeded beside the client's list, so they link to no torrent page.
+11. **Categories offered come from the running config** (`GET /config`), not the draft: a category
+    only in the draft is refused by the role. Alternative: the draft's.
+12. **The page adds a .torrent file raw** (`application/x-bittorrent`, options in the query),
+    checked against 32 MiB before it is sent. Alternative: a form.
+13. **Files take four priorities**: skip, low, normal, high (0, 1, 4, 7), fib's named ones, though the
+    role takes 0–7. Alternative: all eight.
+14. **`bt_add_propose` of a torrent `bt_stream` added on the fly is allowed, with a warning** that it
+    is kept as an ordinary torrent as it is (I203's decision 10).
+15. `TestChatSummarizes`'s window grew from 5600 to 6200 tokens for the new tools' descriptions.
+
+Open from it: a piece map (the role's API, from fib's `Torrent.HavePiece`); pages on the role's own
+console; a streaming pass-through for the node switcher. Not run: the Linux race run and the full
+suite (left to the main session).
 
 ### I205 Interop, failure tests, benchmarks and docs
 

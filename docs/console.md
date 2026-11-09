@@ -351,6 +351,15 @@ and the language (English or Chinese) are picked at the top right. Each page has
   console's Content-Security-Policy lets its pages reach the listeners that serve `vod` and `hls`
   routes, and nothing else. hls.js (1.5.20, Apache-2.0) is vendored in the workbench and loaded only
   when a player first needs it.
+- **BitTorrent** (tagged client / tracker), after Sync: the [BitTorrent](bittorrent.md#the-pages)
+  roles' pages (I204). **Torrents**, filtered and acted on in bulk, with **Add torrent** (a magnet
+  link, a .torrent file or its URL), the alternative rates in the top bar and the client's recent
+  events; a torrent's overview, files with their priorities, peers and trackers, its category,
+  queue position, sequential download and limits edited in place; **Tracker**, its totals, swarms
+  and a user's passkey; **Publishing**, the entries' torrents with their .torrent files and magnet
+  links; and **BitTorrent config**. They read the client's events on the console's own route,
+  `GET /api/m/admin/bittorrent/events`, a stream the console writes on its connection, and poll
+  for the rates.
 - **Account**: the signed-in user's password, and the console users' (below); **This node**, who
   this fit is, as `GET /api/node` says: its node ID (copied with a click), where the ID is kept, the
   host, fit's, fib's and Go's versions, the start and uptime, the running config's version, ETag and
@@ -858,6 +867,33 @@ and dead letters as they are**); namespaces, operations, positions and errors al
 manager, `sync_pipelines` and `sync_dead_letters` take `member`. The skill `sync-pipeline` builds a
 pipeline from a sentence and finds why one stalls, lags, stops or keeps dead letters; a pipeline's
 last error and its dead letters have Ask AI buttons that run it.
+
+### BitTorrent
+
+The [BitTorrent pages](bittorrent.md#the-pages) (I204) have three read tools and three propose
+tools, which read the `bittorrent.client` and `bittorrent.tracker` roles through the Admin API and
+add steps to the conversation's proposal, as the media tools do:
+
+| Tool | Level | What it does |
+| --- | --- | --- |
+| `bt_torrents` | `read` | the torrents in short (state, why held, error, progress, size, rates, peers, ratio, time left), by state, category and name (50, at most 200), with the alternative rates |
+| `bt_torrent` | `read` | a torrent's status, its first 100 files with their priorities, its first 50 peers, and its trackers and web seeds |
+| `bt_tracker_stats` | `read` | the tracker's totals and refusals by reason, and the allow-list's first 50 swarms |
+| `bt_add_propose` | `propose` | a torrent added by magnet link or .torrent URL, in a category, paused or sequential |
+| `bt_pause_propose` | `propose` | torrents paused, by ID (at most 100) |
+| `bt_resume_propose` | `propose` | torrents resumed, by ID (at most 100) |
+
+**What reaches the model.** No passkey: a torrent's magnet link is left out, a tracker's URL keeps
+its scheme, host and last path element (`https://tracker.example/[redacted]/announce`), a web seed's
+loses its user and query, peers their IDs, and no tool reads a user's passkey (the Tracker page
+does, for the person). **BitTorrent steps** join the proposal's media steps (`media` in its view
+and in the apply's answer): checked on what runs now (the role and its client run; a magnet link
+names its torrent and the client does not hold it yet, or holds it only as `bt_stream` added it, kept
+then as an ordinary torrent; a URL is http or https; the category is the client's; the torrents
+named exist, and those already paused, or not paused, are left out with a note), then applied after
+any config change, in order, through `/bittorrent/torrents` as the person who applies the proposal.
+A torrent removed meanwhile makes the proposal no longer check; one removed between the check and
+its step is counted as gone. On a manager, the read tools take `member`.
 
 ### Across a cluster
 

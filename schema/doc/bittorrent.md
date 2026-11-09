@@ -58,11 +58,12 @@ at most 32 MiB), `/bittorrent/torrents/{id}` gives one with its files, pauses, r
 (`POST {"action"}`), changes its priorities, category, limits and queue position (`PATCH`) and
 removes it (`DELETE`, `?delete_data=1`); `.../files`, `.../peers` and `.../trackers`;
 `/bittorrent/alt_speed` reads and sets the alternative rates; `/bittorrent/publish` the publish
-entries; `/bittorrent/tracker/stats`, `.../torrents` and `.../passkey` the tracker's.
+entries, and `.../{name}/torrents/{id}` a published torrent's .torrent file; `/bittorrent/tracker/stats`, `.../torrents` and `.../passkey` the tracker's.
 `GET /bittorrent/events` streams the client's events as server-sent events (torrents added, removed,
 completed, failing or changing state, peers banned, seed limits, the alternative rates), with
 `Last-Event-ID` to catch up, 32 streams at most, a slow one disconnected after 256 events waiting;
-on the Admin API's own address only. `fit bt ls`, `add`, `info`, `pause`, `resume`, `rm`, `limit`
+on the Admin API's address, and on a route of the console's own, `/api/m/admin/bittorrent/events`,
+which the workbench's BitTorrent pages read to show torrents as they change. `fit bt ls`, `add`, `info`, `pause`, `resume`, `rm`, `limit`
 and `alt` call these through the Admin API the bootstrap config names, as `fit sync` does. The
 Admin API's `/metrics` carries the client's as `fit_bittorrent_*` (bytes, rates, peers and hash
 failures by category, torrents by category and state, bans, the alternative rates) and the
