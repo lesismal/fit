@@ -74,6 +74,7 @@
     ['t.cluster_metrics', 'Each member\'s requests, connections, reloads and backends down, read now, and their sums by group; a slow or down member is reported, not waited for.',
       '各成员当前读取的请求、连接、重载与不可用后端，以及按分组的汇总；慢或离线的成员只报告、不等待。'],
     ['t.cluster_certs', 'The certificate inventory across the members, as polled, the one that expires first first.', '各成员证书清单（按轮询读取），最先过期的在前。'],
+    ['t.cluster_bittorrent', 'The members\' BitTorrent roles, read now: torrents by state, rates, bytes, peers, publish entries and trackers, their sums, and the latest distributions with each target\'s progress.', '成员的 BitTorrent 角色（即时读取）：按状态统计的种子、速率、字节数、对端、发布条目与 tracker、合计，以及最近的分发及各目标的进度。'],
     ['t.cluster_log_tail', 'The latest lines of up to 16 members\' own logs, merged by time; a slow or down member is reported, not waited for.', '最多 16 个成员自身日志的最新行，按时间合并；慢或离线的成员只报告、不等待。'],
     ['t.rollout_propose', 'Plans a change across members as a rollout (a template\'s draft, a sync, a patch or a copy): each member\'s diff and dry run; a person starts it on the Rollouts page.',
       '把跨成员的修改规划为一次发布（模板草稿、同步、修改或复制）：各成员的差异与试运行；由人在发布页启动。'],

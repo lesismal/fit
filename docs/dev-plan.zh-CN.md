@@ -363,7 +363,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | done |
 | I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | done |
 | I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | done |
-| I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
+| I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | done |
 | I207 | （第二阶段）集群共享的 tracker Store | I201 | done |
 | I208 | （第二阶段）RSS 自动下载 | I198 | todo |
 | I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
@@ -5642,6 +5642,50 @@ race 测试与完整测试套件（留给主会话）。
 
 - **做什么**：集群汇总各成员的任务和速率；经私有种子加直连 peer，把大文件（llm 节点的模型、发布包）分发到一组成员，与 rollout 配合。
 - **涉及**：`cluster`、`bittorrent`、`app/workbench`。
+- **完成** 2026-11-09（分支 `bt-i206`）：**视图**（`cluster/btview.go`）：成员的 Admin API 新增 `GET /bittorrent/summary`
+  （`admin/btsummary.go`，能力 `bittorrent.summary`）：两个角色的简短汇总，无论是否运行都返回 200（客户端是否运行、接受对端的地址、
+  按状态统计的种子、速率、字节数、对端、错误、发布条目；tracker 的统计）。管理端按需读取各成员（`Manager.BitTorrent`），经
+  `Manager.Call` 同时最多 `max_concurrency` 个，一次读取 2 秒内共用、进行中的读取会被加入；离线及没有该能力的成员不请求。
+  `GET /api/m/cluster/bittorrent`（任何角色）与管理端 Admin API 的 `GET /cluster/bittorrent`。**分发**（`cluster/distribute.go`）：
+  从源成员的私有发布条目（I202）到分组的成员或所选成员；管理端读取源的摘要、条目与 `.torrent` 文件（私有，≤1 TiB）、各目标的摘要，
+  让每个目标以源和其他目标为 `peers` 把种子添加到某分类（地址为客户端监听的地址，否则为成员 URL 的主机，否则为 `peer_hosts`），
+  每 2 秒跟进进度（完成、错误、被删除、停滞），结束时从它添加过种子的目标上删除该种子（完整的保留文件，否则删除；`keep_seeding`
+  让完整的继续做种）；取消；审计条目 `bt.distribute`；`POST`/`GET /api/m/cluster/distributions`、`GET .../<id>`、
+  `POST .../<id>/cancel`，Admin API 的 `/cluster/` 下同样提供。**页面**：集群 → BitTorrent（`app/workbench/web/cluster/bittorrent.js`）：
+  统计块、成员表（“打开”经节点切换器进入成员自己的 BitTorrent 页面）、分发列表、新建分发、分发页及取消；概览卡片
+  （`FitCluster.overviewCard`，`shared.js` 的新扩展点）。**助手**：`cluster_bittorrent`；读取工具的 `member` 参数现在可以读到成员的
+  BitTorrent 读取接口（`memberPaths` 原先缺少它们，带 `member` 的 `bt_*` 会被拒绝），但从不触及 passkey、事件或写操作。文档：
+  [集群](cluster.zh-CN.md#bittorrent成员的种子与分发)与 [BitTorrent](bittorrent.zh-CN.md#集群中)，中英文。测试：基于假成员的视图
+  （合计、没有角色的成员、按能力与按 404 判断的旧成员、离线、TTL 与合并的读取、截断）、助手的读取与成员路径、Admin API、角色
+  （查看者被拒、分组的操作员只能对其成员）；本机回环上进程内 fit 之间的分发（3 MiB 文件逐字节传到两个目标，第三个没有客户端的目标
+  单独失败；再经模块以 `keep_seeding` 分发；再次时被采用）、取消（种子与数据被删除）、停滞、`peer_hosts` 只给主机、源非私有、
+  没有条目或种子、没有客户端、`StartDist` 的各种拒绝（字段、64 个目标、同时 2 个、忙碌的目标、准备中取消）、保留列表、对端地址；
+  有无角色时的 `GET /bittorrent/summary`。
+
+**待审阅的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **分发是独立的资源，而非发布（rollout）的一种步骤**：发布应用配置，带演练、闸门与回滚，下载都不需要；按操作的方式建模（内存中
+   保留最近 16 个，结束时记入审计日志），不修改配置因此不占用成员阻挡发布或操作；一个成员同时只是一个分发的目标。备选：发布步骤；
+   保存在 store 中跨重启。
+2. **源是私有的发布条目（I202），而非一次性构建**：发布条目已用种子模式构建、可跨重启并跟随磁盘，因此管理端不必给角色增加构建路径
+   （不改 `bittorrent/`）；非私有的条目被拒绝（`not_private`）。条目列出的 tracker 允许（运维自己的私有 tracker）。备选：
+   `Role.Share(path)`，在线程池上一次性构建，成员需要异步任务 API。
+3. **“配置的目标目录”即目标上的分类**（或其 `download_dir`）：角色的添加 API 没有自己的目录参数，分类就是配置中的目录。备选：
+   在配置允许的根目录内的 `AddRequest.Dir`。
+4. **对端地址**：目标客户端监听的地址（若为具体地址），否则为其成员 URL 的主机加客户端端口，否则为请求中的 `peer_hosts`（连出成员
+   需要）。源与其他每个目标都是每个目标的对端（最多 65 个）。备选：用成员标签给出其 BitTorrent 主机。
+5. **结束时**：从分发添加过种子的目标上删除该种子，完整的保留文件、不完整的（失败、取消、停滞）删除；`keep_seeding` 让完整的继续
+   做种；已有该种子的目标被采用、跟进、从不删除；从不触碰源的发布条目。备选：所有种子都保留做种。
+6. **上限**：64 个目标、同时 2 个、保留 16 个、1 TiB、停滞超时 10 分钟（1 秒–24 小时）、每 2 秒读取进度；均为常量，不加配置。
+   备选：`admin.cluster.distributions`。
+7. **视图按需读取，而非由轮询器读取**，缓存 2 秒并合并并发读取，任何角色可读；不占用读取名额（`MaxReads`），因为同时只有一次扇出。
+   备选：随每次轮询读取摘要并保存在成员状态中。
+8. **角色**：开始与取消都需要在源和每个目标上是操作员（与操作相同）。
+9. **管理端重启会忘记进行中的分发**；目标保留已下载的内容与种子（角色不会跨重启保留其对端）。
+
+遗留：成员的 `AddRequest.Peers` 不跨重启保存，分发中途重启的目标没有对端而停滞（角色可将其存入 `torrents.json`）；`fit cluster`
+尚无 `bt`/`distribute` 命令（Admin API 已提供）；`.torrent` 文件受 `max_response_bytes` 限制（默认 4 MiB；小分片的 1 TiB 混合种子
+会超出）。未发现 fib 的缺口。未运行：Linux 上的 race、完整测试、浏览器中的页面。
 
 ### I207 （第二阶段）集群共享的 tracker Store
 

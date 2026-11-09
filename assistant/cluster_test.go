@@ -106,6 +106,11 @@ func (fc *fakeCluster) CheckOp(user string, req []byte) ([]byte, error) {
 	return []byte(`{"op":"reload","members":["m1"],"link":"#/cluster/ops?op=reload&members=m1"}`), nil
 }
 
+func (fc *fakeCluster) BitTorrent(ctx context.Context, user, group string, nodes []string) ([]byte, error) {
+	fc.record("bittorrent %s %s %v", user, group, nodes)
+	return []byte(`{"view":{"members":[{"name":"m1","summary":{"client":{"running":true,"torrents":2}}}]},"distributions":[]}`), nil
+}
+
 func (fc *fakeCluster) FixDrift(ctx context.Context, user string, nodes []string) ([]byte, error) {
 	fc.record("fix %s %v", user, nodes)
 	return []byte(`{"link":"#/cluster/rollout/r10","rollout":{"id":"r10"}}`), nil
@@ -181,6 +186,7 @@ func TestClusterToolsRead(t *testing.T) {
 			call("m8", "consistency_check", `{}`),
 			call("m9", "status_get", `{"member": "bare"}`),
 			call("ma", "cluster_log_tail", `{"nodes": ["m1"], "level": "warn", "contains": "dial", "limit": 5}`),
+			call("mb", "cluster_bittorrent", `{"group": "edge"}`),
 		}},
 		{Text: "m2 is down."},
 	}
@@ -190,7 +196,7 @@ func TestClusterToolsRead(t *testing.T) {
 		t.Fatalf("%+v %s", s.end, s.err)
 	}
 	res := s.of(EventToolResult)
-	if len(res) != 15 {
+	if len(res) != 16 {
 		t.Fatalf("%+v", res)
 	}
 	want := [][]string{
@@ -209,6 +215,7 @@ func TestClusterToolsRead(t *testing.T) {
 		{`"differences"`},
 		{`the answer is not what it should be`},
 		{`"message":"dial: refused, Authorization: [redacted]`},
+		{`"running":true`, `"distributions"`},
 	}
 	for i, w := range want {
 		for _, x := range w {
@@ -225,7 +232,7 @@ func TestClusterToolsRead(t *testing.T) {
 	got := fc.called()
 	for _, w := range []string{"members ada edge role=edge up", "templates ada api", "rollouts ada r1", "metrics ada edge []", "certs ada  [m1] 30",
 		"member ada m1 GET /config", "member ada m1 POST /config/render?format=conf", "member ada m1 GET /status", "member ada m1 GET /node",
-		"member ada old GET /status", "member ada down GET /cache", "logs ada  [m1]  warn dial 5"} {
+		"member ada old GET /status", "member ada down GET /cache", "logs ada  [m1]  warn dial 5", "bittorrent ada edge []"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("the manager was not asked %q:\n%s", w, got)
 		}

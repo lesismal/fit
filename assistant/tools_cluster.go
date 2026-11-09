@@ -39,6 +39,7 @@ type Cluster interface {
 	Metrics(ctx context.Context, user, group string, nodes []string) ([]byte, error)
 	Certs(ctx context.Context, user, group string, nodes []string, within int) ([]byte, error)
 	Logs(ctx context.Context, user, group string, nodes []string, logger, level, contains string, limit int) ([]byte, error)
+	BitTorrent(ctx context.Context, user, group string, nodes []string) ([]byte, error)
 	PlanRollout(ctx context.Context, user string, req []byte) ([]byte, error)
 	CheckOp(user string, req []byte) ([]byte, error)
 	FixDrift(ctx context.Context, user string, nodes []string) ([]byte, error)
@@ -178,6 +179,21 @@ func clusterTools(cl Cluster) []*Tool {
 				ctx, cancel := context.WithTimeout(c.Context, clusterReadWait)
 				defer cancel()
 				return c.clusterJSON(cl.Logs(ctx, c.User, a.Group, a.Nodes, a.Logger, a.Level, a.Contains, a.Limit))
+			})},
+		{Name: "cluster_bittorrent", Group: GroupCluster, Level: config.AssistantRead,
+			Description: "The members' BitTorrent roles (I206), read now from each member: whether it runs bittorrent.client and the client runs, the address it takes peers on, its torrents by state, download and upload rates (bytes a second), bytes downloaded and uploaded, peers, torrents in error, its publish entries, and its tracker's torrents, peers and announces; their sums; and the latest distributions (a file one member publishes spread to others over a private torrent) with each target's status, progress and error. A member down or older than the view is said so. Distributions are started by a person on the Cluster → BitTorrent page.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{` + groupSchema + `,` + nodesSchema + `}}`),
+			Run: need(func(c *Call, cl Cluster) (string, error) {
+				var a struct {
+					Group string
+					Nodes []string
+				}
+				if err := c.Decode(&a); err != nil {
+					return "", err
+				}
+				ctx, cancel := context.WithTimeout(c.Context, clusterReadWait)
+				defer cancel()
+				return c.clusterJSON(cl.BitTorrent(ctx, c.User, a.Group, a.Nodes))
 			})},
 		{Name: ToolRolloutPropose, Group: GroupChange, Level: config.AssistantPropose,
 			Description: "Plan a change across members as a rollout: each member's diff, checked by the member's own dry run, nothing applied. kind template rolls out a template as it is, or, with config, a draft of its new config, saved as the template when a person starts the rollout (a cluster-wide admin's); sync brings members in sync with their templates; patch puts config (top-level members whole, named routes, upstreams, listeners and services by name) on nodes or a group's members as they are, for config no template owns (an admin's of each member); copy copies paths from the member from. Secrets stay [redacted], which keeps each one's own. strategy suggests how a person runs it. The answer is the plan with its link: a person starts it on the Rollouts page, with its confirm.",

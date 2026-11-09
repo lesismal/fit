@@ -407,6 +407,7 @@ console), never on a fib worker.
 | `GET /bittorrent/tracker/stats` | the tracker's totals |
 | `GET /bittorrent/tracker/torrents` | `{"torrents", "total", "offset", "source", "next"}`: the allow-list's swarms, or a public tracker's by info hash (`offset`, `limit` at most 1000, `after`); `/bittorrent/tracker/torrents/<info hash>` one torrent's |
 | `GET /bittorrent/tracker/passkey?user=` | a user of the private tracker's policy, and its passkey |
+| `GET /bittorrent/summary` | both roles in one small answer, `200` whether they run or not: `{"client", "tracker"}`, `client` null or `{"running", "listen", "torrents", "states", "download_rate", "upload_rate", "downloaded", "uploaded", "size", "completed", "peers", "errors", "publish"}`, `tracker` null or the tracker's stats; capability `bittorrent.summary`, for a manager's [view of its members](cluster.md#bittorrent-the-members-torrents-and-distributions) (I206) |
 
 A torrent's `<id>` is its ID, the v1 info hash in hex, in either case, or its v2 hash (64 digits),
 whose first 20 bytes are the ID. `limits` take `upload_rate`, `download_rate`, `max_conns`,
@@ -811,6 +812,16 @@ read; one torrent's numbers are the larger of the instance's and its sample's. I
 `/api/m/bittorrent.tracker/...` as a module. The Admin API serves them as
 `/bittorrent/tracker/stats`, `/bittorrent/tracker/torrents[/<hash>]` and
 `/bittorrent/tracker/passkey?user=`, with [metrics](#metrics).
+
+## In a cluster
+
+A manager ([cluster management](cluster.md)) shows its members' BitTorrent roles together, read from
+each member's `GET /bittorrent/summary`, and spreads a file one member publishes to others over
+BitTorrent: a **distribution** (I206). The source publishes it with a `private` publish entry; the
+manager gives each target its `.torrent` file through `POST /bittorrent/torrents` with the source and
+the other targets as `peers`, into a category of the target's, follows the targets' progress, and
+removes the torrent from them at the end (keeping their files), or leaves it seeding with
+`keep_seeding`. See [BitTorrent: the members' torrents, and distributions](cluster.md#bittorrent-the-members-torrents-and-distributions).
 
 ## Interoperability
 

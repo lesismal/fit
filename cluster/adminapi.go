@@ -146,11 +146,12 @@ func (m *Manager) AdminAPI() stdhttp.Handler {
 			apiJSON(w, 404, map[string]string{"error": "a rollout's actions are start, pause, resume, go, abort and rollback"})
 		}
 	})
+	m.btAdminAPI(mux, p)
 	mux.HandleFunc(p+"/", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		apiJSON(w, 404, map[string]string{"error": "no such endpoint of the manager's"})
 	})
 	mux.HandleFunc(p, func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
-		apiJSON(w, 200, map[string]any{"endpoints": []string{"nodes", "state", "groups", "drift", "sync", "metrics", "certificates", "logs", "rollouts"}})
+		apiJSON(w, 200, map[string]any{"endpoints": []string{"nodes", "state", "groups", "drift", "sync", "metrics", "certificates", "logs", "rollouts", "bittorrent", "distributions"}})
 	})
 	return mux
 }
@@ -259,7 +260,7 @@ func apiError(w stdhttp.ResponseWriter, err error) {
 		apiJSON(w, 403, forbiddenBody{Error: fb.Error(), Kind: KindForbidden, ErrForbidden: fb})
 	case errors.As(err, &fe):
 		apiJSON(w, 400, fe)
-	case errors.As(err, new(errNotFound)), errors.As(err, new(errNoGroup)), errors.As(err, new(errNoTemplate)), errors.As(err, new(errNoRollout)):
+	case errors.As(err, new(errNotFound)), errors.As(err, new(errNoGroup)), errors.As(err, new(errNoTemplate)), errors.As(err, new(errNoRollout)), errors.As(err, new(errNoDist)):
 		apiJSON(w, 404, map[string]string{"error": err.Error()})
 	case errors.As(err, new(errBusy)):
 		apiJSON(w, 429, map[string]string{"error": err.Error()})

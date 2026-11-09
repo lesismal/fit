@@ -159,7 +159,9 @@ const DryRunHeader = "Fit-Dry-Run"
 //	                            /bittorrent/events its events as
 //	                            server-sent events; /bittorrent/tracker/
 //	                            stats, .../torrents and .../passkey the
-//	                            tracker's (bittorrent.go, btevents.go)
+//	                            tracker's (bittorrent.go, btevents.go);
+//	                            /bittorrent/summary both roles in one
+//	                            small answer, for a manager (btsummary.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //	GET    /debug/pprof/        Go's runtime profiles, as net/http/pprof
@@ -384,6 +386,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /sync/pipelines/{name}/dead-letters", s.syncDeadLetters)
 	mux.HandleFunc("POST /sync/pipelines/{name}/dead-letters/replay", s.syncReplay)
 	mux.HandleFunc("DELETE /sync/pipelines/{name}/dead-letters", s.syncDropDeadLetters)
+	mux.HandleFunc("GET /bittorrent/summary", s.btSummary)
 	mux.HandleFunc("GET /bittorrent/torrents", s.btTorrents)
 	mux.HandleFunc("POST /bittorrent/torrents", s.btAdd)
 	mux.HandleFunc("GET /bittorrent/torrents/{id}", s.btTorrent)

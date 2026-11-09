@@ -10,6 +10,7 @@
 //                             enrollment), or null; ctx is {readOnly, reload()}
 //   FitCluster.rowExtra(fn)   fn(UI, member, state) → a node shown beside a member's state on the Overview's cards and
 //                             rows and the Nodes page's rows (I149's linked or waiting), or null
+//   FitCluster.overviewCard(fn) fn(UI) → a node shown on the Overview above its filter (I206's BitTorrent card), or null
 //
 // Cluster 菜单的共用部分（I142），供设置了 admin.cluster 的 fit（其他 fit 的管理端）使用：词条、成员状态的颜色、各类问题的
 // 说明、对管理端模块 cluster 的请求（/api/m/cluster/，每次修改以成员列表的 ETag 作为 If-Match）、成员表单（添加与编辑；凭据
@@ -136,7 +137,7 @@
   var STATE_KIND = { up: 'ok', down: 'danger', error: 'warn', unknown: '' };
   var ORDER = { down: 0, error: 1, unknown: 2, up: 3 };
 
-  var addActions = [], rowExtras = [];
+  var addActions = [], rowExtras = [], overviewCards = [];
 
   // ---- Roles (I148) / 角色（I148） ----
   // me is the user's roles, GET /api/me, read again before each page is drawn (cluster.js): {user, open, role (cluster-
@@ -520,6 +521,12 @@
       return out;
     },
     rowExtra: function (fn) { if (typeof fn === 'function') rowExtras.push(fn); },
+    overviewCard: function (fn) { if (typeof fn === 'function') overviewCards.push(fn); },
+    overviewCards: function (UI) {
+      var out = [];
+      overviewCards.forEach(function (fn) { try { var x = fn(UI); if (x) out.push(x); } catch (e) { /* ignore / 忽略 */ } });
+      return out;
+    },
     // The user's roles (I148). / 用户的角色（I148）。
     loadMe: loadMe, me: function () { return me; }, canCluster: canCluster, canAny: canAny, canOn: canOn, canAll: canAll,
     canGroup: canGroup, noRole: noRole, roleWord: roleWord, ROLES: ['viewer', 'operator', 'admin']

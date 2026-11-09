@@ -336,6 +336,7 @@ goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的�
 | `GET /bittorrent/tracker/stats` | tracker 的总计 |
 | `GET /bittorrent/tracker/torrents` | `{"torrents", "total", "offset", "source", "next"}`：允许列表中种子的 swarm，或公开 tracker 按 info hash 排序的种子（`offset`，`limit` 最多 1000，`after`）；`/bittorrent/tracker/torrents/<info hash>` 一个种子的 |
 | `GET /bittorrent/tracker/passkey?user=` | 私有 tracker 策略中的一个用户及其 passkey |
+| `GET /bittorrent/summary` | 两个角色的简短汇总，无论是否运行都返回 `200`：`{"client", "tracker"}`，`client` 为 null 或 `{"running", "listen", "torrents", "states", "download_rate", "upload_rate", "downloaded", "uploaded", "size", "completed", "peers", "errors", "publish"}`，`tracker` 为 null 或 tracker 的统计；能力 `bittorrent.summary`，供管理端[查看其成员](cluster.zh-CN.md#bittorrent成员的种子与分发)（I206） |
 
 种子的 `<id>` 是它的 ID，即十六进制的 v1 info hash，大小写均可，或其 v2 hash（64 位），取前 20 字节为 ID。`limits` 接受
 `upload_rate`、`download_rate`、`max_conns`、`upload_slots`、`seed_ratio` 和 `seed_time`，后者为时长（`"12h"`，`"-1s"`
@@ -650,6 +651,13 @@ swarm，无论是否正在跟踪（`source` 为 `allow_list`）；公开 tracker
 `GET /api/stats`、`/api/torrents`（`offset`、`limit`、`after`）和 `/api/torrents/<hash>`，作为模块时为
 `/api/m/bittorrent.tracker/...`。Admin API 以 `/bittorrent/tracker/stats`、`/bittorrent/tracker/torrents[/<hash>]` 和 `/bittorrent/tracker/passkey?user=`
 提供它们，另有[指标](#指标)。
+
+## 集群中
+
+管理端（[集群管理](cluster.zh-CN.md)）汇总显示其成员的 BitTorrent 角色（读取各成员的 `GET /bittorrent/summary`），并经 BitTorrent
+把一个成员发布的文件传给其他成员：即**分发**（I206）。源以设置了 `private` 的发布条目发布它；管理端通过 `POST /bittorrent/torrents`
+把其 `.torrent` 文件交给每个目标，以源和其他目标作为 `peers`，放入目标的某个分类，跟进各目标的进度，结束时从目标上删除该种子
+（保留其文件），或在设置 `keep_seeding` 时保留做种。详见 [BitTorrent：成员的种子与分发](cluster.zh-CN.md#bittorrent成员的种子与分发)。
 
 ## 互通
 

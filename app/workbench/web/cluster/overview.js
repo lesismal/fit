@@ -138,7 +138,9 @@
     // Ask AI about the members shown (I153, askai.js). / 就所示成员“问 AI”（I153，askai.js）。
     var askFleet = FC.askFleet ? FC.askFleet(UI, function () { return { nodes: shown((data && data.nodes) || []), group: f.group }; }) : null;
     UI.mount(sh.tools, askFleet, h('span.btn-row', cardsBtn, tableBtn), UI.btn(t('refresh'), 'refresh', function () { read(); }, 'ghost sm'));
-    UI.mount(el, h('div.stack', info, stats, h('div.cl-filter', text, label, group, state, sort), list, note));
+    // The cards of later pages (I206's BitTorrent), FitCluster.overviewCard. / 后续页面的卡片（I206 的 BitTorrent）。
+    var extra = FC.overviewCards(UI);
+    UI.mount(el, h('div.stack', info, stats, extra.length ? h('div.cl-ovcards', extra) : null, h('div.cl-filter', text, label, group, state, sort), list, note));
     UI.mount(list, h('div.row', h('span.spinner'), h('span.muted', t('loading'))));
 
     // shown are the members the filter keeps, sorted. / 筛选后保留的成员，已排序。

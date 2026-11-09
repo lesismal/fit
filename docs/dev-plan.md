@@ -373,7 +373,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I210.
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | done |
 | I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | done |
 | I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | done |
-| I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
+| I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | done |
 | I207 | (second phase) A tracker store the cluster shares | I201 | done |
 | I208 | (second phase) RSS auto-download | I198 | todo |
 | I209 | The roles use fib A80–A86: publishing hashes once and builds stop on a context, a public tracker's torrents listed and its bounds changed in place, the client's event queue bounded | I201, I202, I203 | done |
@@ -7933,6 +7933,75 @@ Open from it:
   node's model, a release) to a group of members over a private torrent with direct peers, beside
   rollouts.
 - **Touches**: `cluster`, `bittorrent`, `app/workbench`.
+- **Done** 2026-11-09 (branch `bt-i206`): **The view** (`cluster/btview.go`): a member's Admin API gains
+  `GET /bittorrent/summary` (`admin/btsummary.go`, capability `bittorrent.summary`): both roles in one
+  small answer, 200 whether they run or not (client running, the address it takes peers on, torrents by
+  state, rates, bytes, peers, errors, publish entries; the tracker's stats). The manager reads every
+  member's on demand (`Manager.BitTorrent`), at most `max_concurrency` at once through `Manager.Call`,
+  one read serving every request for 2 s and a read under way joined; down members and those without
+  the capability are not asked. `GET /api/m/cluster/bittorrent` (any role) and `GET
+  /cluster/bittorrent` on the manager's Admin API. **Distributions** (`cluster/distribute.go`): from a
+  source member's private publish entry (I202) to a group's members or members picked; the manager
+  reads the source's summary, entry and `.torrent` file (private, ≤1 TiB), each target's summary, has
+  each target add the torrent into a category with the source and the other targets as `peers` (the
+  address a client listens on, else the member URL's host, else `peer_hosts`), follows progress every
+  2 s (done, error, removed, stalled), and at the end removes the torrent from the targets it added it
+  on (files kept when whole, removed otherwise; `keep_seeding` keeps the whole ones seeding); cancel;
+  the audit entry `bt.distribute`; `POST`/`GET /api/m/cluster/distributions`, `GET .../<id>`, `POST
+  .../<id>/cancel`, and the same under `/cluster/` on the Admin API. **Pages**: Cluster → BitTorrent
+  (`app/workbench/web/cluster/bittorrent.js`): tiles, the members' table with Open into each member's
+  BitTorrent pages through the node switcher, the distributions, New distribution, a distribution's
+  page with Cancel; an Overview card (`FitCluster.overviewCard`, a new extension point in
+  `shared.js`). **Assistant**: `cluster_bittorrent`; the read tools' `member` argument now reaches a
+  member's BitTorrent reads (`memberPaths` lacked them, so `bt_*` with `member` was refused), never
+  passkeys, events or writes. Docs: [cluster](cluster.md#bittorrent-the-members-torrents-and-distributions)
+  and [BitTorrent](bittorrent.md#in-a-cluster) in both languages. Tests: the view over fake members
+  (sums, a member without the roles, older by capabilities and by 404, down, the TTL and joined reads,
+  clipping), the assistant's read and member paths, the Admin API, roles (viewer refused, operator of a
+  group only for its members); distributions between in-process fits on loopback (a 3 MiB file to two
+  targets byte for byte with a third target without the client failing alone, then with
+  `keep_seeding` through the module, then adopted), cancel (torrent and data removed), a stall, by host
+  in `peer_hosts`, a source not private, without the entry or torrent, without a client, every
+  refusal of `StartDist` (fields, 64 targets, 2 at once, a busy target, cancel while preparing), the
+  kept list, peer addresses; `GET /bittorrent/summary` without and with the roles.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **A distribution is a resource of its own, not a rollout step**: rollouts apply configs with dry
+   runs, gates and rollbacks, none of which a download has; it is modelled as operations are (in
+   memory, the last 16, and in the audit log at its end), and holds no member against rollouts or
+   operations (it changes no config); a member is the target of one distribution at a time.
+   Alternatives: a rollout step kind; kept in the store across restarts.
+2. **The source is a private publish entry (I202), not a one-off build**: publish entries already
+   build with Seed mode, survive restarts and follow the disk, so the manager adds no build path to the
+   role (no change to `bittorrent/`); an entry not private is refused (`not_private`). Trackers the
+   entry names are allowed (a private tracker of the operator's own). Alternative: `Role.Share(path)`,
+   a one-off build on a pool, needing an async job API on the member.
+3. **"A configured target directory" is a category on the targets** (or their `download_dir`): the
+   role's add API has no directory of its own, and categories are the config's directories.
+   Alternative: an `AddRequest.Dir` within roots the config allows.
+4. **Peer addresses**: the address a target's client listens on when specific, else its member URL's
+   host with the client's port, else `peer_hosts` from the request (needed for linked members). The
+   source and every other target are each target's peers (at most 65). Alternative: a member label
+   for its BitTorrent host.
+5. **The end**: the torrent leaves the targets the distribution added it on, files kept when whole
+   and removed when not (failed, cancelled, stalled); `keep_seeding` leaves whole ones seeding; a
+   target that had the torrent already is adopted, followed and never removed; the source's publish
+   entry is never touched. Alternative: leave every torrent seeding.
+6. **Bounds**: 64 targets, 2 at once, 16 kept, 1 TiB, a stall timeout of 10 min (1 s–24 h), progress
+   read every 2 s; constants, no config. Alternative: `admin.cluster.distributions`.
+7. **The view is read on demand, not by the poller**, cached 2 s and single-flighted, any role; no
+   read slot (`MaxReads`) is taken since one fan-out runs at a time. Alternative: poll the summary with
+   each member's poll and keep it in its state.
+8. **Roles**: operator on the source and every target, to start and cancel (as operations).
+9. **A manager restart forgets distributions under way**; targets keep what they downloaded and the
+   torrent (whose peers are not kept by the role across a restart).
+
+Open from it: a member's `AddRequest.Peers` are not kept across its restart, so a target restarted
+mid-distribution has no peers and stalls (the role could keep them in `torrents.json`); `fit cluster`
+has no `bt`/`distribute` commands yet (the Admin API serves them); the `.torrent` file is bounded by
+`max_response_bytes` (4 MiB by default; a 1 TiB hybrid torrent with small pieces exceeds it). No fib
+gap found. Not run: the Linux race run, the full suite, the pages in a browser.
 
 ### I207 (second phase) A tracker store the cluster shares
 

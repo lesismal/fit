@@ -16,6 +16,7 @@ nothing else. The design and the choices made are [decision 033](decisions/033-c
 - [Rollouts: a change applied in stages](#rollouts-a-change-applied-in-stages)
 - [Drift and alerts](#drift-and-alerts)
 - [Metrics, logs and certificates](#metrics-logs-and-certificates)
+- [BitTorrent: the members' torrents, and distributions](#bittorrent-the-members-torrents-and-distributions)
 - [How members are reached](#how-members-are-reached)
 - [What the manager reads, and what can go wrong](#what-the-manager-reads-and-what-can-go-wrong)
 - [The API](#the-api)
@@ -471,6 +472,7 @@ assistant reads the cluster and proposes changes across it (I153), as the user w
 | `cluster_metrics` | `read` | each member's requests by class, connections, reloads and backends down, read now from its `GET /status`, summed by group, with the [series](#metrics-logs-and-certificates) of the last 12 polls |
 | `cluster_certs` | `read` | the certificate inventory as the members' polls read it, the soonest to expire first, within some days |
 | `cluster_log_tail` | `read` | the latest lines of up to 16 members' own logs, merged by time, by logger, level and text, 50 a member by default; offered when `data.send_logs` is on, as `log_tail` is |
+| `cluster_bittorrent` | `read` | the members' BitTorrent roles read now (I206): clients, torrents by state, rates, bytes, peers, publish entries, trackers, their sums, and the latest distributions with each target's progress |
 | `member` argument | `read` | `config_get`, `versions_diff`, `status_get`, `metrics_query`, `upstream_health`, `consistency_check`, `certs_list`, `cache_zones` and the media tools read a member instead of the manager, through the manager's session with it |
 | `rollout_propose` | `propose` | a rollout's plan: a template (as it is, or a draft), a sync, a patch or a copy, with a strategy suggested |
 | `cluster_op_propose` | `propose` | an operation (reload, rollback, check, purge, test) checked, not started |
@@ -653,6 +655,59 @@ batch|all`, `-gate-wait 5s`, `-max-5xx 0.01`, `-window 30s`, `-min-requests 20` 
 as the Rollouts page's form. `status` exits 1 for a rollout failed, aborted, rolled back or
 expired. Every command takes `-json` for the Admin API's answer.
 
+## BitTorrent: the members' torrents, and distributions
+
+**Cluster → BitTorrent** (I206) shows every member's BitTorrent roles as the manager reads them now:
+whether it runs `bittorrent.client` and the client runs, the address it takes peers on, its torrents
+by state, its download and upload rates, the bytes downloaded and uploaded, its peers, the torrents in
+error, its publish entries with their torrents, and its tracker's torrents and peers; the sums above;
+and **Open**, the member's own BitTorrent pages through the [node switcher](#a-members-own-pages-the-node-switcher).
+The Overview has a card of the sums and the distributions under way. The manager reads each member's
+`GET /bittorrent/summary` (capability `bittorrent.summary`) when the page, the assistant or the Admin
+API asks, at most `max_concurrency` members at once, each call bounded by `timeout`; one read serves
+every request for 2 s, and a read under way is joined, never started twice. A member down, or one
+older than the view (its capabilities lack `bittorrent.summary`), is not asked, and is said so. Any
+role reads the view, as any reads the members' states.
+
+A **distribution** spreads a file or a directory that one member, the **source**, publishes to a group
+of members over BitTorrent: an LLM node's model, a release. The source publishes it with a publish
+entry whose `private` is set ([publishing](bittorrent.md#publishing)), so that the torrent is never
+announced to the DHT, exchanged with peers or sent to a tracker it does not name. **New distribution**
+names the source, its entry and the torrent (its ID, or its file's path in a `per_file` entry; nothing
+for an entry of one torrent), the targets (a group's members, members picked, or both), a category the
+targets' clients have (whose directory they download into; their `download_dir` when empty), whether
+they keep seeding once done, a stall timeout and a description. The manager then:
+
+1. reads the source's summary (its client must run), its publish entry, and the torrent's `.torrent`
+   file, which must be private, at most 1 TiB, and at most `max_response_bytes`;
+2. reads each target's summary: one without a running client fails alone (`no_client`);
+3. tells each target to add the torrent (`POST /bittorrent/torrents`) into the category, with the
+   source and the other targets as its peers, the addresses their clients take peers on: the address a
+   client listens on, or, when it listens on every address, its member's URL host with the client's
+   port, or what `peer_hosts` gives (`{"edge-7": "10.0.0.7"}` or `"10.0.0.7:6881"`, needed for a linked
+   member whose client listens on every address); a target that has the torrent already is followed
+   and never removed (`adopted`);
+4. reads each target's progress every 2 s: done once it has the torrent whole, failed when its client
+   reports an error, the torrent is removed, or nothing grows for the stall timeout (10 min by default,
+   1 s to 24 h; `stalled`);
+5. at the end removes the torrent from the targets it added it on, keeping the files of those that
+   have it whole (with `keep_seeding` those keep seeding by their limits), and removing what was written
+   on those that failed or were cancelled; and records the distribution, with each target's outcome,
+   in the audit log (`bt.distribute`).
+
+**Cancel** stops it after the reads under way: the targets still downloading are cancelled and the
+torrent leaves them with what they wrote. A distribution's page follows it target by target: status,
+progress, bytes, rate, peers, the address given to the others, and the error. The bounds: 64 targets,
+2 distributions at once (`429`), a member the target of one at a time (`409`), the last 16 kept in
+memory with their outcomes. A distribution changes no config, so it holds no member against
+rollouts and operations; it needs operator on the source and every target, and a manager that can
+write its document (for the audit log). A manager restarted forgets the distributions under way; the
+members keep what they had.
+
+The assistant's `cluster_bittorrent` reads the view of `nodes` or a `group`, with the latest
+distributions; the BitTorrent read tools (`bt_torrents`, `bt_torrent`, `bt_tracker_stats`) take
+`member` as the other read tools do, and never reach a member's passkeys, events or changes.
+
 ## How members are reached
 
 A member is a fit the manager can reach, one of three ways:
@@ -780,6 +835,11 @@ pages above use nothing else:
 | `GET metrics` | the series: `?node=a,b&group=g&points=90` (1 to 360; every member and group when neither is given): `{"interval_ms", "points_max", "now", "nodes", "groups"}`, a member `{"name", "status", "groups", "counters", "series"}`, `counters` `{"at", "requests": {"total", "classes"}, "connections": {"open", "refused", "pending_bytes"}, "reloads": {"succeeded", "failed"}}` as the member last gave them, a group `{"name", "nodes", "series"}`; a series is columns, `{"t", "requests", "errors_4xx", "errors_5xx", "connections", "pending_bytes", "reloads", "reloads_failed", "members"}`, `t` in Unix milliseconds, rates a second, `null` where there is none, a group's `members` the members summed at each point; any role |
 | `GET certificates` | the inventory: `{"now", "certificates", "nodes"}`, a certificate `{"node", "listener", "names", "issuer", "serial", "not_before", "not_after", "days_left", "status", "read"}` the soonest to expire first, a member `{"name", "status", "count", "read"}`; any role |
 | `GET logs` | a tail: `?node=a,b` (1 to 16, required), `level`, `logger`, `contains`, `limit` (each member's latest, 200 by default, 1,000 at most) and `cursor` (the last answer's): `{"records", "cursor", "nodes"}`, a record `{"node", "seq", "time", "level", "logger", "message"}` merged by time, a member `{"name", "count", "last", "error"}`; a role on each member named; one of the 8 reads while it runs |
+| `GET bittorrent` | the members' BitTorrent roles (I206): `{"read", "members", "totals", "distributions"}`, a member `{"name", "labels", "groups", "status", "summary", "error", "read"}`, `summary` its `GET /bittorrent/summary` (`{"client", "tracker"}`), `totals` the sums, `distributions` the distributions kept by state; any role |
+| `POST distributions` | starts a distribution: `{"source", "publish", "torrent", "group", "members", "category", "keep_seeding", "peer_hosts", "stall_timeout_ms", "description"}`; `202` with it, preparing; `400` with `{"field", "error"}`, `404` for a member or group there is none of, `409` for a target in another distribution, `429` when 2 run; operator on the source and every target |
+| `GET distributions` | `{"max_running", "max_targets", "read_only", "distributions"}`, the latest first |
+| `GET distributions/<id>` | a distribution: `{"id", "user", "description", "source", "publish", "torrent", "source_peer", "group", "category", "keep_seeding", "stall_timeout_ms", "state", "reason", "error", "created", "ended", "finished", "counts", "targets"}`, `state` `preparing`, `running`, `done`, `failed` or `cancelled`, a target `{"node", "status", "peer", "adopted", "state", "progress", "completed", "wanted", "download_rate", "peers", "error", "removed", "started", "ended", "took_ms"}`, `status` `pending`, `adding`, `downloading`, `done`, `failed` or `cancelled` |
+| `POST distributions/<id>/cancel` | cancels it; `409` once it ended |
 
 Beside the module, at the console's top level, the node switcher's pass-through:
 
@@ -801,8 +861,8 @@ password, a token or a member's session cookie.
 The manager's Admin API serves the same reads and the rollouts under `/cluster/`, behind its token,
 for `fit cluster`: `GET nodes`, `state`, `groups`, `drift`, `metrics`, `certificates`, `logs`; `POST
 sync` (as the module's, but the members are told nothing); `GET`/`POST rollouts`, `GET`/`DELETE
-rollouts/<id>`, `POST rollouts/<id>/start`, `pause`, `resume`, `go`, `abort`, `rollback`, answered
-as the module answers them. On a fit that manages no members, `/cluster/` is `404`. A member's own
+rollouts/<id>`, `POST rollouts/<id>/start`, `pause`, `resume`, `go`, `abort`, `rollback`; `GET bittorrent`, `GET`/`POST distributions`, `GET
+distributions/<id>`, `POST distributions/<id>/cancel` (I206), answered as the module answers them. On a fit that manages no members, `/cluster/` is `404`. A member's own
 Admin API gains `GET /logs/recent?logger=&level=&contains=&limit=&after=`: `{"records", "last",
 "ring_size"}`, the messages after the sequence number `after` (from the start when `after` is past
 the last), at most `limit` (100 by default, 1,000 at most), the latest.
