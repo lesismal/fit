@@ -56,7 +56,7 @@ func TestBitTorrentWords(t *testing.T) {
 	for _, s := range []string{"starting", "queued", "disk"} {
 		need = append(need, "held."+s)
 	}
-	for _, s := range []string{"added", "removed", "state", "completed", "error", "peer_banned", "seed_limit", "alt_speed", "reset"} {
+	for _, s := range []string{"added", "removed", "state", "completed", "error", "peer_banned", "seed_limit", "alt_speed", "events_dropped", "reset"} {
 		need = append(need, "ev."+s)
 	}
 	need = append(need, "prio.0", "prio.1", "prio.4", "prio.7", "alt.auto", "alt.on", "alt.off", "k.ref.unregistered", "k.ref.passkey", "k.ref.access")

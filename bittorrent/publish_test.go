@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -248,6 +249,87 @@ func TestPublishRestartWithoutHashing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a.bin")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestPublishHashedOnce publishes a file, which the Builder hashes and the
+// client then seeds without reading it (AddOptions.Seed); its pieces are
+// checked as they are first served, and the resume data saved keeps them.
+func TestPublishHashedOnce(t *testing.T) {
+	e := startEngine(t)
+	dir, data := t.TempDir(), t.TempDir()
+	a := writeData(t, dir, "a.bin", 600<<10+5, 21)
+	rc := &readCounter{}
+	r := startRole(t, e, publishJSON(data, entryJSON("pub", dir, `"piece_length": 65536`)), rc)
+	st := waitSeeding(t, r, "pub", 1)
+	if n := r.pub.builds.Load(); n != 1 {
+		t.Fatalf("%d builds", n)
+	}
+	if n := rc.total(); n != 0 {
+		t.Fatalf("%d reads of the data when added: hashed twice", n)
+	}
+	r.mu.Lock()
+	tor := r.pub.entries["pub"].items["a.bin"].t
+	r.mu.Unlock()
+	if s := tor.Stats(); s.Trusted != s.Pieces || s.PiecesHave != s.Pieces {
+		t.Fatalf("stats %+v: not added as complete", s)
+	}
+	// Serving it checks its pieces.
+	_, dl := leech(t, r, st.Torrents[0].ID)
+	sameFile(t, filepath.Join(dl, "a.bin"), a)
+	if rc.total() == 0 {
+		t.Fatal("served with no read")
+	}
+	waitFor(t, "every piece checked", func() bool { return tor.Stats().Trusted == 0 })
+}
+
+// TestPublishBuildCancelled stops an entry while its file is being hashed:
+// the build ends within a megabyte read, not at the end of the file.
+func TestPublishBuildCancelled(t *testing.T) {
+	e := startEngine(t)
+	dir := t.TempDir()
+	// The Builder reads a megabyte at a time; at 100ms a read this file
+	// takes 2.4s to hash.
+	const size = 24 << 20
+	writeData(t, dir, "big.bin", size, 22)
+	r := New(&app.Host{ID: ID, Engine: e, Upstream: e})
+	var reads atomic.Int64
+	started := make(chan struct{})
+	r.pub.readHook = func() {
+		if reads.Add(1) == 3 {
+			close(started)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err := r.Apply(member(t, publishJSON(t.TempDir(), entryJSON("pub", dir, "")))); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(hang):
+		r.Stop(context.Background())
+		t.Fatal("no build started")
+	}
+	at := reads.Load()
+	done := make(chan struct{})
+	go func() {
+		r.Stop(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(hang):
+		t.Fatal("the role does not stop while it hashes")
+	}
+	// BuildContext looks at its context every megabyte.
+	if n := reads.Load() - at; n > 3 {
+		t.Fatalf("%d reads after the stop", n)
+	}
+	if n := reads.Load(); n >= size>>20 {
+		t.Fatalf("%d reads: the build was not cut short", n)
+	}
+	if n := r.pub.builds.Load(); n != 1 {
+		t.Fatalf("%d builds", n)
 	}
 }
 

@@ -1,6 +1,7 @@
 package bittorrent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -41,9 +42,6 @@ const publishDir = "publish"
 
 // maxPublishReport bounds the problems an entry's status lists.
 const maxPublishReport = 20
-
-// errPublishStopped ends a build whose entry stopped.
-var errPublishStopped = errors.New("bittorrent: the publish entry stopped")
 
 // PublishStatus is a publish entry as the index reports it.
 type PublishStatus struct {
@@ -103,6 +101,8 @@ type publisher struct {
 	snaps atomic.Pointer[map[string]*pubSnap]
 	// builds counts the torrents built, for tests.
 	builds atomic.Int64
+	// readHook, when set, runs before each read of a build, for tests.
+	readHook func()
 	// running says a client runs: set when one starts, cleared when it is
 	// closed.
 	running atomic.Bool
@@ -141,9 +141,11 @@ type pubEntry struct {
 	webSeed  string
 	trackers [][]string
 
-	// cancel stops the entry's goroutines and builds; stop wakes the
+	// ctx is done once the entry stops, which ends its walks and its
+	// builds (Builder.BuildContext) at their next step; stop wakes the
 	// walker.
-	cancel atomic.Bool
+	ctx    context.Context
+	cancel context.CancelFunc
 	stop   chan struct{}
 	jobs   chan *pubJob
 
@@ -179,6 +181,10 @@ type pubItem struct {
 	magnet      string
 	resume      []byte
 	resumeSaved bool
+	// seed says it was built here and has no resume data yet: it is
+	// added as complete (AddOptions.Seed), its files having just been
+	// hashed, so that they are not hashed a second time.
+	seed bool
 
 	t   *fibbt.Torrent
 	err error
@@ -294,6 +300,7 @@ func (p *publisher) newEntry(cfg *config.BitTorrentPublish) (*pubEntry, error) {
 		stateDir: filepath.Join(p.r.dataDir, publishDir, cfg.Name), stop: make(chan struct{}),
 		jobs: make(chan *pubJob, cfg.Files()+1), items: map[string]*pubItem{}, building: map[string]bool{},
 		seen: map[string]filewatch.Stamp{}, failed: map[string]pubFailure{}}
+	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.key, e.ekey = buildKey(cfg, e.dir), entryKey(cfg, p.r.dataDir)
 	for _, s := range cfg.Include {
 		e.include = append(e.include, newPattern(s))
@@ -320,7 +327,7 @@ func (e *pubEntry) halt() {
 		return
 	}
 	e.stopped = true
-	e.cancel.Store(true)
+	e.cancel()
 	close(e.stop)
 	for _, it := range e.items {
 		e.detachItem(it)
@@ -541,9 +548,18 @@ func (e *pubEntry) attach(it *pubItem) {
 		o = r.wrap(o)
 	}
 	// A published torrent seeds for ever, whatever the client's seed
-	// limits say.
-	t, err := r.client.AddTorrent(it.mi, &fibbt.AddOptions{Storage: o, Resume: it.resume,
-		Limits: fibbt.TorrentLimits{SeedRatio: -1, SeedTime: -1}})
+	// limits say. One just built is added as complete: the Builder has
+	// hashed its files, and each piece is checked when first served.
+	// Seed and Resume exclude each other (fib's ErrSeedResume), and the
+	// resume data saved once it has every piece keeps the pieces not
+	// checked yet as such.
+	opts := &fibbt.AddOptions{Storage: o, Limits: fibbt.TorrentLimits{SeedRatio: -1, SeedTime: -1}}
+	if len(it.resume) > 0 {
+		opts.Resume = it.resume
+	} else {
+		opts.Seed = it.seed
+	}
+	t, err := r.client.AddTorrent(it.mi, opts)
 	if err != nil {
 		if errors.Is(err, fibbt.ErrTorrentExists) {
 			it.err = fmt.Errorf("%w: the client has a torrent of this info hash already, added to it or published by another entry", ErrExists)
@@ -603,5 +619,5 @@ func (e *pubEntry) saveResume(it *pubItem) {
 		e.report("saving the resume data of %s: %v", it.id, err)
 		return
 	}
-	it.resume, it.resumeSaved = data, true
+	it.resume, it.resumeSaved, it.seed = data, true, false
 }

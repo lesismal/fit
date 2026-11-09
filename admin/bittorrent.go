@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lesismal/fib/bittorrent/metainfo"
+
 	"github.com/lesismal/fit/bittorrent"
 	"github.com/lesismal/fit/bittorrent/tracker"
 	"github.com/lesismal/fit/config"
@@ -57,9 +59,11 @@ import (
 //	GET    /bittorrent/events                   the role's events, as
 //	                                            server-sent events
 //	GET    /bittorrent/tracker/stats            the tracker's totals
-//	GET    /bittorrent/tracker/torrents         the allow-list's swarms (offset,
-//	                                            limit); .../{info hash} one
-//	                                            torrent's swarm
+//	GET    /bittorrent/tracker/torrents         the allow-list's swarms, or a
+//	                                            public tracker's by info hash
+//	                                            (offset, limit, after);
+//	                                            .../{info hash} one torrent's
+//	                                            swarm
 //	GET    /bittorrent/tracker/passkey?user=    a user's passkey
 //
 // A torrent's {id} is the role's ID, its v1 info hash in hex, or its v2
@@ -774,12 +778,27 @@ func (s *Server) btTrackerTorrents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	list, total, err := t.Torrents(offset, limit)
+	var after *metainfo.InfoHash
+	if a := q.Get("after"); a != "" {
+		h, ok := config.ParseInfoHash(a)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "after is not an info hash: 40 hex digits (v1) or 64 (v2)")
+			return
+		}
+		ih := metainfo.InfoHash(h)
+		after = &ih
+	}
+	l, err := t.ListTorrents(offset, limit, after)
+	if errors.Is(err, tracker.ErrAfterAllowList) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		btError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"torrents": list, "total": total, "offset": offset})
+	writeJSON(w, http.StatusOK, map[string]any{"torrents": l.Torrents, "total": l.Total, "offset": offset,
+		"source": l.Source, "next": l.Next})
 }
 
 // btTrackerTorrent answers GET /bittorrent/tracker/torrents/{hash}.

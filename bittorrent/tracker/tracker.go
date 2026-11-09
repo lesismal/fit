@@ -12,12 +12,12 @@
 // read by Apply, on the control plane.
 //
 // A reload changes in place the allow-list, the passkeys' policy, the
-// access and the console. The interval, min_interval, max_numwant and
-// max_scrape make a new fib tracker on the same store, so the swarms stay;
-// the store's bounds (max_torrents, max_peers_per_torrent, max_peers,
-// peer_ttl) make a new store, since fib's MemoryStore takes them only when
-// it is made, and the swarms start empty again. A listen change moves the
-// UDP binding, and a port that cannot be bound leaves the one before.
+// access, the console and the store's bounds (max_torrents,
+// max_peers_per_torrent, max_peers, peer_ttl, through fib's
+// MemoryStore.SetConfig), keeping the swarms. The interval, min_interval,
+// max_numwant and max_scrape make a new fib tracker on the same store. A
+// listen change moves the UDP binding, and a port that cannot be bound
+// leaves the one before.
 package tracker
 
 import (
@@ -179,7 +179,7 @@ func New(h *app.Host) *Role {
 // Module returns the role's module of the workbench.
 func (r *Role) Module() *console.Module { return r.console.Module() }
 
-// storeKey is what fib's MemoryStore takes only when it is made.
+// storeKey is the store's bounds, set in place when they change.
 func storeKey(cfg *config.BitTorrentTracker) string {
 	return fmt.Sprint(cfg.Torrents(), "|", cfg.PeersPerTorrent(), "|", cfg.Peers(), "|", cfg.TTL())
 }
@@ -227,22 +227,27 @@ func (r *Role) Apply(member any) error {
 		r.auth.Store(&guard{key: r.key, name: cfg.Auth, p: mediaauth.Lookup(r.key, cfg.Auth)})
 	}
 	sk, vk := storeKey(cfg), serverKey(cfg)
-	if cur := r.cur.Load(); cur == nil || sk != r.storeKey || vk != r.serverKey {
-		var store *fibtracker.MemoryStore
-		if cur != nil && sk == r.storeKey {
-			store = cur.store
-		} else {
-			store = fibtracker.NewMemoryStore(fibtracker.MemoryStoreConfig{
-				MaxTorrents: cfg.Torrents(), MaxPeersPerTorrent: cfg.PeersPerTorrent(), MaxPeers: cfg.Peers(),
-				PeerTTL: cfg.TTL(),
-			})
-			if cur != nil && r.log != nil {
-				r.log.Infof("a new store for the bounds changed: the swarms start empty")
-			}
-		}
+	scfg := fibtracker.MemoryStoreConfig{MaxTorrents: cfg.Torrents(), MaxPeersPerTorrent: cfg.PeersPerTorrent(),
+		MaxPeers: cfg.Peers(), PeerTTL: cfg.TTL()}
+	cur := r.cur.Load()
+	switch {
+	case cur == nil:
+		store := fibtracker.NewMemoryStore(scfg)
 		r.cur.Store(&server{srv: r.newServer(cfg, store), store: store})
-		r.storeKey, r.serverKey = sk, vk
+	case vk != r.serverKey:
+		if sk != r.storeKey {
+			cur.store.SetConfig(scfg)
+		}
+		r.cur.Store(&server{srv: r.newServer(cfg, cur.store), store: cur.store})
+	case sk != r.storeKey:
+		// The bounds and the peers' TTL in place: the swarms stay. Lowered
+		// bounds drop nothing; new torrents and peers wait for room.
+		cur.store.SetConfig(scfg)
 	}
+	if cur != nil && sk != r.storeKey && r.log != nil {
+		r.log.Infof("the store's bounds changed in place, the swarms kept")
+	}
+	r.storeKey, r.serverKey = sk, vk
 	r.cfg = cfg
 	v := &view{maxTorrents: cfg.Torrents(), maxPeers: cfg.Peers()}
 	if r.udpAddr.IsValid() {

@@ -138,7 +138,8 @@ func (r *Role) metricsLocked() {
 // torrents of none), the payload bytes downloaded and uploaded, the rates,
 // the peers connected, the torrents in each state and the pieces that
 // failed their check; for the client, whether it runs, the peers banned,
-// whether the alternative rates hold, and the event stream's subscribers;
+// whether the alternative rates hold, the client events dropped and the
+// event stream's subscribers;
 // per publish entry, its torrents. It takes no lock of the role's.
 func (r *Role) WriteMetrics(w observe.MetricWriter) {
 	snap := r.snap.Load()
@@ -187,6 +188,8 @@ func (r *Role) WriteMetrics(w observe.MetricWriter) {
 	w.Sample("fit_bittorrent_alt_speed_active", alt)
 	w.Family("fit_bittorrent_event_subscribers", "gauge", "Subscribers to the role's events, as the Admin API's /bittorrent/events streams.")
 	w.Sample("fit_bittorrent_event_subscribers", float64(r.events.subscribers()))
+	w.Family("fit_bittorrent_events_dropped_total", "counter", "Piece and peer events the client dropped since fit started, its queue for the role being full.")
+	w.Sample("fit_bittorrent_events_dropped_total", float64(r.clientDropped.Load()))
 	w.Family("fit_bittorrent_event_subscribers_dropped_total", "counter", "Subscribers to the role's events dropped for not taking them fast enough.")
 	w.Sample("fit_bittorrent_event_subscribers_dropped_total", float64(r.events.dropped.Load()))
 	pubs := r.Publishing(nil)
