@@ -86,6 +86,15 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A77 | BitTorrent limits that change at run time, and per torrent | done, fib `1f1d2e7` | 11 | I196, I199 |
 | A78 | `bittorrent.Config.Filter`: refusing peers by address | done, fib `1f1d2e7` | 11 | I196, I199 |
 | A79 | The BitTorrent client on the caller's engine | done, fib `1f1d2e7` | 11 | I196, I197 |
+| A80 | The BitTorrent client's event queue bounded | requested | 11 | I197 |
+| A81 | Adding a torrent as complete (seed mode) | requested | — | I202 |
+| A82 | A Builder that keeps a piece's leaves, not a file's, and stops on a context | requested | 11 | I202 |
+| A83 | Reader.Close interrupts a Read | requested | 1, 10 | I200 |
+| A84 | Piece layers for a hybrid torrent added from a magnet link | requested | — | I196 |
+| A85 | A tracker store that lists its torrents and changes its bounds in place | requested | 11 | I201 |
+| A86 | A seed does not announce a completed download | requested | — | I201 |
+| A87 | A BitTorrent torrent's trackers and their announces | requested | — | I203 |
+| A88 | Checking a running torrent's data again | requested | — | I203 |
 
 ## Evidence
 
@@ -2557,3 +2566,109 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 **How fit uses it.** The `bittorrent.client` role runs on fit's engine, under its `limits` (I197).
 
 **As built.** `Config.SharedEngine`: the client adds its TCP and UDP bindings to the caller's running engine, builds its HTTP client on it, and on `Close` removes its bindings (`ShutdownBinding`) and closes the connections it dialed, leaving the engine running. No core change was needed.
+
+## A80: The BitTorrent client's event queue bounded
+
+**Status.** Requested on 2026-11-09, from I197 (the BitTorrent track); not made yet.
+
+**Problem.** `bittorrent.Client` queues the events `Config.OnEvent` hears in a slice with no bound; a handler that falls behind, or a burst of piece events, grows it without limit.
+
+**Suggested API.** A bound (`Config.EventQueue`), with what happens past it said: piece events coalesced or dropped first, state changes kept, and a count of those dropped.
+
+**How fit uses it.** The role's event handler (I197) and the SSE stream (I203).
+
+## A81: Adding a torrent as complete (seed mode)
+
+**Status.** Requested on 2026-11-09, from I202 (the BitTorrent track); not made yet.
+
+**Problem.** A torrent just built from files on disk is hashed twice: by `metainfo.Builder`, then by the client's initial check, since the client cannot be told the storage already holds every piece.
+
+**Suggested API.** `AddOptions.Seed`: trust the storage as complete (libtorrent's seed mode), each piece verified when first served or a hash failure reported; or resume data made from a `Builder` result.
+
+**How fit uses it.** Publishing a directory (I202): a published file is hashed once.
+
+## A82: A Builder that keeps a piece's leaves, not a file's, and stops on a context
+
+**Status.** Requested on 2026-11-09, from I202 (the BitTorrent track); not made yet.
+
+**Problem.** `metainfo.Builder` keeps every 16 KiB leaf hash of a v2 file until the file ends: size/512 bytes, 2 GiB for a 1 TiB file; and it cannot be cancelled except by failing its reads.
+
+**Suggested API.** Leaves folded into each piece's subtree root as the piece completes; `BuildContext(ctx, ...)`.
+
+**How fit uses it.** Publishing (I202): bounded memory per build, builds stopped at once on a config change.
+
+## A83: Reader.Close interrupts a Read
+
+**Status.** Requested on 2026-11-09, from I200 (the BitTorrent track); not made yet.
+
+**Problem.** `bittorrent.Reader.Close` waits for a `Read` under way, both taking one lock; a stream whose client went away waits for a piece it no longer wants unless its context was cancelled first.
+
+**Suggested API.** Close cancels the read in progress and returns at once.
+
+**How fit uses it.** `bt_stream` (I200) closing a reader whose client left.
+
+## A84: Piece layers for a hybrid torrent added from a magnet link
+
+**Status.** Requested on 2026-11-09, from I196 (the BitTorrent track); not made yet.
+
+**Problem.** fib's docs say the client computes v2 piece layers after a hybrid magnet download, but `Torrent.computeLayers` is never called: such a torrent cannot answer v2 peers' hash requests as a seed.
+
+**Suggested API.** Compute the layers on the disk pool when the download completes (and on a check of complete data), and test a v2-only peer fetching hashes from it.
+
+**How fit uses it.** Seeding hybrid torrents added by magnet link to v2 peers.
+
+## A85: A tracker store that lists its torrents and changes its bounds in place
+
+**Status.** Requested on 2026-11-09, from I201 (the BitTorrent track); not made yet.
+
+**Problem.** `tracker.MemoryStore` cannot list the torrents it keeps, and its bounds and peer TTL are fixed when made, so a reload that changes them starts the swarms empty.
+
+**Suggested API.** `MemoryStore.Range(func(InfoHash, Stats) bool)` and `MemoryStore.SetConfig(MemoryStoreConfig)`.
+
+**How fit uses it.** The tracker role's statistics for a public tracker and reloads that keep the swarms (I201, I203).
+
+## A86: A seed does not announce a completed download
+
+**Status.** Requested on 2026-11-09, from I201 (the BitTorrent track); not made yet.
+
+**Problem.** The client announces `started` while a seed checks its data and `completed` when the check ends, so trackers count every seed as a finished download.
+
+**Suggested API.** Announce `completed` only when a download finishes, never for data that was complete when added.
+
+**How fit uses it.** Correct statistics on fit's tracker and others.
+
+## A87: A torrent's trackers and their announces
+
+**Status.** Requested on 2026-11-09, from I203; not done. fit reports the trackers a torrent's
+.torrent file or magnet link lists, without their state, meanwhile.
+
+**Problem.** The Admin API's `/bittorrent/torrents/<id>/trackers` and the pages (I204) should show
+each tracker's last announce, its result or error, the seeders and leechers it reported and when
+it announces next, as qBittorrent and Transmission do. fib's `Torrent` keeps this in its announce
+loops (`announceLoop`, `tracker.Tiers`) and exposes none of it; the trackers a magnet link's info
+or PEX brought in later are not visible either.
+
+**Suggested API.** `Torrent.Trackers() []TrackerInfo`, one per URL in tier order: `URL`, `Tier`,
+`Last` (time), `Next` (time), `Err` (the last failure or warning message), `Seeders`, `Leechers`,
+`Downloaded` (from the last announce or scrape), and `Updating` while an announce is under way;
+and DHT, PEX and LSD as their own sources with the peers each found.
+
+**How fit uses it.** `Role.Trackers` returns it in place of the metainfo's list, and the Admin API
+and the pages show it as it is.
+
+## A88: Checking a running torrent's data again
+
+**Status.** Requested on 2026-11-09, from I203; not done. fit's `Role.Recheck` takes the torrent
+out of the client (`Remove(false)`) and adds it again without resume data meanwhile, which drops
+its connections and fib's counts of what it downloaded and uploaded.
+
+**Problem.** A recheck (qBittorrent's "Force recheck") is needed after files were changed or
+restored behind the client's back. fib checks data only when a torrent is added.
+
+**Suggested API.** `Torrent.Recheck()`: pause the torrent's requests, forget the pieces had, run
+the initial check again on the disk pool (`StateChecking`), then go on as it was (paused or
+running), keeping its peers, counters and limits; an `EventChecked` at the end.
+
+**How fit uses it.** `Role.Recheck` calls it, and the Admin API's `{"action": "recheck"}` and
+`fit bt` keep their meaning.
+

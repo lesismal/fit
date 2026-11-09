@@ -7,8 +7,8 @@ fit 在网关旁运行一个 BitTorrent 客户端：`bittorrent.client` 角色�
 （[fib 的 BitTorrent 文档](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)）：v1、v2 和混合种子，磁力链接，
 TCP 和 uTP，MSE 加密，DHT，对端交换，本地服务发现，HTTP 和 UDP tracker，以及 web seed。本页讲这个角色：配置、状态保存
 在哪里、添加种子（磁力链接、.torrent 文件和 URL、`watch_dir`）、分类、队列、磁盘检查、备用速率、每个种子的限制、屏蔽列表、
-重载改变什么、发布目录和它的上限；边下载边播放种子文件的 `bt_stream` 处理器；以及 `bittorrent.tracker` 角色。Admin API 和
-页面随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
+重载改变什么、发布目录和它的上限；Admin API、事件流、`fit bt` 和指标；边下载边播放种子文件的 `bt_stream` 处理器；以及
+`bittorrent.tracker` 角色。页面随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
 
 默认关闭：不写 `bittorrent.client` 时，fit 不打开 BitTorrent 端口，也不保存状态。
 
@@ -251,9 +251,9 @@ route { match { path /torrents/* }; handler bt_publish }
 ## 角色的 API
 
 角色有一组 Go API，供之后的条目（Admin API、`fit bt`、页面）使用：`Add` 磁力链接或 .torrent 字节（可带分类和限制），
-`AddURL`，`List`（按队列顺序），`Get`（含文件），`Pause`，`Resume`，`Remove`（可同时删除数据），`SetFilePriority`，
-`SetSequential`，`SetCategory`，`SetTorrentLimits`，`SetQueuePosition`，`AltSpeed` 和 `SetAltSpeed`，`Save`，以及取得 fib
-种子的 `Torrent`。状态给出种子的分类、自己的和实际生效的限制、队列位置、是否已完成，以及角色暂停它的原因（`queued`、
+`AddURL`，`List`（按队列顺序），`Get`（含文件），`Pause`，`Resume`，`Recheck`，`Remove`（可同时删除数据），
+`SetFilePriority`，`SetSequential`，`SetCategory`，`SetTorrentLimits`，`SetQueuePosition`，`AltSpeed` 和 `SetAltSpeed`，
+`Peers`，`Trackers`，`Subscribe`（事件），`Save`，以及取得 fib 种子的 `Torrent`。状态给出种子的分类、自己的和实际生效的限制、队列位置、是否已完成，以及角色暂停它的原因（`queued`、
 `disk`）。
 设置了角色的控制台时，它目前只读地提供 `GET /api/torrents` 和 `GET /api/torrents/<id>`；显示该角色模块的任何控制台以
 `/api/m/bittorrent.client/torrents` 和 `/api/m/bittorrent.client/torrents/<id>` 提供它们。
@@ -261,6 +261,119 @@ route { match { path /torrents/* }; handler bt_publish }
 API 还为 `bt_stream` 的临时种子提供了钩子：`AddTemporary`（受调用者的 `max_temporary` 限制）、`SetTemporary`、
 `RemoveTemporary`（仅当仍是临时种子时，连同数据一起移除）、`TemporaryBytes` 和 `SetFilePriorities`（一次设置每个文件的
 优先级，只保存一次）。
+
+## Admin API
+
+Admin API 在 `/bittorrent/` 下提供客户端和 tracker 的端点，与所有端点一样受其令牌和 `admin.access` 保护；控制台以
+`/api/m/admin/bittorrent/...` 转发它们（事件流除外）。`/node` 列出能力 `bittorrent`。角色 API 的每次调用都运行在请求自己的
+goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的池），从不在 fib worker 上。
+
+| 端点 | 作用 |
+| --- | --- |
+| `GET /bittorrent/torrents` | 按队列顺序的种子：`{"torrents", "total", "offset"}`；`state`（逗号分隔的状态）、`category`（`category=` 表示无分类的）、`q`（名称包含，不分大小写）、`offset`、`limit`（1000，最多 10000） |
+| `POST /bittorrent/torrents` | 添加一个，以 `201`、其状态和 `Location` 应答：JSON `{"magnet"` 或 `"url"` 或 `"torrent"`（base64）、`"category"`、`"paused"`、`"sequential"`、`"priorities"`、`"peers"`、`"limits"}`；以 `application/x-bittorrent` 发送的 .torrent 文件，`category`、`paused`、`sequential` 放在查询中；或表单（`multipart/form-data`），文件放在 `torrent` 部分，字段同上 |
+| `GET /bittorrent/torrents/<id>` | 种子的状态，含文件 |
+| `POST /bittorrent/torrents/<id>` | `{"action": "pause"}`、`"resume"` 或 `"recheck"`；应答状态 |
+| `PATCH /bittorrent/torrents/<id>` | `{"paused", "sequential", "category", "limits"（null 清除）, "queue_position", "priorities": [{"index", "priority"}]}`，省略的不变；应答状态 |
+| `DELETE /bittorrent/torrents/<id>` | 移除它；`?delete_data=1` 连同文件 |
+| `GET /bittorrent/torrents/<id>/files` | `{"files"}`：索引、路径、长度、已完成、优先级 |
+| `GET /bittorrent/torrents/<id>/peers` | `{"peers"}`：地址、ID、客户端、方向、uTP、加密、是否做种、分块数、字节数与速率、choke 状态 |
+| `GET /bittorrent/torrents/<id>/trackers` | `{"trackers": [{"url", "tier"}], "web_seeds"}`，即其 .torrent 文件或磁力链接所列 |
+| `GET /bittorrent/alt_speed` | 备用速率：模式、是否配置、是否生效、当前生效的速率；`PUT` `{"mode": "auto"}`、`"on"` 或 `"off"` |
+| `GET /bittorrent/publish` | 发布条目及其种子；`/bittorrent/publish/<name>` 一个 |
+| `GET /bittorrent/events` | 事件，以 server-sent events 推送（见下） |
+| `GET /bittorrent/tracker/stats` | tracker 的总计 |
+| `GET /bittorrent/tracker/torrents` | 允许列表中种子的 swarm（`offset`，`limit` 最多 1000）；`/bittorrent/tracker/torrents/<info hash>` 一个种子的 |
+| `GET /bittorrent/tracker/passkey?user=` | 私有 tracker 策略中的一个用户及其 passkey |
+
+种子的 `<id>` 是它的 ID，即十六进制的 v1 info hash，大小写均可，或其 v2 hash（64 位），取前 20 字节为 ID。`limits` 接受
+`upload_rate`、`download_rate`、`max_conns`、`upload_slots`、`seed_ratio` 和 `seed_time`，后者为时长（`"12h"`，`"-1s"`
+表示永远做种）或状态给出的纳秒数。`PATCH` 按上述顺序逐项修改并各自保存；第一项失败时应答其错误，之前的修改保留。
+
+添加一个 `bt_stream` 即时添加的种子时，它会原样转为普通种子保留，而不是应答 `409`。发送的 .torrent 文件最多 32 MiB，与按
+URL 下载的相同，边到达边读取，超出时以 `413` 拒绝（表单的其他字段每个 64 KiB，最多 16 部分）；URL 由角色在 `url_timeout`
+内下载。
+
+| 角色的错误 | 状态码 |
+| --- | --- |
+| 该角色不在此运行 | 404 |
+| 没有该种子 | 404 |
+| 错误的请求：链接、文件、分类、优先级、模式 | 400 |
+| 已添加；无法恢复、只能移除的种子 | 409 |
+| 已达 `max_torrents` | 429 |
+| 已有 4 个 .torrent 文件在下载；已有 32 个事件流 | 503，带 `Retry-After` |
+| 客户端未运行，例如端口无法占用之后 | 503，带 `Retry-After` |
+| .torrent 文件无法下载 | 502 |
+
+## 事件
+
+`GET /bittorrent/events` 以 server-sent events（`text/event-stream`）推送客户端的事件，每个事件带 `id`、作为 `event` 的类型，
+以及作为 `data` 的 JSON：`id`、`time`、`type`，视情况还有 `torrent`、`name`、`category`、`state`、`previous`、`error`、
+`peer`、`data_deleted`。
+
+| 类型 | 何时 |
+| --- | --- |
+| `added` | 添加了种子（`state` 为当时的状态） |
+| `removed` | 移除了种子（`data_deleted` 表示连同文件） |
+| `state` | 种子的状态从 `previous` 变为 `state`（`error` 状态时 `error` 说明原因）；状态即状态信息中的：`metadata`、`checking`、`downloading`、`seeding`、`queued`、`paused`、`stopped`、`error` |
+| `completed` | 种子已拥有想要的每个分块 |
+| `error` | 其存储出错，但不会因此停止 |
+| `peer_banned` | 某个 peer 或某地址的所有 peer 被封禁，`error` 说明原因 |
+| `seed_limit` | 种子达到做种比率或时间而暂停 |
+| `alt_speed` | 备用速率开始（`state` 为 `on`）或停止（`off`）生效 |
+
+状态变化由角色的管理器每秒察觉一次，API 修改之后则立即察觉。没有事件可发时，事件流每 15s 写一行注释。带
+`Last-Event-ID`（或 `?after=<id>`）重连的客户端会先收到它错过的事件，取自角色保留的最近 1024 个；其中有些已不再保留，或
+fit 此后重启过（ID 每次启动从 1 开始）时，事件流以事件 `reset` 开头，客户端此后应重新读取种子。每个事件流有 256 个事件的
+缓冲：取得不够快的客户端不会被悄悄跳过事件，而是收到事件 `lagged` 后被断开，从它拿到的最后一个 ID 重连。最多同时运行
+32 个事件流（超出为 `503`）。角色停止时以事件 `end` 关闭事件流；Admin API 关闭时也是。事件流需要独占一个连接，因此在
+Admin API 的地址上提供，不经控制台（控制台上为 `501`）。
+
+事件也写入 fit 的日志，logger 为 `bittorrent`：添加、移除种子，封禁和做种限制为 info，完成和备用速率照旧为 info，存储错误
+为 error，状态变化为 debug。
+
+## fit bt
+
+`fit bt` 通过运行中 fit 的 Admin API 操作其客户端，查找和认证方式与 `fit check`、`fit sync` 相同（`-c` 引导配置、
+`-timeout`、`-json` 以及 TLS 参数）：
+
+```sh
+fit bt ls -state downloading,queued -category films
+fit bt add -category films 'magnet:?xt=urn:btih:...' https://example.com/x.torrent ./y.torrent
+fit bt info 3f2a91                      # ID 的唯一前缀，或名称
+fit bt pause 3f2a91 sintel
+fit bt resume 3f2a91
+fit bt rm -delete-data 3f2a91
+fit bt limit -down 2M -ratio 2 -seed-time 72h 3f2a91
+fit bt limit -clear 3f2a91
+fit bt alt on                           # auto、on、off；不带参数时显示
+```
+
+`add` 接受磁力链接、http 和 https URL 以及 .torrent 文件，还有 `-paused`、`-sequential`，以及设置种子自身速率的 `-up` 和
+`-down`；速率为每秒字节数，可加 `K`、`M` 或 `G`（二进制）。有一个被 Admin API 拒绝时，它会试完其余的再以 1 退出，用法错误
+时以 2 退出。
+
+## 指标
+
+两个角色的指标与 fit 的指标一起出现在 Admin API 的 `/metrics` 和 OpenTelemetry 导出中。客户端的指标由其管理器每秒采集一次，
+抓取时不取角色的锁；fib 对种子字节数和校验失败分块的计数随增长累加到其分类的总计中，因此计数器保留已移除种子的计数，
+在 fit 运行期间从不回退。无分类的种子 `category` 为 `""`；对它求和即客户端的总计。
+
+| 指标 | 类型 | 标签 |
+| --- | --- | --- |
+| `fit_bittorrent_client_running` | gauge | |
+| `fit_bittorrent_downloaded_bytes_total`、`fit_bittorrent_uploaded_bytes_total`（有效载荷） | counter | `category` |
+| `fit_bittorrent_download_rate_bytes`、`fit_bittorrent_upload_rate_bytes` | gauge | `category` |
+| `fit_bittorrent_peers`、`fit_bittorrent_seeders`（连接） | gauge | `category` |
+| `fit_bittorrent_torrents` | gauge | `category`、`state` |
+| `fit_bittorrent_hash_failures_total` | counter | `category` |
+| `fit_bittorrent_peers_banned_total` | counter | |
+| `fit_bittorrent_alt_speed_active` | gauge | |
+| `fit_bittorrent_event_subscribers`、`fit_bittorrent_event_subscribers_dropped_total` | gauge、counter | |
+| `fit_bittorrent_published_torrents` | gauge | `entry` |
+| `fit_bittorrent_tracker_torrents`、`fit_bittorrent_tracker_peers`、`fit_bittorrent_tracker_max_torrents`、`fit_bittorrent_tracker_max_peers`、`fit_bittorrent_tracker_allowed` | gauge | |
+| `fit_bittorrent_tracker_announces_total`、`fit_bittorrent_tracker_scrapes_total` | counter | |
+| `fit_bittorrent_tracker_refused_total` | counter | `reason`：`unregistered`、`passkey`、`access` |
 
 ## 边下载边播放
 
@@ -382,4 +495,5 @@ passkey 被替换为 `REDACTED`。`public` 含 `play` 的策略让所有人进�
 `Torrent(hash)`（做种者、下载者、完成次数）以及 `Torrents`（允许列表中种子的 swarm）；其控制台只读地提供
 `GET /api/stats`、`/api/torrents`（`offset`、`limit`，最多 1000）和 `/api/torrents/<hash>`，作为模块时为
 `/api/m/bittorrent.tracker/...`。公开的 tracker 无法列出它跟踪的种子：fib 的 `MemoryStore` 只对指名的种子作答。
-Admin API 的 `/bittorrent/tracker/stats` 随 I203 而来。
+Admin API 以 `/bittorrent/tracker/stats`、`/bittorrent/tracker/torrents[/<hash>]` 和 `/bittorrent/tracker/passkey?user=`
+提供它们，另有[指标](#指标)。

@@ -3897,6 +3897,23 @@ with a dot and symbolic links are left out, and `files`, `exclude`, `max_files` 
 that a restart takes those whose files kept their size, times and inode without building or checking
 them again. See [decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
 
+The Admin API serves both roles under `/bittorrent/`, and so does the console under `/api/m/admin/`:
+`GET /bittorrent/torrents` lists the torrents (filtered by `state`, `category` and `q`, paged), `POST`
+adds one from a magnet link, a URL or a .torrent file (JSON, `application/x-bittorrent` or a form,
+at most 32 MiB), `/bittorrent/torrents/{id}` gives one with its files, pauses, resumes or rechecks it
+(`POST {"action"}`), changes its priorities, category, limits and queue position (`PATCH`) and
+removes it (`DELETE`, `?delete_data=1`); `.../files`, `.../peers` and `.../trackers`;
+`/bittorrent/alt_speed` reads and sets the alternative rates; `/bittorrent/publish` the publish
+entries; `/bittorrent/tracker/stats`, `.../torrents` and `.../passkey` the tracker's.
+`GET /bittorrent/events` streams the client's events as server-sent events (torrents added, removed,
+completed, failing or changing state, peers banned, seed limits, the alternative rates), with
+`Last-Event-ID` to catch up, 32 streams at most, a slow one disconnected after 256 events waiting;
+on the Admin API's own address only. `fit bt ls`, `add`, `info`, `pause`, `resume`, `rm`, `limit`
+and `alt` call these through the Admin API the bootstrap config names, as `fit sync` does. The
+Admin API's `/metrics` carries the client's as `fit_bittorrent_*` (bytes, rates, peers and hash
+failures by category, torrents by category and state, bans, the alternative rates) and the
+tracker's as `fit_bittorrent_tracker_*` (torrents, peers, announces, scrapes, refusals by reason).
+
 `bittorrent.tracker` is a BitTorrent tracker on fib's tracker, one a process: HTTP and HTTPS
 announces and scrapes come through any route whose handler is `bt_tracker`, on fit's listeners
 and TLS, and UDP ones (BEP 15) on the role's own `listen`, which may be left out. The swarms are

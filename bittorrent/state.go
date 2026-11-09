@@ -133,6 +133,13 @@ type record struct {
 	// listed, and saved, until removed.
 	err error
 	t   *fibbt.Torrent
+
+	// lastState is the state the last look published (events.go); acctT
+	// is the fib torrent whose counts acctDown, acctUp and acctFails are,
+	// as the role's totals took them last (metrics.go).
+	lastState                   string
+	acctT                       *fibbt.Torrent
+	acctDown, acctUp, acctFails int64
 }
 
 func (r *record) entry() stateEntry {

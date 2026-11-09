@@ -458,7 +458,9 @@ func TestLinkCallBounds(t *testing.T) {
 	e := enrollIn(t, f, "bounded")
 	release := make(chan struct{})
 	var slow atomic.Bool
-	lm := &linkedMember{}
+	// The member's own API, once startLinked has made it: requests may
+	// come before it returns.
+	var member atomic.Pointer[linkedMember]
 	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/big":
@@ -476,11 +478,15 @@ func TestLinkCallBounds(t *testing.T) {
 			w.Header().Set("Content-Type", r.Header.Get("Content-Type"))
 			_, _ = w.Write(body)
 		default:
-			lm.api().ServeHTTP(w, r)
+			if lm := member.Load(); lm != nil {
+				lm.api().ServeHTTP(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 	})
 	got := startLinked(t, f, e.Config, nil, api)
-	lm.f = got.f
+	member.Store(got)
 	got.waitLinked(t, true)
 	f.waitUp("bounded")
 

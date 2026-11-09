@@ -145,6 +145,20 @@ const DryRunHeader = "Fit-Dry-Run"
 //	                            POST .../dead-letters/replay writes them to
 //	                            the sinks again and DELETE drops them
 //	                            (sync.go)
+//	GET    /bittorrent/torrents the BitTorrent client's torrents, filtered
+//	                            and paged; POST adds one by magnet link,
+//	                            URL or .torrent file; /bittorrent/torrents/
+//	                            {id} one, with its files, POST pauses,
+//	                            resumes or rechecks it, PATCH changes its
+//	                            priorities, category, limits and place,
+//	                            DELETE removes it; .../files, .../peers,
+//	                            .../trackers; /bittorrent/alt_speed the
+//	                            alternative rates (PUT auto, on or off);
+//	                            /bittorrent/publish the publish entries;
+//	                            /bittorrent/events its events as
+//	                            server-sent events; /bittorrent/tracker/
+//	                            stats, .../torrents and .../passkey the
+//	                            tracker's (bittorrent.go, btevents.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //	GET    /debug/pprof/        Go's runtime profiles, as net/http/pprof
@@ -194,6 +208,9 @@ type Server struct {
 	ln   net.Listener
 	srv  *http.Server
 	done chan struct{} // closed when Serve returns
+	// closing is closed when the server shuts down, ending the event
+	// streams, which never go idle; nil for the console's.
+	closing chan struct{}
 }
 
 // Start listens where a says and serves the Admin API for configs, over
@@ -202,7 +219,7 @@ type Server struct {
 // without stopping the API, as certificate files that changed and do not
 // load.
 func Start(a *config.Admin, configs *Configs, report func(Result), warnf func(format string, args ...any)) (*Server, error) {
-	s := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceAdmin, done: make(chan struct{})}
+	s := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceAdmin, done: make(chan struct{}), closing: make(chan struct{})}
 	if warnf == nil {
 		warnf = func(string, ...any) {}
 	}
@@ -277,6 +294,7 @@ func Start(a *config.Admin, configs *Configs, report func(Result), warnf func(fo
 		// the connections max_conns counts.
 		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
 	}
+	s.srv.RegisterOnShutdown(func() { close(s.closing) })
 	go func() {
 		defer close(s.done)
 		_ = s.srv.Serve(s.ln)
@@ -365,6 +383,24 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /sync/pipelines/{name}/dead-letters", s.syncDeadLetters)
 	mux.HandleFunc("POST /sync/pipelines/{name}/dead-letters/replay", s.syncReplay)
 	mux.HandleFunc("DELETE /sync/pipelines/{name}/dead-letters", s.syncDropDeadLetters)
+	mux.HandleFunc("GET /bittorrent/torrents", s.btTorrents)
+	mux.HandleFunc("POST /bittorrent/torrents", s.btAdd)
+	mux.HandleFunc("GET /bittorrent/torrents/{id}", s.btTorrent)
+	mux.HandleFunc("POST /bittorrent/torrents/{id}", s.btAction)
+	mux.HandleFunc("PATCH /bittorrent/torrents/{id}", s.btPatch)
+	mux.HandleFunc("DELETE /bittorrent/torrents/{id}", s.btRemove)
+	mux.HandleFunc("GET /bittorrent/torrents/{id}/files", s.btFiles)
+	mux.HandleFunc("GET /bittorrent/torrents/{id}/peers", s.btPeers)
+	mux.HandleFunc("GET /bittorrent/torrents/{id}/trackers", s.btTrackers)
+	mux.HandleFunc("GET /bittorrent/alt_speed", s.btAltSpeed)
+	mux.HandleFunc("PUT /bittorrent/alt_speed", s.btSetAltSpeed)
+	mux.HandleFunc("GET /bittorrent/publish", s.btPublish)
+	mux.HandleFunc("GET /bittorrent/publish/{name}", s.btPublish)
+	mux.HandleFunc("GET /bittorrent/events", s.btEvents)
+	mux.HandleFunc("GET /bittorrent/tracker/stats", s.btTrackerStats)
+	mux.HandleFunc("GET /bittorrent/tracker/torrents", s.btTrackerTorrents)
+	mux.HandleFunc("GET /bittorrent/tracker/torrents/{hash}", s.btTrackerTorrent)
+	mux.HandleFunc("GET /bittorrent/tracker/passkey", s.btPasskey)
 	return mux
 }
 
