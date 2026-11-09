@@ -2659,8 +2659,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A87: A torrent's trackers and their announces
 
-**Status.** Requested on 2026-11-09, from I203; not done. fit reports the trackers a torrent's
-.torrent file or magnet link lists, without their state, meanwhile.
+**Status.** Requested on 2026-11-09, from I203; done in fib at `4c6780e` (`Torrent.Trackers`, `Sources`, `WebSeeds`), made by fit's session; fit is on `404da7e` and moves its `/trackers` to it in I210. Until then fit reports the trackers a torrent's .torrent file or magnet link lists, without their state.
 
 **Problem.** The Admin API's `/bittorrent/torrents/<id>/trackers` and the pages (I204) should show
 each tracker's last announce, its result or error, the seeders and leechers it reported and when
@@ -2678,9 +2677,7 @@ and the pages show it as it is.
 
 ## A88: Checking a running torrent's data again
 
-**Status.** Requested on 2026-11-09, from I203; not done. fit's `Role.Recheck` takes the torrent
-out of the client (`Remove(false)`) and adds it again without resume data meanwhile, which drops
-its connections and fib's counts of what it downloaded and uploaded.
+**Status.** Requested on 2026-11-09, from I203; done in fib at `4c6780e` (`Torrent.Recheck`), made by fit's session; fit is on `404da7e` and moves `Role.Recheck` to it in I210. Until then fit's `Role.Recheck` takes the torrent out of the client (`Remove(false)`) and adds it again without resume data, which drops its connections and fib's counts of what it downloaded and uploaded.
 
 **Problem.** A recheck (qBittorrent's "Force recheck") is needed after files were changed or
 restored behind the client's back. fib checks data only when a torrent is added.

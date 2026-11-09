@@ -2039,7 +2039,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A87：任务的 tracker 及其 announce 状态
 
-**状态。** 2026-11-09 由 I203 提出；未完成。在此之前，fit 只报告任务的 .torrent 文件或磁力链接列出的 tracker，不含其状态。
+**状态。** 2026-11-09 由 I203 提出；已在 fib 的 `4c6780e` 完成（`Torrent.Trackers`、`Sources`、`WebSeeds`），由 fit 的会话实现；fit 已在 `404da7e` 上，并在 I210 中让 `/trackers` 改用它。在此之前，fit 只报告任务的 .torrent 文件或磁力链接列出的 tracker，不含其状态。
 
 **问题。** Admin API 的 `/bittorrent/torrents/<id>/trackers` 和页面（I204）应当像 qBittorrent、Transmission 那样显示每个 tracker 上次 announce 的时间、结果或错误、它报告的做种数与下载数，以及下次 announce 的时间。fib 的 `Torrent` 在 announce 循环（`announceLoop`、`tracker.Tiers`）里保有这些信息，却一项也不公开；磁力链接的 info 或 PEX 之后带来的 tracker 也看不到。
 
@@ -2049,7 +2049,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A88：重新校验运行中任务的数据
 
-**状态。** 2026-11-09 由 I203 提出；未完成。在此之前，fit 的 `Role.Recheck` 把任务从客户端移除（`Remove(false)`），再不带续传数据重新加入，这会断开它的连接，并清零 fib 对其下载、上传量的计数。
+**状态。** 2026-11-09 由 I203 提出；已在 fib 的 `4c6780e` 完成（`Torrent.Recheck`），由 fit 的会话实现；fit 已在 `404da7e` 上，并在 I210 中让 `Role.Recheck` 改用它。在此之前，fit 的 `Role.Recheck` 把任务从客户端移除（`Remove(false)`），再不带续传数据重新加入，这会断开它的连接，并清零 fib 对其下载、上传量的计数。
 
 **问题。** 文件在客户端不知情时被改动或恢复后，需要重新校验（qBittorrent 的“强制重新校验”）。fib 只在加入任务时校验数据。
 
