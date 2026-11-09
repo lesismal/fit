@@ -1,7 +1,9 @@
 # Sync's interoperability and recovery matrix (I192), whole, nightly: each
 # source on every server of its kind (PostgreSQL 13 to 17, MySQL 5.7, 8.0,
 # 8.4 and MariaDB 10.11, 11, MongoDB 6, 7 and 8, TiDB through TiCDC, Kafka
-# and Redpanda), with a larger load and more
+# and Redpanda; the second round's RabbitMQ 3.13 and 4.1, NATS 2.10 and
+# 2.11, Pulsar 3 and 4, Mosquitto and EMQX, SQL Server 2019 and 2022, and
+# Doris), with a larger load and more
 # kills, into the fixed sinks (PostgreSQL 17, MySQL 8.4, MongoDB 8,
 # Elasticsearch, ClickHouse, Redis). A job per source family, each
 # starting only the servers it needs. CI (ci.yml, sync-interop's matrix)
@@ -30,6 +32,12 @@ jobs:
           - {source: mongo, servers: "search mysql postgres mongo", env: "MONGO_VERSIONS='6 7 8'"}
           - {source: tidb, servers: "search mysql postgres mongo tidb", env: ""}
           - {source: kafka, servers: "search mysql postgres mongo kafka", env: "REDPANDA=1"}
+          - {source: rabbitmq, servers: "search mysql postgres mongo mq", env: "RABBITMQ_IMAGES='3.13=rabbitmq:3.13 4.1=rabbitmq:4.1'"}
+          - {source: nats, servers: "search mysql postgres mongo mq", env: "NATS_VERSIONS='210 211'"}
+          - {source: pulsar, servers: "search mysql postgres mongo mq", env: "PULSAR_VERSIONS='3 4'"}
+          - {source: mqtt, servers: "search mysql postgres mongo mq", env: "EMQX=1"}
+          - {source: mssql, servers: "search mysql postgres mongo mssql", env: "MSSQL_VERSIONS='2022 2019'"}
+          - {source: doris, servers: "search mysql postgres mongo olap", env: "OLAP=doris"}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
