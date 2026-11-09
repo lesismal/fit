@@ -111,7 +111,7 @@ func TestBrokenTorrentKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	r2.Stop(context.Background())
-	recs, err := loadState(data)
+	recs, _, err := loadState(data)
 	if err != nil || len(recs) != 1 || recs[0].id != good.ID || len(recs[0].resume) == 0 || string(recs[0].resume) == "garbage" {
 		t.Fatalf("saved %v %v", recs, err)
 	}
@@ -188,7 +188,7 @@ func TestDataDirChange(t *testing.T) {
 	if r.Client() == old || len(r.List()) != 0 {
 		t.Fatalf("client %v, torrents %v", r.Client() == old, r.List())
 	}
-	recs, err := loadState(one)
+	recs, _, err := loadState(one)
 	if err != nil || len(recs) != 1 || recs[0].id != st.ID {
 		t.Fatalf("the old state: %v %v", recs, err)
 	}

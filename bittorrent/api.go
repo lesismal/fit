@@ -54,6 +54,12 @@ type AddRequest struct {
 	Priorities []int `json:"priorities,omitempty"`
 	// Peers are addresses to connect to beside those discovery finds.
 	Peers []string `json:"peers,omitempty"`
+	// Category is the category to add it in, which decides its
+	// directory, its limits and the media library scanned when it
+	// completes; none, download_dir, when empty.
+	Category string `json:"category,omitempty"`
+	// Limits are its own limits, over its category's.
+	Limits *TorrentLimits `json:"limits,omitempty"`
 }
 
 // Status is a torrent as the API reports it.
@@ -72,6 +78,21 @@ type Status struct {
 	// Temporary is a torrent bt_stream added on the fly, removed with its
 	// data after its last stream.
 	Temporary bool `json:"temporary,omitempty"`
+	// Category is its category, if any.
+	Category string `json:"category,omitempty"`
+	// Limits are its own limits, if it has any; Effective what it goes by,
+	// its own over its category's.
+	Limits    *TorrentLimits `json:"limits,omitempty"`
+	Effective *TorrentLimits `json:"effective_limits,omitempty"`
+	// QueuePosition is its place in the list, from 0, which the queue
+	// goes by.
+	QueuePosition int `json:"queue_position"`
+	// Held is why the role keeps it paused, if it does: "starting",
+	// "queued" (past max_active_downloads or max_active_seeds) or "disk"
+	// (short of disk space, Error saying how).
+	Held string `json:"held,omitempty"`
+	// Complete says it has every piece it wants.
+	Complete bool `json:"complete"`
 
 	Size         int64   `json:"size"`
 	Wanted       int64   `json:"wanted"`
@@ -102,9 +123,23 @@ type FileStatus struct {
 }
 
 // status reports rec. r.mu is held.
-func (r *Role) status(rec *record, files bool) Status {
+func (r *Role) status(rec *record, files bool, pos int) Status {
 	s := Status{ID: rec.id, Name: rec.name, Magnet: rec.magnet, Dir: rec.dir, Paused: rec.paused,
-		Sequential: rec.sequential, Added: rec.added, Temporary: rec.temporary}
+		Sequential: rec.sequential, Added: rec.added, Category: rec.category, Held: rec.held.String(),
+		Complete: rec.completed, QueuePosition: pos, Temporary: rec.temporary}
+	if !rec.limits.IsZero() {
+		l := rec.limits
+		s.Limits = &l
+	}
+	if r.cfg != nil {
+		var l TorrentLimits
+		if c := r.cfg.Category(rec.category); c != nil && c.Limits != nil {
+			l = *c.Limits
+		}
+		if l = l.Over(rec.limits); !l.IsZero() {
+			s.Effective = &l
+		}
+	}
 	if rec.mi != nil {
 		if h := rec.mi.Info.InfoHashV1(); rec.mi.Info.HasV1() {
 			s.InfoHash = h.String()
@@ -127,8 +162,13 @@ func (r *Role) status(rec *record, files bool) Status {
 	}
 	st := t.Stats()
 	s.State = strings.ToLower(st.State.String())
+	if rec.held == holdQueue {
+		s.State = "queued"
+	}
 	if err := t.Err(); err != nil {
 		s.Error = err.Error()
+	} else if rec.held == holdDisk {
+		s.Error = rec.holdMsg
 	} else {
 		s.Error = r.lastStorageErr(rec.id)
 	}
@@ -155,7 +195,9 @@ func (r *Role) status(rec *record, files bool) Status {
 }
 
 // Add adds a torrent from a magnet link or a .torrent file, downloading
-// into download_dir, and saves the list at once.
+// into its category's directory, or download_dir, and saves the list at
+// once. It starts at once unless req says paused, the queue is full or
+// the disk short.
 func (r *Role) Add(req AddRequest) (Status, error) { return r.add(req, 0) }
 
 // AddTemporary adds a torrent as Add does, marked temporary, as bt_stream
@@ -173,7 +215,10 @@ func (r *Role) add(req AddRequest, maxTemp int) (Status, error) {
 		return Status{}, fmt.Errorf("%w: give a magnet link or a .torrent file", ErrBadRequest)
 	}
 	rec := &record{magnet: req.Magnet, priorities: slices.Clone(req.Priorities), sequential: req.Sequential,
-		paused: req.Paused, added: time.Now().UTC().Truncate(time.Second)}
+		paused: req.Paused, added: time.Now().UTC().Truncate(time.Second), category: req.Category}
+	if req.Limits != nil {
+		rec.limits = req.Limits.Over(TorrentLimits{})
+	}
 	for _, p := range req.Priorities {
 		if p < fibbt.PriorityNone || p > fibbt.PriorityHigh {
 			return Status{}, fmt.Errorf("%w: a priority is 0 to 7, not %d", ErrBadRequest, p)
@@ -221,7 +266,15 @@ func (r *Role) add(req AddRequest, maxTemp int) (Status, error) {
 		}
 		rec.temporary = true
 	}
-	dir, err := filepath.Abs(r.cfg.Downloads())
+	base := r.cfg.Downloads()
+	if rec.category != "" {
+		c := r.cfg.Category(rec.category)
+		if c == nil {
+			return Status{}, fmt.Errorf("%w: no category is named %q", ErrBadRequest, rec.category)
+		}
+		base = r.cfg.CategoryDir(c)
+	}
+	dir, err := filepath.Abs(base)
 	if err != nil {
 		return Status{}, err
 	}
@@ -249,7 +302,8 @@ func (r *Role) add(req AddRequest, maxTemp int) (Status, error) {
 	r.recs = append(r.recs, rec)
 	r.byID[rec.id] = rec
 	r.listDirty = true
-	if err := saveList(r.dataDir, r.recs); err != nil {
+	r.scheduleLocked()
+	if err := saveList(r.dataDir, r.recs, r.altMode); err != nil {
 		// Saved again by the saver.
 		if r.log != nil {
 			r.log.Errorf("saving the state in %s: %v", r.dataDir, err)
@@ -257,16 +311,17 @@ func (r *Role) add(req AddRequest, maxTemp int) (Status, error) {
 	} else {
 		r.listDirty = false
 	}
-	return r.status(rec, false), nil
+	return r.status(rec, false, len(r.recs)-1), nil
 }
 
-// List reports every torrent, in the order they were added.
+// List reports every torrent, in the order of the list, which the queue
+// goes by: the order they were added in, unless SetQueuePosition moved one.
 func (r *Role) List() []Status {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]Status, 0, len(r.recs))
-	for _, rec := range r.recs {
-		out = append(out, r.status(rec, false))
+	for i, rec := range r.recs {
+		out = append(out, r.status(rec, false, i))
 	}
 	return out
 }
@@ -279,7 +334,7 @@ func (r *Role) Get(id string) (Status, error) {
 	if rec == nil {
 		return Status{}, ErrNotFound
 	}
-	return r.status(rec, true), nil
+	return r.status(rec, true, slices.Index(r.recs, rec)), nil
 }
 
 // Torrent returns fib's torrent id, for what reads its data, as a stream:
@@ -320,8 +375,13 @@ func (r *Role) change(id string, fn func(rec *record) error) error {
 	if err := fn(rec); err != nil {
 		return err
 	}
+	return r.saveListLocked()
+}
+
+// saveListLocked saves the list at once. r.mu is held.
+func (r *Role) saveListLocked() error {
 	r.listDirty = true
-	if err := saveList(r.dataDir, r.recs); err != nil {
+	if err := saveList(r.dataDir, r.recs, r.altMode); err != nil {
 		return fmt.Errorf("saving the state: %w", err)
 	}
 	r.listDirty = false
@@ -334,17 +394,120 @@ func (r *Role) Pause(id string) error {
 	return r.change(id, func(rec *record) error {
 		rec.t.Pause()
 		rec.paused, rec.resumeDirty = true, true
+		rec.held, rec.holdMsg = holdNone, ""
+		r.scheduleLocked()
 		return nil
 	})
 }
 
-// Resume starts the torrent id again.
+// Resume starts the torrent id again, when the queue and the disk let it:
+// else it waits, held, for its turn.
 func (r *Role) Resume(id string) error {
 	return r.change(id, func(rec *record) error {
-		rec.t.Start()
+		if !rec.paused {
+			return nil
+		}
 		rec.paused = false
+		if rec.held == holdNone {
+			rec.held = holdStart
+		}
+		r.scheduleLocked()
 		return nil
 	})
+}
+
+// SetCategory moves the torrent id to the category name, or out of any
+// with "": it takes the category's limits, and its media library is
+// scanned when the torrent completes. Its files stay in the directory it
+// was added with.
+func (r *Role) SetCategory(id, name string) error {
+	return r.change(id, func(rec *record) error {
+		if name != "" && r.cfg.Category(name) == nil {
+			return fmt.Errorf("%w: no category is named %q", ErrBadRequest, name)
+		}
+		rec.category = name
+		r.applyTorrentLimitsLocked()
+		return nil
+	})
+}
+
+// SetTorrentLimits sets the torrent id's own limits, over its category's;
+// the zero TorrentLimits clears them.
+func (r *Role) SetTorrentLimits(id string, l TorrentLimits) error {
+	return r.change(id, func(rec *record) error {
+		rec.limits = l.Over(TorrentLimits{})
+		r.applyTorrentLimitsLocked()
+		return nil
+	})
+}
+
+// SetQueuePosition moves the torrent id to position pos of the list, from
+// 0, which the queue goes by: past the end is the end. The torrents ahead
+// of max_active_downloads and max_active_seeds run.
+func (r *Role) SetQueuePosition(id string, pos int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec := r.byID[id]
+	if rec == nil {
+		return ErrNotFound
+	}
+	if pos < 0 {
+		return fmt.Errorf("%w: a queue position is 0 or more, not %d", ErrBadRequest, pos)
+	}
+	r.recs = slices.DeleteFunc(r.recs, func(x *record) bool { return x == rec })
+	pos = min(pos, len(r.recs))
+	r.recs = slices.Insert(r.recs, pos, rec)
+	r.scheduleLocked()
+	return r.saveListLocked()
+}
+
+// AltSpeedStatus is the alternative rates as the API reports them.
+type AltSpeedStatus struct {
+	// Mode is AltSpeedAuto, AltSpeedOn or AltSpeedOff.
+	Mode string `json:"mode"`
+	// Configured says the config has alt_speed: without it the
+	// alternative rates never hold.
+	Configured bool `json:"configured"`
+	// Active says they hold now.
+	Active       bool `json:"active"`
+	UploadRate   int  `json:"upload_rate"`
+	DownloadRate int  `json:"download_rate"`
+}
+
+// AltSpeed reports the alternative rates.
+func (r *Role) AltSpeed() (AltSpeedStatus, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.client == nil {
+		return AltSpeedStatus{}, ErrNotRunning
+	}
+	s := AltSpeedStatus{Mode: AltSpeedAuto, Configured: r.cfg.AltSpeed != nil, Active: r.altActiveLocked(),
+		UploadRate: r.limits.UploadRate, DownloadRate: r.limits.DownloadRate}
+	if r.altMode != "" {
+		s.Mode = r.altMode
+	}
+	return s, nil
+}
+
+// SetAltSpeed turns the alternative rates on or off whatever their
+// schedules say, or back to the schedules with AltSpeedAuto; the choice is
+// kept in the state across restarts.
+func (r *Role) SetAltSpeed(mode string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.client == nil {
+		return ErrNotRunning
+	}
+	switch mode {
+	case AltSpeedAuto:
+		mode = ""
+	case AltSpeedOn, AltSpeedOff:
+	default:
+		return fmt.Errorf("%w: the alternative rates' mode is auto, on or off, not %q", ErrBadRequest, mode)
+	}
+	r.altMode = mode
+	r.applyLimitsLocked()
+	return r.saveListLocked()
 }
 
 // SetSequential turns the sequential download of the torrent id on or off.
@@ -382,6 +545,8 @@ func (r *Role) SetFilePriority(id string, i, priority int) error {
 			rec.priorities = p
 		}
 		rec.t.SetFilePriority(i, priority)
+		// It may want pieces it lacks now: its next completion counts.
+		rec.completed = false
 		rec.priorities[i] = priority
 		return nil
 	})
@@ -440,7 +605,9 @@ func (r *Role) removeLocked(id string, deleteData bool) error {
 	r.evMu.Lock()
 	delete(r.storageErr, id)
 	r.evMu.Unlock()
-	if err := saveList(r.dataDir, r.recs); err != nil {
+	// Its slot in the queue frees.
+	r.scheduleLocked()
+	if err := saveList(r.dataDir, r.recs, r.altMode); err != nil {
 		errs = append(errs, fmt.Errorf("saving the state: %w", err))
 	} else {
 		r.listDirty = false
@@ -476,7 +643,7 @@ func (r *Role) SetTemporary(id string, on bool) error {
 	}
 	rec.temporary = on
 	r.listDirty = true
-	if err := saveList(r.dataDir, r.recs); err != nil {
+	if err := saveList(r.dataDir, r.recs, r.altMode); err != nil {
 		return fmt.Errorf("saving the state: %w", err)
 	}
 	r.listDirty = false

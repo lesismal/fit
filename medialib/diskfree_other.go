@@ -4,3 +4,6 @@ package medialib
 
 // diskFree cannot tell the space free here: min_free_bytes is not checked.
 func diskFree(string) (uint64, bool) { return 0, false }
+
+// DiskFree cannot tell the space free here: false.
+func DiskFree(dir string) (uint64, bool) { return diskFree(dir) }

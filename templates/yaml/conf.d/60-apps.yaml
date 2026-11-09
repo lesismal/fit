@@ -105,9 +105,13 @@
         # # list of string.
         # deny: ["203.0.113.0/24"]
 
-        # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-        # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-        # # config is applied, and applied again when one changes; each at most 64 MiB.
+        # # Files of more allow entries, one on each line, each line told apart by its content: an
+        # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        # # are left out; any other line is an error. Read when the config is applied, and applied again
+        # # when one changes; each at most 64 MiB.
         # # list of string.
         # allow_files: []
 
@@ -188,9 +192,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -410,9 +418,13 @@
         # # list of string.
         # deny: ["203.0.113.0/24"]
 
-        # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-        # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-        # # config is applied, and applied again when one changes; each at most 64 MiB.
+        # # Files of more allow entries, one on each line, each line told apart by its content: an
+        # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        # # are left out; any other line is an error. Read when the config is applied, and applied again
+        # # when one changes; each at most 64 MiB.
         # # list of string.
         # allow_files: []
 
@@ -493,9 +505,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -820,9 +836,13 @@
         # # list of string.
         # deny: ["203.0.113.0/24"]
 
-        # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-        # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-        # # config is applied, and applied again when one changes; each at most 64 MiB.
+        # # Files of more allow entries, one on each line, each line told apart by its content: an
+        # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        # # are left out; any other line is an error. Read when the config is applied, and applied again
+        # # when one changes; each at most 64 MiB.
         # # list of string.
         # allow_files: []
 
@@ -1063,9 +1083,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -1212,9 +1236,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -1396,9 +1424,13 @@
         # # list of string.
         # deny: ["203.0.113.0/24"]
 
-        # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-        # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-        # # config is applied, and applied again when one changes; each at most 64 MiB.
+        # # Files of more allow entries, one on each line, each line told apart by its content: an
+        # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        # # are left out; any other line is an error. Read when the config is applied, and applied again
+        # # when one changes; each at most 64 MiB.
         # # list of string.
         # allow_files: []
 
@@ -1615,9 +1647,13 @@
         # # list of string.
         # deny: ["203.0.113.0/24"]
 
-        # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-        # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-        # # config is applied, and applied again when one changes; each at most 64 MiB.
+        # # Files of more allow entries, one on each line, each line told apart by its content: an
+        # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        # # are left out; any other line is an error. Read when the config is applied, and applied again
+        # # when one changes; each at most 64 MiB.
         # # list of string.
         # allow_files: []
 
@@ -1789,9 +1825,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -1884,9 +1924,13 @@
         # # list of string.
         # deny: ["203.0.113.0/24"]
 
-        # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-        # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-        # # config is applied, and applied again when one changes; each at most 64 MiB.
+        # # Files of more allow entries, one on each line, each line told apart by its content: an
+        # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        # # are left out; any other line is an error. Read when the config is applied, and applied again
+        # # when one changes; each at most 64 MiB.
         # # list of string.
         # allow_files: []
 
@@ -1960,9 +2004,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -2127,9 +2175,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -2243,9 +2295,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -2720,9 +2776,13 @@
     # # list of string.
     # deny: ["203.0.113.0/24"]
 
-    # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-    # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-    # # config is applied, and applied again when one changes; each at most 64 MiB.
+    # # Files of more allow entries, one on each line, each line told apart by its content: an
+    # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+    # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+    # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+    # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+    # # are left out; any other line is an error. Read when the config is applied, and applied again
+    # # when one changes; each at most 64 MiB.
     # # list of string.
     # allow_files: []
 
@@ -6908,9 +6968,9 @@
     # # duration, as "1.5s" or "2m"; default "5s".
     # save_interval: "5s"
 
-    # # The client's rates and connection, seeding and torrent limits. A change applies in place,
-    # # keeping the peers connected, but those over a lowered connection limit. The defaults when
-    # # left out.
+    # # The client's rates and connection, seeding, queueing, disk and torrent limits. A change
+    # # applies in place, keeping the peers connected, but those over a lowered connection limit.
+    # # The defaults when left out.
     # # object.
     # limits:
       # # The most bytes per second uploaded, payload of all torrents together. Unlimited when left
@@ -6955,6 +7015,150 @@
       # # integer, 0 to 100000; default 1000.
       # max_torrents: 1000
 
+      # # The most torrents downloading at once: past it, torrents queue, paused by the client, in the
+      # # order of the list (which the API's queue position changes), and the first of them starts
+      # # when one finishes, is paused or removed. A torrent fetching a magnet link's metadata counts
+      # # as downloading. No queue when left out or 0.
+      # # integer, 0 or more.
+      # max_active_downloads: 0
+
+      # # The most torrents seeding at once, queued as max_active_downloads queues downloads. No queue
+      # # when left out or 0.
+      # # integer, 0 or more.
+      # max_active_seeds: 0
+
+      # # The disk space a download leaves free: a torrent starts downloading only when its
+      # # directory's disk has what it still has to download and this much more free, and one
+      # # downloading pauses, with an error saying so, when less than this is left; it starts again by
+      # # itself once the space is there. Where the free space cannot be told, it is not checked. 1
+      # # GiB when left out or 0.
+      # # integer, 0 or more; default 1073741824.
+      # min_free_bytes: 1073741824
+
+    # # The categories a torrent may be added in: each downloads into a directory of its own, gives
+    # # its torrents its own limits, and may name a media_library that is scanned again when a
+    # # torrent of it completes. A torrent added with no category downloads into download_dir. A
+    # # change applies in place: limits to the torrents of the category at once, a new directory to
+    # # the torrents added from then on. A torrent whose category is removed keeps its directory and
+    # # loses the category's limits. At most 1000.
+    # # list of object.
+    # categories:
+      # -
+        # # The category's name, which the API and watch_dir's subdirectories name it by. Letters,
+        # # digits, '_', '.' and '-'.
+        # # string; required.
+        # name: ""
+
+        # # The directory the category's torrents download into: a relative path is below download_dir,
+        # # and may not lead out of it. A torrent keeps the directory it was added with when this
+        # # changes. <download_dir>/<name> when left out.
+        # # string.
+        # dir: ""
+
+        # # A media_library to scan again when a torrent of the category completes, so that what it
+        # # downloaded into the library's roots appears in its catalog. None when left out.
+        # # string.
+        # media_library: ""
+
+        # # The limits of each torrent of the category, under the client's; a torrent's own limits take
+        # # the place of those they set. The client's alone when left out.
+        # # object.
+        # limits:
+          # # The most bytes per second the torrent uploads, under the client's rate. The client's rate
+          # # alone when left out, 0 or negative.
+          # # integer.
+          # upload_rate: 0
+
+          # # The most bytes per second the torrent downloads, under the client's rate. The client's rate
+          # # alone when left out, 0 or negative.
+          # # integer.
+          # download_rate: 0
+
+          # # The most peer connections of the torrent, in place of max_conns_per_torrent, above or below
+          # # it; negative is the client's max_conns alone. max_conns_per_torrent when left out or 0.
+          # # integer.
+          # max_conns: 0
+
+          # # How many peers the torrent uploads to at once, beside one optimistic unchoke, in place of
+          # # the client's; negative unchokes every interested peer. The client's when left out or 0.
+          # # integer.
+          # upload_slots: 0
+
+          # # Pause the torrent once it has uploaded this many times its size, in place of the client's;
+          # # negative seeds for ever. The client's when left out or 0.
+          # # number.
+          # seed_ratio: 0
+
+          # # Pause the torrent once it has seeded this long, in place of the client's; negative seeds for
+          # # ever. The client's when left out or 0.
+          # # duration, as "1.5s" or "2m".
+          # seed_time: "10s"
+
+    # # A directory looked at every watch_interval for .torrent files and .magnet files (a magnet
+    # # link on the first line that is not blank), each added once it has kept its size and
+    # # modification time across two looks, so that one being written is not taken half way: those
+    # # directly in it with no category, those in a subdirectory named after a category in that
+    # # category. A file added, or whose torrent is already held, is moved into its .done
+    # # subdirectory; one that cannot be added, being too large, not a torrent or not a link, into
+    # # .failed, beside a .error file saying why; one that may be added later (max_torrents reached,
+    # # the state not written) is left to be tried again. None when left out.
+    # # string.
+    # watch_dir: ""
+
+    # # How often watch_dir is looked at. 10s when left out.
+    # # duration, as "1.5s" or "2m"; default "10s".
+    # watch_interval: "10s"
+
+    # # The most files of watch_dir and its category subdirectories taken in one look, the rest left
+    # # for the next. 100 when left out or 0.
+    # # integer, 0 to 10000; default 100.
+    # watch_max_files: 100
+
+    # # How long the download of a .torrent file by its URL may take in all, connecting, redirects
+    # # (at most 5) and the body (at most 32 MiB) included; at most 4 run at once. 30s when left
+    # # out.
+    # # duration, as "1.5s" or "2m"; default "30s".
+    # url_timeout: "30s"
+
+    # # Alternative rates, in place of limits' upload_rate and download_rate while one of their
+    # # schedules holds, or while the API turns them on. None when left out.
+    # # object.
+    # alt_speed:
+      # # The most bytes per second uploaded while the alternative rates hold, all torrents together.
+      # # Unlimited when left out or 0.
+      # # integer, 0 or more.
+      # upload_rate: 0
+
+      # # The most bytes per second downloaded while the alternative rates hold, all torrents
+      # # together. Unlimited when left out or 0.
+      # # integer, 0 or more.
+      # download_rate: 0
+
+      # # When the alternative rates hold: while any of these does. Only while the API turns them on
+      # # when left out. At most 100.
+      # # list of object.
+      # schedules:
+        # -
+          # # The days the range begins on: mon, tue, wed, thu, fri, sat, sun, weekdays (mon to fri) and
+          # # weekend (sat and sun). A range that runs past midnight holds into the next day. Every day
+          # # when left out.
+          # # list of string.
+          # days: []
+
+          # # The time the range begins at, HH:MM, 00:00 to 23:59.
+          # # string; required.
+          # from: ""
+
+          # # The time the range ends at, HH:MM, 00:01 to 24:00, not included: one earlier than from runs
+          # # past midnight, as 22:00 to 06:00. It may not equal from.
+          # # string; required.
+          # to: "https://{host}{uri}"
+
+      # # The zone the schedules' times are in: local (the default), utc, or an IANA zone name such as
+      # # Asia/Shanghai.
+      # # string.
+      # time_zone: ""
+
     # # The peer addresses the client deals with, deciding before the global access: a peer it
     # # refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never
     # # dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and
@@ -6972,9 +7176,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -7053,9 +7261,13 @@
         # # list of string.
         # deny: ["203.0.113.0/24"]
 
-        # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-        # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-        # # config is applied, and applied again when one changes; each at most 64 MiB.
+        # # Files of more allow entries, one on each line, each line told apart by its content: an
+        # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        # # are left out; any other line is an error. Read when the config is applied, and applied again
+        # # when one changes; each at most 64 MiB.
         # # list of string.
         # allow_files: []
 
@@ -7242,9 +7454,13 @@
       # # list of string.
       # deny: ["203.0.113.0/24"]
 
-      # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-      # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-      # # config is applied, and applied again when one changes; each at most 64 MiB.
+      # # Files of more allow entries, one on each line, each line told apart by its content: an
+      # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      # # are left out; any other line is an error. Read when the config is applied, and applied again
+      # # when one changes; each at most 64 MiB.
       # # list of string.
       # allow_files: []
 
@@ -7323,9 +7539,13 @@
         # # list of string.
         # deny: ["203.0.113.0/24"]
 
-        # # Files of more allow entries: an address or prefix on each line, with blank lines and what
-        # # follows # or ; left out, as the lists published for firewalls are written. Read when the
-        # # config is applied, and applied again when one changes; each at most 64 MiB.
+        # # Files of more allow entries, one on each line, each line told apart by its content: an
+        # # address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        # # are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        # # where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        # # addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        # # are left out; any other line is an error. Read when the config is applied, and applied again
+        # # when one changes; each at most 64 MiB.
         # # list of string.
         # allow_files: []
 

@@ -13,3 +13,8 @@ func diskFree(dir string) (uint64, bool) {
 	}
 	return uint64(st.Bavail) * uint64(st.Bsize), true
 }
+
+// DiskFree returns the bytes free to fit on the disk of dir, or false when
+// it cannot be told: what the BitTorrent client checks before and while it
+// downloads.
+func DiskFree(dir string) (uint64, bool) { return diskFree(dir) }
