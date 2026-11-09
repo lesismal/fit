@@ -219,11 +219,11 @@ func TestListenChangeKeepsTorrents(t *testing.T) {
 	old := r.Client()
 	reads := rc.total()
 
-	port := freePort(t)
-	js := strings.Replace(clientJSON(data, src, ""), `"127.0.0.1:0"`, `"127.0.0.1:`+strconv.Itoa(port)+`"`, 1)
-	if err := r.Apply(member(t, js)); err != nil {
-		t.Fatal(err)
+	jsFor := func(port int) string {
+		return strings.Replace(clientJSON(data, src, ""), `"127.0.0.1:0"`, `"127.0.0.1:`+strconv.Itoa(port)+`"`, 1)
 	}
+	port := applyOnFreePort(t, r, jsFor)
+	js := jsFor(port)
 	if r.Client() == old || int(r.Addr().Port()) != port {
 		t.Fatalf("no new client on port %d: %v", port, r.Addr())
 	}

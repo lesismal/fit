@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -236,4 +237,21 @@ func freePort(t *testing.T) int {
 	}
 	t.Fatal("no free port")
 	return 0
+}
+
+// applyOnFreePort applies the config js makes for a free port, trying
+// another when one found free is taken before the role listens on it (by
+// another test of a parallel run), and returns the port.
+func applyOnFreePort(t *testing.T, r *Role, js func(port int) string) int {
+	t.Helper()
+	for try := 0; ; try++ {
+		port := freePort(t)
+		err := r.Apply(member(t, js(port)))
+		if err == nil {
+			return port
+		}
+		if try == 4 || !strings.Contains(strings.ToLower(err.Error()), "in use") {
+			t.Fatal(err)
+		}
+	}
 }
