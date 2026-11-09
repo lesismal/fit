@@ -213,6 +213,10 @@ func (cs *Console) routes(api *console.API) {
 	api.Handle("POST", "/api/account/password", cs.accountPassword)
 	api.Handle("POST", "/api/users/password", cs.userPassword)
 	api.HandlePrefix("PATCH", "/api/media/library/", cs.uploadChunk)
+	// The BitTorrent client's events stream on the console's connection
+	// (btconsole.go), which the proxy below, answering whole responses,
+	// cannot.
+	api.Handle("GET", "/api/bittorrent/events", cs.btConsoleEvents)
 	api.HandlePrefix("", "/api/", cs.proxy)
 }
 

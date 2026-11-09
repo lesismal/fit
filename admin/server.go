@@ -154,7 +154,8 @@ const DryRunHeader = "Fit-Dry-Run"
 //	                            DELETE removes it; .../files, .../peers,
 //	                            .../trackers; /bittorrent/alt_speed the
 //	                            alternative rates (PUT auto, on or off);
-//	                            /bittorrent/publish the publish entries;
+//	                            /bittorrent/publish the publish entries,
+//	                            .../<name>/torrents/<id> a .torrent file;
 //	                            /bittorrent/events its events as
 //	                            server-sent events; /bittorrent/tracker/
 //	                            stats, .../torrents and .../passkey the
@@ -396,6 +397,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("PUT /bittorrent/alt_speed", s.btSetAltSpeed)
 	mux.HandleFunc("GET /bittorrent/publish", s.btPublish)
 	mux.HandleFunc("GET /bittorrent/publish/{name}", s.btPublish)
+	mux.HandleFunc("GET /bittorrent/publish/{name}/torrents/{id}", s.btPublishedTorrent)
 	mux.HandleFunc("GET /bittorrent/events", s.btEvents)
 	mux.HandleFunc("GET /bittorrent/tracker/stats", s.btTrackerStats)
 	mux.HandleFunc("GET /bittorrent/tracker/torrents", s.btTrackerTorrents)
