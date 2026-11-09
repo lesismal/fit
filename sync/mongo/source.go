@@ -214,6 +214,14 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 			return err
 		}
 		pos.Start = jsonOf(valueOf(tok))
+		// The stream's start with the snapshot not begun is the
+		// pipeline's checkpoint before its first record: a run killed
+		// before the next reads the snapshot again and streams from this
+		// start, replaying the changes since over it, rather than from a
+		// later one, which would lose them.
+		if err := r.SaveStart(pos.marshal()); err != nil {
+			return err
+		}
 		if err := s.snapshot(ctx, r, &pos); err != nil {
 			return err
 		}

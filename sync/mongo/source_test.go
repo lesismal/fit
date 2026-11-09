@@ -297,6 +297,42 @@ func TestSourceResume(t *testing.T) {
 	}
 }
 
+// TestSourceSavesStart: the stream's start, the snapshot not begun, is
+// saved before the first record; a run from it reads the snapshot whole,
+// then the stream from that start. A start not saved fails the run.
+func TestSourceSavesStart(t *testing.T) {
+	f := newSrcFake(t)
+	seed(f)
+	s := srcOf(t, f, map[string]any{"database": "d", "collections": []string{"a"}})
+	stop := errors.New("the sink failed")
+	var starts []string
+	n := 0
+	err := s.Run(context.Background(), &fitsync.Run{
+		Start: func(p fitsync.Position) error { starts = append(starts, string(p)); return nil },
+		Emit: func(*fitsync.Record) error {
+			if len(starts) != 1 {
+				t.Error("a record before the start was saved")
+			}
+			n++
+			return stop
+		},
+	})
+	if err != stop || n != 1 || len(starts) != 1 || !strings.HasPrefix(starts[0], `{"start":{"map":{"_data":`) || strings.Contains(starts[0], `"ns"`) {
+		t.Fatal(err, n, starts)
+	}
+	f.emit(ev("insert", "a", 7, mongowire.Doc("_id", 7)))
+	recs, err := collect(t, s, fitsync.Position(starts[0]), true)
+	if err != nil || summary(recs) != `insert d.a/1; insert d.a/2; insert d.a/"x"; insert d.a/7` {
+		t.Fatalf("from the start: %s, %v", summary(recs), err)
+	}
+	broke := errors.New("the disk is full")
+	err = s.Run(context.Background(), &fitsync.Run{Start: func(fitsync.Position) error { return broke },
+		Emit: func(*fitsync.Record) error { t.Error("a record"); return nil }})
+	if err != broke {
+		t.Fatal(err)
+	}
+}
+
 // TestSourceTargets opens the stream of a deployment and of several
 // collections; the deployment's snapshot lists its databases.
 func TestSourceTargets(t *testing.T) {

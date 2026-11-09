@@ -185,7 +185,7 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 		}
 		err = s.seed(ctx, c)
 		if err == nil && p.Snapshot != nil {
-			err = s.snapshot(ctx, c, &p, r.Emit)
+			err = s.snapshot(ctx, c, &p, r)
 		}
 		c.Close()
 		if err != nil {

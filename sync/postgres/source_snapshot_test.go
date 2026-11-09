@@ -352,6 +352,64 @@ func TestSnapshotResume(t *testing.T) {
 	}
 }
 
+// TestSnapshotSavesStart: a new snapshot's start, none of it read, is
+// saved before its first record; a run from it, the exporter gone, reads
+// every table again from a new snapshot and streams from the first one's
+// point. A start that cannot be saved fails the run before any record.
+func TestSnapshotSavesStart(t *testing.T) {
+	db := newSnapDB(30)
+	main := newSrcFake(db.cat.answer)
+	exports := db.useFakes(t, main)
+	s := srcMust(t, map[string]any{"snapshot": "initial", "chunk_rows": 10, "snapshot_parallel": 1})
+	stop := errors.New("the sink failed")
+	var starts []fitsync.Position
+	var got []*fitsync.Record
+	run := &fitsync.Run{
+		Start: func(p fitsync.Position) error {
+			if len(got) > 0 {
+				t.Errorf("the start saved after %d records", len(got))
+			}
+			starts = append(starts, p)
+			return nil
+		},
+		Emit: func(r *fitsync.Record) error { got = append(got, r); return stop },
+	}
+	if err := s.Run(context.Background(), run); err != stop || len(starts) != 1 || len(*exports) != 1 {
+		t.Fatal(err, starts, len(*exports))
+	}
+	pos := snapPos(t, starts[0])
+	if pos.LSN != "0/50" || pos.Snapshot == nil || pos.Snapshot.Done != "" || len(pos.Snapshot.At) != 0 ||
+		len(pos.Snapshot.Tables) != 2 || pos.Snapshot.Tables[1].Chunks != 3 {
+		t.Fatalf("the start %s", starts[0])
+	}
+	// Killed then: no exporter held by another fit.
+	s.dropHeld()
+	main2 := newSrcFake(db.cat.answer)
+	exports2 := db.useFakes(t, main2)
+	main2.msgs <- errors.New("the stream broke")
+	got = nil
+	run = &fitsync.Run{From: starts[0], Start: func(p fitsync.Position) error { t.Errorf("a start saved again: %s", p); return nil },
+		Emit: func(r *fitsync.Record) error { got = append(got, r); return nil }}
+	if err := s.Run(context.Background(), run); err == nil || err.Error() != "the stream broke" {
+		t.Fatal(err)
+	}
+	if len(*exports2) != 1 || len(got) != 33 || main2.start != 0x50 {
+		t.Fatalf("exports %d, %d records, started at %v", len(*exports2), len(got), main2.start)
+	}
+	// The start not saved.
+	main3 := newSrcFake(db.cat.answer)
+	db.useFakes(t, main3)
+	broke := errors.New("the disk is full")
+	got = nil
+	run = &fitsync.Run{Start: func(fitsync.Position) error { return broke }, Emit: func(r *fitsync.Record) error { got = append(got, r); return nil }}
+	if err := s.Run(context.Background(), run); err != broke || len(got) != 0 || s.held != nil {
+		t.Fatal(err, len(got), s.held)
+	}
+	if db.open != 0 {
+		t.Fatalf("%d connections left open", db.open)
+	}
+}
+
 // TestSnapshotErrors covers what fails while a snapshot is read.
 func TestSnapshotErrors(t *testing.T) {
 	ctx := context.Background()
