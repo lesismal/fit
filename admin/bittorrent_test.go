@@ -736,6 +736,10 @@ func TestBitTorrentEvents(t *testing.T) {
 		t.Fatal("the slow client was not told it lagged")
 	}
 
+	// The bans' events may still be on their way: a stream opened now
+	// could lag behind them and be dropped before the end.
+	waitEventsQuiet(t, f.role)
+
 	// The role stops: the stream ends.
 	end := f.openEvents(t, http.StatusOK)
 	f.role.Stop(context.Background())
@@ -941,36 +945,8 @@ func TestBitTorrentConsoleEvents(t *testing.T) {
 	}
 
 	// The bans' events may still be on their way: a stream opened now
-	// could lag behind them and be dropped before the end. Wait for a
-	// quiet subscriber first.
-	for quietFor := time.Now(); ; {
-		quiet, _, _, err := role.Subscribe(0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		idle := time.NewTimer(200 * time.Millisecond)
-		lagged := false
-	wait:
-		for {
-			select {
-			case _, ok := <-quiet.Events():
-				if !ok { // dropped as lagged: subscribe again
-					lagged = true
-					break wait
-				}
-				idle.Reset(200 * time.Millisecond)
-			case <-idle.C:
-				break wait
-			}
-		}
-		quiet.Close()
-		if !lagged {
-			break
-		}
-		if time.Since(quietFor) > btHang {
-			t.Fatal("the bans' events never quieted")
-		}
-	}
+	// could lag behind them and be dropped before the end.
+	waitEventsQuiet(t, role)
 
 	// The role stops: the stream ends.
 	end := open(http.StatusOK)
@@ -1011,4 +987,38 @@ func TestBitTorrentPublishedTorrent(t *testing.T) {
 	}
 	f.json(t, "GET", "/bittorrent/publish/pub/torrents/"+strings.Repeat("ab", 20), "", http.StatusNotFound)
 	f.json(t, "GET", "/bittorrent/publish/other/torrents/"+id, "", http.StatusNotFound)
+}
+
+// waitEventsQuiet returns once a subscriber of role's events has seen none
+// for 200ms, subscribing again whenever it is dropped as lagged.
+func waitEventsQuiet(t *testing.T, role *bittorrent.Role) {
+	t.Helper()
+	for start := time.Now(); ; {
+		sub, _, _, err := role.Subscribe(0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		idle := time.NewTimer(200 * time.Millisecond)
+		lagged := false
+	wait:
+		for {
+			select {
+			case _, ok := <-sub.Events():
+				if !ok {
+					lagged = true
+					break wait
+				}
+				idle.Reset(200 * time.Millisecond)
+			case <-idle.C:
+				break wait
+			}
+		}
+		sub.Close()
+		if !lagged {
+			return
+		}
+		if time.Since(start) > btHang {
+			t.Fatal("the events never quieted")
+		}
+	}
 }
