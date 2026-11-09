@@ -8135,6 +8135,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "doris"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.doris"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "elasticsearch"
               }
             }
@@ -8199,6 +8215,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "loki"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.loki"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "memory"
               }
             }
@@ -8239,6 +8271,22 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/sync.sinks.mysql"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "otlp_logs"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.otlp_logs"
               }
             }
           }
@@ -8330,13 +8378,16 @@
           "enum": [
             "clickhouse",
             "dead_letters",
+            "doris",
             "elasticsearch",
             "file",
             "http",
             "kafka",
+            "loki",
             "memory",
             "mongo",
             "mysql",
+            "otlp_logs",
             "postgres",
             "redis",
             "s3",
@@ -8479,6 +8530,115 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "sync.sinks.doris": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against over https, in place of the system's roots, for a CA of its own. The check cannot be turned off.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file.",
+          "type": "string"
+        },
+        "database": {
+          "description": "The database of a table named without one. Needed unless every table is named as db.table.",
+          "type": "string"
+        },
+        "deletes": {
+          "default": "sign",
+          "description": "How deletes are written: sign, as the row before (or the key, when the source has no row before) with the flavor's delete column set to 1, which a table of the unique or primary key model takes as deleting the key; ignore, not at all, for a table of another model. A run without deletes sends no delete column. sign when left out.",
+          "enum": [
+            "sign",
+            "ignore"
+          ],
+          "type": "string"
+        },
+        "flavor": {
+          "default": "doris",
+          "description": "The system loaded into: doris, whose deletes set __DORIS_DELETE_SIGN__ and whose partial updates are partial_columns; starrocks, whose deletes set __op and whose partial updates are partial_update. doris when left out.",
+          "enum": [
+            "doris",
+            "starrocks"
+          ],
+          "type": "string"
+        },
+        "format": {
+          "default": "json",
+          "description": "How rows are sent: json, a JSON object of each row's columns; csv, comma-separated values, quoted with escapes, null as \\N (Doris 2.0 and StarRocks 3.0 or later). Either way the load names its columns, the union of the run's rows', so a row without a column of the union loads it null. json when left out.",
+          "enum": [
+            "json",
+            "csv"
+          ],
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "label_prefix": {
+          "default": "fit",
+          "description": "The start of each load's label, letters, digits, _ and -, before a hash of the table and the run's positions; pipelines loading the same database need prefixes of their own only when their sources' positions could match. fit when left out.",
+          "type": "string"
+        },
+        "max_request_bytes": {
+          "default": 16777216,
+          "description": "The most bytes of one load's rows; a batch larger is loaded in several, in order, each with a label of its own, and a row larger fails its record. 16 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "partial_columns": {
+          "description": "Update only the columns a run's rows have, keeping the others as they are, rather than replacing the row: Doris's partial_columns, StarRocks's partial_update. Needs a unique key table with merge on write, or a primary key table. false when left out.",
+          "type": "boolean"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads; none when left out.",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Stream Load's other headers, sent with every load, as {\"max_filter_ratio\": \"0.1\", \"strict_mode\": \"true\", \"timeout\": \"600\"}; they cannot be the ones the sink sets: label, format, columns, the JSON and CSV ones, partial_columns, partial_update, hidden_columns, merge_type, delete, jsonpaths, Expect.",
+          "type": "object"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; each URL's host when left out.",
+          "type": "string"
+        },
+        "table": {
+          "default": "{namespace}",
+          "description": "The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, of the unique key model (merge on write) on Doris or the primary key model on StarRocks for updates and deletes. {namespace} when left out.",
+          "type": "string"
+        },
+        "time_zone": {
+          "description": "The zone times are written in, as DATETIME text: UTC when left out, local, or an IANA name such as Asia/Shanghai.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long one load may take, from connecting to the end of its answer. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "urls": {
+          "description": "The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends' (http://be1:8040) to load into directly: the one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). A frontend's redirect to a backend is followed, with the credentials; the backend's address must be one fit reaches.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "The user to load as, which needs LOAD on the tables (INSERT on StarRocks), sent with basic authentication.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "urls",
+        "username"
+      ],
       "type": "object"
     },
     "sync.sinks.elasticsearch": {
@@ -8812,6 +8972,101 @@
       ],
       "type": "object"
     },
+    "sync.sinks.loki": {
+      "additionalProperties": false,
+      "properties": {
+        "bearer_token_env": {
+          "description": "The environment variable holding a token sent as Authorization: Bearer, in place of username.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against over https, in place of the system's roots, for a CA of its own. The check cannot be turned off.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a record's line: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes the row as a JSON object, which Loki's json parser reads."
+        },
+        "encoding": {
+          "default": "protobuf",
+          "description": "How a push is sent: protobuf, compressed with snappy, as Promtail and Alloy send it; json, Loki's JSON push. protobuf when left out.",
+          "enum": [
+            "protobuf",
+            "json"
+          ],
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The stream's labels, the label's name to a template of its value: text with {name}, a field of the row (after, or before when after is null), and {$namespace}, {$op}, {$source} and {$key}, the record's; {{ is a brace. A label whose value comes out empty is left out. Name only fields of few values here: each set of values is a stream of Loki's. {\"job\": \"fit\", \"namespace\": \"{$namespace}\"} when left out.",
+          "type": "object"
+        },
+        "max_request_bytes": {
+          "default": 1048576,
+          "description": "The most bytes of the lines of one push, before compression; a batch larger is pushed in several, in order, and a line larger fails its record. Loki's own bound is its grpc_server_max_recv_msg_size, 4 MiB by default. 1 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; each URL's host when left out.",
+          "type": "string"
+        },
+        "structured_metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Structured metadata of each line, the name to a template as labels has them, for values of many kinds (a trace ID, a user) that are not to be labels: Loki 3 with allow_structured_metadata (the default from 3.0, on schema v13). Empty values are left out. None when left out.",
+          "type": "object"
+        },
+        "tenant": {
+          "description": "The tenant the lines go to, sent as X-Scope-OrgID, for a Loki with auth_enabled; none when left out.",
+          "type": "string"
+        },
+        "tenant_field": {
+          "description": "A field of the row whose value is a record's tenant, in place of tenant for the records that have it: a batch is pushed in a request per tenant.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long one request may take, from connecting to the end of its answer. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "timestamp_field": {
+          "description": "A field of the row whose value is the line's time: a time, an integer of Unix seconds, milliseconds, microseconds or nanoseconds, or RFC 3339 text. The record's commit time when left out or when a record lacks it, and the time of the write when it has neither, a nanosecond apart for each record of a batch.",
+          "type": "string"
+        },
+        "urls": {
+          "description": "Loki's HTTP address, as http://loki:3100, or a gateway's with the path before /loki (https://logs.example.com/tenant-a): /loki/api/v1/push goes after it. The one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "The user for basic authentication, as a gateway asks for; none when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "urls"
+      ],
+      "type": "object"
+    },
     "sync.sinks.memory": {
       "additionalProperties": false,
       "properties": {
@@ -9028,6 +9283,132 @@
       },
       "required": [
         "username"
+      ],
+      "type": "object"
+    },
+    "sync.sinks.otlp_logs": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Each log record's attributes, the name to a template as resource has them; empty values are left out. {\"fit.namespace\": \"{$namespace}\", \"fit.op\": \"{$op}\"} when left out.",
+          "type": "object"
+        },
+        "bearer_token_env": {
+          "description": "The environment variable holding a token sent as Authorization: Bearer, in place of username.",
+          "type": "string"
+        },
+        "body": {
+          "default": "line",
+          "description": "What a log record's body is: line, the text its codec makes; row, the record's row as a map of its fields, typed (ints, floats, booleans, bytes, arrays and maps as OTLP has them; times, dates and decimals as text). line when left out.",
+          "enum": [
+            "line",
+            "row"
+          ],
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the receiver's is checked against over https, in place of the system's roots, for a CA of its own. The check cannot be turned off.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to a receiver that asks for one; needs key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a record's line, with body line: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes the row as a JSON object."
+        },
+        "compression": {
+          "default": "gzip",
+          "description": "How an export's body is compressed: gzip, or none. gzip when left out.",
+          "enum": [
+            "gzip",
+            "none"
+          ],
+          "type": "string"
+        },
+        "encoding": {
+          "default": "protobuf",
+          "description": "How an export is sent: protobuf (application/x-protobuf) or JSON (application/json), OTLP/HTTP's two. protobuf when left out.",
+          "enum": [
+            "protobuf",
+            "json"
+          ],
+          "type": "string"
+        },
+        "headers_file": {
+          "description": "A file of headers sent with every export, one \"Name: value\" a line, # starting a comment, as telemetry's headers_file, for a vendor's API key kept out of the config. Read when the pipeline loads.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_request_bytes": {
+          "default": 4194304,
+          "description": "The most bytes of one export's log records, before compression; a batch larger is exported in several, in order, and a record larger fails. The Collector's own bound is its max_request_body_size, 20 MiB by default. 4 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "resource": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "More attributes of the resource, the name to a template of the value: text with {name}, a field of the row (after, or before when after is null), and {$namespace}, {$op}, {$source} and {$key}, the record's; {{ is a brace. Records whose resources come out the same are exported under one. Empty values are left out. service.name and service.version are the sink's. None when left out.",
+          "type": "object"
+        },
+        "server_name": {
+          "description": "The name the receiver's certificate must have, and the TLS server name sent; each URL's host when left out.",
+          "type": "string"
+        },
+        "service_name": {
+          "default": "fit",
+          "description": "The resource's service.name. fit when left out, as fit's telemetry has it.",
+          "type": "string"
+        },
+        "severity_field": {
+          "description": "A field of the row whose value is the severity: text (trace, debug, info, warn or warning, error, fatal or critical, any case), kept as the severity text and numbered as OTLP numbers them, or a number from 1 to 24. None when left out.",
+          "type": "string"
+        },
+        "span_id_field": {
+          "description": "A field of the row holding a span's ID as 16 hex digits. None when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long one export may take, from connecting to the end of its answer. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "timestamp_field": {
+          "description": "A field of the row whose value is the log record's time: a time, an integer of Unix seconds, milliseconds, microseconds or nanoseconds, or RFC 3339 text. The record's commit time when left out or when a record lacks it, and none when it has neither (its observed time is the export's).",
+          "type": "string"
+        },
+        "trace_id_field": {
+          "description": "A field of the row holding a trace's ID as 32 hex digits, which the log record is tied to, with span_id_field. None when left out.",
+          "type": "string"
+        },
+        "urls": {
+          "description": "The receiver's OTLP/HTTP address, as http://collector:4318, with or without the path /v1/logs, which goes after it when it is not there. The one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "The user for basic authentication, with password_env; none when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "urls"
       ],
       "type": "object"
     },
@@ -9428,6 +9809,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "doris"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.doris"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "elasticsearch"
               }
             }
@@ -9622,6 +10019,7 @@
           "description": "The module's name within its namespace.",
           "enum": [
             "clickhouse",
+            "doris",
             "elasticsearch",
             "file",
             "generate",
@@ -9754,6 +10152,108 @@
       },
       "required": [
         "urls",
+        "key"
+      ],
+      "type": "object"
+    },
+    "sync.sources.doris": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:9030",
+          "description": "A frontend's MySQL query port, host and port: Doris's and StarRocks's query_port. 127.0.0.1:9030 when left out.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs tls and key_file.",
+          "type": "string"
+        },
+        "cursor": {
+          "description": "A column whose value grows as rows are written or changed (an update time, a version), never null, polled by: rows past the position's are read every poll_interval. A row written later with a value at or below one already read is not seen. Without it the source reads the rows once by the key and ends.",
+          "type": "string"
+        },
+        "database": {
+          "description": "The connection's default database, of a table named without one and of the query's. None when left out.",
+          "type": "string"
+        },
+        "deleted_column": {
+          "description": "A column (a boolean or a number) whose true or non-zero value makes the row a delete rather than an insert. None when left out.",
+          "type": "string"
+        },
+        "key": {
+          "description": "The columns that identify a row, in order, never null: the records' key, and what rows are ordered by after the cursor, so that rows with the same cursor value are read once each.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "The records' namespace. table when left out, or doris for a query.",
+          "type": "string"
+        },
+        "page_rows": {
+          "default": 10000,
+          "description": "How many rows one query reads. 10000 when left out or 0.",
+          "maximum": 1000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads; none when left out.",
+          "type": "string"
+        },
+        "poll_interval": {
+          "default": "5s",
+          "description": "How long to wait, once the rows past the cursor are read, before asking again. 5s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "query": {
+          "description": "A SELECT whose rows are read, as SELECT * FROM shop.orders WHERE region = 'eu': the source reads from it as a subquery, adding its own WHERE, ORDER BY and LIMIT, so it has the key's and the cursor's columns and no ORDER BY or LIMIT of its own. Either table or query.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have, and the TLS server name sent; address's host when left out.",
+          "type": "string"
+        },
+        "snapshot": {
+          "default": "initial",
+          "description": "Where a pipeline without a checkpoint starts: initial, at the first row, reading what is there; never, after the greatest cursor value now there, reading only what comes after (needs cursor). initial when left out.",
+          "enum": [
+            "initial",
+            "never"
+          ],
+          "type": "string"
+        },
+        "table": {
+          "description": "The table read, as db.table or a table of database. Either table or query.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long connecting, and each query, may take. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, required: a server that does not offer it is refused. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "username": {
+          "description": "The user to read as, which needs SELECT on the table, or on what the query reads.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
         "key"
       ],
       "type": "object"

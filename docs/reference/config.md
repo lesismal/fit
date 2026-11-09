@@ -49,8 +49,8 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mysql`](#sync-sources-mysql), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`doris`](#sync-sources-doris), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mysql`](#sync-sources-mysql), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`doris`](#sync-sinks-doris), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`kafka`](#sync-sinks-kafka), [`loki`](#sync-sinks-loki), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`otlp_logs`](#sync-sinks-otlp_logs), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`canal_json`](#sync-codecs-canal_json), [`csv`](#sync-codecs-csv), [`debezium`](#sync-codecs-debezium), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`raw`](#sync-codecs-raw), [`ticdc_simple`](#sync-codecs-ticdc_simple), [`wasm`](#sync-codecs-wasm)
 
@@ -6957,6 +6957,48 @@ In JSON:
 | `poll_interval` | duration | `"5s"` | How long to wait, once the rows past the cursor are read, before asking again. 5s when left out or 0. |
 | `chunk_rows` | integer, 0 or more |  | In a job (mode once), split the snapshot into ranges of the key of about this many rows, read job.max_parallel at a time and resumed by chunk; the next job starts from the beginning. Not split when left out, and the job reads by the cursor, the next job going on after it. |
 
+<a id="sync-sources-doris"></a>
+
+### `doris`
+
+Reads an Apache Doris or StarRocks table, or a query's rows, over MySQL's protocol (a frontend's query port): a snapshot in pages ordered by the cursor column and the key, after the last row read, then, with a cursor, polling for rows past it every poll_interval. Its position is the cursor's and the key's values of the last row read, so a restart resumes after it, rows with the same cursor value included. Every row is an insert, or a delete when deleted_column says so; a row deleted from the table is not seen.
+
+Reads an Apache Doris or StarRocks table, or a query's rows, over MySQL's protocol (a frontend's
+`query_port`, through fit's own client, `sync/mysql/wire`, on the pipeline's goroutine), as the
+clickhouse source reads ClickHouse. It reads in pages of `page_rows`, ordered by `cursor` and `key`,
+each page the rows after the last one read: `(cursor > x) OR (cursor = x AND key > y)`, spelled out,
+since neither system compares row values. Its position is the literals of the last row's cursor and
+key, so a restart resumes after that row, rows with the same cursor value included. With a cursor, it
+polls for rows past the position every `poll_interval`; without one it reads the rows once and ends.
+
+Every row is an insert, or a delete when `deleted_column` is true or non-zero. A row deleted from the
+table is not seen, nor a row written later with a cursor value at or below one already read: the
+cursor must grow with each write (an update time the writer sets, a version). `snapshot: "never"`
+starts past the greatest cursor value there is. Values are typed by their columns as the mysql
+source types them.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:9030"` | A frontend's MySQL query port, host and port: Doris's and StarRocks's query_port. 127.0.0.1:9030 when left out. |
+| `username` | string |  | Required. The user to read as, which needs SELECT on the table, or on what the query reads. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
+| `database` | string |  | The connection's default database, of a table named without one and of the query's. None when left out. |
+| `tls` | boolean |  | Connect over TLS, required: a server that does not offer it is refused. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; address's host when left out. |
+| `timeout` | duration | `"60s"` | How long connecting, and each query, may take. 60s when left out or 0. |
+| `table` | string |  | The table read, as db.table or a table of database. Either table or query. |
+| `query` | string |  | A SELECT whose rows are read, as SELECT * FROM shop.orders WHERE region = 'eu': the source reads from it as a subquery, adding its own WHERE, ORDER BY and LIMIT, so it has the key's and the cursor's columns and no ORDER BY or LIMIT of its own. Either table or query. |
+| `key` | list of string |  | Required. The columns that identify a row, in order, never null: the records' key, and what rows are ordered by after the cursor, so that rows with the same cursor value are read once each. |
+| `cursor` | string |  | A column whose value grows as rows are written or changed (an update time, a version), never null, polled by: rows past the position's are read every poll_interval. A row written later with a value at or below one already read is not seen. Without it the source reads the rows once by the key and ends. |
+| `deleted_column` | string |  | A column (a boolean or a number) whose true or non-zero value makes the row a delete rather than an insert. None when left out. |
+| `namespace` | string |  | The records' namespace. table when left out, or doris for a query. |
+| `snapshot` | string: `initial`, `never` | `"initial"` | Where a pipeline without a checkpoint starts: initial, at the first row, reading what is there; never, after the greatest cursor value now there, reading only what comes after (needs cursor). initial when left out. |
+| `page_rows` | integer, 0 to 1000000 | `10000` | How many rows one query reads. 10000 when left out or 0. |
+| `poll_interval` | duration | `"5s"` | How long to wait, once the rows past the cursor are read, before asking again. 5s when left out or 0. |
+
 <a id="sync-sources-elasticsearch"></a>
 
 ### `elasticsearch`
@@ -8428,6 +8470,64 @@ Keeps a pipeline's dead letters in a file of its state_dir, bounded by max_recor
 | `max_bytes` | integer, 0 or more | `67108864` | The most bytes of dead letters kept, as their lines in the file. 64 MiB when left out or 0. |
 | `when_full` | string: `refuse`, `drop_oldest` | `"refuse"` | What a dead letter that does not fit does: refuse fails its write, so that after its attempts the pipeline stops, its checkpoint before the record, and nothing is lost; drop_oldest drops the oldest dead letters to make room, counting them. refuse when left out. |
 
+<a id="sync-sinks-doris"></a>
+
+### `doris`
+
+Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says, with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON (or CSV) rows whose label is made from the run's first and last positions, so a run loaded again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a table of the unique or primary key model; a delete is the row (or its key) with Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is followed. A load refused for its data is split until the record it cannot take is found, which fails, on_error taking it, those before it loaded.
+
+Loads records into Apache Doris or StarRocks with Stream Load (`PUT /api/<db>/<table>/_stream_load`),
+through fib's asynchronous HTTP client, with `Expect: 100-continue`; a frontend's redirect to a
+backend is followed with the credentials. Each run of a batch's records for one table is one load,
+its rows JSON (a row a line on Doris, an array on StarRocks) or CSV, and its `columns` header the union
+of the run's columns. The load's `label` is `label_prefix`, `_` and a hash of the database, the table,
+the run's first and last positions and its count: written again after a crash, the same records make
+the same label and the server answers `Label Already Exists`, which counts as loaded once the earlier
+load has finished (and is asked again while it runs).
+
+An insert, an update or a message is its row (`after`). A delete is the row as it was (`before`), or
+its key, with Doris's `__DORIS_DELETE_SIGN__` or StarRocks's `__op` set to 1, which a table of the
+unique key model (Doris, merge on write) or the primary key model (StarRocks) takes as deleting the
+key; a run without deletes sends no such column, so inserts load into any table, and `deletes:
+"ignore"` drops deletes for a duplicate key table. Times are written as `DATETIME` text in
+`time_zone`, bytes in base64. `partial_columns` updates only the columns the rows have. The table is
+not made.
+
+A load refused for its rows (`too many filtered rows`, a JSON it cannot parse) is split in two, each
+half loaded, until the record it cannot take is found: that record fails for good (`on_error` takes
+it), the records before it are loaded, and the error names the load's `ErrorURL`. Any other failure
+is retried by the pipeline; a 429 or a 5xx is sent again with a backoff first. Labels outlive a
+table dropped and made again (Doris keeps them `label_keep_max_second`, three days by default): after
+a pipeline is reset, or its tables made afresh, change `label_prefix`, or the records loaded before
+are refused as already loaded.
+
+```sql
+CREATE TABLE shop.orders (id BIGINT NOT NULL, status VARCHAR(20), total DECIMAL(12, 2))
+UNIQUE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 8
+PROPERTIES ("enable_unique_key_merge_on_write" = "true");
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urls` | list of string |  | Required. The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends' (http://be1:8040) to load into directly: the one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). A frontend's redirect to a backend is followed, with the credentials; the backend's address must be one fit reaches. |
+| `username` | string |  | Required. The user to load as, which needs LOAD on the tables (INSERT on StarRocks), sent with basic authentication. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against over https, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; each URL's host when left out. |
+| `timeout` | duration | `"60s"` | How long one load may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `flavor` | string: `doris`, `starrocks` | `"doris"` | The system loaded into: doris, whose deletes set __DORIS_DELETE_SIGN__ and whose partial updates are partial_columns; starrocks, whose deletes set __op and whose partial updates are partial_update. doris when left out. |
+| `database` | string |  | The database of a table named without one. Needed unless every table is named as db.table. |
+| `table` | string | `"{namespace}"` | The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, of the unique key model (merge on write) on Doris or the primary key model on StarRocks for updates and deletes. {namespace} when left out. |
+| `format` | string: `json`, `csv` | `"json"` | How rows are sent: json, a JSON object of each row's columns; csv, comma-separated values, quoted with escapes, null as \N (Doris 2.0 and StarRocks 3.0 or later). Either way the load names its columns, the union of the run's rows', so a row without a column of the union loads it null. json when left out. |
+| `deletes` | string: `sign`, `ignore` | `"sign"` | How deletes are written: sign, as the row before (or the key, when the source has no row before) with the flavor's delete column set to 1, which a table of the unique or primary key model takes as deleting the key; ignore, not at all, for a table of another model. A run without deletes sends no delete column. sign when left out. |
+| `partial_columns` | boolean |  | Update only the columns a run's rows have, keeping the others as they are, rather than replacing the row: Doris's partial_columns, StarRocks's partial_update. Needs a unique key table with merge on write, or a primary key table. false when left out. |
+| `label_prefix` | string | `"fit"` | The start of each load's label, letters, digits, _ and -, before a hash of the table and the run's positions; pipelines loading the same database need prefixes of their own only when their sources' positions could match. fit when left out. |
+| `time_zone` | string |  | The zone times are written in, as DATETIME text: UTC when left out, local, or an IANA name such as Asia/Shanghai. |
+| `properties` | object of string |  | Stream Load's other headers, sent with every load, as {"max_filter_ratio": "0.1", "strict_mode": "true", "timeout": "600"}; they cannot be the ones the sink sets: label, format, columns, the JSON and CSV ones, partial_columns, partial_update, hidden_columns, merge_type, delete, jsonpaths, Expect. |
+| `max_request_bytes` | integer, 0 or more | `16777216` | The most bytes of one load's rows; a batch larger is loaded in several, in order, each with a label of its own, and a row larger fails its record. 16 MiB when left out or 0. |
+
 <a id="sync-sinks-elasticsearch"></a>
 
 ### `elasticsearch`
@@ -8836,6 +8936,50 @@ In JSON:
 | `replication_factor` | integer, 0 or more |  | The copies of each partition; the brokers' default.replication.factor when left out or 0. |
 | `configs` | object of string |  | The topic's configs, as cleanup.policy compact or retention.ms. |
 
+<a id="sync-sinks-loki"></a>
+
+### `loki`
+
+Pushes records to Grafana Loki (2.9 and 3) as log lines, with its push API: protobuf compressed with snappy, or JSON. Each record is a line its codec makes, at the time timestamp_field or its commit time says, in the stream its labels' templates make of the record's configured fields, so that the streams are as many as those fields' values; structured metadata (Loki 3) the same way. Requests are bounded by max_request_bytes, sent again with a backoff on 429 and 5xx; one Loki refuses (400, an entry too old or a line too long) is split until the record it refuses is found, which fails, on_error taking it, those before it pushed. Loki keeps one copy of an entry pushed again with the same stream, time and line, so a batch written again after a crash is stored once when its records have times.
+
+Pushes records to Grafana Loki's push API (`POST /loki/api/v1/push`) through fib's asynchronous HTTP
+client: protobuf (logproto's `PushRequest`, encoded by hand) compressed with snappy, as Promtail and
+Alloy send it, or Loki's JSON. Each record is a line its `codec` makes (the line codec by default,
+which writes a file source's lines as they are), in the stream its `labels` make: each label a
+template of the record's fields, so that the streams are only as many as the values of the fields
+named, never one per record. `structured_metadata` (Loki 3) carries values of many kinds beside the
+line, out of the labels. A line's time is `timestamp_field`'s, or the record's commit time, or the
+time of the write, a nanosecond apart for each record of a batch.
+
+A batch is pushed in requests of up to `max_request_bytes` (before compression), a request for each
+tenant (`tenant`, `tenant_field`, sent as `X-Scope-OrgID`), each stream's entries in time order. A
+429 or a 5xx is sent again with a backoff, as `Retry-After` asks; a request Loki refuses (400: an
+entry too far behind, a line too long, too many labels) is split until the record it refuses is
+found, which fails for good (`on_error` takes it), the records before it pushed. Loki keeps one copy
+of an entry pushed again with the same stream, time and line, so a batch written again after a crash
+is stored once when its records have times; lines without one get the time of the write, and a
+replay stores them again.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urls` | list of string |  | Required. Loki's HTTP address, as http://loki:3100, or a gateway's with the path before /loki (https://logs.example.com/tenant-a): /loki/api/v1/push goes after it. The one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). |
+| `username` | string |  | The user for basic authentication, as a gateway asks for; none when left out. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `bearer_token_env` | string |  | The environment variable holding a token sent as Authorization: Bearer, in place of username. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against over https, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; each URL's host when left out. |
+| `timeout` | duration | `"60s"` | How long one request may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `tenant` | string |  | The tenant the lines go to, sent as X-Scope-OrgID, for a Loki with auth_enabled; none when left out. |
+| `tenant_field` | string |  | A field of the row whose value is a record's tenant, in place of tenant for the records that have it: a batch is pushed in a request per tenant. |
+| `encoding` | string: `protobuf`, `json` | `"protobuf"` | How a push is sent: protobuf, compressed with snappy, as Promtail and Alloy send it; json, Loki's JSON push. protobuf when left out. |
+| `labels` | object of string |  | The stream's labels, the label's name to a template of its value: text with {name}, a field of the row (after, or before when after is null), and {$namespace}, {$op}, {$source} and {$key}, the record's; {{ is a brace. A label whose value comes out empty is left out. Name only fields of few values here: each set of values is a stream of Loki's. {"job": "fit", "namespace": "{$namespace}"} when left out. |
+| `structured_metadata` | object of string |  | Structured metadata of each line, the name to a template as labels has them, for values of many kinds (a trace ID, a user) that are not to be labels: Loki 3 with allow_structured_metadata (the default from 3.0, on schema v13). Empty values are left out. None when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes a record's line: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes the row as a JSON object, which Loki's json parser reads. |
+| `timestamp_field` | string |  | A field of the row whose value is the line's time: a time, an integer of Unix seconds, milliseconds, microseconds or nanoseconds, or RFC 3339 text. The record's commit time when left out or when a record lacks it, and the time of the write when it has neither, a nanosecond apart for each record of a batch. |
+| `max_request_bytes` | integer, 0 or more | `1048576` | The most bytes of the lines of one push, before compression; a batch larger is pushed in several, in order, and a line larger fails its record. Loki's own bound is its grpc_server_max_recv_msg_size, 4 MiB by default. 1 MiB when left out or 0. |
+
 <a id="sync-sinks-memory"></a>
 
 ### `memory`
@@ -9131,6 +9275,54 @@ In JSON:
 | `checkpoint` | string: `file`, `sink` | `"file"` | Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash between a commit and the file's next checkpoint writes the records after it again (to the same rows); sink, also in checkpoint_table, written in the same transaction as the records it covers and read back when the pipeline starts, in preference to the file, so that no record is written twice: exactly once, while every sink of the pipeline keeps it. file when left out. |
 | `checkpoint_table` | string | `"_fit_sync_checkpoints"` | With checkpoint sink, the table the checkpoint is kept in, a row a pipeline, made when missing (which needs CREATE on it); db.table names the database too, database's otherwise. _fit_sync_checkpoints when left out. |
 | `max_transaction_bytes` | integer, 0 or more |  | The most bytes of values one of the server's transactions holds: past it, a transaction is committed at the next record that ends a source transaction, and a source transaction larger than this alone is committed in parts, with a warning. Against TiDB, whose transactions are bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and MariaDB. |
+
+<a id="sync-sinks-otlp_logs"></a>
+
+### `otlp_logs`
+
+Exports records as OpenTelemetry log records over OTLP/HTTP (/v1/logs), protobuf or JSON, gzipped, to an OpenTelemetry Collector or any OTLP receiver. A record's body is the line its codec makes, or its row as a map; its time comes from timestamp_field or its commit time, its severity from severity_field; its attributes and the resource's are templates of its fields, records of one resource exported together under it, with service.name and service.version as fit's own telemetry sends them. Requests are bounded by max_request_bytes and sent again with a backoff on 429 and 5xx; one the receiver refuses (400) is split until the record it refuses is found, which fails, on_error taking it, those before it exported.
+
+Exports records as OpenTelemetry log records over OTLP/HTTP (`POST /v1/logs`) through fib's
+asynchronous HTTP client: protobuf (`ExportLogsServiceRequest`, encoded by hand) or OTLP's JSON,
+gzipped unless `compression` is `none`. The resource is the one fit's own telemetry export sends,
+`service.name` (`service_name`, fit) and `service.version` (fit's), with `resource`'s attributes,
+templates of the record's fields; records whose resources come out the same are exported under one,
+in the scope `fit`. A log record's body is the line its `codec` makes, or, with `body: "row"`, the
+record's row as a map of typed values; its time is `timestamp_field`'s or the commit time, its
+observed time the export's, its severity `severity_field`'s (text, numbered as OTLP numbers it, or a
+number), its trace and span IDs `trace_id_field`'s and `span_id_field`'s, and its attributes
+`attributes`' templates (`fit.namespace` and `fit.op` by default).
+
+A batch is exported in requests of up to `max_request_bytes` (before compression). A 429 or a 5xx is
+sent again with a backoff, as `Retry-After` asks; a request the receiver refuses (400) is split
+until the record it refuses is found, which fails for good (`on_error` takes it), the records before
+it exported. A partial success (records the receiver dropped) is logged as a warning. OTLP has no
+deduplication: a batch written again after a crash is exported again (at least once).
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urls` | list of string |  | Required. The receiver's OTLP/HTTP address, as http://collector:4318, with or without the path /v1/logs, which goes after it when it is not there. The one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). |
+| `username` | string |  | The user for basic authentication, with password_env; none when left out. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `bearer_token_env` | string |  | The environment variable holding a token sent as Authorization: Bearer, in place of username. |
+| `headers_file` | string |  | A file of headers sent with every export, one "Name: value" a line, # starting a comment, as telemetry's headers_file, for a vendor's API key kept out of the config. Read when the pipeline loads. |
+| `ca_file` | string |  | A PEM file of the certificates the receiver's is checked against over https, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a receiver that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the receiver's certificate must have, and the TLS server name sent; each URL's host when left out. |
+| `timeout` | duration | `"60s"` | How long one export may take, from connecting to the end of its answer. 60s when left out or 0. |
+| `encoding` | string: `protobuf`, `json` | `"protobuf"` | How an export is sent: protobuf (application/x-protobuf) or JSON (application/json), OTLP/HTTP's two. protobuf when left out. |
+| `compression` | string: `gzip`, `none` | `"gzip"` | How an export's body is compressed: gzip, or none. gzip when left out. |
+| `service_name` | string | `"fit"` | The resource's service.name. fit when left out, as fit's telemetry has it. |
+| `resource` | object of string |  | More attributes of the resource, the name to a template of the value: text with {name}, a field of the row (after, or before when after is null), and {$namespace}, {$op}, {$source} and {$key}, the record's; {{ is a brace. Records whose resources come out the same are exported under one. Empty values are left out. service.name and service.version are the sink's. None when left out. |
+| `attributes` | object of string |  | Each log record's attributes, the name to a template as resource has them; empty values are left out. {"fit.namespace": "{$namespace}", "fit.op": "{$op}"} when left out. |
+| `body` | string: `line`, `row` | `"line"` | What a log record's body is: line, the text its codec makes; row, the record's row as a map of its fields, typed (ints, floats, booleans, bytes, arrays and maps as OTLP has them; times, dates and decimals as text). line when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes a record's line, with body line: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes the row as a JSON object. |
+| `timestamp_field` | string |  | A field of the row whose value is the log record's time: a time, an integer of Unix seconds, milliseconds, microseconds or nanoseconds, or RFC 3339 text. The record's commit time when left out or when a record lacks it, and none when it has neither (its observed time is the export's). |
+| `severity_field` | string |  | A field of the row whose value is the severity: text (trace, debug, info, warn or warning, error, fatal or critical, any case), kept as the severity text and numbered as OTLP numbers them, or a number from 1 to 24. None when left out. |
+| `trace_id_field` | string |  | A field of the row holding a trace's ID as 32 hex digits, which the log record is tied to, with span_id_field. None when left out. |
+| `span_id_field` | string |  | A field of the row holding a span's ID as 16 hex digits. None when left out. |
+| `max_request_bytes` | integer, 0 or more | `4194304` | The most bytes of one export's log records, before compression; a batch larger is exported in several, in order, and a record larger fails. The Collector's own bound is its max_request_body_size, 20 MiB by default. 4 MiB when left out or 0. |
 
 <a id="sync-sinks-postgres"></a>
 
