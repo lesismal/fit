@@ -62,6 +62,28 @@ type Run struct {
 	// is, for the pipeline's status and metrics; a source calls ReportLag,
 	// which spares it the nil check.
 	Lag func(SourceLag)
+	// Start, when not nil, is what SaveStart calls: the pipeline's, in a
+	// run that has no checkpoint yet.
+	Start func(Position) error
+}
+
+// SaveStart gives the pipeline, when it has no checkpoint (From is nil),
+// the position a run started again would resume from, before the source
+// emits its first record: a source that reads a snapshot then a stream
+// gives its stream's start with none of the snapshot read. The pipeline
+// saves it as its checkpoint at once, so that a run killed before any
+// record is acknowledged starts again from it, replaying the stream from
+// that start over a new snapshot, rather than from nothing: a new
+// snapshot and a stream from its own, later start, which would lose the
+// changes between the two (the deletes of rows the first run wrote among
+// them). It does nothing when the run has a checkpoint, in a job (mode
+// once) and in a dry run. Its error, the pipeline stopping or the file
+// not written, is the source's to return.
+func (r *Run) SaveStart(p Position) error {
+	if r.Start == nil || r.From != nil || p == nil {
+		return nil
+	}
+	return r.Start(p)
 }
 
 // SourceLag is how far behind its server's head a source is: a PostgreSQL

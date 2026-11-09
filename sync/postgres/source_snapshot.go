@@ -535,7 +535,17 @@ func (s *Source) snapshot(ctx context.Context, r *fitsync.Run, st *setup, from p
 		}
 		sr.tables[len(sr.tables)-1].Chunks++
 	}
-	err := sr.run(ctx, s, s.parallel())
+	// A new snapshot's start, none of it read, is the pipeline's
+	// checkpoint before its first record: a run killed before the next
+	// reads the tables again from another snapshot and streams from this
+	// one's point, replaying the changes between the two over it, rather
+	// than from the other's, which would lose them.
+	err := r.SaveStart(sr.position())
+	if err != nil {
+		exp.close()
+		return 0, err
+	}
+	err = sr.run(ctx, s, s.parallel())
 	switch {
 	case err == nil:
 		exp.close()

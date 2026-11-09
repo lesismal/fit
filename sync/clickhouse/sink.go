@@ -48,8 +48,8 @@ type Sink struct {
 	Settings        map[string]string `json:"settings,omitempty" doc:"ClickHouse settings sent with every query, the name to the value, as {\"async_insert\": \"1\"}; they cannot be query, database, insert_deduplication_token, insert_deduplicate or a param_."`
 	Table           string            `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, a ReplacingMergeTree(_version, _deleted) ordered by the key for updates and deletes, with non_replicated_deduplication_window set unless it is replicated, so that the deduplication token works. {namespace} when left out."`
 	Plain           bool              `json:"plain,omitempty" doc:"Write rows as they are, without the version and deleted columns, as for a log's MergeTree; deletes must then be delete or ignore. false when left out."`
-	VersionColumn   string            `json:"version_column,omitempty" default:"\"_version\"" doc:"The UInt64 column each row's version goes in, which a ReplacingMergeTree keeps the greatest of: the record's commit time in Unix nanoseconds, or version_field's value. _version when left out."`
-	VersionField    string            `json:"version_field,omitempty" doc:"A field of the row (an int, a uint, or a time, in Unix nanoseconds) whose value is the version, for a source whose commit times can tie for one key, as a binlog's seconds; a record without it fails. The commit time when left out, or, when the source gives none, the time the record is written."`
+	VersionColumn   string            `json:"version_column,omitempty" default:"\"_version\"" doc:"The UInt64 column each row's version goes in, which a ReplacingMergeTree keeps the greatest of: the record's commit time in Unix nanoseconds, 0 when it has none (a snapshot's rows, which any change then outranks), or version_field's value. _version when left out."`
+	VersionField    string            `json:"version_field,omitempty" doc:"A field of the row (an int, a uint, or a time, in Unix nanoseconds) whose value is the version, for a source whose commit times can tie for one key, as a binlog's seconds; a record without it fails. The commit time when left out, or, when the source gives none, 0: a snapshot's rows never outrank a change, and rows of one version are kept as the last written."`
 	DeletedColumn   string            `json:"deleted_column,omitempty" default:"\"_deleted\"" doc:"The UInt8 column set to 1 for a delete and 0 otherwise, a ReplacingMergeTree's is_deleted. _deleted when left out."`
 	Deletes         string            `json:"deletes,omitempty" enum:"flag,delete,ignore" default:"\"flag\"" doc:"How deletes are written: flag, as a row with the deleted column set to 1; delete, as a lightweight DELETE of the key's rows, run in order between the inserts, which are then not deduplicated (a DELETE written again would remove a row a deduplicated insert would not bring back), so a replay stores rows again and the table is best a ReplacingMergeTree; ignore, not at all. flag when left out."`
 	MaxRequestBytes int64             `json:"max_request_bytes,omitempty" min:"0" default:"8388608" doc:"The most bytes of one INSERT's rows; a batch larger is sent in several, in order, each with a token of its own, and a row larger fails its record. 8 MiB when left out or 0."`
@@ -171,7 +171,7 @@ type item struct {
 }
 
 // build makes r's item.
-func (s *Sink) build(r *fitsync.Record, now time.Time) item {
+func (s *Sink) build(r *fitsync.Record) item {
 	switch r.Op {
 	case fitsync.OpDDL:
 		return item{skip: true}
@@ -215,7 +215,7 @@ func (s *Sink) build(r *fitsync.Record, now time.Time) item {
 		}
 		it.row = append(b, '\n')
 	} else {
-		version, err := s.version(r, row, now)
+		version, err := s.version(r, row)
 		if err != nil {
 			return item{err: fitsync.Permanent(err)}
 		}
@@ -244,14 +244,18 @@ func (s *Sink) build(r *fitsync.Record, now time.Time) item {
 }
 
 // version returns a row's version: version_field's value, or the commit
-// time in Unix nanoseconds, or now when the source gives none.
-func (s *Sink) version(r *fitsync.Record, row fitsync.Value, now time.Time) (uint64, error) {
+// time in Unix nanoseconds, or 0 when the source gives none. A snapshot's
+// rows have none: versioned 0, they never outrank a change, which the
+// stream after the snapshot, replayed over it after a restart, then wins
+// with; rows of one version are kept as the last written, as
+// ReplacingMergeTree keeps them, so that a source of no commit times at
+// all is written as it comes.
+func (s *Sink) version(r *fitsync.Record, row fitsync.Value) (uint64, error) {
 	if s.VersionField == "" {
-		at := r.CommitTime
-		if at.IsZero() {
-			at = now
+		if r.CommitTime.IsZero() {
+			return 0, nil
 		}
-		return uint64(max(at.UnixNano(), 0)), nil
+		return uint64(max(r.CommitTime.UnixNano(), 0)), nil
 	}
 	v, ok := row.Get(s.VersionField)
 	if !ok || v.IsNull() {
@@ -336,10 +340,9 @@ func Literal(v fitsync.Value) (string, error) {
 // without it; any other failure is the run's first record's, retried by
 // the pipeline.
 func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
-	now := time.Now()
 	items := make([]item, len(batch))
 	for i, r := range batch {
-		items[i] = s.build(r, now)
+		items[i] = s.build(r)
 	}
 	limit := s.maxRequest()
 	for i := 0; i < len(items); {

@@ -167,8 +167,12 @@ func (s *Source) schemaOf(ctx context.Context, c db, ns string) (*table, error) 
 func quote(name string) string { return "`" + strings.ReplaceAll(name, "`", "``") + "`" }
 
 // snapshot reads the tables at one timestamp, taken now or the
-// checkpoint's, in pages by primary key, from where p says.
-func (s *Source) snapshot(ctx context.Context, c db, p *position, emit func(*fitsync.Record) error) error {
+// checkpoint's, in pages by primary key, from where p says. A timestamp
+// taken now, none of the tables read, is the pipeline's checkpoint before
+// the first record: a run killed before the next reads the snapshot again
+// at it, and the changes after it, rather than at a later one, after
+// which the changes between the two would be left out.
+func (s *Source) snapshot(ctx context.Context, c db, p *position, r *fitsync.Run) error {
 	if _, err := c.Exec(ctx, "SET time_zone = '+00:00'"); err != nil {
 		return fmt.Errorf("tidb: %w", err)
 	}
@@ -178,7 +182,12 @@ func (s *Source) snapshot(ctx context.Context, c db, p *position, emit func(*fit
 			return err
 		}
 		p.TS = ts
+		b, _ := json.Marshal(p)
+		if err := r.SaveStart(b); err != nil {
+			return err
+		}
 	}
+	emit := r.Emit
 	if _, err := c.Exec(ctx, "SET @@tidb_snapshot = '"+strconv.FormatUint(p.TS, 10)+"'"); err != nil {
 		return fmt.Errorf("tidb: reading at %d (older than the GC safe point?): %w", p.TS, err)
 	}

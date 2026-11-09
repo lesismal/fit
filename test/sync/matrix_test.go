@@ -40,6 +40,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lesismal/fit/config"
 	fitsync "github.com/lesismal/fit/sync"
 	_ "github.com/lesismal/fit/sync/clickhouse"
 	_ "github.com/lesismal/fit/sync/elasticsearch"
@@ -236,13 +237,10 @@ type mxRun struct {
 // mxSource is a source of the matrix: family is what
 // FIT_SYNC_MATRIX_SOURCES names; txs, whether the load writes transactions
 // of several changes; rekey, whether it changes keys; setup makes a table
-// of name run holding the model's rows. settle kills the first run only
-// once it has saved a checkpoint: for a source that loses changes when
-// killed before its first one (I192's decisions, pending review).
+// of name run holding the model's rows.
 type mxSource struct {
 	name, family string
 	txs, rekey   bool
-	settle       bool
 	setup        func(t *testing.T, run string, m *mxModel) mxRun
 }
 
@@ -292,7 +290,20 @@ func mxRunSource(t *testing.T, src mxSource, sinks []mxSink, size mxSize) {
 	if len(r.transforms) > 0 {
 		pipeline["transforms"] = r.transforms
 	}
-	cfg := loadSync(t, filepath.Join(t.TempDir(), "state"), pipeline)
+	state := filepath.Join(t.TempDir(), "state")
+	cfg := loadSync(t, state, pipeline)
+	// The first run saves no checkpoint but its source's start: it is
+	// killed before its first, with rows in the sinks, as a source of a
+	// snapshot then a stream must survive (the start it saves, I192's
+	// fix): a run again from nothing would snapshot and stream from a later
+	// start, and lose the changes between the two, the deletes of rows the
+	// sinks hold among them.
+	first := map[string]any{}
+	for k, v := range pipeline {
+		first[k] = v
+	}
+	first["checkpoint_interval"] = "1h"
+	cfgFirst := loadSync(t, state, first)
 
 	// The load, while the pipeline runs and is killed.
 	var stop atomic.Bool
@@ -326,28 +337,24 @@ func mxRunSource(t *testing.T, src mxSource, sinks []mxSink, size mxSize) {
 		fitsync.CrashAcknowledged, fitsync.CrashCheckpointWritten, fitsync.CrashCheckpointSaved}
 	kills := 0
 	var rt *fitsync.Runtime
-	start := func(crash func(string, fitsync.Point) bool) {
+	start := func(c *config.Config, crash func(string, fitsync.Point) bool) {
 		rt = fitsync.NewRuntime(fitsync.Options{Crash: crash})
-		if err := rt.Apply(cfg.Sync); err != nil {
+		if err := rt.Apply(c.Sync); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for round := range size.kills {
 		at := points[rnd.IntN(len(points))]
+		c := cfg
 		if round == 0 {
-			at = fitsync.CrashWritten // the first run is killed for sure
+			at, c = fitsync.CrashWritten, cfgFirst // killed for sure, before its first checkpoint
 		}
 		nth := int32(1 + rnd.IntN(200))
 		if at == fitsync.CrashCheckpointWritten || at == fitsync.CrashCheckpointSaved {
 			nth = int32(1 + rnd.IntN(5))
 		}
-		// FIT_SYNC_MATRIX_EARLY=1 kills them too before their first
-		// checkpoint, which they fail today.
-		if round == 0 && src.settle && os.Getenv("FIT_SYNC_MATRIX_EARLY") != "1" {
-			at, nth = fitsync.CrashCheckpointSaved, 1
-		}
 		var seen atomic.Int32
-		start(func(_ string, p fitsync.Point) bool { return p == at && seen.Add(1) == nth })
+		start(c, func(_ string, p fitsync.Point) bool { return p == at && seen.Add(1) == nth })
 		deadline := time.Now().Add(20 * time.Second)
 		for redisState(rt) != "killed" && time.Now().Before(deadline) {
 			if st := redisState(rt); st == "stopped" {
@@ -362,7 +369,7 @@ func mxRunSource(t *testing.T, src mxSource, sinks []mxSink, size mxSize) {
 		}
 		rt.Close(context.Background())
 	}
-	start(nil)
+	start(cfg, nil)
 	defer func() { rt.Close(context.Background()) }()
 	select {
 	case err := <-loadDone:
@@ -435,13 +442,7 @@ func mxSources(t *testing.T) []mxSource {
 		}
 		for _, s := range servers {
 			out = append(out, mxSource{name: "postgres" + s.version, family: "postgres", txs: true, rekey: true,
-				// Killed before its first checkpoint, a source of a snapshot
-				// then a stream snapshots again and streams from that second
-				// snapshot: the changes between the two runs, deletes of rows
-				// the sinks hold from the first among them, are lost (I192's
-				// decisions, pending review). So for MySQL and MongoDB too.
-				settle: true,
-				setup:  func(t *testing.T, run string, m *mxModel) mxRun { return mxPostgresSource(t, s, run, m) }})
+				setup: func(t *testing.T, run string, m *mxModel) mxRun { return mxPostgresSource(t, s, run, m) }})
 		}
 	}
 	if mxPick("mongo") {
@@ -458,7 +459,7 @@ func mxSources(t *testing.T) []mxSource {
 		}
 		for _, name := range names {
 			uri := sets[name]
-			out = append(out, mxSource{name: name, family: "mongo", settle: true,
+			out = append(out, mxSource{name: name, family: "mongo",
 				setup: func(t *testing.T, run string, m *mxModel) mxRun { return mxMongoSource(t, uri, run, m) }})
 		}
 	}
@@ -473,7 +474,7 @@ func mxSources(t *testing.T) []mxSource {
 			}
 		}
 		for _, s := range servers {
-			out = append(out, mxSource{name: s.name, family: "mysql", txs: true, rekey: true, settle: true,
+			out = append(out, mxSource{name: s.name, family: "mysql", txs: true, rekey: true,
 				setup: func(t *testing.T, run string, m *mxModel) mxRun { return mxMySQLSource(t, s, run, m) }})
 		}
 	}
@@ -1085,15 +1086,11 @@ func mxESSink(t *testing.T, es *cluster, run string) (map[string]any, func(*test
 		}
 }
 
-// mxClickHouseSink: a ReplacingMergeTree versioned by the row's ver
-// (version_field), deletes as lightweight DELETEs in order (deletes
-// delete), read with FINAL. Versions by commit time (the default) lose to
-// a snapshot's rows, which have none and are versioned by the time they
-// are written: a row read again after a kill outranks the later changes
-// replayed after it. Flagged deletes (the default) need a version too,
-// which a delete of only the key does not carry.
+// mxClickHouseSink: the sink's defaults, a ReplacingMergeTree(_version,
+// _deleted) versioned by commit time (a snapshot's rows, which have none,
+// 0) and deletes flagged, read with FINAL.
 func mxClickHouseSink(t *testing.T, ch *clickhouse, run string) (map[string]any, func(*testing.T) mxState) {
-	table := ch.table(t, run, "(id Int64, v String, n Nullable(Int64), ver Int64, _version UInt64) ENGINE = ReplacingMergeTree(_version) ORDER BY id SETTINGS non_replicated_deduplication_window = 1000")
+	table := ch.table(t, run, "(id Int64, v String, n Nullable(Int64), ver Int64, _version UInt64, _deleted UInt8) ENGINE = ReplacingMergeTree(_version, _deleted) ORDER BY id SETTINGS non_replicated_deduplication_window = 1000")
 	t.Cleanup(func() {
 		req, _ := http.NewRequest(http.MethodPost, ch.url, strings.NewReader("DROP TABLE IF EXISTS "+table))
 		req.SetBasicAuth(ch.user, ch.password)
@@ -1101,13 +1098,13 @@ func mxClickHouseSink(t *testing.T, ch *clickhouse, run string) (map[string]any,
 			resp.Body.Close()
 		}
 	})
-	p := map[string]any{"urls": []string{ch.url}, "username": ch.user, "table": table, "version_field": "ver", "deletes": "delete"}
+	p := map[string]any{"urls": []string{ch.url}, "username": ch.user, "table": table}
 	if ch.password != "" {
 		p["password_env"] = "FIT_SYNC_CH_PASSWORD"
 	}
 	return map[string]any{"module": "clickhouse", "params": p}, func(t *testing.T) mxState {
 		var lines []string
-		for _, r := range ch.rows(t, "SELECT concat(toString(id), '|', v, '|', ifNull(toString(n), '~'), '|', toString(ver)) FROM "+table+" FINAL") {
+		for _, r := range ch.rows(t, "SELECT concat(toString(id), '|', v, '|', ifNull(toString(n), '~'), '|', toString(ver)) FROM "+table+" FINAL WHERE _deleted = 0") {
 			var row []string
 			if err := json.Unmarshal([]byte(r), &row); err != nil || len(row) != 1 {
 				t.Fatalf("%s: %v", r, err)

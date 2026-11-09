@@ -254,7 +254,6 @@ func TestSinkBuildErrors(t *testing.T) {
 
 func TestSinkVersions(t *testing.T) {
 	s := &Sink{VersionField: "ver"}
-	now := time.Unix(10, 0)
 	at := time.Unix(20, 5)
 	for _, c := range []struct {
 		row, key fitsync.Value
@@ -265,12 +264,16 @@ func TestSinkVersions(t *testing.T) {
 		{fitsync.Map(fitsync.Field{Name: "ver", Value: fitsync.Time(at)}), fitsync.Null(), uint64(at.UnixNano())},
 		{fitsync.Map(fitsync.Field{Name: "ver", Value: fitsync.Null()}), fitsync.Map(fitsync.Field{Name: "ver", Value: fitsync.Uint(3)}), 3},
 	} {
-		v, err := s.version(&fitsync.Record{Key: c.key}, c.row, now)
+		v, err := s.version(&fitsync.Record{Key: c.key}, c.row)
 		if err != nil || v != c.want {
 			t.Errorf("%v %v", v, err)
 		}
 	}
-	if v, _ := (&Sink{}).version(&fitsync.Record{}, fitsync.Null(), now); v != uint64(now.UnixNano()) {
+	// Without a commit time, a snapshot's row: 0, below any change.
+	if v, _ := (&Sink{}).version(&fitsync.Record{}, fitsync.Null()); v != 0 {
+		t.Errorf("%d", v)
+	}
+	if v, _ := (&Sink{}).version(&fitsync.Record{CommitTime: at}, fitsync.Null()); v != uint64(at.UnixNano()) {
 		t.Errorf("%d", v)
 	}
 }

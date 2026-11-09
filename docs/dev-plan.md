@@ -4429,6 +4429,45 @@ track can place it); exactly-once into sinks with no transactions.
   explained and accepted; TinyGo and Rust plugins pass the same tests as the Go one.
 - **Touches**: `plugin/wasm`, `plugin/wasm/guest`, `sync`, fit-examples.
 
+**Decisions pending review** (made while building all but the benchmark host's run, 2026-11-09; each
+stands until the user rules on it; the item stays todo until that run):
+
+1. **The same tests, one subtest a guest.** `TestSyncTransform`, `TestSyncTransformFailures`,
+   `TestSyncCodec`, `TestSyncConnectors`, `TestSyncTransformInAPipeline` and
+   `TestSyncFailuresKeepTheCheckpoint` run as `/go`, `/tinygo` and `/rust`
+   (`plugin/wasm/guests_test.go`): TinyGo builds `testdata/sync`, the Go plugin's own source,
+   unchanged (`tinygo build -target=wasip1 -buildmode=c-shared`, default flags, as a user would);
+   Rust builds `testdata/rust`, a plugin of the same behaviour on the `fit-guest` crate. All pass,
+   locally in a container (TinyGo 0.44.0 with Go 1.27.3, Rust 1.99.0). Alternative: a smaller
+   TinyGo transform and Rust transform of their own, as the plan's wording allows.
+2. **Missing toolchains skip, unless required.** Without `tinygo`, or `cargo`/`rustc` with the
+   `wasm32-wasip1` target, a guest's subtests skip, so the Test and Coverage jobs (no toolchains) are
+   unaffected and no production code changed; `FIT_WASM_GUESTS=tinygo,rust` turns a missing one into a
+   failure. CI's new job **WASM guests (TinyGo, Rust)** installs TinyGo 0.44.0 (its .deb) and Rust
+   1.99.0 (`rustup`, `--target wasm32-wasip1`), runs the crate's `cargo test` and the `TestSync*`
+   tests with `-race` and that variable set. Alternative: a build tag; or prebuilt plugins in
+   testdata.
+3. **The Rust crate reads records by hand, as the Go guest does.** `fit-guest` gains `Record`,
+   `parse_batch`, `Row`, the value helpers (`int`, `string`, `boolean`, `as_int`, `as_str`, ...),
+   `members`/`elements`, `emit_record`, `request` (an HTTP request from its parts) and
+   `response_header`, still with no dependencies; `records` stays. Alternative: serde_json in the
+   test plugin and the examples, the crate left as I165 had it.
+4. **BenchmarkSyncTransform covers every guest**: `builtin`, then `wasm-<go|tinygo|rust>-<1|4>`, each
+   guest skipped where it cannot be built, so the benchmark host needs TinyGo and Rust installed for
+   all the numbers (the CI job's versions). Locally, in a container on an Apple M4 Pro (not the
+   benchmark host), per record: built-in 206 ns; Go 49.9 µs on one instance, 15.3 µs on four;
+   TinyGo 45.8 / 14.3 µs; Rust 30.2 / 11.3 µs. Every guest makes about 209 host allocations a
+   record (53.5k a batch of 256), so the host's JSON decoding of what plugins emit dominates, not
+   the guest's language: the binary form, with a host decoder that allocates less, is what the
+   host run will most likely ask for. Left to the main session with the host run.
+5. **Examples**: fit-examples branch `wasm-sync-examples` adds `sync-wasm-codec` (a line format of
+   its own read from a file and written back, its bad line dead-lettered), `sync-wasm-source` (a
+   paged API that fit itself serves, the checkpoint a page and how far into it) and
+   `sync-wasm-sink` (NDJSON posts to a webhook fit itself answers), beside I194's
+   `sync-wasm-transform`; each runs with fit alone and was run; their plugins are Go, and build by
+   TinyGo 0.44 too (checked), which the comments show. No Rust example there: its CI builds only Go.
+   Alternative: a Rust example, with a Rust toolchain in fit-examples' test.
+
 ### I166 Files as a source and a sink
 
 - **Do**: source `file`: paths and globs, scanned each `scan_interval`; each file known by its device,
@@ -6699,20 +6738,40 @@ review:
 4. **Kills** as the per-connector tests have them: the crash hook at a random point and count, the
    first run killed for sure, then a run to the end.
 5. **Found by the matrix: a source of a snapshot and a stream killed before its first checkpoint
-   loses changes.** PostgreSQL, MySQL and MongoDB, started again without a checkpoint, take a new
-   snapshot and stream from it, so the changes between the two runs are never read; a row the first
-   run wrote to the sinks and that was deleted meanwhile stays in them for good (seen in every sink,
-   a few rows a run). The matrix kills these sources the first time only once a checkpoint is saved
-   (`settle`), and `FIT_SYNC_MATRIX_EARLY=1` kills them before, which fails today. A fix (a pipeline
-   that ran before streaming from the earliest position its server kept, the slot's confirmed LSN, or
-   the runtime saving a position before the first record) belongs to the sources' items, for review.
-   Alternative: the matrix failing on it until then.
-6. **Found by the matrix: ClickHouse's defaults lose to a snapshot.** Versions by commit time (the
-   default) are the write time for a snapshot's rows, which have none, so a row read again after a
-   kill outranks the later changes replayed after it; flagged deletes (the default) need a version a
-   delete of only the key does not have. The matrix's ClickHouse sink has `version_field: "ver"` and
-   `deletes: "delete"`. Alternative: snapshot records carrying the snapshot's time, for the sources'
-   items to decide.
+   lost changes.** PostgreSQL, MySQL and MongoDB (and TiDB, of the same shape), started again without
+   a checkpoint, took a new snapshot and streamed from it, so the changes between the two runs were
+   never read; a row the first run wrote to the sinks and that was deleted meanwhile stayed in them
+   for good (seen in every sink, a few rows a run). **Fixed** (2026-11-09) by the runtime saving the
+   source's start: `fitsync.Run.SaveStart(p)`, small and additive in package sync (a `Run.Start` func
+   the runtime fills for pipelines that are not jobs, none in a dry run), by which a source with no
+   checkpoint gives, before its first record, the position a run started again resumes from; the
+   runtime saves it as the checkpoint at once (through the crash points `checkpoint_written` and
+   `checkpoint_saved`, without telling a `Confirmer`). PostgreSQL gives its snapshot's state with no
+   chunk done at the exported point, so a restart reads every table again from a new snapshot and
+   streams from the first point (the path a checkpoint inside a snapshot already took, its slot never
+   confirmed past that point); MySQL its binlog start with an empty snapshot position; MongoDB its
+   start token with the snapshot not begun; TiDB its snapshot's TSO, read again at the same TSO
+   (within `tidb_gc_life_time`, or the run fails with the existing "older than the GC safe point").
+   The stream replayed over a newer snapshot converges in sinks writing by key, each key's last
+   change coming last. The matrix kills every source's first run before its first checkpoint (that
+   run's `checkpoint_interval` an hour, killed at a random write), `settle` and
+   `FIT_SYNC_MATRIX_EARLY` gone; with `SaveStart` disabled it fails, with it it passes.
+   Alternatives: each source streaming from the earliest position its server kept (PostgreSQL's
+   slot's confirmed LSN holds only for a slot that outlives the run, and MySQL and MongoDB keep no
+   such mark: the oldest binlog or oplog entry would replay far too much, or be gone); the source
+   saving nothing until a record is acknowledged (the bug).
+6. **Found by the matrix: ClickHouse's defaults lost to a snapshot.** Versions by commit time (the
+   default) were the write time for a record without one, a snapshot's row, so a row read again
+   after a kill outranked the earlier-committed changes replayed after it. **Fixed** (2026-11-09):
+   such a record is version 0, below any change; rows of one version keep the one written last, as
+   `ReplacingMergeTree` does, so a source with no commit times at all is still written as it comes.
+   Flagged deletes already carried their commit time's version: the "no version" seen was
+   `version_field`'s, which a delete of only the key lacks. The matrix's ClickHouse sink is the
+   default now (`ReplacingMergeTree(_version, _deleted)`, flagged deletes, read with `FINAL`). Left:
+   ties at one version (a transaction changing a key twice, MariaDB's commit seconds) are ordered by
+   write, which a deduplicated replay can get wrong; `version_field` stays for those. Alternatives:
+   versions from positions (not comparable across a source's kinds of position), snapshot records
+   carrying the snapshot's time (only TiDB's have one; PostgreSQL's exported point has none).
 7. **No Docker Compose file**: the servers are started by `test/sync/run.sh` and its helpers, as every
    interop test's already are, now by family (`SYNC_FAMILIES`: search, mysql, postgres, mongo, kafka,
    tidb, matrix), each family a CI job of its own on its own runner, in parallel, with `-timeout` and
@@ -6727,8 +6786,8 @@ review:
    runner's 65,536 and TiDB gave up on it; TiKV gets `--ulimit nofile=1048576`, TiDB and TiCDC
    `--restart on-failure`.
 10. **Size**: about 1,100 lines of test, run.sh reorganized by family (about 150 lines changed), small
-    additions to `kafka.sh` (`REDPANDA=0`), `mongo.sh` (`MONGO_VERSIONS`) and `tidb.sh`; nothing left
-    but decisions 5 and 6, so no I192b.
+    additions to `kafka.sh` (`REDPANDA=0`), `mongo.sh` (`MONGO_VERSIONS`) and `tidb.sh`; decisions 5 and 6
+    fixed after, so no I192b.
 
 ### I193 Benchmarks
 

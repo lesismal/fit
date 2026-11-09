@@ -3343,6 +3343,33 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   测试。
 - **涉及**：`plugin/wasm`、`plugin/wasm/guest`、`sync`、fit-examples。
 
+**待审决定**（除压测主机上的运行外均已完成，2026-11-09；在用户裁定前有效；该运行完成前本项保持 todo）：
+
+1. **同样的测试，每种客体一个子测试。** `TestSyncTransform`、`TestSyncTransformFailures`、`TestSyncCodec`、
+   `TestSyncConnectors`、`TestSyncTransformInAPipeline` 和 `TestSyncFailuresKeepTheCheckpoint` 分别以 `/go`、
+   `/tinygo`、`/rust` 运行（`plugin/wasm/guests_test.go`）：TinyGo 原样构建 Go 插件自己的源码 `testdata/sync`
+   （`tinygo build -target=wasip1 -buildmode=c-shared`，默认参数，与用户一样）；Rust 构建 `testdata/rust`，一个基于
+   `fit-guest` crate、行为相同的插件。全部通过（本地容器中：TinyGo 0.44.0 配 Go 1.27.3，Rust 1.99.0）。备选：按计划
+   字面，各写一个更小的 TinyGo 变换和 Rust 变换。
+2. **缺少工具链时跳过，除非要求。** 没有 `tinygo`，或没有带 `wasm32-wasip1` 目标的 `cargo`/`rustc` 时，该客体的子测试
+   跳过，因此 Test 和 Coverage 任务（没有这些工具链）不受影响，也没有改动生产代码；`FIT_WASM_GUESTS=tinygo,rust`
+   让缺少的工具链变成失败。CI 新任务 **WASM guests (TinyGo, Rust)** 安装 TinyGo 0.44.0（.deb）和 Rust 1.99.0
+   （`rustup`，`--target wasm32-wasip1`），运行 crate 的 `cargo test`，并在设置该变量的情况下以 `-race` 运行
+   `TestSync*`。备选：构建标签；或在 testdata 中放预先构建的插件。
+3. **Rust crate 像 Go 客体一样手工读取记录。** `fit-guest` 新增 `Record`、`parse_batch`、`Row`、值辅助函数（`int`、
+   `string`、`boolean`、`as_int`、`as_str` 等）、`members`/`elements`、`emit_record`、`request`（由各部分组成 HTTP
+   请求）和 `response_header`，仍然没有依赖；`records` 保留。备选：测试插件和示例使用 serde_json，crate 保持 I165 的样子。
+4. **BenchmarkSyncTransform 覆盖每种客体**：`builtin`，然后是 `wasm-<go|tinygo|rust>-<1|4>`，无法构建的客体跳过，因此
+   压测主机需要安装 TinyGo 和 Rust（版本同 CI 任务）才能得到全部数字。本地（Apple M4 Pro 上的容器，不是压测主机）每条
+   记录：内置 206 ns；Go 单实例 49.9 µs、四实例 15.3 µs；TinyGo 45.8 / 14.3 µs；Rust 30.2 / 11.3 µs。每种客体每条记录
+   都有约 209 次宿主分配（每批 256 条 53.5k 次），所以占主导的是宿主对插件输出 JSON 的解码，而不是客体语言：压测主机的
+   运行最可能要求的是二进制形式及分配更少的宿主解码器。留给主会话与主机运行一起处理。
+5. **示例**：fit-examples 分支 `wasm-sync-examples` 在 I194 的 `sync-wasm-transform` 之外新增 `sync-wasm-codec`（从文件
+   读取自己的行格式并写回，坏行进入死信）、`sync-wasm-source`（由 fit 自己提供的分页 API，检查点是页面及其中的进度）和
+   `sync-wasm-sink`（以 NDJSON 发送到由 fit 自己应答的 webhook）；每个都只需 fit 即可运行，且已实际运行；插件用 Go 编写，
+   也能用 TinyGo 0.44 构建（已验证），注释中有说明。那里没有 Rust 示例：它的 CI 只构建 Go。备选：增加 Rust 示例，并在
+   fit-examples 的测试中加入 Rust 工具链。
+
 ### I166 文件作为源与目标
 
 - **做什么**：源 `file`：路径与通配，每 `scan_interval` 扫描一次；每个文件以设备号、inode 和文件开头字节的指纹识别，因此
@@ -4824,14 +4851,25 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
    个事务（每晚 1,000 行、2,500 个事务、10 次杀进程），相隔二到十毫秒。MongoDB 的负载没有事务（客户端不支持会话），改键是一次
    删除加一次插入，Kafka 中的 Debezium 事件也是如此。类型由各连接器的测试覆盖。
 4. **杀进程**与各连接器测试相同：崩溃钩子在随机的点和次数触发，第一次运行一定被杀，最后一次运行到底。
-5. **矩阵发现：先快照后流的源在第一个检查点之前被杀会丢变更。** PostgreSQL、MySQL 和 MongoDB 在没有检查点时重新启动，会做新的
-   快照并从它开始流，两次运行之间的变更永远读不到；第一次运行已写入目标、其间又被删除的行会一直留在目标中（每个目标都出现，
-   每次运行几行）。矩阵对这些源的第一次杀进程推迟到已保存检查点之后（`settle`），`FIT_SYNC_MATRIX_EARLY=1` 则在之前就杀，目前
-   会失败。修复（运行过的流水线从服务器保留的最早位置开始流，如槽的已确认 LSN，或运行时在第一条记录前保存位置）属于各源的条目，
-   待审查。备选：在修复前让矩阵一直失败。
-6. **矩阵发现：ClickHouse 的默认值敌不过快照。** 按提交时间做版本（默认）时，快照的行没有提交时间，用写入时间，于是杀进程后
-   重读的行会压过之后重放的变更；标记删除（默认）需要版本，而只有键的删除没有。矩阵的 ClickHouse 目标用 `version_field: "ver"`
-   和 `deletes: "delete"`。备选：快照记录带上快照的时间，由各源的条目决定。
+5. **矩阵发现：先快照后流的源在第一个检查点之前被杀会丢变更。** PostgreSQL、MySQL 和 MongoDB（以及同样形态的 TiDB）在没有
+   检查点时重新启动，会做新的快照并从它开始流，两次运行之间的变更永远读不到；第一次运行已写入目标、其间又被删除的行会一直留在
+   目标中（每个目标都出现，每次运行几行）。**已修复**（2026-11-09），由运行时保存源的起点：`fitsync.Run.SaveStart(p)`，sync 包中
+   小而增量的 API（运行时为非作业的流水线填上 `Run.Start`，试运行没有），没有检查点的源在第一条记录之前用它给出重新启动的运行
+   应当从哪里继续的位置；运行时立即把它保存为检查点（经过崩溃点 `checkpoint_written` 和 `checkpoint_saved`，不告诉 `Confirmer`）。
+   PostgreSQL 给出导出点上、没有完成任何块的快照状态，于是重启时从新快照重读每张表，并从第一个点开始流（检查点落在快照中时
+   本就走这条路，槽从未确认到该点之后）；MySQL 给出 binlog 起点和空的快照位置；MongoDB 给出起始令牌、快照尚未开始；TiDB 给出
+   快照的 TSO，在同一 TSO 重读（在 `tidb_gc_life_time` 之内，否则以已有的 “older than the GC safe point” 失败）。在较新的快照上
+   重放的流在按键写入的目标中收敛，每个键的最后一次变更最后到达。矩阵在每个源的第一次运行的第一个检查点之前杀掉它（该次运行的
+   `checkpoint_interval` 为一小时，在随机一次写入时杀），去掉了 `settle` 和 `FIT_SYNC_MATRIX_EARLY`；禁用 `SaveStart` 时它失败，
+   启用时通过。备选：每个源从服务器保留的最早位置开始流（PostgreSQL 槽的已确认 LSN 只对比运行活得久的槽成立，MySQL 和 MongoDB
+   没有这样的标记：最旧的 binlog 或 oplog 条目会重放太多，或已不在）；源在有记录被确认之前什么都不保存（即这个缺陷）。
+6. **矩阵发现：ClickHouse 的默认值敌不过快照。** 按提交时间做版本（默认）时，没有提交时间的记录（快照的行）用写入时间，于是
+   杀进程后重读的行会压过之后重放的、更早提交的变更。**已修复**（2026-11-09）：这样的记录版本为 0，低于任何变更；同一版本的行
+   保留最后写入的，与 `ReplacingMergeTree` 的做法一致，因此完全没有提交时间的源仍按到达顺序写入。标记删除本就带有其提交时间的
+   版本：看到的 “没有版本” 来自 `version_field`，只有键的删除没有它。矩阵的 ClickHouse 目标现在用默认值
+   （`ReplacingMergeTree(_version, _deleted)`、标记删除、用 `FINAL` 读取）。遗留：同一版本的平局（一个事务两次修改同一个键、
+   MariaDB 的秒级提交时间）按写入顺序决定，被去重的重放可能弄错；这些情况仍用 `version_field`。备选：用位置做版本（同一个源的
+   不同位置种类之间无法比较），快照记录带上快照的时间（只有 TiDB 的有；PostgreSQL 的导出点没有时间）。
 7. **没有 Docker Compose 文件**：服务器由 `test/sync/run.sh` 及其辅助脚本启动，和所有互通测试一样，现在按族划分（`SYNC_FAMILIES`：
    search、mysql、postgres、mongo、kafka、tidb、matrix），每族在 CI 中是一个单独的任务、在自己的运行器上并行运行，`-timeout` 和
    `timeout-minutes` 按其大小设定；`matrix` 每种服务器启动一个，不含 OpenSearch、Valkey、S3、Redpanda 和单机 TiDB。`SYNC_PREFIX`
@@ -4841,7 +4879,7 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
 9. **TiKV 需要 123,880 个打开文件**：CI 运行 42504979157 在 `tidb.sh` 失败，因为 TiKV 拒绝运行器的 65,536，TiDB 随之放弃；TiKV
    加上 `--ulimit nofile=1048576`，TiDB 和 TiCDC 加上 `--restart on-failure`。
 10. **规模**：约 1,100 行测试，run.sh 按族重组（约 150 行改动），`kafka.sh`（`REDPANDA=0`）、`mongo.sh`（`MONGO_VERSIONS`）和
-    `tidb.sh` 有小的增补；除决定 5 和 6 外没有剩余，因此没有 I192b。
+    `tidb.sh` 有小的增补；决定 5 和 6 随后已修复，因此没有 I192b。
 
 ### I193 基准测试
 

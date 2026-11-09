@@ -180,6 +180,44 @@ func TestSnapshotThenStream(t *testing.T) {
 	}
 }
 
+// TestSnapshotSavesStart: the stream's start, the snapshot not begun, is
+// saved before the first record; a run from it reads the snapshot whole,
+// then the stream from that start. A start not saved fails the run.
+func TestSnapshotSavesStart(t *testing.T) {
+	f := newSnapFake(1, 2, 3)
+	s := newSource(t, f.srcFake, map[string]any{"tables": []string{"shop.t"}, "snapshot": "initial"})
+	stop := errors.New("the sink failed")
+	var starts []string
+	n := 0
+	err := s.Run(context.Background(), &fitsync.Run{
+		Start: func(p fitsync.Position) error { starts = append(starts, string(p)); return nil },
+		Emit: func(*fitsync.Record) error {
+			if len(starts) != 1 {
+				t.Error("a record before the start was saved")
+			}
+			n++
+			return stop
+		},
+	})
+	want := `{"gtids":"` + uuidA + `:1-5","file":"bin.000001","pos":157,"snapshot":{"table":""}}`
+	if err != stop || n != 1 || len(starts) != 1 || starts[0] != want {
+		t.Fatal(err, n, starts)
+	}
+	f.streams = [][]evItem{newStream("bin.000001", 157, "8.4.3").gtid(uuidA, 6).query("shop", "BEGIN").
+		table(10, "shop", "t", fullNames, 0).rows(binlog.WriteRowsEventV2, 10, img(9, "x")).xid().items}
+	r := startSrc(s, fitsync.Position(starts[0]), false)
+	if got := ids(r.take(t, 4)); got != "1,2,3,9" {
+		t.Fatal(got)
+	}
+	r.stop(t)
+	broke := errors.New("the disk is full")
+	err = s.Run(context.Background(), &fitsync.Run{Start: func(fitsync.Position) error { return broke },
+		Emit: func(*fitsync.Record) error { t.Error("a record"); return nil }})
+	if err != broke {
+		t.Fatal(err)
+	}
+}
+
 func TestSnapshotErrors(t *testing.T) {
 	for name, c := range map[string]struct {
 		params map[string]any

@@ -568,6 +568,37 @@ func (r *run) checkpoint() {
 	}
 }
 
+// saveStart is Run.Start: the source's start saved as the checkpoint, while
+// the run has none and nothing is acknowledged, so that a run killed before
+// its first checkpoint starts again from it.
+func (r *run) saveStart(pos Position) error {
+	r.saveMu.Lock()
+	defer r.saveMu.Unlock()
+	r.mu.Lock()
+	has := r.from != nil || r.mark != nil
+	r.mu.Unlock()
+	if r.killed.Load() {
+		return errStopped
+	}
+	if has {
+		return nil
+	}
+	err := r.p.store.save(pos, nil)
+	if errors.Is(err, errCrashed) {
+		r.kill()
+		return errStopped
+	}
+	if err != nil {
+		return fmt.Errorf("saving the source's start as the checkpoint: %w", err)
+	}
+	r.from = pos
+	r.p.noteSaved(pos)
+	if r.crash(CrashCheckpointSaved) {
+		return errStopped
+	}
+	return nil
+}
+
 // outcome is how a run ended.
 type outcome int
 
@@ -596,6 +627,9 @@ func (r *run) do(from Position) (outcome, error) {
 	go func() {
 		defer wg.Done()
 		run := &Run{From: from, Once: p.cfg.Once(), Emit: r.emit, Pipeline: p.cfg.Name, Lag: p.meter.setLag}
+		if !p.cfg.Once() {
+			run.Start = r.saveStart
+		}
 		var err error
 		if c, ok := p.src.(Chunker); ok && p.cfg.Once() {
 			err = p.runChunks(r.srcCtx, c, run, p.cfg.Parallel())
