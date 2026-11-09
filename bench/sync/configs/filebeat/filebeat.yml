@@ -1,0 +1,31 @@
+# Filebeat in the sync benchmark's files scenario: the files' lines, as they
+# are, into one file, as fit's config does (configs/fit/files.conf). Two
+# waits are set to fit's, so that the steady phase's lag compares like with
+# like: the harvester looks for new lines every 250ms (fit's poll_interval)
+# rather than backing off to 10s, and the queue hands what it holds to the
+# output after 1s (fit's batch max_wait) rather than 10s. The rest is
+# Filebeat's defaults; no processor adds metadata.
+filebeat.inputs:
+  - type: filestream
+    id: bench
+    paths:
+      - /data/in/*.log
+    backoff.init: 250ms
+    backoff.max: 250ms
+
+queue.mem:
+  flush.timeout: 1s
+
+output.file:
+  path: /data/out
+  filename: filebeat
+  # One file, never rotated, which syncbench counts.
+  rotate_every_kb: 100000000
+  rotate_on_startup: false
+  codec.format:
+    string: '%{[message]}'
+
+http.enabled: false
+logging.level: warning
+logging.to_stderr: true
+monitoring.enabled: false

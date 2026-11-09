@@ -1,0 +1,31 @@
+{
+  "job": {
+    "setting": {
+      "speed": {"channel": 4},
+      "errorLimit": {"record": 0}
+    },
+    "content": [{
+      "reader": {
+        "name": "mysqlreader",
+        "parameter": {
+          "username": "root",
+          "password": "fit-syncbench-1",
+          "column": ["id", "k", "c", "pad"],
+          "splitPk": "id",
+          "connection": [{"table": ["items"], "jdbcUrl": ["jdbc:mysql://mysql:3306/shop?useSSL=false"]}]
+        }
+      },
+      "writer": {
+        "name": "mysqlwriter",
+        "parameter": {
+          "writeMode": "insert",
+          "username": "root",
+          "password": "fit-syncbench-1",
+          "column": ["id", "k", "c", "pad"],
+          "batchSize": 1000,
+          "connection": [{"table": ["items"], "jdbcUrl": "jdbc:mysql://mysql2:3306/shop?useSSL=false"}]
+        }
+      }
+    }]
+  }
+}

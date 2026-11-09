@@ -1,0 +1,19 @@
+{
+  "name": "bench",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "fit-syncbench-1",
+    "database.dbname": "shop",
+    "topic.prefix": "bench",
+    "table.include.list": "public.items",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_bench",
+    "publication.name": "dbz_bench",
+    "publication.autocreate.mode": "filtered",
+    "snapshot.mode": "no_data"
+  }
+}

@@ -6881,6 +6881,56 @@ review:
 - **Done when**: the results are in `bench` and the scored report (rule 24), with where fit stands.
 - **Touches**: `bench`, `docs`.
 
+**The harness** (built 2026-11-09; the host's run, the results and the report are still to come, so
+I193 stays todo): [`bench/sync`](../bench/sync/README.md). `bench/sync/run.sh SCENARIO` runs fit and
+its rivals one at a time against fresh servers (scenarios `files`, `mysql-es`, `mysql-kafka`,
+`pg-kafka`, `mysql-batch`), in Docker on a private network, no host port, CPU-pinned (mover, driver,
+servers on separate physical cores), everything removed at the end; `bench/sync/plan.sh DATE` runs
+every item 3 times into `bench/results/sync-DATE` and renders `tables.md` and `scores.md`.
+`bench/sync/syncbench` (Go, fit's own wire clients) writes the load, counts at the sink, samples the
+movers through the Docker API and saves fit's pprof CPU and heap profiles; `bench/cmd/benchreport`
+renders `"kind": "sync"` results and scores them (workloads S1-S5). Smoke-tested end to end on
+macOS Docker (arm64) at `SIZE=smoke`; not yet run on Linux.
+
+**Decisions pending review** (made while building the harness, 2026-11-09; each stands until the user rules on it):
+
+1. **Throughput from a backlog.** A stream's mover is `docker pause`d while its rows are written,
+   then unpaused, so it drains a backlog at its own pace and the writer is never the bound; files
+   and the batch's rows exist before the mover starts (syncbench starts its containers). Lag comes
+   from a separate steady phase at a fixed rate (2,000 records/s for 20s), by matching each write's
+   commit to the sink's count. Alternative: writing while the mover runs (`PAUSE=0`, kept as an
+   option), which measures the writer as much as the mover.
+2. **Counted at the sink, never from the mover**: lines in the output files, Elasticsearch `_count`
+   (so its 1s refresh is in every mover's lag), Kafka offsets (a message a row), Canal's flat
+   messages by their `data` rows (Canal puts a transaction's rows of a table in one message), the
+   target's `COUNT(*)`. Extra records (counted twice) are reported, not scored.
+3. **A stream's start by warm-up transactions until the sink's count rises**, then the count once
+   settled is the base: rows written before a mover attached are not read by Canal or Debezium
+   (`no_data`), nor fit (`snapshot never`), so a fixed warm-up count would hang.
+4. **Each mover's defaults, except where the comparison needs alignment**: Filebeat's harvester
+   backoff to 250ms and queue flush to 1s (fit's `poll_interval` and batch `max_wait`); fit writes
+   Debezium's envelope to Kafka; one partition per topic; the batch copy at 4 readers/writers and
+   1,000-row batches on both sides; no TLS; servers' durability relaxed alike. JVM heaps stay at what
+   each image ships (Canal 2-3 GiB, Connect up to 2 GiB, DataX 1 GiB), which their RSS shows.
+   Alternative: equal heaps.
+5. **Debezium to Elasticsearch** is Debezium's MySQL connector plus Confluent's Elasticsearch sink
+   14.1.2 in one Kafka Connect, the Kafka broker counted as a server, not the mover; topics renamed
+   at the source (`RegexRouter`), the sink allowing no topic-changing SMT. **Canal to Elasticsearch**
+   is canal-server plus its client adapter (built from the 1.1.8 release), both containers the mover.
+6. **Images**: pinned tags (MySQL 8.0.42, PostgreSQL 17.5, Elasticsearch 7.17.28, Kafka 3.9.1,
+   Filebeat 8.17.4, canal-server v1.1.8, Debezium connect 3.0.8.Final, Temurin 8u452); the Canal
+   adapter, DataX 202309 (engine and MySQL plugins only, of a 1.7 GB tarball) and the Confluent
+   sink downloaded with pinned sha256 and built into local images. MySQL 8.0 rather than 8.4, for
+   `mysql_native_password`, which DataX's and Canal's drivers need.
+7. **Scores**: S1 files 25% (four items: 128 B and 1 KiB lines, 1 and 16 files), S2 MySQL→ES 20%,
+   S3 MySQL→Kafka 20%, S4 PostgreSQL→Kafka 15%, S5 batch 20%; metrics as the HTTP plan's (throughput
+   50%, CPU 25%, memory 15%, lag 10%), the batch without lag (55/25/20). In benchreport beside the
+   HTTP plan's, a plan folder being one or the other.
+8. **Seen in the smoke runs (sizes too small to trust)**: fit's lag at low rates is its sink batch
+   `max_wait` (1s); fit PostgreSQL→Kafka drained with little CPU, and Canal's and Debezium's
+   Elasticsearch paths ran at under 1,000 rows/s with little CPU, each worth a look at the host's
+   sizes before conclusions.
+
 ### I194 Sync's documentation and examples
 
 - **Do**: `docs/sync.md` and its Chinese twin: concepts, every connector's settings, the guarantees

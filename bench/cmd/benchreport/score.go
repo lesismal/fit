@@ -61,15 +61,38 @@ var workloads = []workload{
 	{"w6", "W6, latency at a fixed rate", 0.15, rateMetrics},
 }
 
-// workloadOf is the workload a results file belongs to, by its name.
+// syncWorkloads are the sync benchmark's plan (bench/sync/plan.sh), whose
+// results files are named s1-... to s5-...: the files and the two MySQL
+// streams count most, being what Filebeat and Canal are most used for; a
+// batch copy is scored without a lag, which it has none of.
+var syncWorkloads = []workload{
+	{"s1", "S1, files to a file", 0.25, defaultMetrics},
+	{"s2", "S2, MySQL to Elasticsearch", 0.20, defaultMetrics},
+	{"s3", "S3, MySQL to Kafka", 0.20, defaultMetrics},
+	{"s4", "S4, PostgreSQL to Kafka", 0.15, defaultMetrics},
+	{"s5", "S5, a MySQL batch copy", 0.20, batchMetrics},
+}
+
+// batchMetrics is a batch copy's: no lag, so throughput and what it costs.
+var batchMetrics = metricWeights{tps: 0.55, cpu: 0.25, mem: 0.20}
+
+// workloadOf is the workload a results file belongs to, by its name, and
+// the plan it is of: the load test plan's or the sync benchmark's.
 func workloadOf(name string) (workload, bool) {
+	w, _, ok := familyOf(name)
+	return w, ok
+}
+
+func familyOf(name string) (workload, []workload, bool) {
 	prefix, _, _ := strings.Cut(name, "-")
-	for _, w := range workloads {
-		if w.prefix == prefix {
-			return w, true
+	for _, family := range [][]workload{workloads, syncWorkloads} {
+		for _, w := range family {
+			if w.prefix == prefix {
+				return w, family, true
+			}
 		}
 	}
-	return workload{}, false
+	return workload{}, nil, false
 }
 
 // item is one table of the plan.
@@ -81,12 +104,15 @@ type item struct {
 type plan struct {
 	runs    []*run
 	weights map[item]float64
+	// family is the plan's workloads: the load test plan's, or the sync
+	// benchmark's, by its first results file.
+	family []workload
 }
 
 // loadPlan reads every workload's results files in dir, and gives each of
 // their items its share of its workload's weight.
 func loadPlan(dir string) (*plan, error) {
-	paths, err := filepath.Glob(filepath.Join(dir, "w*.json"))
+	paths, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
 		return nil, err
 	}
@@ -94,13 +120,14 @@ func loadPlan(dir string) (*plan, error) {
 	p := &plan{weights: map[item]float64{}}
 	count := map[string]int{}
 	for _, path := range paths {
+		w, family, ok := familyOf(strings.TrimSuffix(filepath.Base(path), ".json"))
+		if !ok || p.family != nil && &family[0] != &p.family[0] {
+			continue
+		}
+		p.family = family
 		r, err := load(path)
 		if err != nil {
 			return nil, err
-		}
-		w, ok := workloadOf(r.name)
-		if !ok {
-			continue
 		}
 		p.runs = append(p.runs, r)
 		for _, k := range r.items() {
@@ -308,13 +335,13 @@ func renderScores(w io.Writer, p *plan, level int) {
 
 	fmt.Fprintf(w, "%s Overall ranking\n\n", hashes)
 	rank := [][]string{{"Rank", "Server", "Score"}}
-	for _, wl := range workloads {
+	for _, wl := range p.family {
 		rank[0] = append(rank[0], strings.ToUpper(wl.prefix[:1])+wl.prefix[1:])
 	}
 	rank[0] = append(rank[0], "Coverage")
 	for i, r := range ranking {
 		row := []string{fmt.Sprint(i + 1), r.server, fmt.Sprintf("%.1f", r.score)}
-		for _, wl := range workloads {
+		for _, wl := range p.family {
 			if t := byWorkload[r.server][wl.prefix]; t != nil && t.weight > 0 {
 				row = append(row, fmt.Sprintf("%.1f", t.weighted/t.weight))
 			} else {
@@ -332,7 +359,7 @@ func renderScores(w io.Writer, p *plan, level int) {
 
 	fmt.Fprintf(w, "%s How the items are scored\n\n", hashes)
 	rules := [][]string{{"Workload", "Weight", "Items", "Weight an item", "TPS", "CPU EER", "MEM EER", "Latency"}}
-	for _, wl := range workloads {
+	for _, wl := range p.family {
 		n := 0
 		for k := range p.weights {
 			if f, _ := workloadOf(k.file); f.prefix == wl.prefix {
@@ -347,11 +374,19 @@ func renderScores(w io.Writer, p *plan, level int) {
 			fmt.Sprintf("%.2f%%", wl.weight/float64(n)*100), pct(m.tps), pct(m.cpu), pct(m.mem), pct(m.latency)})
 	}
 	writeTable(w, rules, 1)
-	fmt.Fprintf(w, "\nAn item is one table: a scenario over a protocol in one results file. A server's score for it is "+
-		"100 times the weighted sum of its shares of the table's best throughput, CPU efficiency (TPS a core), "+
-		"memory efficiency (TPS a MiB of peak memory) and latency (the best's latency over its own: p99 where "+
-		"measured, the mean otherwise), times the share of its requests that did not fail. A run that failed or "+
-		"that the server cannot serve scores 0.\n\n")
+	if &p.family[0] == &syncWorkloads[0] {
+		fmt.Fprintf(w, "\nAn item is one table: a scenario's variant in one results file, its servers the movers. A mover's "+
+			"score for it is 100 times the weighted sum of its shares of the table's best throughput (records a second, "+
+			"counted at the sink), CPU efficiency (records a CPU-second), memory efficiency (records a second a MiB of "+
+			"peak anonymous memory) and lag (the best's p99 over its own, in the steady phase). A run that failed, "+
+			"its records not all at the sink in time, scores 0.\n\n")
+	} else {
+		fmt.Fprintf(w, "\nAn item is one table: a scenario over a protocol in one results file. A server's score for it is "+
+			"100 times the weighted sum of its shares of the table's best throughput, CPU efficiency (TPS a core), "+
+			"memory efficiency (TPS a MiB of peak memory) and latency (the best's latency over its own: p99 where "+
+			"measured, the mean otherwise), times the share of its requests that did not fail. A run that failed or "+
+			"that the server cannot serve scores 0.\n\n")
+	}
 
 	fmt.Fprintf(w, "%s Every item\n\n", hashes)
 	writeTable(w, table, 1)

@@ -4938,6 +4938,43 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
 - **完成标准**：结果写入 `bench` 和带评分的报告（规则 24），并说明 fit 所处的位置。
 - **涉及**：`bench`、`docs`。
 
+**测试工具**（2026-11-09 搭建；主机运行、结果与报告尚待完成，因此 I193 仍为 todo）：
+[`bench/sync`](../bench/sync/README.zh-CN.md)。`bench/sync/run.sh SCENARIO` 逐个运行 fit 与对手，每次面对全新的
+服务器（场景 `files`、`mysql-es`、`mysql-kafka`、`pg-kafka`、`mysql-batch`），在 Docker 私有网络中、不占主机端口、
+绑定 CPU（搬运者、驱动、服务器各占不同物理核），结束时全部清理；`bench/sync/plan.sh DATE` 将每个项目各运行 3 次，
+写入 `bench/results/sync-DATE` 并生成 `tables.md` 与 `scores.md`。`bench/sync/syncbench`（Go，使用 fit 自己的协议
+客户端）写入负载、在目标处计数、通过 Docker API 采样搬运者，并保存 fit 的 pprof CPU 与堆 profile；
+`bench/cmd/benchreport` 渲染 `"kind": "sync"` 结果并评分（工作负载 S1-S5）。已在 macOS Docker（arm64）上以
+`SIZE=smoke` 端到端冒烟测试；尚未在 Linux 上运行。
+
+**待评审的决定**（搭建时做出，2026-11-09；在用户裁定前有效）：
+
+1. **吞吐取自积压**：流场景写入时 `docker pause` 搬运者，写完再恢复，使其按自身速度排空积压，写入端不成为瓶颈；
+   文件与批量的数据在搬运者启动前已就绪（由 syncbench 启动其容器）。延迟取自单独的固定速率稳定阶段（2,000 条/秒、
+   20 秒），按每次写入的提交时间与目标计数匹配。备选：搬运者运行时写入（`PAUSE=0`，保留为选项）。
+2. **只在目标处计数**：输出文件的行数、Elasticsearch `_count`（其 1 秒刷新计入所有搬运者的延迟）、Kafka 偏移量
+   （每行一条消息）、Canal flat message 按 `data` 行数（Canal 将一个事务中同一表的行放进一条消息）、目标表
+   `COUNT(*)`。重复计数的记录会报告但不计分。
+3. **流的起点靠预热事务，直到目标计数上升**，计数稳定后作为基数：搬运者接入之前写入的行，Canal、Debezium
+   （`no_data`）与 fit（`snapshot never`）都不会读取，固定的预热数会卡住。
+4. **各搬运者用默认设置，仅在比较需要时对齐**：Filebeat 的 harvester 退避为 250ms、队列刷新为 1s（即 fit 的
+   `poll_interval` 与批 `max_wait`）；fit 向 Kafka 写 Debezium 信封；每个 topic 一个分区；批量复制两侧均为 4 个读写
+   并发、1,000 行一批；不用 TLS；服务器持久化同等放宽。JVM 堆保持各镜像默认（Canal 2-3 GiB、Connect 最多 2 GiB、
+   DataX 1 GiB），RSS 如实反映。备选：统一堆大小。
+5. **Debezium 到 Elasticsearch** 为 Debezium MySQL 连接器加 Confluent Elasticsearch sink 14.1.2，运行于同一
+   Kafka Connect，Kafka broker 计为服务器而非搬运者；topic 在源端改名（`RegexRouter`），因为该 sink 不允许改 topic
+   的 SMT。**Canal 到 Elasticsearch** 为 canal-server 加其 client adapter（由 1.1.8 发布包构建），两个容器都算搬运者。
+6. **镜像**：固定标签（MySQL 8.0.42、PostgreSQL 17.5、Elasticsearch 7.17.28、Kafka 3.9.1、Filebeat 8.17.4、
+   canal-server v1.1.8、Debezium connect 3.0.8.Final、Temurin 8u452）；Canal adapter、DataX 202309（1.7 GB 压缩包中只取
+   引擎与 MySQL 插件）与 Confluent sink 按固定 sha256 下载并构建为本地镜像。用 MySQL 8.0 而非 8.4，因为 DataX 与 Canal
+   的驱动需要 `mysql_native_password`。
+7. **评分**：S1 文件 25%（四个项目：128 B 与 1 KiB 行、1 与 16 个文件），S2 MySQL→ES 20%，S3 MySQL→Kafka 20%，
+   S4 PostgreSQL→Kafka 15%，S5 批量 20%；指标与 HTTP 计划相同（吞吐 50%、CPU 25%、内存 15%、延迟 10%），批量无延迟
+   （55/25/20）。在 benchreport 中与 HTTP 计划并列，一个计划目录只属其一。
+8. **冒烟运行中所见（规模太小，不可作结论）**：fit 低速率下的延迟就是其 sink 批 `max_wait`（1 秒）；fit
+   PostgreSQL→Kafka 排空时 CPU 很低，Canal 与 Debezium 的 Elasticsearch 路径不到 1,000 行/秒且 CPU 很低，均需在主机
+   规模下查看后再下结论。
+
 ### I194 同步的文档与示例
 
 - **做什么**：`docs/sync.md` 及其中文版：概念、每个连接器的设置、保证，以及每个源对服务端的要求（binlog 设置、复制用户的权限、

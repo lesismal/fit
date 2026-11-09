@@ -1,0 +1,8 @@
+dataSourceKey: defaultDS
+destination: example
+groupId: g1
+esMapping:
+  _index: bench
+  _id: _id
+  sql: "select a.id as _id, a.id, a.k, a.c, a.pad from items a"
+  commitBatch: 3000
