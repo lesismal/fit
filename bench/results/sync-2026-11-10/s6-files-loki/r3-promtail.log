@@ -1,0 +1,7 @@
+level=info ts=2026-11-09T21:13:50.620219584Z caller=promtail.go:135 msg="Reloading configuration file" sha3sum=aeffb1c21eb39c324030b3428ed379c2732c7f29a39f4c5a142774729f19915b
+level=info ts=2026-11-09T21:13:50.620653525Z caller=main.go:173 msg="Starting Promtail" version="(version=3.5.5, branch=release-3.5.x, revision=5aa8bd27)"
+level=warn ts=2026-11-09T21:13:50.620674785Z caller=promtail.go:262 msg="disable watchConfig" reason="Promtail server is disabled"
+level=info ts=2026-11-09T21:13:55.621420682Z caller=filetargetmanager.go:373 msg="Adding target" key="/data/in/*.log:{job=\"bench\"}"
+level=info ts=2026-11-09T21:13:55.621524832Z caller=filetarget.go:343 msg="watching new directory" directory=/data/in
+level=info ts=2026-11-09T21:13:55.621570362Z caller=tailer.go:147 component=tailer msg="tail routine: started" path=/data/in/in-0.log
+ts=2026-11-09T21:13:55.621594942Z caller=log.go:168 level=info msg="Seeked /data/in/in-0.log - &{Offset:0 Whence:0}"

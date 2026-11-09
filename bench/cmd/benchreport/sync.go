@@ -17,6 +17,15 @@ import (
 // plan's are; render draws them as sync's own.
 
 // syncResult is one mover's result.
+// missing is how many records never reached the sink: the count less its
+// copies, which a replay adds.
+func (s *syncResult) missing() int64 {
+	if m := s.Records - (s.Counted - s.Extra); m > 0 {
+		return m
+	}
+	return 0
+}
+
 type syncResult struct {
 	Mover          string  `json:"mover"`
 	Scenario       string  `json:"scenario"`
@@ -146,7 +155,7 @@ func renderSync(w io.Writer, cur *run, level int) {
 				rounds += fmt.Sprintf(", %d failed", len(s.Failures))
 			}
 			row = append(row, fmt.Sprintf("%.2f", r.CPUCores), mib(r.memory()), fmt.Sprintf("%.1fs", s.StartupSeconds),
-				rounds, fmt.Sprintf("%s / %s", group(float64(s.Records-s.Counted), 0), group(float64(s.Extra), 0)))
+				rounds, fmt.Sprintf("%s / %s", group(float64(s.missing()), 0), group(float64(s.Extra), 0)))
 			if sc != nil {
 				row = append(row[:1], append([]string{fmt.Sprintf("%.1f", sc[r.Server])}, row[1:]...)...)
 			}

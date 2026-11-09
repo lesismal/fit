@@ -1,0 +1,25 @@
+{
+  "mover": "fit",
+  "scenario": "mssql-kafka",
+  "variant": "s9-mssql-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 331434.10874652665,
+  "drain_seconds": 1.499543912,
+  "cpu_cores": 1.6835538991538381,
+  "startup_seconds": 4.072163817,
+  "write_seconds": 15.758407567999999,
+  "rss_peak_bytes": 48660480,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 878.707737,
+    "p99": 1438.460971,
+    "max": 1498.529583,
+    "mean": 882.4929832390002
+  },
+  "profiles": [
+    "fit-s9-mssql-kafka-cpu.pprof",
+    "fit-s9-mssql-kafka-heap.pprof"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "mover": "debezium",
+  "scenario": "mssql-kafka",
+  "variant": "s9-mssql-kafka",
+  "records": 500000,
+  "counted": 500010,
+  "extra": 10,
+  "records_per_sec": 87728.98261722305,
+  "drain_seconds": 5.699370779,
+  "cpu_cores": 2.6913953478021297,
+  "startup_seconds": 3.754569588,
+  "write_seconds": 16.01978678,
+  "rss_peak_bytes": 1228234752,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 908.835788,
+    "p99": 1818.742222,
+    "max": 2018.718982,
+    "mean": 913.6946367989999
+  }
+}

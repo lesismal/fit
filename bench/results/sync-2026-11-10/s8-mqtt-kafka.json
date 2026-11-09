@@ -1,0 +1,195 @@
+{
+  "kind": "sync",
+  "name": "s8-mqtt-kafka",
+  "finished": "2026-11-09T22:54:57.706988872Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-38-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "6cae0fd0",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "500000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "kafka": "apache/kafka:3.9.1",
+    "kafka-connect": "fit-syncbench/connect-camel:3.0.8-4.14.5",
+    "mosquitto": "eclipse-mosquitto:2.0.22"
+  },
+  "results": [
+    {
+      "mover": "fit",
+      "scenario": "mqtt-kafka",
+      "variant": "s8-mqtt-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 102180.5379929067,
+      "drain_seconds": 4.8003270449999995,
+      "cpu_cores": 1.7095578953412747,
+      "startup_seconds": 2.847941497,
+      "write_seconds": 26.748206414,
+      "rss_peak_bytes": 19087360,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 265.235053,
+        "p99": 544.115843,
+        "max": 561.07988,
+        "mean": 266.88696143200036
+      },
+      "profiles": [
+        "fit-s8-mqtt-kafka-cpu.pprof",
+        "fit-s8-mqtt-kafka-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.02326812226385085
+    },
+    {
+      "mover": "kafka-connect",
+      "scenario": "mqtt-kafka",
+      "variant": "s8-mqtt-kafka",
+      "records": 500000,
+      "counted": 499999,
+      "records_per_sec": 0,
+      "drain_seconds": 0,
+      "cpu_cores": 0,
+      "startup_seconds": 2.578245675,
+      "write_seconds": 27.010885723,
+      "rss_peak_bytes": 693305344,
+      "error": "the sink had 500009 of 500010 records after 30m0s",
+      "rounds": 3
+    }
+  ],
+  "runs": [
+    {
+      "mover": "fit",
+      "scenario": "mqtt-kafka",
+      "variant": "s8-mqtt-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 104460.48913967419,
+      "drain_seconds": 4.700341766,
+      "cpu_cores": 1.7444733613440824,
+      "startup_seconds": 2.850992579,
+      "write_seconds": 26.750581772,
+      "rss_peak_bytes": 18259968,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 262.148172,
+        "p99": 542.892443,
+        "max": 560.950817,
+        "mean": 267.24930445099994
+      },
+      "profiles": [
+        "fit-s8-mqtt-kafka-cpu.pprof",
+        "fit-s8-mqtt-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "kafka-connect",
+      "scenario": "mqtt-kafka",
+      "variant": "s8-mqtt-kafka",
+      "records": 500000,
+      "counted": 499999,
+      "records_per_sec": 0,
+      "drain_seconds": 0,
+      "cpu_cores": 0,
+      "startup_seconds": 2.578245675,
+      "write_seconds": 27.010885723,
+      "rss_peak_bytes": 693305344,
+      "error": "the sink had 500009 of 500010 records after 30m0s"
+    },
+    {
+      "mover": "fit",
+      "scenario": "mqtt-kafka",
+      "variant": "s8-mqtt-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 102180.5379929067,
+      "drain_seconds": 4.8003270449999995,
+      "cpu_cores": 1.7095578953412747,
+      "startup_seconds": 2.847941497,
+      "write_seconds": 26.748206414,
+      "rss_peak_bytes": 19087360,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 265.235053,
+        "p99": 544.115843,
+        "max": 561.07988,
+        "mean": 266.88696143200036
+      },
+      "profiles": [
+        "fit-s8-mqtt-kafka-cpu.pprof",
+        "fit-s8-mqtt-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "kafka-connect",
+      "scenario": "mqtt-kafka",
+      "variant": "s8-mqtt-kafka",
+      "records": 500000,
+      "counted": 499995,
+      "records_per_sec": 0,
+      "drain_seconds": 0,
+      "cpu_cores": 0,
+      "startup_seconds": 2.581366315,
+      "write_seconds": 26.587552276,
+      "rss_peak_bytes": 648101888,
+      "error": "the sink had 500005 of 500010 records after 30m0s"
+    },
+    {
+      "mover": "fit",
+      "scenario": "mqtt-kafka",
+      "variant": "s8-mqtt-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 102082.93988866918,
+      "drain_seconds": 4.8000185,
+      "cpu_cores": 1.7039042662023074,
+      "startup_seconds": 2.849467476,
+      "write_seconds": 26.741980874,
+      "rss_peak_bytes": 18481152,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 265.477797,
+        "p99": 549.890519,
+        "max": 556.644263,
+        "mean": 267.365480928
+      },
+      "profiles": [
+        "fit-s8-mqtt-kafka-cpu.pprof",
+        "fit-s8-mqtt-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "kafka-connect",
+      "scenario": "mqtt-kafka",
+      "variant": "s8-mqtt-kafka",
+      "records": 500000,
+      "counted": 499998,
+      "records_per_sec": 0,
+      "drain_seconds": 0,
+      "cpu_cores": 0,
+      "startup_seconds": 2.536911236,
+      "write_seconds": 26.695449653,
+      "rss_peak_bytes": 653295616,
+      "error": "the sink had 500008 of 500010 records after 30m0s"
+    }
+  ]
+}

@@ -361,7 +361,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I219 | Loki 与 OpenTelemetry 日志作为目标（push API、OTLP/HTTP），文件到它们并对比 Promtail | I166 | done |
 | I220 | InfluxDB（line protocol）与 TDengine（schemaless）作为目标；MQTT 到 InfluxDB 端到端 | I214 | done |
 | I221 | Milvus 与 Qdrant 作为目标，按键 upsert 与删除，配 `embed` 变换 | I163 | done |
-| I222 | 第二批进入恢复矩阵、CI 互通分组、基准测试与文档 | I211–I221 | done（CI 与基准主机的运行待做） |
+| I222 | 第二批进入恢复矩阵、CI 互通分组、基准测试与文档 | I211–I221 | done |
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
 | **BitTorrent** | | | |

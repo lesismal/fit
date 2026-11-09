@@ -1,0 +1,14 @@
+21:14:30 s7-rabbitmq-kafka: movers fit,kafka-connect, 3 rounds, 500000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+21:14:30 s7-rabbitmq-kafka round 1: fit
+ "records_per_sec": 116913.48785427409, "cpu_cores": 1.150951140429748, "rss_peak_bytes": 16928768, 
+21:15:10 s7-rabbitmq-kafka round 1: kafka-connect
+ "records_per_sec": 50407.096484467744, "cpu_cores": 1.9525026187135652, "rss_peak_bytes": 626151424, 
+21:15:59 s7-rabbitmq-kafka round 2: kafka-connect
+ "records_per_sec": 58022.48022206291, "cpu_cores": 2.1278327198527935, "rss_peak_bytes": 608215040, 
+21:16:47 s7-rabbitmq-kafka round 2: fit
+ "records_per_sec": 140044.7017086066, "cpu_cores": 1.3433370735348098, "rss_peak_bytes": 17903616, 
+21:17:25 s7-rabbitmq-kafka round 3: fit
+ "records_per_sec": 143526.6393365985, "cpu_cores": 1.3597049117706514, "rss_peak_bytes": 17072128, 
+21:18:04 s7-rabbitmq-kafka round 3: kafka-connect
+ "records_per_sec": 43393.1960723222, "cpu_cores": 1.639425035880551, "rss_peak_bytes": 635695104, 
+21:18:55 s7-rabbitmq-kafka: /root/fitbench/sync2/bench/results/sync-2026-11-10/s7-rabbitmq-kafka.json (0 runs failed)

@@ -1,0 +1,14 @@
+{
+  "mover": "kafka-connect",
+  "scenario": "mqtt-kafka",
+  "variant": "s8-mqtt-kafka",
+  "records": 500000,
+  "counted": 499999,
+  "records_per_sec": 0,
+  "drain_seconds": 0,
+  "cpu_cores": 0,
+  "startup_seconds": 2.578245675,
+  "write_seconds": 27.010885723,
+  "rss_peak_bytes": 693305344,
+  "error": "the sink had 500009 of 500010 records after 30m0s"
+}

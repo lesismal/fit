@@ -1,0 +1,14 @@
+21:09:13 s6-files-loki: movers fit,promtail, 3 rounds, 2000000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+21:09:13 s6-files-loki round 1: fit
+ "records_per_sec": 278630.14895064454, "cpu_cores": 1.2449368318554237, "rss_peak_bytes": 41177088, 
+21:10:01 s6-files-loki round 1: promtail
+ "records_per_sec": 202459.3774639266, "cpu_cores": 1.0646958551381849, "rss_peak_bytes": 45543424, 
+21:10:59 s6-files-loki round 2: promtail
+ "records_per_sec": 201202.12359289994, "cpu_cores": 1.0550023588207966, "rss_peak_bytes": 45502464, 
+21:11:56 s6-files-loki round 2: fit
+ "records_per_sec": 278766.80140855437, "cpu_cores": 1.2526023944154403, "rss_peak_bytes": 41836544, 
+21:12:44 s6-files-loki round 3: fit
+ "records_per_sec": 278805.6551429778, "cpu_cores": 1.2518275323366737, "rss_peak_bytes": 42020864, 
+21:13:33 s6-files-loki round 3: promtail
+ "records_per_sec": 201203.74715059556, "cpu_cores": 1.0596560230742007, "rss_peak_bytes": 45600768, 
+21:14:30 s6-files-loki: /root/fitbench/sync2/bench/results/sync-2026-11-10/s6-files-loki.json (0 runs failed)

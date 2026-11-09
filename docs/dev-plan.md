@@ -371,7 +371,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I219 | Loki and OpenTelemetry logs as sinks (push API, OTLP/HTTP), files to them against Promtail | I166 | done |
 | I220 | InfluxDB (line protocol) and TDengine (schemaless) as sinks; MQTT to InfluxDB end to end | I214 | done |
 | I221 | Milvus and Qdrant as sinks, upserts and deletes by key, with an `embed` transform | I163 | done |
-| I222 | The second round in the recovery matrix, CI's interop families, the benchmarks and the docs | I211–I221 | done (CI and the benchmark host's run to do) |
+| I222 | The second round in the recovery matrix, CI's interop families, the benchmarks and the docs | I211–I221 | done |
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 | **BitTorrent** | | | |
