@@ -375,7 +375,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I210.
 | I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | done |
 | I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
 | I207 | (second phase) A tracker store the cluster shares | I201 | todo |
-| I208 | (second phase) RSS auto-download | I198 | todo |
+| I208 | (second phase) RSS auto-download | I198 | done |
 | I209 | The roles use fib A80–A86: publishing hashes once and builds stop on a context, a public tracker's torrents listed and its bounds changed in place, the client's event queue bounded | I201, I202, I203 | done |
 
 ## M0, foundations
@@ -7756,6 +7756,109 @@ Open from it:
 - **Do**: feeds polled on a schedule, rules (patterns, categories, size bounds, episode
   deduplication) adding torrents; bounded feeds, items and history.
 - **Touches**: `bittorrent`.
+- **Done** 2026-11-09 (branch `bt-i208`): config `bittorrent.client.rss` (`config/bittorrent_rss.go`):
+  `feeds` (name, url, interval, enabled, max_items, headers, headers_env), `rules` (name, feeds,
+  patterns, exclude, category, paused, min_size, max_size, episodes, max_per_poll, enabled),
+  `history_size`, `max_feed_bytes`, `timeout`, with their checks. The role (`bittorrent/rss.go`,
+  `rss_parse.go`, `rss_rules.go`, `rss_state.go`): a goroutine of the RSS's own starts the polls due
+  every tick, at most 4 at once, each on a goroutine of its own; a feed is downloaded with fib's
+  asynchronous HTTP client (a client of its own, bounded by `max_feed_bytes`), conditionally with
+  its `ETag` and `Last-Modified`, within `timeout`, at most 5 redirects to http(s); read with
+  `encoding/xml` (RSS 2.0, 1.0, Atom; torrent namespace, enclosures, info hashes; UTF-8 and
+  ISO-8859-1), bounded (items, titles, IDs, URLs, magnet links); the rules compiled at Apply pick
+  items, which are added by `Add` or by `addURL` (`AddURL` now takes a context inside, so that a
+  stop ends a poll's download); every item remembered with its outcome in `data_dir/rss.json`
+  (bounded per feed, episodes per rule, written atomically after each poll and at stop), the
+  toggles too. API: `RSS`, `RSSItems`, `PollFeed`, `SetFeedEnabled`, `SetRuleEnabled`. Events
+  `rss_added`; metrics `fit_bittorrent_rss_polls_total{feed,result}`,
+  `fit_bittorrent_rss_items_added_total`, `fit_bittorrent_rss_items_failed_total`. Admin API
+  (`admin/btrss.go`): `GET /bittorrent/rss`, `GET /bittorrent/rss/items`,
+  `POST /bittorrent/rss/feeds/{name}/poll`, `PUT /bittorrent/rss/feeds/{name}` and
+  `.../rules/{name}`. `fit bt rss [ls] | items | poll | enable | disable | reset [-rule]`
+  (`cli/bt_rss.go`). The workbench's BitTorrent menu gains **RSS** (feeds with switches and Poll
+  now, rules with switches, recent items filtered by feed and outcome, linking to the torrents
+  added; `rss_added` in the events), English and Chinese. The assistant's read tool `bt_rss` (a
+  feed's URL as scheme, host and last element, item IDs left out), on a manager's members too.
+  Schema, templates, the reference (and its Chinese chapter row), `schema-zh.js`,
+  [BitTorrent](bittorrent.md#rss-auto-download) and [the console](console.md#bittorrent) in both
+  languages. Tests: parsing (RSS with every source kind, Atom, RDF, ISO-8859-1, bounds, malformed,
+  not a feed, an unknown charset), episode keys, rules (globs, `re:`, exclude, sizes, feeds), polls
+  against a local server (magnet and .torrent enclosure items added in the rule's category and
+  pause, an episode's second quality left out, unmatched and oversized items, headers and
+  headers_env sent, the event, the metrics, `If-None-Match` and a 304, a changed feed adding only
+  the new item), `max_per_poll` with the rest left and no conditional request, `max_torrents`
+  leaving an item for later, history, episodes and toggles across a restart, the oldest items
+  forgotten past `history_size`, a bad `rss.json` moved aside, bad feeds (past `max_feed_bytes`,
+  malformed, HTML, 500, a redirect loop, a redirect to ftp, a server that never answers, one that
+  cuts the body; a redirect followed), a .torrent URL failing at 3 polls and a bad one at once, the
+  schedule on a fake clock (first poll, none before the interval, none while off, again once back),
+  a reload dropping feeds and rules and their history, a poll refused while one runs, a stop ending
+  a poll waiting on a server; config checks; the Admin API (each endpoint and its errors, 404
+  without the role); `fit bt rss` (requests, output, refusals, usage errors); the assistant's tool
+  (nothing secret reaches the model); the pages' words and endpoints.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **Patterns are case-insensitive globs over the whole title** (`*` any run, `?` one character,
+   everything else literal), **or `re:` and a Go regular expression found anywhere** in it. The
+   field is `patterns`, not `include`: `include` is a directive of the `.conf` format and could not
+   be written there. Alternatives: regular expressions only; substring matching (qBittorrent's
+   "must contain").
+2. **Episodes**: `S01E02` (also `S1E2`, `S01.E02`, ranges `S01E02E03`, `S01E02-03`, `S01E02-E03`,
+   a range's end at most 50 past its start so that `S01E02-1080p` is no range), `1x02`, and dates
+   `YYYY-MM-DD`/`YYYY.MM.DD`/`YYYY MM DD`; the key is the show (the title before the episode, lower
+   case, punctuation made spaces, leading `[group]`/`(group)`/`【group】` tags dropped) and the
+   episode, **per rule**; the first item of an episode wins, so repacks and propers are not
+   downloaded again; a title without an episode (season packs, films) is told only by its ID.
+   A torrent held already (`exists`) also marks its episode. A rule remembers 10000 episodes.
+   Alternatives: per client rather than per rule; take a later PROPER/REPACK; qBittorrent's smart
+   filter's own syntax for episode lists in the rule.
+3. **The first rule, in order, whose feeds, patterns and size bounds hold picks an item**; the size
+   bounds are part of matching, so a later rule may take an item too large for an earlier one. An
+   item's size is the torrent namespace's `contentLength`, else a site's `size` (`1.5 GiB`), else
+   the enclosure's `length`; **an unknown size passes**. Alternatives: refuse unknown sizes when a
+   rule has bounds; every matching rule.
+4. **Every item read is remembered as seen**, unmatched ones included, so a rule added later does
+   not look back at items seen before; **a new feed's first poll treats its whole document as new**
+   (bounded by `max_per_poll`), as qBittorrent does. Alternatives: remember only picked items; a
+   feed option to skip the backlog at its first poll; an API to forget a feed's history.
+5. **Items left for later are not remembered and the feed's validators are not kept**: past
+   `max_per_poll`, or an add that may pass (`max_torrents`, `ErrBusy`, the client down, a stop), so
+   the next poll reads the whole feed rather than a 304. A .torrent URL that fails to download is
+   tried at 3 polls (`attempts`), a bad torrent or link given up at once.
+6. **Source order**: a magnet link (torrent namespace, enclosure or link), then a .torrent
+   enclosure's URL, then an info hash alone (made a magnet link with the title), then the item's
+   link (which fails as not a torrent when it is a web page). URLs are added as I198's `AddURL`
+   adds them, sharing its 4 downloads at once.
+7. **Defaults and bounds**: interval 15m (at least 1m), max_items 200 (at most 1000), history_size
+   1000 (at most 10000, at least each feed's max_items), max_feed_bytes 4 MiB (at most 32 MiB),
+   timeout 30s, max_per_poll 5 (at most 100), 100 feeds, 200 rules, 32 patterns of 512 bytes, 16
+   headers, 4 polls at once (not configurable), titles 1 KiB, IDs 1 KiB (hashed past), URLs 8 KiB.
+8. **Secrets**: `headers` (literal) and `headers_env` (environment variables read at each poll);
+   no redaction of `GET /config`, which shows the feed URL and literal headers as the config has
+   them. The role's status gives a feed's URL without user and query; the assistant scheme, host and
+   last path element, and no item IDs. **No internal-address guard**, as I198's decision 3: the
+   URLs are the operator's config.
+9. **Charsets**: UTF-8, ASCII and ISO-8859-1, no dependency (`golang.org/x/text` is not in fit);
+   another charset fails the poll. The XML is read leniently (HTML entities, not strict).
+10. **`rss.json` apart from `torrents.json`**, with its own lock (taken after the role's) and
+    goroutine, not the manager's (a poll waits for HTTP). One that does not read is **moved aside as
+    `rss.json.bad` and the role starts with nothing seen**, rather than refusing to start as
+    `torrents.json` does: only re-adds are at stake, which `exists` catches. The feeds and rules the
+    config no longer names are forgotten at the next save. Counters (polls, errors, added) are not
+    persisted; a rule's `added` is.
+11. **Toggles**: the Admin API's `enabled` for a feed or rule stands, kept in `rss.json`, until set
+    back with `null`; a forced poll works on a disabled feed; a poll of a feed being polled is
+    **409** with `Retry-After`; no such feed or rule 404.
+12. **The pages**: an RSS page in the BitTorrent menu, read every 10s; Poll now waits for the
+    poll. `fit bt rss poll` exits 1 when the poll's result is an error.
+13. `TestChatSummarizes`'s window grew from 6200 to 6500 tokens for `bt_rss`'s description.
+
+Open from it: no browser check of the RSS page (its words and endpoints are tested); an enclosure's
+`length` is sometimes the .torrent file's size rather than the content's, which size bounds then
+misread (a feed with `contentLength` or `size` is right); no smart-filter episode lists or
+"ignore for N days"; no gzip (fib's client does not decompress, so fit sends no
+`Accept-Encoding`). Not run: the Linux race run and the full suite (left to the main session).
 
 ### I209 The roles use what fib A80–A86 added
 

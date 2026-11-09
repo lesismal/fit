@@ -157,6 +157,18 @@ func (f *fakeBT) handler(next http.Handler) http.Handler {
 			answer(w, 200, `{"torrents": [{"info_hash": "`+btSintel+`", "seeders": 3, "leechers": 2, "completed": 7, "tracked": true}], "total": 2, "offset": 0}`)
 		}
 	})
+	mux.HandleFunc("GET /bittorrent/rss", func(w http.ResponseWriter, r *http.Request) {
+		if gate(w, r) {
+			answer(w, 200, `{"configured": true, "feeds": [{"name": "shows", "url": "https://rss.example/feeds/`+btPasskey+`/shows.xml", "enabled": true,
+				"interval": 900000000000, "last_result": "ok", "seen": 3, "added": 1}], "rules": [{"name": "s", "enabled": true, "category": "films", "added": 1}]}`)
+		}
+	})
+	mux.HandleFunc("GET /bittorrent/rss/items", func(w http.ResponseWriter, r *http.Request) {
+		if gate(w, r) {
+			answer(w, 200, `{"items": [{"feed": "shows", "key": "https://rss.example/dl/`+btPasskey+`", "title": "Show S01E01", "outcome": "added", "rule": "s",
+				"torrent": "`+btSintel+`"}], "total": 3}`)
+		}
+	})
 	mux.Handle("/", next)
 	return mux
 }
@@ -243,10 +255,23 @@ func TestBTToolsRead(t *testing.T) {
 		t.Error(got)
 	}
 
+	out = mustRun(t, a, "bt_rss", `{"feed": "shows", "outcome": "added", "items": 5}`)
+	if !strings.Contains(out, `"url":"https://rss.example/[redacted]/shows.xml"`) || !strings.Contains(out, `"title":"Show S01E01"`) ||
+		!strings.Contains(out, `"items_total":3`) || !strings.Contains(out, `"rules":[{"name":"s"`) || strings.Contains(out, btPasskey) {
+		t.Error(out)
+	}
+	if got := bt.last(); got != "GET /bittorrent/rss/items?feed=shows&limit=5&outcome=added" {
+		t.Error(got)
+	}
+	if out := mustRun(t, a, "bt_rss", `{"items": 0}`); strings.Contains(out, `"items"`) || bt.last() != "GET /bittorrent/rss" {
+		t.Error(out, bt.last())
+	}
+	wantErr(t, a, "bt_rss", `{"items": 101}`, "items is 0 to 100")
+
 	bt.mu.Lock()
 	bt.down = true
 	bt.mu.Unlock()
-	for _, c := range [][2]string{{"bt_torrents", `{}`}, {"bt_torrent", `{"torrent": "` + btSintel + `"}`}, {"bt_tracker_stats", `{}`}} {
+	for _, c := range [][2]string{{"bt_torrents", `{}`}, {"bt_torrent", `{"torrent": "` + btSintel + `"}`}, {"bt_tracker_stats", `{}`}, {"bt_rss", `{}`}} {
 		wantErr(t, a, c[0], c[1], "does not run here")
 	}
 	if len(bt.changed()) != 0 {
@@ -440,7 +465,7 @@ func TestBTToolsServed(t *testing.T) {
 		return out
 	}
 	read, propose := names(config.AssistantRead), names(config.AssistantPropose)
-	for _, n := range []string{"bt_torrents", "bt_torrent", "bt_tracker_stats"} {
+	for _, n := range []string{"bt_torrents", "bt_torrent", "bt_tracker_stats", "bt_rss"} {
 		if !slices.Contains(read, n) || !slices.Contains(memberTools, n) {
 			t.Errorf("read lacks %s", n)
 		}

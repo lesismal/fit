@@ -879,6 +879,7 @@ add steps to the conversation's proposal, as the media tools do:
 | `bt_torrents` | `read` | the torrents in short (state, why held, error, progress, size, rates, peers, ratio, time left), by state, category and name (50, at most 200), with the alternative rates |
 | `bt_torrent` | `read` | a torrent's status, its first 100 files with their priorities, its first 50 peers, and its trackers and web seeds |
 | `bt_tracker_stats` | `read` | the tracker's totals and refusals by reason, and the first 50 swarms (the allow-list's, or a public tracker's by info hash) |
+| `bt_rss` | `read` | the RSS auto-download's feeds (last poll, result, counts) and rules, and the latest items seen; a feed's URL as scheme, host and last path element |
 | `bt_add_propose` | `propose` | a torrent added by magnet link or .torrent URL, in a category, paused or sequential |
 | `bt_pause_propose` | `propose` | torrents paused, by ID (at most 100) |
 | `bt_resume_propose` | `propose` | torrents resumed, by ID (at most 100) |

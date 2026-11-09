@@ -365,7 +365,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | done |
 | I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
 | I207 | （第二阶段）集群共享的 tracker Store | I201 | todo |
-| I208 | （第二阶段）RSS 自动下载 | I198 | todo |
+| I208 | （第二阶段）RSS 自动下载 | I198 | done |
 | I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
 
 ## M0 基础
@@ -5529,6 +5529,73 @@ race 测试与完整测试套件（留给主会话）。
 
 - **做什么**：按计划轮询订阅源，用规则（模式、分类、大小上限、剧集去重）添加任务；订阅源、条目和历史都有上限。
 - **涉及**：`bittorrent`。
+- **完成** 2026-11-09（分支 `bt-i208`）：配置 `bittorrent.client.rss`（`config/bittorrent_rss.go`）：`feeds`（name、url、
+  interval、enabled、max_items、headers、headers_env）、`rules`（name、feeds、patterns、exclude、category、paused、min_size、
+  max_size、episodes、max_per_poll、enabled）、`history_size`、`max_feed_bytes`、`timeout`，及其检查。角色（`bittorrent/rss.go`、
+  `rss_parse.go`、`rss_rules.go`、`rss_state.go`）：RSS 自己的 goroutine 每个 tick 启动到期的轮询，最多同时 4 个，每次轮询在
+  自己的 goroutine 上；订阅源用 fib 的异步 HTTP 客户端下载（独立的客户端，受 `max_feed_bytes` 约束），带 `ETag` 和
+  `Last-Modified` 条件请求，`timeout` 内完成，最多 5 次重定向到 http(s)；用 `encoding/xml` 读取（RSS 2.0、1.0、Atom；torrent
+  命名空间、附件、info hash；UTF-8 和 ISO-8859-1），各项有界（条目、标题、ID、URL、磁力链接）；Apply 时编译的规则挑选条目，
+  经 `Add` 或 `addURL` 添加（`AddURL` 内部现在带 context，停止时结束轮询中的下载）；每个条目连同结果记在 `data_dir/rss.json`
+  中（每个订阅源、每条规则的集数都有上限，每次轮询后和停止时原子写入），开关也在其中。API：`RSS`、`RSSItems`、`PollFeed`、
+  `SetFeedEnabled`、`SetRuleEnabled`。事件 `rss_added`；指标 `fit_bittorrent_rss_polls_total{feed,result}`、
+  `fit_bittorrent_rss_items_added_total`、`fit_bittorrent_rss_items_failed_total`。Admin API（`admin/btrss.go`）：
+  `GET /bittorrent/rss`、`GET /bittorrent/rss/items`、`POST /bittorrent/rss/feeds/{name}/poll`、`PUT /bittorrent/rss/feeds/{name}`
+  与 `.../rules/{name}`。`fit bt rss [ls] | items | poll | enable | disable | reset [-rule]`（`cli/bt_rss.go`）。工作台的
+  BitTorrent 菜单新增 **RSS**（订阅源带开关和“立即轮询”，规则带开关，最近条目可按订阅源与结果筛选并链接到添加的种子；事件中
+  的 `rss_added`），中英文。助手的读工具 `bt_rss`（订阅源 URL 只给出 scheme、主机和最后一段，略去条目 ID），管理端的成员也可用。
+  schema、模板、参考（及其中文章节行）、`schema-zh.js`、两种语言的 [BitTorrent](bittorrent.zh-CN.md#rss-自动下载) 和
+  [控制台](console.zh-CN.md)。测试：解析（各种来源的 RSS、Atom、RDF、ISO-8859-1、上限、格式错误、不是订阅源、未知字符集）、
+  集数键、规则（通配符、`re:`、排除、大小、订阅源）、对本地服务器的轮询（磁力与 .torrent 附件条目按规则的分类与暂停添加、一集
+  的第二种画质被略去、未匹配和超大条目、发送 headers 与 headers_env、事件、指标、`If-None-Match` 与 304、变化的订阅源只添加新
+  条目）、`max_per_poll` 留下其余且不发条件请求、`max_torrents` 把条目留到以后、历史、集数与开关跨重启保留、超过 `history_size`
+  遗忘最旧条目、坏的 `rss.json` 被移到一旁、坏订阅源（超过 `max_feed_bytes`、格式错误、HTML、500、重定向循环、重定向到 ftp、
+  从不应答的服务器、截断正文的服务器；跟随正常重定向）、.torrent URL 在 3 次轮询后放弃、坏种子立即放弃、假时钟上的计划（第一次
+  轮询、间隔前不轮询、关闭时不轮询、重新打开后再轮询）、重载删除订阅源与规则及其历史、轮询进行中拒绝另一次、停止结束等待服务器
+  的轮询；配置检查；Admin API（每个接口及其错误，无角色时 404）；`fit bt rss`（请求、输出、拒绝、用法错误）；助手工具（没有
+  机密到达模型）；页面的词条与接口。
+
+**待评审的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **模式是对整个标题的不区分大小写的通配符**（`*` 任意一串、`?` 一个字符，其余按字面），**或 `re:` 加 Go 正则表达式，在标题
+   任意位置找到即可**。字段名为 `patterns` 而非 `include`：`include` 是 `.conf` 格式的指令，无法在其中写出。备选：只用正则；
+   子串匹配（qBittorrent 的“必须包含”）。
+2. **剧集**：`S01E02`（以及 `S1E2`、`S01.E02`，范围 `S01E02E03`、`S01E02-03`、`S01E02-E03`，范围终点至多比起点大 50，使
+   `S01E02-1080p` 不算范围）、`1x02`，以及日期 `YYYY-MM-DD`/`YYYY.MM.DD`/`YYYY MM DD`；键为节目名（集数之前的标题，小写，标点
+   变空格，去掉开头的 `[组]`/`(组)`/`【组】` 标签）加集数，**按规则区分**；一集的第一个条目胜出，因此 repack 和 proper 不再
+   下载；没有集数的标题（整季包、电影）只按 ID 区分。已持有的种子（`exists`）也记下其集数。每条规则记住 10000 集。备选：按
+   客户端而非按规则；接受之后的 PROPER/REPACK；qBittorrent 智能过滤的集数列表语法。
+3. **按顺序第一条订阅源、模式和大小界限都满足的规则挑中条目**；大小界限是匹配的一部分，因此对前一条规则过大的条目可被后一条
+   规则挑中。条目大小取 torrent 命名空间的 `contentLength`，否则网站的 `size`（`1.5 GiB`），否则附件的 `length`；**大小未知的
+   通过**。备选：规则有界限时拒绝未知大小；所有匹配的规则。
+4. **读到的每个条目都记为已见**，包括未匹配的，因此之后添加的规则不会回看已见条目；**新订阅源的第一次轮询把整个文档当作新的**
+   （受 `max_per_poll` 约束），与 qBittorrent 相同。备选：只记被挑中的条目；订阅源选项在第一次轮询时跳过存量；遗忘订阅源历史的
+   API。
+5. **留到以后的条目不记住，也不保留订阅源的校验器**：超过 `max_per_poll`，或添加可能稍后成功（`max_torrents`、`ErrBusy`、客户端
+   未运行、停止），使下次轮询读取整个订阅源而不是 304。下载失败的 .torrent URL 在 3 次轮询中重试（`attempts`），坏种子或坏链接
+   立即放弃。
+6. **来源顺序**：磁力链接（torrent 命名空间、附件或链接），然后 .torrent 附件的 URL，然后单独的 info hash（加标题做成磁力
+   链接），然后条目的链接（若是网页，会因不是种子而失败）。URL 按 I198 的 `AddURL` 添加，共用其同时 4 个下载。
+7. **默认值与上限**：interval 15m（至少 1m）、max_items 200（最多 1000）、history_size 1000（最多 10000，至少为每个订阅源的
+   max_items）、max_feed_bytes 4 MiB（最多 32 MiB）、timeout 30s、max_per_poll 5（最多 100）、100 个订阅源、200 条规则、32 个
+   512 字节的模式、16 个请求头、同时 4 次轮询（不可配置）、标题 1 KiB、ID 1 KiB（超过则取哈希）、URL 8 KiB。
+8. **机密**：`headers`（字面值）和 `headers_env`（每次轮询读取的环境变量）；`GET /config` 不做遮盖，按配置显示订阅源 URL 和
+   字面请求头。角色的状态给出去掉用户信息和查询串的订阅源 URL；助手得到 scheme、主机和最后一段路径，不给条目 ID。**不做内部地址
+   防护**，与 I198 的决定 3 一致：URL 是运维者的配置。
+9. **字符集**：UTF-8、ASCII 和 ISO-8859-1，不引入依赖（fit 没有 `golang.org/x/text`）；其他字符集使轮询失败。XML 宽松读取
+   （HTML 实体，非严格）。
+10. **`rss.json` 与 `torrents.json` 分开**，有自己的锁（在角色的锁之后获取）和 goroutine，不用管理器的（轮询要等 HTTP）。无法
+    读取的 **移到一旁成为 `rss.json.bad`，角色从一无所见开始**，而不是像 `torrents.json` 那样拒绝启动：受影响的只是重复添加，
+    `exists` 会拦下。配置中不再有的订阅源和规则在下次保存时遗忘。计数（轮询、错误、添加）不持久化；规则的 `added` 持久化。
+11. **开关**：Admin API 对订阅源或规则设置的 `enabled` 一直有效，保存在 `rss.json` 中，直到用 `null` 改回；强制轮询对已停用的
+    订阅源也有效；正在轮询的订阅源再次轮询为 **409**，带 `Retry-After`；没有该订阅源或规则为 404。
+12. **页面**：BitTorrent 菜单中的 RSS 页，每 10s 读取一次；“立即轮询”等待轮询完成。`fit bt rss poll` 在轮询结果为错误时以 1
+    退出。
+13. `TestChatSummarizes` 的窗口因 `bt_rss` 的描述从 6200 增至 6500 token。
+
+遗留：RSS 页未在浏览器中检查（其词条与接口有测试）；附件的 `length` 有时是 .torrent 文件的大小而非内容大小，此时大小界限会
+误读（有 `contentLength` 或 `size` 的订阅源无此问题）；没有智能过滤的集数列表或“N 天内忽略”；不支持 gzip（fib 的客户端不解压，
+因此 fit 不发送 `Accept-Encoding`）。未运行：Linux 上的 race 测试和全量测试（留给主会话）。
 
 ### I209 各角色用上 fib A80–A86 新增的能力
 

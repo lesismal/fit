@@ -220,8 +220,9 @@ func newRSS(r *Role) *rssRunner {
 
 // apply takes cfg's rss, its state in dataDir. r.mu is held.
 func (s *rssRunner) apply(cfg *config.BitTorrentClient, dataDir string) error {
-	rules, err := compileRules(nil)
+	var rules []*rssRule
 	if cfg.RSS != nil {
+		var err error
 		if rules, err = compileRules(cfg.RSS.Rules); err != nil {
 			return err
 		}

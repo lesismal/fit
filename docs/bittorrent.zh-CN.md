@@ -188,6 +188,80 @@ metainfo 拒绝含 `..`、`.`、空或含 `/` 的路径段，其文件存储把�
 PeerGuardian 的 `.p2p` 行（`name:first-last`），逐行按内容区分（[access](reference/config.md#access)）。策略或列表文件
 的更改立即生效：角色重新过滤（`Client.Refilter`），关闭现在被拒绝的已连接对端。
 
+## RSS 自动下载
+
+`rss` 从 RSS 2.0（及 1.0）和 Atom 订阅源添加种子（I208），如 qBittorrent 的 RSS 下载器，但没有搜索插件或索引站
+（决定 037）：
+
+```json
+"rss": {
+  "feeds": [
+    {"name": "shows", "url": "https://example.com/rss?passkey=...", "interval": "15m"},
+    {"name": "linux", "url": "https://example.org/torrents.atom", "headers_env": {"Authorization": "LINUX_FEED_AUTH"}}
+  ],
+  "rules": [
+    {"name": "show", "feeds": ["shows"], "patterns": ["*Show Name*1080p*"], "exclude": ["*hevc*"],
+     "category": "tv", "episodes": true, "max_size": 4294967296},
+    {"name": "isos", "feeds": ["linux"], "patterns": ["re:\\b(?:debian|ubuntu)\\b.*\\.iso"], "paused": true}
+  ]
+}
+```
+
+**轮询。** `feeds` 中每个订阅源每隔 `interval`（15m，至少 1m）由角色自己的 goroutine 轮询，最多同时 4 个订阅源，每次轮询在
+自己的 goroutine 上进行，从不占用 fib 的 worker。订阅源用 fib 的异步 HTTP 客户端下载（其回调只把应答交出），回送上次应答的
+`ETag` 与 `Last-Modified`，使未变化的订阅源回答 `304`、不再多花什么；正文受 `max_feed_bytes`（4 MiB，最多 32 MiB）限制，
+整个下载受 `timeout`（30s）限制，最多跟随 5 次重定向，且只到 http 和 https。`headers` 随其请求发送，`headers_env` 发送
+其值在每次轮询时从环境变量读取的请求头（未设置的变量不发送），使机密不必写进配置。订阅源的 URL 只来自配置；与 .torrent URL
+（I198 的决定 3）一样，它指向哪里就从哪里获取，包括回环和私有地址。第一次轮询在角色启动后立即进行，之后在上次轮询后每隔
+`interval` 一次，上次轮询的时间跨重启保留。`enabled: false` 的订阅源只在被要求时（Admin API 的轮询）才轮询。
+
+**读取。** RSS 2.0、RSS 1.0（RDF）和 Atom 用 Go 的 `encoding/xml` 宽松地读取（HTML 实体、未知元素），编码为 UTF-8 或
+ISO-8859-1；最多读取 `max_items` 个条目（200，最多 1000），取文档中靠前的。每个条目给出：
+
+- ID：其 `guid`（Atom 为 `id`），否则为其链接，否则为附件的 URL，否则为标题；超过 1 KiB 的取哈希；
+- 标题，超过 1 KiB 截断；
+- 来源，取以下第一个存在的：磁力链接（torrent 命名空间的 `magnetURI`、本身是磁力链接的附件或链接）、.torrent 附件的 http 或
+  https URL、单独的 info hash（`infoHash`，做成磁力链接）、条目的链接；超过 8 KiB 的 URL 或超过 64 KiB 的磁力链接被略去；
+- 大小：torrent 命名空间的 `contentLength`、网站自己的 `size`（如 `1.5 GiB`），否则为附件的 `length`；都没有时未知。
+
+**规则。** 未见过的条目按顺序交给规则；第一条其 `feeds`（不写时为所有订阅源）、`patterns`、`exclude` 和大小界限都满足的规则
+挑中它：
+
+- `patterns`（标题须匹配其一）和 `exclude`（都不能匹配）不区分大小写。模式是匹配整个标题的通配符，`*` 匹配任意一串字符、
+  `?` 匹配一个（`*Show Name*1080p*`），或者 `re:` 之后的 Go 语法正则表达式，在标题任意位置找到即可。它们在应用配置时编译；
+  错误的模式使配置检查失败。各最多 32 个，每个最多 512 字节。
+- `min_size` 和 `max_size` 限制条目的大小；订阅源没有给出大小的条目视为通过。
+- `episodes` 使每集只添加一次：标题中的集数，`S01E02`（`S01E02E03` 与 `S01E02-03` 视为范围）、`1x02` 或日期（`2026-11-09`、
+  `2026.11.09`），加上节目名（集数之前的标题，转为小写，标点变为空格，去掉开头的发布组 `[标签]`）构成一个键；该规则已添加
+  过（或已持有）的键的条目为 `duplicate`：已有一集的另一种画质、repack 或 proper。文档中一集的第一个条目胜出。标题中没有
+  集数（整季包、电影）时，条目只按其 ID 区分。
+- `max_per_poll`（5，最多 100）限制一条规则在一个订阅源的一次轮询中添加的种子数。
+
+规则像 Admin API 那样添加条目的种子，放入其 `category`，如有 `paused` 则暂停：磁力链接立即添加，URL 按 .torrent URL 添加
+（I198：fib 的 HTTP 客户端、32 MiB、5 次重定向（其中一次可以到磁力链接）、`url_timeout`、同时 4 个）。`added` 事件之后有一个
+`rss_added` 事件，带订阅源、规则和条目的标题。
+
+**记住什么。** 读到的每个条目都连同其结果记为已见，保存在 `data_dir/rss.json` 中，使它跨重启也只处理一次：
+
+| 结果 | 含义 |
+| --- | --- |
+| `added` | 规则挑中它，其种子已添加（`torrent` 为其 ID） |
+| `exists` | 规则挑中它，其种子已被持有 |
+| `duplicate` | 带 `episodes` 的规则挑中了它已有的一集 |
+| `unmatched` | 没有规则挑中它（之后添加的规则不会再看它） |
+| `no_source` | 规则挑中它，但它没有磁力链接、URL 或 info hash |
+| `failed` | 其种子无法添加：不是种子、链接错误（立即放弃），或 .torrent 文件无法下载（在之后的轮询中重试，共 3 次） |
+
+有两类条目不被记住，会在下次轮询时再来：超出规则 `max_per_poll` 的，以及其添加可能稍后成功的（已达 `max_torrents`、已有 4 个
+URL 下载在进行、客户端未运行）。这样的轮询之后不保留订阅源新的 `ETag` 与 `Last-Modified`，使下次轮询重新读取整个订阅源，
+而不是得到 `304`。一个订阅源最多记住 `history_size` 个条目（1000，至少为每个订阅源的 `max_items`），最旧的先遗忘；一条规则
+记住它最近的 10000 集。`rss.json` 与种子的状态一样写入：先写临时文件再改名，在每次有变化的轮询之后和角色停止时写入。无法读取
+的会被移到一旁，成为 `rss.json.bad`，角色从一无所见开始：再次添加的种子会因已被持有而被拒绝。配置中不再有的订阅源和规则，
+连同它们见过的内容，在下次保存时被遗忘。
+
+**关闭订阅源和规则。** Admin API（`fit bt rss enable|disable`、页面）可以不论配置的 `enabled` 如何关闭或打开订阅源的轮询或
+规则；`rss.json` 保留这一选择，直到改回（`reset`，`{"enabled": null}`）。
+
 ## 重载
 
 | 更改 | 结果 |
@@ -197,6 +271,7 @@ PeerGuardian 的 `.p2p` 行（`name:first-last`），逐行按内容区分（[ac
 | `save_interval`、`console`、`download_dir`、`watch_dir`、`watch_interval`、`watch_max_files`、`url_timeout` | 就地生效 |
 | `categories` | 就地生效：限制立即作用于该分类的种子，新的 `dir` 作用于此后添加的种子；分类被删除的种子保留其目录、失去其限制 |
 | `max_active_downloads`、`max_active_seeds`、`min_free_bytes`、`alt_speed` | 就地生效，种子按它们立即启动或暂停 |
+| `rss` | 就地生效：重新编译规则，新订阅源立即轮询，更改的 `interval` 从上次轮询算起，不再有的订阅源和规则连同它们见过的内容被遗忘；进行中的轮询会完成 |
 | `listen`、`encryption`、`dht`、`pex`、`utp`、`lsd`、`disk_workers`、`disk_queue_bytes` | 新建客户端：关闭旧客户端、保存每个种子的续传数据，再把种子无需校验地加入新客户端。新客户端无法创建（端口被占）时，重新创建旧客户端，重载报告错误 |
 | `data_dir` | 像重启一样，在新目录的状态上新建客户端；旧目录保留已保存的内容 |
 
@@ -293,6 +368,12 @@ route { match { path /torrents/* }; handler bt_publish }
 | 经 URL 下载的 .torrent 文件；同时进行的 URL 下载；重定向 | 32 MiB；4；5 |
 | `url_timeout` | 30s |
 | `watch_max_files`，每次查看 `watch_dir` 取走的文件数 | 100（最多 10000） |
+| `rss.feeds`、`rss.rules` | 最多 100、200 |
+| 订阅源正文；其下载；重定向；同时轮询的订阅源 | `max_feed_bytes` 4 MiB（最多 32 MiB）；`timeout` 30s；5；4 |
+| 每次轮询读取的条目；每个订阅源记住的条目；每条规则记住的集数 | `max_items` 200（最多 1000）；`history_size` 1000（最多 10000）；10000 |
+| 规则每次轮询添加的种子；规则的模式 | `max_per_poll` 5（最多 100）；各 32 个，每个 512 字节 |
+| 条目的标题；ID；URL | 1 KiB（截断）；1 KiB（超过则取哈希）；8 KiB |
+| 读回的 `rss.json` | 64 MiB |
 | `disk_queue_bytes`，等待写盘的已接收块 | 64 MiB |
 | .torrent 文件 | 128 MiB（fib 的 metainfo 上限） |
 | 磁力链接 | 64 KiB |
@@ -333,6 +414,10 @@ goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的�
 | `GET /bittorrent/publish` | 发布条目及其种子；`/bittorrent/publish/<name>` 一个 |
 | `GET /bittorrent/publish/<name>/torrents/<id>` | 已发布种子的 .torrent 文件（`application/x-bittorrent`，作为附件），页面提供下载 |
 | `GET /bittorrent/events` | 事件，以 server-sent events 推送（见下） |
+| `GET /bittorrent/rss` | RSS 自动下载：`{"configured", "feeds", "rules", "error"}`，每个订阅源的名称、URL（去掉用户信息和查询串）、标题、`enabled` 与 `toggled`（经 API 设置）、间隔、`polling`、`last_poll`、`next_poll`、`last_result` 与 `last_error`、`last`（fit 启动以来的上次轮询）、`seen`，以及 fit 启动以来的 `polls`、`errors`、`added`、`failed`；每条规则的订阅源、分类、`episodes`、`episodes_seen`、`added` 与 `last_added` |
+| `GET /bittorrent/rss/items` | 已见过的条目，最新的在前：`{"items", "total"}`，每个带 `feed`、`key`、`title`、`seen`、`outcome`、`rule`、`torrent`、`size`、`source`、`error`、`attempts`；参数 `feed`、`outcome`、`limit`（100，最多 1000） |
+| `POST /bittorrent/rss/feeds/<name>/poll` | 立即轮询一个订阅源（无论是否启用），回答这次轮询做了什么：`result`（`ok`、`not_modified`、`error`）、`status`、`error`、`items`、`new`、`added`、`failed`、`deferred`、`truncated`；正在轮询时为 `409` |
+| `PUT /bittorrent/rss/feeds/<name>`、`PUT /bittorrent/rss/rules/<name>` | `{"enabled": true}`、`false`，或 `null` 恢复为配置；回答该订阅源或规则的状态 |
 | `GET /bittorrent/tracker/stats` | tracker 的总计 |
 | `GET /bittorrent/tracker/torrents` | `{"torrents", "total", "offset", "source", "next"}`：允许列表中种子的 swarm，或公开 tracker 按 info hash 排序的种子（`offset`，`limit` 最多 1000，`after`）；`/bittorrent/tracker/torrents/<info hash>` 一个种子的 |
 | `GET /bittorrent/tracker/passkey?user=` | 私有 tracker 策略中的一个用户及其 passkey |
@@ -360,7 +445,7 @@ URL 下载的相同，边到达边读取，超出时以 `413` 拒绝（表单的
 
 `GET /bittorrent/events` 以 server-sent events（`text/event-stream`）推送客户端的事件，每个事件带 `id`、作为 `event` 的类型，
 以及作为 `data` 的 JSON：`id`、`time`、`type`，视情况还有 `torrent`、`name`、`category`、`state`、`previous`、`error`、
-`peer`、`data_deleted`、`dropped`。
+`peer`、`data_deleted`、`dropped`、`feed`、`rule`、`title`。
 
 | 类型 | 何时 |
 | --- | --- |
@@ -371,6 +456,7 @@ URL 下载的相同，边到达边读取，超出时以 `413` 拒绝（表单的
 | `error` | 其存储出错，但不会因此停止 |
 | `peer_banned` | 某个 peer 或某地址的所有 peer 被封禁，`error` 说明原因 |
 | `seed_limit` | 种子达到做种比率或时间而暂停 |
+| `rss_added` | RSS 规则（`rule`）从订阅源（`feed`）的条目（`title`）添加了种子，在其 `added` 之后 |
 | `alt_speed` | 备用速率开始（`state` 为 `on`）或停止（`off`）生效 |
 | `events_dropped` | 自管理器上次查看以来，fib 的客户端因交给角色的队列已满丢弃了 `dropped` 个分块和 peer 事件；每秒最多一个 |
 
@@ -407,6 +493,11 @@ fit bt rm -delete-data 3f2a91
 fit bt limit -down 2M -ratio 2 -seed-time 72h 3f2a91
 fit bt limit -clear 3f2a91
 fit bt alt on                           # auto、on、off；不带参数时显示
+fit bt rss                              # 订阅源（上次轮询、结果、计数）与规则
+fit bt rss items -feed shows -outcome added -limit 20
+fit bt rss poll shows                   # 轮询失败时以 1 退出
+fit bt rss disable shows                # enable、disable、reset（恢复为配置）
+fit bt rss enable -rule show
 ```
 
 `add` 接受磁力链接、http 和 https URL 以及 .torrent 文件，还有 `-paused`、`-sequential`，以及设置种子自身速率的 `-up` 和
@@ -432,6 +523,8 @@ fit bt alt on                           # auto、on、off；不带参数时显�
 | `fit_bittorrent_event_subscribers`、`fit_bittorrent_event_subscribers_dropped_total` | gauge、counter | |
 | `fit_bittorrent_events_dropped_total`（fib 丢弃的客户端分块和 peer 事件） | counter | |
 | `fit_bittorrent_published_torrents` | gauge | `entry` |
+| `fit_bittorrent_rss_polls_total` | counter | `feed`、`result`：`ok`、`not_modified`、`error` |
+| `fit_bittorrent_rss_items_added_total`、`fit_bittorrent_rss_items_failed_total` | counter | `feed` |
 | `fit_bittorrent_tracker_torrents`、`fit_bittorrent_tracker_peers`、`fit_bittorrent_tracker_max_torrents`、`fit_bittorrent_tracker_max_peers`、`fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`、`fit_bittorrent_tracker_scrapes_total` | counter | |
 | `fit_bittorrent_tracker_refused_total` | counter | `reason`：`unregistered`、`passkey`、`access` |
@@ -457,6 +550,7 @@ fit bt alt on                           # auto、on、off；不带参数时显�
   从不保存。
 - **发布**：各发布条目的目录、模式、Web 种子、上次遍历时间、待处理文件与问题，以及其种子的大小、文件数、状态与构建时间，
   提供 **.torrent** 下载（Admin API 的 `/bittorrent/publish/<name>/torrents/<id>`）与磁力链接（打开或复制）。
+- **RSS**（I208）：每个订阅源的标题、URL、开关（在此设置过时有标记，并有恢复为配置的链接）、间隔、上次轮询及其结果与错误、下次轮询、已见条目、已添加种子与失败条目，以及**立即轮询**，提示这次轮询做了什么；每条规则的开关、订阅源、分类、记住的集数、已添加种子数及上次添加时间；最近的条目（200 个），可按订阅源与结果筛选，各带其规则及指向其添加的种子的链接。客户端的事件列表也列出 `rss_added`。
 - **BitTorrent 配置**：整个 `bittorrent` 成员，由 schema 生成：客户端及其分类、限制、`alt_speed` 与 `publish`，以及 tracker；
   保存时 `bittorrent` 下的问题链接到此页。
 
@@ -474,6 +568,7 @@ fit bt alt on                           # auto、on、off；不带参数时显�
 | `bt_torrents` | `read` | 种子的简要信息（状态、保持原因、错误、进度、大小、速率、peer、分享率、剩余时间），可按状态、分类与名称筛选（50 个，最多 200 个），并附备用速率 |
 | `bt_torrent` | `read` | 种子的状态、前 100 个文件及其优先级、前 50 个 peer，以及其 tracker 与 Web 种子 |
 | `bt_tracker_stats` | `read` | tracker 的总计与拒绝，以及白名单中前 50 个种子的 swarm |
+| `bt_rss` | `read` | RSS 订阅源（上次轮询、结果、计数）与规则，以及最近见过的条目（20 个，最多 100），可按订阅源与结果筛选；订阅源 URL 只给出 scheme、主机和最后一段路径，略去条目的 ID（常为链接） |
 | `bt_add_propose` | `propose` | 按磁力链接或 .torrent URL 添加种子，可指定分类、暂停或顺序下载 |
 | `bt_pause_propose` | `propose` | 按 ID 暂停种子（最多 100 个） |
 | `bt_resume_propose` | `propose` | 按 ID 恢复种子（最多 100 个） |
@@ -685,5 +780,6 @@ profile 中占 CPU 的五分之一），而且每个 16 KiB 块各是一次 `pwr
   `auth`，用 `allow` 或 `allow_files` 限制它跟踪什么）或不用 tracker（web seed 和 DHT）。访问日志中从不出现 passkey。
 - **流。** 不设 `auth` 的 `bt_stream` 把客户端持有的每个种子提供给能到达该路由的任何人；设了 `auth` 时，令牌的 `play` 授权
   指定哪些种子（`bt/*` 表示全部）。
+- **RSS。** 订阅源的 URL 和请求头只来自配置，与 .torrent URL 一样，指向哪里就从哪里获取；机密请求头最好从环境变量读取（`headers_env`），而不是写在配置里（Admin API 的 `GET /config` 会显示配置）。Admin API、`fit bt` 和页面显示订阅源 URL 时去掉用户信息和查询串，助手只得到其 scheme、主机和最后一段路径。规则像 `fit bt add` 一样从互联网添加种子，受 `max_per_poll`、`max_torrents` 和 `min_free_bytes` 约束；`patterns` 应写得窄一些。
 - **事件队列。** fib 的客户端为角色最多排队 4096 个事件（超出时丢弃分块和 peer 事件并计数）；每个事件流 256 个，角色保留
   1024 个。
