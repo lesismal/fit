@@ -69,11 +69,15 @@ type run struct {
 	drained    bool
 	err        error
 	base, next uint64
-	pending    []entry
-	from       Position
-	mark       Position
-	dirty      bool
-	saved      bool
+	// waiting counts the source's emits waiting for room in the queue,
+	// which only the oldest record's writes free: the writer holding that
+	// record writes it without waiting for its batch to fill.
+	waiting int
+	pending []entry
+	from    Position
+	mark    Position
+	dirty   bool
+	saved   bool
 	// sinks are the sinks' writers, groups the writers of each sink: one,
 	// or a job's max_parallel for a ParallelSink.
 	sinks  []*sinkRun
@@ -171,13 +175,21 @@ func (r *run) emit(rec *Record) error {
 	}
 	r.mu.Lock()
 	for r.inRecords > 0 && (r.inRecords+1 > limRecords || r.inBytes+int64(size) > limBytes) {
+		r.waiting++
 		r.mu.Unlock()
+		for _, s := range r.sinks {
+			notify(s.wake)
+		}
 		select {
 		case <-r.space:
 		case <-r.srcCtx.Done():
+			r.mu.Lock()
+			r.waiting--
+			r.mu.Unlock()
 			return errStopped
 		}
 		r.mu.Lock()
+		r.waiting--
 	}
 	if r.srcCtx.Err() != nil {
 		r.mu.Unlock()
@@ -313,7 +325,11 @@ func (r *run) dispatch() {
 			r.pending[rec.seq-r.base].left = len(outs) * len(r.groups)
 			for _, g := range r.groups {
 				for _, o := range outs {
-					s := g[laneOf(o.rec, len(g), &keyBuf)]
+					lane := rec.lane - 1
+					if lane < 0 {
+						lane = laneOf(o.rec, len(g), &keyBuf)
+					}
+					s := g[lane%len(g)]
 					if len(s.queue) == 0 {
 						s.first = time.Now()
 					}
@@ -417,7 +433,11 @@ func (s *sinkRun) loop() {
 	for {
 		r.mu.Lock()
 		for {
-			full := len(s.queue) >= maxRecords || s.bytes >= maxBytes
+			// A batch not full is written at once when the source waits
+			// for room that its first record holds: with several
+			// writers, the others may have written all theirs.
+			full := len(s.queue) >= maxRecords || s.bytes >= maxBytes ||
+				r.waiting > 0 && len(s.queue) > 0 && s.queue[0].rec.seq == r.base
 			if full || len(s.queue) > 0 && (r.drained || time.Since(s.first) >= wait) {
 				break
 			}

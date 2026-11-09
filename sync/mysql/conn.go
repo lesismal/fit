@@ -3,7 +3,8 @@
 // deletes by key, batched per table into multi-row statements, each source
 // transaction written as one of the server's. It speaks the protocol
 // through sync/mysql/wire, over TCP or TLS, on a connection of its own on
-// the pipeline's goroutine, never on a fib worker. See
+// the pipeline's goroutine (a job's writers one each, on theirs), never on
+// a fib worker. See
 // docs/decisions/036-sync.md.
 package syncmysql
 
@@ -148,6 +149,14 @@ func dialWire(ctx context.Context, cfg mysqlwire.Config) (db, error) {
 
 // wireConn is the client's connection as a db.
 type wireConn struct{ *mysqlwire.Conn }
+
+// InsertRows writes the rows' values as literals in text queries
+// (mysqlwire's InsertRowsText): one round trip a statement, where a
+// prepared statement took a prepare, an execute and a close, and the
+// server's parse of a 1,000-row statement's thousands of placeholders.
+func (c wireConn) InsertRows(ctx context.Context, head string, rows [][]any, tail string) (mysqlwire.Result, error) {
+	return c.InsertRowsText(ctx, head, rows, tail)
+}
 
 func (c wireConn) QueryRow(ctx context.Context, query string, args ...any) ([]any, error) {
 	rows, err := c.Query(ctx, query, args...)

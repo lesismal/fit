@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lesismal/fit/config"
@@ -67,6 +68,18 @@ type Sink struct {
 	ckTable           string
 	pipeline, lineage string
 
+	// writer is the sink's first connection, the only one of a stream;
+	// a job's parallel writers take spare ones while it is busy.
+	writer
+	mu    sync.Mutex
+	busy  bool
+	spare []*writer
+}
+
+// writer is a connection of the sink's and the transaction it writes, for
+// one Write at a time.
+type writer struct {
+	s     *Sink
 	conn  db
 	tidb  bool
 	maxTx int64
@@ -167,20 +180,69 @@ func (s *Sink) Provision(ctx *module.Context) error {
 		s.ckTable = quoteName(ck)
 	}
 	s.log = logs.Named(config.LoggerSync)
+	s.writer.s = s
 	if len(errs) == 0 {
 		return nil
 	}
 	return errs
 }
 
-// Cleanup closes the connection, which rolls back a transaction left open:
-// its records are written again from the checkpoint, which is never inside
-// it.
+// Cleanup closes the connections, which rolls back a transaction left
+// open: its records are written again from the checkpoint, which is never
+// inside it. The spare writers are dropped.
 func (s *Sink) Cleanup() {
-	if s.conn != nil {
-		s.conn.Close()
-		s.conn = nil
+	s.mu.Lock()
+	spare := s.spare
+	s.spare = nil
+	s.mu.Unlock()
+	s.writer.close()
+	for _, w := range spare {
+		w.close()
 	}
+}
+
+// close closes the writer's connection.
+func (w *writer) close() {
+	if w.conn != nil {
+		w.conn.Close()
+		w.conn = nil
+	}
+}
+
+// ParallelWrites marks the sink as one a job may write through several
+// writers at once, each on a connection of its own, a key always going to
+// the same one: a job's records have no source transactions, so that each
+// Write commits what it writes and no writer holds a transaction into the
+// next. A stream has one writer, the sink's first.
+func (s *Sink) ParallelWrites() {}
+
+// take returns a writer for a Write: the first when it is free, else a
+// spare, made when there is none.
+func (s *Sink) take() *writer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.busy {
+		s.busy = true
+		s.writer.s = s
+		return &s.writer
+	}
+	if n := len(s.spare); n > 0 {
+		w := s.spare[n-1]
+		s.spare = s.spare[:n-1]
+		return w
+	}
+	return &writer{s: s}
+}
+
+// give returns a writer taken.
+func (s *Sink) give(w *writer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if w == &s.writer {
+		s.busy = false
+		return
+	}
+	s.spare = append(s.spare, w)
 }
 
 // KeepsCheckpoint reports whether checkpoint is sink.
@@ -289,8 +351,9 @@ func (s *Sink) build(i int, r *fitsync.Record) item {
 		it.err = fmt.Errorf("an %s's row is a %s, not a map of columns", r.Op, r.After.Kind())
 		return it
 	}
-	up := &op{rec: i, table: table}
-	for _, f := range r.After.Fields() {
+	fields := r.After.Fields()
+	up := &op{rec: i, table: table, cols: make([]string, 0, len(fields)), vals: make([]any, 0, len(fields))}
+	for _, f := range fields {
 		v, err := arg(f.Value)
 		if err != nil {
 			it.err = fmt.Errorf("column %s: %w", f.Name, err)
@@ -428,11 +491,19 @@ func (e *badRecord) Error() string { return e.err.Error() }
 // other error once the connection is closed, for the batch to be written
 // again whole.
 func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
+	w := s.take()
+	defer s.give(w)
+	return w.write(ctx, batch)
+}
+
+// write is Write on w.
+func (w *writer) write(ctx context.Context, batch []*fitsync.Record) error {
+	s := w.s
 	items := make([]item, len(batch))
 	for i, r := range batch {
 		items[i] = s.build(i, r)
 	}
-	if err := s.connect(ctx); err != nil {
+	if err := w.connect(ctx); err != nil {
 		return err
 	}
 	// With transactions batch, the server's transaction is committed at
@@ -450,27 +521,27 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 	// refuse commits what is before record i, the checkpoint at the last
 	// of them that ends a source transaction, not at those after it whose
 	// statements were not run yet.
-	startPos := s.tx.pos
+	startPos := w.tx.pos
 	refuse := func(i int, err error) error {
-		s.tx.pos = startPos
+		w.tx.pos = startPos
 		for j := i - 1; j >= 0; j-- {
 			if items[j].pos != nil {
-				s.tx.pos = items[j].pos
+				w.tx.pos = items[j].pos
 				break
 			}
 		}
-		return s.refuse(ctx, i, err)
+		return w.refuse(ctx, i, err)
 	}
 	fail := func(err error) error {
 		var br *badRecord
 		if errors.As(err, &br) {
 			return refuse(br.rec, br.err)
 		}
-		s.reset()
+		w.reset()
 		return err
 	}
 	flush := func() error {
-		err := s.flush(ctx, g)
+		err := w.flush(ctx, g)
 		g = g[:0]
 		return err
 	}
@@ -482,24 +553,24 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 			}
 			return refuse(i, it.err)
 		}
-		if !s.batch && s.tx.open && it.unit != s.tx.unit {
+		if !s.batch && w.tx.open && it.unit != w.tx.unit {
 			if err := flush(); err != nil {
 				return fail(err)
 			}
-			if err := s.commit(ctx); err != nil {
+			if err := w.commit(ctx); err != nil {
 				return fail(err)
 			}
 		}
-		if s.tx.curEnded || it.unit != s.tx.cur || it.unit == "" {
-			s.tx.cur, s.tx.curBytes = it.unit, 0
+		if w.tx.curEnded || it.unit != w.tx.cur || it.unit == "" {
+			w.tx.cur, w.tx.curBytes = it.unit, 0
 		}
-		s.tx.curEnded = it.ends
+		w.tx.curEnded = it.ends
 		for _, o := range it.ops {
-			if !s.tx.open {
-				if _, err := s.conn.Exec(ctx, "START TRANSACTION"); err != nil {
+			if !w.tx.open {
+				if _, err := w.conn.Exec(ctx, "START TRANSACTION"); err != nil {
 					return fail(err)
 				}
-				s.tx.open, s.tx.unit = true, it.unit
+				w.tx.open, w.tx.unit = true, it.unit
 			}
 			if len(g) > 0 && !g[0].same(o) {
 				if err := flush(); err != nil {
@@ -507,26 +578,26 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 				}
 			}
 			g = append(g, o)
-			s.tx.bytes += o.size
-			s.tx.curBytes += o.size
+			w.tx.bytes += o.size
+			w.tx.curBytes += o.size
 		}
 		if it.pos != nil {
-			s.tx.pos = it.pos
+			w.tx.pos = it.pos
 		}
-		if !s.tx.open {
+		if !w.tx.open {
 			continue
 		}
-		split := s.maxTx > 0 && !it.ends && s.tx.curBytes >= s.maxTx
+		split := w.maxTx > 0 && !it.ends && w.tx.curBytes >= w.maxTx
 		ended := it.ends && (s.batch && i == lastEnd || !s.batch && it.unit != "")
-		if ended || s.maxTx > 0 && it.ends && s.tx.bytes >= s.maxTx || split {
+		if ended || w.maxTx > 0 && it.ends && w.tx.bytes >= w.maxTx || split {
 			if err := flush(); err != nil {
 				return fail(err)
 			}
 			if split {
-				s.log.Warnf("sync mysql: source transaction %s holds more than max_transaction_bytes (%d): it is committed in parts", it.unit, s.maxTx)
-				s.tx.curBytes = 0
+				s.log.Warnf("sync mysql: source transaction %s holds more than max_transaction_bytes (%d): it is committed in parts", it.unit, w.maxTx)
+				w.tx.curBytes = 0
 			}
-			if err := s.commit(ctx); err != nil {
+			if err := w.commit(ctx); err != nil {
 				return fail(err)
 			}
 		}
@@ -534,15 +605,15 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 	if err := flush(); err != nil {
 		return fail(err)
 	}
-	if s.tx.open && !s.batch && len(items) > 0 && items[len(items)-1].unit == "" {
+	if w.tx.open && !s.batch && len(items) > 0 && items[len(items)-1].unit == "" {
 		// Records without a source transaction, a run of them at the
 		// batch's end.
-		if err := s.commit(ctx); err != nil {
+		if err := w.commit(ctx); err != nil {
 			return fail(err)
 		}
 	}
-	s.acked = s.tx
-	s.acked.ops = slices.Clone(s.tx.ops)
+	w.acked = w.tx
+	w.acked.ops = slices.Clone(w.tx.ops)
 	return nil
 }
 
@@ -550,38 +621,39 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 // refuses for good, and returns the BatchError that says so: the records
 // before it acknowledged, even a part of a source transaction, which
 // on_error stop writes again from the checkpoint.
-func (s *Sink) refuse(ctx context.Context, i int, err error) error {
-	if s.tx.open {
-		if cerr := s.commit(ctx); cerr != nil {
-			s.reset()
+func (w *writer) refuse(ctx context.Context, i int, err error) error {
+	if w.tx.open {
+		if cerr := w.commit(ctx); cerr != nil {
+			w.reset()
 			return cerr
 		}
 	}
-	s.acked = txState{}
-	s.tx = txState{}
+	w.acked = txState{}
+	w.tx = txState{}
 	return &fitsync.BatchError{Index: i, Err: fitsync.Permanent(err)}
 }
 
 // connect makes the connection when there is none or it broke, and writes
 // again what the transaction the last Write left open held.
-func (s *Sink) connect(ctx context.Context) error {
-	if s.conn != nil && s.conn.Err() == nil {
+func (w *writer) connect(ctx context.Context) error {
+	s := w.s
+	if w.conn != nil && w.conn.Err() == nil {
 		return nil
 	}
-	s.Cleanup()
+	w.close()
 	c, err := s.dial(ctx, s.cfg)
 	if err != nil {
 		return err
 	}
-	s.tidb = strings.Contains(c.ServerVersion(), "TiDB")
-	s.maxTx = s.MaxTransactionBytes
-	if s.tidb && s.maxTx <= 0 {
-		s.maxTx = DefaultTiDBTransactionBytes
+	w.tidb = strings.Contains(c.ServerVersion(), "TiDB")
+	w.maxTx = s.MaxTransactionBytes
+	if w.tidb && w.maxTx <= 0 {
+		w.maxTx = DefaultTiDBTransactionBytes
 	}
 	// A key of 0 is written as 0, not a new AUTO_INCREMENT or AUTO_RANDOM
 	// value.
 	setup := []string{"SET time_zone = '+00:00'", "SET sql_mode = CONCAT_WS(',', NULLIF(@@sql_mode, ''), 'NO_AUTO_VALUE_ON_ZERO')"}
-	if s.tidb {
+	if w.tidb {
 		// The source's values go in AUTO_RANDOM columns as they are.
 		setup = append(setup, "SET @@session.allow_auto_random_explicit_insert = 1")
 	}
@@ -591,67 +663,68 @@ func (s *Sink) connect(ctx context.Context) error {
 			return err
 		}
 	}
-	s.conn = c
-	s.tx = s.acked
-	s.tx.open = false
-	s.tx.ops = nil
-	if !s.acked.open {
+	w.conn = c
+	w.tx = w.acked
+	w.tx.open = false
+	w.tx.ops = nil
+	if !w.acked.open {
 		return nil
 	}
 	if _, err := c.Exec(ctx, "START TRANSACTION"); err != nil {
-		s.reset()
+		w.reset()
 		return err
 	}
-	s.tx.open = true
-	for i := 0; i < len(s.acked.ops); {
+	w.tx.open = true
+	for i := 0; i < len(w.acked.ops); {
 		j := i + 1
-		for j < len(s.acked.ops) && s.acked.ops[i].same(s.acked.ops[j]) {
+		for j < len(w.acked.ops) && w.acked.ops[i].same(w.acked.ops[j]) {
 			j++
 		}
-		if err := s.exec(ctx, s.acked.ops[i:j]); err != nil {
-			s.reset()
+		if err := w.exec(ctx, w.acked.ops[i:j]); err != nil {
+			w.reset()
 			return err
 		}
 		i = j
 	}
-	s.tx.ops = slices.Clone(s.acked.ops)
+	w.tx.ops = slices.Clone(w.acked.ops)
 	return nil
 }
 
 // reset closes the connection after an error, which rolls back the
 // transaction open: the next Write connects again and writes what was
 // acknowledged in it again.
-func (s *Sink) reset() {
-	s.Cleanup()
-	s.tx = s.acked
+func (w *writer) reset() {
+	w.close()
+	w.tx = w.acked
 }
 
-func (s *Sink) commit(ctx context.Context) error {
-	if s.pipeline != "" && s.tx.pos != nil {
-		row := [][]any{{s.pipeline, s.lineage, string(s.tx.pos), time.Now().UTC()}}
-		if _, err := s.conn.InsertRows(ctx, "INSERT INTO "+s.ckTable+" (`pipeline`,`lineage`,`position`,`updated`) VALUES", row,
+func (w *writer) commit(ctx context.Context) error {
+	s := w.s
+	if s.pipeline != "" && w.tx.pos != nil {
+		row := [][]any{{s.pipeline, s.lineage, string(w.tx.pos), time.Now().UTC()}}
+		if _, err := w.conn.InsertRows(ctx, "INSERT INTO "+s.ckTable+" (`pipeline`,`lineage`,`position`,`updated`) VALUES", row,
 			"ON DUPLICATE KEY UPDATE `lineage`=VALUES(`lineage`),`position`=VALUES(`position`),`updated`=VALUES(`updated`)"); err != nil {
 			return err
 		}
 	}
-	if _, err := s.conn.Exec(ctx, "COMMIT"); err != nil {
+	if _, err := w.conn.Exec(ctx, "COMMIT"); err != nil {
 		return err
 	}
-	cur, curBytes, curEnded := s.tx.cur, s.tx.curBytes, s.tx.curEnded
-	s.tx = txState{cur: cur, curBytes: curBytes, curEnded: curEnded}
+	cur, curBytes, curEnded := w.tx.cur, w.tx.curBytes, w.tx.curEnded
+	w.tx = txState{cur: cur, curBytes: curBytes, curEnded: curEnded}
 	return nil
 }
 
 // flush writes g, ops of one table and columns, as one statement or a few;
 // on an error the server gives for good, the statement undone, it writes
 // them one at a time to find the record at fault.
-func (s *Sink) flush(ctx context.Context, g []*op) error {
+func (w *writer) flush(ctx context.Context, g []*op) error {
 	if len(g) == 0 {
 		return nil
 	}
-	err := s.exec(ctx, g)
+	err := w.exec(ctx, g)
 	if err == nil {
-		s.tx.ops = append(s.tx.ops, g...)
+		w.tx.ops = append(w.tx.ops, g...)
 		return nil
 	}
 	if !permanent(err) {
@@ -659,15 +732,15 @@ func (s *Sink) flush(ctx context.Context, g []*op) error {
 	}
 	if len(g) > 1 {
 		for k := range g {
-			if err = s.exec(ctx, g[k:k+1]); err != nil {
+			if err = w.exec(ctx, g[k:k+1]); err != nil {
 				if !permanent(err) {
 					return err
 				}
-				s.tx.ops = append(s.tx.ops, g[:k]...)
+				w.tx.ops = append(w.tx.ops, g[:k]...)
 				return &badRecord{rec: g[k].rec, err: err}
 			}
 		}
-		s.tx.ops = append(s.tx.ops, g...)
+		w.tx.ops = append(w.tx.ops, g...)
 		return nil
 	}
 	return &badRecord{rec: g[0].rec, err: err}
@@ -675,7 +748,7 @@ func (s *Sink) flush(ctx context.Context, g []*op) error {
 
 // exec runs ops of one table and columns: upserts as multi-row INSERTs,
 // deletes as DELETEs of up to maxDeleteKeys keys.
-func (s *Sink) exec(ctx context.Context, ops []*op) error {
+func (w *writer) exec(ctx context.Context, ops []*op) error {
 	o := ops[0]
 	table := quoteName(o.table)
 	cols := make([]string, len(o.cols))
@@ -695,7 +768,7 @@ func (s *Sink) exec(ctx context.Context, ops []*op) error {
 			}
 			fmt.Fprintf(&tail, "%s=VALUES(%s)", c, c)
 		}
-		_, err := s.conn.InsertRows(ctx, "INSERT INTO "+table+" ("+strings.Join(cols, ",")+") VALUES", rows, tail.String())
+		_, err := w.conn.InsertRows(ctx, "INSERT INTO "+table+" ("+strings.Join(cols, ",")+") VALUES", rows, tail.String())
 		return err
 	}
 	per := min(maxDeleteKeys, mysqlwire.MaxPlaceholders/len(cols))
@@ -719,7 +792,7 @@ func (s *Sink) exec(ctx context.Context, ops []*op) error {
 			args = append(args, p.vals...)
 		}
 		q.WriteByte(')')
-		if _, err := s.conn.Exec(ctx, q.String(), args...); err != nil {
+		if _, err := w.conn.Exec(ctx, q.String(), args...); err != nil {
 			return err
 		}
 		ops = ops[n:]

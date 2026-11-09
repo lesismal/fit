@@ -230,7 +230,7 @@ func (p *pipe) runChunks(ctx context.Context, c Chunker, r *Run, parallel int) e
 	var wg sync.WaitGroup
 	var once sync.Once
 	var first error
-	for range min(parallel, len(plan)) {
+	for g := range min(parallel, len(plan)) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -239,7 +239,7 @@ func (p *pipe) runChunks(ctx context.Context, c Chunker, r *Run, parallel int) e
 				if !ok {
 					return
 				}
-				if err := cr.read(ctx, i, from); err != nil {
+				if err := cr.read(ctx, i, from, g+1); err != nil {
 					once.Do(func() { first = err })
 					cancel()
 					return
@@ -296,8 +296,10 @@ func (cr *chunkRun) take() (int, Position, bool) {
 	return i, cr.at[i], true
 }
 
-// read reads chunk i from from, holding each record back until the next.
-func (cr *chunkRun) read(ctx context.Context, i int, from Position) error {
+// read reads chunk i from from, holding each record back until the next;
+// its records go to the sinks' writer lane, the reader's, which a key read
+// once keeps.
+func (cr *chunkRun) read(ctx context.Context, i int, from Position, lane int) error {
 	var held *Record
 	err := cr.c.ReadChunk(ctx, cr.plan[i], from, func(rec *Record) error {
 		if held != nil {
@@ -306,6 +308,7 @@ func (cr *chunkRun) read(ctx context.Context, i int, from Position) error {
 			}
 		}
 		rec.Tx = Tx{}
+		rec.lane = lane
 		held = rec
 		return nil
 	})

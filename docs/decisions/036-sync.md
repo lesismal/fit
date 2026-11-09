@@ -194,8 +194,12 @@ The plan's I167 section lists them all; these change the record above.
    records, and a job interrupted reads no finished chunk again. Snapshot records carry no
    transactions.
 2. **Parallel writers** only for a chunked snapshot, and only for sinks implementing
-   `ParallelSink`: each gets `job.max_parallel` writers, records sent by their key's hash so that
-   a key is never written out of order; otherwise one writer per sink, as before.
+   `ParallelSink`: each gets `job.max_parallel` writers, a chunk's records sent to the writer of
+   the reader that read them (since I193's S5, 2026-11-09: by their key's hash before, which
+   gave every writer's batch keys from across the table, contending for the same B-tree pages in
+   a database, a copy into MySQL 25% slower), so that a key, read once, is never written out of
+   order; otherwise one writer per sink, as before. While the source waits for room in the queue,
+   the writer holding the oldest record writes its batch unfilled, since only that frees room.
 3. **The progress is kept in the checkpoint** (`job`: when it started and finished, records read,
    written and failed, the rows reckoned, an ETA, the chunks done and the plan), whose version
    stays 1. A finished job is not run again when fit restarts or reloads; a schedule's next time or

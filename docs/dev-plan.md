@@ -6983,8 +6983,93 @@ Docker 29.1.3) and what came of it:
   **Pending review**: canal_json's encoder has the same maps-through-`encoding/json` pattern but is
   not on any benchmark's path (fit writes Debezium in S3 and S4), so it is left as it is until a
   profile shows it.
+- **S5 again, waiting rather than computing** (2026-11-09): after d5db60fd the host had fit at 122k
+  rows/s on 0.47 cores, DataX at 220k on 0.59. Found locally (Docker Desktop, MySQL 8.0.42 as the
+  benchmark runs it, 2M rows, `fit sync run --once`, the servers' process lists sampled, and probes
+  of the source and the sink alone):
+  1. **The mysql sink had one writer.** It was not a `ParallelSink`, so a job's four chunk readers
+     fed one connection: the target's process list showed one INSERT at a time, and a single
+     writer's ceiling was 130k rows/s, the host's figure. The source was never the bound: its four
+     readers alone read 1.41M rows/s, and sat idle (`Sleep`) while the writer worked.
+  2. **Parallel writers by key hash contend in the B-tree.** With four writers, each record sent to
+     the writer its key hashes to, every batch held keys from across the four chunks being read, so
+     the writers inserted into the same leaf pages: 161k rows/s. A probe of the sink alone, four
+     writers of 1,000-row batches: runs of consecutive keys 240k rows/s, the same keys interleaved
+     across the writers 183k (-25%).
+  3. **A prepared statement a batch** (prepare, execute, close: two round trips and the server's
+     parse of 4,000 placeholders) against one text statement: +11% end to end (204k to 227k).
+  4. Left as they are, measured: `ON DUPLICATE KEY UPDATE` costs the server about 8% against a
+     plain INSERT (DataX's `insert` mode), and the batch's START TRANSACTION and COMMIT about 3%.
+  5. **Writers waiting out `max_wait` with the queue full**, seen once the writers followed the
+     readers: in `bench/sync/run.sh` fit then ran at 98k-104k rows/s on 0.21-0.25 cores, both
+     servers' process lists showing every connection asleep for seconds. The queue (10,000 records)
+     frees room only from its oldest record on; when a reader fell behind (each chunk opens a
+     connection and reads the table's definition), its writer held fewer than 1,000 records, the
+     oldest among them, and waited the batch's `max_wait` (1s) for more that the full queue could
+     not let in, while the other writers had written all theirs.
+
+  Fixed, with tests: the mysql sink is a `ParallelSink`, its per-connection state a `writer`, the
+  first for a stream and spare ones for a job's writers, each on a connection of its own; a job's
+  records go to the writer of the chunk reader that read them (`Record.lane`, in package `sync`;
+  any other record by its key's hash as before), so a writer's batches are runs of one chunk's keys,
+  as DataX's channels write; the sink's rows go as text statements (`mysqlwire.InsertRowsText`,
+  which the sink's connection uses for every `InsertRows`), each value written as a literal standing
+  for the parameter InsertRows would send; while the source waits for room in the queue, the
+  writer holding the oldest record writes its batch without waiting for it to fill (package
+  `sync`, `run.waiting`; any pipeline, one writer or several); and the snapshot's rows and the
+  sink's statements cost less CPU (no column definition copied a value, one slice fewer a row,
+  columns preallocated, a table for the escapes). Locally (Docker Desktop's numbers are only
+  indicative), `fit sync run --once` alternating with the code before (2M rows, the last two of
+  three rounds; before the queue fix): 120k and 131k rows/s before, 212k and 232k after.
+  `RECORDS=2000000 bench/sync/run.sh -n 2 mysql-batch` with everything: fit 214k and 240k rows/s
+  on 0.47 and 0.54 cores (57 MiB), DataX 230k and 224k on 0.50 and 0.46 (443 MiB); the same run
+  before the queue fix had fit at 104k and 93k.
+  `BenchmarkInsertRowsText` against `BenchmarkInsertRowsPrepared` (a 1,000-row batch of sysbench's
+  shape, a fake server that answers OK): 13 allocations a batch against 24,032.
+
+  **Decisions pending review** (2026-11-09):
+  1. **Text statements with literals, not prepared statements cached per connection.** Caching
+     would save the prepare's round trip and parse too, but leaves statements open on the server
+     (one per batch width, each holding the server's memory, bounded by
+     `max_prepared_stmt_count` for every client) and needs the cache's eviction and a statement
+     lost on reconnect handled; text needs neither, keeps the client's promise that it leaves no
+     statement open, and is what JDBC's `rewriteBatchedStatements` sends for DataX. Every value is
+     written as the parameter means it: integers as numbers, floats in their shortest form with an
+     exponent (a DOUBLE, as the binary protocol sends them; `0.1` alone would be a DECIMAL),
+     strings, bytes and JSON as quoted strings of the connection's character set (as the binary
+     protocol sends all three; a `_binary` string, which go-sql-driver writes for bytes, is refused
+     by a JSON column, 3144), times as DATETIME text as long as the binary form, durations as TIME
+     text; quotes escaped as the session's `sql_mode` reads them (`NO_BACKSLASH_ESCAPES` from the
+     server's status flag 0x0200). Escaping byte by byte is exact only in character sets that never
+     hide `'`, `"` or `\` in a multi-byte character: utf8mb4 (the client's), utf8mb3, latin1, ascii
+     and binary; a connection of another collation (GBK, Big5, SJIS, ...) is sent parameters, as
+     before. `TestMySQLTextInsertsMatchPrepared` (test/sync) writes every column type, the rows of
+     extremes, nulls and zeros, a 17 MiB LONGBLOB, every byte value and every escaped character,
+     both ways, under `''`, `NO_BACKSLASH_ESCAPES` and strict modes, into MySQL 5.7, 8.0 and 8.4
+     and MariaDB 10.11 and 11: the tables read back byte for byte the same.
+  2. **The sink's writers**: the first writer is the stream's, so a stream's transaction held open
+     across batches is untouched; a job's spare writers are made as Writes overlap and closed by
+     Cleanup. A job's records have no source transactions, so each Write commits what it writes and
+     no writer holds a transaction into the next. With `checkpoint sink` in a job each writer
+     writes the job's position to the same row; a job uses its local file alone (I191), so that row
+     is informational there.
+  3. **Lanes by chunk reader** in package `sync` (a shared change, decision 036 item 2 updated): a
+     key read once goes to one writer; a transform that makes records of one key from rows of two
+     chunks gets them written by two writers, which two chunks read in parallel never ordered
+     anyway.
+  4. **A batch written unfilled while the source waits for room**, by the writer holding the
+     oldest record only, so that the others keep their batches full; it applies to streams too (a
+     `queue` smaller than a sink's `batch.max_records` no longer waits `max_wait` each time).
+     Alternative: a queue per writer.
+  5. **Not done**: a batch of one statement written without START TRANSACTION and COMMIT (two
+     round trips, about 3% locally; the sink's transaction rules and its tests would need a path of
+     their own); `ON DUPLICATE KEY UPDATE` kept for its idempotence (a job resumed writes its
+     chunk's rows again); the source's paging (1,000 rows a query in a consistent-snapshot
+     transaction of its own, rows copied twice) stays, never the bound here.
 - To re-run on the host: `s3-mysql-kafka` (the Debezium encoder), `s2-mysql-es` (Canal) and
-  `s5-mysql-batch` (fit's fixes); the other items stand. The lag columns are filled for every stream and files item, and the batch has none, as
+  `s5-mysql-batch` (fit's fixes, now with the parallel writers, text statements and the queue's
+  flush); the other items stand (a stream's one writer always holds the oldest record, and its
+  queue of 10,000 records always fills a 1,000-record batch, so the flush does not change them). The lag columns are filled for every stream and files item, and the batch has none, as
   designed.
 
 ### I194 Sync's documentation and examples

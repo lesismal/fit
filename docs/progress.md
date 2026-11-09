@@ -5830,6 +5830,32 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I165b section, pending review; no Rust example in
   fit-examples (its CI builds Go only).
 
+### I193 The MySQL batch copy (S5): parallel writers, text statements — done
+
+- **Why fit waited** (host: 122k rows/s on 0.47 cores, DataX 220k on 0.59): the mysql sink had one
+  writer for a job's four readers; parallel writers by key hash then contended for the same B-tree
+  pages; a prepared statement a batch cost two round trips and a parse; and, once writers followed
+  readers, a writer holding the queue's oldest record waited out `max_wait` with the queue full.
+  The source was never the bound (1.41M rows/s alone).
+- **Fixed**: the mysql sink is a `ParallelSink` (a `writer` per connection, the first a stream's);
+  a job's records go to the writer of their chunk's reader (`Record.lane`); the writer holding the
+  oldest record writes unfilled while the source waits for room (`run.waiting`); rows go as text
+  statements, `mysqlwire.InsertRowsText`, values as literals (UTF-8-safe character sets only,
+  escaped per `NO_BACKSLASH_ESCAPES`); less CPU in the snapshot's rows and the sink's statements.
+  Decision 036 item 2 updated.
+- **Results** (Docker Desktop, indicative): `bench/sync/run.sh -n 2 mysql-batch` at 2M rows, fit
+  214k and 240k rows/s on 0.47 and 0.54 cores, DataX 230k and 224k on 0.50 and 0.46; the code
+  before, alone, 120k-131k.
+- **Tests**: `TestJobLanesByReader`, `TestQueueFullWritesHead`, `TestParallelWriters`, literal and
+  escaping tests with a round-trip property, `TestInsertRowsText*`; the fake's transactions no
+  longer undo one another's commits. Interop: `test/sync/mysql.sh -race` (MySQL 5.7, 8.0, 8.4,
+  MariaDB 10.11, 11, TiDB) passing, with `TestMySQLTextInsertsMatchPrepared` (every column type,
+  both ways, four sql_modes, byte for byte). Without containers: sync 95.6%, mysql 96.7%, wire
+  97.1%.
+- **Gaps**: the host's re-run; decisions pending review in the plan's I193 section (text over cached
+  statements, lanes by reader, the queue's flush; single-statement batches without a transaction
+  and the source's paging not done).
+
 ### I192 fixes: a source's start saved, ClickHouse's snapshot versions — done
 
 - **A source of a snapshot then a stream no longer loses changes when killed before its first

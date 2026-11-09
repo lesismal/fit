@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -195,6 +196,65 @@ func TestBatchTransactions(t *testing.T) {
 	want(t, d, "t", "id=1,v=a", "id=2,v=b", "id=3,v=b", "id=4,v=c", "id=5,v=c")
 	if n := strings.Count(strings.Join(d.statements(), "\n"), "COMMIT"); n != 2 {
 		t.Errorf("%d commits", n)
+	}
+}
+
+// TestParallelWriters writes a job's batches from several goroutines at
+// once, as a job's writers do: each Write on a connection of its own, the
+// spare ones kept for the next, every row written, and Cleanup closing
+// them all.
+func TestParallelWriters(t *testing.T) {
+	var _ fitsync.ParallelSink = (*Sink)(nil)
+	for _, mode := range []string{"source", "batch"} {
+		t.Run(mode, func(t *testing.T) {
+			d := newFakeDB(map[string][]string{"t": {"id"}})
+			s := fakeSink(t, d, map[string]any{"transactions": mode})
+			const writers, batches, size = 4, 25, 20
+			var wg sync.WaitGroup
+			errs := make(chan error, writers)
+			for w := range writers {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for b := range batches {
+						var batch []*fitsync.Record
+						for i := range size {
+							batch = append(batch, rec("t", fitsync.OpInsert, int64((w*batches+b)*size+i), "v"))
+						}
+						if err := s.Write(ctxT(t), batch); err != nil {
+							errs <- err
+							return
+						}
+					}
+				}()
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				t.Fatal(err)
+			}
+			if n := len(d.rows("t")); n != writers*batches*size {
+				t.Fatalf("%d rows", n)
+			}
+			if d.dials < 1 || d.dials > writers {
+				t.Fatalf("%d dials", d.dials)
+			}
+			st := strings.Join(d.statements(), "\n")
+			if n := strings.Count(st, "COMMIT"); n != writers*batches {
+				t.Errorf("%d commits", n)
+			}
+			s.Cleanup()
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			for i, c := range d.conns {
+				if !c.closed {
+					t.Errorf("connection %d left open", i)
+				}
+			}
+			if len(s.spare) != 0 || s.busy {
+				t.Errorf("%d spare writers, busy %v", len(s.spare), s.busy)
+			}
+		})
 	}
 }
 
@@ -568,6 +628,12 @@ func TestDialAndTest(t *testing.T) {
 	if err := s.connect(ctxT(t)); err != nil {
 		t.Fatal(err)
 	}
+	// Rows go through the client's text inserts, which ask the server's
+	// max_allowed_packet first: this server answers OK, not a row.
+	if _, err := s.conn.InsertRows(ctxT(t), "INSERT INTO t (a) VALUES", [][]any{{1}}, ""); err == nil || !strings.Contains(err.Error(), "max_allowed_packet") {
+		t.Fatal(err)
+	}
+	s.ParallelWrites()
 	// Nothing listening.
 	s = loadSink(t, map[string]any{"username": "u", "address": "127.0.0.1:1"})
 	if err := s.Test(ctxT(t)); err == nil {

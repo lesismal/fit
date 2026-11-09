@@ -4148,6 +4148,24 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   即可运行。
 - **不足**：计划 I165b 一节中的决策，待审查；fit-examples 中没有 Rust 示例（其 CI 只构建 Go）。
 
+### I193 MySQL 批量复制（S5）：并行写入者、文本语句 — 已完成
+
+- **fit 为何在等待**（主机：0.47 核 12.2 万行/秒，DataX 0.59 核 22 万）：作业的四个读块者只对应 mysql 目标的一个写入者；
+  按键哈希的并行写入者又争用同样的 B 树页；每批一条预备语句要两次往返和一次解析；写入者跟随读块者之后，持有队列最旧记录的
+  写入者在队列满时干等 `max_wait`。源从来不是瓶颈（单独 141 万行/秒）。
+- **已修复**：mysql 目标成为 `ParallelSink`（每个连接一个 `writer`，第一个属于流）；作业的记录交给其块的读块者对应的写入者
+  （`Record.lane`）；源等待空间时持有最旧记录的写入者不等批满就写（`run.waiting`）；行以文本语句发送，
+  `mysqlwire.InsertRowsText`，值为字面量（仅限 UTF-8 等安全字符集，按 `NO_BACKSLASH_ESCAPES` 转义）；快照的行与目标的
+  语句花更少的 CPU。已更新决定 036 第 2 条。
+- **结果**（Docker Desktop，仅供参考）：`bench/sync/run.sh -n 2 mysql-batch` 200 万行，fit 21.4 万、24.0 万行/秒，
+  0.47、0.54 核；DataX 23.0 万、22.4 万，0.50、0.46 核；修改前的代码单独运行 12.0 万到 13.1 万。
+- **测试**：`TestJobLanesByReader`、`TestQueueFullWritesHead`、`TestParallelWriters`，字面量与转义测试（含往返性质测试），
+  `TestInsertRowsText*`；假服务器的事务不再撤销彼此的提交。互通：`test/sync/mysql.sh -race`（MySQL 5.7、8.0、8.4，
+  MariaDB 10.11、11，TiDB）通过，含 `TestMySQLTextInsertsMatchPrepared`（每种列类型，两种方式，四种 sql_mode，逐字节相同）。
+  不开容器：sync 95.6%，mysql 96.7%，wire 97.1%。
+- **缺口**：主机上的重跑；待评审的决定见计划的 I193 一节（文本而非缓存语句、按读块者分道、队列满时写出；未做无事务的单语句批
+  与源的分页）。
+
 ### I192 的修复：保存源的起点、ClickHouse 快照行的版本 — 已完成
 
 - **先快照后流的源在第一个检查点之前被杀不再丢变更**（I192 的决定 5）：`fitsync.Run.SaveStart`，没有检查点的源用它在第一条
