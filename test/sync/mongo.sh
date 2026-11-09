@@ -9,9 +9,10 @@
 # member on a port that is the same inside and out (a replica set's
 # members are known by their host:port, which the client must reach),
 # with keyfile authentication, a root user fit, and TLS preferred (with a
-# CA of its own; connections without TLS are taken too).
+# CA of its own; connections without TLS are taken too). MONGO_VERSIONS
+# (6 7 8) picks the versions.
 
-MONGO_VERSIONS="6 7 8"
+MONGO_VERSIONS=${MONGO_VERSIONS:-6 7 8}
 MONGO_PASSWORD=${MONGO_PASSWORD:-'Fit-sync-1nterop!'}
 
 # make_mongo_certs dir: a CA and a server certificate for localhost and

@@ -4132,6 +4132,25 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I192 互通与恢复矩阵 — 已完成
+
+- **`TestMatrix`**（`test/sync/matrix_test.go`）：每个源（PostgreSQL、MySQL 和 MariaDB、MongoDB、经 TiCDC 的 TiDB、Kafka 中的
+  Debezium 事件）经一条流水线同时写入六个目标（PostgreSQL 17、MySQL 8.4、MongoDB 8、Elasticsearch、ClickHouse、Redis 键）：先填
+  一张表（快照），再在流水线于随机崩溃点被杀的同时写入插入、更新、删除、改键、NULL 和事务组成的混合负载，最后每个目标逐行与源
+  比较，列出缺少、多出或不同的行。`FIT_SYNC_MATRIX=full` 让每个源在同类的每个服务器上以更大的负载运行；`FIT_SYNC_MATRIX_SOURCES`
+  选择源。
+- **CI 按族划分**：`test/sync/run.sh` 接受 `SYNC_FAMILIES`（search、mysql、postgres、mongo、kafka、tidb、matrix），每族只启动自己的
+  服务器、只运行自己的测试，`SYNC_PREFIX` 和端口变量用于第二套，`SYNC_TIMEOUT`；`sync-interop` 是七个并行任务，各有 go test 超时
+  和任务时限；`sync-matrix.yml` 每晚完整运行矩阵，每个源族一个任务。`kafka.sh` 增加 `REDPANDA=0`，`mongo.sh` 增加 `MONGO_VERSIONS`；
+  `tidb.sh` 给 TiKV 它检查的打开文件数（CI 运行 42504979157 中 “TiDB or TiCDC did not start” 的原因），并重启因此放弃的 TiDB 和 TiCDC。
+- **发现**：先快照后流的源（PostgreSQL、MySQL、MongoDB）在第一个检查点之前被杀，会丢掉两次运行之间的变更，把已删除的行留在
+  目标中；ClickHouse 默认的版本（提交时间）敌不过重读的快照行。矩阵绕开了这两点，并说明如何看到第一点（`FIT_SYNC_MATRIX_EARLY=1`）。
+- **文档**：`docs/sync.md` 的互操作一节（两种语言）描述了这些任务及本地运行方式。
+- **测试**：在 macOS（Docker Desktop，14 CPU）上依次运行每族，为本次运行创建并删除 `fit-mx-*` 容器，全部通过：search 80 秒、
+  mysql 277 秒、postgres 31 秒、mongo 91 秒、kafka 66 秒、tidb 208 秒、matrix 91 秒（从头到尾，镜像已拉取）；矩阵另连续运行三次，
+  15 个子测试通过 14 个，失败的一个是 MongoDB 副本集 30 秒无应答。
+- **缺口**：计划 I192 一节中的决定，待审查：上述两项发现留给各源和 ClickHouse 的条目；CI 中的时间未测（这些任务尚未在 CI 运行）。
+
 ### I185 Kafka 作为源与目标；经 TiCDC 的 TiDB — 已完成
 
 - **包 `sync/kafka`**（`synckafka`），基于 I184 的客户端：源 `kafka`，从检查点中的 offset 读取各 topic 的所有分区（不用消费组），
