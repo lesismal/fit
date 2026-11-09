@@ -4250,6 +4250,44 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   1,000 行单元测试和 300 行互通测试；没有 I176b。
 - **遗留**：计划中 I176 一节的决定，待评审。`ddl: "stop"` 只有在 `on_error: "stop"` 时才停止流水线；超过
   `max_transaction_bytes` 的源事务，或有记录被拒的源事务，会部分提交；作业没有并行写入者。
+### I174 MySQL 与 MariaDB 作为源 — 已完成
+
+- **源 `mysql`**，在 `sync/mysql`（`source*.go`）中，与目标一同注册：以副本身份（带 `server_id` 的 `COM_REGISTER_SLAVE`）从
+  检查点按 GTID（MySQL 且 `gtid_mode = ON` 时用 `COM_BINLOG_DUMP_GTID`，MariaDB 用 `@slave_connect_state`）或按文件与偏移读取
+  binlog，否则从服务器当前位置开始；检查 `binlog_format`、`binlog_row_image` 和 `log_bin`。行变成 `db.table` 的记录，键为主键
+  （或 `keys`），键改变写成 delete 加 insert；列名、有无符号、是否二进制和枚举值取自表映射的元数据或 `information_schema`
+  （保留到下一个 DDL）；DDL 作为 `ddl` 记录；事务带 GTID 整体交出，位置 `{"gtids", "file", "pos"}` 放在每个事务的最后一条记录
+  上；读取 payload；`tables`/`exclude` 通配。流中断后从最后交出的事务重连，跳过中断事务中已交出的记录；错误 1236 要求重新
+  快照。心跳（`heartbeat`，10s）和超出位置的 binlog 字节数（`SHOW BINARY LOGS`）作为 I189 的延迟。作业读到 binlog 末尾（非阻塞
+  dump）。**测试连接**（`fitsync.Tester`）检查 binlog 的设置。
+- **`mysqlwire`**：为副本命令新增 `Conn.Command`、`StartBinlog` 和 `ReadEvent`。
+- **文档**：schema 与参考（章节 `sync_sources_mysql.md`）、模板、`schema-zh.js`、配置文档的 sync 行。
+- **测试**：基于流式发送构造事件的伪连接的单元测试（不用容器时包覆盖率 96.5%，`mysqlwire` 96.7%）：GTID 集合的解析、合并与
+  编码，MariaDB 位置，源处理的每种事件，`information_schema` 补全及其错误，事务中间的重连，dump 命令，每种起始位置，每种拒绝，
+  延迟。互通（`test/sync/mysql_source_test.go`）覆盖 MySQL 5.7、8.0、8.4 与 MariaDB 10.11、11：跨表变更、流中途的 DDL、从检查点
+  重启、真实清除 binlog 后要求快照，以及经目标 `mysql` 的 MySQL 到 MySQL 流水线在随机位置被杀、服务器在其运行中重启，最终
+  校验和相同；`test/sync/mysql.sh` 用自己的容器（`MYSQL_PREFIX=fit-i174`）单独运行通过。未在 Linux 上运行，也未运行完整测试
+  （留给合并时）。
+- **与计划的差异**：延迟以字节计，来自 `SHOW BINARY LOGS`，而不只来自心跳（心跳只说明源已追上）。约 1,430 行代码、1,240 行
+  单元测试和 420 行互通测试；不需要 I174b。
+- **缺口**：计划中 I174 一节的决定，待评审。带标签的 GTID 集合按文件与偏移续读；冷门表的检查点不随服务器的其他事务移动；
+  表变更前写下的事件按表的当前结构命名。
+
+### I175 MySQL 快照及其到 binlog 的交接 — 已完成
+
+- **源 `mysql` 的快照**：`snapshot` 为 `initial`（默认）、`always` 或 `never`；先不加锁读取 binlog 位置，再按键分页读每张表，
+  每页 `batch_size` 行，各在一个带一致性快照的 `REPEATABLE READ` 事务中，值按 binlog 的方式定型；之后从先读到的位置跟随流，
+  快照期间的变更得以收敛。每条记录携带起点及读到的表和键，最后一条只携带起点。没有主键的表，除非 `keys` 指定，否则拒绝。
+  作业的快照（I167 的 `Chunker`）把每张表按键分成每块 `chunk_rows` 行的范围，各在自己的连接上读取。
+- **文档**：schema 章节，`schema-zh.js` 中的三个参数，配置文档的 sync 行。
+- **测试**：基于伪连接的单元测试（分页、交接时的 dump、从表中间继续、`always`、`never`、块及其边界、客户端的每种值类型、每种
+  错误）。五个服务器上的互通：一张 3,000 行的表在快照期间被写入，经目标 `mysql` 跨越随机的杀进程，最终校验和相同；一个按
+  300 行分块的作业被杀后重启完成，结果相同。`test/sync/mysql.sh` 用自己的容器单独运行。未在 Linux 上运行，也未运行完整测试
+  （留给合并时）。
+- **与计划的差异**：每页一个一致性快照事务，而不是整个快照一个；中断的快照从最后保存的键之后继续，而不是从下一个块（作业按块
+  续读）。约 530 行代码、380 行单元测试和 150 行互通测试；不需要 I175b。
+- **缺口**：计划中 I175 一节的决定，待评审。没有行的快照不保存检查点；`always` 在源每次重启后都重读快照。
+
 ### I177 PostgreSQL 客户端：连接、认证与查询 — 已完成
 
 - **包 `sync/postgres/wire`**（`pgwire`），基于 `net.Conn` 与 `crypto/tls` 的阻塞客户端，不引入驱动：以 `SSLRequest` 和

@@ -5984,6 +5984,62 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I176 section, pending review. `ddl: "stop"` stops the pipeline
   only with `on_error: "stop"`; a source transaction past `max_transaction_bytes`, or one with a
   record refused, is committed in part; no parallel writers for jobs.
+### I174 MySQL and MariaDB as a source — done
+
+- **The source `mysql`** in `sync/mysql` (`source*.go`), registered with the sink: a replica
+  (`COM_REGISTER_SLAVE` with `server_id`) reading the binlog from the checkpoint by GTIDs
+  (`COM_BINLOG_DUMP_GTID` on MySQL with `gtid_mode = ON`, `@slave_connect_state` on MariaDB) or by
+  file and offset, else from the server's position now; `binlog_format`, `binlog_row_image` and
+  `log_bin` checked. Rows to records of `db.table` with the primary key (or `keys`), a key change as a
+  delete and an insert; column names, signedness, binary or not and enum values from the table map's
+  metadata or `information_schema` (kept until a DDL); DDL as `ddl` records; transactions whole with
+  their GTID, the position `{"gtids", "file", "pos"}` on each one's last record; payloads read;
+  `tables`/`exclude` globs. A stream cut reconnects from the last transaction handed on, passing over
+  the records of a cut transaction handed on already; error 1236 asks for a new snapshot. Heartbeats
+  (`heartbeat`, 10s) and the binlog bytes past the position (`SHOW BINARY LOGS`) as I189's lag. A job
+  reads to the binlog's end (a non-blocking dump). **Test connection** (`fitsync.Tester`) checks the
+  binlog's settings.
+- **`mysqlwire`**: `Conn.Command`, `StartBinlog` and `ReadEvent` for the replica's commands.
+- **Docs**: the schema and reference (chapter `sync_sources_mysql.md`), templates, `schema-zh.js`, the
+  configuration's sync row.
+- **Tests**: unit tests against a fake connection streaming built events (the package 96.5% of
+  statements without containers, `mysqlwire` 96.7%): GTID sets parsed, merged and encoded, MariaDB
+  positions, every event the source handles, `information_schema` completion and its errors, a
+  reconnect inside a transaction, the dump commands, every start position, every refusal, the lag.
+  Interop (`test/sync/mysql_source_test.go`) on MySQL 5.7, 8.0 and 8.4 and MariaDB 10.11 and 11:
+  changes across tables, a DDL mid-stream, a restart from a checkpoint, a real purge asking for a
+  snapshot, and a MySQL-to-MySQL pipeline through the sink `mysql` killed at random points with the
+  server restarted under it, ending equal by checksum; `test/sync/mysql.sh` alone with its own
+  containers (`MYSQL_PREFIX=fit-i174`). Not run on Linux nor in the full suite (the merge's).
+- **Differs from the plan**: lag is in bytes from `SHOW BINARY LOGS`, not from heartbeats alone, which
+  say only that the source is caught up. About 1,430 lines of code, 1,240 of unit tests and 420 of
+  interop; no I174b.
+- **Gaps**: the decisions in the plan's I174 section, pending review. Tagged GTID sets resume by file
+  and offset; a quiet table's checkpoint does not move with the server's other transactions; names
+  of events written before a table changed follow the table as it is now.
+
+### I175 The MySQL snapshot and its hand-over to the binlog — done
+
+- **The source `mysql`'s snapshot**: `snapshot` `initial` (the default), `always` or `never`; the
+  binlog's position read first, without locks, then each table by its key in pages of `batch_size`
+  rows, each in a `REPEATABLE READ` transaction with a consistent snapshot, its values typed as the
+  binlog's; the stream then from the position read first, so changes during the snapshot converge.
+  Every record carries the start and the table and key read up to; the last the start alone. Tables
+  without a primary key refused unless `keys` names one. A job's snapshot (I167's `Chunker`) split
+  into ranges of `chunk_rows` rows of each table's key, read on connections of their own.
+- **Docs**: the schema chapter, the three params in `schema-zh.js`, the configuration's sync row.
+- **Tests**: unit tests against the fake (pages, the hand-over's dump, a resume inside a table,
+  `always`, `never`, the chunks and their bounds, every value type from the client, every error).
+  Interop on the five servers: a table of 3,000 rows written to during its snapshot, through the sink
+  `mysql` across random kills, ending equal by checksum; a job in chunks of 300 rows killed and
+  finished on its restart, equal. `test/sync/mysql.sh` alone with its own containers. Not run on
+  Linux nor in the full suite (the merge's).
+- **Differs from the plan**: one consistent-snapshot transaction a page, not one for the snapshot; an
+  interrupted snapshot resumes after its last key saved, not at its next chunk (a job resumes by
+  chunk). About 530 lines of code, 380 of unit tests and 150 of interop; no I175b.
+- **Gaps**: the decisions in the plan's I175 section, pending review. A snapshot with no rows saves no
+  checkpoint; `always` reads a new snapshot after every restart of the source.
+
 ### I177 A PostgreSQL client: connections, authentication and queries — done
 
 - **Package `sync/postgres/wire`** (`pgwire`), a blocking client on `net.Conn` and `crypto/tls`
