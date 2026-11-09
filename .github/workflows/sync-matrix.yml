@@ -1,0 +1,42 @@
+# Sync's interoperability and recovery matrix (I192), whole, nightly: each
+# source on every server of its kind (PostgreSQL 13 to 17, MySQL 5.7, 8.0,
+# 8.4 and MariaDB 10.11, 11, MongoDB 6, 7 and 8, TiDB through TiCDC, Kafka
+# and Redpanda), with a larger load and more
+# kills, into the fixed sinks (PostgreSQL 17, MySQL 8.4, MongoDB 8,
+# Elasticsearch, ClickHouse, Redis). A job per source family, each
+# starting only the servers it needs. CI (ci.yml, sync-interop's matrix)
+# runs one server of each on every push.
+name: Sync matrix
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: Sync matrix (${{ matrix.source }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {source: postgres, servers: "search mysql postgres mongo", env: "PG_VERSIONS='13 14 15 16 17'"}
+          - {source: mysql, servers: "search mysql postgres mongo", env: "MYSQL_SERVERS='mysql57 mysql80 mysql84 mariadb1011 mariadb11'"}
+          - {source: mongo, servers: "search mysql postgres mongo", env: "MONGO_VERSIONS='6 7 8'"}
+          - {source: tidb, servers: "search mysql postgres mongo tidb", env: ""}
+          - {source: kafka, servers: "search mysql postgres mongo kafka", env: "REDPANDA=1"}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: test/sync/run.sh
+        run: |
+          eval "export ${{ matrix.env }}"
+          SYNC_FAMILIES=matrix MATRIX_SERVERS="${{ matrix.servers }}" FIT_SYNC_MATRIX=full \
+            FIT_SYNC_MATRIX_SOURCES=${{ matrix.source }} SYNC_TIMEOUT=90m test/sync/run.sh -v

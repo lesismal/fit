@@ -877,10 +877,37 @@ WAL，MySQL 会保留 binlog，所以请关注 `fit_sync_source_lag` 和 `lag_wa
 ## 互操作
 
 `test/sync/run.sh` 在 Docker 中启动这些服务器，并针对它们运行连接器的互操作测试：Elasticsearch 8 和 OpenSearch 2、
-ClickHouse、MySQL 5.7、8.0 和 8.4、MariaDB 10.11 和 11、TiDB、PostgreSQL 13 到 17、MongoDB 6、7 和 8、Kafka 3.9 和
-Redpanda、Redis 7 和 Valkey 8、MinIO；CI 在每次推送时运行它。每个测试在随机时刻杀掉流水线，并在最后把目标与源比较；
-`test/sync/exactly_once_test.go` 统计写入的每一行，以检查恰好一次。
+ClickHouse 25.8、MySQL 5.7、8.0 和 8.4、MariaDB 10.11 和 11、TiDB（单机，以及 PD、TiKV、TiDB 和 TiCDC 组成的集群）、
+PostgreSQL 13 到 17、MongoDB 6、7 和 8（副本集）、Kafka 3.9 和 Redpanda、Redis 7 和 Valkey 8、MinIO 和 SeaweedFS。每个测试
+在随机时刻杀掉流水线，并在最后把目标与源比较；`test/sync/exactly_once_test.go` 统计写入的每一行，以检查恰好一次。
 
-<!-- MERGE CHECK (I192): CI 中的互操作与恢复矩阵（每个连接器的服务器及版本组成的 Docker Compose 矩阵，每个源对一组固定的
-目标在混合负载和随机杀进程下运行，每次触及 sync/ 的推送都运行，每晚完整运行）与本项同时落地：按其合并后的形式（compose
-文件、测试名、CI 任务和定时）在此描述，并对照它检查上面的服务器列表。 -->
+**互操作与恢复矩阵**（`TestMatrix`，`test/sync/matrix_test.go`）让每个源同时写入一组固定的目标：PostgreSQL 17、MySQL 8.4、
+MongoDB 8、Elasticsearch、ClickHouse（按行中一列做版本的 `ReplacingMergeTree`，删除用 `DELETE`）和 Redis（每行一个键）。
+源有 PostgreSQL、MySQL 和 MariaDB、MongoDB、经 TiCDC 的 TiDB，以及 Kafka 中的 Debezium 事件。每个源先有一张表的行（它的
+快照），然后写入插入、更新、删除、改键、NULL 和多变更事务组成的混合负载，同时流水线在随机的崩溃点被一次次杀掉；最后每个
+目标都必须逐行与源相同，否则测试列出每个目标中缺少、多出或不同的行。
+
+服务器按族划分，每族是 CI 中一个单独的任务，并行运行（`SYNC_FAMILIES`）：
+
+| 任务 | 服务器 | 测试 |
+| --- | --- | --- |
+| `search` | Elasticsearch、OpenSearch、ClickHouse、Redis、Valkey、MinIO、SeaweedFS | `TestElasticsearch*`、`TestClickHouse*`、`TestRedis*`、`TestS3*` |
+| `mysql` | MySQL 5.7、8.0、8.4，MariaDB 10.11、11，单机 TiDB | `TestMySQL*` |
+| `postgres` | PostgreSQL 13 到 17 | `TestPostgres*` |
+| `mongo` | MongoDB 6、7 和 8 | `TestMongo*` |
+| `kafka` | Kafka（三个 broker）、Redpanda | `TestKafka*` |
+| `tidb` | PD、TiKV、TiDB、TiCDC，在 Kafka 上；PostgreSQL 17 | `TestTiDB*` |
+| `matrix` | 每种一个：PostgreSQL 17、MySQL 8.4、MongoDB 8、Elasticsearch、ClickHouse、Redis、Kafka、带 TiCDC 的 TiDB | `TestMatrix`，每个源一次 |
+
+工作流 `sync-matrix.yml` 每晚完整运行矩阵：每个源一个任务，在同类的每个服务器上运行（PostgreSQL 13 到 17、MySQL 5.7
+到 MariaDB 11、MongoDB 6 到 8、TiDB、Kafka 和 Redpanda），负载更大、杀得更多（`FIT_SYNC_MATRIX=full`）。在本地运行：
+
+```sh
+test/sync/run.sh -v                          # 所有族、所有测试，包括矩阵
+SYNC_FAMILIES=postgres test/sync/run.sh -v   # 一族
+SYNC_FAMILIES=matrix test/sync/run.sh -v     # 每种服务器一个的矩阵
+SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="13 14 15 16 17" \
+  FIT_SYNC_MATRIX=full FIT_SYNC_MATRIX_SOURCES=postgres test/sync/run.sh -v   # 每晚的一个任务
+```
+
+`SYNC_PREFIX` 和脚本列出的 `*_PORT` 变量可以在第一套旁边再运行一套；`KEEP=1` 保留容器供下次运行。

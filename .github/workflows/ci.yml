@@ -316,18 +316,41 @@ jobs:
   # write pool small enough to answer 429s (I168, I169), ClickHouse 25.8
   # (I170), MySQL 5.7, 8.0, 8.4 and MariaDB 10.11, 11 (I172), PostgreSQL 13 to
   # 17 with TLS, SCRAM and logical replication (I177), MongoDB 6, 7 and 8 as
-  # replica sets (I181), Kafka 3.9 and Redpanda (I184), Redis 7 and Valkey 8
-  # (I186), and MinIO and SeaweedFS (I187), and requires the interop tests to run rather than skip.
+  # replica sets (I181), Kafka 3.9 and Redpanda (I184), TiDB with TiCDC
+  # (I185), Redis 7 and Valkey 8 (I186), and MinIO and SeaweedFS (I187), and
+  # requires the interop tests to run rather than skip. One job per family
+  # of servers, each starting only its own (SYNC_FAMILIES), in parallel
+  # rather than every server on one 4-CPU runner; tidb is TiDB with TiCDC,
+  # on Kafka, with PostgreSQL 17;
+  # matrix is I192's interoperability and recovery matrix, each source into
+  # every sink through pipelines killed at random points, on one server of
+  # each kind (sync-matrix.yml runs it whole, nightly).
   sync-interop:
-    name: Sync interop (Elasticsearch, OpenSearch, ClickHouse, databases, Kafka, Redis, S3)
+    name: Sync interop (${{ matrix.family }})
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.minutes }}
+    strategy:
+      fail-fast: false
+      # go test's -timeout per family, about five times a local run's
+      # (2026-11-09, images pulled: search 80s, mysql 277s, postgres 31s,
+      # mongo 91s, kafka 66s, tidb 208s, matrix 91s), the job's limit
+      # past it for the pulls and the servers' start.
+      matrix:
+        include:
+          - {family: search, timeout: 15m, minutes: 30}
+          - {family: mysql, timeout: 30m, minutes: 45}
+          - {family: postgres, timeout: 15m, minutes: 30}
+          - {family: mongo, timeout: 15m, minutes: 30}
+          - {family: kafka, timeout: 15m, minutes: 30}
+          - {family: tidb, timeout: 25m, minutes: 45}
+          - {family: matrix, timeout: 20m, minutes: 40}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: test/sync/run.sh
-        run: test/sync/run.sh -v
+        run: SYNC_FAMILIES=${{ matrix.family }} SYNC_TIMEOUT=${{ matrix.timeout }} test/sync/run.sh -v
 
   # The container image with the Docker Compose example, and the systemd
   # units, each run as deploy/README.md and the examples' READMEs say (I66).

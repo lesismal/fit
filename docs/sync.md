@@ -986,13 +986,44 @@ before `sync_ingest`. The users a pipeline logs in as need only the rights in th
 ## Interop
 
 `test/sync/run.sh` starts the servers in Docker and runs the connectors' interop tests against them:
-Elasticsearch 8 and OpenSearch 2, ClickHouse, MySQL 5.7, 8.0 and 8.4, MariaDB 10.11 and 11, TiDB,
-PostgreSQL 13 to 17, MongoDB 6, 7 and 8, Kafka 3.9 and Redpanda, Redis 7 and Valkey 8, MinIO; CI runs
-it on every push. Each test kills its pipelines at random points and checks the sink against the
-source at the end; `test/sync/exactly_once_test.go` counts every row written, to check exactly once.
+Elasticsearch 8 and OpenSearch 2, ClickHouse 25.8, MySQL 5.7, 8.0 and 8.4, MariaDB 10.11 and 11, TiDB
+(standalone, and a cluster of PD, TiKV, TiDB and TiCDC), PostgreSQL 13 to 17, MongoDB 6, 7 and 8 (replica
+sets), Kafka 3.9 and Redpanda, Redis 7 and Valkey 8, MinIO and SeaweedFS. Each test kills its pipelines at
+random points and checks the sink against the source at the end; `test/sync/exactly_once_test.go`
+counts every row written, to check exactly once.
 
-<!-- MERGE CHECK (I192): the interop and recovery matrix in CI (a Docker Compose matrix of every
-connector's servers and versions, each source against a fixed set of sinks under a mixed load and
-random kills, on every push touching sync/ and nightly in full) lands concurrently: describe it here
-from its merged form (the compose file, the test's name, the CI job and schedule) and check the
-server list above against it. -->
+**The interoperability and recovery matrix** (`TestMatrix`, `test/sync/matrix_test.go`) runs each source
+into one fixed set of sinks at once: PostgreSQL 17, MySQL 8.4, MongoDB 8, Elasticsearch, ClickHouse
+(a `ReplacingMergeTree` versioned by a column of the row, deletes as `DELETE`s) and Redis (a key per
+row). The sources are PostgreSQL, MySQL and MariaDB, MongoDB, TiDB through TiCDC, and Debezium's events
+in Kafka. Each starts with a table of rows (its snapshot), then a mixed load of inserts, updates,
+deletes, key changes, NULLs and transactions of several changes is written while the pipeline is
+killed at random crash points again and again; at the end every sink must hold the source's rows,
+row for row, or the test names the rows missing, extra or different in each.
+
+Servers come in families, each a CI job of its own, run in parallel (`SYNC_FAMILIES`):
+
+| Job | Servers | Tests |
+| --- | --- | --- |
+| `search` | Elasticsearch, OpenSearch, ClickHouse, Redis, Valkey, MinIO, SeaweedFS | `TestElasticsearch*`, `TestClickHouse*`, `TestRedis*`, `TestS3*` |
+| `mysql` | MySQL 5.7, 8.0, 8.4, MariaDB 10.11, 11, TiDB standalone | `TestMySQL*` |
+| `postgres` | PostgreSQL 13 to 17 | `TestPostgres*` |
+| `mongo` | MongoDB 6, 7 and 8 | `TestMongo*` |
+| `kafka` | Kafka (three brokers), Redpanda | `TestKafka*` |
+| `tidb` | PD, TiKV, TiDB, TiCDC, on Kafka; PostgreSQL 17 | `TestTiDB*` |
+| `matrix` | one of each: PostgreSQL 17, MySQL 8.4, MongoDB 8, Elasticsearch, ClickHouse, Redis, Kafka, TiDB with TiCDC | `TestMatrix`, every source once |
+
+The workflow `sync-matrix.yml` runs the matrix whole every night, a job per source on every server of
+its kind (PostgreSQL 13 to 17, MySQL 5.7 to MariaDB 11, MongoDB 6 to 8, TiDB, Kafka and Redpanda),
+with a larger load and more kills (`FIT_SYNC_MATRIX=full`). To run them locally:
+
+```sh
+test/sync/run.sh -v                          # every family, every test, the matrix too
+SYNC_FAMILIES=postgres test/sync/run.sh -v   # one family
+SYNC_FAMILIES=matrix test/sync/run.sh -v     # the matrix on one server of each kind
+SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="13 14 15 16 17" \
+  FIT_SYNC_MATRIX=full FIT_SYNC_MATRIX_SOURCES=postgres test/sync/run.sh -v   # a nightly job
+```
+
+`SYNC_PREFIX` and the `*_PORT` variables the script lists run a second set beside the first; `KEEP=1`
+keeps the containers for the next run.

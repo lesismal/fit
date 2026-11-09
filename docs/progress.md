@@ -5810,6 +5810,34 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   pending review.
 
 
+### I192 The interoperability and recovery matrix — done
+
+- **`TestMatrix`** (`test/sync/matrix_test.go`): each source (PostgreSQL, MySQL and MariaDB, MongoDB,
+  TiDB through TiCDC, Debezium's events in Kafka) through one pipeline into six sinks at once
+  (PostgreSQL 17, MySQL 8.4, MongoDB 8, Elasticsearch, ClickHouse, Redis keys): a table filled first
+  (the snapshot), then a mixed load of inserts, updates, deletes, key changes, NULLs and transactions
+  while the pipeline is killed at random crash points, and every sink compared row for row with the
+  source at the end, the rows missing, extra or different named. `FIT_SYNC_MATRIX=full` runs each
+  source on every server of its kind with a larger load; `FIT_SYNC_MATRIX_SOURCES` picks sources.
+- **CI by family**: `test/sync/run.sh` takes `SYNC_FAMILIES` (search, mysql, postgres, mongo, kafka,
+  tidb, matrix), each starting only its servers and running only its tests, `SYNC_PREFIX` and the
+  ports for a second set, `SYNC_TIMEOUT`; `sync-interop` is seven parallel jobs with a go test
+  timeout and a job limit each; `sync-matrix.yml` runs the full matrix nightly, a job per source
+  family. `kafka.sh` gains `REDPANDA=0`, `mongo.sh` `MONGO_VERSIONS`; `tidb.sh` gives TiKV the open
+  files it checks for (the cause of CI run 42504979157's "TiDB or TiCDC did not start") and restarts
+  TiDB and TiCDC that gave up on it.
+- **Found**: a source of a snapshot and a stream (PostgreSQL, MySQL, MongoDB) killed before its first
+  checkpoint loses the changes between its two runs, leaving deleted rows in the sinks; ClickHouse's
+  default versions (commit times) lose to a snapshot's rows read again. The matrix works around both
+  and says how to see the first (`FIT_SYNC_MATRIX_EARLY=1`).
+- **Docs**: `docs/sync.md`'s Interop (both languages) describes the jobs and how to run them.
+- **Tests**: each family run one after another on macOS (Docker Desktop, 14 CPUs), containers
+  `fit-mx-*` made for the run and removed, every test passing: search 80 s, mysql 277 s, postgres 31 s,
+  mongo 91 s, kafka 66 s, tidb 208 s, matrix 91 s (start to end, images pulled); the matrix also
+  three times in a row, 14 of 15 passing, the one a MongoDB set that answered nothing for 30 s.
+- **Gaps**: the decisions in the plan's I192 section, pending review: the two findings above for
+  the sources' and ClickHouse's items; CI's times not measured (the jobs have not run there yet).
+
 ### I185 Kafka as a source and a sink; TiDB through TiCDC — done
 
 - **Package `sync/kafka`** (`synckafka`), on I184's client: the source `kafka`, every partition of
