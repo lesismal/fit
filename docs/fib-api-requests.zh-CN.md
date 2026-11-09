@@ -1959,6 +1959,8 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 **fit 如何使用。** 角色的事件处理（I197）和 SSE 流（I203）。
 
+**使用情况**（I209）：客户端角色设置 `Config.EventQueue`（取 fib 的默认值 4096，不可配置），把 `EventDropped` 计为 `fit_bittorrent_events_dropped_total`，并每秒一次以事件流的 `events_dropped` 告知。
+
 ## A81：以完整状态添加种子（seed 模式）
 
 **状态。** 2026-11-09 由 I202（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
@@ -1968,6 +1970,8 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 **建议的 API。** `AddOptions.Seed`：信任存储是完整的（如 libtorrent 的 seed 模式），每个 piece 首次上传时校验或报告哈希失败；或由 `Builder` 结果生成续传数据。
 
 **fit 如何使用。** 发布目录（I202）：发布的文件只哈希一次。
+
+**使用情况**（I209）：新生成的发布种子以 `AddOptions.Seed` 加入，加入时不读取数据（测试统计了存储读取）；之后保存的续传数据只以 `Resume` 传回。
 
 ## A82：Builder 只保留一个 piece 的叶子哈希，并可按 context 停止
 
@@ -1979,6 +1983,8 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 **fit 如何使用。** 发布（I202）：每次构建内存有界，配置变化时立即停止构建。
 
+**使用情况**（I209）：发布以条目的 context 调用 `BuildContext`；停止或配置变化在一兆字节之内结束构建（有测试），叶子折叠使内存有界，fit 无需改动。
+
 ## A83：Reader.Close 中断进行中的 Read
 
 **状态。** 2026-11-09 由 I200（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
@@ -1988,6 +1994,8 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 **建议的 API。** Close 取消进行中的读并立即返回。
 
 **fit 如何使用。** `bt_stream`（I200）关闭客户端已离开的 reader。
+
+**使用情况**（I209）：`bt_stream` 中没有可删的绕行：它从不在 `Read` 进行时关闭 reader（而是取消流的 context，这也结束其他等待并驱动 `read_timeout`）；注释已说明。
 
 ## A84：磁力链添加的 hybrid 种子的 piece layer
 
@@ -1999,6 +2007,8 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 **fit 如何使用。** 向 v2 对端做种由磁力链添加的 hybrid 种子。
 
+**使用情况**（I209）：经由客户端，fit 无需改动：磁力链添加的 hybrid 种子做种后可应答 v2 对端的哈希请求（fib 的测试覆盖，fit 未单独测试）。
+
 ## A85：tracker Store 可列出种子、可原地修改上限
 
 **状态。** 2026-11-09 由 I201（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
@@ -2009,6 +2019,8 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 **fit 如何使用。** 公开 tracker 的统计，以及保留 swarm 的重载（I201、I203）。
 
+**使用情况**（I209）：tracker 角色经 `Range` 按 info hash 列出公开 tracker 的种子（Admin API、控制台、页面，按 `offset` 或 `after` 翻页），并以 `SetConfig` 应用新的上限和 `peer_ttl`，保留 swarm。
+
 ## A86：做种方不宣告“下载完成”
 
 **状态。** 2026-11-09 由 I201（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
@@ -2018,6 +2030,8 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 **建议的 API。** 只在下载完成时宣告 `completed`，添加时就已完整的数据不宣告。
 
 **fit 如何使用。** fit 的 tracker 及其他 tracker 统计正确。
+
+**使用情况**（I209）：经由客户端，fit 无需改动：fit 的做种和发布的种子不再在 tracker 上被算作完成的下载（fib 的测试覆盖，fit 未单独测试）。
 
 ## A87：任务的 tracker 及其 announce 状态
 

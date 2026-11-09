@@ -2579,6 +2579,8 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 **How fit uses it.** The role's event handler (I197) and the SSE stream (I203).
 
+**Used** (I209): the client role sets `Config.EventQueue` (fib's default, 4096, not configurable), counts `EventDropped` as `fit_bittorrent_events_dropped_total` and publishes it once a second as the stream's `events_dropped`.
+
 ## A81: Adding a torrent as complete (seed mode)
 
 **Status.** Requested on 2026-11-09, from I202 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
@@ -2588,6 +2590,8 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 **Suggested API.** `AddOptions.Seed`: trust the storage as complete (libtorrent's seed mode), each piece verified when first served or a hash failure reported; or resume data made from a `Builder` result.
 
 **How fit uses it.** Publishing a directory (I202): a published file is hashed once.
+
+**Used** (I209): a newly built published torrent is added with `AddOptions.Seed`, reading no data at add (a test counts the storage reads); its resume data, saved afterwards, is passed back with `Resume` alone.
 
 ## A82: A Builder that keeps a piece's leaves, not a file's, and stops on a context
 
@@ -2599,6 +2603,8 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 **How fit uses it.** Publishing (I202): bounded memory per build, builds stopped at once on a config change.
 
+**Used** (I209): publishing builds with `BuildContext` on the entry's context; a stop or a config change ends a build within a megabyte (tested), and the leaf-folding bounds its memory with no change in fit.
+
 ## A83: Reader.Close interrupts a Read
 
 **Status.** Requested on 2026-11-09, from I200 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
@@ -2608,6 +2614,8 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 **Suggested API.** Close cancels the read in progress and returns at once.
 
 **How fit uses it.** `bt_stream` (I200) closing a reader whose client left.
+
+**Used** (I209): nothing to remove in `bt_stream`, which never closed a reader during a `Read` (it cancels the stream's context, which also ends its other waits and drives `read_timeout`); its comment says so.
 
 ## A84: Piece layers for a hybrid torrent added from a magnet link
 
@@ -2619,6 +2627,8 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 **How fit uses it.** Seeding hybrid torrents added by magnet link to v2 peers.
 
+**Used** (I209): through the client, with no change in fit: a hybrid torrent added by magnet link answers v2 peers' hash requests once seeding (fib's tests cover it; not tested in fit).
+
 ## A85: A tracker store that lists its torrents and changes its bounds in place
 
 **Status.** Requested on 2026-11-09, from I201 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
@@ -2629,6 +2639,8 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 **How fit uses it.** The tracker role's statistics for a public tracker and reloads that keep the swarms (I201, I203).
 
+**Used** (I209): the tracker role lists a public tracker's torrents by info hash through `Range` (Admin API, console, pages, paged by `offset` or `after`) and applies new bounds and `peer_ttl` with `SetConfig`, keeping the swarms.
+
 ## A86: A seed does not announce a completed download
 
 **Status.** Requested on 2026-11-09, from I201 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
@@ -2638,6 +2650,8 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 **Suggested API.** Announce `completed` only when a download finishes, never for data that was complete when added.
 
 **How fit uses it.** Correct statistics on fit's tracker and others.
+
+**Used** (I209): through the client, with no change in fit: fit's seeds and published torrents no longer count as completed downloads on trackers (fib's tests cover it; not tested in fit).
 
 ## A87: A torrent's trackers and their announces
 
