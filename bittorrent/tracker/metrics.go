@@ -31,6 +31,23 @@ func (r *Role) WriteMetrics(w observe.MetricWriter) {
 	for _, name := range refusalNames {
 		w.Sample("fit_bittorrent_tracker_refused_total", float64(st.Refused[name]), "reason", name)
 	}
+	if ss := st.Store; ss != nil {
+		up := 0.0
+		if ss.Reachable {
+			up = 1
+		}
+		gauge("fit_bittorrent_tracker_store_reachable", "1 while the tracker's shared store answers, 0 while the tracker answers from memory alone.", up)
+		gauge("fit_bittorrent_tracker_store_queued", "Announces waiting to be written to the tracker's shared store.", float64(ss.Queued))
+		gauge("fit_bittorrent_tracker_store_cached", "Torrents of which the tracker keeps a sample of the shared store's peers.", float64(ss.Cached))
+		counter := func(name, help string, v uint64) {
+			w.Family(name, "counter", help)
+			w.Sample(name, float64(v))
+		}
+		counter("fit_bittorrent_tracker_store_written_total", "Announces written to the tracker's shared store.", ss.Written)
+		counter("fit_bittorrent_tracker_store_dropped_total", "Announces not written to the tracker's shared store: past its queue, or expired while it could not be reached.", ss.Dropped)
+		counter("fit_bittorrent_tracker_store_refused_total", "Announces the shared store's bounds refused: answered, but not shared.", ss.Refused)
+		counter("fit_bittorrent_tracker_store_failed_total", "Announces the shared store answered with an error.", ss.Failed)
+	}
 }
 
 // The role's metrics go with fit's.

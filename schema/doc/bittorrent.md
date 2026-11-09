@@ -79,8 +79,12 @@ of the policy's tokens or a user's passkey (derived from the policy's secret and
 read on the console's `/api/passkey?user=`), whose grant must play `bittorrent/<info hash>`.
 With `allow` or `allow_files`, only the info hashes listed are tracked; the files are read again
 when they change. A reload changes the allow-list, `auth`, `access` and `console` in place; the
-interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms; the store's bounds and
-`peer_ttl` start them empty. See [decision 037](../decisions/037-bittorrent.md) and
+interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms, and so do the store's
+bounds and `peer_ttl`, changed in place. With a `store` block, the trackers of several instances
+share their swarms through Redis and answer as one: each answers from its own memory at once, and a
+goroutine of the store's own writes its announces to Redis and reads samples of the shared swarms
+every `refresh`, so an instance learns of another's peers within a refresh; while Redis cannot be
+reached it answers from memory. See [decision 037](../decisions/037-bittorrent.md) and
 [BitTorrent](../bittorrent.md).
 
 ```json

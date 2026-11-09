@@ -45,7 +45,7 @@ a config against it and more.
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
-- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits), [`bittorrent.client.categories[]`](#config-bittorrentcategory), [`bittorrent.client.categories[].limits`](#config-bittorrenttorrentlimits), [`bittorrent.client.alt_speed`](#config-bittorrentaltspeed), [`bittorrent.client.alt_speed.schedules[]`](#config-bittorrentschedule), [`bittorrent.client.publish[]`](#config-bittorrentpublish), [`bittorrent.tracker`](#config-bittorrenttracker)
+- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits), [`bittorrent.client.categories[]`](#config-bittorrentcategory), [`bittorrent.client.categories[].limits`](#config-bittorrenttorrentlimits), [`bittorrent.client.alt_speed`](#config-bittorrentaltspeed), [`bittorrent.client.alt_speed.schedules[]`](#config-bittorrentschedule), [`bittorrent.client.publish[]`](#config-bittorrentpublish), [`bittorrent.tracker`](#config-bittorrenttracker), [`bittorrent.tracker.store`](#config-bittorrenttrackerstore)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
@@ -1989,6 +1989,8 @@ In JSON:
 
 ### `acme.shared_storage.redis`
 
+Also at `bittorrent.tracker.store.redis`.
+
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string | `"127.0.0.1:6379"` | The server's host and port. 127.0.0.1:6379 when left out. |
@@ -3925,8 +3927,12 @@ of the policy's tokens or a user's passkey (derived from the policy's secret and
 read on the console's `/api/passkey?user=`), whose grant must play `bittorrent/<info hash>`.
 With `allow` or `allow_files`, only the info hashes listed are tracked; the files are read again
 when they change. A reload changes the allow-list, `auth`, `access` and `console` in place; the
-interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms; the store's bounds and
-`peer_ttl` start them empty. See [decision 037](../decisions/037-bittorrent.md) and
+interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms, and so do the store's
+bounds and `peer_ttl`, changed in place. With a `store` block, the trackers of several instances
+share their swarms through Redis and answer as one: each answers from its own memory at once, and a
+goroutine of the store's own writes its announces to Redis and reads samples of the shared swarms
+every `refresh`, so an instance learns of another's peers within a refresh; while Redis cannot be
+reached it answers from memory. See [decision 037](../decisions/037-bittorrent.md) and
 [BitTorrent](../bittorrent.md).
 
 In a .conf file:
@@ -4228,6 +4234,21 @@ In JSON:
 | `allow_files` | list of string |  | Files of more allowed info hashes: one on each line, as allow has them, with blank lines and what follows # left out. Read when the config is applied, and read again when one changes; each at most 64 MiB, and at most 1048576 info hashes in all. |
 | `access` | [object](#config-access) |  | The client addresses the tracker serves, deciding before the global access: a UDP datagram from an address it refuses is dropped before a connection is made, and an HTTP announce or scrape through bt_tracker from one is answered with a failure reason. A change applies at once. Every address when left out, unless the global access says otherwise. |
 | `console` | [object](#config-roleconsole) |  | The tracker's web pages: its statistics, read-only. None when left out. |
+| `store` | [object](#config-bittorrenttrackerstore) |  | A store of the swarms that the trackers of several fit instances share, so that they answer as one tracker: each keeps its own peers in memory, as without it, and shares them through the store, answering an announce with peers of every instance and a scrape with the counts of all. Each instance's swarms alone, in its memory, when left out. A change of it, or adding or removing it, makes a new store: this instance's swarms start anew in memory (clients announce again within their interval), the shared ones staying in the store. The bounds max_torrents, max_peers_per_torrent and max_peers apply to the shared store too, to all instances' peers together. |
+
+<a id="config-bittorrenttrackerstore"></a>
+
+### `bittorrent.tracker.store`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `redis` | [object](#config-redisstorage) |  | Share the swarms through Redis 6.2 or later (or Valkey), a standalone server or a primary (not Redis Cluster), with Lua scripts, each announce one script run, on Redis's clock. Its maxmemory-policy must not evict keys (noeviction): the store bounds them instead. |
+| `prefix` | string | `"fit/bittorrent/tracker/"` | What the store's keys start with, as fit/bittorrent/tracker/t/<info hash>/s; the trackers that answer as one share it. fit/bittorrent/tracker/ when left out. |
+| `request_timeout` | duration | `"2s"` | How long each round trip to the store may take, connecting included; past it the store counts as unreachable, and is tried again after a back-off. 2s when left out. |
+| `refresh` | duration | `"5s"` | How often the peers of the torrents this instance serves are read from the store again, and so how late an instance learns of another's peers. Read peers are used for three times this, then only the instance's own. 5s when left out; at least 100ms, and shorter than interval. |
+| `queue` | integer, 0 to 1048576 | `65536` | The most announces waiting to be written to the store, one per peer and torrent, a later announce of a peer taking its earlier one's place; past it announces are still answered but not shared, and counted as dropped. 65536 when left out or 0. |
+| `cache_torrents` | integer, 0 to 1048576 | `4096` | The most torrents whose shared peers this instance keeps a sample of; a torrent past it is answered with this instance's own peers. A torrent leaves when nobody has announced or scraped it here for peer_ttl; scrapes alone may fill three quarters. 4096 when left out or 0. |
+| `cache_peers` | integer, 0 to 1000 | `100` | How many seeders and how many leechers of a torrent's shared peers, picked at random, each sample keeps, about 60 bytes each; announces get peers from it. 100 when left out or 0. |
 
 <a id="providers"></a>
 
