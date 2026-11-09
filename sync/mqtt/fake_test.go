@@ -56,6 +56,13 @@ func (n *fakeNet) dial(ctx context.Context, cfg mqttwire.Config) (client, error)
 	return c, nil
 }
 
+// dialed is how many clients were dialed so far.
+func (n *fakeNet) dialed() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.clients)
+}
+
 // last returns the last client dialed, waiting for one.
 func (n *fakeNet) last(t *testing.T, count int) *fakeClient {
 	t.Helper()

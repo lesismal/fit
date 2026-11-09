@@ -334,8 +334,9 @@ func TestSourceJob(t *testing.T) {
 	}
 	// ctx ending, or the connection lost, while it waits.
 	for _, lose := range []bool{false, true} {
+		dialed := n.dialed()
 		cancel, done := started(src, col.run(true))
-		c := n.last(t, len(n.clients)+1)
+		c := n.last(t, dialed+1)
 		c.msgs <- &mqttwire.Message{Topic: "t", QoS: 1}
 		col.next(t)
 		time.Sleep(40 * time.Millisecond)
