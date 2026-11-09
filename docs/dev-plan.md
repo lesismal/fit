@@ -360,9 +360,9 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I192 | The interoperability and recovery matrix in CI | I176, I180, I183, I185 | done |
 | I193 | Benchmarks against Filebeat, Canal, Debezium and DataX | I192 | done |
 | I194 | Sync's documentation and examples | I190 | done |
-| I211 | RabbitMQ as a source (queues and stream queues, acknowledged after the sinks) and a sink (publisher confirms) | I163 | todo |
-| I212 | NATS JetStream as a source (a durable pull consumer, the sequence in the checkpoint) and a sink (`Nats-Msg-Id` deduplication) | I163 | todo |
-| I213 | Apache Pulsar as a source (readers from message IDs, or a subscription) and a sink (sequence IDs, broker deduplication) | I163 | todo |
+| I211 | RabbitMQ as a source (queues and stream queues, acknowledged after the sinks) and a sink (publisher confirms) | I163 | done |
+| I212 | NATS JetStream as a source (a durable pull consumer, the sequence in the checkpoint) and a sink (`Nats-Msg-Id` deduplication) | I163 | done |
+| I213 | Apache Pulsar as a source (readers from message IDs, or a subscription) and a sink (sequence IDs, broker deduplication) | I163 | done |
 | I214 | MQTT 3.1.1 and 5 as a source (persistent sessions, QoS 1/2 acknowledged after the sinks) and a sink | I163 | todo |
 | I215 | A SQL Server client: TDS 7.4, TLS, SQL authentication, RPC with typed parameters, bulk load, cancellation | I163 | todo |
 | I216 | SQL Server as a source: CDC change tables by LSN, a snapshot without locks handed over at its LSN | I215 | todo |
@@ -7194,6 +7194,66 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
   nothing; a stream queue resumes from its offset; publisher confirms hold a batch until the broker
   has it.
 - **Touches**: `sync/rabbitmq`, `test/sync`, `docs`.
+- **Done** 2026-11-10: `sync/rabbitmq/wire` (AMQP 0-9-1 written in fit: negotiation, PLAIN and
+  EXTERNAL, TLS, heartbeats, `connection.blocked`, `channel.flow`, `basic.qos`, consume, ack and nack,
+  publisher confirms, `basic.return`, frames bounded by `frame_max` and bodies by `max_message_bytes`)
+  and the source and sink `rabbitmq` in `sync/rabbitmq`; unit tests against an in-process broker
+  (coverage 98.8% and 98.5%); `test/sync/rabbitmq.sh` and `TestRabbitMQ*` passed against RabbitMQ 3.13
+  and 4.1 in Docker, three runs: a quorum queue copied across kills (3000 messages, about 3100
+  delivered, nothing lost, the source queue empty at the end), a stream queue resumed from its offset,
+  a batch held for publisher confirms over TLS. Not yet in `run.sh`'s families or CI (I222).
+
+**Decisions pending review** (I211, made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **One channel per connection, one connection per source or sink.** Choice: `sync/rabbitmq/wire`
+   opens channel 1 only; the source's consumers (one per queue and stream) share it and its delivery
+   tags. Why: one tag sequence lets a single `basic.ack multiple` cover every queue up to the
+   pipeline's watermark, and a pipeline has one reader anyway. Alternatives: a channel per queue
+   (acks per channel, more state, no gain in throughput at a pipeline's rate); a channel pool in the
+   client.
+2. **Acknowledgement on the watermark (`fitsync.Acknowledger`), not the saved checkpoint
+   (`Confirmer`).** Choice: `Acknowledged` stores the position's tag and the session's goroutine
+   sends `basic.ack multiple=true`; positions of another session (run ID in the position) are
+   ignored. Why: a queue's place is the broker's, so nothing waits on the local checkpoint file;
+   acking sooner frees the prefetch. For a stream queue the offset is also in the checkpoint, so a
+   checkpoint not yet saved replays from the older offset (at least once). Alternative: ack on
+   `Confirm`, after the checkpoint is saved (slower, and gains nothing for queues).
+3. **The session outlives `Run`.** Choice: the connection stays open after `Run` returns, so that
+   acknowledgements of records still in the sinks reach the broker; it is closed at the next `Run`
+   or `Cleanup`, which requeues the rest. Why: closing at once would redeliver every in-flight
+   message after each restart. Alternative: close at the end of `Run` (more duplicates).
+4. **A delivery that makes no records is acknowledged at once** (single ack), and so is a stream
+   message before the offset asked (a stream consumer starts at its chunk's first message). Why: it
+   would otherwise hold a prefetch slot until a later multiple ack. Alternative: a placeholder record.
+5. **Stream queues are named apart (`streams`)**, not detected. Why: AMQP 0-9-1 cannot ask a queue's
+   type without the management API, and a stream needs `x-stream-offset` and offset tracking.
+   Alternative: one `queues` list with a `stream:` prefix, or the HTTP management API.
+6. **Jobs end on silence.** Choice: in `mode once` the source ends once no message came for
+   `idle_end` (2s), after waiting for every emitted record's acknowledgement. Why: a queue has no
+   end; message counts from `queue.declare` exclude unacknowledged and redelivered messages and race
+   with producers. Alternative: drain to the count read at start.
+7. **Message metadata.** Choice: a message record (raw codec, or a codec's error record) has
+   `exchange`, `routing_key`, `queue`, `redelivered`, `headers` (a map, in name order) and the
+   properties set (`message_id`, `content_type`, `timestamp`, ...) as fields beside `value`; rows a
+   codec makes get them under `metadata_field` only. Keys come from the `fit-key` header the sink
+   writes (strings and bytes as they are, other keys as plain JSON), null otherwise. Alternatives:
+   the message ID or routing key as the key.
+8. **Sink headers and IDs.** Choice: every message carries `fit-key` (when the record has one),
+   `fit-op` and `fit-namespace` headers, `message_id` from `fitsync.RecordIDs`, `timestamp` from the
+   commit time, delivery mode 2 unless `transient`. RabbitMQ has no broker-side deduplication, so a
+   batch written again is published again; consumers drop repeats by `message_id`. Alternatives: the
+   message-deduplication community plugin (`x-deduplication-header`), not in the images.
+9. **Unroutable messages are permanent errors by default.** Choice: published `mandatory`; a
+   `basic.return` fails its record with `fitsync.Permanent`, so `on_error` takes it rather than
+   retrying forever; `unroutable: drop` publishes without `mandatory`. A `basic.nack` fails from its
+   record, to be retried. A body over `max_message_bytes` (16 MiB) is permanent.
+10. **Flow control.** Choice: while `connection.blocked` or `channel.flow` holds, publishing waits up
+    to `timeout`, then the batch fails and the pipeline retries; the source is never blocked by it.
+    Heartbeats default to 30s (the broker's when lower); two missed end the connection.
+11. **Interop servers.** `test/sync/rabbitmq.sh` runs RabbitMQ 3.13 and 4.1, one node each, with a
+    user and a TLS listener; not wired into `test/sync/run.sh` (I222's `mq` family). Not tested:
+    EXTERNAL against a real broker (needs `rabbitmq_auth_mechanism_ssl` and client certs), a
+    cluster's node failover (addresses are tried in order on each dial).
 
 ### I212 NATS JetStream as a source and a sink
 
@@ -7207,6 +7267,67 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done when**: interop with nats-server 2.10 and 2.11 (a three-node cluster) in Docker; a stream
   copied across kills and a server restart ends equal; a batch sent twice is stored once.
 - **Touches**: `sync/nats`, `test/sync`, `docs`.
+- **Done** 2026-11-10: `sync/nats/wire` (the NATS text protocol written in fit: TLS, token, user and
+  password, NKey and JWT creds signed with ed25519, reconnects across the servers and INFO's
+  `connect_urls`, lame duck mode, keep-alive; JetStream's API over its subjects) and the source and sink
+  `nats` in `sync/nats`, with an in-process fake server and JetStream in `sync/nats/natstest` (coverage
+  99.4% and 97.8%, 98.3% for the three together); `test/sync/nats.sh` and `TestNATS*` passed against
+  nats-server 2.10 and 2.11, three JetStream nodes each: 20,000 messages copied exactly once across 6
+  to 12 kills and a node's restart, three runs each; a batch sent twice stored once. The first interop
+  run lost about 15% of a stream (decision 2 below is the fix). Not yet in `run.sh`'s families or CI
+  (I222).
+
+**Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **When the source acknowledges**: on `fitsync.Acknowledger` (the watermark every sink has), not on
+   `Confirmer` (the checkpoint saved). A crash between the two leaves the consumer ahead of the
+   checkpoint, which is safe: the sinks have those messages. Acknowledged hands the work to an acker
+   goroutine of the source's (it must not block). Alternative: Confirm, which acknowledges later and
+   keeps more messages pending (max_ack_pending) for nothing.
+2. **The consumer fit makes has ack policy all, and is made again at the start of a run that finds it
+   holding messages delivered and not acknowledged** (a run killed), from the floor: the checkpoint's
+   sequence or the consumer's acknowledgement floor, whichever is later. Why: JetStream delivers such
+   messages again only after ack_wait, among later ones; a later message acknowledged under ack all
+   would acknowledge them unread, and a run would take a later sequence for their position (the first
+   interop run lost ~15% of a stream this way before the fix). Made again, the consumer delivers in
+   order, positions are monotone, and ack all is safe and cheap. Alternatives: ack policy explicit with
+   a set of emitted sequences and positions that can go back (the checkpoint would no longer be a
+   floor); waiting out ack_wait at each start.
+3. **A consumer of the user's own (create_consumer off) is read from its acknowledgement floor, not the
+   checkpoint, and must have ack policy explicit** (none reads at most once); ack policy all is an error
+   at start. Why: fit cannot make it again, so its redeliveries come out of order, and only explicit
+   acknowledgements and the server's own floor are safe then. Alternative: accept all and warn.
+4. **A pull takes what the consumer has now (no_wait, up to batch), and only when it has nothing waits
+   with a pull of one up to max_wait**: a message is read as soon as it comes, rather than a pull
+   holding its whole batch until max_wait (nats.go's Fetch does the same). Alternative: one pull of the
+   batch with a short expiry; heartbeats (idle_heartbeat) — not needed with short pulls.
+5. **Nats-Msg-Id from `fitsync.RecordIDs`** (a hash of the record's anchor position and its distance
+   from it): a batch written again is dropped by the stream's duplicate window, 2 minutes by default;
+   a replay after a longer outage stores copies (at least once). The window is the stream's, documented,
+   not set by fit. Alternative: IDs from the record's content (two equal records would be dropped).
+6. **No key in the messages**: NATS has no message key; the sink sends only `Nats-Msg-Id`, and the
+   source's records have no key unless the codec sets one (a `key` transform makes one from fields).
+   Deletes are encoded by the codec like any record. Alternative: a `Fit-Key` header written and read
+   back — invented, and nothing else reads it.
+7. **Message metadata**: a message record (raw, json plain, a codec's error) holds `subject`, `headers`
+   (a map; several values an array), and from JetStream `stream`, `sequence`, `time` beside its
+   value, fields the codec made winning; rows another codec makes get them only under `metadata_field`.
+8. **Core mode is at most once and has no position**: records carry none, so its checkpoint never
+   moves; a job (mode once) of mode core is an error, as core subjects have no end. A full `buffer`
+   drops messages (counted by the client, not yet reported in status).
+9. **Reconnects**: the client moves to the next of the servers it knows (config and INFO's
+   connect_urls) when a connection breaks, two PINGs go unanswered, or a server enters lame duck mode;
+   publishes and pulls under way fail with ErrDisconnected (no buffering across reconnects), so the
+   sink's batch is written again (deduplicated) and the source's run restarts. Alternative: nats.go's
+   reconnect buffer — hides failures at the cost of memory.
+10. **TLS is upgraded after INFO**, as nats-server does by default; `handshake_first` (2.10.4's TLS
+    first) is not supported. A `tls://` or `nats://` URL is not accepted: servers are host:port.
+11. **The fake server is a package, `sync/nats/natstest`**, shared by the wire and connector tests;
+    it counts in the repo's coverage (98% with both packages' tests).
+12. **Found in I213's interop, holds here too**: `fitsync.RecordIDs` repeats only for a record read again
+    at the same position; the `kafka` and `pulsar` sources write every partition's place in each
+    position, as the run interleaved them, so a NATS stream fed by them stores replayed records again
+    (at least once). The fix is for `RecordIDs` and those sources together (I213's decision 1).
 
 ### I213 Apache Pulsar as a source and a sink
 
@@ -7219,6 +7340,80 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done when**: interop with Pulsar 3.x and 4.x standalone in Docker; a partitioned topic copied
   across kills ends equal; a batch sent twice is stored once with deduplication on.
 - **Touches**: `sync/pulsar`, `test/sync`, `docs`.
+- **Done** 2026-11-10: `sync/pulsar/wire` (Pulsar's binary protocol, its protobuf encoded by hand:
+  lookup with redirects and the proxy, partitioned metadata, producers, readers and subscriptions,
+  flow permits, batches, LZ4, zlib, zstd and snappy, TLS and tokens, keep-alive) and the source and sink
+  `pulsar` in `sync/pulsar`; kafkawire's LZ4 block code exported (`LZ4Block`, `LZ4Unblock`) for it;
+  unit tests against an in-process broker (coverage 97.8% and 97.1%); `test/sync/pulsar.sh` and
+  `TestPulsar*` passed against Pulsar 3.0.11 and 4.0.5 standalone, five runs: a partitioned topic
+  copied across kills in both modes ends with every message, each key's in order, but with replayed
+  copies (decision 1 below: the multi-partition sources' positions); a batch sent twice from a source
+  whose positions repeat is stored once. Interop found and fixed a job's end dropping the last entry
+  of a batch. Not yet in `run.sh`'s families or CI (I222).
+
+**Decisions pending review** (I213, made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **How "a batch sent twice is stored once" holds**: each message carries the property `fit-id`
+   (`fitsync.RecordIDs`, from the record's position); with `dedup read_back` (the default) the sink, when
+   it makes a partition's producer, reads back the partition's last 64 entries (a reader at
+   `last - 64`, after `GET_LAST_MESSAGE_ID`), keeps the `fit-id`s its producer name stored there (and
+   every one it stores after, up to 100,000 a partition), and drops a batch's records whose `fit-id` it
+   has. The producer's sequence IDs carry on from `PRODUCER_SUCCESS`'s `last_sequence_id`, so broker
+   deduplication accepts them, and drops only a send the client repeated itself. Why: Pulsar's broker
+   deduplication is by producer name and an increasing sequence ID, which an opaque position cannot
+   give; reading back is local to the sink and needs no state of fit's. Limits: a replay larger than 64
+   Pulsar batches of a partition, or one after another producer wrote, is stored again (at least once);
+   it needs the permission to consume. Alternatives: Pulsar transactions (needs the transaction
+   coordinator, and a commit tied to fit's checkpoint); `checkpoint: sink` as I191 (the sink keeping the
+   pipeline's position in the topic, read back the same way, and the run starting from it); plain at
+   least once (`dedup off`, which is also offered); a local file of the last sequence ID per position.
+   **Found in interop**: `fitsync.RecordIDs` repeats only when the source reads a record again at the
+   same position. The kafka and pulsar sources write every partition's place in each record's position,
+   as the run happened to interleave the partitions, so a record read again after a restart has another
+   position and another `fit-id`: a Pulsar-to-Pulsar copy killed at random points has every message,
+   each key's first copies in order, and replay copies after them (TestPulsarAcrossKills checks that,
+   as the Kafka test does; 0 to 22% copies seen). A batch from a source whose positions repeat
+   (generate, a database's log, files) is stored once (TestPulsarBatchTwice). Fixing it is for
+   `RecordIDs` and the multi-partition sources together, e.g. a per-record identity a source can set
+   (partition and offset, or message ID) that `RecordIDs` prefers to the position.
+2. **Partition routing by the Java client's default**, `JavaStringHash` (Java's `String.hashCode` of
+   the partition key, `& Integer.MAX_VALUE`, modulo the partitions), which pulsar-client-go also uses by
+   default; a key of bytes is hashed as the base64 the Java client sends it as. A record without a key
+   goes to one partition per sink batch, the next one each batch. Alternative: Murmur3_32Hash (the Java
+   client's other scheme, the C++ client's default is different again).
+3. **The source's position is the last message emitted of each partition** (ledger, entry, batch index,
+   -1 once an entry is done), by the partition's full name. A reader starts at it; the broker sends the
+   entry again when it is a batch read in part, and the source passes over what the checkpoint has. In
+   `mode subscription` the same IDs filter what the subscription sends again, and the checkpoint is
+   acknowledged cumulatively at start in case an acknowledgement was lost; a batch read in part is
+   acknowledged up to the entry before it (no `ack_set`), so its rest comes again after a restart and is
+   passed over. Alternative: batch-index acknowledgements (`ack_set`), which need the broker's
+   `acknowledgmentAtBatchIndexLevelEnabled`.
+4. **Message metadata in records**, shared with the RabbitMQ and NATS sources: a message record (raw
+   codec, or a codec error) has `topic` (the partition's full name), `message_id`, `properties` (a map),
+   `producer`, `publish_time` and `event_time` beside `value`; a row a codec makes has them under
+   `metadata_field` only when it is set. CommitTime is the event time, or the publish time. The sink
+   writes only `fit-id` as a property; a Pulsar-to-Pulsar copy does not carry the source's properties.
+5. **Not read**: encrypted messages and chunked ones (a message larger than `maxMessageSize` split by
+   the producer) fail the source with an error rather than being skipped; markers are passed over.
+   Alternative: chunk reassembly (bounded), later if asked.
+6. **No reconnection inside the client**: a connection lost fails its producers and consumers, and the
+   source's run or the sink's write returns the error; the pipeline's retry makes them again (the sink's
+   producer read back again). Keep-alive pings every 30s, a connection with nothing from the broker for
+   60s is closed. Why: one recovery path, the pipeline's, as the Kafka connectors do.
+7. **The receive queue is bounded by flow permits** (`receiver_queue`, 1000 by default, refilled at
+   half); a broker sending past them by more than twice the queue and 10,000 messages fails the
+   connection. Frames are bounded by the broker's `maxMessageSize` (5 MiB default, from `CONNECTED`) plus
+   10 KiB, and a message's decompressed size by 64 MiB.
+8. **The interop servers are standalones without authentication**: Pulsar 3.0.11 and 4.0.5,
+   deduplication on, advertised on 127.0.0.1 at the host's port (`test/sync/pulsar.sh`, standalone like
+   `kafka.sh`, not yet in `run.sh`'s families, which I222 adds as `mq`). Token auth and TLS are covered
+   against the in-process fake broker only. Alternative: a standalone with `authenticationEnabled` and a
+   secret key made by the script.
+9. **LZ4 is kafkawire's block code**, exported as `kafkawire.LZ4Block` and `LZ4Unblock` (Pulsar's LZ4 is
+   a raw block, its size in the metadata); zstd and snappy are klauspost/compress's (already a
+   dependency), zlib the standard library's. Alternative: move the LZ4 code into an internal package
+   both use.
 
 ### I214 MQTT as a source and a sink
 

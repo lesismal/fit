@@ -350,9 +350,9 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I192 | CI 中的互通与恢复矩阵 | I176, I180, I183, I185 | done |
 | I193 | 对比 Filebeat、Canal、Debezium 和 DataX 的基准测试 | I192 | done |
 | I194 | 同步的文档与示例 | I190 | done |
-| I211 | RabbitMQ 作为源（队列与 stream 队列，目标拿到后确认）与目标（publisher confirms） | I163 | todo |
-| I212 | NATS JetStream 作为源（持久 pull consumer，序号存入检查点）与目标（`Nats-Msg-Id` 去重） | I163 | todo |
-| I213 | Apache Pulsar 作为源（按消息 ID 的 reader，或订阅）与目标（序列号与代理去重） | I163 | todo |
+| I211 | RabbitMQ 作为源（队列与 stream 队列，目标拿到后确认）与目标（publisher confirms） | I163 | done |
+| I212 | NATS JetStream 作为源（持久 pull consumer，序号存入检查点）与目标（`Nats-Msg-Id` 去重） | I163 | done |
+| I213 | Apache Pulsar 作为源（按消息 ID 的 reader，或订阅）与目标（序列号与代理去重） | I163 | done |
 | I214 | MQTT 3.1.1 与 5 作为源（持久会话，QoS 1/2 在目标拿到后确认）与目标 | I163 | todo |
 | I215 | SQL Server 客户端：TDS 7.4、TLS、SQL 认证、带类型参数的 RPC、批量导入、取消 | I163 | todo |
 | I216 | SQL Server 作为源：按 LSN 读 CDC 变更表，不加锁的快照在其 LSN 处衔接 | I215 | todo |
@@ -5156,6 +5156,44 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 RabbitMQ 3.13 和 4.x 互通；跨多次 kill 消费完一个队列不丢消息；stream 队列从其偏移续读；
   publisher confirms 在代理收到前一直持有这一批。
 - **涉及**：`sync/rabbitmq`、`test/sync`、`docs`。
+- **完成** 2026-11-10：`sync/rabbitmq/wire`（在 fit 中实现的 AMQP 0-9-1：协商、PLAIN 与 EXTERNAL、TLS、心跳、
+  `connection.blocked`、`channel.flow`、`basic.qos`、消费、ack 与 nack、publisher confirms、`basic.return`，帧受 `frame_max`
+  限制、消息体受 `max_message_bytes` 限制）以及 `sync/rabbitmq` 中的源与目标 `rabbitmq`；针对进程内代理的单元测试（覆盖率
+  98.8% 与 98.5%）；`test/sync/rabbitmq.sh` 与 `TestRabbitMQ*` 在 Docker 中对 RabbitMQ 3.13 和 4.1 运行三次均通过：跨多次 kill
+  复制一个 quorum 队列（3000 条消息，约 3100 次投递，无丢失，结束时源队列为空）、stream 队列从其偏移续读、经 TLS 的一批在
+  publisher confirms 前一直被持有。尚未加入 `run.sh` 的分组与 CI（I222）。
+
+**待审查的决策**（I211，实现时所做，2026-11-10；在用户裁定前有效）：
+
+1. **每个连接一个信道，每个源或目标一个连接**：源的各消费者（每个队列和 stream 一个）共用信道 1 及其投递标签，一次
+   `basic.ack multiple` 即可覆盖所有队列直到流水线的水位。备选：每个队列一个信道；客户端中的信道池。
+2. **在水位（`fitsync.Acknowledger`）上确认，而非检查点保存后（`Confirmer`）**：`Acknowledged` 记下位置中的标签，由会话的
+   goroutine 发送 `basic.ack multiple=true`；其他会话（位置中的运行 ID）的位置被忽略。队列的位置在代理处，无需等待本地
+   检查点文件；早确认可释放预取。stream 队列的偏移也在检查点中，检查点尚未保存时从较旧的偏移重放（至少一次）。备选：在
+   `Confirm` 时确认。
+3. **会话比 `Run` 活得久**：`Run` 返回后连接仍保持，使目标中仍在处理的记录的确认能到达代理；在下一次 `Run` 或 `Cleanup` 时
+   关闭，余下的重新入队。备选：`Run` 结束即关闭（重复更多）。
+4. **不产生记录的投递立即单独确认**，stream 中早于所请求偏移的消息也一样，否则它会占用预取名额直到之后的批量确认。备选：
+   占位记录。
+5. **stream 队列单独列出（`streams`）**，不做探测：AMQP 0-9-1 无法在没有管理 API 的情况下查询队列类型。备选：`queues` 中加
+   `stream:` 前缀，或 HTTP 管理 API。
+6. **作业在静默时结束**：`mode once` 下 `idle_end`（2s）内无消息、且所有已发出的记录都已确认时结束。队列没有终点，
+   `queue.declare` 的计数不含未确认与重投的消息，且与生产者竞争。备选：消费到开始时读到的数量。
+7. **消息元数据**：消息记录（raw 编解码器或编解码器的错误记录）在 `value` 旁有 `exchange`、`routing_key`、`queue`、
+   `redelivered`、`headers`（按名排序的 map）和已设置的属性（`message_id`、`content_type`、`timestamp` 等）；编解码器生成的行
+   只在 `metadata_field` 下带有它们。键取自目标写入的 `fit-key` 头（字符串与字节原样，其他键为纯 JSON），否则为 null。备选：
+   以消息 ID 或路由键为键。
+8. **目标的头与 ID**：每条消息带 `fit-key`（记录有键时）、`fit-op` 与 `fit-namespace` 头，`message_id` 来自
+   `fitsync.RecordIDs`，`timestamp` 为提交时间，除 `transient` 外投递模式为 2。RabbitMQ 没有代理端去重，重写的一批会再发布一次，
+   消费者按 `message_id` 丢弃重复。备选：社区的消息去重插件（`x-deduplication-header`），镜像中没有。
+9. **默认不可路由的消息为永久错误**：以 `mandatory` 发布，`basic.return` 以 `fitsync.Permanent` 使其记录失败，由 `on_error` 处理
+   而不是无休止重试；`unroutable: drop` 不带 `mandatory` 发布。`basic.nack` 从其记录起失败并重试。超过 `max_message_bytes`
+   （16 MiB）的消息体为永久错误。
+10. **流控**：`connection.blocked` 或 `channel.flow` 生效时，发布最多等待 `timeout`，之后这一批失败由流水线重试；源从不因此
+    阻塞。心跳默认 30s（代理的更小时用代理的）；错过两次即结束连接。
+11. **互通服务器**：`test/sync/rabbitmq.sh` 运行 RabbitMQ 3.13 和 4.1，各一个节点，带用户与 TLS 监听；尚未接入
+    `test/sync/run.sh`（I222 的 `mq` 分组）。未测试：对真实代理的 EXTERNAL（需要 `rabbitmq_auth_mechanism_ssl` 与客户端证书）、
+    集群节点故障转移（每次拨号按顺序尝试各地址）。
 
 ### I212 NATS JetStream 作为源与目标
 
@@ -5166,6 +5204,44 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 nats-server 2.10 和 2.11（三节点集群）互通；跨多次 kill 和服务器重启复制一个流后两边相同；
   重发的一批只存一次。
 - **涉及**：`sync/nats`、`test/sync`、`docs`。
+- **完成** 2026-11-10：`sync/nats/wire`（在 fit 中实现的 NATS 文本协议：TLS、令牌、用户名与密码、以 ed25519 签名的 NKey
+  与 JWT 凭据，在各服务器与 INFO 的 `connect_urls` 间重连、lame duck 模式、keep-alive；经其主题调用 JetStream API）以及
+  `sync/nats` 中的源与目标 `nats`，进程内的假服务器与 JetStream 在 `sync/nats/natstest`（覆盖率 99.4% 与 97.8%，三者合计
+  98.3%）；`test/sync/nats.sh` 与 `TestNATS*` 对 nats-server 2.10 和 2.11（各三个 JetStream 节点）通过：跨 6 到 12 次 kill 和
+  一个节点重启，20,000 条消息恰好复制一次，各运行三次；重发的一批只存一次。第一次互通运行丢失约 15% 的流（下面的决策 2
+  是修复）。尚未加入 `run.sh` 的分组与 CI（I222）。
+
+**待审查的决策**（I212，实现时所做，2026-11-10；在用户裁定前有效）：
+
+1. **源何时确认**：在 `fitsync.Acknowledger`（所有目标都拿到的水位）上，而非 `Confirmer`（检查点已保存）。两者之间崩溃会让
+   consumer 领先于检查点，这是安全的：目标已有这些消息。`Acknowledged` 把工作交给源的确认 goroutine（不得阻塞）。备选：
+   `Confirm`，确认更晚，待确认消息（max_ack_pending）更多而无益。
+2. **fit 创建的 consumer 用 ack 策略 all，且当某次运行开始时发现它持有已投递未确认的消息（上次运行被 kill）时，从下限重建**：
+   下限为检查点的序号与 consumer 确认下限中较晚者。JetStream 只在 ack_wait 之后才在较新消息之间重投这些消息；ack all 下确认
+   较新的消息会把它们未读就确认掉（第一次互通运行因此丢失约 15%）。重建后按序投递，位置单调，ack all 安全且廉价。备选：
+   ack 策略 explicit 加已发出序号集合（位置可回退，检查点不再是下限）；每次开始时等过 ack_wait。
+3. **用户自己的 consumer（create_consumer 关闭）从其确认下限读起，而非检查点，且必须为 ack 策略 explicit**（none 为至多一次），
+   ack 策略 all 在开始时报错：fit 无法重建它，其重投会乱序，只有显式确认和服务器自己的下限是安全的。备选：接受 all 并告警。
+4. **一次拉取取走 consumer 现有的（no_wait，至多 batch），只有在没有时才以拉取一条等待至多 max_wait**：消息一到即读，而非整批
+   拉取等到 max_wait（nats.go 的 Fetch 也如此）。备选：短过期的一次整批拉取；心跳（idle_heartbeat）——短拉取下不需要。
+5. **`Nats-Msg-Id` 来自 `fitsync.RecordIDs`**（记录的锚定位置及与它的距离的哈希）：流的去重窗口（默认 2 分钟）丢弃重写的
+   一批；更长中断后的重放会存下副本（至少一次）。窗口属于流，写入文档，fit 不设置。备选：按记录内容生成 ID（两条相同的记录
+   会被丢弃）。
+6. **消息中没有键**：NATS 没有消息键；目标只发送 `Nats-Msg-Id`，源的记录除非编解码器设置否则没有键（`key` 变换可从字段生成）。
+   删除与其他记录一样由编解码器编码。备选：写入再读回一个 `Fit-Key` 头——自创，别的程序不读。
+7. **消息元数据**：消息记录（raw、json plain、编解码器的错误）在其值旁有 `subject`、`headers`（map，多值为数组），以及来自
+   JetStream 的 `stream`、`sequence`、`time`，编解码器生成的字段优先；其他编解码器生成的行只在 `metadata_field` 下带有它们。
+8. **core 模式至多一次且没有位置**：记录不带位置，检查点从不移动；core 模式的作业（mode once）报错，因为 core 主题没有终点。
+   `buffer` 满时丢弃消息（客户端计数，尚未在状态中报告）。
+9. **重连**：连接断开、两个 PING 无应答或服务器进入 lame duck 模式时，客户端换到它所知（配置与 INFO 的 connect_urls）的下一个
+   服务器；进行中的发布与拉取以 ErrDisconnected 失败（重连期间不缓冲），于是目标的批次被重写（去重），源的运行重启。备选：
+   nats.go 的重连缓冲——以内存为代价掩盖失败。
+10. **TLS 在 INFO 之后升级**，与 nats-server 的默认一致；不支持 `handshake_first`（2.10.4 的 TLS 优先）。不接受 `tls://` 或
+    `nats://` URL：服务器写成 host:port。
+11. **假服务器是一个包 `sync/nats/natstest`**，供 wire 与连接器的测试共用；它计入仓库的覆盖率（两包测试合计 98%）。
+12. **在 I213 的互通中发现，这里同样成立**：`fitsync.RecordIDs` 只对在相同位置被再次读到的记录重复；`kafka` 与 `pulsar` 源在
+    每个位置中写入所有分区的进度，按运行时交错的顺序，所以由它们供给的 NATS 流会再次存下重放的记录（至少一次）。修复属于
+    `RecordIDs` 与这些源（I213 的决策 1）。
 
 ### I213 Apache Pulsar 作为源与目标
 
@@ -5176,6 +5252,50 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 Pulsar 3.x 和 4.x standalone 互通；跨多次 kill 复制一个分区 topic 后两边相同；开启去重时重发
   的一批只存一次。
 - **涉及**：`sync/pulsar`、`test/sync`、`docs`。
+- **完成** 2026-11-10：`sync/pulsar/wire`（Pulsar 二进制协议，protobuf 手工编码：带重定向与代理的查找、分区元数据、producer、
+  reader 与订阅、flow 许可、批量、LZ4、zlib、zstd 与 snappy、TLS 与令牌、keep-alive）以及 `sync/pulsar` 中的源与目标 `pulsar`；
+  为此导出了 kafkawire 的 LZ4 块代码（`LZ4Block`、`LZ4Unblock`）；针对进程内代理的单元测试（覆盖率 97.8% 与 97.1%）；
+  `test/sync/pulsar.sh` 与 `TestPulsar*` 对 Pulsar 3.0.11 和 4.0.5 standalone 运行五次均通过：两种模式下跨多次 kill 复制一个
+  分区 topic，结果包含每条消息、每个键内有序，但含重放的副本（下面的决策 1：多分区源的位置）；位置可重复的源重发的一批只存
+  一次。互通发现并修复了作业的终点丢掉一个批次最后一条的问题。尚未加入 `run.sh` 的分组与 CI（I222）。
+
+**待审查的决策**（I213，实现时所做，2026-11-10；在用户裁定前有效）：
+
+1. **"重发的一批只存一次"如何成立**：每条消息带属性 `fit-id`（`fitsync.RecordIDs`，取自记录的位置）；`dedup read_back`（默认）时，
+   目标在创建一个分区的 producer 时读回该分区最后 64 个条目（`GET_LAST_MESSAGE_ID` 之后在 `last - 64` 处的 reader），记下其
+   producer 名存下的 `fit-id`（以及之后存下的每一个，每分区至多 100,000），并丢弃一批中 `fit-id` 已有的记录。producer 的序列号
+   接着 `PRODUCER_SUCCESS` 的 `last_sequence_id`，使代理去重接受它们，只丢弃客户端自己重复的发送。原因：Pulsar 的代理去重按
+   producer 名与递增的序列号，不透明的位置给不出；读回对目标是本地的，不需要 fit 的状态。局限：超过一个分区 64 个 Pulsar 批次
+   的重放，或另一个 producer 写入之后的重放，会再存一次（至少一次）；需要消费权限。备选：Pulsar 事务（需要事务协调器，且提交
+   要与 fit 的检查点绑定）；像 I191 那样的 `checkpoint: sink`；纯至少一次（`dedup off`，也提供）；本地文件记录每个位置的最后
+   序列号。**互通中发现**：`fitsync.RecordIDs` 只在源以相同位置再次读到记录时重复。`kafka` 与 `pulsar` 源在每条记录的位置中
+   写入所有分区的进度，按运行时交错的顺序，所以重启后再次读到的记录位置不同、`fit-id` 也不同：随机 kill 的 Pulsar 到 Pulsar
+   复制有每条消息、每个键的首份按序，其后有重放的副本（TestPulsarAcrossKills 与 Kafka 测试一样检查这一点；观察到 0 到 22%
+   的副本）。位置可重复的源（generate、数据库日志、文件）的一批只存一次（TestPulsarBatchTwice）。修复属于 `RecordIDs` 与多分区
+   源两者，例如源可设置的逐记录标识（分区与偏移，或消息 ID），`RecordIDs` 优先于位置使用它。
+2. **按 Java 客户端的默认方式路由分区**：`JavaStringHash`（分区键的 Java `String.hashCode`，`& Integer.MAX_VALUE`，对分区数
+   取模），pulsar-client-go 默认也用它；字节键按 Java 客户端发送时的 base64 计算哈希。没有键的记录每个目标批次去一个分区，下一批
+   换下一个。备选：Murmur3_32Hash（Java 客户端的另一方案，C++ 客户端的默认又不同）。
+3. **源的位置是每个分区最后发出的消息**（ledger、entry、批内序号，一个条目读完时为 -1），以分区全名为键。reader 从它开始；
+   读了一部分的批次会被代理重发，源跳过检查点已有的部分。`mode subscription` 中同样用这些 ID 过滤订阅重发的消息，并在开始时
+   对检查点再做一次累积确认以防确认丢失；读了一部分的批次只确认到它之前的条目（不用 `ack_set`），其余部分重启后重来并被跳过。
+   备选：批内序号级确认（`ack_set`），需要代理的 `acknowledgmentAtBatchIndexLevelEnabled`。
+4. **记录中的消息元数据**，与 RabbitMQ 和 NATS 源一致：消息记录（raw 编解码器或编解码器错误）在 `value` 旁有 `topic`（分区
+   全名）、`message_id`、`properties`（map）、`producer`、`publish_time` 与 `event_time`；编解码器生成的行只在设置了
+   `metadata_field` 时在其下带有它们。CommitTime 为事件时间，否则为发布时间。目标只写入 `fit-id` 属性；Pulsar 到 Pulsar 的复制
+   不带源的属性。
+5. **不读取**：加密消息与分块消息（超过 `maxMessageSize` 被 producer 拆开的消息）使源报错而非被跳过；标记消息被跳过。备选：
+   有界的分块重组，日后按需。
+6. **客户端内部不重连**：连接丢失时其 producer 与 consumer 失败，源的运行或目标的写入返回错误；流水线的重试重新创建它们
+   （目标的 producer 重新读回）。keep-alive 每 30s 一次 ping，60s 内未收到代理任何数据的连接被关闭。原因：只有一条恢复路径，
+   即流水线的，与 Kafka 连接器一致。
+7. **接收队列受 flow 许可约束**（`receiver_queue`，默认 1000，降到一半时补充）；代理超出许可两倍队列加 10,000 条时连接失败。
+   帧受代理的 `maxMessageSize`（默认 5 MiB，来自 `CONNECTED`）加 10 KiB 限制，消息解压后的大小受 64 MiB 限制。
+8. **互通服务器为不带认证的 standalone**：Pulsar 3.0.11 与 4.0.5，开启去重，在 127.0.0.1 的主机端口上发布（`test/sync/pulsar.sh`，
+   与 `kafka.sh` 一样独立，尚未加入 `run.sh` 的分组，由 I222 加为 `mq`）。令牌认证与 TLS 只针对进程内假代理测试。备选：带
+   `authenticationEnabled` 与脚本生成密钥的 standalone。
+9. **LZ4 使用 kafkawire 的块代码**，导出为 `kafkawire.LZ4Block` 与 `LZ4Unblock`（Pulsar 的 LZ4 是原始块，大小在元数据中）；
+   zstd 与 snappy 用 klauspost/compress（已是依赖），zlib 用标准库。备选：把 LZ4 代码移入两者共用的 internal 包。
 
 ### I214 MQTT 作为源与目标
 

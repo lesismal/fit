@@ -8247,6 +8247,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "nats"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.nats"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "postgres"
               }
             }
@@ -8255,6 +8271,38 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/sync.sinks.postgres"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "pulsar"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.pulsar"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "rabbitmq"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sinks.rabbitmq"
               }
             }
           }
@@ -8337,7 +8385,10 @@
             "memory",
             "mongo",
             "mysql",
+            "nats",
             "postgres",
+            "pulsar",
+            "rabbitmq",
             "redis",
             "s3",
             "stdout",
@@ -9031,6 +9082,98 @@
       ],
       "type": "object"
     },
+    "sync.sinks.nats": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file of the certificates the servers' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for servers that verify clients; needs tls and key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a message's data of a record: raw when left out, after's value field as it is, or the record's canonical JSON when it has none; json for the row as plain JSON (form plain) or the whole record (form record)."
+        },
+        "creds_file": {
+          "description": "A creds file, as nsc writes it, holding a user's JWT and NKey seed, for servers in operator mode.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_in_flight": {
+          "default": 256,
+          "description": "With mode jetstream, the most publishes waiting for the stream's acknowledgement at once. 256 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "default": "jetstream",
+          "description": "jetstream, each message acknowledged by the stream that takes its subject, deduplicated by its Nats-Msg-Id; core, published to core NATS, at most once. jetstream when left out.",
+          "enum": [
+            "jetstream",
+            "core"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "default": "fit-sync",
+          "description": "The connection's name, in the servers' monitoring. fit-sync when left out.",
+          "type": "string"
+        },
+        "nkey_file": {
+          "description": "A file holding a user's NKey seed (SU...), whose key signs the server's nonce.",
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the servers' certificates must have; each server's host when left out.",
+          "type": "string"
+        },
+        "servers": {
+          "description": "The servers, host:port each; the others of the cluster are learnt from them, and the client connects to another when one fails.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subject": {
+          "default": "{namespace}",
+          "description": "The subject a record goes to: text with {namespace}, the record's namespace (a route transform can map namespaces to subjects first). A record whose subject is empty or holds a wildcard fails. {namespace} when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "How long connecting, and each publish's acknowledgement, may take. 10s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "token_env": {
+          "description": "The environment variable holding a token to authenticate with, read when the pipeline loads.",
+          "type": "string"
+        },
+        "username": {
+          "description": "The user to authenticate as, with password_env.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "servers"
+      ],
+      "type": "object"
+    },
     "sync.sinks.postgres": {
       "additionalProperties": false,
       "properties": {
@@ -9155,6 +9298,213 @@
       },
       "required": [
         "user"
+      ],
+      "type": "object"
+    },
+    "sync.sinks.pulsar": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs a pulsar+ssl:// url.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a message's value of a record: raw when left out, after's value field as it is, or the record's canonical JSON when it has none; json for the row as plain JSON (form plain) or the whole record (form record)."
+        },
+        "compression": {
+          "default": "lz4",
+          "description": "How batches are compressed. lz4 when left out.",
+          "enum": [
+            "none",
+            "lz4",
+            "zlib",
+            "zstd",
+            "snappy"
+          ],
+          "type": "string"
+        },
+        "dedup": {
+          "default": "read_back",
+          "description": "How a batch written again is kept from being stored twice: read_back, the last 64 entries (Pulsar batches) of each partition read back when the producer is made (which needs the permission to consume the topic), and the records of a batch whose fit-id it, or a message stored since, has dropped; off, nothing, every record sent, so a batch written again after a crash is stored again. read_back when left out.",
+          "enum": [
+            "read_back",
+            "off"
+          ],
+          "type": "string"
+        },
+        "deletes": {
+          "default": "tombstone",
+          "description": "What a delete with a key is: tombstone, a message of the key with a null value, which topic compaction takes as the key gone and the source pulsar reads back as a delete; encode, a message of what the codec makes of it. tombstone when left out.",
+          "enum": [
+            "tombstone",
+            "encode"
+          ],
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_batch_bytes": {
+          "default": 1048576,
+          "description": "The most bytes, keys and values before compression, of one Pulsar batch; a sink batch with more for a partition sends several, in order. Keep it below the brokers' maxMessageSize (5 MiB by default). 1048576 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_batch_messages": {
+          "default": 1000,
+          "description": "The most messages of one Pulsar batch. 1000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "producer_name": {
+          "default": "fit-sync",
+          "description": "The producers' name, the same for every partition: the brokers deduplicate by it, so it must stay the same across restarts, and differ between two sinks writing one topic (the broker refuses a second producer of a name). fit-sync when left out.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the brokers' certificates must have; each broker's host when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting and each answer, the broker's receipt of a batch among them, may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "token_env": {
+          "description": "The environment variable holding a token (a JWT) to authenticate with, read when the pipeline loads; no authentication when left out.",
+          "type": "string"
+        },
+        "topic": {
+          "default": "{namespace}",
+          "description": "The topic a record goes to: text with {namespace}, the record's namespace (a route transform can map namespaces to topics first), a name (public/default's), tenant/namespace/name or persistent://tenant/namespace/name. A record whose topic is not a name Pulsar takes fails. The topic is not made by the sink, unless the brokers make topics when first used. {namespace} when left out.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The service URL: pulsar://host:6650, or pulsar+ssl://host:6651 for TLS, the broker's certificate checked against the system's roots or ca_file's (the check cannot be turned off); several hosts separated by commas are tried in order.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "sync.sinks.rabbitmq": {
+      "additionalProperties": false,
+      "properties": {
+        "addresses": {
+          "description": "The nodes, host:port each (5672, or 5671 for TLS), tried in order until one answers.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "auth": {
+          "default": "PLAIN",
+          "description": "How to authenticate: PLAIN, with username and password_env (over TLS, or the password goes in clear); EXTERNAL, with the TLS client certificate of cert_file, as the rabbitmq_auth_mechanism_ssl plugin takes it. PLAIN when left out.",
+          "enum": [
+            "PLAIN",
+            "EXTERNAL"
+          ],
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the nodes' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for nodes that ask for one or for EXTERNAL; needs tls and key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes a message's body of a record: raw when left out, after's value field as it is, or the record's canonical JSON when it has none; json for the row as plain JSON (form plain) or the whole record (form record)."
+        },
+        "content_type": {
+          "description": "The content_type property of every message, as application/json; none when left out.",
+          "type": "string"
+        },
+        "exchange": {
+          "description": "The exchange published to, which must exist; the default exchange when left out, which routes a message to the queue its routing key names.",
+          "type": "string"
+        },
+        "frame_max": {
+          "default": 131072,
+          "description": "The largest frame asked for, the broker's when lower; larger messages go in several frames. 131072 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "heartbeat": {
+          "default": "30s",
+          "description": "The heartbeat interval asked for, the broker's when lower: a connection silent for two of them is lost. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_message_bytes": {
+          "default": 16777216,
+          "description": "The largest message body published: a record that makes a larger one fails, and on_error takes it. Keep it at or below the broker's max_message_size. 16 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "routing_key": {
+          "default": "{namespace}",
+          "description": "The routing key of a record's message: text with {namespace}, the record's namespace, and {key}, its key (a string as it is, anything else as JSON). At most 255 bytes once made. {namespace} when left out.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the nodes' certificates must have; each node's host when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting, each answer of the broker, each write, the wait for a batch's confirms (from the last one), the wait while the broker blocks publishing (a memory or disk alarm), and closing may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the nodes' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "transient": {
+          "description": "Publish messages as transient (delivery mode 1), which a classic queue keeps in memory alone; persistent when left out. Quorum and stream queues keep every message on disk.",
+          "type": "boolean"
+        },
+        "unroutable": {
+          "default": "error",
+          "description": "What a message the exchange routes to no queue is: error, its record fails (the message is published mandatory and returned), on_error then taking it; drop, it is dropped by the broker unseen. error when left out.",
+          "enum": [
+            "error",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "username": {
+          "description": "The user, for PLAIN.",
+          "type": "string"
+        },
+        "vhost": {
+          "default": "/",
+          "description": "The virtual host. / when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addresses"
       ],
       "type": "object"
     },
@@ -9540,6 +9890,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "nats"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.nats"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "postgres"
               }
             }
@@ -9548,6 +9914,38 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/sync.sources.postgres"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "pulsar"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.pulsar"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "rabbitmq"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.rabbitmq"
               }
             }
           }
@@ -9629,7 +10027,10 @@
             "kafka",
             "mongo",
             "mysql",
+            "nats",
             "postgres",
+            "pulsar",
+            "rabbitmq",
             "redis",
             "s3",
             "tidb",
@@ -10387,6 +10788,158 @@
       ],
       "type": "object"
     },
+    "sync.sources.nats": {
+      "additionalProperties": false,
+      "properties": {
+        "ack_wait": {
+          "default": "1m",
+          "description": "A consumer made's ack_wait: how long the server waits for a message's acknowledgement before it delivers it again. Keep it above the time the sinks take. 1m when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "batch": {
+          "default": 256,
+          "description": "The most messages one pull asks for. 256 when left out or 0.",
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "buffer": {
+          "default": 10000,
+          "description": "With mode core, the most messages held between the connection and the pipeline; more are dropped. 10000 when left out or 0.",
+          "maximum": 1000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the servers' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for servers that verify clients; needs tls and key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a message's data: raw when left out, a message record holding it as after's value."
+        },
+        "consumer": {
+          "description": "The durable pull consumer the stream is read through; needed with mode jetstream. One pipeline a consumer. A consumer fit does not make is read from its acknowledgement floor, and needs ack policy explicit (none reads at most once).",
+          "type": "string"
+        },
+        "create_consumer": {
+          "description": "Make the consumer when it does not exist, and make it again when it is lost or a run finds it holding messages delivered and not acknowledged: from after the checkpoint's sequence (or its acknowledgement floor, when later), its ack policy all, its filter subjects, start, ack_wait and max_ack_pending these params'. A consumer that does not exist is an error when left out.",
+          "type": "boolean"
+        },
+        "creds_file": {
+          "description": "A creds file, as nsc writes it, holding a user's JWT and NKey seed, for servers in operator mode.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_ack_pending": {
+          "default": 10000,
+          "description": "A consumer made's max_ack_pending: the most messages delivered and not acknowledged. 10000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_wait": {
+          "default": "5s",
+          "description": "How long a pull waits for messages. 5s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "metadata_field": {
+          "description": "A field of after that the message's subject, headers, stream, sequence and time go in, as a map, in records a codec makes rows of; a message record holds them beside its value without it.",
+          "type": "string"
+        },
+        "mode": {
+          "default": "jetstream",
+          "description": "jetstream, a stream read through a durable consumer, at least once; core, subjects subscribed to, at most once. jetstream when left out.",
+          "enum": [
+            "jetstream",
+            "core"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "default": "fit-sync",
+          "description": "The connection's name, in the servers' monitoring. fit-sync when left out.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "The records' namespace. The codec's, or the message's subject, when left out.",
+          "type": "string"
+        },
+        "nkey_file": {
+          "description": "A file holding a user's NKey seed (SU...), whose key signs the server's nonce.",
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "queue": {
+          "description": "With mode core, the queue group the subscriptions join, so that several fits share the messages.",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the servers' certificates must have; each server's host when left out.",
+          "type": "string"
+        },
+        "servers": {
+          "description": "The servers, host:port each; the others of the cluster are learnt from them, and the client connects to another when one fails.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "start": {
+          "default": "all",
+          "description": "Where a consumer made without a checkpoint starts: all, the stream's first message; new, after its last, reading only what comes after. all when left out.",
+          "enum": [
+            "all",
+            "new"
+          ],
+          "type": "string"
+        },
+        "stream": {
+          "description": "The stream read; needed with mode jetstream.",
+          "type": "string"
+        },
+        "subjects": {
+          "description": "With mode jetstream, the filter subjects of a consumer made (the whole stream when left out); with mode core, the subjects subscribed to, which are needed; * and > are wildcards.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "How long connecting, and each answer of JetStream's API beyond a pull's wait, may take. 10s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "token_env": {
+          "description": "The environment variable holding a token to authenticate with, read when the pipeline loads.",
+          "type": "string"
+        },
+        "username": {
+          "description": "The user to authenticate as, with password_env.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "servers"
+      ],
+      "type": "object"
+    },
     "sync.sources.postgres": {
       "additionalProperties": false,
       "properties": {
@@ -10522,6 +11075,243 @@
         "database",
         "publication",
         "slot"
+      ],
+      "type": "object"
+    },
+    "sync.sources.pulsar": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs a pulsar+ssl:// url.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a message's value: raw when left out, a message record holding it as after's value."
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "metadata_field": {
+          "description": "The field of after that holds the message's metadata (topic, message_id, properties, producer, publish_time, event_time) in the records a codec makes of rows. A message record has them as fields of its own, beside value; a row has them only when this is set.",
+          "type": "string"
+        },
+        "mode": {
+          "default": "reader",
+          "description": "How the topics are read: reader, a non-durable reader of each partition from the checkpoint's message IDs, which needs nothing kept on the broker (messages the topic's retention removed before they are read are lost); subscription, the durable subscription named by subscription, which keeps the messages until it acknowledges them, cumulatively, once every sink has them. reader when left out.",
+          "enum": [
+            "reader",
+            "subscription"
+          ],
+          "type": "string"
+        },
+        "namespace": {
+          "description": "The records' namespace. The codec's (canal_json's db.table, say), or the topic as written in topics, when left out.",
+          "type": "string"
+        },
+        "receiver_queue": {
+          "default": 1000,
+          "description": "How many messages of each partition the broker may send ahead of what the source has taken. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "server_name": {
+          "description": "The name the brokers' certificates must have; each broker's host when left out.",
+          "type": "string"
+        },
+        "start": {
+          "default": "earliest",
+          "description": "Where a partition starts when the pipeline has no checkpoint (and, in mode subscription, the subscription is new): earliest, the oldest message kept; latest, after the newest. A partition found later starts at its earliest. earliest when left out.",
+          "enum": [
+            "earliest",
+            "latest"
+          ],
+          "type": "string"
+        },
+        "subscription": {
+          "description": "The durable subscription's name, for mode subscription.",
+          "type": "string"
+        },
+        "subscription_type": {
+          "default": "exclusive",
+          "description": "The subscription's type: exclusive, one consumer, a second pipeline refused; failover, one active consumer of each partition and others standing by. exclusive when left out.",
+          "enum": [
+            "exclusive",
+            "failover"
+          ],
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting and each answer may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "token_env": {
+          "description": "The environment variable holding a token (a JWT) to authenticate with, read when the pipeline loads; no authentication when left out.",
+          "type": "string"
+        },
+        "tombstones": {
+          "default": "delete",
+          "description": "What a message with a null value is: delete, a delete record of the message's key, as a compacted topic means it; skip, nothing. delete when left out.",
+          "enum": [
+            "delete",
+            "skip"
+          ],
+          "type": "string"
+        },
+        "topics": {
+          "description": "The topics read: a name (public/default's), tenant/namespace/name or persistent://tenant/namespace/name; every partition of a partitioned topic, partitions added found within a minute and read from their start.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "url": {
+          "description": "The service URL: pulsar://host:6650, or pulsar+ssl://host:6651 for TLS, the broker's certificate checked against the system's roots or ca_file's (the check cannot be turned off); several hosts separated by commas are tried in order. Topics are looked up from it, and their brokers connected to, or a proxy, as the lookup says.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "topics"
+      ],
+      "type": "object"
+    },
+    "sync.sources.rabbitmq": {
+      "additionalProperties": false,
+      "properties": {
+        "addresses": {
+          "description": "The nodes, host:port each (5672, or 5671 for TLS), tried in order until one answers.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "auth": {
+          "default": "PLAIN",
+          "description": "How to authenticate: PLAIN, with username and password_env (over TLS, or the password goes in clear); EXTERNAL, with the TLS client certificate of cert_file, as the rabbitmq_auth_mechanism_ssl plugin takes it. PLAIN when left out.",
+          "enum": [
+            "PLAIN",
+            "EXTERNAL"
+          ],
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the nodes' are checked against, in place of the system's roots; needs tls.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file of a client certificate, and the chain after it, for nodes that ask for one or for EXTERNAL; needs tls and key_file.",
+          "type": "string"
+        },
+        "codec": {
+          "$ref": "#/$defs/sync.codecs",
+          "description": "What makes records of a message's body: raw when left out, a message record holding it as after's value."
+        },
+        "frame_max": {
+          "default": 131072,
+          "description": "The largest frame asked for, the broker's when lower; larger messages come in several frames. 131072 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "heartbeat": {
+          "default": "30s",
+          "description": "The heartbeat interval asked for, the broker's when lower: a connection silent for two of them is lost. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "idle_end": {
+          "default": "2s",
+          "description": "In a job (mode once), the source ends once no message has come for this long, every record acknowledged. 2s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "The PEM file of cert_file's private key.",
+          "type": "string"
+        },
+        "max_message_bytes": {
+          "default": 16777216,
+          "description": "The largest message body taken: a larger one ends the connection, as a broken one would. 16 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "metadata_field": {
+          "description": "A field of after to put the message's metadata in (exchange, routing_key, queue, redelivered, headers and the properties set), on the records a codec makes rows of; a message record has them as fields of its own. None when left out.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "The records' namespace. The codec's, or the queue's name, when left out.",
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding the password, read when the pipeline loads.",
+          "type": "string"
+        },
+        "prefetch": {
+          "default": 1000,
+          "description": "How many deliveries of each queue may be unacknowledged at once (basic.qos): bounds what the broker sends ahead of the sinks. 1000 when left out or 0.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "queues": {
+          "description": "The classic and quorum queues consumed, by name; they are not declared, and must exist. Their messages are acknowledged once every sink has them, so a restart delivers again what was not.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "server_name": {
+          "description": "The name the nodes' certificates must have; each node's host when left out.",
+          "type": "string"
+        },
+        "stream_start": {
+          "default": "first",
+          "description": "Where a stream the checkpoint has no offset of starts: first, its oldest message kept; last, its last chunk; next, after its end, reading only what comes after. first when left out.",
+          "enum": [
+            "first",
+            "last",
+            "next"
+          ],
+          "type": "string"
+        },
+        "streams": {
+          "description": "The stream queues consumed, by name, each from the offset after the last one in the checkpoint, or from stream_start without one. At least one of queues and streams.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long connecting, each answer of the broker, each write and closing may take. 30s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS, the nodes' certificates checked against the system's roots or ca_file's; the check cannot be turned off.",
+          "type": "boolean"
+        },
+        "username": {
+          "description": "The user, for PLAIN.",
+          "type": "string"
+        },
+        "vhost": {
+          "default": "/",
+          "description": "The virtual host. / when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addresses"
       ],
       "type": "object"
     },
