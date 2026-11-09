@@ -12,7 +12,6 @@
     "camel.kamelet.spring-rabbitmq-source.password": "fit-syncbench-1",
     "camel.kamelet.spring-rabbitmq-source.exchangeName": "bench",
     "camel.kamelet.spring-rabbitmq-source.queues": "bench",
-    "camel.kamelet.spring-rabbitmq-source.routingKey": "bench",
-    "camel.kamelet.spring-rabbitmq-source.autoDeclare": "true"
+    "camel.kamelet.spring-rabbitmq-source.autoDeclare": "false"
   }
 }

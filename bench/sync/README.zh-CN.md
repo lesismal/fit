@@ -49,8 +49,9 @@ bench/sync/plan.sh 2026-11-09           # 整个计划：每个场景 3 轮，�
 “On the benchmark host”一节（构建 `fit`、`syncbench`、`benchreport` 为 linux/amd64，复制 `bench/sync`、
 `bench/cmd` 与 `bin`，以 `FIT_REV`、`BIN`、`BENCHREPORT` 在 `flock /root/bench.lock` 下 `nohup` 运行
 `plan.sh`）。运行前按 fit 计划的方式清理主机。首次运行会把 Canal adapter（291 MB）、DataX（1.7 GB，只保留引擎
-与 MySQL 插件）和 Confluent Elasticsearch sink（43 MB）下载到 `CACHE`，按固定的 sha256 校验，并据此构建三个
-镜像（[`images/`](images)）。完整规模 3 轮约需两小时。
+与 MySQL 插件）、Confluent Elasticsearch sink（43 MB）和 Camel 的 RabbitMQ 与 MQTT 连接器（45 MB，来自 Maven
+Central）下载到 `CACHE`，按固定的 sha256 校验，并据此构建四个镜像（[`images/`](images)）。主机下载不到时（基准
+主机从 GitHub 下载得到 504），在别处下载，按 `run.sh` 给它的文件名复制到 `CACHE`。完整规模 3 轮约需两小时。
 
 ## 测量内容
 

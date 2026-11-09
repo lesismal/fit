@@ -91,9 +91,11 @@ $host "cd $dir/bench/results && tar cf - sync-$(date +%F)" | tar xf - -C bench/r
 
 Before the plan, clean the host as for fit's plan (no other benchmark, the LLM service stopped and
 restored after). The first run downloads Canal's adapter (291 MB), DataX (1.7 GB, of which only the
-engine and the MySQL plugins are kept) and Confluent's Elasticsearch sink (43 MB) into `CACHE`,
-checked against their pinned sha256, and builds three images from them
-([`images/`](images)); later runs reuse them. The plan takes about two hours at the full sizes with 3
+engine and the MySQL plugins are kept), Confluent's Elasticsearch sink (43 MB) and Camel's RabbitMQ
+and MQTT connectors (45 MB, from Maven Central) into `CACHE`, checked against their pinned sha256,
+and builds four images from them ([`images/`](images)); later runs reuse them. Where the host cannot
+reach a download (the benchmark host gets 504s from GitHub), fetch it elsewhere and copy it into
+`CACHE` under the name `run.sh` gives it. The plan takes about two hours at the full sizes with 3
 rounds.
 
 ## What is measured

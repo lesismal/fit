@@ -162,7 +162,9 @@ cpu_split() {
 cleanup() {
 	[ "${KEEP:-}" = 1 ] && return
 	ids=$(docker ps -aq --filter "label=$LABEL")
-	[ -n "$ids" ] && docker rm -f $ids >/dev/null 2>&1
+	# -v: with the anonymous volumes their images declare (Kafka's,
+	# RabbitMQ's, SQL Server's, ...), which would be left behind.
+	[ -n "$ids" ] && docker rm -f -v $ids >/dev/null 2>&1
 	vols=$(docker volume ls -q --filter "label=$LABEL")
 	[ -n "$vols" ] && docker volume rm $vols >/dev/null 2>&1
 	docker network rm "$NET" >/dev/null 2>&1 || true
@@ -345,7 +347,11 @@ servers_up() {
 	mysql-es | mysql-kafka) mysql_wait mysql || return 1 ;;
 	mysql-batch) mysql_wait mysql && mysql_wait mysql2 || return 1 ;;
 	pg-kafka) wait_for postgres 120 docker exec "$PREFIX-postgres" pg_isready -q -h 127.0.0.1 -U postgres || return 1 ;;
-	rabbitmq-kafka) wait_for rabbitmq 180 docker exec "$PREFIX-rabbitmq" rabbitmqctl await_startup || return 1 ;;
+	rabbitmq-kafka)
+		# As the server's user: rabbitmqctl as root, before the server
+		# has made its Erlang cookie, makes it root's, and the server dies.
+		wait_for rabbitmq 180 docker exec -u rabbitmq "$PREFIX-rabbitmq" rabbitmqctl await_startup || return 1
+		;;
 	mqtt-kafka) wait_for mosquitto 60 sh -c "docker logs '$PREFIX-mosquitto' 2>&1 | grep -q running" || return 1 ;;
 	mssql-kafka)
 		wait_for mssql 300 docker exec "$PREFIX-mssql" /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$PW" -Q 'SELECT 1' || return 1
@@ -367,10 +373,13 @@ agent() {
 		shift
 	done
 	shift
+	# In the background, waited for, so that an interrupt ends the run
+	# now (the shell runs a trap only once its foreground command ends).
 	# shellcheck disable=SC2086 # the flags are words
 	docker run --rm --label "$LABEL" --network "$NET" --cpuset-cpus "$AGENT_CPUS" \
 		-v "$bindir/syncbench:/usr/local/bin/syncbench:ro" -v "$outdir:/out" $flags \
-		"$BASE_IMAGE" syncbench "$@"
+		"$BASE_IMAGE" syncbench "$@" &
+	wait $!
 }
 
 # The connectors Kafka Connect runs, from configs: debezium/ (Debezium's)
