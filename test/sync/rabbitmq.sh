@@ -63,15 +63,10 @@ for v in $RABBITMQ_IMAGES; do
 	ADDRS="$ADDRS${ADDRS:+,}$version=localhost:$p"
 	TLS_ADDRS="$TLS_ADDRS${TLS_ADDRS:+,}$version=localhost:$((p + 1))"
 	if ! docker inspect "$name" >/dev/null 2>&1; then
-		# Copied in, not mounted: the image's entrypoint takes /etc/rabbitmq
-		# for its user, and a read-only mount there left the node unable to
-		# read its own .erlang.cookie (eacces).
-		docker create --name "$name" --hostname "$name" \
+		docker run -d --name "$name" --hostname "$name" \
 			-p "127.0.0.1:$p:5672" -p "127.0.0.1:$((p + 1)):5671" \
+			-v "$STATE:/etc/rabbitmq/fit:ro" -v "$STATE/10-fit.conf:/etc/rabbitmq/conf.d/10-fit.conf:ro" \
 			"$image" >/dev/null
-		docker cp "$STATE/." "$name:/etc/rabbitmq/fit" >/dev/null
-		docker cp "$STATE/10-fit.conf" "$name:/etc/rabbitmq/conf.d/10-fit.conf" >/dev/null
-		docker start "$name" >/dev/null
 	fi
 	p=$((p + 2))
 done
@@ -79,7 +74,11 @@ done
 for v in $RABBITMQ_IMAGES; do
 	name=${PREFIX}rabbitmq-${v%%=*}
 	i=0
-	until docker exec "$name" rabbitmqctl await_startup >/dev/null 2>&1; do
+	# As the image's user, not root: rabbitmqctl run before the node has
+	# made its .erlang.cookie makes it, and root's (mode 400) is one the
+	# node cannot read (eacces), a race a busy host (CI's matrix job,
+	# starting other families' servers) loses.
+	until docker exec -u rabbitmq "$name" rabbitmqctl await_startup >/dev/null 2>&1; do
 		i=$((i + 1))
 		if [ $i -gt 90 ]; then
 			echo "$name did not start:" >&2
