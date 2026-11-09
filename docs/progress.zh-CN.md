@@ -4132,6 +4132,25 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I192 互通与恢复矩阵 — 已完成
+
+- **`TestMatrix`**（`test/sync/matrix_test.go`）：每个源（PostgreSQL、MySQL 和 MariaDB、MongoDB、经 TiCDC 的 TiDB、Kafka 中的
+  Debezium 事件）经一条流水线同时写入六个目标（PostgreSQL 17、MySQL 8.4、MongoDB 8、Elasticsearch、ClickHouse、Redis 键）：先填
+  一张表（快照），再在流水线于随机崩溃点被杀的同时写入插入、更新、删除、改键、NULL 和事务组成的混合负载，最后每个目标逐行与源
+  比较，列出缺少、多出或不同的行。`FIT_SYNC_MATRIX=full` 让每个源在同类的每个服务器上以更大的负载运行；`FIT_SYNC_MATRIX_SOURCES`
+  选择源。
+- **CI 按族划分**：`test/sync/run.sh` 接受 `SYNC_FAMILIES`（search、mysql、postgres、mongo、kafka、tidb、matrix），每族只启动自己的
+  服务器、只运行自己的测试，`SYNC_PREFIX` 和端口变量用于第二套，`SYNC_TIMEOUT`；`sync-interop` 是七个并行任务，各有 go test 超时
+  和任务时限；`sync-matrix.yml` 每晚完整运行矩阵，每个源族一个任务。`kafka.sh` 增加 `REDPANDA=0`，`mongo.sh` 增加 `MONGO_VERSIONS`；
+  `tidb.sh` 给 TiKV 它检查的打开文件数（CI 运行 42504979157 中 “TiDB or TiCDC did not start” 的原因），并重启因此放弃的 TiDB 和 TiCDC。
+- **发现**：先快照后流的源（PostgreSQL、MySQL、MongoDB）在第一个检查点之前被杀，会丢掉两次运行之间的变更，把已删除的行留在
+  目标中；ClickHouse 默认的版本（提交时间）敌不过重读的快照行。矩阵绕开了这两点，并说明如何看到第一点（`FIT_SYNC_MATRIX_EARLY=1`）。
+- **文档**：`docs/sync.md` 的互操作一节（两种语言）描述了这些任务及本地运行方式。
+- **测试**：在 macOS（Docker Desktop，14 CPU）上依次运行每族，为本次运行创建并删除 `fit-mx-*` 容器，全部通过：search 80 秒、
+  mysql 277 秒、postgres 31 秒、mongo 91 秒、kafka 66 秒、tidb 208 秒、matrix 91 秒（从头到尾，镜像已拉取）；矩阵另连续运行三次，
+  15 个子测试通过 14 个，失败的一个是 MongoDB 副本集 30 秒无应答。
+- **缺口**：计划 I192 一节中的决定，待审查：上述两项发现留给各源和 ClickHouse 的条目；CI 中的时间未测（这些任务尚未在 CI 运行）。
+
 ### I185 Kafka 作为源与目标；经 TiCDC 的 TiDB — 已完成
 
 - **包 `sync/kafka`**（`synckafka`），基于 I184 的客户端：源 `kafka`，从检查点中的 offset 读取各 topic 的所有分区（不用消费组），
@@ -4250,6 +4269,44 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   1,000 行单元测试和 300 行互通测试；没有 I176b。
 - **遗留**：计划中 I176 一节的决定，待评审。`ddl: "stop"` 只有在 `on_error: "stop"` 时才停止流水线；超过
   `max_transaction_bytes` 的源事务，或有记录被拒的源事务，会部分提交；作业没有并行写入者。
+### I174 MySQL 与 MariaDB 作为源 — 已完成
+
+- **源 `mysql`**，在 `sync/mysql`（`source*.go`）中，与目标一同注册：以副本身份（带 `server_id` 的 `COM_REGISTER_SLAVE`）从
+  检查点按 GTID（MySQL 且 `gtid_mode = ON` 时用 `COM_BINLOG_DUMP_GTID`，MariaDB 用 `@slave_connect_state`）或按文件与偏移读取
+  binlog，否则从服务器当前位置开始；检查 `binlog_format`、`binlog_row_image` 和 `log_bin`。行变成 `db.table` 的记录，键为主键
+  （或 `keys`），键改变写成 delete 加 insert；列名、有无符号、是否二进制和枚举值取自表映射的元数据或 `information_schema`
+  （保留到下一个 DDL）；DDL 作为 `ddl` 记录；事务带 GTID 整体交出，位置 `{"gtids", "file", "pos"}` 放在每个事务的最后一条记录
+  上；读取 payload；`tables`/`exclude` 通配。流中断后从最后交出的事务重连，跳过中断事务中已交出的记录；错误 1236 要求重新
+  快照。心跳（`heartbeat`，10s）和超出位置的 binlog 字节数（`SHOW BINARY LOGS`）作为 I189 的延迟。作业读到 binlog 末尾（非阻塞
+  dump）。**测试连接**（`fitsync.Tester`）检查 binlog 的设置。
+- **`mysqlwire`**：为副本命令新增 `Conn.Command`、`StartBinlog` 和 `ReadEvent`。
+- **文档**：schema 与参考（章节 `sync_sources_mysql.md`）、模板、`schema-zh.js`、配置文档的 sync 行。
+- **测试**：基于流式发送构造事件的伪连接的单元测试（不用容器时包覆盖率 96.5%，`mysqlwire` 96.7%）：GTID 集合的解析、合并与
+  编码，MariaDB 位置，源处理的每种事件，`information_schema` 补全及其错误，事务中间的重连，dump 命令，每种起始位置，每种拒绝，
+  延迟。互通（`test/sync/mysql_source_test.go`）覆盖 MySQL 5.7、8.0、8.4 与 MariaDB 10.11、11：跨表变更、流中途的 DDL、从检查点
+  重启、真实清除 binlog 后要求快照，以及经目标 `mysql` 的 MySQL 到 MySQL 流水线在随机位置被杀、服务器在其运行中重启，最终
+  校验和相同；`test/sync/mysql.sh` 用自己的容器（`MYSQL_PREFIX=fit-i174`）单独运行通过。未在 Linux 上运行，也未运行完整测试
+  （留给合并时）。
+- **与计划的差异**：延迟以字节计，来自 `SHOW BINARY LOGS`，而不只来自心跳（心跳只说明源已追上）。约 1,430 行代码、1,240 行
+  单元测试和 420 行互通测试；不需要 I174b。
+- **缺口**：计划中 I174 一节的决定，待评审。带标签的 GTID 集合按文件与偏移续读；冷门表的检查点不随服务器的其他事务移动；
+  表变更前写下的事件按表的当前结构命名。
+
+### I175 MySQL 快照及其到 binlog 的交接 — 已完成
+
+- **源 `mysql` 的快照**：`snapshot` 为 `initial`（默认）、`always` 或 `never`；先不加锁读取 binlog 位置，再按键分页读每张表，
+  每页 `batch_size` 行，各在一个带一致性快照的 `REPEATABLE READ` 事务中，值按 binlog 的方式定型；之后从先读到的位置跟随流，
+  快照期间的变更得以收敛。每条记录携带起点及读到的表和键，最后一条只携带起点。没有主键的表，除非 `keys` 指定，否则拒绝。
+  作业的快照（I167 的 `Chunker`）把每张表按键分成每块 `chunk_rows` 行的范围，各在自己的连接上读取。
+- **文档**：schema 章节，`schema-zh.js` 中的三个参数，配置文档的 sync 行。
+- **测试**：基于伪连接的单元测试（分页、交接时的 dump、从表中间继续、`always`、`never`、块及其边界、客户端的每种值类型、每种
+  错误）。五个服务器上的互通：一张 3,000 行的表在快照期间被写入，经目标 `mysql` 跨越随机的杀进程，最终校验和相同；一个按
+  300 行分块的作业被杀后重启完成，结果相同。`test/sync/mysql.sh` 用自己的容器单独运行。未在 Linux 上运行，也未运行完整测试
+  （留给合并时）。
+- **与计划的差异**：每页一个一致性快照事务，而不是整个快照一个；中断的快照从最后保存的键之后继续，而不是从下一个块（作业按块
+  续读）。约 530 行代码、380 行单元测试和 150 行互通测试；不需要 I175b。
+- **缺口**：计划中 I175 一节的决定，待评审。没有行的快照不保存检查点；`always` 在源每次重启后都重读快照。
+
 ### I177 PostgreSQL 客户端：连接、认证与查询 — 已完成
 
 - **包 `sync/postgres/wire`**（`pgwire`），基于 `net.Conn` 与 `crypto/tls` 的阻塞客户端，不引入驱动：以 `SSLRequest` 和
@@ -4626,6 +4683,20 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   `sync/postgres/sink` 99.0%。单元测试在 macOS 上于竞态检测下运行；互通测试使用为此创建并已删除的 `fit-i191-*` 容器。
 - **缺口**：计划 I191 一节中的决策，待审查：只有每个目标都保存检查点时才恰好一次；分块读取的作业只用文件；分几部分提交的源事务
   仍可能写两次。
+
+### I194 同步的文档与示例 — 已完成
+
+- **指南**：`docs/sync.md` 与 `docs/sync.zh-CN.md`：记录、流水线、检查点、至少一次与 I191 的恰好一次、错误；每个连接器及一份
+  .conf 配置（均用 `fit validate` 检查，MySQL 源的待 I174 落地后）；每个源对服务端的要求（MySQL 的 binlog 设置与权限、
+  PostgreSQL 的 `wal_level` 与 publication、MongoDB 的副本集、Kafka 的 ACL 等）；系统之间的类型映射；变换、编解码器与 WASM
+  插件；作业；Admin API、`fit sync` 与工作台；指标与死信；快照、重置、迁移、故障、上限。从 README 和配置页的 `sync` 一行链接。
+  其配置由 `TestConfigExamples` 加载检查。MySQL 源的部分已对照合并后的 I174/I175 检查；I192 的矩阵以 `MERGE CHECK` 标出，供其合并时检查。
+- **示例**在 fit-examples 的 `sync-examples` 分支（未推送）：文件到 Elasticsearch、MySQL 到 PostgreSQL（恰好一次）、PostgreSQL
+  到 Kafka、用 Go 写的 WASM 变换；其测试把密码变量设为替代值并构建插件；go.mod 在 fit `7a793de`。
+- **测试**：`go test ./docs`（TestLinks、TestConfigExamples）；fit-examples 的 `go test` 经本地 `replace` 针对本 fit；WASM 示例用
+  `fit sync run --once` 运行。
+- **缺口**：计划 I194 一节中的决策，待审查；fit-examples 的 go.mod 需移到含 I179、I185 和 I174 的已推送 fit（I174 合并后
+  `sync-mysql-to-postgres` 已移出 `noValidate`，参与验证）。
 
 ### I186 Redis 作为源与目标 — 已完成
 

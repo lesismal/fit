@@ -38,6 +38,7 @@ func TestMySQLBinlogInterop(t *testing.T) {
 		pool.AppendCertsFromPEM(b)
 	}
 	w := loadWorkload(t)
+	binlogLock(t)
 	for _, s := range strings.Split(list, ",") {
 		name, addr, _ := strings.Cut(s, "=")
 		t.Run(name, func(t *testing.T) {
@@ -139,4 +140,25 @@ func captureWorkload(t *testing.T, w *workload, server string, cfg mysqlwire.Con
 		t.Fatalf("LOAD_FILE(%s/%s) is NULL: is secure_file_priv off, and the file readable by all?", dir, file)
 	}
 	return b
+}
+
+// binlogLock keeps test/sync's source tests from purging binlogs while
+// this test reads its own: they take the same lock file.
+func binlogLock(t *testing.T) {
+	t.Helper()
+	p := filepath.Join(os.TempDir(), "fit-sync-mysql-binlog.lock")
+	deadline := time.Now().Add(3 * time.Minute) // a lock left by a test killed is taken after it
+	for {
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			f.Close()
+			t.Cleanup(func() { os.Remove(p) })
+			return
+		}
+		if time.Now().After(deadline) {
+			os.Remove(p)
+			deadline = time.Now().Add(3 * time.Minute)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

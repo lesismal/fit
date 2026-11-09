@@ -19,6 +19,7 @@
 # FIT_SYNC_KAFKA_TLS_BROKERS, FIT_SYNC_KAFKA_CA, FIT_SYNC_KAFKA_USER,
 # FIT_SYNC_KAFKA_PASSWORD, FIT_SYNC_KAFKA_CONTAINERS (node=container, for
 # stopping a leader) and FIT_SYNC_REDPANDA_BROKERS, FIT_SYNC_REDPANDA_SASL_BROKERS.
+# REDPANDA=0 leaves Redpanda out, and its variables.
 set -eu
 cd "$(dirname "$0")/../.."
 
@@ -96,7 +97,8 @@ for i in 1 2 3; do
 done
 
 RP=${PREFIX}redpanda
-if ! docker inspect "$RP" >/dev/null 2>&1; then
+REDPANDA=${REDPANDA:-1}
+if [ "$REDPANDA" = 1 ] && ! docker inspect "$RP" >/dev/null 2>&1; then
 	docker run -d --name "$RP" -p "127.0.0.1:$REDPANDA_PORT:9092" -p "127.0.0.1:$((REDPANDA_PORT + 1)):9093" \
 		"$REDPANDA_IMAGE" redpanda start --mode dev-container --smp 1 --memory 1G --overprovisioned \
 		--kafka-addr 'PLAIN://0.0.0.0:9092,SASL://0.0.0.0:9093|sasl' \
@@ -120,6 +122,9 @@ until scram_user SCRAM-SHA-256 && scram_user SCRAM-SHA-512; do
 	fi
 	sleep 2
 done
+echo "export FIT_SYNC_KAFKA_BROKERS='$BROKERS' FIT_SYNC_KAFKA_SASL_BROKERS='$SASL_BROKERS' FIT_SYNC_KAFKA_TLS_BROKERS='$TLS_BROKERS'"
+echo "export FIT_SYNC_KAFKA_CA='$STATE/ca.pem' FIT_SYNC_KAFKA_USER=fit FIT_SYNC_KAFKA_PASSWORD='$PASSWORD' FIT_SYNC_KAFKA_CONTAINERS='$CONTAINERS'"
+[ "$REDPANDA" = 1 ] || exit 0
 i=0
 until docker exec "$RP" rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true'; do
 	i=$((i + 1))
@@ -134,6 +139,4 @@ docker exec "$RP" rpk security user create fit -p "$PASSWORD" --mechanism SCRAM-
 docker exec "$RP" rpk cluster config set superusers '["fit"]' >/dev/null
 docker exec "$RP" rpk cluster config set sasl_mechanisms '["SCRAM","PLAIN"]' >/dev/null
 
-echo "export FIT_SYNC_KAFKA_BROKERS='$BROKERS' FIT_SYNC_KAFKA_SASL_BROKERS='$SASL_BROKERS' FIT_SYNC_KAFKA_TLS_BROKERS='$TLS_BROKERS'"
-echo "export FIT_SYNC_KAFKA_CA='$STATE/ca.pem' FIT_SYNC_KAFKA_USER=fit FIT_SYNC_KAFKA_PASSWORD='$PASSWORD' FIT_SYNC_KAFKA_CONTAINERS='$CONTAINERS'"
 echo "export FIT_SYNC_REDPANDA_BROKERS='localhost:$REDPANDA_PORT' FIT_SYNC_REDPANDA_SASL_BROKERS='localhost:$((REDPANDA_PORT + 1))'"

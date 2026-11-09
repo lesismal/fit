@@ -63,12 +63,16 @@ run "${PREFIX}pd" "pingcap/pd:$VERSION" --name=pd --data-dir=/data/pd \
 	--client-urls=http://0.0.0.0:2379 --advertise-client-urls="http://${PREFIX}pd:2379" \
 	--peer-urls=http://0.0.0.0:2380 --advertise-peer-urls="http://${PREFIX}pd:2380" \
 	--initial-cluster="pd=http://${PREFIX}pd:2380"
-run "${PREFIX}tikv" --memory "${TIKV_MEMORY_MB}m" -v "$STATE:/etc/tikv-fit:ro" "pingcap/tikv:$VERSION" \
+# TiKV refuses to start below 123880 open files (its check wants more than
+# the 65536 Docker gives on a CI runner: "the maximum number of open file
+# descriptors is too small"); TiDB, which gives up when TiKV does not
+# bootstrap within its backoff, is started again until it does.
+run "${PREFIX}tikv" --ulimit nofile=1048576:1048576 --memory "${TIKV_MEMORY_MB}m" -v "$STATE:/etc/tikv-fit:ro" "pingcap/tikv:$VERSION" \
 	--config=/etc/tikv-fit/tikv.toml --addr=0.0.0.0:20160 --advertise-addr="${PREFIX}tikv:20160" \
 	--status-addr=0.0.0.0:20180 --data-dir=/data/tikv --pd="${PREFIX}pd:2379"
-run "${PREFIX}cdc-tidb" -p "127.0.0.1:$TIDB_CDC_PORT:4000" "pingcap/tidb:$VERSION" \
+run "${PREFIX}cdc-tidb" --restart on-failure -p "127.0.0.1:$TIDB_CDC_PORT:4000" "pingcap/tidb:$VERSION" \
 	--store=tikv --path="${PREFIX}pd:2379" --advertise-address="${PREFIX}cdc-tidb"
-run "${PREFIX}ticdc" "pingcap/ticdc:$VERSION" /cdc server --pd="http://${PREFIX}pd:2379" \
+run "${PREFIX}ticdc" --restart on-failure "pingcap/ticdc:$VERSION" /cdc server --pd="http://${PREFIX}pd:2379" \
 	--addr=0.0.0.0:8300 --advertise-addr="${PREFIX}ticdc:8300"
 
 fail() {

@@ -156,6 +156,8 @@ type Conn struct {
 	ctx      context.Context
 	stop     func() bool
 	maxAllow int
+	// dumping says the connection is a binlog's stream (StartBinlog).
+	dumping bool
 }
 
 // deadlineConn sets the deadline of each read and write: Timeout from
@@ -327,7 +329,7 @@ func (c *Conn) Close() error {
 	c.raw.deadline = time.Now().Add(time.Second)
 	c.raw.cancelled = false
 	c.raw.mu.Unlock()
-	if c.rows == nil {
+	if c.rows == nil && !c.dumping {
 		_ = c.writePacket(c.startCommand(comQuit))
 	}
 	c.end()
