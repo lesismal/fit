@@ -86,7 +86,7 @@ columns'. Transforms, plugins, the `stdout` sink and dead letters see a record i
 which round-trips every kind: null, booleans, strings and arrays are JSON's own, every other kind an
 object of one member named after it.
 
-```json
+```json record
 {"source": "mysql", "namespace": "shop.orders", "op": "update",
  "key": {"map": {"id": {"int": 7}}},
  "before": {"map": {"id": {"int": 7}, "status": "paid", "total": {"decimal": "12.30"}}},
@@ -380,23 +380,34 @@ by `max_transaction_bytes` (16 MiB) and `AUTO_RANDOM` columns take the source's 
 are yours, each with a primary or unique key on the record's key columns; the session's time zone is
 UTC.
 
-<!-- MERGE CHECK (I174, I175): the mysql source was written from the dev-plan's I174 and I175 specs
-before they merged. Check against the merged sync/mysql source and its schema chapter: the param
-names (address, username, password_env, tls, server_id, tables with include/exclude globs, snapshot
-initial/always/never), the position's form, the server settings and grants it checks, the DDL and
-binlog-purge behaviour, the lag unit; and that the config block below loads (fit validate). -->
+The `mysql` source follows MySQL 5.7 and later or MariaDB 10.11 and later as a replica, registered
+with its own `server_id`; it checks when it starts that the binlog is on (`log_bin`), in
+`binlog_format = ROW` with `binlog_row_image = FULL`. Every insert, update and delete of the tables
+`tables` names (globs of `db.table`, every table but the system databases' when left out) and
+`exclude` does not becomes a record of namespace `db.table`, keyed by the primary key's columns (or
+those `keys` names); an update that changed the key comes as a delete of the old key and an insert.
+Column names come from the binlog where the server writes them (`binlog_row_metadata = FULL`), else
+from `information_schema`, read again after each DDL. A DDL of a table read (`CREATE`, `ALTER`,
+`DROP`, `RENAME`, `TRUNCATE`) is a `ddl` record holding the `statement` and the `database`, which the
+SQL sinks report and do not apply.
 
-The `mysql` source reads MySQL's and MariaDB's binlog as a replica with its own `server_id`, from the
-checkpoint's GTID set (or file and offset), else from now: every insert, update and delete of
-`tables` (globs of `db.table`) in row format, each transaction's records with its ID and a checkpoint
-at each commit (`XID`), DDL as `ddl` records, column names from `binlog_row_metadata = FULL` where the
-server has it and from `information_schema` otherwise. With `snapshot initial` (when there is no
-checkpoint), `always` or `never`, the existing rows are read first, without global locks: the binlog
-position is read, then each table in chunks by primary key in a `REPEATABLE READ` transaction with a
-consistent snapshot, and the stream starts from the position read first, so changes during the
-snapshot are applied again and converge in the idempotent sinks. An interrupted snapshot resumes at
-its next chunk; a table without a primary key is refused unless a key is named. A binlog the server
-has purged past the checkpoint stops the pipeline with an error saying a new snapshot is needed.
+Records come a transaction at a time, in commit order, with the transaction's GTID (or binlog file
+and offset) and commit time. The position, at each transaction's end, is
+`{"gtids": "...", "file": "mysql-bin.000042", "pos": 1234}`: a pipeline resumes from it by GTIDs where
+the server has them (MySQL's `gtid_mode = ON`, MariaDB's GTIDs), else by file and offset. A stream cut,
+as by a server restarting, is read again from the last transaction handed on. A position whose
+binlogs the server has purged stops the pipeline with an error saying a new snapshot is needed.
+
+With `snapshot initial` (the default) a pipeline without a checkpoint first reads the tables' rows,
+then the binlog; `always` reads them at every start of the source; `never` reads the binlog alone,
+from the checkpoint or from now. The binlog's position is read first, without a lock, then each table
+by its key, `batch_size` (1,000) rows a query, each query in a `REPEATABLE READ` transaction with a
+consistent snapshot; the stream then starts from that position, so what changed meanwhile comes
+again and the sinks, writing by key, converge. A snapshot interrupted goes on after the last key
+saved; a table without a primary key is refused unless `keys` names one. In a job (`mode once`) the
+snapshot alone is read, each table split into chunks of `chunk_rows` (100,000) rows of its key. The
+lag the source reports is the binlog bytes the server holds past its position (`SHOW BINARY LOGS`),
+none once a `heartbeat` (10s) says it is caught up.
 
 ```fit
 sync {
@@ -908,7 +919,7 @@ The Admin API's `/metrics` carries each pipeline's as `fit_sync_*`, labelled `pi
 | `fit_sync_queue_records`, `fit_sync_queue_bytes`, `fit_sync_queue_max_records`, `fit_sync_queue_max_bytes` | gauge | the queue against its bounds |
 | `fit_sync_lag_seconds` | gauge | from the last acknowledged record's commit time to its acknowledgement |
 | `fit_sync_last_commit_timestamp_seconds` | gauge | the last acknowledged record's commit time |
-| `fit_sync_source_lag` | gauge | behind the source's server, in its unit: a slot's bytes of WAL, Kafka's offsets |
+| `fit_sync_source_lag` | gauge | behind the source's server, in its unit: a PostgreSQL slot's bytes of WAL, MySQL's binlog bytes, Kafka's offsets |
 | `fit_sync_sink_records_total`, `fit_sync_sink_bytes_total`, `fit_sync_sink_batches_total`, `fit_sync_sink_errors_total`, `fit_sync_sink_retries_total`, `fit_sync_sink_failed_total` | counter | per sink: written, batches tried, failed, tried again, records failed |
 | `fit_sync_dead_letters_total`, `fit_sync_dead_letters_replayed_total`, `fit_sync_dead_letters_dropped_total` | counter | dead letters written, replayed and dropped |
 | `fit_sync_dead_letters_kept`, `fit_sync_dead_letters_kept_bytes` | gauge | dead letters kept |

@@ -6627,15 +6627,16 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   settings and grants, PostgreSQL's `wal_level` and publication, MongoDB's replica set, Kafka's ACLs,
   ...); the type mapping between systems; transforms, codecs and WASM plugins; jobs; the Admin API,
   `fit sync` and the workbench; metrics and dead letters; snapshots, resets, moves, failures, limits.
-  Linked from the README and the configuration pages' `sync` row. The MySQL source (I174, I175) and
-  I192's matrix are marked `MERGE CHECK` for the merge.
+  Linked from the README and the configuration pages' `sync` row; its configs loaded by
+  `TestConfigExamples`. The MySQL source's parts checked against merged I174/I175; I192's matrix is
+  marked `MERGE CHECK` for its merge.
 - **Examples** in fit-examples, branch `sync-examples` (not pushed): files to Elasticsearch, MySQL to
   PostgreSQL (exactly once), PostgreSQL to Kafka, a WASM transform in Go; its test sets the password
   variables to stand-ins and builds the plugin; go.mod at fit `7a793de`.
 - **Tests**: `go test ./docs` (TestLinks, TestConfigExamples); fit-examples' `go test` against this
   fit through a local `replace`; the WASM example run with `fit sync run --once`.
 - **Gaps**: the decisions in the plan's I194 section, pending review; fit-examples' go.mod to move to a
-  pushed fit with I179, I185 and I174, and `sync-mysql-to-postgres` out of `noValidate` then.
+  pushed fit with I179, I185 and I174 (`sync-mysql-to-postgres` is validated since I174 merged).
 
 ### I186 Redis as a source and a sink — done
 

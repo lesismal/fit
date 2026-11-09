@@ -6721,10 +6721,10 @@ review:
    I192's matrix is not described yet: both are marked in the guide with `MERGE CHECK` comments
    (hidden on GitHub) for the merge to check against the merged code. Alternative: leave them out
    until merged.
-6. **The guide's configs were checked with `fit validate` while writing**, not by a permanent test:
-   `TestConfigExamples` covers the configuration pages, and the guide's MySQL source block cannot
-   load until I174. Once it can, `sync*.md` can join that test. Alternative: a test skipping blocks of
-   modules not registered.
+6. **The guide's configs are loaded by `TestConfigExamples`**, which now takes `sync*.md` too (since
+   I174 merged, every block loads; each was also checked with `fit validate` while writing). The
+   record's canonical JSON example is fenced `json record`, so it is not taken for a config. The
+   MySQL source's parts were checked against the merged I174/I175 source and its schema chapter.
 7. **Size**: about 1,000 lines of guide in English and 890 in Chinese; four examples and 30 lines of test in
    fit-examples. Nothing of the plan is left out, but decision 2's runs against servers.
 

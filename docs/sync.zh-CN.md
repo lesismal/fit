@@ -75,7 +75,7 @@ sync {
 JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。变换、插件、`stdout` 目标和死信看到的是记录的规范 JSON，
 它能无损往返每种类型：null、布尔、字符串和数组用 JSON 自身的形式，其他类型都写成一个以类型命名的单成员对象。
 
-```json
+```json record
 {"source": "mysql", "namespace": "shop.orders", "op": "update",
  "key": {"map": {"id": {"int": 7}}},
  "before": {"map": {"id": {"int": 7}, "status": "paid", "total": {"decimal": "12.30"}}},
@@ -332,18 +332,24 @@ sync {
 `max_transaction_bytes`（16 MiB）限制，`AUTO_RANDOM` 列接受源的值。表由你创建，每张表在记录的键列上要有主键或唯一键；
 会话的时区为 UTC。
 
-<!-- MERGE CHECK (I174, I175): mysql 源是在 I174、I175 合并之前按开发计划的规格写的。合并时对照合并后的 sync/mysql 源
-及其 schema 章节检查：参数名（address、username、password_env、tls、server_id、带包含/排除通配符的 tables、snapshot
-initial/always/never），位置的形式，它检查的服务器设置和权限，DDL 与 binlog 被清除时的行为，延迟的单位；以及下面的
-配置能否加载（fit validate）。 -->
+`mysql` 源作为副本跟随 MySQL 5.7 及以后或 MariaDB 10.11 及以后，以自己的 `server_id` 注册；启动时检查 binlog 已开启
+（`log_bin`）、`binlog_format = ROW` 且 `binlog_row_image = FULL`。`tables`（`db.table` 的通配符，省略时为系统库之外的
+所有表）列出且 `exclude` 未排除的表中的每个 insert、update 和 delete 成为命名空间为 `db.table` 的记录，键为主键各列（或
+`keys` 指定的列）；改变了键的 update 以旧键的删除加新行的插入出现。列名在服务器写入时取自 binlog
+（`binlog_row_metadata = FULL`），否则取自 `information_schema`，每次 DDL 之后重新读取。所读表的 DDL（`CREATE`、
+`ALTER`、`DROP`、`RENAME`、`TRUNCATE`）是一条 `ddl` 记录，带 `statement` 和 `database`，SQL 目标只报告而不执行。
 
-`mysql` 源以自己的 `server_id` 作为副本读取 MySQL 和 MariaDB 的 binlog，从检查点的 GTID 集合（或文件和偏移）开始，没有
-检查点时从现在开始：`tables`（`db.table` 的通配符）的每个 insert、update 和 delete，行格式，每个事务的记录带其 ID，每次
-提交（`XID`）一个检查点，DDL 为 `ddl` 记录，列名在服务器有 `binlog_row_metadata = FULL` 时取自 binlog，否则取自
-`information_schema`。`snapshot initial`（没有检查点时）、`always` 或 `never`：先不加全局锁地读取已有的行——先读 binlog
-位置，再在带一致性快照的 `REPEATABLE READ` 事务中按主键分块读每张表，然后流从最先读到的位置开始，所以快照期间的变更会
-再应用一遍，在幂等的目标中收敛。被中断的快照从下一块继续；没有主键的表会被拒绝，除非指定了键。服务器已清除检查点之后的
-binlog 时，流水线停止，错误信息说明需要新的快照。
+记录按提交顺序一次一个事务地到来，带事务的 GTID（或 binlog 文件和偏移）和提交时间。每个事务结束处的位置为
+`{"gtids": "...", "file": "mysql-bin.000042", "pos": 1234}`：服务器有 GTID 时（MySQL 的 `gtid_mode = ON`、MariaDB 的
+GTID）流水线按 GTID 从它续读，否则按文件和偏移。被切断的流（如服务器重启）从最后交出的事务之后重新读取。服务器已清除该
+位置的 binlog 时，流水线停止，错误信息说明需要新的快照。
+
+`snapshot initial`（默认）时，没有检查点的流水线先读表中的行，再读 binlog；`always` 在源每次启动时都读；`never` 只读
+binlog，从检查点或从现在开始。先不加锁地读 binlog 位置，再按键读每张表，每次查询 `batch_size`（1,000）行，每次查询在
+带一致性快照的 `REPEATABLE READ` 事务中；然后流从那个位置开始，所以期间的变更会再来一遍，按键写入的目标会收敛。被中断的
+快照从最后保存的键之后继续；没有主键的表会被拒绝，除非 `keys` 指定了键。作业（`mode once`）中只读快照，每张表按键分成
+`chunk_rows`（100,000）行的块。源报告的延迟是服务器在其位置之后保存的 binlog 字节数（`SHOW BINARY LOGS`），`heartbeat`
+（10s）表明已追上时为零。
 
 ```fit
 sync {
@@ -813,7 +819,7 @@ Admin API 的 `/metrics` 以 `fit_sync_*` 输出每条流水线的指标，标�
 | `fit_sync_queue_records`、`fit_sync_queue_bytes`、`fit_sync_queue_max_records`、`fit_sync_queue_max_bytes` | gauge | 队列与其上限 |
 | `fit_sync_lag_seconds` | gauge | 最后确认的记录从提交时间到被确认的时长 |
 | `fit_sync_last_commit_timestamp_seconds` | gauge | 最后确认的记录的提交时间 |
-| `fit_sync_source_lag` | gauge | 落后于源服务器的量，以源自己的单位：复制槽的 WAL 字节数、Kafka 的 offset 数 |
+| `fit_sync_source_lag` | gauge | 落后于源服务器的量，以源自己的单位：PostgreSQL 复制槽的 WAL 字节数、MySQL 的 binlog 字节数、Kafka 的 offset 数 |
 | `fit_sync_sink_records_total`、`fit_sync_sink_bytes_total`、`fit_sync_sink_batches_total`、`fit_sync_sink_errors_total`、`fit_sync_sink_retries_total`、`fit_sync_sink_failed_total` | counter | 每个目标：写入量、尝试的批次、失败、重试、失败的记录 |
 | `fit_sync_dead_letters_total`、`fit_sync_dead_letters_replayed_total`、`fit_sync_dead_letters_dropped_total` | counter | 写入、重放和丢弃的死信 |
 | `fit_sync_dead_letters_kept`、`fit_sync_dead_letters_kept_bytes` | gauge | 保存着的死信 |
