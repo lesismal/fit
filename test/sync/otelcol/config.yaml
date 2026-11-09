@@ -1,0 +1,22 @@
+# The OpenTelemetry Collector of sync's otlp_logs interop tests
+# (test/sync/obs.sh): OTLP/HTTP in, and every log record written as OTLP
+# JSON, a request a line, to /out/logs.json, which the tests read.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  file:
+    path: /out/logs.json
+    flush_interval: 100ms
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [file]
+  telemetry:
+    logs:
+      level: warn
