@@ -153,16 +153,33 @@ func (c *Conn) readColumns(n int, cols []Column) ([]Column, error) {
 		}
 		cols = append(cols, col)
 	}
+	return cols, c.columnsEOF()
+}
+
+// skipColumns reads n column definitions, and the EOF after them, without
+// parsing them.
+func (c *Conn) skipColumns(n int) error {
+	for range n {
+		if _, err := c.readPacket(); err != nil {
+			return c.fail(err)
+		}
+	}
+	return c.columnsEOF()
+}
+
+// columnsEOF reads the EOF after column definitions, which a server sends
+// unless CLIENT_DEPRECATE_EOF is agreed.
+func (c *Conn) columnsEOF() error {
 	if c.caps&capDeprecateEOF == 0 {
 		p, err := c.readPacket()
 		if err != nil {
-			return nil, c.fail(err)
+			return c.fail(err)
 		}
 		if first(p) != 0xfe {
-			return nil, c.fail(fmt.Errorf("%w: no EOF after the columns", ErrMalformed))
+			return c.fail(fmt.Errorf("%w: no EOF after the columns", ErrMalformed))
 		}
 	}
-	return cols, nil
+	return nil
 }
 
 // Columns are the current result set's columns; none for a Result alone.

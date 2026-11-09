@@ -296,9 +296,23 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 }
 
 func appendString(b []byte, s string) []byte {
-	q, _ := json.Marshal(s) // a string always marshals
-	return append(b, q...)
+	// A string of printable ASCII that json.Marshal escapes nothing of (it
+	// escapes the quote, the backslash and, for HTML, <, > and &) is
+	// written as it is: most keys and namespaces, without an allocation.
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c > 0x7e || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
+			q, _ := json.Marshal(s) // a string always marshals
+			return append(b, q...)
+		}
+	}
+	b = append(b, '"')
+	b = append(b, s...)
+	return append(b, '"')
 }
+
+// AppendJSONString appends s as a JSON string, escaped as encoding/json
+// escapes it.
+func AppendJSONString(b []byte, s string) []byte { return appendString(b, s) }
 
 func appendCompact(b, doc []byte) ([]byte, error) {
 	var buf bytes.Buffer

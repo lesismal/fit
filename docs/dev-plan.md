@@ -6942,6 +6942,37 @@ macOS Docker (arm64) at `SIZE=smoke`; not yet run on Linux.
    Elasticsearch paths ran at under 1,000 rows/s with little CPU, each worth a look at the host's
    sizes before conclusions.
 
+**The host's first run** (2026-11-09, `bench/results/sync-2026-11-09`; Ryzen 7 7800X3D, 16 threads,
+Docker 29.1.3) and what came of it:
+
+- **Canal's mysql-es failed every round on Linux**: its client adapter refused the whole `es7`
+  adapter ("unacceptable code point", SnakeYAML), so it wrote nothing. The harness mounted the
+  `configs/canal/es7` folder, and the adapter loads every file there: the copy to the host, made with
+  macOS `tar`, carried an AppleDouble `._items.yml` beside `items.yml`. Fixed: the image (now
+  `fit-syncbench/canal-adapter:1.1.8-2`) drops the release's example mappings and run.sh mounts
+  `items.yml` alone; the README's copy is `COPYFILE_DISABLE=1 tar`. Checked again on Docker Desktop.
+- **fit's batch copy (S5) cost 0.84 cores for 139.8k rows/s against DataX's 0.47 for 173k** (fit at
+  46 MiB, DataX 432). Its CPU profile (`s5-mysql-batch/profiles-r*`): `encoding/json.Marshal` 14.5%
+  (a snapshot position marshalled by reflection for every record, 7.5%, and `appendString`, the
+  canonical JSON's string writer, going through `json.Marshal` for every string, 4%); the mysql
+  sink's `InsertRows` preparing each batch's statement 12.9%, of which parsing the server's 4,000
+  parameter definitions (1,000 rows of four columns), which nothing reads, was 11%; GC about 24%,
+  much of it from those. Fixed, with tests and benchmarks: the wire client's `Prepare` reads the
+  parameter definitions without parsing them (`skipColumns`; 2.18 MB to 0.42 MB allocated a
+  4,000-parameter prepare, the rest the fake server's); the snapshot position is written by hand
+  (`appendSnapPos`, 239 ns and 6 allocations to 31 ns and 1, byte for byte what `json.Marshal`
+  wrote); `appendString` writes plain ASCII as it is (8 ns, no allocation) and falls back to
+  `json.Marshal` otherwise, its output unchanged (`fitsync.AppendJSONString` exports it). Not
+  done, for review: caching InsertRows' prepared statements across batches on a connection, which
+  would save the prepare's round trip and the server's work too, but changes the client's promise
+  that it leaves no statement open.
+- **Seen, not fixed**: in S3 (MySQL to Kafka) the Debezium codec's envelope is built as maps and
+  marshalled by `encoding/json`, 35% of fit's CPU (`kafka.(*Debezium).Encode`); a hand-written
+  encoder there is the next cost worth taking, for the kafka connector's owner.
+- To re-run on the host: `s2-mysql-es` (Canal) and `s5-mysql-batch` (fit's fixes); the other items
+  stand. The lag columns are filled for every stream and files item, and the batch has none, as
+  designed.
+
 ### I194 Sync's documentation and examples
 
 - **Do**: `docs/sync.md` and its Chinese twin: concepts, every connector's settings, the guarantees

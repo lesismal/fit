@@ -8,11 +8,14 @@ import (
 
 // Stmt is a prepared statement of its connection.
 type Stmt struct {
-	c      *Conn
-	id     uint32
-	params []Column
-	cols   []Column
-	closed bool
+	c  *Conn
+	id uint32
+	// nparams is the count of the parameters, whose definitions the
+	// server sends and the client does not keep: InsertRows' statements
+	// have thousands, and nothing reads them.
+	nparams int
+	cols    []Column
+	closed  bool
 }
 
 // Prepare prepares query, its parameters marked by ?.
@@ -44,9 +47,10 @@ func (c *Conn) Prepare(ctx context.Context, query string) (*Stmt, error) {
 		return nil, c.fail(fmt.Errorf("%w: prepare OK", ErrMalformed))
 	}
 	if nparams > 0 {
-		if st.params, err = c.readColumns(nparams, nil); err != nil {
+		if err = c.skipColumns(nparams); err != nil {
 			return nil, err
 		}
+		st.nparams = nparams
 	}
 	if ncols > 0 {
 		if st.cols, err = c.readColumns(ncols, nil); err != nil {
@@ -57,7 +61,7 @@ func (c *Conn) Prepare(ctx context.Context, query string) (*Stmt, error) {
 }
 
 // NumParams is the count of the statement's parameters.
-func (s *Stmt) NumParams() int { return len(s.params) }
+func (s *Stmt) NumParams() int { return s.nparams }
 
 // Columns are the columns the statement's rows have, as the server
 // described them when preparing it.
@@ -88,8 +92,8 @@ func (s *Stmt) query(ctx context.Context, args []any, closeAfter bool) (*Rows, e
 	if s.closed {
 		return nil, fmt.Errorf("mysql: statement %d is closed", s.id)
 	}
-	if len(args) != len(s.params) {
-		err := fmt.Errorf("mysql: %d arguments for %d parameters", len(args), len(s.params))
+	if len(args) != s.nparams {
+		err := fmt.Errorf("mysql: %d arguments for %d parameters", len(args), s.nparams)
 		if closeAfter {
 			if e := c.begin(ctx); e == nil {
 				_ = s.close()
