@@ -13,6 +13,7 @@ import (
 
 	"github.com/lesismal/fit/llm/hub"
 	"github.com/lesismal/fit/llm/internal/llmtest"
+	"github.com/lesismal/fit/llm/internal/mesh"
 	"github.com/lesismal/fit/llm/node"
 	"github.com/lesismal/fit/llm/proxy"
 )
@@ -27,6 +28,16 @@ func freeAddr(t *testing.T) string {
 	}
 	defer ln.Close()
 	return ln.Addr().String()
+}
+
+// listenAddr returns where m listens, failing the test when it does not.
+func listenAddr(t *testing.T, m *mesh.Mesh) string {
+	t.Helper()
+	addr := m.ListenAddr()
+	if addr == "" {
+		t.Fatalf("not listening: %+v", m.Listen())
+	}
+	return addr
 }
 
 // member wraps a role's member in a config.

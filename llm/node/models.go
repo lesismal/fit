@@ -36,6 +36,11 @@ type modelRT struct {
 	checkedAt int64
 	inflight  int
 	checking  bool
+	// probes counts the probes started; applied is the newest probe whose
+	// outcome (or a later proxy outcome) the state holds. A probe that
+	// ends after a newer one has been applied is stale and dropped, so a
+	// slow background check cannot overwrite a fresher result.
+	probes, applied uint64
 }
 
 func key(name, api string) string { return api + "\x00" + name }
@@ -214,12 +219,19 @@ func (n *Node) checkModel(ctx context.Context, _ model.Identity, req *model.Name
 // check probes the upstream of m, records the result and calls done. It
 // does not wait: the probe goes through the asynchronous client.
 func (n *Node) check(m model.Model, done func()) {
+	var seq uint64
+	n.mu.Lock()
+	if r := n.rt[key(m.Name, m.API)]; r != nil {
+		r.probes++
+		seq = r.probes
+	}
+	n.mu.Unlock()
 	n.probeModel(m, func(err error) {
 		msg := ""
 		if err != nil {
 			msg = err.Error()
 		}
-		n.setModelErr(m, msg, true)
+		n.setState(m, msg, true, seq)
 		if done != nil {
 			done()
 		}
@@ -227,12 +239,27 @@ func (n *Node) check(m model.Model, done func()) {
 }
 
 // setModelErr records the state of a model; checked also sets the check
-// time.
+// time. It supersedes the probes in flight.
 func (n *Node) setModelErr(m model.Model, msg string, checked bool) {
+	n.setState(m, msg, checked, 0)
+}
+
+// setState records the state of a model: the outcome of probe seq, or of
+// a call when seq is 0. A probe older than the state it would replace is
+// dropped.
+func (n *Node) setState(m model.Model, msg string, checked bool, seq uint64) {
 	n.mu.Lock()
 	r := n.rt[key(m.Name, m.API)]
+	if r != nil && seq != 0 && seq <= r.applied {
+		n.mu.Unlock()
+		return
+	}
 	changed := r != nil && r.err != msg
 	if r != nil {
+		if seq == 0 {
+			seq = r.probes
+		}
+		r.applied = seq
 		if changed && msg != "" {
 			n.log.Warnf("model %s (%s) unavailable: %s", m.Name, m.API, msg)
 		} else if changed {

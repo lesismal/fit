@@ -17,19 +17,26 @@ import (
 // node's config.
 func TestHubRelayAndManage(t *testing.T) {
 	mock := llmtest.StartMockLLM(t)
-	hubAddr, node2Addr := freeAddr(t), freeAddr(t)
-	hf := llmtest.Start(t, member("hub", `{"console": `+llmtest.Console()+`, "listen": {"address": "`+hubAddr+`", "password": "`+meshPass+`"},
+	// The listeners take ports the kernel picks, and are dialed at the
+	// address they got: a port found free and given back (freeAddr) may be
+	// taken meanwhile by another test process, and a member that cannot
+	// listen still starts, so the links would never come up.
+	n2f := llmtest.Start(t, member("node", `{"console": `+llmtest.Console()+`, "listen": {"address": "127.0.0.1:0", "password": "`+meshPass+`"},
+		"models": [{"name": "shared", "api": "openai", "base_url": "`+mock.BaseURL("n2")+`", "api_key": "sk-n2"},
+		{"name": "only2", "api": "openai", "base_url": "`+mock.BaseURL("n2")+`", "api_key": "sk-n2"}]}`), "")
+	n2 := nodeOf(t, n2f)
+	node2Addr := listenAddr(t, n2.Mesh)
+	// The hub dials node2; node1 dials the hub.
+	hf := llmtest.Start(t, member("hub", `{"console": `+llmtest.Console()+`, "listen": {"address": "127.0.0.1:0", "password": "`+meshPass+`"},
 		"peers": [{"address": "`+node2Addr+`", "password": "`+meshPass+`", "role": "node"}]}`), "")
-	// node1 dials the hub; the hub dials node2.
+	h := hubOf(t, hf)
+	hubAddr := listenAddr(t, h.Mesh)
 	n1f := llmtest.Start(t, member("node", `{"console": `+llmtest.Console()+`, "settings": {"allow_hub_manage": true},
 		"peers": [{"address": "`+hubAddr+`", "password": "`+meshPass+`", "role": "hub"}],
 		"models": [{"name": "shared", "api": "openai", "base_url": "`+mock.BaseURL("n1")+`", "api_key": "sk-n1"}]}`), "")
-	n2f := llmtest.Start(t, member("node", `{"console": `+llmtest.Console()+`, "listen": {"address": "`+node2Addr+`", "password": "`+meshPass+`"},
-		"models": [{"name": "shared", "api": "openai", "base_url": "`+mock.BaseURL("n2")+`", "api_key": "sk-n2"},
-		{"name": "only2", "api": "openai", "base_url": "`+mock.BaseURL("n2")+`", "api_key": "sk-n2"}]}`), "")
 	cf := llmtest.Start(t, member("proxy", `{"console": `+llmtest.Console()+`, "api": {"address": "127.0.0.1:0"},
 		"peers": [{"address": "`+hubAddr+`", "password": "`+meshPass+`", "role": "hub"}]}`), "")
-	h, n1, n2, c := hubOf(t, hf), nodeOf(t, n1f), nodeOf(t, n2f), proxyOf(t, cf)
+	n1, c := nodeOf(t, n1f), proxyOf(t, cf)
 	hp, n1p, cp := pages(t, h.Console().URL()), pages(t, n1.Console().URL()), pages(t, c.Console().URL())
 
 	llmtest.Eventually(t, "the hub's models", func() bool {

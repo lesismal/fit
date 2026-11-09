@@ -307,6 +307,42 @@ func TestCheckModel(t *testing.T) {
 	}
 }
 
+// A probe that ends after a newer one (a background check that was slow,
+// say) must not overwrite the newer outcome.
+func TestCheckDropsStaleProbe(t *testing.T) {
+	arrived, release := make(chan struct{}), make(chan struct{})
+	srv := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if strings.HasPrefix(r.URL.Path, "/old") {
+			close(arrived)
+			<-release
+			w.WriteHeader(stdhttp.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(stdhttp.StatusNotFound)
+	}))
+	defer srv.Close()
+	n := startNode(t, &config.LLMNode{Models: []config.LLMModel{
+		{Name: "m1", API: model.APIOpenAI, BaseURL: srv.URL, APIKey: "k"},
+	}}, nil)
+	// The old probe reaches the upstream first and answers last.
+	stale := make(chan struct{})
+	n.check(model.Model{Name: "m1", API: model.APIOpenAI, BaseURL: srv.URL + "/old"}, func() { close(stale) })
+	<-arrived
+	raw, _ := json.Marshal(model.NameReq{Name: "m1"})
+	res, err := n.Router.Invoke(context.Background(), local, model.MethodNodeModelCheck, raw)
+	if v, _ := res.(model.ModelView); err != nil || v.State != model.ModelReady {
+		t.Fatalf("check = %+v %v", v, err)
+	}
+	close(release)
+	<-stale
+	n.mu.Lock()
+	v := n.viewLocked(model.Model{Name: "m1", API: model.APIOpenAI})
+	n.mu.Unlock()
+	if v.State != model.ModelReady {
+		t.Fatalf("the stale probe overwrote the newer check: %+v", v)
+	}
+}
+
 func TestCheckLoopRechecksErrors(t *testing.T) {
 	tick, every, errEvery := checkTick, checkEvery, checkErrorEvery
 	t.Cleanup(func() { checkTick, checkEvery, checkErrorEvery = tick, every, errEvery })

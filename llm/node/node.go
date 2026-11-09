@@ -164,6 +164,7 @@ func (n *Node) Apply(member any) error {
 		case i >= 0 && (old[i].BaseURL != nm.BaseURL || old[i].APIKey != nm.APIKey || old[i].Upstream != nm.Upstream ||
 			old[i].APIVersion != nm.APIVersion):
 			r.err, r.checkedAt = "", 0
+			r.applied = r.probes // a probe of the old upstream is stale
 		}
 	}
 	for k, r := range n.rt {
