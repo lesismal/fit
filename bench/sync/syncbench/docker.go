@@ -20,12 +20,13 @@ type dockerAPI struct {
 }
 
 // newDocker reaches the API at endpoint: unix:///path or http://host:port.
+// Version 1.44 (Docker 25) is the oldest Docker 29 still takes.
 func newDocker(endpoint string, timeout time.Duration) (*dockerAPI, error) {
 	client, base, err := httpClient(endpoint, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("-docker: %w", err)
 	}
-	return &dockerAPI{client: client, base: base + "/v1.41"}, nil
+	return &dockerAPI{client: client, base: base + "/v1.44"}, nil
 }
 
 // httpClient is a client of the HTTP server at endpoint, unix:///path or
