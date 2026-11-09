@@ -3343,6 +3343,33 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   测试。
 - **涉及**：`plugin/wasm`、`plugin/wasm/guest`、`sync`、fit-examples。
 
+**待审决定**（除压测主机上的运行外均已完成，2026-11-09；在用户裁定前有效；该运行完成前本项保持 todo）：
+
+1. **同样的测试，每种客体一个子测试。** `TestSyncTransform`、`TestSyncTransformFailures`、`TestSyncCodec`、
+   `TestSyncConnectors`、`TestSyncTransformInAPipeline` 和 `TestSyncFailuresKeepTheCheckpoint` 分别以 `/go`、
+   `/tinygo`、`/rust` 运行（`plugin/wasm/guests_test.go`）：TinyGo 原样构建 Go 插件自己的源码 `testdata/sync`
+   （`tinygo build -target=wasip1 -buildmode=c-shared`，默认参数，与用户一样）；Rust 构建 `testdata/rust`，一个基于
+   `fit-guest` crate、行为相同的插件。全部通过（本地容器中：TinyGo 0.44.0 配 Go 1.27.3，Rust 1.99.0）。备选：按计划
+   字面，各写一个更小的 TinyGo 变换和 Rust 变换。
+2. **缺少工具链时跳过，除非要求。** 没有 `tinygo`，或没有带 `wasm32-wasip1` 目标的 `cargo`/`rustc` 时，该客体的子测试
+   跳过，因此 Test 和 Coverage 任务（没有这些工具链）不受影响，也没有改动生产代码；`FIT_WASM_GUESTS=tinygo,rust`
+   让缺少的工具链变成失败。CI 新任务 **WASM guests (TinyGo, Rust)** 安装 TinyGo 0.44.0（.deb）和 Rust 1.99.0
+   （`rustup`，`--target wasm32-wasip1`），运行 crate 的 `cargo test`，并在设置该变量的情况下以 `-race` 运行
+   `TestSync*`。备选：构建标签；或在 testdata 中放预先构建的插件。
+3. **Rust crate 像 Go 客体一样手工读取记录。** `fit-guest` 新增 `Record`、`parse_batch`、`Row`、值辅助函数（`int`、
+   `string`、`boolean`、`as_int`、`as_str` 等）、`members`/`elements`、`emit_record`、`request`（由各部分组成 HTTP
+   请求）和 `response_header`，仍然没有依赖；`records` 保留。备选：测试插件和示例使用 serde_json，crate 保持 I165 的样子。
+4. **BenchmarkSyncTransform 覆盖每种客体**：`builtin`，然后是 `wasm-<go|tinygo|rust>-<1|4>`，无法构建的客体跳过，因此
+   压测主机需要安装 TinyGo 和 Rust（版本同 CI 任务）才能得到全部数字。本地（Apple M4 Pro 上的容器，不是压测主机）每条
+   记录：内置 206 ns；Go 单实例 49.9 µs、四实例 15.3 µs；TinyGo 45.8 / 14.3 µs；Rust 30.2 / 11.3 µs。每种客体每条记录
+   都有约 209 次宿主分配（每批 256 条 53.5k 次），所以占主导的是宿主对插件输出 JSON 的解码，而不是客体语言：压测主机的
+   运行最可能要求的是二进制形式及分配更少的宿主解码器。留给主会话与主机运行一起处理。
+5. **示例**：fit-examples 分支 `wasm-sync-examples` 在 I194 的 `sync-wasm-transform` 之外新增 `sync-wasm-codec`（从文件
+   读取自己的行格式并写回，坏行进入死信）、`sync-wasm-source`（由 fit 自己提供的分页 API，检查点是页面及其中的进度）和
+   `sync-wasm-sink`（以 NDJSON 发送到由 fit 自己应答的 webhook）；每个都只需 fit 即可运行，且已实际运行；插件用 Go 编写，
+   也能用 TinyGo 0.44 构建（已验证），注释中有说明。那里没有 Rust 示例：它的 CI 只构建 Go。备选：增加 Rust 示例，并在
+   fit-examples 的测试中加入 Rust 工具链。
+
 ### I166 文件作为源与目标
 
 - **做什么**：源 `file`：路径与通配，每 `scan_interval` 扫描一次；每个文件以设备号、inode 和文件开头字节的指纹识别，因此

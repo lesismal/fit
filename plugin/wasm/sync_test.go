@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,42 +22,11 @@ import (
 	fitsync "github.com/lesismal/fit/sync"
 )
 
-var (
-	syncOnce  sync.Once
-	syncBuilt string
-	syncErr   error
-)
-
-// syncPluginPath builds testdata/sync for wasip1, once, and returns where.
-func syncPluginPath(t testing.TB) string {
-	t.Helper()
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go command to build the plugin with")
-	}
-	syncOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "fit-wasm-sync-")
-		if err != nil {
-			syncErr = err
-			return
-		}
-		syncBuilt = filepath.Join(dir, "sync.wasm")
-		cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", syncBuilt, "./testdata/sync")
-		cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm", "CGO_ENABLED=0")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			syncErr = err
-			syncBuilt = string(out)
-		}
-	})
-	if syncErr != nil {
-		t.Fatalf("building the plugin: %v\n%s", syncErr, syncBuilt)
-	}
-	return syncBuilt
-}
-
-// syncParams returns params for the test plugin, with conf as its config.
-func syncParams(t testing.TB, conf map[string]any, params map[string]any) map[string]any {
+// syncParams returns params for the test plugin at path, with conf as its
+// config.
+func syncParams(path string, conf map[string]any, params map[string]any) map[string]any {
 	c, _ := json.Marshal(conf)
-	out := map[string]any{"path": syncPluginPath(t), "config": string(c)}
+	out := map[string]any{"path": path, "config": string(c)}
 	for k, v := range params {
 		out[k] = v
 	}
@@ -85,9 +53,9 @@ func loadSync(t testing.TB, ns string, params map[string]any) (any, error) {
 	return m, nil
 }
 
-func mustTransform(t testing.TB, conf, params map[string]any) *SyncTransform {
+func mustTransform(t testing.TB, plugin string, conf, params map[string]any) *SyncTransform {
 	t.Helper()
-	m, err := loadSync(t, fitsync.Transforms, syncParams(t, conf, params))
+	m, err := loadSync(t, fitsync.Transforms, syncParams(plugin, conf, params))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,9 +87,11 @@ func keyID(r *fitsync.Record) int64 {
 // TestSyncTransform checks a transform plugin drops, changes and splits
 // records, in order, whether a batch is one call or several on several
 // instances.
-func TestSyncTransform(t *testing.T) {
+func TestSyncTransform(t *testing.T) { eachGuest(t, testSyncTransform) }
+
+func testSyncTransform(t *testing.T, plugin string) {
 	for _, params := range []map[string]any{nil, {"batch_records": 3, "instances": 3}} {
-		tr := mustTransform(t, map[string]any{"mode": "transform", "fail": -1}, params)
+		tr := mustTransform(t, plugin, map[string]any{"mode": "transform", "fail": -1}, params)
 		in := records(0, 12)
 		var got []string
 		var fails int
@@ -148,7 +118,7 @@ func TestSyncTransform(t *testing.T) {
 		}
 	}
 	// Every part and value type crosses unchanged, both ways.
-	tr := mustTransform(t, map[string]any{"mode": "route", "fail": -1}, nil)
+	tr := mustTransform(t, plugin, map[string]any{"mode": "route", "fail": -1}, nil)
 	in := records(0, 14)
 	in[3].Tx = fitsync.Tx{ID: "tx \"7\"\n", First: true}
 	in[4].Namespace = "shop.ördérs\t\x01"
@@ -164,7 +134,7 @@ func TestSyncTransform(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A record the plugin refuses fails alone; Apply takes one record.
-	tr = mustTransform(t, map[string]any{"mode": "refuse", "fail": 3}, nil)
+	tr = mustTransform(t, plugin, map[string]any{"mode": "refuse", "fail": 3}, nil)
 	var failed []int
 	n := 0
 	if err := tr.ApplyBatch(records(2, 5), func(int, *fitsync.Record) { n++ }, func(i int, err error) {
@@ -183,11 +153,13 @@ func TestSyncTransform(t *testing.T) {
 // TestSyncTransformFailures checks a call that runs past its timeout,
 // asks for more memory than it may have, traps or reaches for HTTP fails
 // each record of its batch, and the instance it stopped is made again.
-func TestSyncTransformFailures(t *testing.T) {
+func TestSyncTransformFailures(t *testing.T) { eachGuest(t, testSyncTransformFailures) }
+
+func testSyncTransformFailures(t *testing.T, plugin string) {
 	for mode, want := range map[string]string{
 		"loop": "past its timeout", "grow": "", "trap": "", "http": "may make HTTP requests",
 	} {
-		tr := mustTransform(t, map[string]any{"mode": mode, "fail": 4}, map[string]any{"instances": 1, "timeout": "200ms", "max_memory_bytes": 64 << 20})
+		tr := mustTransform(t, plugin, map[string]any{"mode": mode, "fail": 4}, map[string]any{"instances": 1, "timeout": "200ms", "max_memory_bytes": 64 << 20})
 		var failed []int
 		err := tr.ApplyBatch(records(2, 6), func(int, *fitsync.Record) {}, func(i int, err error) {
 			failed = append(failed, i)
@@ -219,15 +191,17 @@ func TestSyncLoadErrors(t *testing.T) {
 	if _, err := loadSync(t, fitsync.Codecs, map[string]any{"path": bare}); err == nil || !strings.Contains(err.Error(), "fit_sync_decode") {
 		t.Error(err)
 	}
-	if _, err := loadSync(t, fitsync.Sources, map[string]any{"path": syncPluginPath(t), "allow_hosts": []string{""}}); err == nil || !strings.Contains(err.Error(), "names no host") {
+	if _, err := loadSync(t, fitsync.Sources, map[string]any{"path": goGuest(t), "allow_hosts": []string{""}}); err == nil || !strings.Contains(err.Error(), "names no host") {
 		t.Error(err)
 	}
 }
 
 // TestSyncCodec reads a line format of the plugin's own from a file, and
 // writes the records back the same.
-func TestSyncCodec(t *testing.T) {
-	m, err := loadSync(t, fitsync.Codecs, syncParams(t, nil, nil))
+func TestSyncCodec(t *testing.T) { eachGuest(t, testSyncCodec) }
+
+func testSyncCodec(t *testing.T, plugin string) {
+	m, err := loadSync(t, fitsync.Codecs, syncParams(plugin, nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +337,9 @@ func memSink(store string) map[string]any {
 // TestSyncConnectors reads a paged HTTP API through a source plugin into a
 // sink plugin, which posts it back, and a memory sink; then, run again,
 // goes on from the checkpoint, reading only what is new.
-func TestSyncConnectors(t *testing.T) {
+func TestSyncConnectors(t *testing.T) { eachGuest(t, testSyncConnectors) }
+
+func testSyncConnectors(t *testing.T, plugin string) {
 	a := &pagedAPI{}
 	a.add("a", "b", "c", "d", "e")
 	srv := httptest.NewServer(a)
@@ -373,9 +349,9 @@ func TestSyncConnectors(t *testing.T) {
 	defer store.Reset()
 	dir := t.TempDir()
 	cfg := syncConfig(t, dir, map[string]any{"name": "p", "mode": "once",
-		"source": map[string]any{"module": "wasm", "params": syncParams(t, map[string]any{"url": srv.URL + "/items"}, map[string]any{"allow_hosts": []string{u.Hostname()}})},
+		"source": map[string]any{"module": "wasm", "params": syncParams(plugin, map[string]any{"url": srv.URL + "/items"}, map[string]any{"allow_hosts": []string{u.Hostname()}})},
 		"sinks": []any{memSink(t.Name()), map[string]any{"name": "api", "sink": map[string]any{"module": "wasm",
-			"params": syncParams(t, map[string]any{"url": srv.URL + "/sink"}, map[string]any{"allow_hosts": []string{u.Host}})}}}})
+			"params": syncParams(plugin, map[string]any{"url": srv.URL + "/sink"}, map[string]any{"allow_hosts": []string{u.Host}})}}}})
 	opts := fitsync.Options{Engine: engine(t)}
 	if st := runOnce(t, opts, cfg); st.State != "finished" || string(st.Checkpoint) != `{"after":5}` {
 		t.Fatalf("%+v", st)
@@ -399,12 +375,14 @@ func TestSyncConnectors(t *testing.T) {
 
 // TestSyncTransformInAPipeline runs a transform plugin in a pipeline to its
 // end, its checkpoint past every record.
-func TestSyncTransformInAPipeline(t *testing.T) {
+func TestSyncTransformInAPipeline(t *testing.T) { eachGuest(t, testSyncTransformInAPipeline) }
+
+func testSyncTransformInAPipeline(t *testing.T, plugin string) {
 	store := fitsync.MemoryStore(t.Name())
 	defer store.Reset()
 	st := runOnce(t, fitsync.Options{}, syncConfig(t, t.TempDir(), map[string]any{"name": "p", "mode": "once",
 		"source":     map[string]any{"module": "generate", "params": map[string]any{"records": 20, "tx_size": 3}},
-		"transforms": []any{map[string]any{"module": "wasm", "params": syncParams(t, map[string]any{"mode": "transform", "fail": -1}, map[string]any{"batch_records": 4})}},
+		"transforms": []any{map[string]any{"module": "wasm", "params": syncParams(plugin, map[string]any{"mode": "transform", "fail": -1}, map[string]any{"batch_records": 4})}},
 		"sinks":      []any{memSink(t.Name())}}))
 	if st.State != "finished" || string(st.Checkpoint) != `{"n":20}` {
 		t.Fatalf("%+v", st)
@@ -425,7 +403,9 @@ func ids(recs []*fitsync.Record) string {
 // TestSyncFailuresKeepTheCheckpoint checks a plugin past its time or its
 // memory, or calling a host not allowed, fails its batch, which stops the
 // pipeline with on_error stop, and the checkpoint stays before it.
-func TestSyncFailuresKeepTheCheckpoint(t *testing.T) {
+func TestSyncFailuresKeepTheCheckpoint(t *testing.T) { eachGuest(t, testSyncFailuresKeepTheCheckpoint) }
+
+func testSyncFailuresKeepTheCheckpoint(t *testing.T, plugin string) {
 	a := &pagedAPI{}
 	srv := httptest.NewServer(a)
 	defer srv.Close()
@@ -446,11 +426,11 @@ func TestSyncFailuresKeepTheCheckpoint(t *testing.T) {
 				"source": map[string]any{"module": "generate", "params": map[string]any{"records": 60}},
 				"sinks":  []any{memSink(t.Name())}}
 			if tc.transform != nil {
-				p["transforms"] = []any{map[string]any{"module": "wasm", "params": syncParams(t, tc.transform, map[string]any{"timeout": "200ms", "max_memory_bytes": 64 << 20, "batch_records": 8})}}
+				p["transforms"] = []any{map[string]any{"module": "wasm", "params": syncParams(plugin, tc.transform, map[string]any{"timeout": "200ms", "max_memory_bytes": 64 << 20, "batch_records": 8})}}
 			}
 			if tc.sink != nil {
 				p["sinks"] = append(p["sinks"].([]any), map[string]any{"name": "api", "sink": map[string]any{"module": "wasm",
-					"params": syncParams(t, tc.sink, map[string]any{"allow_hosts": []string{"example.com"}})}})
+					"params": syncParams(plugin, tc.sink, map[string]any{"allow_hosts": []string{"example.com"}})}})
 			}
 			st := runOnce(t, fitsync.Options{Engine: engine(t)}, syncConfig(t, dir, p))
 			if st.State != "stopped" || !strings.Contains(st.Err, tc.want) {
@@ -496,7 +476,8 @@ func TestAllowedHosts(t *testing.T) {
 
 // BenchmarkSyncTransform compares the WASM transform with the built-in
 // route doing the same work, renaming the namespace, over batches of 256
-// records.
+// records, in a plugin of each guest that can be built here (go, tinygo,
+// rust; see syncGuests): wasm-<guest>-<instances>.
 func BenchmarkSyncTransform(b *testing.B) {
 	in := records(0, 256)
 	b.Run("builtin", func(b *testing.B) {
@@ -515,17 +496,19 @@ func BenchmarkSyncTransform(b *testing.B) {
 		}
 		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(in)), "ns/record")
 	})
-	for _, instances := range []int{1, 4} {
-		b.Run(fmt.Sprintf("wasm-%d", instances), func(b *testing.B) {
-			tr := mustTransform(b, map[string]any{"mode": "route", "fail": -1}, map[string]any{"instances": instances, "batch_records": 64})
-			b.ReportAllocs()
-			for b.Loop() {
-				if err := tr.ApplyBatch(in, func(int, *fitsync.Record) {}, func(_ int, err error) { b.Fatal(err) }); err != nil {
-					b.Fatal(err)
+	for _, g := range syncGuests {
+		for _, instances := range []int{1, 4} {
+			b.Run(fmt.Sprintf("wasm-%s-%d", g.name, instances), func(b *testing.B) {
+				tr := mustTransform(b, g.plugin(b), map[string]any{"mode": "route", "fail": -1}, map[string]any{"instances": instances, "batch_records": 64})
+				b.ReportAllocs()
+				for b.Loop() {
+					if err := tr.ApplyBatch(in, func(int, *fitsync.Record) {}, func(_ int, err error) { b.Fatal(err) }); err != nil {
+						b.Fatal(err)
+					}
 				}
-			}
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(in)), "ns/record")
-		})
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(in)), "ns/record")
+			})
+		}
 	}
 }
 

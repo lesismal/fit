@@ -699,7 +699,10 @@ sync {
 限制的调用会让其记录失败，交给 `on_error`。
 
 `plugin/wasm/guest` 包是这些调用的 Go 端（`OnTransform`、`OnDecode`、`OnEncode`、`OnPoll`、`OnWrite`、`Emit`、`Fail`、
-`Row`），`plugin/wasm/guest/rust` 是 Rust 端。一个丢弃测试账号的变换：
+`Row`），可用 Go 或 TinyGo（`tinygo build -target=wasip1 -buildmode=c-shared`）构建；crate
+`plugin/wasm/guest/rust`（`fit-guest`）是 Rust 端；fit 的测试会各运行一个这样的插件。fit-examples 中有变换
+（`sync-wasm-transform`）、编解码器（`sync-wasm-codec`）、源（`sync-wasm-source`）和目标（`sync-wasm-sink`）的示例。
+一个丢弃测试账号的变换：
 
 ```go
 //go:build wasip1
