@@ -192,8 +192,9 @@ func TestRoleEvents(t *testing.T) {
 		t.Fatalf("added %+v", added)
 	}
 	// Completed and the state change to seeding, in either order: a fast
-	// download may report one before the other.
-	completed, seeding := false, false
+	// download may report one before the other. One done before the added
+	// event took its state has no change to seeding: added says seeding.
+	completed, seeding := false, added.State == "seeding"
 	w.wait("completed and seeding", func(e Event) bool {
 		completed = completed || (e.Type == EventCompleted && e.Torrent == st.ID)
 		seeding = seeding || (e.Type == EventState && e.State == "seeding" && e.Previous != "")
