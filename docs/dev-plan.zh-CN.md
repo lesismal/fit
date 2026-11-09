@@ -4998,9 +4998,18 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
   与 `json.Marshal` 逐字节相同）；`appendString` 对纯 ASCII 直接写出（8 ns，无分配），其余仍走 `json.Marshal`，输出不变
   （导出为 `fitsync.AppendJSONString`）。未做、待评审：在同一连接上跨批缓存 InsertRows 的预备语句，可省去准备的往返与
   服务器的工作，但会改变客户端“不留下打开的语句”的约定。
-- **发现但未修复**：S3（MySQL 到 Kafka）中 Debezium 编码器以 map 构建信封再用 `encoding/json` 序列化，占 fit CPU 的
-  35%（`kafka.(*Debezium).Encode`）；手写编码器是下一个值得处理的开销，归 kafka 连接器的负责人。
-- 需在主机上重跑：`s2-mysql-es`（Canal）与 `s5-mysql-batch`（fit 的修复）；其余项目保留。所有流与文件项目的延迟列均已
+- **S3（MySQL 到 Kafka）**：Debezium 编码器以 map 构建信封再用 `encoding/json` 序列化，占 fit CPU 的 35%
+  （`kafka.(*Debezium).Encode`，连同行的纯 JSON 共 43%）。已修复：事件手工写入池化缓冲区（`appendDebezium`），字符串用
+  `fitsync.AppendJSONString`，与 map 的输出逐字节相同：成员按排序后的顺序（after、before、op、source、ts_ms），数字、
+  decimal、base64 字节、RFC 3339 时间与日期照旧，JSON 文档仍经 `encoding/json`，使其中的 `<`、`>`、`&`、U+2028、U+2029
+  照旧转义。旧路径（`encodeMaps`）保留，处理快速路径交回的情形：NaN 或无穷浮点数（同样的错误）、不是 JSON 数字的
+  decimal 或无法序列化的 JSON 文档（照旧略去该记录）、没有事件的操作。两者由覆盖所有值类型、null、嵌套 map 与数组、
+  删除、键与命名空间的用例表，以及模糊测试（`FuzzDebeziumEncode`，500 万次无差异）约束为相同的字节与错误。
+  `BenchmarkDebeziumEncode`（六列的更新，Apple M4 Pro）：由 2,500 ns、2,700 B、58 次分配降至 310 ns、384 B、1 次分配
+  （即消息本身的字节）；写入复用缓冲区为 276 ns、零分配。编码器不写 schema 信封（从来没有）；解码两种都读。
+  **待评审**：canal_json 的编码器同样是 map 经 `encoding/json`，但不在任何基准的路径上（S3、S4 中 fit 写 Debezium），
+  在剖析显示它之前保持不变。
+- 需在主机上重跑：`s3-mysql-kafka`（Debezium 编码器）、`s2-mysql-es`（Canal）与 `s5-mysql-batch`（fit 的修复）；其余项目保留。所有流与文件项目的延迟列均已
   填写，批量项目按设计没有延迟列。
 
 ### I194 同步的文档与示例

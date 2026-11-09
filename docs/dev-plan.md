@@ -6966,11 +6966,25 @@ Docker 29.1.3) and what came of it:
   done, for review: caching InsertRows' prepared statements across batches on a connection, which
   would save the prepare's round trip and the server's work too, but changes the client's promise
   that it leaves no statement open.
-- **Seen, not fixed**: in S3 (MySQL to Kafka) the Debezium codec's envelope is built as maps and
-  marshalled by `encoding/json`, 35% of fit's CPU (`kafka.(*Debezium).Encode`); a hand-written
-  encoder there is the next cost worth taking, for the kafka connector's owner.
-- To re-run on the host: `s2-mysql-es` (Canal) and `s5-mysql-batch` (fit's fixes); the other items
-  stand. The lag columns are filled for every stream and files item, and the batch has none, as
+- **S3 (MySQL to Kafka)**: the Debezium codec built its envelope as maps and marshalled them by
+  `encoding/json`, 35% of fit's CPU (`kafka.(*Debezium).Encode`, 43% with the rows' plain JSON).
+  Fixed: the event is written by hand into a pooled buffer (`appendDebezium`), the strings by
+  `fitsync.AppendJSONString`, byte for byte what the maps wrote: the members in their sorted order
+  (after, before, op, source, ts_ms), numbers, decimals, base64 bytes, RFC 3339 times and dates as
+  before, a JSON document still sent through `encoding/json` so that its `<`, `>`, `&`, U+2028 and
+  U+2029 come out escaped as they did. The old path (`encodeMaps`) is kept for what the fast path
+  hands back: a NaN or infinite float (the same error), a decimal that is not a JSON number or a
+  JSON document that does not marshal (the record left out, as before), an operation with no event.
+  The two are held to the same bytes and errors by a table of every value kind, nulls, nested maps
+  and arrays, deletes, keys and namespaces, and by a fuzz test (`FuzzDebeziumEncode`, 5M runs
+  clean). `BenchmarkDebeziumEncode`, an update of six columns (Apple M4 Pro): 2,500 ns, 2,700 B
+  and 58 allocations to 310 ns, 384 B and 1 allocation (the message's own bytes); 276 ns and none
+  into a reused buffer. The encoder writes no schema envelope (it never did); decoding reads both.
+  **Pending review**: canal_json's encoder has the same maps-through-`encoding/json` pattern but is
+  not on any benchmark's path (fit writes Debezium in S3 and S4), so it is left as it is until a
+  profile shows it.
+- To re-run on the host: `s3-mysql-kafka` (the Debezium encoder), `s2-mysql-es` (Canal) and
+  `s5-mysql-batch` (fit's fixes); the other items stand. The lag columns are filled for every stream and files item, and the batch has none, as
   designed.
 
 ### I194 Sync's documentation and examples

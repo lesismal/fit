@@ -4,8 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/lesismal/fit/module"
@@ -257,43 +259,226 @@ func decimalOf(b []byte, scale int) string {
 }
 
 // Encode appends each record as a Debezium event without a schema, its
-// rows as plain JSON.
+// rows as plain JSON: {"after":...,"before":...,"op":...,"source":{...},
+// "ts_ms":...}, the members in the order encoding/json writes a map's. An
+// event is written by hand into a pooled buffer, then appended to b, byte
+// for byte what encodeMaps writes; a record the hand-written path is unsure
+// of (a JSON document that does not marshal, a decimal that is not a JSON
+// number, a float JSON cannot hold, an operation with no event) is written
+// by encodeMaps itself, errors and all.
 func (c *Debezium) Encode(b []byte, recs []*fitsync.Record) ([]byte, error) {
+	sp := scratch.Get().(*[]byte)
+	defer scratch.Put(sp)
 	for _, r := range recs {
-		var op string
-		switch r.Op {
-		case fitsync.OpInsert, fitsync.OpMessage:
-			op = "c"
-		case fitsync.OpUpdate:
-			op = "u"
-		case fitsync.OpDelete:
-			op = "d"
-		default:
-			return b, fmt.Errorf("debezium: a %s record has no event", r.Op)
+		ev, ok := appendDebezium((*sp)[:0], r)
+		if cap(ev) <= 64<<10 {
+			*sp = ev[:0]
 		}
-		before, err := plainJSON(r.Before)
-		if err != nil {
+		if ok {
+			b = append(b, ev...)
+			continue
+		}
+		var err error
+		if b, err = encodeMaps(b, r); err != nil {
 			return b, err
 		}
-		after, err := plainJSON(r.After)
-		if err != nil {
-			return b, err
-		}
-		if r.Before.IsNull() {
-			before = []byte("null")
-		}
-		if r.After.IsNull() {
-			after = []byte("null")
-		}
-		db, table := splitNamespace(r.Namespace)
-		ms := r.CommitTime.UnixMilli()
-		if r.CommitTime.IsZero() {
-			ms = 0
-		}
-		src, _ := json.Marshal(map[string]any{"connector": "fit", "db": db, "table": table, "ts_ms": ms})
-		ev, _ := json.Marshal(map[string]any{"before": json.RawMessage(before), "after": json.RawMessage(after), "op": op, "ts_ms": ms,
-			"source": json.RawMessage(src)})
-		b = append(b, ev...)
 	}
 	return b, nil
+}
+
+// scratch holds the buffers Encode writes an event into.
+var scratch = sync.Pool{New: func() any { b := make([]byte, 0, 512); return &b }}
+
+// appendDebezium appends r's event, or reports it could not.
+func appendDebezium(b []byte, r *fitsync.Record) ([]byte, bool) {
+	var op string
+	switch r.Op {
+	case fitsync.OpInsert, fitsync.OpMessage:
+		op = "c"
+	case fitsync.OpUpdate:
+		op = "u"
+	case fitsync.OpDelete:
+		op = "d"
+	default:
+		return b, false
+	}
+	var ok bool
+	b = append(b, `{"after":`...)
+	if b, ok = appendPlainFast(b, r.After); !ok {
+		return b, false
+	}
+	b = append(b, `,"before":`...)
+	if b, ok = appendPlainFast(b, r.Before); !ok {
+		return b, false
+	}
+	b = append(b, `,"op":"`...)
+	b = append(b, op...)
+	db, table := splitNamespace(r.Namespace)
+	ms := r.CommitTime.UnixMilli()
+	if r.CommitTime.IsZero() {
+		ms = 0
+	}
+	b = append(b, `","source":{"connector":"fit","db":`...)
+	b = fitsync.AppendJSONString(b, db)
+	b = append(b, `,"table":`...)
+	b = fitsync.AppendJSONString(b, table)
+	b = append(b, `,"ts_ms":`...)
+	b = strconv.AppendInt(b, ms, 10)
+	b = append(b, `},"ts_ms":`...)
+	b = strconv.AppendInt(b, ms, 10)
+	return append(b, '}'), true
+}
+
+// appendPlainFast appends v as plain JSON as fitsync.AppendPlain writes it
+// and encoding/json then rewrites it as a json.RawMessage, or reports it
+// could not.
+func appendPlainFast(b []byte, v fitsync.Value) ([]byte, bool) {
+	switch v.Kind() {
+	case fitsync.KindNull:
+		return append(b, "null"...), true
+	case fitsync.KindBool:
+		return strconv.AppendBool(b, v.AsBool()), true
+	case fitsync.KindInt:
+		return strconv.AppendInt(b, v.AsInt(), 10), true
+	case fitsync.KindUint:
+		return strconv.AppendUint(b, v.AsUint(), 10), true
+	case fitsync.KindFloat:
+		f := v.AsFloat()
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return b, false
+		}
+		return strconv.AppendFloat(b, f, 'g', -1, 64), true
+	case fitsync.KindDecimal:
+		if !jsonNumber(v.Text()) {
+			return b, false
+		}
+		return append(b, v.Text()...), true
+	case fitsync.KindString:
+		return fitsync.AppendJSONString(b, v.Text()), true
+	case fitsync.KindBytes:
+		b = append(b, '"')
+		b = base64.StdEncoding.AppendEncode(b, []byte(v.Text()))
+		return append(b, '"'), true
+	case fitsync.KindTime:
+		b = append(b, '"')
+		b = v.AsTime().AppendFormat(b, time.RFC3339Nano)
+		return append(b, '"'), true
+	case fitsync.KindDate:
+		b = append(b, '"')
+		b = v.AsTime().AppendFormat(b, time.DateOnly)
+		return append(b, '"'), true
+	case fitsync.KindArray:
+		b = append(b, '[')
+		for i, e := range v.Elems() {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			var ok bool
+			if b, ok = appendPlainFast(b, e); !ok {
+				return b, false
+			}
+		}
+		return append(b, ']'), true
+	case fitsync.KindMap:
+		b = append(b, '{')
+		for i, f := range v.Fields() {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			b = append(fitsync.AppendJSONString(b, f.Name), ':')
+			var ok bool
+			if b, ok = appendPlainFast(b, f.Value); !ok {
+				return b, false
+			}
+		}
+		return append(b, '}'), true
+	}
+	// A JSON document, whose strings may hold what encoding/json escapes
+	// on its way out (<, >, &, U+2028, U+2029), goes through encoding/json
+	// as encodeMaps sends it; AppendPlain fails a kind it does not know.
+	j, err := fitsync.AppendPlain(nil, v)
+	if err == nil {
+		j, err = json.Marshal(json.RawMessage(j))
+	}
+	if err != nil {
+		return b, false
+	}
+	return append(b, j...), true
+}
+
+// jsonNumber reports whether s is a number as JSON's grammar has one.
+func jsonNumber(s string) bool {
+	i := 0
+	digits := func() bool {
+		j := i
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		return i > j
+	}
+	if i < len(s) && s[i] == '-' {
+		i++
+	}
+	if i < len(s) && s[i] == '0' {
+		i++
+	} else if i == len(s) || s[i] < '1' || s[i] > '9' || !digits() {
+		return false
+	}
+	if i < len(s) && s[i] == '.' {
+		i++
+		if !digits() {
+			return false
+		}
+	}
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			i++
+		}
+		if !digits() {
+			return false
+		}
+	}
+	return i == len(s)
+}
+
+// encodeMaps appends r's event as the codec first wrote it, as maps through
+// encoding/json: Encode falls back to it, and the tests hold the two to the
+// same bytes. A record whose rows do not marshal appends nothing, as
+// before.
+func encodeMaps(b []byte, r *fitsync.Record) ([]byte, error) {
+	var op string
+	switch r.Op {
+	case fitsync.OpInsert, fitsync.OpMessage:
+		op = "c"
+	case fitsync.OpUpdate:
+		op = "u"
+	case fitsync.OpDelete:
+		op = "d"
+	default:
+		return b, fmt.Errorf("debezium: a %s record has no event", r.Op)
+	}
+	before, err := plainJSON(r.Before)
+	if err != nil {
+		return b, err
+	}
+	after, err := plainJSON(r.After)
+	if err != nil {
+		return b, err
+	}
+	if r.Before.IsNull() {
+		before = []byte("null")
+	}
+	if r.After.IsNull() {
+		after = []byte("null")
+	}
+	db, table := splitNamespace(r.Namespace)
+	ms := r.CommitTime.UnixMilli()
+	if r.CommitTime.IsZero() {
+		ms = 0
+	}
+	src, _ := json.Marshal(map[string]any{"connector": "fit", "db": db, "table": table, "ts_ms": ms})
+	ev, _ := json.Marshal(map[string]any{"before": json.RawMessage(before), "after": json.RawMessage(after), "op": op, "ts_ms": ms,
+		"source": json.RawMessage(src)})
+	return append(b, ev...), nil
 }
