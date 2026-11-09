@@ -728,6 +728,27 @@ func (s *Server) btPublish(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+// btPublishedTorrent answers GET /bittorrent/publish/{name}/torrents/{id}:
+// the .torrent file of a publish entry's torrent, which the pages offer to
+// download (I204). It is read from the role's snapshot, without a lock.
+func (s *Server) btPublishedTorrent(w http.ResponseWriter, r *http.Request) {
+	role := s.btRole(w)
+	if role == nil {
+		return
+	}
+	id := strings.ToLower(r.PathValue("id"))
+	raw, name, _, ok := role.PublishedTorrent([]string{r.PathValue("name")}, id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "no torrent "+strconv.Quote(id)+" is published by "+strconv.Quote(r.PathValue("name")))
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-bittorrent")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name + ".torrent"}))
+	w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
 // btTrackerStats answers GET /bittorrent/tracker/stats.
 func (s *Server) btTrackerStats(w http.ResponseWriter, _ *http.Request) {
 	t := s.btTracker(w)

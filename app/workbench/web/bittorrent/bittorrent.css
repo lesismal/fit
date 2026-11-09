@@ -1,0 +1,32 @@
+/* The BitTorrent pages (bittorrent/bittorrent.js, I204): progress bars, the torrents' table, a torrent's numbers and
+   forms, the events, the alternative rates in the top bar. The rest is core/ui.css and the config form's config.css.
+
+   BitTorrent 页面（bittorrent/bittorrent.js，I204）：进度条、种子表格、单个种子的数字与表单、事件列表与顶栏中的备用速率。
+   其余样式见 core/ui.css 与配置表单的 config.css。 */
+
+.bt-progress { display: flex; align-items: center; gap: 8px; min-width: 140px; }
+.bt-progress__bar { flex: 1; height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.bt-progress__fill { height: 100%; background: var(--primary); border-radius: 999px; transition: width .4s; }
+.bt-progress--ok .bt-progress__fill { background: var(--ok); }
+.bt-progress--danger .bt-progress__fill { background: var(--danger); }
+.bt-progress--muted .bt-progress__fill { background: var(--text-3, var(--border)); }
+.bt-progress__text { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; color: var(--text-2); }
+.bt-num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bt-pick { width: 28px; }
+.bt-name { max-width: 420px; }
+.bt-name a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-clip { display: inline-block; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.bt-path { word-break: break-all; }
+.bt-bad { color: var(--danger); }
+.bt-title { margin: 0; font-size: 18px; word-break: break-word; }
+.bt-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.bt-limits { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.bt-forms { align-items: start; }
+@media (max-width: 960px) { .bt-forms { grid-template-columns: minmax(0, 1fr); } }
+.bt-magnet { width: 100%; font-family: var(--mono, monospace); font-size: 12px; }
+.bt-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+.bt-events li { font-size: 13px; }
+.bt-list { margin: 0; padding-left: 18px; }
+.bt-alt { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.bt-alt svg { width: 15px; height: 15px; }
+.bt-problems summary { cursor: pointer; font-size: 13px; }

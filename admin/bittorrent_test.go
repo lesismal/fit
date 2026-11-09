@@ -530,12 +530,19 @@ type sseStream struct {
 // want; the stream is read on a goroutine of its own.
 func (f *btFixture) openEvents(t *testing.T, want int, header ...string) *sseStream {
 	t.Helper()
+	return openSSE(t, &http.Client{Transport: &http.Transport{}}, f.api+"/bittorrent/events", want, header...)
+}
+
+// openSSE opens the stream of events at url with c and header, which must
+// answer want; the stream is read on a goroutine of its own.
+func openSSE(t *testing.T, c *http.Client, url string, want int, header ...string) *sseStream {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	req, _ := http.NewRequestWithContext(ctx, "GET", f.api+"/bittorrent/events", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	for i := 0; i+1 < len(header); i += 2 {
 		req.Header.Set(header[i], header[i+1])
 	}
-	resp, err := (&http.Client{Transport: &http.Transport{}}).Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -782,10 +789,161 @@ func TestBitTorrentConsole(t *testing.T) {
 	if code, body, _ := b.do("GET", "/api/m/admin/bittorrent/torrents", ""); code != http.StatusOK || !strings.Contains(body, h) {
 		t.Fatalf("list: %d %s", code, body)
 	}
-	if code, body, _ := b.do("GET", "/api/m/admin/bittorrent/events", ""); code != http.StatusNotImplemented {
-		t.Fatalf("events through the console: %d %s", code, body)
-	}
 	if !f.logged(`"ada": POST /bittorrent/torrents: 201`) {
 		t.Errorf("the add is not logged: %q", f.logLines())
 	}
+}
+
+// TestBitTorrentConsoleEvents streams the events through the console's own
+// route (I204): behind a session, the add's events and heartbeats, a
+// replay from Last-Event-ID, a reset, a bad ID, the bound on streams, a
+// client gone freeing its slot, a slow client dropped, and the end when
+// the role stops; and 404 without the role.
+func TestBitTorrentConsoleEvents(t *testing.T) {
+	defer func(d time.Duration) { btHeartbeat = d }(btHeartbeat)
+	btHeartbeat = 20 * time.Millisecond
+	e := testEngine(t)
+	f := &consoleFixture{fixture: startEnv(t, doc("one"), &config.Admin{}, runtime.Env{Metrics: observe.NewMetrics(), Engine: e}), now: time.Now()}
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	c := &config.Console{Address: "127.0.0.1:0", Users: []config.ConsoleUser{{Username: "ada", PasswordHash: string(hash)}}, MaxConns: 128}
+	var err error
+	f.console, err = StartConsole(testEngine(t), c, &config.Admin{}, f.configs, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.console.Shutdown(context.Background()) })
+	f.url = strings.TrimSuffix(f.console.URL(), "/")
+	const path = "/api/m/admin/bittorrent/events"
+
+	b := f.browser(t)
+	if code, _, _ := b.do("GET", path, ""); code != http.StatusUnauthorized {
+		t.Fatalf("without a login: %d", code)
+	}
+	if code := b.login("ada", "pw"); code != http.StatusOK {
+		t.Fatalf("login: %d", code)
+	}
+	if code, body, _ := b.do("GET", path, ""); code != http.StatusNotFound || !strings.Contains(body, "does not run here") {
+		t.Fatalf("without the role: %d %s", code, body)
+	}
+	role, _, _ := startBTRoles(t, e, "")
+	client := &http.Client{Jar: b.c.Jar, Transport: &http.Transport{}}
+	open := func(want int, header ...string) *sseStream {
+		t.Helper()
+		return openSSE(t, client, f.url+path, want, header...)
+	}
+	s := open(http.StatusOK)
+	if ct := s.resp.Header.Get("Content-Type"); ct != "text/event-stream" || s.resp.Header.Get("Cache-Control") != "no-cache" {
+		t.Fatalf("headers %v", s.resp.Header)
+	}
+	const h = "0123456789abcdef0123456789abcdef01234567"
+	if code, body, _ := b.do("POST", "/api/m/admin/bittorrent/torrents", `{"magnet": "magnet:?xt=urn:btih:`+h+`&dn=film", "paused": true}`); code != http.StatusCreated {
+		t.Fatalf("add: %d %s", code, body)
+	}
+	added := s.next("added", func(e sseEvent) bool { return e.event == bittorrent.EventAdded })
+	var ev bittorrent.Event
+	if err := json.Unmarshal([]byte(added.data), &ev); err != nil || ev.Torrent != h || ev.Name != "film" || strconv.FormatUint(ev.ID, 10) != added.id {
+		t.Fatalf("added %+v %v", added, err)
+	}
+	s.next("a heartbeat", func(e sseEvent) bool { return strings.Contains(e.comment, "heartbeat") })
+	if code, body, _ := b.do("DELETE", "/api/m/admin/bittorrent/torrents/"+h, ""); code != http.StatusOK {
+		t.Fatalf("remove: %d %s", code, body)
+	}
+	removed := s.next("removed", func(e sseEvent) bool { return e.event == bittorrent.EventRemoved })
+	again := open(http.StatusOK, "Last-Event-ID", added.id)
+	if e := again.next("the removal replayed", func(e sseEvent) bool { return e.id != "" }); e.id != removed.id {
+		t.Fatalf("replayed %+v, want %s", e, removed.id)
+	}
+	again.close()
+	byQuery := openSSE(t, client, f.url+path+"?after="+added.id, http.StatusOK)
+	byQuery.next("the removal replayed by ?after", func(e sseEvent) bool { return e.id == removed.id })
+	byQuery.close()
+	reset := open(http.StatusOK, "Last-Event-ID", "999999")
+	reset.next("reset", func(e sseEvent) bool { return e.event == "reset" })
+	reset.close()
+	open(http.StatusBadRequest, "Last-Event-ID", "x")
+	s.close()
+
+	// The bound: the role's subscribers, the console's streams among them.
+	var held []*bittorrent.Subscription
+	waitSubscribe := func() {
+		t.Helper()
+		for deadline := time.Now().Add(btHang); ; time.Sleep(10 * time.Millisecond) {
+			sub, _, _, err := role.Subscribe(0)
+			if err == nil {
+				held = append(held, sub)
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("no slot freed: %v", err)
+			}
+		}
+	}
+	for range bittorrent.MaxSubscribers - 1 {
+		waitSubscribe()
+	}
+	last := open(http.StatusOK)
+	if code, _, hd := b.do("GET", path, ""); code != http.StatusServiceUnavailable || hd.Get("Retry-After") == "" {
+		t.Fatalf("past the bound: %d %v", code, hd)
+	}
+	last.close()
+	waitSubscribe()
+	for _, sub := range held {
+		sub.Close()
+	}
+
+	// A client that reads nothing while far more events come than its
+	// buffer and the connection hold: it is dropped, told why.
+	req, _ := http.NewRequest("GET", f.url+path, nil)
+	slow, err := (&http.Client{Jar: b.c.Jar, Transport: &http.Transport{ReadBufferSize: 512, DisableCompression: true}}).Do(req)
+	if err != nil || slow.StatusCode != http.StatusOK {
+		t.Fatalf("slow: %v %v", err, slow)
+	}
+	t.Cleanup(func() { _ = slow.Body.Close() })
+	cl := role.Client()
+	for i := range 40000 {
+		cl.Ban(netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}), 0))
+	}
+	if !strings.Contains((&rawStream{resp: slow}).drain(t), "event: lagged") {
+		t.Fatal("the slow client was not told it lagged")
+	}
+
+	// The role stops: the stream ends.
+	end := open(http.StatusOK)
+	role.Stop(context.Background())
+	got := end.ended()
+	if len(got) == 0 || got[len(got)-1].event != "end" {
+		t.Fatalf("the end: %+v", got)
+	}
+}
+
+// TestBitTorrentPublishedTorrent serves a publish entry's .torrent file,
+// directly and through the console, and 404 for one it does not publish.
+func TestBitTorrentPublishedTorrent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.bin"), bytes.Repeat([]byte("x"), 70000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := startBT(t, &config.Admin{}, `, "publish": [{"name": "pub", "dir": `+strconv.Quote(dir)+`, "check_interval": "50ms"}]`)
+	var id string
+	for deadline := time.Now().Add(btHang); id == ""; time.Sleep(20 * time.Millisecond) {
+		v := f.json(t, "GET", "/bittorrent/publish/pub", "", http.StatusOK)
+		if ts, _ := v["torrents"].([]any); len(ts) == 1 {
+			id, _ = ts[0].(map[string]any)["id"].(string)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("not published: %v", v)
+		}
+	}
+	req, _ := http.NewRequest("GET", f.api+"/bittorrent/publish/pub/torrents/"+strings.ToUpper(id), nil)
+	resp, body := f.do(t, req)
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/x-bittorrent" ||
+		!strings.Contains(resp.Header.Get("Content-Disposition"), `filename=a.bin.torrent`) {
+		t.Fatalf("%d %v", resp.StatusCode, resp.Header)
+	}
+	mi, err := metainfo.Parse([]byte(body))
+	if err != nil || mi.Info.Name != "a.bin" {
+		t.Fatalf("%v %+v", err, mi)
+	}
+	f.json(t, "GET", "/bittorrent/publish/pub/torrents/"+strings.Repeat("ab", 20), "", http.StatusNotFound)
+	f.json(t, "GET", "/bittorrent/publish/other/torrents/"+id, "", http.StatusNotFound)
 }

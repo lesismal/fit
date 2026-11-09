@@ -11,9 +11,8 @@ discovery, HTTP and UDP trackers and web seeds. This page covers the role: its c
 keeps its state, adding torrents (magnet links, .torrent files and URLs, `watch_dir`), categories,
 the queue, the disk checks, the alternative rates, each torrent's limits, the blocklists, what a
 reload changes, publishing a directory, and its bounds; the Admin API, the event stream, `fit bt`
-and the metrics; the `bt_stream` handler that plays a torrent's file while it downloads; and the
-`bittorrent.tracker` role. The pages come with a later item of the
-[development plan](dev-plan.md#bittorrent-downloading-and-seeding-a-tracker-publishing).
+and the metrics; the workbench's pages and the assistant's tools; the `bt_stream` handler that plays
+a torrent's file while it downloads; and the `bittorrent.tracker` role.
 
 Off by default: without `bittorrent.client`, fit opens no BitTorrent port and keeps no state.
 
@@ -328,7 +327,7 @@ data), `TemporaryBytes` and `SetFilePriorities` (every file's priority, saved on
 
 The Admin API serves the client and the tracker under `/bittorrent/`, behind its token and
 `admin.access` as every endpoint, and the console passes them on as `/api/m/admin/bittorrent/...`
-(the event stream excepted). `/node` lists the capability `bittorrent`. Each call of the role's
+(the event stream on a route of its own, below). `/node` lists the capability `bittorrent`. Each call of the role's
 API runs on the request's goroutine (net/http's on the Admin API, the console's pool behind the
 console), never on a fib worker.
 
@@ -345,6 +344,7 @@ console), never on a fib worker.
 | `GET /bittorrent/torrents/<id>/trackers` | `{"trackers": [{"url", "tier"}], "web_seeds"}`, as its .torrent file or magnet link lists them |
 | `GET /bittorrent/alt_speed` | the alternative rates: mode, configured, active, the rates in force; `PUT` `{"mode": "auto"}`, `"on"` or `"off"` |
 | `GET /bittorrent/publish` | the publish entries and their torrents; `/bittorrent/publish/<name>` one |
+| `GET /bittorrent/publish/<name>/torrents/<id>` | a published torrent's .torrent file (`application/x-bittorrent`, as an attachment), which the pages offer |
 | `GET /bittorrent/events` | the events, as server-sent events (below) |
 | `GET /bittorrent/tracker/stats` | the tracker's totals |
 | `GET /bittorrent/tracker/torrents` | the allow-list's swarms (`offset`, `limit` at most 1000); `/bittorrent/tracker/torrents/<info hash>` one torrent's |
@@ -397,8 +397,13 @@ stream begins with an event `reset`, after which the client reads the torrents a
 has a buffer of 256 events: a client that does not take them fast enough is not skipped silently
 but sent an event `lagged` and disconnected, to reconnect from the last ID it had. At most 32
 streams run at once (`503` past them). When the role stops, an event `end` closes the stream; when
-the Admin API shuts down, too. The stream needs a connection of its own, so it is served on the
-Admin API's address and not through the console (`501` there).
+the Admin API shuts down, too. The stream needs a connection of its own: the Admin API serves it on
+its address, and the console on a route of its own, `GET /api/m/admin/bittorrent/events`, behind
+the session, since its proxy answers whole responses. There it is written on fib's connection: the
+worker subscribes and writes the stream's start, then one goroutine of the stream's own writes each
+event without waiting and, past the connection's watermark, waits for it to drain, at most 30s, after
+which the stream is cut; the same 32 streams bound both. A manager's pass-through to its members
+(the node switcher) answers whole responses too, so the pages poll there.
 
 The events go to fit's log too, under the logger `bittorrent`: torrents added and removed, bans and
 seed limits at info, completions and the alternative rates at info as before, storage errors at
@@ -449,6 +454,73 @@ so the counters keep what removed torrents counted and never go back while fit r
 | `fit_bittorrent_tracker_torrents`, `fit_bittorrent_tracker_peers`, `fit_bittorrent_tracker_max_torrents`, `fit_bittorrent_tracker_max_peers`, `fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`, `fit_bittorrent_tracker_scrapes_total` | counter | |
 | `fit_bittorrent_tracker_refused_total` | counter | `reason`: `unregistered`, `passkey`, `access` |
+
+## The pages
+
+The workbench has a **BitTorrent** menu (I204), beside Sync, for the config's console: it calls the
+Admin API's `/bittorrent/` endpoints through the console, and edits the shared draft.
+
+- **Torrents**: every torrent in queue order, with its name (and error), size, a progress bar, its
+  state and why the role holds it (queued, short of disk space), download and upload rates, the
+  time left at the present rate, its ratio (uploaded over size, as `seed_ratio` counts it), peers
+  and seeders, and category; filtered by state, category (or none) and a part of the name, the
+  filters the Admin API's own. Torrents picked are paused, resumed or removed, a removal asking
+  first whether their downloaded files go too. **Add torrent** takes a magnet link, a .torrent file
+  (sent raw as `application/x-bittorrent`, at most 32 MiB) or a URL fit downloads, with a category,
+  paused and sequential. **Recent events** lists the client's last 30 events since the page opened.
+- **A torrent** (`#/bittorrent/torrent/<id>`): **Overview**, its progress, rates, totals, peers,
+  ratio and time left, the pieces it has of all, its ID and hashes, directory, the date it was
+  added and its magnet link to copy; its category, queue position and sequential download, changed
+  at once, and its own limits (rates, connections, upload slots, seed ratio and time, saved together
+  or cleared), beside the limits in force; Pause or Resume, Recheck (after a confirm: it stops while
+  its files are checked again) and Remove. **Files**, each file's progress and priority (skip, low,
+  normal, high), set one by one or for the files picked. **Peers**, each peer's address, client,
+  connection (direction, uTP, encryption, seed, choked) and rates. **Trackers**, its trackers by
+  tier and its web seeds, as its .torrent file or magnet link names them.
+- The **alternative rates** are in the top bar of the client's pages: auto (the schedules), on or
+  off, and whether they hold now, with the rates.
+- **Tracker**: the tracker's torrents and peers against its bounds, announces and scrapes, refusals
+  by reason, private or public with its allow-list and UDP address; the allow-list's swarms, 100 a
+  page; and, for a private tracker, a user's passkey looked up for their announce URL, shown to
+  the person signed in and never kept.
+- **Publishing**: each publish entry, its directory, mode, web seed, last walk, files pending and
+  problems, and its torrents with their size, files, state and age, a **.torrent** download (the
+  Admin API's `/bittorrent/publish/<name>/torrents/<id>`) and the magnet link, opened or copied.
+- **BitTorrent config**: the whole `bittorrent` member, the client with its categories, limits,
+  `alt_speed` and `publish`, and the tracker, made from the schema; a save's problems under
+  `bittorrent` link here.
+
+The pages read the list every two seconds, for the rates and the progress, which no event carries;
+beside it they read the client's events from the console's stream, so that a torrent added,
+removed or changing state shows at once and a completion or a storage error is told. A break
+reconnects with `Last-Event-ID`; a `reset` reads the list again; without the stream (a member opened
+through a manager, the bound of streams, a fit without the role) they poll only, and the list says
+which (**live** or **polling**). A role that does not run here is said, with a link to the config
+page. The role's own `console` serves only its read-only module; these pages need `admin.console`.
+
+### The assistant
+
+The assistant reads the client and the tracker, and proposes changes to the torrents, under its
+levels as every tool ([the console](console.md#bittorrent)):
+
+| Tool | Level | What it does |
+| --- | --- | --- |
+| `bt_torrents` | `read` | the torrents in short (state, held, error, progress, size, rates, peers, ratio, time left), filtered by state, category and name (50, at most 200), with the alternative rates |
+| `bt_torrent` | `read` | a torrent's status, its first 100 files with their priorities, its first 50 peers and its trackers and web seeds |
+| `bt_tracker_stats` | `read` | the tracker's totals and refusals, and the allow-list's first 50 swarms |
+| `bt_add_propose` | `propose` | a torrent added by magnet link or .torrent URL, in a category, paused or sequential |
+| `bt_pause_propose` | `propose` | torrents paused, by ID (at most 100) |
+| `bt_resume_propose` | `propose` | torrents resumed, by ID (at most 100) |
+
+No passkey reaches a model: a torrent's magnet link is left out (its trackers' URLs may carry a
+private tracker's passkey), a tracker's URL is given as its scheme, host and last path element,
+a web seed's without its user or query, peers without their IDs, and a user's passkey is never
+read by a tool. The propose tools add steps to the conversation's one pending proposal, as the
+media ones do: checked on what runs now (the role and its client run, the category exists, the
+torrent is not held already, those named exist and are not paused, or paused, already, leaving out
+with a note those that are), applied after any config change of the proposal, in order, through
+the Admin API as the person who applies it after the second confirm. A step that fails leaves the
+others applied, the outcome `partial`.
 
 ## Playing a file while it downloads
 

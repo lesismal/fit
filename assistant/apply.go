@@ -148,8 +148,8 @@ type ProposalView struct {
 	Fixes        []FixRef          `json:"fixes,omitempty"`
 	Rollback     uint64            `json:"rollback,omitempty"`
 	Purges       []PurgeStep       `json:"purges,omitempty"`
-	// Media are the media steps, checked on what runs now, with what uses
-	// the items they change; MediaTag is a digest of that, which an apply
+	// Media are the media steps and the BitTorrent ones (I204), checked on
+	// what runs now, with what uses the items they change; MediaTag is a digest of that, which an apply
 	// names to confirm what it was shown.
 	Media    []MediaAction `json:"media,omitempty"`
 	MediaTag string        `json:"media_tag,omitempty"`
@@ -482,7 +482,12 @@ func (a *Assistant) apply(r *console.Request, viewer, user, conv string, body pr
 		res.Version, res.ETag, res.Warnings = ans.Version, ans.ETag, ans.Warnings
 	}
 	for _, m := range b.media {
-		mr := a.applyMedia(ctx, viewer, m)
+		var mr mediaResult
+		if isBTTool(m.Tool) {
+			mr = a.applyBT(ctx, viewer, m)
+		} else {
+			mr = a.applyMedia(ctx, viewer, m)
+		}
 		if mr.Error != "" {
 			res.Outcome = OutcomePartial
 		}

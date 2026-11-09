@@ -8,7 +8,7 @@ fit 在网关旁运行一个 BitTorrent 客户端：`bittorrent.client` 角色�
 TCP 和 uTP，MSE 加密，DHT，对端交换，本地服务发现，HTTP 和 UDP tracker，以及 web seed。本页讲这个角色：配置、状态保存
 在哪里、添加种子（磁力链接、.torrent 文件和 URL、`watch_dir`）、分类、队列、磁盘检查、备用速率、每个种子的限制、屏蔽列表、
 重载改变什么、发布目录和它的上限；Admin API、事件流、`fit bt` 和指标；边下载边播放种子文件的 `bt_stream` 处理器；以及
-`bittorrent.tracker` 角色。页面随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
+`bittorrent.tracker` 角色；以及工作台的页面和助手的工具。
 
 默认关闭：不写 `bittorrent.client` 时，fit 不打开 BitTorrent 端口，也不保存状态。
 
@@ -265,7 +265,7 @@ API 还为 `bt_stream` 的临时种子提供了钩子：`AddTemporary`（受调�
 ## Admin API
 
 Admin API 在 `/bittorrent/` 下提供客户端和 tracker 的端点，与所有端点一样受其令牌和 `admin.access` 保护；控制台以
-`/api/m/admin/bittorrent/...` 转发它们（事件流除外）。`/node` 列出能力 `bittorrent`。角色 API 的每次调用都运行在请求自己的
+`/api/m/admin/bittorrent/...` 转发它们（事件流由控制台自己的路由提供，见下）。`/node` 列出能力 `bittorrent`。角色 API 的每次调用都运行在请求自己的
 goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的池），从不在 fib worker 上。
 
 | 端点 | 作用 |
@@ -281,6 +281,7 @@ goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的�
 | `GET /bittorrent/torrents/<id>/trackers` | `{"trackers": [{"url", "tier"}], "web_seeds"}`，即其 .torrent 文件或磁力链接所列 |
 | `GET /bittorrent/alt_speed` | 备用速率：模式、是否配置、是否生效、当前生效的速率；`PUT` `{"mode": "auto"}`、`"on"` 或 `"off"` |
 | `GET /bittorrent/publish` | 发布条目及其种子；`/bittorrent/publish/<name>` 一个 |
+| `GET /bittorrent/publish/<name>/torrents/<id>` | 已发布种子的 .torrent 文件（`application/x-bittorrent`，作为附件），页面提供下载 |
 | `GET /bittorrent/events` | 事件，以 server-sent events 推送（见下） |
 | `GET /bittorrent/tracker/stats` | tracker 的总计 |
 | `GET /bittorrent/tracker/torrents` | 允许列表中种子的 swarm（`offset`，`limit` 最多 1000）；`/bittorrent/tracker/torrents/<info hash>` 一个种子的 |
@@ -326,8 +327,11 @@ URL 下载的相同，边到达边读取，超出时以 `413` 拒绝（表单的
 `Last-Event-ID`（或 `?after=<id>`）重连的客户端会先收到它错过的事件，取自角色保留的最近 1024 个；其中有些已不再保留，或
 fit 此后重启过（ID 每次启动从 1 开始）时，事件流以事件 `reset` 开头，客户端此后应重新读取种子。每个事件流有 256 个事件的
 缓冲：取得不够快的客户端不会被悄悄跳过事件，而是收到事件 `lagged` 后被断开，从它拿到的最后一个 ID 重连。最多同时运行
-32 个事件流（超出为 `503`）。角色停止时以事件 `end` 关闭事件流；Admin API 关闭时也是。事件流需要独占一个连接，因此在
-Admin API 的地址上提供，不经控制台（控制台上为 `501`）。
+32 个事件流（超出为 `503`）。角色停止时以事件 `end` 关闭事件流；Admin API 关闭时也是。事件流需要独占一个连接：Admin API
+在其地址上提供，控制台则以自己的路由 `GET /api/m/admin/bittorrent/events` 在会话之后提供，因为它的代理只回答完整的应答。
+控制台在 fib 的连接上写出事件流：worker 订阅并写出流的开头，之后由该流自己的一个 goroutine 不等待地写出每个事件，超过连接
+的水位时等待其排空，最多 30s，超时即断开；两者共用 32 个事件流的上限。管理端到成员的转发（节点切换器）同样只回答完整的
+应答，因此页面在那里只轮询。
 
 事件也写入 fit 的日志，logger 为 `bittorrent`：添加、移除种子，封禁和做种限制为 info，完成和备用速率照旧为 info，存储错误
 为 error，状态变化为 debug。
@@ -374,6 +378,54 @@ fit bt alt on                           # auto、on、off；不带参数时显�
 | `fit_bittorrent_tracker_torrents`、`fit_bittorrent_tracker_peers`、`fit_bittorrent_tracker_max_torrents`、`fit_bittorrent_tracker_max_peers`、`fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`、`fit_bittorrent_tracker_scrapes_total` | counter | |
 | `fit_bittorrent_tracker_refused_total` | counter | `reason`：`unregistered`、`passkey`、`access` |
+
+## 页面
+
+工作台有一个 **BitTorrent** 菜单（I204），位于“数据同步”之后，供配置本身的控制台使用：它经控制台调用 Admin API 的
+`/bittorrent/` 端点，并编辑共享草稿。
+
+- **种子**：按队列顺序列出每个种子：名称（及错误）、大小、进度条、状态及角色保持它的原因（排队、磁盘空间不足）、下载与上传
+  速率、按当前速率的剩余时间、分享率（已上传量除以大小，与 `seed_ratio` 的计算一致）、peer 与做种者数、分类；可按状态、分类
+  （或无分类）和名称的一部分筛选，筛选由 Admin API 完成。所选种子可暂停、恢复或删除，删除前询问是否同时删除已下载的文件。
+  **添加种子**接受磁力链接、.torrent 文件（以 `application/x-bittorrent` 原样发送，最多 32 MiB）或由 fit 下载的 URL，可指定
+  分类、暂停与顺序下载。**最近事件**列出页面打开以来客户端最近的 30 个事件。
+- **单个种子**（`#/bittorrent/torrent/<id>`）：**概览**显示进度、速率、总量、peer、分享率与剩余时间、已有分片数与总分片数、
+  ID 与 hash、目录、添加时间以及可复制的磁力链接；分类、队列位置与顺序下载即改即生效，自身限制（速率、连接数、上传槽位、
+  做种分享率与时长）一起保存或清除，旁边显示当前生效的限制；暂停或恢复、重新校验（需确认：校验文件期间它会停止）与删除。
+  **文件**显示各文件的进度与优先级（不下载、低、普通、高），可逐个或对所选文件设置。**Peer**显示各 peer 的地址、客户端、
+  连接（方向、uTP、加密、做种、阻塞）与速率。**Tracker**按层级列出其 tracker 及其 Web 种子，即其 .torrent 文件或磁力链接所列。
+- **备用速率**位于客户端各页面的顶栏：自动（按计划）、开或关，以及当前是否生效及其速率。
+- **Tracker**：tracker 的种子与 peer 数及其上限、announce 与 scrape 数、按原因统计的拒绝、私有或公开及其白名单与 UDP 地址；
+  白名单中种子的 swarm，每页 100 个；私有 tracker 还可按用户查询其 passkey，用于该用户的 announce URL，只显示给登录者，
+  从不保存。
+- **发布**：各发布条目的目录、模式、Web 种子、上次遍历时间、待处理文件与问题，以及其种子的大小、文件数、状态与构建时间，
+  提供 **.torrent** 下载（Admin API 的 `/bittorrent/publish/<name>/torrents/<id>`）与磁力链接（打开或复制）。
+- **BitTorrent 配置**：整个 `bittorrent` 成员，由 schema 生成：客户端及其分类、限制、`alt_speed` 与 `publish`，以及 tracker；
+  保存时 `bittorrent` 下的问题链接到此页。
+
+页面每两秒读取一次列表，以更新事件不携带的速率与进度；同时从控制台的事件流读取客户端的事件，使添加、删除或状态变化的种子
+即时显示，并提示完成与存储错误。断开后带 `Last-Event-ID` 重连；收到 `reset` 时重新读取列表；没有事件流时（经管理端打开的
+成员、事件流已达上限、没有该角色的 fit）只轮询，列表上标出是哪一种（**实时**或**轮询**）。角色未在此运行时会说明，并链接到
+配置页。角色自己的 `console` 只提供其只读模块；这些页面需要 `admin.console`。
+
+### 助手
+
+助手读取客户端与 tracker，并提议对种子的修改，与所有工具一样受其级别约束（[控制台](console.zh-CN.md#bittorrent)）：
+
+| 工具 | 级别 | 作用 |
+| --- | --- | --- |
+| `bt_torrents` | `read` | 种子的简要信息（状态、保持原因、错误、进度、大小、速率、peer、分享率、剩余时间），可按状态、分类与名称筛选（50 个，最多 200 个），并附备用速率 |
+| `bt_torrent` | `read` | 种子的状态、前 100 个文件及其优先级、前 50 个 peer，以及其 tracker 与 Web 种子 |
+| `bt_tracker_stats` | `read` | tracker 的总计与拒绝，以及白名单中前 50 个种子的 swarm |
+| `bt_add_propose` | `propose` | 按磁力链接或 .torrent URL 添加种子，可指定分类、暂停或顺序下载 |
+| `bt_pause_propose` | `propose` | 按 ID 暂停种子（最多 100 个） |
+| `bt_resume_propose` | `propose` | 按 ID 恢复种子（最多 100 个） |
+
+passkey 不会到达模型：种子的磁力链接被省略（其 tracker URL 可能带有私有 tracker 的 passkey），tracker 的 URL 只给出协议、
+主机与路径的最后一段，Web 种子的 URL 去掉用户与查询，peer 不带 ID，工具也从不读取用户的 passkey。提议工具与媒体工具一样
+向对话中唯一待处理的提案加入步骤：按当前运行状态检查（角色及其客户端在运行、分类存在、种子尚未持有、所列种子存在且尚未
+暂停或尚未恢复，已处于该状态的会附说明后略去），在提案的配置修改之后按顺序、经 Admin API 以二次确认后应用提案的人的身份
+执行。某一步失败时其余步骤仍会完成，结果为 `partial`。
 
 ## 边下载边播放
 

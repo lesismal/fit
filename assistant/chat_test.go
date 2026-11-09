@@ -285,7 +285,7 @@ func TestChatTokensSpentInLoop(t *testing.T) {
 // the calls after it carry the summary instead of the turns.
 func TestChatSummarizes(t *testing.T) {
 	// The window holds the system prompt and the read tools, with some room.
-	const window = 5600
+	const window = 6200
 	long := strings.Repeat("The upstream api has backends in three zones. ", 60)
 	var summaries int
 	var mu sync.Mutex
@@ -518,7 +518,7 @@ func TestToolsEndpoint(t *testing.T) {
 	if status != 200 || json.Unmarshal([]byte(body), &b) != nil {
 		t.Fatalf("%d %s", status, body)
 	}
-	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools())+len(mediaTools())+len(syncTools())+len(pageTools())+1 || b.Tools[0].Group != GroupConfig {
+	if b.Level != "read" || b.Model != "gpt-test" || !b.UseTools || len(b.Tools) != len(readTools())+len(proposeTools())+len(mediaTools())+len(syncTools())+len(btTools())+len(pageTools())+1 || b.Tools[0].Group != GroupConfig {
 		t.Fatalf("%+v", b)
 	}
 	byName := map[string]toolView{}

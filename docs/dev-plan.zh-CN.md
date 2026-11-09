@@ -361,7 +361,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I201 | `bittorrent.tracker` 角色：HTTP 的 `bt_tracker`、UDP、私有 passkey、白名单、统计 | I196 | done |
 | I202 | 把目录发布成带 web seed 的 hybrid 种子，跟随磁盘变化 | I197 | done |
 | I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | done |
-| I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | todo |
+| I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | done |
 | I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | todo |
 | I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
 | I207 | （第二阶段）集群共享的 tracker Store | I201 | todo |
@@ -5348,6 +5348,62 @@ I198/I203 的添加路径。fib 的 `Reader.Close` 会等待进行中的 `Read`�
 - **做什么**：任务列表（速率、进度、ETA、分享率），任务的文件、peer、tracker 和 piece，添加对话框，tracker 页，发布页；
   schema 描述补到 `schema-zh.js`；AI 助手函数（列出、添加、暂停），遵守其审批规则。
 - **涉及**：`app/workbench`、`assistant`。
+- **完成** 2026-11-09：**BitTorrent** 菜单（`app/workbench/web/bittorrent/`，位于数据同步之后）：种子（状态、保持原因、大小、
+  进度条、速率、剩余时间、分享率、peer、分类；经 Admin API 按状态、分类与名称筛选；对所选种子暂停、恢复或删除（可连同数据）；
+  “添加种子”可用磁力链接、原样发送的 .torrent 文件或 URL，并指定分类、暂停与顺序下载；客户端最近事件），单个种子的概览（各项
+  数字、已有分片、hash、目录、磁力链接；分类、队列位置、顺序下载与自身限制就地修改，旁边显示生效的限制；暂停、恢复、重新校验、
+  删除）、文件（逐个或对所选文件设置优先级）、Peer 与 Tracker；客户端页面顶栏中的备用速率（自动、开、关）；Tracker（总计与上限、
+  按原因统计的拒绝、分页的白名单 swarm、私有 tracker 按用户查询 passkey）；发布（条目、问题、种子的 .torrent 下载与磁力链接）；
+  BitTorrent 配置。中英文。实时更新：控制台自己的路由 `GET /api/m/admin/bittorrent/events`（`admin/btconsole.go`），在 fib 的
+  连接上写出角色的事件流（worker 订阅并写出开头，该流自己的 goroutine 以 `WriteNoWait` 写出，超过水位时等待 `OnWritable`，
+  最多 30s），支持 `Last-Event-ID`，受角色的 32 个订阅者限制；页面在读取事件流的同时每 2s 轮询速率，无法流式接收时只轮询。
+  Admin API 新增 `GET /bittorrent/publish/<name>/torrents/<id>`，提供已发布种子的 .torrent 文件。`schema-zh.js` 已包含所有
+  BitTorrent 描述（I197–I203 已补齐，测试通过）。助手（`assistant/tools_bittorrent.go`、`proposals_bt.go`）：只读工具
+  `bt_torrents`、`bt_torrent`、`bt_tracker_stats`（不含磁力链接，tracker 只给协议、主机与最后一段路径，Web 种子去掉用户与
+  查询，peer 不带 ID，不含 passkey），提议工具 `bt_add_propose`、`bt_pause_propose`、`bt_resume_propose`，其步骤与提案的媒体
+  步骤放在一起，按当前运行状态检查，并在配置之后由确认的人执行；功能页的 `bittorrent` 分组、提案卡片的词条、系统提示、管理端
+  上的 `member`。文档：[BitTorrent](bittorrent.zh-CN.md#页面)（页面、助手、控制台事件流、.torrent 端点）、
+  [控制台](console.zh-CN.md#bittorrent)（页面与工具）、参考的章节，中英文。测试：`admin`（会话之后的控制台事件流、添加的事件、
+  心跳、按 `Last-Event-ID` 与 `?after` 重放、reset、错误的 ID、无角色时 404、32 个上限与带 `Retry-After` 的 503、释放名额、
+  不读取的客户端以 `lagged` 断开、角色停止时的 `end`；.torrent 端点及其 404），`assistant`（各只读工具及其参数与错误、角色未
+  运行、结果中无机密；对话与 MCP 中的提议工具，以人的身份按顺序执行，含配置修改、种子已不存在、失败使结果为 `partial`；拒绝
+  步骤的每项检查；级别与分组），`app/workbench`（每个词条都有中英文且被使用，每种状态、保持原因、事件与优先级都有词条，页面
+  调用的端点，助手工具的词条）。已在浏览器面板中对本地 fit 检查：列表、添加、实时事件、恢复、连同数据删除、种子概览与限制、
+  备用速率、tracker、发布及 .torrent 下载、配置，中英文。
+
+**待审查的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **实时更新采用控制台流式路由加轮询**：控制台在 fib 的连接上以自己的路由提供事件流，而不是页面只轮询，因为事件能即时说明
+   轮询要晚些才知道的事（完成、错误、封禁）；列表仍每 2s 读取一次，以更新事件不携带的速率与进度。备选：只轮询；控制台代理
+   对所有端点提供流式模式。
+2. **控制台事件流在超过水位后最多等待客户端 30s**（`btStall`），之后断开；与 Admin API 的事件流共用角色的 32 个订阅者。不可
+   配置。备选：控制台自己的上限；使用控制台的 `write_stall_timeout`。
+3. **经管理端的节点切换器时页面只轮询**：其转发只回答完整的应答。备选：`cluster` 中的流式转发。
+4. **一个模块 `bittorrent`，服务端模块为 `admin`**，凡有 `admin.console` 处即显示（与数据同步相同），角色未运行时各页说明并
+   链接到 BitTorrent 配置；角色自己的 `console` 只提供其只读路由，没有这些页面。备选：每个角色一个模块，只在其运行时显示；
+   在角色自己的控制台上提供页面。
+5. **备用速率位于客户端页面（种子列表与单个种子）的顶栏**，而非每个页面。备选：在每个页面的 `topbar` 中。
+6. **助手的写操作是提议工具**（添加、暂停、恢复），其步骤与提案的媒体步骤放在一起（`MediaAction`，视图与应用应答中的
+   `media`）：按当前运行状态检查，由级别为 apply 的人二次确认后执行，与媒体步骤相同。没有删除、重新校验或设置限制的工具：
+   这些仍由人在页面上操作。备选：视图中单独的 `bittorrent` 成员；`bt_remove_propose` 等。
+7. **交给模型的内容**：不含磁力链接，tracker 只给协议、主机与路径最后一段（私有 tracker 的 passkey 在路径中），Web 种子去掉
+   用户与查询，peer 不带 ID，不含 passkey（由 Tracker 页面为人读取）；peer 的地址原样发送，与媒体工具发送地址相同。备选：
+   像播放主体一样对 peer 地址做哈希。
+8. **分享率为已上传量除以大小**，与 `seed_ratio` 的计算一致；剩余时间为下载中按当前速率计算的所需时间，两者由页面与工具计算，
+   而非角色。备选：已上传除以已下载（qBittorrent 的算法）。
+9. **分片显示为已有数 / 总数及进度条**，而不是分片图：角色的状态只给出计数。备选：在角色 API 中由 fib 的
+   `Torrent.HavePiece` 生成分片图（遗留）。
+10. **已发布种子的 .torrent 文件由新的 Admin API 端点提供**，`GET /bittorrent/publish/<name>/torrents/<id>`，从角色的快照读取，
+    而不是链接到 `bt_publish` 路由（配置未必有该路由，且它在监听的源上提供）。已发布的种子在客户端列表之外做种，因此不链接到
+    单个种子页。
+11. **可选的分类取自运行中的配置**（`GET /config`），而非草稿：只在草稿中的分类会被角色拒绝。备选：取自草稿。
+12. **页面以原始字节添加 .torrent 文件**（`application/x-bittorrent`，选项放在查询中），发送前检查 32 MiB 上限。备选：表单。
+13. **文件只提供四种优先级**：不下载、低、普通、高（0、1、4、7，即 fib 命名的几种），尽管角色接受 0–7。备选：全部八种。
+14. **允许对 `bt_stream` 即时添加的种子使用 `bt_add_propose`，并附警告**：它会原样转为普通种子保留（I203 的决定 10）。
+15. `TestChatSummarizes` 的窗口从 5600 增至 6200 个 token，以容纳新工具的描述。
+
+遗留：分片图（角色 API，由 fib 的 `Torrent.HavePiece` 生成）；角色自己控制台上的页面；节点切换器的流式转发。未运行：Linux 上的
+race 测试与完整测试套件（留给主会话）。
 
 ### I205 互通、故障测试、基准与文档
 

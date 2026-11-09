@@ -24,8 +24,10 @@ import (
 // run at once; one more is answered 503.
 //
 // The stream needs a connection of its own: it is served on the Admin
-// API's address, not through the console, which answers whole responses
-// (501 there).
+// API's address; the console serves it on its own connection with a route
+// of its own (btconsole.go), since its proxy answers whole responses, and
+// a caller in process that cannot stream, as the proxy's recorder, gets
+// 501.
 
 // btEvents answers GET /bittorrent/events.
 func (s *Server) btEvents(w http.ResponseWriter, r *http.Request) {

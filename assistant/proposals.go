@@ -133,6 +133,13 @@ type stepArgs struct {
 	Policy   string          `json:"policy"`
 	Sessions []SessionRef    `json:"sessions"`
 	Key      string          `json:"key"`
+	// the BitTorrent propose tools (proposals_bt.go)
+	Magnet     string   `json:"magnet"`
+	URL        string   `json:"url"`
+	Category   string   `json:"category"`
+	Paused     bool     `json:"paused"`
+	Sequential bool     `json:"sequential"`
+	Torrents   []string `json:"torrents"`
 }
 
 // patchOp is an operation of config_propose: add, replace or remove at a
@@ -343,6 +350,9 @@ func (b *built) step(a *Assistant, ctx context.Context, i int, st ProposalStep) 
 	}
 	if isMediaTool(st.Tool) {
 		return b.mediaStep(a, ctx, i, st.Tool, args)
+	}
+	if isBTTool(st.Tool) {
+		return b.btStep(a, ctx, i, st.Tool, args)
 	}
 	return fmt.Errorf("%s is not a propose tool", st.Tool)
 }
