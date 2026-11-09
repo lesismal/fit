@@ -59,3 +59,6 @@ fib 已有完整的 BitTorrent 协议栈（`fib/bittorrent/...`）：bencode、m
 - BT 的 TCP/UDP 端口进入 fit 共享引擎，受 `limits` 与 `access` 约束；`bt_stream` 让 fit 的 HTTP 路由能触发外网下载，
   所以临时添加默认受 `media_auth` 保护，并有数量和磁盘上限。
 - 互通测试沿用 fib 的方式（libtorrent、anacrolix，在容器里）；吞吐与 CPU 基准只在 .51 上跑。
+- **仅用于测试的依赖**（I205，规则 14）：`test/btinterop` 与 `test/mcpsdk` 一样是独立模块，为互通测试和基准的对照组
+  （`btbench`）依赖 `github.com/anacrolix/torrent`（MPL-2.0）及其依赖；fit 自身不引用它，fit 的 `go.mod` 不增加任何依赖。
+  libtorrent 在 CI 和容器中通过 Ubuntu 的 `python3-libtorrent` 包使用，从不链接。

@@ -372,7 +372,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | done |
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | done |
 | I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | todo |
-| I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | todo |
+| I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | done |
 | I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
 | I207 | (second phase) A tracker store the cluster shares | I201 | todo |
 | I208 | (second phase) RSS auto-download | I198 | todo |
@@ -7496,6 +7496,94 @@ run: the Linux race run and the full suite (left to the main session).
   way); disk full, restarts and reloads under load; throughput and CPU on the benchmark host only;
   `docs/bittorrent*.md`, the reference, an example in fit-examples.
 - **Touches**: `test`, `bench`, `docs`, fit-examples.
+- **Done** 2026-11-09 (branch `bt-i205`; fit-examples branch `bittorrent-example`):
+  - **Interop**: `test/btinterop`, a module of its own (anacrolix/torrent 1.61 and fib's metainfo
+    builder; decision 037 covers the dependency), whose tests build fit from the checkout and run it,
+    steered through the Admin API, against anacrolix in the test's process and libtorrent-rasterbar
+    2.0.11 through `libtorrent_peer.py` (`FIT_LIBTORRENT=1`); `run.sh` runs it all in docker, CI's
+    `bittorrent-interop` job on the runner with Ubuntu's python3-libtorrent and cgo. 46 cases, all
+    passing: fit downloading from and seeding to both (v1, hybrid and, with libtorrent, v2; .torrent
+    files and magnet links; TCP and uTP; MSE off, preferred and RC4 required; the peers' transport and
+    encryption checked through the Admin API); the private tracker over HTTP (a token's passkey) and
+    UDP (a user's passkey from the Admin API, BEP 41) for anacrolix and libtorrent swarms, fit's own
+    client among them, an unknown passkey refused; `bt_stream` playing a 24 MiB file while it
+    downloads from anacrolix (a middle range answered at 8% of the torrent) and a magnet link added on
+    the fly; a publish entry's web seed (fit's `static` route) alone, `per_file` and `whole_dir`, by
+    libtorrent, `whole_dir` by anacrolix.
+  - **Failure tests** (`bittorrent/failure_test.go`), beside I197–I203's: the disk filling during a
+    download (ENOSPC writes while the free-space check still finds room: the error in the status, the
+    blocks asked for again; then the check pausing it; then completing, no hash failure); a stop and
+    restart in the middle of three downloads (every piece had again with no read, then completing); a
+    `listen` change while downloading (the pieces kept, no read, completing); the only seeder cut in the
+    middle of a piece's block, then back; one of two seeders stalled mid-piece (the download done from
+    the other in about 2s, far before fib's 60s snub).
+  - **Benchmarks** on the benchmark host: `bench/bt.sh`, `bench/bt/host.sh`, `bench/bt/summary.py`
+    and `test/btinterop/btbench`; one 1 GiB torrent in `/dev/shm`, the client measured on 4 CPUs, four
+    fib peers on 8 others, fit beside anacrolix and fib's client alone, plaintext and RC4, 3 alternating
+    rounds; results in `bench/results/bt-2026-11-09` (medians). Seeding to 4 leechers fit does 1688
+    MiB/s plaintext (anacrolix 1110) at 0.60 CPU s/GiB (1.23), 933 with RC4 (744), peak RSS 46–56 MiB
+    (anacrolix about 1050). Downloading from 4 seeders fit does 705 MiB/s plaintext (anacrolix 1039,
+    fib alone 478) and 553 with RC4 (759, 363), at anacrolix's CPU per byte, under 2 of its 4 CPUs:
+    bound by fib's torrent lock (below).
+  - **Docs**: [BitTorrent](bittorrent.md) in both languages: an overview of the four parts, a config
+    with every part (validated with `fit validate`), the duplicated state row merged, and new
+    sections Interoperability, Performance and Limits and security; the configuration overview's
+    rows and the README's docs list, both languages. **Example**: fit-examples' `bittorrent/`
+    (client with categories, `alt_speed`, `watch_dir` and a publish entry, the private tracker,
+    `bt_tracker`, `bt_publish`, `static`, `bt_stream` with `magnet`, the Admin API), listed in its
+    READMEs; fit-examples' pin already had the roles.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **The interop tests drive the fit binary through its Admin API**, as test/mcpsdk does, rather
+   than the roles in-process: they check what a user runs, need no `replace` of fit in the module,
+   and the same harness serves the benchmark. The module requires fib at fit's version for the test
+   torrents only. Alternative: in-process roles with `replace github.com/lesismal/fit => ../..`.
+2. **The anacrolix cases run in every `go test` of the module; the libtorrent cases need
+   `FIT_LIBTORRENT=1`**, as fib's; CI runs both, with `-race`, within 25 minutes. The module is not in
+   fit's main `go test ./...` (a module of its own).
+3. **Interop transfers run at 2 MiB/s** (fit's own `limits`), so that a case lasts the seconds it
+   takes to see its peers through the Admin API, which lists only connected peers. Alternative: an
+   event for each peer connected.
+4. **The other clients' bugs are gone around in the tests and recorded, not fixed upstream yet**:
+   anacrolix takes a v2/hybrid single-file torrent for a directory (its web seed refuses a URL not
+   ending in `/`, so `per_file` web seeds are not fetched by anacrolix, and it looks for the file below
+   its name), its web seed skips a short last piece, and 1.61 panics announcing a hybrid torrent it
+   checks; the cases use v1 or `whole_dir` with it. Alternative: report them to anacrolix and skip
+   the cases until fixed.
+5. **The benchmark's baseline is anacrolix, beside fib's client alone**; libtorrent is not installed
+   on the host, and through its Python binding the harness would measure Python too. The other side is
+   fib's client (its seeders take the first one's resume data, checking nothing); data in `/dev/shm`
+   so the disk is not measured; 1 GiB, v1, 1 MiB pieces, TCP; CPU and peak RSS from `/proc`. Not a
+   plan report: no scores or ranking (rule 24 is for the full plan). The host's LLM service was left
+   running (idle; 13 GiB free), as the user prefers.
+6. **btbench lives in test/btinterop** (`btbench/`), the module that already has anacrolix, not in
+   `bench/` (whose Go is fit's module). It waits for fit's `pieces_have` rather than `complete`, which
+   the role sets at its manager's look every second (see open items).
+7. **The failure tests fake a full disk with a storage wrapper and the free-space function**, not a
+   tmpfs or loop device (root, Linux only); cut and stalled peers through a TCP relay of the test's.
+8. **The docs' config example is .conf with placeholders** (no `${...}`), the tracker public in it
+   so that the published torrents carry no passkey; the security notes say why.
+
+Open from it:
+
+- **fib: a torrent's download is bound by its lock** (a fib request to file): every block received
+  takes `Torrent.mu` and refills the peer's requests, `nextRequest`/`pickPiece` scanning pieces with
+  `math/rand` (24% of fib alone's CPU in a profile of a 1 GiB download from 4 seeders, `pickPiece`
+  21%), and each 16 KiB block is a `pwrite` of its own (30%). Suggested: a peer reserves a piece and
+  requests its blocks without picking again, refilling when its pipeline falls below half its reqq;
+  rarest-first kept in buckets updated on have/bitfield rather than scanned; blocks written per piece
+  or per run (`pwritev`) on the disk pool. fit would gain the download rate with no API change.
+- **fib alone downloads at 0.68 of fit's rate** on its own engine: its engine defaults for a client
+  made without `SharedEngine` are worth a look in fib.
+- **fit: `Status.Complete` lags up to a second** (the manager's look, I198's decision 10): an API
+  client polling for completion waits for it; computing it from fib's torrent when asked would not
+  count a completion twice if the count stays the manager's.
+- Report the anacrolix bugs above upstream. fit-examples' `bittorrent/` announces published torrents
+  to its private tracker with a static token, which every downloader then shares (its comments call
+  the token a placeholder; the docs' security notes say to publish to a public tracker).
+- Not run: the full `go test -race ./...` and the Linux race run (left to the main session); the
+  interop tests ran in docker (Linux) and anacrolix's on macOS.
 
 ### I206 (second phase) The cluster and BitTorrent distribution
 
