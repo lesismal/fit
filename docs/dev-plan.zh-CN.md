@@ -328,7 +328,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I172 | MySQL 客户端：握手、TLS、两种密码插件、文本查询与预处理语句 | I163 | done |
 | I173 | MySQL binlog：事件、校验和与所有列类型，含 MySQL 与 MariaDB | I172 | done |
 | I174 | MySQL 与 MariaDB 作为源：从检查点的 GTID 集合以副本身份读取，列名、DDL，每个 XID 一个检查点 | I173 | done |
-| I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | todo |
+| I175 | 不加锁、按键分块的 MySQL 快照，及其到 binlog 的交接 | I174 | done |
 | I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | done |
 | I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | done |
 | I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | done |
@@ -3911,6 +3911,36 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
   了键，否则拒绝。
 - **完成标准**：对快照期间仍在写入的表做快照，结束时目标与源相同（对两边做校验和检查）；中断的快照从下一个块继续。
 - **涉及**：`sync/mysql`、`test/sync`。
+
+**待评审的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **参数。** `snapshot`：`initial`（默认，与计划草图和 `mongo` 源一致）、`always` 或 `never`；`batch_size`，每次查询读取的
+   行数（1,000，至多 100,000）；`chunk_rows`，作业的块大小（100,000）。
+2. **不加锁的交接。** 先在快照连接上读取 binlog 位置（8.2 起 `SHOW BINARY LOG STATUS`，否则 `SHOW MASTER STATUS`，以及 MySQL
+   已执行的 GTID 或 MariaDB 的 `gtid_binlog_pos`），再读表；之后流从该位置开始，读表期间的变更会再次到来，在幂等目标中收敛。
+   不用 `FLUSH TABLES WITH READ LOCK`，也不锁表。
+3. **每页一个事务。** 每次读取 `batch_size` 行的查询都在各自的 `START TRANSACTION WITH CONSISTENT SNAPSHOT`（`REPEATABLE READ`）
+   中执行，而不是整个快照一个事务：长事务会在繁忙的服务器上阻碍旧行版本的清理，而交接并不需要单一视图，因为流会重放该位置
+   之后的一切。备选：每张表一个事务，或整个快照一个事务（单一视图，代价如上）。
+4. **按键分页。** 按 `db.table` 名称顺序读表，每张表按键读取：`WHERE (k1, k2) > (?, ?) ORDER BY k1, k2 LIMIT n`，上次读到的键作为
+   参数（时间以 UTC 文本传入：会话的 `time_zone` 为 `+00:00`）。
+5. **同一行，无论由谁读出，都是同一条记录。** 客户端的值按 binlog 的方式定型（`binlog.Column`）：整数（无符号为 `Uint`，`YEAR`
+   为 `Int`），`FLOAT` 取最短十进制表示，decimal，日期，`DATETIME` 为 UTC，`TIMESTAMP` 为时刻，零日期和 `TIME` 为服务器的文本
+   （按列的小数位数），`BIT` 为 `Uint`，`JSON`，二进制串和 `GEOMETRY` 为字节，其余为文本；因此一行的快照记录与流记录相同。
+6. **每条记录都带进度。** 快照记录没有事务，携带流的起点及 `{"snapshot": {"table": "db.table", "key": <键的映射的规范 JSON>}}`；
+   快照的最后一条记录只携带起点，所以在它之后重启会读流。中断的快照从最后保存的键之后继续，比块更细。没有行的快照什么也不
+   保存，重启时会重新读取（与 I182 的决定 11 相同）。
+7. **`always`** 在源每次启动时都读快照，包括出错重启之后，除非检查点处于快照之中，此时继续该快照；`never` 从检查点或当前开始。
+   备选：`always` 只在 fit 启动或重载时生效。
+8. **键。** 没有主键的表会被拒绝，除非 `keys` 指定了其键列：报错并指明该表，于是流水线反复重启，直到 `keys` 或 `tables` 改变。
+   `keys` 也可以选用某个唯一键代替主键。
+9. **作业。** `Chunks` 把每张表按键分成范围，每块 `chunk_rows` 行，边界是沿键用 `LIMIT 1 OFFSET chunk_rows` 找到的键（扫描索引，
+   精确，不抽样）；最后一块的行数用 `information_schema.TABLES.TABLE_ROWS`（估计值）估算；每块在自己的连接上读取。`snapshot:
+   "never"` 时作业不分块，读 binlog 到末尾（I174）。备选：像 `mongo` 源那样由抽样得到边界。
+10. **互通**（`test/sync/mysql_source_test.go`，五个服务器）：一张 3,000 行的表，在以每页 50 行读取其快照期间被混合负载写入，
+    经目标 `mysql` 复制，流水线在随机位置（包括快照中）被杀并重启，最终与原表校验和相同；一个 2,000 行的作业，按 300 行一块、
+    同时读四块，被杀后重启完成，结果相同。
+11. **规模**：约 530 行代码、380 行单元测试（不用容器时包覆盖率 96.6%）和 150 行互通测试；没有遗留，不需要 I175b。
 
 ### I176 MySQL 与 TiDB 作为目标
 

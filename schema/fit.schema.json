@@ -9030,6 +9030,13 @@
           "description": "The server's host and port: MySQL 5.7 or later, or MariaDB 10.11 or later, with the binlog on (log_bin), binlog_format ROW and binlog_row_image FULL. 127.0.0.1:3306 when left out.",
           "type": "string"
         },
+        "batch_size": {
+          "default": 1000,
+          "description": "The rows a snapshot's query reads, by key, each in a transaction of its own with a consistent snapshot. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
         "ca_file": {
           "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own; needs tls.",
           "type": "string"
@@ -9037,6 +9044,12 @@
         "cert_file": {
           "description": "A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs tls and key_file.",
           "type": "string"
+        },
+        "chunk_rows": {
+          "default": 100000,
+          "description": "In a job (mode once), the rows of a chunk of the snapshot: each table is split into ranges of its key this many rows each, read job.max_parallel at a time. 100000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
         },
         "exclude": {
           "description": "Tables left out of those tables names, as db.table globs.",
@@ -9080,6 +9093,16 @@
         },
         "server_public_key_file": {
           "description": "A PEM file of the server's RSA public key, with which caching_sha2_password and sha256_password send the password without TLS. Without it and without TLS, a user of those plugins logs in only through the server's cache.",
+          "type": "string"
+        },
+        "snapshot": {
+          "default": "initial",
+          "description": "Whether the tables' rows are read before the binlog: initial, when the pipeline has no checkpoint; always, at every start of the source, unless its checkpoint is inside a snapshot, which it goes on with; never, the binlog alone, from the checkpoint or from now. The binlog's position is read first and the stream starts there, so what changes during the snapshot comes again. initial when left out.",
+          "enum": [
+            "initial",
+            "always",
+            "never"
+          ],
           "type": "string"
         },
         "tables": {

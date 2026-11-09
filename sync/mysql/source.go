@@ -23,7 +23,7 @@ import (
 
 func init() {
 	module.Register(module.Info{ID: fitsync.Sources + ".mysql", New: func() any { return new(Source) },
-		Doc: "Follows MySQL (5.7 and later) or MariaDB (10.11 and later) as a replica: the binlog in row format, read with COM_BINLOG_DUMP_GTID (or MariaDB's GTID position, or a file and offset) from the checkpoint, else from now. Each row inserted, updated or deleted is a record of namespace db.table, its key the primary key's columns, a DDL a ddl record; the records of a transaction carry its GTID and boundaries, and the checkpoint, the GTID set and the file and offset at a transaction's end, never falls inside one. A position the server no longer has (binlogs purged) is an error saying a new snapshot is needed."})
+		Doc: "Follows MySQL (5.7 and later) or MariaDB (10.11 and later) as a replica: a snapshot of the tables read by key without locks, then the binlog in row format, read with COM_BINLOG_DUMP_GTID (or MariaDB's GTID position, or a file and offset) from the checkpoint, else from now. Each row inserted, updated or deleted is a record of namespace db.table, its key the primary key's columns, a DDL a ddl record; the records of a transaction carry its GTID and boundaries, and the checkpoint, the GTID set and the file and offset at a transaction's end, never falls inside one. A position the server no longer has (binlogs purged) is an error saying a new snapshot is needed. In a job (mode once) the snapshot is split into ranges of each table's key, read job.max_parallel at a time."})
 }
 
 // The defaults of the source's params.
@@ -62,6 +62,9 @@ type Source struct {
 	Exclude             []string            `json:"exclude,omitempty" doc:"Tables left out of those tables names, as db.table globs."`
 	Keys                map[string][]string `json:"keys,omitempty" doc:"The key's columns of tables, by db.table, in place of the primary key: for a table without one, or to key by a unique key. A table with neither key nor primary key has records without a key."`
 	Heartbeat           config.Duration     `json:"heartbeat,omitempty" default:"\"10s\"" doc:"How long the server waits, when it has nothing to send, before it sends a heartbeat, which tells the source that it is caught up and the connection alive; below timeout. 10s when left out or 0."`
+	Snapshot            string              `json:"snapshot,omitempty" enum:"initial,always,never" default:"\"initial\"" doc:"Whether the tables' rows are read before the binlog: initial, when the pipeline has no checkpoint; always, at every start of the source, unless its checkpoint is inside a snapshot, which it goes on with; never, the binlog alone, from the checkpoint or from now. The binlog's position is read first and the stream starts there, so what changes during the snapshot comes again. initial when left out."`
+	BatchSize           int                 `json:"batch_size,omitempty" min:"0" max:"100000" default:"1000" doc:"The rows a snapshot's query reads, by key, each in a transaction of its own with a consistent snapshot. 1000 when left out or 0."`
+	ChunkRows           int64               `json:"chunk_rows,omitempty" min:"0" default:"100000" doc:"In a job (mode once), the rows of a chunk of the snapshot: each table is split into ranges of its key this many rows each, read job.max_parallel at a time. 100000 when left out or 0."`
 
 	cfg  mysqlwire.Config
 	dial func(context.Context, mysqlwire.Config) (srcConn, error)
@@ -295,6 +298,9 @@ type position struct {
 	GTIDs string `json:"gtids,omitempty"`
 	File  string `json:"file,omitempty"`
 	Pos   uint64 `json:"pos,omitempty"`
+	// Snapshot is where a snapshot is, while it is read; the position is
+	// then the stream's start.
+	Snapshot *snapPos `json:"snapshot,omitempty"`
 }
 
 func (p position) marshal() fitsync.Position {
@@ -343,7 +349,9 @@ func binlogStatus(ctx context.Context, c srcConn, srv server) (position, error) 
 	return p, nil
 }
 
-// Run reads the binlog from the checkpoint, or from now.
+// Run reads the snapshot, when the checkpoint is inside one or snapshot
+// says so, then the binlog from the checkpoint, from the snapshot's start,
+// or from now.
 func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	var from *position
 	if r.From != nil {
@@ -354,6 +362,34 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 		if from.File == "" && from.GTIDs == "" {
 			return fmt.Errorf("mysql: the checkpoint %s has neither GTIDs nor a file", r.From)
 		}
+	}
+	switch {
+	case from != nil && from.Snapshot != nil:
+		at := from.Snapshot
+		from.Snapshot = nil
+		c, _, err := s.snapshotConn(ctx)
+		if err != nil {
+			return err
+		}
+		err = s.snapshot(ctx, r, c, *from, at)
+		c.Close()
+		if err != nil {
+			return err
+		}
+	case from == nil && s.Snapshot != "never" || s.Snapshot == "always":
+		c, srv, err := s.snapshotConn(ctx)
+		if err != nil {
+			return err
+		}
+		start, err := binlogStatus(ctx, c, srv)
+		if err == nil {
+			err = s.snapshot(ctx, r, c, start, nil)
+		}
+		c.Close()
+		if err != nil {
+			return err
+		}
+		from = &start
 	}
 	st := &streamer{s: s, r: r}
 	defer st.close()

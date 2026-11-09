@@ -338,7 +338,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I172 | A MySQL client: handshake, TLS, both password plugins, text and prepared statements | I163 | done |
 | I173 | The MySQL binlog: events, checksums and every column type, MySQL's and MariaDB's | I172 | done |
 | I174 | MySQL and MariaDB as a source: a replica from the checkpoint's GTID set, column names, DDL, a checkpoint at each XID | I173 | done |
-| I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | todo |
+| I175 | The MySQL snapshot without locks, chunked by key, and its hand-over to the binlog | I174 | done |
 | I176 | MySQL and TiDB as a sink: upserts and deletes by key, the source's transactions kept | I172 | done |
 | I177 | A PostgreSQL client: startup, TLS, SCRAM-SHA-256, both query protocols, `COPY`, replication commands | I163 | done |
 | I178 | PostgreSQL as a source: `pgoutput` from a slot, the LSN confirmed only after the sinks | I177 | done |
@@ -5295,6 +5295,53 @@ track can place it); exactly-once into sinks with no transactions.
 - **Done when**: a snapshot of tables written to during it ends with the sink equal to the source
   (checked by a checksum of both); an interrupted snapshot resumes at its next chunk.
 - **Touches**: `sync/mysql`, `test/sync`.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **Params.** `snapshot`: `initial` (the default, as the plan's sketch and the `mongo` source have
+   it), `always` or `never`; `batch_size`, the rows a query reads (1,000, at most 100,000); and
+   `chunk_rows`, a job's chunk (100,000).
+2. **The hand-over without locks.** The binlog's position (`SHOW BINARY LOG STATUS` from 8.2, else
+   `SHOW MASTER STATUS`, with MySQL's executed GTIDs or MariaDB's `gtid_binlog_pos`) is read first, on
+   the snapshot's connection, then the tables; the stream then starts from that position, so what
+   changed while the tables were read comes again and converges in idempotent sinks. No `FLUSH TABLES
+   WITH READ LOCK`, no table locks.
+3. **A transaction a page.** Each query of `batch_size` rows runs in a `START TRANSACTION WITH
+   CONSISTENT SNAPSHOT` of its own, in `REPEATABLE READ`, rather than one transaction for the whole
+   snapshot: a long transaction holds back the server's purge of old row versions on a busy server,
+   and the hand-over needs no single view, since the stream replays everything after the position.
+   Alternative: one transaction per table, or for the whole snapshot (one view, at that cost).
+4. **Keyset pages.** Tables are read in the order of their `db.table` names, each by its key, `WHERE
+   (k1, k2) > (?, ?) ORDER BY k1, k2 LIMIT n`, the last key read as parameters (times as UTC text: the
+   session's `time_zone` is `+00:00`).
+5. **One record for one row, whichever reads it.** The client's values are typed as the binlog's
+   (`binlog.Column`): integers (unsigned ones `Uint`, `YEAR` an `Int`), `FLOAT` as its shortest
+   decimal, decimals, dates, `DATETIME` in UTC and `TIMESTAMP` the instant, zero dates and `TIME` as
+   the server's text with the column's digits, `BIT` a `Uint`, `JSON`, binary strings and `GEOMETRY`
+   as bytes, the rest as text; so a row's snapshot record and its stream record are the same.
+6. **Progress in every record.** A snapshot record has no transaction and carries the stream's start
+   with `{"snapshot": {"table": "db.table", "key": <the key's map in canonical JSON>}}`; the
+   snapshot's last record carries the start alone, so a restart after it reads the stream. A snapshot
+   interrupted resumes after the last key saved, finer than a chunk. A snapshot with no rows saves
+   nothing, and is read again on a restart (as I182's decision 11).
+7. **`always`** reads a snapshot at every start of the source, also after an error restarts it, except
+   when its checkpoint is inside one, which it resumes; `never` starts from the checkpoint or from now.
+   Alternative: `always` only at fit's start or a reload.
+8. **Keys.** A table without a primary key is refused unless `keys` names its key's columns: an error
+   naming the table, so the pipeline restarts until `keys` or `tables` change. `keys` also chooses a
+   unique key over the primary one.
+9. **Jobs.** `Chunks` splits each table into ranges of its key, `chunk_rows` rows each, at the keys
+   found by `LIMIT 1 OFFSET chunk_rows` walking the key (an index scan, exact, no sample);
+   `information_schema.TABLES.TABLE_ROWS` (an estimate) reckons the last chunk's rows; each chunk is
+   read on a connection of its own. With `snapshot: "never"` a job is not split and reads the binlog
+   to its end (I174). Alternative: bounds from a sample, as the `mongo` source's.
+10. **Interop** (`test/sync/mysql_source_test.go`, the five servers): a table of 3,000 rows written to
+    by a mixed load while its snapshot is read 50 rows a page, through the sink `mysql`, the pipeline
+    killed at random points (inside the snapshot too) and started again, ends equal to the table by
+    checksum; a job of 2,000 rows in chunks of 300 read four at a time, killed and finished on its
+    restart, ends equal.
+11. **Size**: about 530 lines of code, 380 of unit tests (the package at 96.6% of statements without
+    containers) and 150 of interop; nothing left, no I175b.
 
 ### I176 MySQL and TiDB as a sink
 

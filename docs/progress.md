@@ -5987,6 +5987,28 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   and offset; a quiet table's checkpoint does not move with the server's other transactions; names
   of events written before a table changed follow the table as it is now.
 
+### I175 The MySQL snapshot and its hand-over to the binlog — done
+
+- **The source `mysql`'s snapshot**: `snapshot` `initial` (the default), `always` or `never`; the
+  binlog's position read first, without locks, then each table by its key in pages of `batch_size`
+  rows, each in a `REPEATABLE READ` transaction with a consistent snapshot, its values typed as the
+  binlog's; the stream then from the position read first, so changes during the snapshot converge.
+  Every record carries the start and the table and key read up to; the last the start alone. Tables
+  without a primary key refused unless `keys` names one. A job's snapshot (I167's `Chunker`) split
+  into ranges of `chunk_rows` rows of each table's key, read on connections of their own.
+- **Docs**: the schema chapter, the three params in `schema-zh.js`, the configuration's sync row.
+- **Tests**: unit tests against the fake (pages, the hand-over's dump, a resume inside a table,
+  `always`, `never`, the chunks and their bounds, every value type from the client, every error).
+  Interop on the five servers: a table of 3,000 rows written to during its snapshot, through the sink
+  `mysql` across random kills, ending equal by checksum; a job in chunks of 300 rows killed and
+  finished on its restart, equal. `test/sync/mysql.sh` alone with its own containers. Not run on
+  Linux nor in the full suite (the merge's).
+- **Differs from the plan**: one consistent-snapshot transaction a page, not one for the snapshot; an
+  interrupted snapshot resumes after its last key saved, not at its next chunk (a job resumes by
+  chunk). About 530 lines of code, 380 of unit tests and 150 of interop; no I175b.
+- **Gaps**: the decisions in the plan's I175 section, pending review. A snapshot with no rows saves no
+  checkpoint; `always` reads a new snapshot after every restart of the source.
+
 ### I177 A PostgreSQL client: connections, authentication and queries — done
 
 - **Package `sync/postgres/wire`** (`pgwire`), a blocking client on `net.Conn` and `crypto/tls`

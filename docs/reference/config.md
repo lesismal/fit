@@ -6701,7 +6701,7 @@ In JSON:
 
 ### `mysql`
 
-Follows MySQL (5.7 and later) or MariaDB (10.11 and later) as a replica: the binlog in row format, read with COM_BINLOG_DUMP_GTID (or MariaDB's GTID position, or a file and offset) from the checkpoint, else from now. Each row inserted, updated or deleted is a record of namespace db.table, its key the primary key's columns, a DDL a ddl record; the records of a transaction carry its GTID and boundaries, and the checkpoint, the GTID set and the file and offset at a transaction's end, never falls inside one. A position the server no longer has (binlogs purged) is an error saying a new snapshot is needed.
+Follows MySQL (5.7 and later) or MariaDB (10.11 and later) as a replica: a snapshot of the tables read by key without locks, then the binlog in row format, read with COM_BINLOG_DUMP_GTID (or MariaDB's GTID position, or a file and offset) from the checkpoint, else from now. Each row inserted, updated or deleted is a record of namespace db.table, its key the primary key's columns, a DDL a ddl record; the records of a transaction carry its GTID and boundaries, and the checkpoint, the GTID set and the file and offset at a transaction's end, never falls inside one. A position the server no longer has (binlogs purged) is an error saying a new snapshot is needed. In a job (mode once) the snapshot is split into ranges of each table's key, read job.max_parallel at a time.
 
 Follows MySQL (5.7 and later) or MariaDB (10.11 and later) as a replica, through fit's own client of
 their protocol, on connections of the pipeline's own, never on a fib worker: the source registers
@@ -6730,15 +6730,27 @@ transaction's end, is `{"gtids": "...", "file": "mysql-bin.000042", "pos": 1234}
 GTID set executed up to it (MySQL's, or MariaDB's `gtid_binlog_pos` form), and the file and offset
 after it. A pipeline resumes from its checkpoint by GTIDs where the server has them
 (`COM_BINLOG_DUMP_GTID`, or MariaDB's `@slave_connect_state`), else by file and offset; without a
-checkpoint it starts from the server's binlog now. A stream cut, as by a server restarting, is read
+checkpoint, after the snapshot below, or with `snapshot: "never"` from the server's binlog now. A stream cut, as by a server restarting, is read
 again from the last transaction handed on, a transaction cut in the middle without handing on its
 records twice. A position the server no longer has, its binlogs purged, is an error saying a new
 snapshot is needed.
 
+With `snapshot: "initial"` (the default), a pipeline without a checkpoint first reads the tables'
+rows, then the binlog; `always` reads them at every start of the source; `never` reads the binlog
+alone. The binlog's position is read first, without a lock, then each table in the order of its
+name, by its key (`batch_size` rows a query, each query in a `REPEATABLE READ` transaction with a
+consistent snapshot); the stream then starts from that position, so what changed while the tables
+were read comes again and the sinks, writing by key, converge. A snapshot's records are inserts
+without a transaction, typed as the binlog's; each carries the stream's start and the table and key
+read up to, so a snapshot interrupted goes on after the last key saved. A table without a primary
+key is refused unless `keys` names its key. In a job (`mode: "once"`) the snapshot alone is read:
+each table split into ranges of `chunk_rows` rows of its key, read `job.max_parallel` at a time, each
+on a connection of its own, and resumed by chunk.
+
 `heartbeat` (10s) is how long the server waits, with nothing to send, before it says so: the source
 then reports no lag. Otherwise it reports, every 10 seconds, the binlog bytes the server holds past
-its position (`SHOW BINARY LOGS`), as the pipeline's lag. In a job (`mode: "once"`) the source reads
-to the binlog's end as it is when it asks, and stops.
+its position (`SHOW BINARY LOGS`), as the pipeline's lag. A job with `snapshot: "never"` reads to the
+binlog's end as it is when it asks, and stops.
 
 TLS, when `tls` is set, is required and verified; MySQL 5.7's image needs `tls_rsa`. **Test
 connection** logs in and checks the binlog's settings.
@@ -6757,6 +6769,7 @@ sync {
 			ca_file /etc/fit/mysql-ca.pem
 			server_id 4101
 			tables shop.orders shop.order_items
+			snapshot initial
 		}
 		sinks search { sink elasticsearch { urls https://es:9200 } }
 	}
@@ -6782,6 +6795,7 @@ sync:
           tables:
             - shop.orders
             - shop.order_items
+          snapshot: initial
       sinks:
         - name: search
           sink:
@@ -6803,7 +6817,7 @@ In JSON:
         "source": {"module": "mysql", "params": {
           "address": "db.internal:3306", "username": "repl", "password_env": "MYSQL_REPL_PASSWORD",
           "tls": true, "ca_file": "/etc/fit/mysql-ca.pem", "server_id": 4101,
-          "tables": ["shop.orders", "shop.order_items"]}},
+          "tables": ["shop.orders", "shop.order_items"], "snapshot": "initial"}},
         "sinks": [{"name": "search", "sink": {"module": "elasticsearch", "params": {"urls": ["https://es:9200"]}}}]
       }
     ]
@@ -6829,6 +6843,9 @@ In JSON:
 | `exclude` | list of string |  | Tables left out of those tables names, as db.table globs. |
 | `keys` | object of list of string |  | The key's columns of tables, by db.table, in place of the primary key: for a table without one, or to key by a unique key. A table with neither key nor primary key has records without a key. |
 | `heartbeat` | duration | `"10s"` | How long the server waits, when it has nothing to send, before it sends a heartbeat, which tells the source that it is caught up and the connection alive; below timeout. 10s when left out or 0. |
+| `snapshot` | string: `initial`, `always`, `never` | `"initial"` | Whether the tables' rows are read before the binlog: initial, when the pipeline has no checkpoint; always, at every start of the source, unless its checkpoint is inside a snapshot, which it goes on with; never, the binlog alone, from the checkpoint or from now. The binlog's position is read first and the stream starts there, so what changes during the snapshot comes again. initial when left out. |
+| `batch_size` | integer, 0 to 100000 | `1000` | The rows a snapshot's query reads, by key, each in a transaction of its own with a consistent snapshot. 1000 when left out or 0. |
+| `chunk_rows` | integer, 0 or more | `100000` | In a job (mode once), the rows of a chunk of the snapshot: each table is split into ranges of its key this many rows each, read job.max_parallel at a time. 100000 when left out or 0. |
 
 <a id="sync-sources-postgres"></a>
 

@@ -29,8 +29,10 @@ type srcFake struct {
 	answers map[string][][]any
 	cols    map[string][]mysqlwire.Column
 	query   func(q string, args []any) (rows [][]any, err error, ok bool)
-	execErr func(q string) error
-	dialErr func(n int) error
+	// queryCols, when set, gives the columns of the queries query answers.
+	queryCols func(q string) []mysqlwire.Column
+	execErr   func(q string) error
+	dialErr   func(n int) error
 	// streams are what each dump reads: events, then an error, or, past
 	// them, a wait for the context's end.
 	streams [][]evItem
@@ -102,10 +104,13 @@ func (c *srcFakeConn) Exec(ctx context.Context, q string, args ...any) (mysqlwir
 
 func (c *srcFakeConn) QueryAll(ctx context.Context, q string, args ...any) ([]mysqlwire.Column, [][]any, error) {
 	c.f.mu.Lock()
-	query, answers, cols := c.f.query, c.f.answers, c.f.cols
+	query, answers, cols, qcols := c.f.query, c.f.answers, c.f.cols, c.f.queryCols
 	c.f.mu.Unlock()
 	if query != nil {
 		if rows, err, ok := query(q, args); ok {
+			if qcols != nil {
+				return qcols(q), rows, err
+			}
 			return cols[q], rows, err
 		}
 	}
@@ -328,7 +333,8 @@ func newSource(t *testing.T, f *srcFake, params map[string]any) *Source {
 
 func provisionSource(t *testing.T, f *srcFake, params map[string]any) (*Source, error) {
 	t.Helper()
-	p := map[string]any{"username": "repl", "server_id": 4101}
+	// The binlog alone, unless a test asks for a snapshot.
+	p := map[string]any{"username": "repl", "server_id": 4101, "snapshot": "never"}
 	for k, v := range params {
 		p[k] = v
 	}

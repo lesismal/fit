@@ -264,17 +264,30 @@ type mysqlWriter struct {
 	rnd   *rand.Rand
 	rows  map[int64]bool
 	n     int
+	// space is how many keys the load picks from, 300 when 0.
+	space int
 }
 
 func (w *mysqlWriter) write(t *testing.T, c *mysqlwire.Conn, txs int) {
 	t.Helper()
-	ctx := hangGuard(t)
+	if err := w.writeErr(hangGuard(t), c, txs); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (w *mysqlWriter) writeErr(ctx context.Context, c *mysqlwire.Conn, txs int) error {
 	base := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	space := w.space
+	if space == 0 {
+		space = 300
+	}
 	for range txs {
 		w.n++
-		mustExec(t, c, "BEGIN")
+		if _, err := c.Exec(ctx, "BEGIN"); err != nil {
+			return err
+		}
 		for k := range 1 + w.rnd.IntN(6) {
-			id := int64(w.rnd.IntN(300))
+			id := int64(w.rnd.IntN(space))
 			v := fmt.Sprintf("t%d-%d", w.n, k)
 			n := fmt.Sprintf("%d.%02d", w.rnd.IntN(10000), w.rnd.IntN(100))
 			at := base.Add(time.Duration(w.rnd.Int64N(1e12)) * time.Microsecond)
@@ -294,7 +307,7 @@ func (w *mysqlWriter) write(t *testing.T, c *mysqlwire.Conn, txs int) {
 			case r < 3:
 				to := id
 				for w.rows[to] {
-					to = 300 + int64(w.rnd.IntN(1000))
+					to = int64(space) + int64(w.rnd.IntN(1000))
 				}
 				_, err = c.Exec(ctx, "UPDATE "+w.table+" SET id = ?, v = ? WHERE id = ?", to, v, id)
 				delete(w.rows, id)
@@ -303,11 +316,14 @@ func (w *mysqlWriter) write(t *testing.T, c *mysqlwire.Conn, txs int) {
 				_, err = c.Exec(ctx, "UPDATE "+w.table+" SET v = ?, n = ?, at = ?, j = ?, b = ? WHERE id = ?", v, n, at, j, b, id)
 			}
 			if err != nil {
-				t.Fatal(err)
+				return err
 			}
 		}
-		mustExec(t, c, "COMMIT")
+		if _, err := c.Exec(ctx, "COMMIT"); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // TestMySQLSourceAcrossKills copies a table written to by a mixed load,
@@ -413,5 +429,141 @@ func TestMySQLSourceAcrossKills(t *testing.T) {
 			t.Fatalf("the tables differ: %s and %s; %+v", loadChecksum(t, c, "fit_src.t"), loadChecksum(t, c, "fit_dst.t"), rt.Status())
 		}
 		t.Logf("%d rows of %d transactions, equal across %d kills", len(w.rows), w.n, kills)
+	})
+}
+
+// mysqlFill writes n rows of the load's columns, ids 0 to n-1, to table.
+func mysqlFill(t *testing.T, c *mysqlwire.Conn, table string, n int, w *mysqlWriter) {
+	t.Helper()
+	at := time.Date(2026, 11, 9, 1, 2, 3, 456000, time.UTC)
+	var rows [][]any
+	for id := range n {
+		rows = append(rows, []any{int64(id), fmt.Sprint("fill-", id), "1.25", at, json.RawMessage(`{"fill": true}`), []byte{byte(id)}})
+		w.rows[int64(id)] = true
+	}
+	if _, err := c.InsertRows(hangGuard(t), "INSERT INTO "+table+" (id, v, n, at, j, b) VALUES", rows, ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mysqlCopyConfig is a pipeline from the source mysql reading srcTable to
+// the sink mysql writing dstTable, on server s.
+func mysqlCopyConfig(t *testing.T, s mysqlServer, rnd *rand.Rand, stateDir, srcTable, dstTable string, srcExtra, extra map[string]any) *config.Sync {
+	t.Helper()
+	srcExtra["tables"] = []string{srcTable}
+	pipeline := map[string]any{"name": "p", "on_error": "stop", "checkpoint_interval": "1ms",
+		"retry":  map[string]any{"max_attempts": 1000, "backoff": "50ms", "max_backoff": "1s"},
+		"queue":  map[string]any{"max_records": 20 + rnd.IntN(300)},
+		"source": map[string]any{"module": "mysql", "params": mysqlSourceParams(t, s, srcExtra)},
+		"sinks": []any{map[string]any{"name": "my", "batch": map[string]any{"max_records": 1 + rnd.IntN(60), "max_wait": "1ms"},
+			"sink": map[string]any{"module": "mysql", "params": mysqlTarget{name: s.name, addr: s.addr, password: s.password, srv: s}.params(t, map[string]any{"table": dstTable})}}}}
+	for k, v := range extra {
+		pipeline[k] = v
+	}
+	b, _ := json.Marshal(map[string]any{"sync": map[string]any{"state_dir": stateDir, "pipelines": []any{pipeline}}})
+	cfg, err := config.Load(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Sync
+}
+
+// crashRuntime runs cfg until the crash hook kills it at a random point,
+// or for at most wait.
+func crashRuntime(t *testing.T, cfg *config.Sync, rnd *rand.Rand, wait time.Duration) bool {
+	t.Helper()
+	points := []fitsync.Point{fitsync.CrashEmitted, fitsync.CrashDispatched, fitsync.CrashWritten,
+		fitsync.CrashAcknowledged, fitsync.CrashCheckpointWritten, fitsync.CrashCheckpointSaved}
+	at, nth := points[rnd.IntN(len(points))], int32(1+rnd.IntN(200))
+	var seen atomic.Int32
+	rt := fitsync.NewRuntime(fitsync.Options{Crash: func(_ string, p fitsync.Point) bool {
+		return p == at && seen.Add(1) == nth
+	}})
+	if err := rt.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(context.Background())
+	deadline := time.Now().Add(wait)
+	for st := redisState(rt); st != "killed" && st != "finished" && time.Now().Before(deadline); st = redisState(rt) {
+		time.Sleep(time.Millisecond)
+	}
+	return redisState(rt) == "killed"
+}
+
+// TestMySQLSourceSnapshot copies a table of 3,000 rows written to while
+// its snapshot is read, a page of 50 rows at a time, through the sink
+// mysql, the pipeline killed at random points, inside the snapshot too:
+// the copy ends equal to the table by checksum.
+func TestMySQLSourceSnapshot(t *testing.T) {
+	eachMySQL(t, func(t *testing.T, s mysqlServer) {
+		seed := uint64(time.Now().UnixNano())
+		t.Logf("seed %d", seed)
+		rnd := rand.New(rand.NewPCG(seed, 9))
+		c := s.root(t)
+		mysqlDB(t, c, "fit_snapdst")
+		mustExec(t, c, "CREATE TABLE t "+fmt.Sprintf(loadColumns, ""))
+		mysqlDB(t, c, "fit_snap")
+		mustExec(t, c, "CREATE TABLE t "+fmt.Sprintf(loadColumns, ""))
+		w := &mysqlWriter{table: "fit_snap.t", rnd: rand.New(rand.NewPCG(seed, 7)), rows: map[int64]bool{}, space: 3000}
+		mysqlFill(t, c, "fit_snap.t", 3000, w)
+		cfg := mysqlCopyConfig(t, s, rnd, t.TempDir(), "fit_snap.t", "fit_snapdst.t", map[string]any{"batch_size": 50}, nil)
+
+		// The load written meanwhile, on a connection of its own.
+		wc := s.root(t)
+		done := make(chan error, 1)
+		wctx := hangGuard(t)
+		go func() { done <- w.writeErr(wctx, wc, 300) }()
+		kills := 0
+		for range 6 {
+			if crashRuntime(t, cfg, rnd, 2*time.Second) {
+				kills++
+			}
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		rt := fitsync.NewRuntime(fitsync.Options{})
+		if err := rt.Apply(cfg); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Close(context.Background())
+		deadline := time.Now().Add(3 * time.Minute) // a hang guard
+		for loadChecksum(t, c, "fit_snap.t") != loadChecksum(t, c, "fit_snapdst.t") {
+			if time.Now().After(deadline) {
+				t.Fatalf("the tables differ: %s and %s; %+v", loadChecksum(t, c, "fit_snap.t"), loadChecksum(t, c, "fit_snapdst.t"), rt.Status())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Logf("%d rows after %d transactions during the snapshot, equal across %d kills", len(w.rows), w.n, kills)
+	})
+}
+
+// TestMySQLSourceJob copies a table of 2,000 rows in a job, chunks of 300
+// rows read four at a time, killed half way and finished on its restart.
+func TestMySQLSourceJob(t *testing.T) {
+	eachMySQL(t, func(t *testing.T, s mysqlServer) {
+		seed := uint64(time.Now().UnixNano())
+		t.Logf("seed %d", seed)
+		rnd := rand.New(rand.NewPCG(seed, 11))
+		c := s.root(t)
+		mysqlDB(t, c, "fit_jobdst")
+		mustExec(t, c, "CREATE TABLE t "+fmt.Sprintf(loadColumns, ""))
+		mysqlDB(t, c, "fit_job")
+		mustExec(t, c, "CREATE TABLE t "+fmt.Sprintf(loadColumns, ""))
+		mysqlFill(t, c, "fit_job.t", 2000, &mysqlWriter{rows: map[int64]bool{}})
+		mustExec(t, c, "ANALYZE TABLE t")
+		cfg := mysqlCopyConfig(t, s, rnd, t.TempDir(), "fit_job.t", "fit_jobdst.t", map[string]any{"batch_size": 100, "chunk_rows": 300},
+			map[string]any{"mode": "once", "job": map[string]any{"max_parallel": 4}})
+		killed := crashRuntime(t, cfg, rnd, 3*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // a hang guard
+		defer cancel()
+		st, err := fitsync.RunPipeline(ctx, cfg, "p", fitsync.Options{})
+		if err != nil || st.State != "finished" || st.Job == nil {
+			t.Fatalf("%v: %+v", err, st)
+		}
+		if got, want := loadChecksum(t, c, "fit_jobdst.t"), loadChecksum(t, c, "fit_job.t"); got != want {
+			t.Fatalf("the copy's checksum is %s, want %s", got, want)
+		}
+		t.Logf("2,000 rows in %d chunks, killed %v", len(st.Job.Chunks), killed)
 	})
 }
