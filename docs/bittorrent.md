@@ -10,9 +10,9 @@ hybrid torrents, magnet links, TCP and uTP, MSE encryption, the DHT, peer exchan
 discovery, HTTP and UDP trackers and web seeds. This page covers the role: its config, where it
 keeps its state, adding torrents (magnet links, .torrent files and URLs, `watch_dir`), categories,
 the queue, the disk checks, the alternative rates, each torrent's limits, the blocklists, what a
-reload changes, publishing a directory, and its bounds; the `bt_stream` handler that plays a
-torrent's file while it downloads; and the `bittorrent.tracker` role. The Admin API and the pages
-come with later items of the
+reload changes, publishing a directory, and its bounds; the Admin API, the event stream, `fit bt`
+and the metrics; the `bt_stream` handler that plays a torrent's file while it downloads; and the
+`bittorrent.tracker` role. The pages come with a later item of the
 [development plan](dev-plan.md#bittorrent-downloading-and-seeding-a-tracker-publishing).
 
 Off by default: without `bittorrent.client`, fit opens no BitTorrent port and keeps no state.
@@ -310,9 +310,10 @@ file and a torrent added by hand) share is seeded once; the second is listed wit
 
 The role has a Go API that the later items build on (the Admin API, `fit bt`, the pages): `Add` a
 magnet link or .torrent bytes (with a category and limits), `AddURL`, `List` (in queue order),
-`Get` (with the files), `Pause`, `Resume`, `Remove` with or without the data, `SetFilePriority`,
-`SetSequential`, `SetCategory`, `SetTorrentLimits`, `SetQueuePosition`, `AltSpeed` and
-`SetAltSpeed`, `Save`, and `Torrent` for fib's torrent. A status says a torrent's category, its own
+`Get` (with the files), `Pause`, `Resume`, `Recheck`, `Remove` with or without the data,
+`SetFilePriority`, `SetSequential`, `SetCategory`, `SetTorrentLimits`, `SetQueuePosition`,
+`AltSpeed` and `SetAltSpeed`, `Peers`, `Trackers`, `Subscribe` (the events), `Save`, and `Torrent`
+for fib's torrent. A status says a torrent's category, its own
 and effective limits, its queue position, whether it is complete, and why the role holds it
 (`queued`, `disk`). The
 role's console, when set, serves `GET /api/torrents` and `GET /api/torrents/<id>` read-only for
@@ -322,6 +323,132 @@ now, and any console that shows the role's module serves them as
 The API has hooks for `bt_stream`'s temporary torrents too: `AddTemporary` (bounded by the
 caller's `max_temporary`), `SetTemporary`, `RemoveTemporary` (only while still temporary, with its
 data), `TemporaryBytes` and `SetFilePriorities` (every file's priority, saved once).
+
+## The Admin API
+
+The Admin API serves the client and the tracker under `/bittorrent/`, behind its token and
+`admin.access` as every endpoint, and the console passes them on as `/api/m/admin/bittorrent/...`
+(the event stream excepted). `/node` lists the capability `bittorrent`. Each call of the role's
+API runs on the request's goroutine (net/http's on the Admin API, the console's pool behind the
+console), never on a fib worker.
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /bittorrent/torrents` | the torrents in queue order: `{"torrents", "total", "offset"}`; `state` (states with commas), `category` (`category=` for those of none), `q` (in the name, any case), `offset`, `limit` (1000, at most 10000) |
+| `POST /bittorrent/torrents` | add one, answered `201` with its status and `Location`: JSON `{"magnet"` or `"url"` or `"torrent"` (base64), `"category"`, `"paused"`, `"sequential"`, `"priorities"`, `"peers"`, `"limits"}`; a .torrent file as `application/x-bittorrent` with `category`, `paused` and `sequential` in the query; or a form (`multipart/form-data`) with the file in the part `torrent` and the same fields |
+| `GET /bittorrent/torrents/<id>` | a torrent's status, with its files |
+| `POST /bittorrent/torrents/<id>` | `{"action": "pause"}`, `"resume"` or `"recheck"`; answers the status |
+| `PATCH /bittorrent/torrents/<id>` | `{"paused", "sequential", "category", "limits" (null clears them), "queue_position", "priorities": [{"index", "priority"}]}`, what is left out unchanged; answers the status |
+| `DELETE /bittorrent/torrents/<id>` | remove it; `?delete_data=1` with its files |
+| `GET /bittorrent/torrents/<id>/files` | `{"files"}`: index, path, length, completed, priority |
+| `GET /bittorrent/torrents/<id>/peers` | `{"peers"}`: address, ID, client, direction, uTP, encryption, seed, pieces, bytes and rates, choking |
+| `GET /bittorrent/torrents/<id>/trackers` | `{"trackers": [{"url", "tier"}], "web_seeds"}`, as its .torrent file or magnet link lists them |
+| `GET /bittorrent/alt_speed` | the alternative rates: mode, configured, active, the rates in force; `PUT` `{"mode": "auto"}`, `"on"` or `"off"` |
+| `GET /bittorrent/publish` | the publish entries and their torrents; `/bittorrent/publish/<name>` one |
+| `GET /bittorrent/events` | the events, as server-sent events (below) |
+| `GET /bittorrent/tracker/stats` | the tracker's totals |
+| `GET /bittorrent/tracker/torrents` | the allow-list's swarms (`offset`, `limit` at most 1000); `/bittorrent/tracker/torrents/<info hash>` one torrent's |
+| `GET /bittorrent/tracker/passkey?user=` | a user of the private tracker's policy, and its passkey |
+
+A torrent's `<id>` is its ID, the v1 info hash in hex, in either case, or its v2 hash (64 digits),
+whose first 20 bytes are the ID. `limits` take `upload_rate`, `download_rate`, `max_conns`,
+`upload_slots`, `seed_ratio` and `seed_time`, a duration (`"12h"`, `"-1s"` to seed for ever) or
+nanoseconds as a status gives it. A `PATCH` makes its changes in that order, each saved; the first
+that fails is answered and those before it stay made.
+
+Adding a torrent that `bt_stream` added on the fly keeps it as any other torrent, as it is, rather
+than answering `409`. A .torrent file sent is at most 32 MiB, as one downloaded by URL, read as it
+arrives and refused with `413` past the bound (a form's other fields 64 KiB each, 16 parts at most);
+a URL is downloaded by the role, within `url_timeout`.
+
+| The role's error | Status |
+| --- | --- |
+| the role does not run here | 404 |
+| no such torrent | 404 |
+| a bad request: a link, a file, a category, a priority, a mode | 400 |
+| added already; a torrent that could not be restored, which may only be removed | 409 |
+| `max_torrents` held | 429 |
+| four .torrent files being downloaded already; 32 event streams | 503 with `Retry-After` |
+| the client does not run, as after a port it could not take | 503 with `Retry-After` |
+| a .torrent file that could not be downloaded | 502 |
+
+## Events
+
+`GET /bittorrent/events` streams the client's events as server-sent events (`text/event-stream`),
+each with its `id`, its type as `event`, and as `data` the event in JSON: `id`, `time`, `type`, and
+as they apply `torrent`, `name`, `category`, `state`, `previous`, `error`, `peer`, `data_deleted`.
+
+| Type | When |
+| --- | --- |
+| `added` | a torrent was added (`state` its state then) |
+| `removed` | a torrent was removed (`data_deleted` with its files) |
+| `state` | a torrent's state changed, `previous` to `state` (`error` why, for `error`); the states are a status's: `metadata`, `checking`, `downloading`, `seeding`, `queued`, `paused`, `stopped`, `error` |
+| `completed` | a torrent has every piece it wants |
+| `error` | its storage failed, which does not stop it |
+| `peer_banned` | a peer, or every peer of an address, was banned, `error` why |
+| `seed_limit` | a torrent reached its seed ratio or time and paused |
+| `alt_speed` | the alternative rates started (`state` `on`) or stopped (`off`) holding |
+
+State changes are noticed by the role's manager every second, and at once after the API's
+changes. With no event to send, the stream writes a comment every 15s. A client that reconnects with
+`Last-Event-ID` (or `?after=<id>`) first gets the events it missed, of the last 1024 the role keeps;
+when some are no longer kept, or fit started again since (the IDs count from 1 at each start), the
+stream begins with an event `reset`, after which the client reads the torrents again. Each stream
+has a buffer of 256 events: a client that does not take them fast enough is not skipped silently
+but sent an event `lagged` and disconnected, to reconnect from the last ID it had. At most 32
+streams run at once (`503` past them). When the role stops, an event `end` closes the stream; when
+the Admin API shuts down, too. The stream needs a connection of its own, so it is served on the
+Admin API's address and not through the console (`501` there).
+
+The events go to fit's log too, under the logger `bittorrent`: torrents added and removed, bans and
+seed limits at info, completions and the alternative rates at info as before, storage errors at
+error, state changes at debug.
+
+## fit bt
+
+`fit bt` steers a running fit's client through its Admin API, found and authenticated as `fit check`
+and `fit sync` find it (`-c` the bootstrap config, `-timeout`, `-json`, and the TLS flags):
+
+```sh
+fit bt ls -state downloading,queued -category films
+fit bt add -category films 'magnet:?xt=urn:btih:...' https://example.com/x.torrent ./y.torrent
+fit bt info 3f2a91                      # a unique start of the ID, or the name
+fit bt pause 3f2a91 sintel
+fit bt resume 3f2a91
+fit bt rm -delete-data 3f2a91
+fit bt limit -down 2M -ratio 2 -seed-time 72h 3f2a91
+fit bt limit -clear 3f2a91
+fit bt alt on                           # auto, on, off; alone it shows them
+```
+
+`add` takes magnet links, http and https URLs and .torrent files, `-paused`, `-sequential`, and
+`-up` and `-down` for the torrents' own rates; rates are bytes per second with `K`, `M` or `G`
+(binary) after them. It exits 1 when the Admin API refuses one, after trying the rest, and 2 when
+used wrongly.
+
+## Metrics
+
+The roles' metrics go with fit's at the Admin API's `/metrics` and in OpenTelemetry's export. The
+client's are taken every second by its manager and read by a scrape without a lock of the role's;
+fib's counts of a torrent's bytes and failed pieces are added to its category's totals as they grow,
+so the counters keep what removed torrents counted and never go back while fit runs. `category` is
+`""` for the torrents of none; sum over it for the client's totals.
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `fit_bittorrent_client_running` | gauge | |
+| `fit_bittorrent_downloaded_bytes_total`, `fit_bittorrent_uploaded_bytes_total` (payload) | counter | `category` |
+| `fit_bittorrent_download_rate_bytes`, `fit_bittorrent_upload_rate_bytes` | gauge | `category` |
+| `fit_bittorrent_peers`, `fit_bittorrent_seeders` (connections) | gauge | `category` |
+| `fit_bittorrent_torrents` | gauge | `category`, `state` |
+| `fit_bittorrent_hash_failures_total` | counter | `category` |
+| `fit_bittorrent_peers_banned_total` | counter | |
+| `fit_bittorrent_alt_speed_active` | gauge | |
+| `fit_bittorrent_event_subscribers`, `fit_bittorrent_event_subscribers_dropped_total` | gauge, counter | |
+| `fit_bittorrent_published_torrents` | gauge | `entry` |
+| `fit_bittorrent_tracker_torrents`, `fit_bittorrent_tracker_peers`, `fit_bittorrent_tracker_max_torrents`, `fit_bittorrent_tracker_max_peers`, `fit_bittorrent_tracker_allowed` | gauge | |
+| `fit_bittorrent_tracker_announces_total`, `fit_bittorrent_tracker_scrapes_total` | counter | |
+| `fit_bittorrent_tracker_refused_total` | counter | `reason`: `unregistered`, `passkey`, `access` |
 
 ## Playing a file while it downloads
 
@@ -480,5 +607,6 @@ served, refusals by reason, the bounds), `Torrent(hash)` (seeders, leechers, com
 `Torrents`, the swarms of the allow-list's torrents; its console serves them read-only as
 `GET /api/stats`, `/api/torrents` (`offset`, `limit`, at most 1000) and `/api/torrents/<hash>`,
 and as `/api/m/bittorrent.tracker/...` as a module. A public tracker cannot list the torrents it
-tracks: fib's `MemoryStore` answers only for a torrent named. The Admin API's
-`/bittorrent/tracker/stats` comes with I203.
+tracks: fib's `MemoryStore` answers only for a torrent named. The Admin API serves them as
+`/bittorrent/tracker/stats`, `/bittorrent/tracker/torrents[/<hash>]` and
+`/bittorrent/tracker/passkey?user=`, with [metrics](#metrics).

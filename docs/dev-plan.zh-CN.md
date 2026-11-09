@@ -360,7 +360,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I200 | `bt_stream`：经 HTTP Range 边下边播，允许按磁力链临时添加 | I197 | done |
 | I201 | `bittorrent.tracker` 角色：HTTP 的 `bt_tracker`、UDP、私有 passkey、白名单、统计 | I196 | done |
 | I202 | 把目录发布成带 web seed 的 hybrid 种子，跟随磁盘变化 | I197 | done |
-| I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | todo |
+| I203 | Admin API、事件 SSE 流、`fit bt`、指标 | I198 | done |
 | I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | todo |
 | I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | todo |
 | I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
@@ -5141,6 +5141,68 @@ I198/I203 的添加路径。fib 的 `Reader.Close` 会等待进行中的 `Read`�
 - **做什么**：`/bittorrent/torrents`（列表、添加、上传、暂停、继续、删除、重新校验、优先级、限制）及其文件、peer、tracker，
   `/bittorrent/tracker/stats`，事件的 SSE 流；`fit bt add|ls|info|pause|resume|rm|limit`；按分类和状态的指标；事件写入 fit 日志。
 - **涉及**：`bittorrent`、`admin`、`cli`、`observe`。
+- **完成** 2026-11-09：Admin API 的 `/bittorrent/...`（`admin/bittorrent.go`）：列出种子（按 `state`、`category`、`q` 过滤，
+  分页），从磁力链接、URL 或 .torrent 文件添加（带 base64 的 JSON、`application/x-bittorrent`，或逐部分读取的表单，32 MiB），
+  单个种子及其文件，动作（`pause`、`resume`、`recheck`），`PATCH`（暂停、顺序下载、分类、限制、队列位置、优先级），带
+  `delete_data` 的 `DELETE`，`.../files`、`.../peers`、`.../trackers`，`/bittorrent/alt_speed`（GET、PUT），
+  `/bittorrent/publish[/<name>]`，tracker 的 `stats`、`torrents[/<hash>]` 和 `passkey`；角色的错误映射为状态码；`/node` 中的
+  能力 `bittorrent`。事件流 `GET /bittorrent/events`（`admin/btevents.go`）基于角色的事件（`bittorrent/events.go`：added、
+  removed、state、completed、error、peer_banned、seed_limit、alt_speed；最多 32 个订阅者、每个 256 个事件缓冲的 hub，保留
+  最近 1024 个供 `Last-Event-ID` 使用，`reset`、`lagged`、`end`、心跳），事件写入 `bittorrent` 日志。角色 API 新增 `Peers`、
+  `Trackers`、`Recheck` 和 `Subscribe`（`bittorrent/inspect.go`），`Add` 会保留 `bt_stream` 即时添加的种子。指标
+  （`bittorrent/metrics.go`、`bittorrent/tracker/metrics.go`，两个角色都实现 `app.Metered`）：按分类的字节数、速率、peer、
+  做种 peer 和校验失败，按分类和状态的种子数，封禁，备用速率，事件订阅者，已发布种子；tracker 的种子、peer、上限、announce、
+  scrape 和拒绝。`fit bt ls|add|info|pause|resume|rm|limit|alt`（`cli/bt.go`）。文档：[BitTorrent](bittorrent.zh-CN.md#admin-api)
+  （Admin API、事件、`fit bt`、指标）中英文两版，参考手册的章节，fib 请求 A80（任务的 tracker 及其 announce 状态）和 A81
+  （原地重新校验）。测试：未运行角色时的每个端点（404），令牌保护（401），每种添加方式及其错误（重复、错误链接、没有或两个
+  来源、错误 JSON、错误 scheme、失败的 URL、未知分类、错误限制、不是种子、不支持的类型、错误表单、超限的表单字段和文件
+  （有无 `Content-Length`）、过多部分、`max_torrents`），列表的过滤、分页及其错误，任意大小写 ID 的种子，文件、peer、
+  tracker（来自 .torrent 文件和磁力链接），动作及其错误，`PATCH` 及其错误，带与不带数据的移除，备用速率，发布，tracker 的
+  端点，错误到状态码的表，控制台（登录、添加被记录、事件流的 501）；事件流：添加的事件、心跳、按 `Last-Event-ID` 重放、
+  `reset`、错误 ID、32 个订阅者与 503、关闭的流释放名额、不读取的客户端在 40000 个事件到来时以 `lagged` 被断开、角色停止时
+  的 `end`；hub 的上限；一次下载、暂停、备用速率、封禁、做种限制、存储错误和移除经过的角色事件及其日志，重放和停止时的结束；
+  两个角色之间的 peer，磁力链接的 tracker 和 web seed，重新校验再次读取数据；按分类的指标在移除和停止后保留，封禁和备用速率；
+  tracker 的指标；`fit bt` 的命令、请求和输出，ID 前缀和名称，拒绝和用法错误。
+
+**待审查的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **Admin API 不为角色 API 另设池**：每次调用运行在请求的 goroutine 上，Admin API 上是 net/http 的，控制台后面是控制台的
+   有界池，与 sync 和媒体端点相同；两者都不是 fib worker，并受 `admin.max_conns` 约束。备选：角色自己的 API 池。
+2. **状态码**：没有该种子 404，该角色不在此运行 404，错误输入 400，已添加或损坏 409，`max_torrents`（以及 `max_temporary`）
+   **429**，URL 下载或事件流过多以及客户端未运行 **503** 并带 `Retry-After: 5`，失败的 URL 502。理由：429 表示调用者要求的
+   超过了它可持有的；503 是会过去的状态。备选：`max_torrents` 用 409 或 507；角色不在此运行用 503。
+3. **添加接受三种请求体**：JSON（文件为 base64）、以 `application/x-bittorrent` 发送的原始文件（选项在查询中），以及逐部分
+   读取的 `multipart/form-data`；.torrent 文件上限 **32 MiB**，与按 URL 的相同（而非 fib 的 128 MiB），表单其他字段 64 KiB，
+   最多 16 部分。以 `201` 和 `Location` 应答。备选：fib 的上限；`max_config_bytes`；只接受 JSON。
+4. **`PATCH` 不是原子的**：按固定顺序（暂停、顺序下载、分类、限制、队列位置、优先级）逐项修改并各自保存，第一项失败时
+   应答其错误，之前的修改保留；限制在任何修改之前解析。理由：角色的 API 没有事务。备选：先对照状态检查所有字段再应用。
+5. **`recheck` 把种子从 fib 客户端移除（保留文件），再不带续传数据重新加入**（续传文件被删除，校验中崩溃也会重新校验），
+   因为 fib 无法重新校验运行中的种子；其连接和 fib 的计数从头开始，队列位置、优先级、限制和暂停保留。已提为 fib 请求 A81。
+   备选：在 fib 有 `Torrent.Recheck` 之前应答 501。
+6. **`/trackers` 列出 .torrent 文件或磁力链接中的 tracker**（带 tier）和 web seed，不含 announce 状态：fib 不公开（fib 请求 A80）。
+7. **慢的事件订阅者被断开，而不是被跳过事件**：每个流 256 个事件的缓冲；填满时收到 `event: lagged` 并被关闭，用
+   `Last-Event-ID` 重连，从角色保留的最近 1024 个事件重放；有缺口，或 ID 超过最后一个（fit 重启过：ID 每次启动从 1 开始）时，
+   流以 `event: reset` 开头。最多 32 个流（503），每 15s 一行注释，角色停止或 Admin API 关闭时发 `end`。**不可配置**，因此
+   不改 schema。理由：悄悄错过事件的流会显示错误的状态；带重放的重连在常见情况下不丢任何事件。备选：丢弃最旧的事件并
+   标出缺口；为上限加配置。
+8. **事件流只在 Admin API 自己的地址上提供**：控制台的代理整段应答（其 recorder），因此在那里应答 501。I204 的页面需要一个
+   流式的控制台路由（在 fib 上，配合 `OnWritable`），或改为轮询。备选：现在就做这个路由。
+9. **状态变化由管理器每秒的查看察觉**，API 修改后立即察觉，方法是比较每个种子状态信息中的状态与上次发布的状态，因为 fib 的
+   事件不说种子何时开始下载、做种或校验。事件在 API、管理器和 fib 的事件 goroutine 上发布，从不等待。
+10. **添加 `bt_stream` 即时添加的种子会原样保留它**为普通种子（不应用请求的分类、限制和暂停），应答其状态而不是 409
+    （I200 的遗留点）。备选：也应用请求的选项。
+11. **指标**：角色每次查看（以及移除、重新校验、关闭客户端之前）把 fib 每个种子的计数累加到按分类的总计中，因此计数器比种子
+    长寿，但 fit 启动时从零开始（不持久化，同 I197 的决定 9）；无分类为 `category=""`，不另设总计；抓取读快照，不取角色的锁；
+    封禁是客户端范围的；tracker 的指标即其 `Stats`。备选：把总计保存在 `torrents.json` 中。
+12. **日志**：添加、移除、封禁和做种限制为 info，状态变化为 debug；完成、存储错误和备用速率保持原有的日志行（info、error、info）。
+13. **`fit bt`**：种子以 info hash、至少 4 位的唯一 ID 前缀或名称指定，经列表解析；速率接受 `K`、`M`、`G`（二进制）；文件以
+    原始形式发送，除非 `-up`/`-down` 需要 JSON；某个种子被拒时，试完其余的再以 1 退出。没有 `peers` 或 `events` 命令。备选：
+    只接受 ID；`fit bt events`。
+14. **用户的 passkey 也在 Admin API 上**（`/bittorrent/tracker/passkey?user=`），受其令牌保护，与角色控制台的并存。列表默认
+    每页 1000 个种子，最多 10000。
+
+遗留：fib 请求 A80 和 A81（合并时编号可能与其他分支冲突）；供页面使用的控制台流式路由（I204）；事件和指标计数不持久化。
+未运行：Linux 上的 race 测试和完整测试集（留给主会话）。
 
 ### I204 工作台的 BitTorrent 页面
 
