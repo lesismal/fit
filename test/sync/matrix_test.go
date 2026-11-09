@@ -12,9 +12,12 @@ package synctest
 // Redis (keys), one server each: the newest PostgreSQL and MongoDB of the
 // environment, MySQL 8.4 (or the last of FIT_SYNC_MYSQL). The sources are
 // those of mxSources: PostgreSQL, MySQL and MariaDB, MongoDB, TiDB
-// through TiCDC, and Debezium's events in Kafka; FIT_SYNC_MATRIX_SOURCES
-// (postgres, mysql, mongo, tidb, kafka, separated by commas or spaces)
-// picks some, every one when unset. FIT_SYNC_MATRIX=full runs each source
+// through TiCDC, and Debezium's events in Kafka, and the second round's
+// (matrix2_test.go): Debezium's events in RabbitMQ, NATS JetStream, Pulsar
+// and MQTT, SQL Server through CDC, and Doris polled by a cursor;
+// FIT_SYNC_MATRIX_SOURCES (postgres, mysql, mongo, tidb, kafka, rabbitmq,
+// nats, pulsar, mqtt, mssql, doris, separated by commas or spaces) picks
+// some, every one when unset. FIT_SYNC_MATRIX=full runs each source
 // on every server of its kind (PostgreSQL 13 to 17, MySQL 5.7, 8.0, 8.4 and
 // MariaDB 10.11, 11, MongoDB 6 to 8, Kafka and Redpanda), with a larger
 // load and more kills: the nightly matrix. test/sync/run.sh starts the
@@ -491,6 +494,7 @@ func mxSources(t *testing.T) []mxSource {
 				setup: func(t *testing.T, run string, m *mxModel) mxRun { return mxKafkaSource(t, s, run, m) }})
 		}
 	}
+	out = append(out, mxSources2(t)...)
 	if len(out) == 0 {
 		t.Fatalf("FIT_SYNC_MATRIX_SOURCES %q picks no source", os.Getenv("FIT_SYNC_MATRIX_SOURCES"))
 	}
