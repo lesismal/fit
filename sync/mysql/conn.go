@@ -20,6 +20,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
+	fitsync "github.com/lesismal/fit/sync"
 	mysqlwire "github.com/lesismal/fit/sync/mysql/wire"
 )
 
@@ -188,3 +189,8 @@ type ConnParams = connParams
 func WireConfig(ctx *module.Context, p ConnParams) (mysqlwire.Config, config.Errors) {
 	return wireConfig(ctx, p)
 }
+
+// WireValue is a value of a result as the mysql source reads it, typed by
+// its column, for connectors outside the package that read rows over
+// MySQL's protocol (the doris source).
+func WireValue(col *mysqlwire.Column, v any) fitsync.Value { return wireValue(col, v) }
