@@ -9,7 +9,7 @@
 //   torrent/:id[/:tab] a torrent: Overview (its numbers, pieces had, a magnet link to copy, the category, queue position,
 //                      sequential and its own limits, edited in place; pause, resume, recheck and remove), Files (each
 //                      file's progress and priority, set one by one or for the files picked), Peers and Trackers (its
-//                      trackers by tier and web seeds)
+//                      trackers by tier with their announces' state, its peer sources and web seeds' state, I210)
 //   tracker            the tracker's totals and refusals, the allow-list's swarms, paged, and a user's passkey looked up
 //   rss                the RSS auto-download (I208): each feed's last poll, its result and counts, turned on or off and
 //                      polled now; the rules with what they added, turned on or off; the items seen, filtered by feed and
@@ -27,7 +27,7 @@
 // 及被保持的原因、速率、剩余时间、分享率、peer 与分类），可按状态、分类与名称筛选，可对所选种子暂停、恢复或删除（可连同数据，
 // 需确认），“添加”可用磁力链接、.torrent 文件或其 URL，并指定分类、暂停与顺序下载，另列出客户端最近的事件；torrent/:id 为单个
 // 种子：概览（各项数字、已有分片、可复制的磁力链接，以及就地编辑的分类、队列位置、顺序下载与自身限制；暂停、恢复、重新校验与删除）、
-// 文件（各文件进度与优先级，可逐个或对所选文件设置）、Peer 与 Tracker（按层级列出的 tracker 与 Web 种子）。tracker 页显示
+// 文件（各文件进度与优先级，可逐个或对所选文件设置）、Peer 与 Tracker（按层级列出的 tracker 及其 announce 状态、peer 来源与 Web 种子状态，I210）。tracker 页显示
 // tracker 的总计与拒绝、白名单中种子的 swarm（分页）以及按用户查询 passkey。rss 页（I208）显示 RSS 自动下载：各订阅源的上次轮询、结果与计数，可开关并立即轮询；各规则及其添加的种子数，可开关；
 // 已见过的条目，可按订阅源与结果筛选，链接到其添加的种子。publish 页列出各发布条目、其状态与问题，及其种子的
 // .torrent 文件与磁力链接。config 为整个 bittorrent 成员。备用速率（自动、开、关）位于每个客户端页面的顶栏。页面每两秒轮询列表
@@ -97,8 +97,8 @@
     ['a.big', 'The file is larger than 32 MiB.', '文件大于 32 MiB。'], ['a.added', '{name} added.', '已添加 {name}。'],
     // a torrent / 单个种子
     ['t.notFound', 'No torrent {id} is held by the client.', '客户端中没有种子 {id}。'], ['t.list', 'Torrents', '种子列表'],
-    ['t.recheck', 'Recheck', '重新校验'], ['t.recheck.q', 'Check {name}\'s files again, piece by piece? It stops while it is checked, and its peers connect again.',
-      '逐个分片重新校验 {name} 的文件？校验期间它会停止，peer 会重新连接。'],
+    ['t.recheck', 'Recheck', '重新校验'], ['t.recheck.q', 'Check {name}\'s files again, piece by piece? It requests nothing while it is checked and keeps its peers; pieces that fail are downloaded again.',
+      '逐个分片重新校验 {name} 的文件？校验期间不请求数据，peer 保持连接；校验失败的分片会重新下载。'],
     ['t.rechecking', '{name} is checked again.', '{name} 正在重新校验。'],
     ['t.remove.q', 'Remove {name} from the client?', '从客户端删除 {name}？'], ['t.removed', '{name} removed.', '已删除 {name}。'],
     ['t.pausedMsg', '{name} paused.', '{name} 已暂停。'], ['t.resumedMsg', '{name} resumed.', '{name} 已恢复。'],
@@ -125,7 +125,19 @@
     ['p.utp', 'uTP', 'uTP'], ['p.enc', 'encrypted', '加密'], ['p.seed', 'seed', '做种者'], ['p.choked', 'choked', '阻塞'], ['p.snubbed', 'snubbed', '冷落'],
     // trackers / Tracker
     ['tr.url', 'URL', 'URL'], ['tr.tier', 'Tier', '层级'], ['tr.none', 'No tracker: peers are found by the DHT and peer exchange.', '没有 tracker：通过 DHT 与 peer 交换寻找 peer。'],
-    ['tr.seeds', 'Web seeds', 'Web 种子'], ['tr.note', 'As its .torrent file or magnet link names them.', '即其 .torrent 文件或磁力链接中列出的。'],
+    ['tr.seeds', 'Web seeds', 'Web 种子'],
+    ['tr.note', 'Trackers in tier order: a later tier is asked only when those before it do not answer. Seeders, leechers and downloads are the tracker\'s last answer or scrape.',
+      'tracker 按层级排列：只有前面的层级都没有应答时才会询问后面的层级。做种数、下载数与完成数来自 tracker 的上次应答或 scrape。'],
+    ['tr.status', 'Status', '状态'], ['tr.working', 'working', '正常'], ['tr.updating', 'announcing', '正在 announce'], ['tr.refused', 'refused', '被拒绝'],
+    ['tr.failing', 'not answering', '无应答'], ['tr.notYet', 'not contacted', '尚未联系'], ['tr.fails', '{n} failed in a row', '连续失败 {n} 次'],
+    ['tr.last', 'Last announce', '上次 announce'], ['tr.next', 'Next announce', '下次 announce'], ['tr.interval', 'Interval', '间隔'],
+    ['tr.peers', 'Peers', 'Peer'], ['tr.counts', 'Seeders / leechers / downloaded', '做种 / 下载 / 完成'], ['tr.v2', 'v2 hash', 'v2 哈希'],
+    ['tr.sources', 'Peer sources', 'Peer 来源'], ['tr.source', 'Source', '来源'], ['tr.found', 'Found', '找到'], ['tr.connected', 'Connected', '已连接'],
+    ['tr.on', 'on', '启用'], ['tr.off', 'off', '未启用'],
+    ['src.tracker', 'Trackers', 'Tracker'], ['src.dht', 'DHT', 'DHT'], ['src.pex', 'Peer exchange', 'Peer 交换'], ['src.lsd', 'Local discovery', '本地发现'],
+    ['src.manual', 'Added by hand', '手动添加'], ['src.other', 'Other sources', '其他来源'],
+    ['ws.active', 'Fetching', '正在获取'], ['ws.state', 'State', '状态'], ['ws.dropped', 'dropped after {n} failures', '失败 {n} 次后停用'],
+    ['ws.retry', 'retried {when}', '{when} 重试'], ['ws.ok', 'working', '正常'],
     // the tracker / Tracker 角色
     ['k.torrents', 'Torrents', '种子'], ['k.peers', 'Peers', 'Peer'], ['k.announces', 'Announces', 'Announce'], ['k.scrapes', 'Scrapes', 'Scrape'],
     ['k.refused', 'Refused', '拒绝'], ['k.access', 'Who may announce', '谁可以 announce'], ['k.private', 'Private', '私有'], ['k.public', 'Public', '公开'], ['k.allowedN', '{n} info hashes', '{n} 个 info hash'], ['k.noList', 'none: every torrent', '无：接受所有种子'], ['k.udp', 'UDP', 'UDP'],
@@ -564,7 +576,7 @@
               if (!drawnForms) drawForms(s);
             } else if (tab === 'files') drawFiles(s);
             else if (tab === 'peers') loadPeers();
-            else if (tab === 'trackers' && !body.firstChild) loadTrackers();
+            else if (tab === 'trackers') loadTrackers();
           }).catch(function (e) {
             if (!document.body.contains(body)) return;
             if (e.status === 404) {
@@ -738,17 +750,54 @@
         function loadTrackers() {
           return api('GET', torrentPath(id) + '/trackers').then(function (r) {
             if (!document.body.contains(body)) return;
-            var tr = r.trackers || [], ws = r.web_seeds || [];
+            var tr = r.trackers || [], src = r.sources || [], ws = (r.web_seeds || []).map(function (w) { return typeof w === 'string' ? { url: w } : w; });
+            // A tracker's state under one hash: its badge, then its error or warning.
+            function annStatus(a) {
+              var b = a.updating ? UI.badge(t('tr.updating'), 'primary') : a.error ? UI.badge(t(a.refused ? 'tr.refused' : 'tr.failing'), 'danger')
+                : a.last_announce ? UI.badge(t('tr.working'), 'ok') : UI.badge(t('tr.notYet'), '');
+              return h('div', b, a.fails ? h('span.small.muted', ' ' + t('tr.fails', { n: a.fails })) : null,
+                a.error ? h('div.small.bt-clip', { title: a.error }, a.error) : null,
+                a.warning ? h('div.small.muted.bt-clip', { title: a.warning }, a.warning) : null);
+            }
+            function count(n) { return n == null || n < 0 ? '—' : String(n); }
+            function annCols(pick) {
+              return [
+                { label: t('tr.status'), render: function (x) { return annStatus(pick(x)); } },
+                { label: t('tr.last'), render: function (x) { var a = pick(x); return a.last_announce ? UI.ago(unix(a.last_announce)) : t('never'); } },
+                { label: t('tr.next'), render: function (x) { var a = pick(x); return a.next_announce ? UI.fmtTime(unix(a.next_announce)) : h('span.muted', '—'); } },
+                { label: t('tr.interval'), cls: 'bt-num', render: function (x) { var a = pick(x); return a.interval ? UI.fmtDur(a.interval) : '—'; } },
+                { label: t('tr.peers'), cls: 'bt-num', render: function (x) { return String(pick(x).peers || 0); } },
+                { label: t('tr.counts'), cls: 'bt-num', render: function (x) { var a = pick(x); return count(a.seeders) + ' / ' + count(a.leechers) + ' / ' + count(a.downloaded); } }
+              ];
+            }
+            var urlCols = [
+              { label: t('tr.tier'), cls: 'bt-num', render: function (x) { return String(x.tier); } },
+              { label: t('tr.url'), render: function (x) { return h('code.bt-clip', { title: x.url }, x.url); } }
+            ];
+            var hybrid = tr.some(function (x) { return !!x.v2; });
             UI.mount(body, h('div.small.muted', t('tr.note')),
-              UI.card(t('n.trackers'), tr.length ? UI.table([
-                { label: t('tr.tier'), cls: 'bt-num', render: function (x) { return String(x.tier); } },
-                { label: t('tr.url'), render: function (x) { return h('code.bt-clip', { title: x.url }, x.url); } }
-              ], tr) : UI.empty(t('tr.none'), 'radio'), null, !!tr.length),
-              ws.length ? UI.card(t('tr.seeds'), h('ul.bt-list', ws.map(function (u) { return h('li', h('code', u)); }))) : null);
+              UI.card(t('n.trackers'), tr.length ? UI.table(urlCols.concat(annCols(function (x) { return x; })), tr) : UI.empty(t('tr.none'), 'radio'), null, !!tr.length),
+              hybrid ? UI.card(t('n.trackers') + ' (' + t('tr.v2') + ')', UI.table(urlCols.concat(annCols(function (x) { return x.v2 || {}; })), tr), null, true) : null,
+              src.length ? UI.card(t('tr.sources'), UI.table([
+                { label: t('tr.source'), render: function (x) { var w = t('src.' + x.source); return w === 'src.' + x.source ? x.source : w; } },
+                { label: t('tr.status'), render: function (x) { return x.enabled ? UI.badge(t('tr.on'), 'ok') : UI.badge(t('tr.off'), ''); } },
+                { label: t('tr.found'), cls: 'bt-num', render: function (x) { return String(x.candidates || 0); } },
+                { label: t('tr.connected'), cls: 'bt-num', render: function (x) { return String(x.connected || 0); } }
+              ], src), null, true) : null,
+              ws.length ? UI.card(t('tr.seeds'), UI.table([
+                { label: t('tr.url'), render: function (x) { return h('code.bt-clip', { title: x.url }, x.url); } },
+                { label: t('ws.state'), render: function (x) {
+                  return h('div', x.dropped ? UI.badge(t('ws.dropped', { n: x.fails }), 'danger') : x.error ? UI.badge(t('tr.failing'), 'warn') : UI.badge(t('ws.ok'), 'ok'),
+                    !x.dropped && x.fails ? h('span.small.muted', ' ' + t('tr.fails', { n: x.fails })) : null,
+                    x.next_try ? h('span.small.muted', ' ' + t('ws.retry', { when: UI.fmtTime(unix(x.next_try)) })) : null,
+                    x.error ? h('div.small.bt-clip', { title: x.error }, x.error) : null);
+                } },
+                { label: t('ws.active'), cls: 'bt-num', render: function (x) { return String(x.active || 0); } }
+              ], ws), null, true) : null);
           }).catch(function (e) { if (document.body.contains(body)) fail(body, e); });
         }
         load();
-        if (tab !== 'trackers') UI.every(tab === 'files' ? POLL * 2 : POLL, load);
+        UI.every(tab === 'files' || tab === 'trackers' ? POLL * 2 : POLL, load);
       }
 
       // ---- the tracker / Tracker ----

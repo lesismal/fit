@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I210。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I211。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -367,6 +367,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I207 | （第二阶段）集群共享的 tracker Store | I201 | done |
 | I208 | （第二阶段）RSS 自动下载 | I198 | done |
 | I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
+| I210 | 客户端角色用上 fib A87–A88：`/trackers` 显示各 tracker 的 announce 状态、peer 来源与 Web 种子状态，就地重新校验 | I203、I204 | done |
 
 ## M0 基础
 
@@ -5483,7 +5484,11 @@ I198/I203 的添加路径。fib 的 `Reader.Close` 会等待进行中的 `Read`�
 5. **`recheck` 把种子从 fib 客户端移除（保留文件），再不带续传数据重新加入**（续传文件被删除，校验中崩溃也会重新校验），
    因为 fib 无法重新校验运行中的种子；其连接和 fib 的计数从头开始，队列位置、优先级、限制和暂停保留。已提为 fib 请求 A88。
    备选：在 fib 有 `Torrent.Recheck` 之前应答 501。
+   **I210 已改**：重新校验改用 fib 的 `Torrent.Recheck`（A88）就地进行：不再移除，连接与计数保留，状态显示 `checking`；
+   续传数据仍在开始时删除，校验结束后重新保存。
 6. **`/trackers` 列出 .torrent 文件或磁力链接中的 tracker**（带 tier）和 web seed，不含 announce 状态：fib 不公开（fib 请求 A87）。
+   **I210 已改**：`/trackers` 从 fib 的 `Torrent.Trackers`、`Sources` 与 `WebSeeds`（A87）给出各 tracker 的 announce 状态、
+   peer 来源与 Web 种子状态；`web_seeds` 改为对象。
 7. **慢的事件订阅者被断开，而不是被跳过事件**：每个流 256 个事件的缓冲；填满时收到 `event: lagged` 并被关闭，用
    `Last-Event-ID` 重连，从角色保留的最近 1024 个事件重放；有缺口，或 ID 超过最后一个（fit 重启过：ID 每次启动从 1 开始）时，
    流以 `event: reset` 开头。最多 32 个流（503），每 15s 一行注释，角色停止或 Admin API 关闭时发 `end`。**不可配置**，因此
@@ -5875,3 +5880,63 @@ race 测试与完整测试套件（留给主会话）。
 由此遗留：A84（磁力链添加的 hybrid 种子的 piece layer）和 A86（做种方不宣告 `completed`）经由客户端生效，fit 无需改动，但 fit
 本身未测试；一个纯 v2 对端从 fit 做种的磁力链 hybrid 种子获取哈希的互通用例可覆盖 A84。未运行：Linux 上的 race 测试和完整测试
 （留给主会话）。
+
+### I210 客户端角色用上 fib A87–A88 新增的能力
+
+- **原因**：I203 留下两个权宜之计（其决定 5 与 6）：重新校验把种子从 fib 客户端移除再加入，断开连接、清零计数；`/trackers`
+  只列出 .torrent 文件或磁力链接中的内容，没有 announce 状态。fib A87（`Torrent.Trackers`、`Sources`、`WebSeeds`）与 A88
+  （`Torrent.Recheck`）已在 fib `4c6780e` 完成；fit 在 `404da7e` 上。
+- **要做**：`Role.Recheck` 改用 `Torrent.Recheck`（不移除；连接与计数保留；状态显示 `checking`；之后保存续传数据）；
+  `/trackers`（Admin API、控制台、页面、助手）显示各 tracker 的状态（上次与下次 announce、错误或警告、失败次数、peer、做种数、
+  下载数、完成数、间隔）、peer 来源与 Web 种子状态，助手照旧隐去 URL。
+- **完成标准**：重新校验保持 peer 连接与计数，被损坏的文件失去分片并重新下载；trackers 接口显示正常应答、拒绝与无法连接的
+  tracker；隐去规则成立；页面为所显示内容提供文案；两种语言的文档。
+- **涉及**：`bittorrent`、`admin`、`assistant`、`app/workbench`、`docs`。
+- **已完成** 2026-11-09（分支 `bt-i210`）：**重新校验**（`bittorrent/inspect.go`）：`Role.Recheck` 就地调用 `Torrent.Recheck`，
+  删除续传数据文件并忘掉为新客户端保留的副本（校验期间重启或替换客户端都会再次完整校验），标记待保存，保存器在 fib 给出续传
+  数据后写入（校验期间会出错）；清除为该种子保留的存储错误；立即发布进入 `checking` 的状态变化。fib 拒绝（种子处于错误状态或
+  正被移除）为 `ErrCannotCheck`，在 Admin API 上为 409。指标统计不再让该种子的计数从头开始。**Tracker**：`Role.Trackers` 返回
+  `Trackers{Trackers, Sources, WebSeeds}`：每个 tracker 有 `url`、`tier` 及其 announce 状态（`updating`、`last_announce`、
+  `next_announce`、`error`、`refused`、`warning`、`fails`、以秒计的 `interval` 与 `min_interval`、`peers`、`seeders`、
+  `leechers`、`downloaded`（未知为 -1）、`scraped`），hybrid 种子的 v2 哈希在 `v2` 中；按名称列出来源（`tracker`、`dht`、
+  `pex`、`lsd`、`manual`、`other`）及 `enabled`、`candidates`、`connected`；HTTP(S) Web 种子及 `active`、`fails`、`dropped`、
+  `error`、`next_try`。不在 fib 客户端中的种子（损坏的）列出其元信息或磁力链接中的 tracker 与 Web 种子，状态未知。Admin API
+  原样应答（`admin/bittorrent.go`）；控制台照常转发。**页面**（`app/workbench/web/bittorrent/bittorrent.js`）：Tracker 标签页
+  每 4 秒重新读取，显示各 tracker 的状态标记、错误或警告、失败次数、上次与下次 announce、间隔、peer 与计数，hybrid 种子的 v2
+  哈希另列一表，以及 peer 来源与 Web 种子状态；重新校验的确认说明 peer 保持连接；助手的“功能”页更新 `bt_torrent` 的文案。
+  **助手**（`assistant/tools_bittorrent.go`）：`bt_torrent` 给出 tracker 状态、来源与 Web 种子状态；tracker 的 URL 仍只保留
+  协议、主机与路径最后一段，Web 种子的去掉用户与查询；错误与警告中的每个 URL 都按 tracker 的方式显示，tracker 或 Web 种子自身
+  URL 中可能是秘密的部分（用户、最后一段之前的路径、长度不少于 6 的查询值）替换为 `[redacted]`；运行较早 fit 的成员（Web 种子
+  为纯 URL）仍可读取。集群的成员路径已允许 `/trackers`，无需改动。文档：[BitTorrent](bittorrent.zh-CN.md)（Admin API 的重新校验
+  与 `/trackers` 行、Tracker 标签页、助手工具与隐去规则），两种语言；[fib-api-requests](fib-api-requests.zh-CN.md) 中 A87 与 A88
+  标为已使用；I203 的决定 5 与 6 注明已改。测试：被重新校验（读取放慢）的做种方处于 `checking`、续传数据已删除，之后以同一个 fib
+  任务继续做种，下载方仍连接（地址与 ID 相同），上传计数不减，无哈希失败，续传数据重新写入，下载方以正确内容完成；文件被改了
+  两个字节的下载方在重新校验后失去两个分片并从做种方重新下载，文件随后正确；本地 fib tracker 上三个层级的 tracker：正常应答的
+  （间隔 3600，1 个做种者，0 个下载者，scrape 得到 0 次完成，约一小时后下次 announce，两个哈希都如此）、拒绝的（`refused` 及
+  原因）、无法连接的（有错误、非 `refused`、计数为 -1）；来源（tracker 启用、DHT 未启用、手动启用）；暂停时没有下次 announce；
+  应答 404 的 Web 种子及其错误与失败次数；磁力链接在 info 到来前的 tracker 与 Web 种子；Admin API 的结构（无法连接的 tracker
+  的状态、`v2`、六个来源、无 Web 种子）与 `ErrCannotCheck` 的 409；`bt_torrent` 在新结构下（状态照给，URL 与错误中没有
+  passkey，Web 种子错误中没有用户与查询）与较早成员的结构下；`redactText` 的用例；页面的文案与字段。运行：`bittorrent`、`admin`、
+  `assistant` 的 `go test -race`；`go test ./schema/ ./app/workbench/ ./docs/ ./test/workers/`；vet、gofmt。
+
+**待审决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **`web_seeds` 改为对象**（`{"url", "active", "fails", "dropped", "error", "next_try"}`），而不是 URL 列表旁另附状态，这改变了
+   Admin API 的结构；页面与助手两种结构都能读（运行较早 fit 的集群成员）。理由：每种东西一个列表，与 `trackers` 一致。备选：
+   `web_seeds` 保持为 URL，另加 `web_seed_state`。
+2. **hybrid 种子的 v2 announce 是每个 tracker 中的 `v2` 对象**，与 fib 一致，页面只在 hybrid 种子时另列一表。备选：每个 URL 与
+   哈希一行。
+3. **时间用 RFC 3339，为零时省略；间隔为整秒；未知计数为 -1**，与 fib 一致。`refused` 只在 tracker 自己拒绝时（`*tracker.Error`）
+   设置，让页面区分“被拒绝”与“无应答”。备选：时长用 Go 的纳秒，与 Admin API 其他限制一致。
+4. **重新校验开始时仍删除续传数据文件**（并忘掉内存中的副本），校验期间崩溃或换了客户端都会再次完整校验；fib 给出续传数据后由
+   保存器重新写入。理由：fib 的 `ResumeData` 在校验期间出错，旧文件会信任校验可能失败的分片。备选：保留旧文件（崩溃后会信任
+   未再校验的分片）。
+5. **fib 拒绝重新校验时应答 409**（`ErrCannotCheck`），与损坏的种子一样：是调用方可以改变的状态（先恢复它）。备选：400。
+6. **Tracker 标签页每 4 秒轮询**（列表间隔的两倍，与“文件”一致），此前只读取一次。备选：只提供刷新按钮。
+7. **助手按模式隐去错误与警告**：其中每个 URL 按 tracker URL 处理，tracker 或 Web 种子自身 URL 中可能是秘密的部分（用户、最后
+   一段之前的路径、查询值）长度不少于 6 时替换，免得短的截断普通词语。错误文本中短于 6 的秘密会漏过（passkey 远长于此）。
+   备选：助手的应答中去掉错误与警告。
+8. **不在 fib 客户端中的种子（损坏的）应答其元信息中的列表，状态未知、没有来源**，而不是 409，与之前一致。
+
+由此遗留：fit 中没有；运行较早 fit 的集群成员以旧结构应答 `/trackers`，助手能读（已测试），页面能显示（Web 种子没有状态）。
+未运行：Linux 上的 race 测试和完整测试（留给主会话）。

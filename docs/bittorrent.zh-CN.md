@@ -404,12 +404,12 @@ goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的�
 | `GET /bittorrent/torrents` | 按队列顺序的种子：`{"torrents", "total", "offset"}`；`state`（逗号分隔的状态）、`category`（`category=` 表示无分类的）、`q`（名称包含，不分大小写）、`offset`、`limit`（1000，最多 10000） |
 | `POST /bittorrent/torrents` | 添加一个，以 `201`、其状态和 `Location` 应答：JSON `{"magnet"` 或 `"url"` 或 `"torrent"`（base64）、`"category"`、`"paused"`、`"sequential"`、`"priorities"`、`"peers"`、`"limits"}`；以 `application/x-bittorrent` 发送的 .torrent 文件，`category`、`paused`、`sequential` 放在查询中；或表单（`multipart/form-data`），文件放在 `torrent` 部分，字段同上 |
 | `GET /bittorrent/torrents/<id>` | 种子的状态，含文件 |
-| `POST /bittorrent/torrents/<id>` | `{"action": "pause"}`、`"resume"` 或 `"recheck"`；应答状态 |
+| `POST /bittorrent/torrents/<id>` | `{"action": "pause"}`、`"resume"` 或 `"recheck"`；应答状态。重新校验就地进行（自 I210 起用 fib 的 `Torrent.Recheck`）：种子处于 `checking`，保留其 peer、计数、队列位置、优先级、限制与暂停状态，期间不请求数据，之后重新下载校验失败的分片或继续做种；其续传数据在开始时删除，校验结束后重新保存。fib 此时无法校验（处于错误状态）时应答 `409` |
 | `PATCH /bittorrent/torrents/<id>` | `{"paused", "sequential", "category", "limits"（null 清除）, "queue_position", "priorities": [{"index", "priority"}]}`，省略的不变；应答状态 |
 | `DELETE /bittorrent/torrents/<id>` | 移除它；`?delete_data=1` 连同文件 |
 | `GET /bittorrent/torrents/<id>/files` | `{"files"}`：索引、路径、长度、已完成、优先级 |
 | `GET /bittorrent/torrents/<id>/peers` | `{"peers"}`：地址、ID、客户端、方向、uTP、加密、是否做种、分块数、字节数与速率、choke 状态 |
-| `GET /bittorrent/torrents/<id>/trackers` | `{"trackers": [{"url", "tier"}], "web_seeds"}`，即其 .torrent 文件或磁力链接所列 |
+| `GET /bittorrent/torrents/<id>/trackers` | `{"trackers", "sources", "web_seeds"}`（I210，fib 的 `Torrent.Trackers`、`Sources` 与 `WebSeeds`）。`trackers` 按层级顺序，每项有 `url`、`tier` 及其 announce 状态：`updating`、`last_announce`、`next_announce`（不运行时没有；只有前面的层级都没有应答时才询问后面的层级）、`error`、`refused`（tracker 拒绝）、`warning`、连续失败次数 `fails`、`interval` 与 `min_interval`（秒）、上次应答的 `peers`、`seeders`、`leechers` 与 `downloaded`（未知时为 -1；完成数来自 scrape，至多每 30 分钟一次）、`scraped`；hybrid 种子以 v2 哈希 announce 的状态在 `v2` 中。`sources`：`tracker`、`dht`、`pex`、`lsd`、`manual`、`other`，各有 `enabled`、找到的 `candidates` 与其中 `connected` 的数量。`web_seeds`（HTTP 与 HTTPS）：`url`、正在获取的分片数 `active`、`fails`、`dropped`（失败 5 次）、`error`、`next_try`。不在客户端中的种子列出其 .torrent 文件或磁力链接所列的内容，状态未知 |
 | `GET /bittorrent/alt_speed` | 备用速率：模式、是否配置、是否生效、当前生效的速率；`PUT` `{"mode": "auto"}`、`"on"` 或 `"off"` |
 | `GET /bittorrent/publish` | 发布条目及其种子；`/bittorrent/publish/<name>` 一个 |
 | `GET /bittorrent/publish/<name>/torrents/<id>` | 已发布种子的 .torrent 文件（`application/x-bittorrent`，作为附件），页面提供下载 |
@@ -544,9 +544,9 @@ fit bt rss enable -rule show
   分类、暂停与顺序下载。**最近事件**列出页面打开以来客户端最近的 30 个事件。
 - **单个种子**（`#/bittorrent/torrent/<id>`）：**概览**显示进度、速率、总量、peer、分享率与剩余时间、已有分片数与总分片数、
   ID 与 hash、目录、添加时间以及可复制的磁力链接；分类、队列位置与顺序下载即改即生效，自身限制（速率、连接数、上传槽位、
-  做种分享率与时长）一起保存或清除，旁边显示当前生效的限制；暂停或恢复、重新校验（需确认：校验文件期间它会停止）与删除。
+  做种分享率与时长）一起保存或清除，旁边显示当前生效的限制；暂停或恢复、重新校验（需确认：校验文件期间保持 peer 连接、不请求数据，校验失败的分片会重新下载）与删除。
   **文件**显示各文件的进度与优先级（不下载、低、普通、高），可逐个或对所选文件设置。**Peer**显示各 peer 的地址、客户端、
-  连接（方向、uTP、加密、做种、阻塞）与速率。**Tracker**按层级列出其 tracker 及其 Web 种子，即其 .torrent 文件或磁力链接所列。
+  连接（方向、uTP、加密、做种、阻塞）与速率。**Tracker**（每 4 秒重新读取）按层级列出其 tracker，各附状态（正常、正在 announce、被拒绝、无应答或尚未联系，及其错误或警告与连续失败次数）、上次与下次 announce、间隔、peer 数以及做种数、下载数与完成数，hybrid 种子的 v2 哈希另列一表；其 peer 来源（启用与否、找到与已连接的 peer）；以及其 Web 种子及其状态、失败次数、下次重试与正在获取的分片。
 - **备用速率**位于客户端各页面的顶栏：自动（按计划）、开或关，以及当前是否生效及其速率。
 - **Tracker**：tracker 的种子与 peer 数及其上限、announce 与 scrape 数、按原因统计的拒绝、私有或公开及其白名单与 UDP 地址；
   种子的 swarm，每页 100 个（白名单中的，或公开 tracker 按 info hash 排序的）；私有 tracker 还可按用户查询其 passkey，用于该用户的 announce URL，只显示给登录者，
@@ -569,7 +569,7 @@ fit bt rss enable -rule show
 | 工具 | 级别 | 作用 |
 | --- | --- | --- |
 | `bt_torrents` | `read` | 种子的简要信息（状态、保持原因、错误、进度、大小、速率、peer、分享率、剩余时间），可按状态、分类与名称筛选（50 个，最多 200 个），并附备用速率 |
-| `bt_torrent` | `read` | 种子的状态、前 100 个文件及其优先级、前 50 个 peer，以及其 tracker 与 Web 种子 |
+| `bt_torrent` | `read` | 种子的状态、前 100 个文件及其优先级、前 50 个 peer、其 tracker 及其 announce 状态、peer 来源，以及 Web 种子及其状态 |
 | `bt_tracker_stats` | `read` | tracker 的总计与拒绝，以及白名单中前 50 个种子的 swarm |
 | `bt_rss` | `read` | RSS 订阅源（上次轮询、结果、计数）与规则，以及最近见过的条目（20 个，最多 100），可按订阅源与结果筛选；订阅源 URL 只给出 scheme、主机和最后一段路径，略去条目的 ID（常为链接） |
 | `bt_add_propose` | `propose` | 按磁力链接或 .torrent URL 添加种子，可指定分类、暂停或顺序下载 |
@@ -577,7 +577,7 @@ fit bt rss enable -rule show
 | `bt_resume_propose` | `propose` | 按 ID 恢复种子（最多 100 个） |
 
 passkey 不会到达模型：种子的磁力链接被省略（其 tracker URL 可能带有私有 tracker 的 passkey），tracker 的 URL 只给出协议、
-主机与路径的最后一段，Web 种子的 URL 去掉用户与查询，peer 不带 ID，工具也从不读取用户的 passkey。提议工具与媒体工具一样
+主机与路径的最后一段，Web 种子的 URL 去掉用户与查询（tracker 或 Web 种子的错误与警告中的 URL 也按 tracker 的方式处理，其自身 URL 中可能的秘密部分无论出现在哪里都会隐去），peer 不带 ID，工具也从不读取用户的 passkey。提议工具与媒体工具一样
 向对话中唯一待处理的提案加入步骤：按当前运行状态检查（角色及其客户端在运行、分类存在、种子尚未持有、所列种子存在且尚未
 暂停或尚未恢复，已处于该状态的会附说明后略去），在提案的配置修改之后按顺序、经 Admin API 以二次确认后应用提案的人的身份
 执行。某一步失败时其余步骤仍会完成，结果为 `partial`。

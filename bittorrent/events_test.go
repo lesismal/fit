@@ -340,18 +340,19 @@ func TestPeersTrackersRecheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trackers, seeds, err := r.Trackers(m.ID)
-	if err != nil || len(trackers) != 2 || trackers[0].URL != "udp://t1.example:6969" || trackers[1].Tier != 1 ||
-		len(seeds) != 1 || seeds[0] != "http://ws.example/x" {
-		t.Fatalf("trackers %+v, web seeds %v, %v", trackers, seeds, err)
+	tr, err := r.Trackers(m.ID)
+	if err != nil || len(tr.Trackers) != 2 || tr.Trackers[0].URL != "udp://t1.example:6969" || tr.Trackers[1].URL != "http://t2.example/announce" ||
+		tr.Trackers[0].Seeders != -1 || tr.Trackers[0].LastAnnounce != nil || tr.Trackers[0].NextAnnounce != nil ||
+		len(tr.WebSeeds) != 1 || tr.WebSeeds[0].URL != "http://ws.example/x" || tr.WebSeeds[0].Fails != 0 || len(tr.Sources) == 0 {
+		t.Fatalf("trackers %+v, %v", tr, err)
 	}
 	if err := r.Recheck(m.ID); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("a magnet without info: %v", err)
 	}
-	if trackers, seeds, err := r.Trackers(st.ID); err != nil || len(trackers) != 0 || len(seeds) != 0 {
-		t.Fatalf("no trackers: %+v %v %v", trackers, seeds, err)
+	if tr, err := r.Trackers(st.ID); err != nil || len(tr.Trackers) != 0 || len(tr.WebSeeds) != 0 || tr.Sources[0].Source != "tracker" || tr.Sources[0].Enabled {
+		t.Fatalf("no trackers: %+v %v", tr, err)
 	}
-	if _, _, err := r.Trackers(strings.Repeat("0", 40)); !errors.Is(err, ErrNotFound) {
+	if _, err := r.Trackers(strings.Repeat("0", 40)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 }

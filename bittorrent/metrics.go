@@ -49,7 +49,7 @@ type metricsSnap struct {
 // category's totals. r.mu is held.
 func (r *Role) accountLocked(rec *record, st *fibbt.Stats) {
 	if rec.t != rec.acctT {
-		// Another torrent of fib's (a new client, a recheck): its counts
+		// Another torrent of fib's (a new client, a restore): its counts
 		// start at zero.
 		rec.acctT, rec.acctDown, rec.acctUp, rec.acctFails = rec.t, 0, 0, 0
 	}

@@ -62,7 +62,7 @@
     ['t.sync_dry_run', 'Reads a pipeline\'s first records through its transforms, writing nothing; values as their kinds unless data.send_records.', '读取管道的前几条记录并经过各转换，不写入任何内容；除非设置 data.send_records，值只显示其类型。'],
     ['t.sync_dead_letters', 'A pipeline\'s dead letters: error, where it failed and attempts; values as their kinds unless data.send_records.', '管道的死信：错误、失败位置与尝试次数；除非设置 data.send_records，值只显示其类型。'],
     ['t.bt_torrents', 'The BitTorrent client\'s torrents: state, why held, progress, rates, peers, ratio and time left; by state, category or name.', 'BitTorrent 客户端的种子：状态、被保持的原因、进度、速率、peer、分享率与剩余时间；可按状态、分类或名称筛选。'],
-    ['t.bt_torrent', 'One torrent whole: its status, files with priorities, peers and trackers; never a passkey.', '单个种子的完整信息：状态、文件及优先级、peer 与 tracker；从不含 passkey。'],
+    ['t.bt_torrent', 'One torrent whole: its status, files with priorities, peers, trackers with their announces, peer sources and web seeds; never a passkey.', '单个种子的完整信息：状态、文件及优先级、peer、tracker 及其 announce 状态、peer 来源与 Web 种子；从不含 passkey。'],
     ['t.bt_rss', 'The RSS auto-download: each feed\'s last poll and result, the rules and what they added, the latest items seen; a feed\'s URL without its passkey.', 'RSS 自动下载：各订阅源的上次轮询与结果、各规则及其添加的种子、最近见过的条目；订阅源 URL 不含 passkey。'],
     ['t.bt_tracker_stats', 'The tracker\'s totals, refusals by reason and the allow-list\'s swarms; never a passkey.', 'tracker 的总计、按原因统计的拒绝与白名单中种子的 swarm；从不含 passkey。'],
     ['t.bt_add_propose', 'Adds a torrent by magnet link or .torrent URL to the proposal, in a category, paused or sequential.', '向提案加入按磁力链接或 .torrent URL 添加种子，可指定分类、暂停或顺序下载。'],

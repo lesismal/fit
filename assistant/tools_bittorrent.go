@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -48,7 +49,7 @@ func btTools() []*Tool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"state":{"type":"string","description":"states with commas, as downloading,queued"},"category":{"type":"string","description":"a category's name; \"\" for torrents of none; every torrent when left out"},"q":{"type":"string","description":"in the name, any case"},"offset":{"type":"integer"},"limit":{"type":"integer","description":"the most torrents, 50 when left out, at most 200"}}}`),
 			Run:         toolBTTorrents},
 		{Name: "bt_torrent", Group: GroupBitTorrent, Level: config.AssistantRead,
-			Description: "One torrent of the client whole, by its ID as bt_torrents lists it: its status (state, held, error, progress, pieces had of all, rates, totals, ratio, category, its own limits and those it goes by, queue position, sequential, directory), its files (the first 100: index, path, length, completed, priority 0 not downloaded, 1 low, 4 normal, 7 high), its peers (the first 50: address, client, direction, uTP, encryption, seed, pieces, rates, choking) and its trackers by tier and web seeds, as its .torrent file or magnet link names them (a tracker's URL as scheme, host and last path element).",
+			Description: "One torrent of the client whole, by its ID as bt_torrents lists it: its status (state, held, error, progress, pieces had of all, rates, totals, ratio, category, its own limits and those it goes by, queue position, sequential, directory), its files (the first 100: index, path, length, completed, priority 0 not downloaded, 1 low, 4 normal, 7 high), its peers (the first 50: address, client, direction, uTP, encryption, seed, pieces, rates, choking), its trackers by tier with their announces (last and next, error, refused, fails, interval, seeders, leechers, downloaded; -1 unknown; v2 for a hybrid's second hash), peer sources and web seeds with their state (a tracker's URL as scheme, host and last path element).",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"torrent":{"type":"string","description":"the torrent's ID: 40 hex digits, or its v2 hash"}},"required":["torrent"]}`),
 			Run:         toolBTTorrent},
 		{Name: "bt_tracker_stats", Group: GroupBitTorrent, Level: config.AssistantRead,
@@ -265,23 +266,51 @@ func toolBTTorrent(c *Call) (string, error) {
 		delete(p, "id")
 	}
 	out["peers"] = peers.Peers
+	// Each tracker's state (I210) passes as it is, but for its URL and any
+	// URL or secret of it in its error or warning; a member running an
+	// earlier fit answers web seeds as bare URLs.
 	var tr struct {
-		Trackers []struct {
-			URL  string `json:"url"`
-			Tier int    `json:"tier"`
-		} `json:"trackers"`
-		WebSeeds []string `json:"web_seeds"`
+		Trackers []map[string]json.RawMessage `json:"trackers"`
+		Sources  json.RawMessage              `json:"sources"`
+		WebSeeds []json.RawMessage            `json:"web_seeds"`
 	}
 	if err := c.a.apiGet(c.Context, base+"/trackers", &tr); err != nil {
 		return "", err
 	}
-	for i := range tr.Trackers {
-		tr.Trackers[i].URL = trackerURL(tr.Trackers[i].URL)
+	for _, t := range tr.Trackers {
+		var raw string
+		_ = json.Unmarshal(t["url"], &raw)
+		t["url"], _ = json.Marshal(trackerURL(raw))
+		redactMembers(t, raw)
+		var v2 map[string]json.RawMessage
+		if json.Unmarshal(t["v2"], &v2) == nil && v2 != nil {
+			redactMembers(v2, raw)
+			t["v2"], _ = json.Marshal(v2)
+		}
 	}
-	for i := range tr.WebSeeds {
-		tr.WebSeeds[i] = webSeedURL(tr.WebSeeds[i])
+	seeds := make([]any, 0, len(tr.WebSeeds))
+	for _, w := range tr.WebSeeds {
+		var u string
+		if json.Unmarshal(w, &u) == nil {
+			seeds = append(seeds, webSeedURL(u))
+			continue
+		}
+		var ws map[string]json.RawMessage
+		if json.Unmarshal(w, &ws) != nil || ws == nil {
+			continue
+		}
+		_ = json.Unmarshal(ws["url"], &u)
+		ws["url"], _ = json.Marshal(webSeedURL(u))
+		redactMembers(ws, u)
+		seeds = append(seeds, ws)
 	}
-	out["trackers"], out["web_seeds"] = tr.Trackers, tr.WebSeeds
+	if tr.Trackers == nil {
+		tr.Trackers = []map[string]json.RawMessage{}
+	}
+	out["trackers"], out["web_seeds"] = tr.Trackers, seeds
+	if len(tr.Sources) > 0 {
+		out["sources"] = tr.Sources
+	}
 	return jsonText(out), nil
 }
 
@@ -303,6 +332,53 @@ func trackerURL(raw string) string {
 		out += "/[redacted]"
 	}
 	return out + "/" + parts[len(parts)-1]
+}
+
+// urlInText finds the URLs in an error's or a warning's text.
+var urlInText = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
+
+// redactText returns an error's or a warning's text of the tracker or web
+// seed of URL raw as the model is shown it: every URL in it as trackerURL
+// gives it, and the parts of raw that may be secret (its user, the path
+// elements before the last, its query's values) as [redacted] wherever
+// they still appear.
+func redactText(text, raw string) string {
+	text = urlInText.ReplaceAllStringFunc(text, func(u string) string {
+		t := strings.TrimRight(u, ".,;:)]")
+		return trackerURL(t) + u[len(t):]
+	})
+	u, err := url.Parse(raw)
+	if err != nil {
+		return text
+	}
+	var secrets []string
+	if u.User != nil {
+		secrets = append(secrets, u.User.String())
+	}
+	if parts := strings.Split(strings.Trim(u.Path, "/"), "/"); len(parts) > 1 {
+		secrets = append(secrets, parts[:len(parts)-1]...)
+	}
+	for _, vs := range u.Query() {
+		secrets = append(secrets, vs...)
+	}
+	for _, sec := range secrets {
+		// Short ones would cut ordinary words.
+		if len(sec) >= 6 {
+			text = strings.ReplaceAll(text, sec, "[redacted]")
+		}
+	}
+	return text
+}
+
+// redactMembers redacts the error and warning of m, a tracker's or a web
+// seed's state, of URL raw.
+func redactMembers(m map[string]json.RawMessage, raw string) {
+	for _, k := range []string{"error", "warning"} {
+		var s string
+		if json.Unmarshal(m[k], &s) == nil && s != "" {
+			m[k], _ = json.Marshal(redactText(s, raw))
+		}
+	}
 }
 
 // webSeedURL returns a web seed's URL without its user or query.

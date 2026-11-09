@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I210.
+Status: `todo`, `doing` or `done`. The next free iteration number is I211.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -377,6 +377,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I210.
 | I207 | (second phase) A tracker store the cluster shares | I201 | done |
 | I208 | (second phase) RSS auto-download | I198 | done |
 | I209 | The roles use fib A80–A86: publishing hashes once and builds stop on a context, a public tracker's torrents listed and its bounds changed in place, the client's event queue bounded | I201, I202, I203 | done |
+| I210 | The client role uses fib A87–A88: each tracker's announces, the peer sources and the web seeds' state on `/trackers`, a recheck in place | I203, I204 | done |
 
 ## M0, foundations
 
@@ -7699,8 +7700,14 @@ Open from it (fib, reported, not worked around):
    has no recheck of a running torrent; its connections and fib's counters start again, its place,
    priorities, limits and pause stay. Filed as fib request A88. Alternative: answer 501 until fib
    has `Torrent.Recheck`.
+   **Changed by I210**: the recheck runs in place with fib's `Torrent.Recheck` (A88): no removal,
+   connections and counters kept, the state `checking`; the resume data is still removed at the
+   start and saved again after the check.
 6. **`/trackers` lists what the .torrent file or magnet link names**, with tiers, and the web
    seeds, no announce state: fib exposes none (fib request A87).
+   **Changed by I210**: `/trackers` answers each tracker's announces, the peer sources and the web
+   seeds' state from fib's `Torrent.Trackers`, `Sources` and `WebSeeds` (A87); `web_seeds` became
+   objects.
 7. **Slow event subscribers are disconnected, not skipped**: a buffer of 256 events per stream; one
    that fills gets `event: lagged` and is closed, to reconnect with `Last-Event-ID`, replayed from
    the last 1024 events the role keeps; a gap, or an ID past the last (fit restarted: IDs count
@@ -8292,3 +8299,96 @@ Open from it: A84 (piece layers of a hybrid added by magnet link) and A86 (no `c
 work through the client with no change in fit and are not tested in fit itself; an interop case of
 a v2-only peer fetching hashes from a fit seed of a magnet-added hybrid would cover A84. Not run: the
 Linux race run and the full suite (left to the main session).
+
+### I210 The client role uses what fib A87–A88 added
+
+- **Why**: I203 left two stopgaps (its decisions 5 and 6): a recheck took the torrent out of fib's
+  client and added it again, dropping its connections and counters, and `/trackers` listed only
+  what the .torrent file or magnet link names, with no announce state. fib A87
+  (`Torrent.Trackers`, `Sources`, `WebSeeds`) and A88 (`Torrent.Recheck`) are done at fib
+  `4c6780e`; fit is on `404da7e`.
+- **Do**: `Role.Recheck` uses `Torrent.Recheck` (no removal; connections and counters kept; the
+  state shows `checking`; resume data saved after); `/trackers` (Admin API, console, pages,
+  assistant) shows each tracker's state (last and next announce, error or warning, fails, peers,
+  seeders, leechers, downloaded, interval), the peer sources and the web seeds' state, URLs
+  redacted for the assistant as before.
+- **Done when**: a recheck keeps peers connected and counters, a corrupted file loses pieces and
+  downloads them again; the trackers endpoint shows an answering, a refusing and an unreachable
+  tracker; redaction holds; the pages word what they show; docs in both languages.
+- **Touches**: `bittorrent`, `admin`, `assistant`, `app/workbench`, `docs`.
+- **Done** 2026-11-09 (branch `bt-i210`): **Recheck** (`bittorrent/inspect.go`): `Role.Recheck`
+  calls `Torrent.Recheck` on the torrent in place, removes its resume data file and forgets the
+  copy kept for a new client (so that a restart or a client replaced during the check checks it all
+  again), marks it to be saved, and the saver writes it once fib gives it (it errs while checking);
+  the storage error kept for the torrent is cleared; the state change to `checking` is published at
+  once. fib's refusal (a torrent in its error state, or being removed) is `ErrCannotCheck`, a 409 on
+  the Admin API. The metrics' accounting no longer starts the torrent's counts again. **Trackers**:
+  `Role.Trackers` returns `Trackers{Trackers, Sources, WebSeeds}`: each tracker with `url`, `tier`
+  and its announces (`updating`, `last_announce`, `next_announce`, `error`, `refused`, `warning`,
+  `fails`, `interval` and `min_interval` in seconds, `peers`, `seeders`, `leechers`, `downloaded`,
+  -1 unknown, `scraped`), a hybrid's v2 hash in `v2`; the sources by name (`tracker`, `dht`,
+  `pex`, `lsd`, `manual`, `other`) with `enabled`, `candidates` and `connected`; the HTTP(S) web
+  seeds with `active`, `fails`, `dropped`, `error`, `next_try`. A torrent not in fib's client
+  (broken) lists its metainfo's or magnet link's trackers and web seeds, their state unknown. The
+  Admin API answers it as it is (`admin/bittorrent.go`); the console passes it on. **Pages**
+  (`app/workbench/web/bittorrent/bittorrent.js`): the Trackers tab is read again every 4 seconds
+  and shows each tracker's state badge, error or warning, fails, last and next announce, interval,
+  peers and counts, a table for a hybrid's v2 hash, the peer sources and the web seeds' state; the
+  recheck's confirm says the peers stay; the assistant's Functions page words `bt_torrent` anew.
+  **Assistant** (`assistant/tools_bittorrent.go`): `bt_torrent` passes the trackers' state,
+  sources and web seeds' state; a tracker's URL stays scheme, host and last path element, a web
+  seed's loses user and query, and in errors and warnings every URL is shown as a tracker's and the
+  secret parts of the tracker's or web seed's own URL (user, path elements before the last, query
+  values of 6 characters or more) are `[redacted]`; a member running an earlier fit (web seeds as
+  bare URLs) still reads. The cluster's member paths already allow `/trackers`; nothing changes
+  there. Docs: [BitTorrent](bittorrent.md#the-admin-api) (the Admin API's recheck and `/trackers`
+  rows, the Trackers tab, the assistant's tool and redaction) in both languages; A87 and A88 marked
+  used in [fib-api-requests](fib-api-requests.md#a87-a-torrents-trackers-and-their-announces);
+  I203's decisions 5 and 6 noted as changed. Tests: a seed rechecked (reads slowed) is `checking`,
+  its resume data gone, then seeding with the same fib torrent, its leecher still connected (same
+  address and ID), its upload counter not lower, no hash failure, its resume data written again,
+  and the leecher finishing with the right bytes; a leecher whose file had two bytes changed loses
+  two pieces on a recheck and downloads them again from the seed, the file right after; trackers of
+  three tiers on local fib trackers: one answering (interval 3600, 1 seeder, 0 leechers, 0
+  downloaded from its scrape, next announce in about an hour, under both hashes), one refusing
+  (`refused`, its reason), one unreachable (an error, not `refused`, counts -1); the sources (the
+  tracker on, DHT off, manual on); no next announce while paused; a web seed answering 404 with its
+  error and fails; a magnet link's trackers and web seeds before its info; the Admin API's shape
+  (an unreachable tracker's state, `v2`, six sources, no web seeds) and `ErrCannotCheck`'s 409;
+  `bt_torrent` with the new shape (state passed, passkeys gone from URLs and errors, user and query
+  gone from a web seed's error) and with an earlier member's; `redactText`'s cases; the pages'
+  words and fields. Run: `go test -race` of `bittorrent`, `admin`, `assistant`; `go test ./schema/
+  ./app/workbench/ ./docs/ ./test/workers/`; vet, gofmt.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **`web_seeds` became objects** (`{"url", "active", "fails", "dropped", "error", "next_try"}`)
+   rather than a list of URLs with the state beside it, a change of the Admin API's shape; the
+   pages and the assistant read both shapes (a cluster member running an earlier fit). Why: one
+   list per thing, as `trackers`. Alternative: keep `web_seeds` as URLs and add `web_seed_state`.
+2. **A hybrid's v2 announces are a `v2` object in each tracker**, as fib gives them, and the pages
+   show them in a second table only for a hybrid. Alternative: one row per URL and hash.
+3. **Times are RFC 3339 and absent when zero; intervals in whole seconds; counts -1 when not
+   known**, as fib. `refused` is set only for a tracker's own refusal (`*tracker.Error`), so the
+   pages tell "refused" from "not answering". Alternative: durations as Go's nanoseconds, as the
+   rest of the Admin API's limits.
+4. **The resume data file is still removed at a recheck's start** (and the in-memory copy
+   forgotten), so a crash or a new client during the check checks it all again; it is written
+   again by the saver once fib gives it. Why: fib's `ResumeData` errs during the check, and the
+   old file would trust pieces the check may fail. Alternative: keep the old file (a crash then
+   trusts pieces never checked again).
+5. **fib's refusal of a recheck is 409** (`ErrCannotCheck`), as a broken torrent's: a state that
+   the caller can change (resume it). Alternative: 400.
+6. **The Trackers tab polls every 4 seconds** (twice the list's interval, as Files), where it was
+   read once. Alternative: a refresh button only.
+7. **The assistant redacts errors and warnings by pattern**: every URL in them as a tracker's URL,
+   and the parts of the tracker's or web seed's own URL that may be secret (user, path elements
+   before the last, query values) when 6 characters or more, so that short ones do not cut ordinary
+   words. A secret shorter than 6 in an error's text would pass (passkeys are far longer).
+   Alternative: drop errors and warnings from the assistant's answer.
+8. **A torrent not in fib's client (broken) answers its metainfo's list with the state unknown and
+   no sources**, rather than 409, as before.
+
+Open from it: nothing in fit; a cluster member running an earlier fit answers `/trackers` in the
+old shape, which the assistant reads (tested) and the pages show (web seeds without state). Not
+run: the Linux race run and the full suite (left to the main session).

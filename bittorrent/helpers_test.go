@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -74,6 +75,8 @@ func member(t *testing.T, js string) *config.BitTorrentClient {
 type readCounter struct {
 	mu    sync.Mutex
 	reads int
+	// delay, when set, slows each read by as much.
+	delay atomic.Int64
 }
 
 func (rc *readCounter) total() int {
@@ -88,6 +91,9 @@ type countingStorage struct {
 }
 
 func (s *countingStorage) ReadAt(file int, p []byte, off int64) (int, error) {
+	if d := s.rc.delay.Load(); d > 0 {
+		time.Sleep(time.Duration(d))
+	}
 	s.rc.mu.Lock()
 	s.rc.reads++
 	s.rc.mu.Unlock()

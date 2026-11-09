@@ -2039,7 +2039,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A87：任务的 tracker 及其 announce 状态
 
-**状态。** 2026-11-09 由 I203 提出；已在 fib 的 `4c6780e` 完成（`Torrent.Trackers`、`Sources`、`WebSeeds`），由 fit 的会话实现；fit 已在 `404da7e` 上，并在 I210 中让 `/trackers` 改用它。在此之前，fit 只报告任务的 .torrent 文件或磁力链接列出的 tracker，不含其状态。
+**状态。** 2026-11-09 由 I203 提出；已在 fib 的 `4c6780e` 完成（`Torrent.Trackers`、`Sources`、`WebSeeds`），由 fit 的会话实现；fit 已在 `404da7e` 上，自 I210 起使用它。I210 之前，fit 只报告任务的 .torrent 文件或磁力链接列出的 tracker，不含其状态。
 
 **问题。** Admin API 的 `/bittorrent/torrents/<id>/trackers` 和页面（I204）应当像 qBittorrent、Transmission 那样显示每个 tracker 上次 announce 的时间、结果或错误、它报告的做种数与下载数，以及下次 announce 的时间。fib 的 `Torrent` 在 announce 循环（`announceLoop`、`tracker.Tiers`）里保有这些信息，却一项也不公开；磁力链接的 info 或 PEX 之后带来的 tracker 也看不到。
 
@@ -2047,15 +2047,19 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 **fit 如何使用。** `Role.Trackers` 改为返回它，Admin API 和页面原样显示。
 
+**使用情况**（I210）：`Role.Trackers` 从 `Torrent.Trackers` 给出各 tracker 的 announce 状态（hybrid 种子的 v2 哈希在 `v2` 中，以 `*tracker.Error` 区分拒绝与失败），从 `Sources` 给出 peer 来源，从 `WebSeeds` 给出 Web 种子的状态；Admin API 的 `/trackers`、控制台、Tracker 标签页与助手的 `bt_torrent`（URL 照旧隐去，错误中的 URL 与秘密也隐去）显示它们。测试用了正常应答、拒绝与无法连接的 fib tracker，以及应答 404 的 Web 种子。
+
 ## A88：重新校验运行中任务的数据
 
-**状态。** 2026-11-09 由 I203 提出；已在 fib 的 `4c6780e` 完成（`Torrent.Recheck`），由 fit 的会话实现；fit 已在 `404da7e` 上，并在 I210 中让 `Role.Recheck` 改用它。在此之前，fit 的 `Role.Recheck` 把任务从客户端移除（`Remove(false)`），再不带续传数据重新加入，这会断开它的连接，并清零 fib 对其下载、上传量的计数。
+**状态。** 2026-11-09 由 I203 提出；已在 fib 的 `4c6780e` 完成（`Torrent.Recheck`），由 fit 的会话实现；fit 已在 `404da7e` 上，自 I210 起使用它。I210 之前，fit 的 `Role.Recheck` 把任务从客户端移除（`Remove(false)`），再不带续传数据重新加入，这会断开它的连接，并清零 fib 对其下载、上传量的计数。
 
 **问题。** 文件在客户端不知情时被改动或恢复后，需要重新校验（qBittorrent 的“强制重新校验”）。fib 只在加入任务时校验数据。
 
 **建议的 API。** `Torrent.Recheck()`：暂停任务的请求，忘掉已有的分块，在磁盘池上重跑初始校验（`StateChecking`），然后按原状态继续（暂停或运行），保留 peer、计数和限制；结束时发出 `EventChecked`。
 
 **fit 如何使用。** `Role.Recheck` 调用它，Admin API 的 `{"action": "recheck"}` 和 `fit bt` 含义不变。
+
+**使用情况**（I210）：`Role.Recheck` 就地调用 `Torrent.Recheck`，开始时删除其续传数据（校验期间重启会再次校验），校验结束、fib 给出续传数据后重新保存；fib 拒绝（种子处于错误状态）时应答 409。测试：做种方校验期间保持与下载方的连接、同一个任务及其上传计数；文件被改动的下载方失去两个分片并重新下载。
 
 ## A89：单个种子的下载不受其锁和选块器限制
 

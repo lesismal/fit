@@ -494,12 +494,12 @@ console), never on a fib worker.
 | `GET /bittorrent/torrents` | the torrents in queue order: `{"torrents", "total", "offset"}`; `state` (states with commas), `category` (`category=` for those of none), `q` (in the name, any case), `offset`, `limit` (1000, at most 10000) |
 | `POST /bittorrent/torrents` | add one, answered `201` with its status and `Location`: JSON `{"magnet"` or `"url"` or `"torrent"` (base64), `"category"`, `"paused"`, `"sequential"`, `"priorities"`, `"peers"`, `"limits"}`; a .torrent file as `application/x-bittorrent` with `category`, `paused` and `sequential` in the query; or a form (`multipart/form-data`) with the file in the part `torrent` and the same fields |
 | `GET /bittorrent/torrents/<id>` | a torrent's status, with its files |
-| `POST /bittorrent/torrents/<id>` | `{"action": "pause"}`, `"resume"` or `"recheck"`; answers the status |
+| `POST /bittorrent/torrents/<id>` | `{"action": "pause"}`, `"resume"` or `"recheck"`; answers the status. A recheck runs in place (fib's `Torrent.Recheck`, since I210): the torrent is `checking`, keeps its peers, counters, place, priorities, limits and pause, requests nothing meanwhile, then downloads again the pieces that failed or seeds; its resume data is removed at the start and saved again after the check. `409` when fib cannot check it now (in its error state) |
 | `PATCH /bittorrent/torrents/<id>` | `{"paused", "sequential", "category", "limits" (null clears them), "queue_position", "priorities": [{"index", "priority"}]}`, what is left out unchanged; answers the status |
 | `DELETE /bittorrent/torrents/<id>` | remove it; `?delete_data=1` with its files |
 | `GET /bittorrent/torrents/<id>/files` | `{"files"}`: index, path, length, completed, priority |
 | `GET /bittorrent/torrents/<id>/peers` | `{"peers"}`: address, ID, client, direction, uTP, encryption, seed, pieces, bytes and rates, choking |
-| `GET /bittorrent/torrents/<id>/trackers` | `{"trackers": [{"url", "tier"}], "web_seeds"}`, as its .torrent file or magnet link lists them |
+| `GET /bittorrent/torrents/<id>/trackers` | `{"trackers", "sources", "web_seeds"}` (I210, fib's `Torrent.Trackers`, `Sources` and `WebSeeds`). `trackers` in tier order, each with `url`, `tier` and its announces: `updating`, `last_announce`, `next_announce` (absent while it does not run; a later tier is asked only when those before it do not answer), `error`, `refused` (the tracker's refusal), `warning`, `fails` in a row, `interval` and `min_interval` (seconds), `peers` of the last answer, `seeders`, `leechers` and `downloaded` (-1 until known; downloaded from a scrape, at most every 30 minutes), `scraped`; a hybrid's announces under its v2 hash in `v2`. `sources`: `tracker`, `dht`, `pex`, `lsd`, `manual`, `other`, each `enabled`, with the `candidates` it found and those `connected`. `web_seeds` (HTTP and HTTPS): `url`, `active` pieces, `fails`, `dropped` (at 5), `error`, `next_try`. A torrent not in the client lists what its .torrent file or magnet link names, its state unknown |
 | `GET /bittorrent/alt_speed` | the alternative rates: mode, configured, active, the rates in force; `PUT` `{"mode": "auto"}`, `"on"` or `"off"` |
 | `GET /bittorrent/publish` | the publish entries and their torrents; `/bittorrent/publish/<name>` one |
 | `GET /bittorrent/publish/<name>/torrents/<id>` | a published torrent's .torrent file (`application/x-bittorrent`, as an attachment), which the pages offer |
@@ -657,11 +657,16 @@ Admin API's `/bittorrent/` endpoints through the console, and edits the shared d
   ratio and time left, the pieces it has of all, its ID and hashes, directory, the date it was
   added and its magnet link to copy; its category, queue position and sequential download, changed
   at once, and its own limits (rates, connections, upload slots, seed ratio and time, saved together
-  or cleared), beside the limits in force; Pause or Resume, Recheck (after a confirm: it stops while
-  its files are checked again) and Remove. **Files**, each file's progress and priority (skip, low,
+  or cleared), beside the limits in force; Pause or Resume, Recheck (after a confirm: it keeps its
+  peers and requests nothing while its files are checked again; pieces that fail are downloaded
+  again) and Remove. **Files**, each file's progress and priority (skip, low,
   normal, high), set one by one or for the files picked. **Peers**, each peer's address, client,
-  connection (direction, uTP, encryption, seed, choked) and rates. **Trackers**, its trackers by
-  tier and its web seeds, as its .torrent file or magnet link names them.
+  connection (direction, uTP, encryption, seed, choked) and rates. **Trackers** (read again every 4
+  seconds), its trackers by tier, each with its state (working, announcing, refused, not answering
+  or not contacted, with its error or warning and fails in a row), last and next announce,
+  interval, peers, and seeders, leechers and downloads, a hybrid's v2 hash in a table of its own;
+  its peer sources (on or off, peers found and connected); and its web seeds with their state,
+  fails, next try and pieces being fetched.
 - The **alternative rates** are in the top bar of the client's pages: auto (the schedules), on or
   off, and whether they hold now, with the rates.
 - **Tracker**: the tracker's torrents and peers against its bounds, announces and scrapes, refusals
@@ -692,7 +697,7 @@ levels as every tool ([the console](console.md#bittorrent)):
 | Tool | Level | What it does |
 | --- | --- | --- |
 | `bt_torrents` | `read` | the torrents in short (state, held, error, progress, size, rates, peers, ratio, time left), filtered by state, category and name (50, at most 200), with the alternative rates |
-| `bt_torrent` | `read` | a torrent's status, its first 100 files with their priorities, its first 50 peers and its trackers and web seeds |
+| `bt_torrent` | `read` | a torrent's status, its first 100 files with their priorities, its first 50 peers, its trackers with their announces, its peer sources and its web seeds with their state |
 | `bt_tracker_stats` | `read` | the tracker's totals and refusals, and the allow-list's first 50 swarms |
 | `bt_rss` | `read` | the RSS feeds (last poll, result, counts) and rules, and the latest items seen (20, at most 100), by feed and outcome; a feed's URL as scheme, host and last path element, an item's ID (often a link) left out |
 | `bt_add_propose` | `propose` | a torrent added by magnet link or .torrent URL, in a category, paused or sequential |
@@ -701,7 +706,9 @@ levels as every tool ([the console](console.md#bittorrent)):
 
 No passkey reaches a model: a torrent's magnet link is left out (its trackers' URLs may carry a
 private tracker's passkey), a tracker's URL is given as its scheme, host and last path element,
-a web seed's without its user or query, peers without their IDs, and a user's passkey is never
+a web seed's without its user or query (and any URL in a tracker's or a web seed's error or
+warning as a tracker's is, the secret parts of its own URL redacted wherever they appear), peers
+without their IDs, and a user's passkey is never
 read by a tool. The propose tools add steps to the conversation's one pending proposal, as the
 media ones do: checked on what runs now (the role and its client run, the category exists, the
 torrent is not held already, those named exist and are not paused, or paused, already, leaving out
