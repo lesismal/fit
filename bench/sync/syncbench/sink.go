@@ -131,6 +131,47 @@ func (e *esCounter) count(ctx context.Context) (int64, error) {
 
 func (e *esCounter) close() {}
 
+// lokiCounter counts the lines Loki took: its distributors'
+// loki_distributor_lines_received_total, of every tenant, from its
+// metrics, which costs Loki nothing a query of the lines would.
+type lokiCounter struct {
+	client *http.Client
+	url    string
+}
+
+func (l *lokiCounter) count(ctx context.Context) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.url, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := l.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("%s: %s", l.url, resp.Status)
+	}
+	var total float64
+	for _, line := range strings.Split(string(body), "\n") {
+		if !strings.HasPrefix(line, "loki_distributor_lines_received_total") {
+			continue
+		}
+		var v float64
+		if _, err := fmt.Sscan(line[strings.LastIndexByte(line, ' ')+1:], &v); err != nil {
+			return 0, fmt.Errorf("%s: %q: %v", l.url, line, err)
+		}
+		total += v
+	}
+	return int64(total), nil
+}
+
+func (l *lokiCounter) close() {}
+
 // kafkaCounter counts a topic's messages: the sum of its partitions' next
 // offsets, the movers writing no transactions. A topic not made yet has
 // none.
@@ -233,6 +274,8 @@ func openCounter(ctx context.Context, o *options) (counter, error) {
 	switch o.sc.sink {
 	case "files":
 		return &fileCounter{dir: o.outDir}, nil
+	case "loki":
+		return &lokiCounter{client: &http.Client{Timeout: 10 * time.Second}, url: strings.TrimRight(o.loki, "/") + "/metrics"}, nil
 	case "es":
 		return &esCounter{client: &http.Client{Timeout: 10 * time.Second},
 			url: strings.TrimRight(o.es, "/") + "/" + o.esIndex + "/_count"}, nil

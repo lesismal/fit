@@ -21,6 +21,7 @@ type scenario struct {
 
 var scenarios = map[string]scenario{
 	"files":       {source: "files", sink: "files"},
+	"files-loki":  {source: "files", sink: "loki"},
 	"mysql-es":    {source: "mysql", sink: "es", stream: true},
 	"mysql-kafka": {source: "mysql", sink: "kafka", stream: true},
 	"pg-kafka":    {source: "pg", sink: "kafka", stream: true},
@@ -43,7 +44,7 @@ type options struct {
 	writers                         int
 
 	// The sink.
-	outDir, es, esIndex, kafka, kafkaTopic, kafkaFormat, target string
+	outDir, es, esIndex, kafka, kafkaTopic, kafkaFormat, target, loki string
 
 	// The measurement.
 	containers    []string
@@ -66,7 +67,7 @@ func parseOptions(cmd string, args []string, stderr io.Writer) (*options, error)
 	o := &options{}
 	fs := flag.NewFlagSet("syncbench "+cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&o.scenario, "scenario", "", "files, mysql-es, mysql-kafka, pg-kafka or mysql-batch")
+	fs.StringVar(&o.scenario, "scenario", "", "files, files-loki, mysql-es, mysql-kafka, pg-kafka or mysql-batch")
 	fs.StringVar(&o.mover, "mover", "", "the mover's name in the results")
 	fs.StringVar(&o.variant, "variant", "", "the scenario's variant, as its results name it")
 
@@ -91,6 +92,7 @@ func parseOptions(cmd string, args []string, stderr io.Writer) (*options, error)
 	fs.StringVar(&o.kafkaTopic, "kafka-topic", "bench", "the topic the mover writes to")
 	fs.StringVar(&o.kafkaFormat, "kafka-format", "", "canal for a topic of Canal's flat messages, its rows counted; a message a record otherwise")
 	fs.StringVar(&o.target, "target", "mysql2:3306", "the batch job's target MySQL")
+	fs.StringVar(&o.loki, "loki", "http://loki:3100", "Loki's URL, whose metrics count the lines it took")
 
 	containers := fs.String("containers", "", "the mover's containers, comma-separated, measured and paused together")
 	fs.StringVar(&o.docker, "docker", "unix:///var/run/docker.sock", "the Docker API: unix://path or http://host:port")
@@ -112,7 +114,7 @@ func parseOptions(cmd string, args []string, stderr io.Writer) (*options, error)
 	}
 	sc, ok := scenarios[o.scenario]
 	if !ok {
-		fmt.Fprintf(stderr, "syncbench %s: -scenario %q is not one of files, mysql-es, mysql-kafka, pg-kafka, mysql-batch\n", cmd, o.scenario)
+		fmt.Fprintf(stderr, "syncbench %s: -scenario %q is not one of files, files-loki, mysql-es, mysql-kafka, pg-kafka, mysql-batch\n", cmd, o.scenario)
 		return nil, errUsage
 	}
 	o.sc = sc

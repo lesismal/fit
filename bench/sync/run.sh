@@ -8,7 +8,8 @@
 #
 #   bench/sync/run.sh [-n ROUNDS] [-movers LIST] [-o DIR] [-name NAME] SCENARIO
 #
-# SCENARIO is files, mysql-es, mysql-kafka, pg-kafka or mysql-batch. The
+# SCENARIO is files, files-loki, mysql-es, mysql-kafka, pg-kafka or
+# mysql-batch. The
 # results go in DIR (bench/results/sync) as NAME.json (NAME is the scenario
 # and its variant), with NAME/: each round's result, fit's profiles, and the
 # movers' logs. The environment sets the rest (defaults in brackets):
@@ -53,11 +54,12 @@ done
 sc=$1
 case $sc in
 files) all=fit,filebeat ;;
+files-loki) all=fit,promtail ;;
 mysql-es | mysql-kafka) all=fit,canal,debezium ;;
 pg-kafka) all=fit,debezium ;;
 mysql-batch) all=fit,datax ;;
 *)
-	echo "run.sh: unknown scenario $sc: files, mysql-es, mysql-kafka, pg-kafka or mysql-batch" >&2
+	echo "run.sh: unknown scenario $sc: files, files-loki, mysql-es, mysql-kafka, pg-kafka or mysql-batch" >&2
 	exit 2
 	;;
 esac
@@ -70,6 +72,8 @@ PG_IMAGE=${PG_IMAGE:-postgres:17.5-bookworm}
 ES_IMAGE=${ES_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:7.17.28}
 KAFKA_IMAGE=${KAFKA_IMAGE:-apache/kafka:3.9.1}
 FILEBEAT_IMAGE=${FILEBEAT_IMAGE:-docker.elastic.co/beats/filebeat:8.17.4}
+LOKI_IMAGE=${LOKI_IMAGE:-grafana/loki:3.5.5}
+PROMTAIL_IMAGE=${PROMTAIL_IMAGE:-grafana/promtail:3.5.5}
 CANAL_IMAGE=${CANAL_IMAGE:-canal/canal-server:v1.1.8}
 DEBEZIUM_IMAGE=${DEBEZIUM_IMAGE:-quay.io/debezium/connect:3.0.8.Final}
 JRE_IMAGE=${JRE_IMAGE:-eclipse-temurin:8u452-b09-jre-jammy}
@@ -91,7 +95,7 @@ smoke) d_files=20000 d_stream=5000 d_batch=20000 d_rate=200 d_for=3s ;;
 *) d_files=2000000 d_stream=500000 d_batch=2000000 d_rate=2000 d_for=20s ;;
 esac
 case $sc in
-files) RECORDS=${RECORDS:-$d_files} ;;
+files | files-loki) RECORDS=${RECORDS:-$d_files} ;;
 mysql-batch) RECORDS=${RECORDS:-$d_batch} ;;
 *) RECORDS=${RECORDS:-$d_stream} ;;
 esac
@@ -112,7 +116,7 @@ DOCKER_SOCK=${DOCKER_SOCK:-/var/run/docker.sock}
 
 if [ -z "$name" ]; then
 	name=$sc
-	[ "$sc" = files ] && name=files-${LINE_BYTES}b-${FILES}f
+	case $sc in files | files-loki) name=$sc-${LINE_BYTES}b-${FILES}f ;; esac
 fi
 # A run of the same name before is replaced.
 rm -rf "${outdir:?}/$name" "$outdir/$name.json"
@@ -273,6 +277,12 @@ mysql_wait() {
 servers_up() {
 	case $sc in
 	files) return ;;
+	files-loki)
+		run_d loki --cpuset-cpus "$SERVER_CPUS" -v "$here/configs/loki/loki.yaml:/etc/loki/loki.yaml:ro" \
+			"$LOKI_IMAGE" -config.file=/etc/loki/loki.yaml
+		wait_for loki 120 docker exec "$PREFIX-loki" /busybox/wget -q -O /dev/null http://127.0.0.1:3100/ready
+		return
+		;;
 	mysql-es | mysql-kafka | mysql-batch) mysql_up mysql ;;
 	pg-kafka)
 		run_d postgres --cpuset-cpus "$SERVER_CPUS" -e POSTGRES_PASSWORD=$PW -e POSTGRES_DB=shop "$PG_IMAGE" \
@@ -338,7 +348,7 @@ mover_up() {
 	case $1 in
 	fit)
 		vol=""
-		[ "$sc" = files ] && vol="-v $PREFIX-data:/data"
+		case $sc in files | files-loki) vol="-v $PREFIX-data:/data" ;; esac
 		# shellcheck disable=SC2086
 		run_d fit --cpuset-cpus "$MOVER_CPUS" $vol -v "$PREFIX-run:/run/fit" \
 			-v "$bindir/fit:/usr/local/bin/fit:ro" -v "$here/configs/fit/$sc.conf:/etc/fit/fit.conf:ro" \
@@ -350,6 +360,12 @@ mover_up() {
 			-v "$here/configs/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro" \
 			"$FILEBEAT_IMAGE" -e --strict.perms=false
 		containers=$PREFIX-filebeat
+		;;
+	promtail)
+		run_d promtail --cpuset-cpus "$MOVER_CPUS" -v "$PREFIX-data:/data" \
+			-v "$here/configs/promtail/promtail.yml:/etc/promtail/config.yml:ro" \
+			"$PROMTAIL_IMAGE" -config.file=/etc/promtail/config.yml
+		containers=$PREFIX-promtail
 		;;
 	canal)
 		mode=tcp
@@ -424,7 +440,7 @@ run_one() {
 	# A mover of records there before it starts is made here and started
 	# by syncbench, once it counts the sink.
 	start=false
-	case $sc in files | mysql-batch) start=true ;; esac
+	case $sc in files | files-loki | mysql-batch) start=true ;; esac
 	CREATE=0
 	$start && CREATE=1
 	if ! mover_up "$m"; then
@@ -482,6 +498,7 @@ binaries
 pull "$BASE_IMAGE"
 case $sc in
 files) pull "$FILEBEAT_IMAGE" ;;
+files-loki) pull "$LOKI_IMAGE" "$PROMTAIL_IMAGE" ;;
 mysql-es) pull "$MYSQL_IMAGE" "$ES_IMAGE" "$KAFKA_IMAGE" "$CANAL_IMAGE" "$DEBEZIUM_IMAGE" "$JRE_IMAGE" ;;
 mysql-kafka) pull "$MYSQL_IMAGE" "$KAFKA_IMAGE" "$CANAL_IMAGE" "$DEBEZIUM_IMAGE" ;;
 pg-kafka) pull "$PG_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
@@ -507,6 +524,7 @@ done
 images="-image base=$BASE_IMAGE"
 case $sc in
 files) images="$images -image filebeat=$FILEBEAT_IMAGE" ;;
+files-loki) images="$images -image loki=$LOKI_IMAGE -image promtail=$PROMTAIL_IMAGE" ;;
 mysql-es) images="$images -image mysql=$MYSQL_IMAGE -image es=$ES_IMAGE -image kafka=$KAFKA_IMAGE -image canal=$CANAL_IMAGE -image canal-adapter=$ADAPTER_IMAGE -image debezium=$CONNECT_ES_IMAGE" ;;
 mysql-kafka) images="$images -image mysql=$MYSQL_IMAGE -image kafka=$KAFKA_IMAGE -image canal=$CANAL_IMAGE -image debezium=$DEBEZIUM_IMAGE" ;;
 pg-kafka) images="$images -image postgres=$PG_IMAGE -image kafka=$KAFKA_IMAGE -image debezium=$DEBEZIUM_IMAGE" ;;

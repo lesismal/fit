@@ -122,9 +122,16 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | `mongo` | 按 `_id` upsert 和 delete：文档相同 |
 | `elasticsearch` | 按由键生成的 `_id` 索引和删除：文档相同（没有键的记录由集群生成 `_id`，重放会重复） |
 | `clickhouse` | 相同记录得到相同的去重令牌：服务器丢弃这次插入；否则由 `ReplacingMergeTree` 按版本合并 |
+| `doris` | 相同记录得到相同的 label：服务器以“已导入”拒绝这次导入；否则由 Unique Key 或主键表按键覆盖 |
+| `loki` | 相同的条目（流、时间、行）只保留一份；没有时间的行使用写入时间，会再存一次 |
 | `redis` | 键相同；`entry_id key` 时已存在的流条目被拒绝 |
 | `s3` | 同一批次生成同一个对象，覆盖自身；重放若被切成不同的批次，会生成别的对象 |
-| `kafka`、`http`、`file`、`stdout` | 再写一次：Kafka 的生产者不是幂等的；`http` 对相同记录发送相同的 `Idempotency-Key` |
+| `influxdb`、`tdengine` | 同一个数据点：序列（子表）加时间，覆盖自身；删除不写 |
+| `qdrant`、`milvus` | 按由键生成的 ID upsert 和 delete：数据点和实体相同 |
+| `nats` | 相同记录得到相同的 `Nats-Msg-Id`：流的去重窗口丢弃它（默认 2 分钟） |
+| `pulsar` | 相同记录得到相同的 `fit-id` 属性：`dedup read_back` 时，生产者最近存过的记录被丢弃 |
+| `rabbitmq` | 再发布一次，`message_id` 相同，消费者可据此丢弃 |
+| `kafka`、`http`、`otlp_logs`、`file`、`stdout` | 再写一次：Kafka 的生产者不是幂等的，OTLP 也不是；`http` 对相同记录发送相同的 `Idempotency-Key` |
 
 **事务保持完整。** 检查点从不落在源事务内部；一个事务的记录带有其 ID，`mysql` 和 `postgres` 目标把每个源事务写成自己的
 一个事务（`transactions source`），所以目标的读者永远不会看到半个事务。
@@ -158,6 +165,9 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [文件](#文件) | `file`：跨轮转跟踪路径和通配符，多行合并 | `file`：按编解码器或模板写行，像日志一样轮转 |
 | [Elasticsearch、OpenSearch](#elasticsearch-与-opensearch) | `elasticsearch`：经时间点读快照，再轮询游标字段 | `elasticsearch`：按 `_id` 用 `_bulk` 写 |
 | [ClickHouse](#clickhouse) | `clickhouse`：按键读表或查询，再轮询游标列 | `clickhouse`：`JSONEachRow` 插入，去重，`ReplacingMergeTree` |
+| [Doris、StarRocks](#doris-与-starrocks) | `doris`：经 MySQL 协议按键读表或查询，再轮询游标列 | `doris`：Stream Load，按位置生成 label，删除标记 |
+| [Loki](#loki) | | `loki`：推送 API，protobuf 或 JSON，流取自配置的字段 |
+| [OpenTelemetry 日志](#opentelemetry-日志) | | `otlp_logs`：OTLP/HTTP 日志记录，protobuf 或 JSON |
 | [HTTP](#http) | `http`：POST 到 `sync_ingest` 路由的记录 | `http`：以 NDJSON 或 JSON 批量 POST |
 | [MySQL、MariaDB、TiDB](#mysqlmariadb-与-tidb) | `mysql`：以副本身份读 binlog，无锁快照 | `mysql`：upsert 和 delete，保持源的事务 |
 | [经由 TiCDC 读取 TiDB](#经由-ticdc-读取-tidb) | `tidb`：在一个时间戳上读快照，再从 Kafka 读 changefeed | （用 `mysql` 目标） |
@@ -166,13 +176,19 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [MongoDB](#mongodb) | `mongo`：按 `_id` 读快照，再读 change stream | `mongo`：按 `_id` 批量 upsert 和 delete |
 | [Kafka、Redpanda](#kafka-与-redpanda) | `kafka`：每个分区从检查点中的 offset 读 | `kafka`：带键消息，批量、压缩 |
 | [MQTT](#mqtt) | `mqtt`：持久会话，QoS 1 与 2 在目标拿到后确认 | `mqtt`：主题模板、QoS、可选保留 |
+| [RabbitMQ](#rabbitmq) | `rabbitmq`：队列在目标拿到后确认，流队列从检查点中的 offset 读 | `rabbitmq`：持久消息，批次等发布确认 |
+| [NATS JetStream](#nats-jetstream) | `nats`：持久拉取消费者，在目标拿到后确认；core 主题 | `nats`：JetStream 发布，按 `Nats-Msg-Id` 去重；core |
+| [Apache Pulsar](#apache-pulsar) | `pulsar`：每个分区作为读者从检查点中的消息 ID 读，或持久订阅 | `pulsar`：带键消息，批量、压缩、去重 |
 | [Redis、Valkey](#redis-与-valkey) | `redis`：用 `XREAD` 读流 | `redis`：`XADD`，或每条记录一个键 |
 | [S3 及兼容存储](#s3-及兼容存储) | `s3`：前缀下的对象，按键的顺序，逐行 | `s3`：由行组成的对象，按大小和时间滚动 |
+| [InfluxDB](#influxdb) | | `influxdb`：行协议写入 InfluxDB 1、2 和 3，按序列和时间 |
+| [TDengine](#tdengine) | | `tdengine`：schemaless 行，或 `INSERT ... USING` 超级表 |
+| [Qdrant 与 Milvus](#qdrant-与-milvus) | | `qdrant`、`milvus`：按键 upsert 和 delete，向量来自 `embed` |
 | [插件](#插件) | `wasm`：经 fit 的 HTTP 客户端轮询的插件 | `wasm`：经它写出的插件 |
 | [试用](#试用generatememory-和-stdout) | `generate` | `memory`、`stdout` |
 
 密钥从不写在配置里：每个连接器都给出保存其密码或令牌的环境变量名（`password_env`、`secret_access_key_env`、
-`bearer_token_env`），在流水线加载时读取，所以 `fit validate` 也需要设置它。TLS 按系统根证书或 `ca_file` 校验，且不能
+`bearer_token_env`、`headers_file`），在流水线加载时读取，所以 `fit validate` 也需要设置它。TLS 按系统根证书或 `ca_file` 校验，且不能
 关闭；客户端证书为 `cert_file` 和 `key_file`。除 `wasm` 连接器（其可达范围是插件自己的）外，每个连接器的连接都可以在不写
 任何记录的情况下测试（[测试连接](#admin-apifit-sync-与工作台)）。
 
@@ -281,6 +297,107 @@ sync {
 				table shop.orders
 			}
 			batch { max_records 10000; max_wait 1s }
+		}
+	}
+}
+```
+
+### Doris 与 StarRocks
+
+一个连接器 `doris` 同时服务 Apache Doris（2.1 及以上）和 StarRocks（3 及以上）；`flavor` 指明系统，两者在这里的区别只有
+删除列和部分列更新的请求头。目标用 HTTP 上的 Stream Load 导入一个批次中同一张表的每段连续记录，行为 JSON（或 CSV），
+`label` 由这段记录的第一个和最后一个位置生成：崩溃后再次导入的同一段会被以“已导入”拒绝，所以即使是 Duplicate Key 表，
+一个批次也只存一份。更新和删除需要 merge on write 的 Unique Key 表（Doris）或主键表（StarRocks）：删除写出行或其键，
+并把 `__DORIS_DELETE_SIGN__`（或 `__op`）设为 1。`partial_columns` 只更新记录带有的列。前端到后端的重定向会带着凭据跟随，
+所以后端地址必须是 fit 能访问到的；`urls` 也可以直接写后端的 HTTP 端口。因行而被拒绝的导入会被拆分，直到找出它不能
+接受的那条记录：该记录交给 `on_error`，它之前的记录都已导入。
+
+label 比表活得久：Doris 会保留 `label_keep_max_second`（默认三天），所以重置流水线或重建它的表之后，要改 `label_prefix`，
+否则之前导入过的记录会被以“已导入”拒绝。
+
+源经 MySQL 协议（前端的查询端口）读取表或查询，按 `cursor` 和 `key` 排序分页，再轮询上次读到的行之后的行，与 clickhouse
+源相同；从表中删除的行看不到，但 `deleted_column` 会读成删除。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-doris {
+		source mysql {
+			address mysql:3306
+			username fit_repl
+			password_env MYSQL_PASSWORD
+			server_id 4101
+			tables shop.orders
+		}
+		sinks doris {
+			sink doris {
+				urls http://fe1:8030 http://fe2:8030
+				username fit
+				password_env DORIS_PASSWORD
+				table dw.{namespace}
+			}
+			batch { max_records 20000; max_wait 2s }
+		}
+	}
+	pipelines starrocks-events {
+		source doris {
+			address sr-fe:9030
+			username fit
+			password_env SR_PASSWORD
+			table app.events
+			key id
+			cursor updated_at
+		}
+		sinks out { sink stdout }
+	}
+}
+```
+
+`orders-to-doris` 在 Doris 上的表：
+
+```sql
+CREATE TABLE dw.orders (id BIGINT NOT NULL, status VARCHAR(20), total DECIMAL(12, 2))
+UNIQUE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 8
+PROPERTIES ("enable_unique_key_merge_on_write" = "true");
+```
+
+### Loki
+
+目标 `loki` 把记录作为日志行推送到 Loki 的推送 API，格式为 snappy 压缩的 protobuf（与 Promtail 和 Alloy 相同）或 JSON。
+记录的行由其 `codec` 生成，默认是 line 编解码器，文件的行原样保留。流的 `labels` 是记录字段的模板，默认为
+`{"job": "fit", "namespace": "{$namespace}"}`：只有配置中写出的字段才成为标签，所以流的数量等于这些字段取值的数量，
+绝不会每条记录一个流；取值很多的值放进 `structured_metadata`（Loki 3）。行的时间取 `timestamp_field`，否则取记录的提交
+时间，再否则取写入时间。`tenant`（或 `tenant_field`）以 `X-Scope-OrgID` 发送。每个流的条目按时间排序；Loki 拒绝的请求
+（条目太旧、行太长）会被拆分，直到找出它拒绝的记录，交给 `on_error`。Loki 对流、时间和行都相同的条目只保留一份，所以
+记录带时间时，崩溃后再写一次的批次只存一份。
+
+### OpenTelemetry 日志
+
+目标 `otlp_logs` 把记录作为 OpenTelemetry 日志记录，经 OTLP/HTTP（`/v1/logs`）导出到 OpenTelemetry Collector 或任何
+OTLP 接收端，protobuf 或 JSON，gzip 压缩。资源与 fit 自身遥测发送的相同（`service.name`、`service.version`），再加上
+由记录字段模板生成的 `resource` 属性；日志记录的 body 是其 `codec` 生成的行，或带类型的行 map（`body row`），时间取
+`timestamp_field` 或提交时间，严重级别取 `severity_field`，属性取 `attributes` 的模板（默认 `fit.namespace` 和
+`fit.op`）。`headers_file` 让服务商的 key 不出现在配置中。OTLP 没有去重：崩溃后再写一次的批次会再导出一次。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines app-logs {
+		source file { paths /var/log/app/*.log }
+		sinks loki {
+			sink loki {
+				urls http://loki:3100
+				labels { job app; host web1 }
+			}
+			batch { max_wait 1s }
+		}
+		sinks otel {
+			sink otlp_logs {
+				urls http://collector:4318
+				service_name app
+				resource { host.name web1 }
+			}
+			batch { max_wait 1s }
 		}
 	}
 }
@@ -608,6 +725,128 @@ sync {
 Mosquitto 的 `max_inflight_messages` 默认 20；请把它们以及版本 5 中源的 `receive_maximum`（128）调到高于目标的
 `batch.max_records`，或把 `batch.max_wait` 设短。每条流水线需要自己的 `client_id`：同一 ID 的第二个客户端会接管会话。
 
+### RabbitMQ
+
+`rabbitmq` 源通过 AMQP 0-9-1 消费 `queues`（经典队列和仲裁队列，RabbitMQ 3.13 和 4.x），带 `prefetch`（`basic.qos`，默认
+1000），每条投递只在所有目标都拿到其记录后才确认：队列的位置在 broker 那里，检查点中没有它，fit 停止时未确认的消息会被
+再次投递。`streams` 是流队列，从检查点中最后一个 offset 之后读（没有检查点时从 `stream_start`，默认 `first`）。消息体经
+`codec` 处理（默认 `raw`）；消息记录在 `value` 旁还有 `exchange`、`routing_key`、`queue`、`redelivered`、`headers` 以及已设置
+的属性，`metadata_field` 把它们放进编解码器生成的行的一个字段。记录的键是 `rabbitmq` 目标写入的 `fit-key` 头。在作业
+（`mode once`）中，源在 `idle_end`（2s）内没有消息到来、且所有记录都已确认时结束。
+
+`rabbitmq` 目标为每条记录向 `exchange`（不写时为默认交换机）以 `routing_key`（`{namespace}`；也可用 `{key}`）发布一条持久
+消息，其 `message_id` 在记录再次写入时不变，并在 broker 确认整批之前一直持有该批次（发布确认）。没有队列接收的消息使其
+记录失败（`unroutable error`，默认；`drop` 让 broker 丢弃它）。投递至少一次：消费者可以按 `message_id` 丢弃重复。支持 TLS
+（`ca_file`、`cert_file`）以及 PLAIN 和 EXTERNAL 认证；遵守心跳，以及 broker 的内存和磁盘告警（发布最多被挡 `timeout`）。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-queue {
+		source rabbitmq {
+			addresses rabbit-1:5671 rabbit-2:5671
+			tls true
+			username fit
+			password_env RABBITMQ_PASSWORD
+			queues orders
+			prefetch 500
+			codec json
+		}
+		sinks archive {
+			sink rabbitmq {
+				addresses archive:5672
+				username fit
+				password_env RABBITMQ_PASSWORD
+				exchange archive
+				routing_key orders.{namespace}
+				content_type application/json
+				codec json
+			}
+		}
+	}
+}
+```
+
+### NATS JetStream
+
+`nats` 源通过持久拉取 `consumer` 读取 JetStream 的 `stream`（nats-server 2.10 及以后），每条消息只在所有目标都拿到后才确认，
+所以崩溃不会丢消息：至少一次。设置 `create_consumer` 时由 fit 创建消费者（ack 策略 all，`subjects` 为其过滤，`start` 为 all
+或 new，`ack_wait`、`max_ack_pending`）；流序号在每条记录的位置和检查点中，fit 创建的消费者丢失时，或某次运行发现它持有已投递
+未确认的消息时，会从检查点重新创建，使这些消息先来且有序。你自己的消费者从其确认下限读起，且需要 ack 策略 `explicit`。
+每条消息经 `codec` 处理（默认 `raw`）；消息记录在 `value` 旁还有主题、头、流、序号和时间，`metadata_field` 把它们放进
+编解码器生成的行。报告的延迟是消费者待处理的消息数。`mode core` 改为订阅 core NATS 的 `subjects`（`queue` 组可分担），
+至多一次，用于遥测：fit 停机时、或到来得比它处理得快（`buffer`）的消息会丢失。
+
+`nats` 目标为每条记录向 `subject`（`{namespace}`）发布一条消息，数据来自 `codec`，带由记录位置生成的 `Nats-Msg-Id`，
+所以在流的去重窗口（`duplicate_window`，默认 2 分钟）内再次写入的批次只存一次；最多 `max_in_flight` 个发布同时等待流的
+确认，批次在其每条消息都被确认后才确认。`mode core` 发布到 core NATS，只确认到服务器读到为止。
+
+两者都连接 `servers`（集群的其他服务器会被获知，一台失败时客户端换到另一台），`tls` 时走 TLS，用令牌（`token_env`）、
+用户名和密码（`username`、`password_env`）、NKey 种子（`nkey_file`）或 JWT 及其种子的 creds 文件（`creds_file`）认证。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-search {
+		source nats {
+			servers nats-1:4222 nats-2:4222 nats-3:4222
+			tls true
+			username fit
+			password_env NATS_PASSWORD
+			stream ORDERS
+			consumer fit-orders-to-search
+			create_consumer true
+			subjects orders.>
+			codec json
+		}
+		transforms key { fields order_id }
+		sinks search {
+			sink elasticsearch { urls https://es:9200; username fit; password_env ES_PASSWORD }
+		}
+	}
+}
+```
+
+### Apache Pulsar
+
+`pulsar` 源读取 `topics` 的每个分区（Pulsar 2.10 及以后；裸名属于 `public/default`）。默认（`mode reader`）每个分区由一个
+非持久的读者从流水线检查点中的消息 ID 读起，所以 broker 上不保留任何东西，保留策略在读之前删掉的消息会丢失；
+`mode subscription` 通过持久的 `subscription`（`exclusive` 或 `failover`）读取，在所有目标拿到记录后累积确认，消息 ID 仍在
+检查点中，以便跳过 broker 再次发送的内容。每条消息经 `codec` 处理（默认 `raw`）；消息记录还带有消息的 `topic`、
+`message_id`、`properties`、`producer`、`publish_time` 和 `event_time`，设置 `metadata_field` 时编解码器生成的行把它们放在该
+字段下。值为 null 的消息是对其键的删除。加密和分块的消息不读取。
+
+`pulsar` 目标为每条记录向 `topic`（`{namespace}`）发送一条消息，以记录的键为消息键，由 Java 客户端的默认路由（键的 Java
+字符串哈希）分配分区，所以同一个键的消息保持顺序；删除的值为 null，供主题压缩。一个分区的消息作为 Pulsar 批次发出
+（`max_batch_messages`、`max_batch_bytes`），压缩（`lz4`；`zlib`、`zstd`、`snappy`），生产者名为 `producer_name`，其序列 ID
+接着 broker 的继续。每条消息带属性 `fit-id`，由记录的位置生成：`dedup read_back`（默认）时目标在创建生产者时读回每个分区
+最后 64 个条目，丢弃其中已存储的记录，所以崩溃后再次写入的批次只存一次（这需要消费该主题的权限；`dedup off` 全部发送）。
+这在源以相同位置再次读到记录时成立：数据库日志、文件、单个分区。多分区的源（`kafka`、`pulsar`）在每个位置中写入所有分区
+的进度，按运行时交错的顺序，所以重放的位置不同，会再存一次：至少一次。`pulsar+ssl://` 的 URL 走 TLS；`token_env` 以令牌
+认证。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-pulsar {
+		source kafka {
+			brokers kafka-1:9092
+			topics shop.orders
+			codec debezium
+		}
+		sinks events {
+			sink pulsar {
+				url pulsar+ssl://pulsar.internal:6651
+				token_env PULSAR_TOKEN
+				topic shop/orders/{namespace}
+				producer_name orders-to-pulsar
+				codec json
+			}
+		}
+	}
+}
+```
+
 ### Redis 与 Valkey
 
 `redis` 源用 `XREAD` 从上次读到的条目 ID 之后读取 `streams`（没有消费者组，不确认也不删除任何东西），每个条目是一条由其
@@ -671,6 +910,122 @@ sync {
 
 目标的凭据需要对该前缀有 `s3:PutObject` 权限；源的需要 `s3:ListBucket` 和 `s3:GetObject`。
 
+### InfluxDB
+
+该目标把每条插入和更新写成行协议的一个数据点：measurement 来自模板（`{namespace}`，或某个字段的值），`tags` 来自行的
+字段，其余字段（或 `fields`）作为数据点的字段，时间来自 `time_field` 或提交时间，并截断到 `precision`。数据点由其序列
+（measurement 和标签）和时间确定，所以同一记录再写一次会覆盖同一个数据点，更新就是数据点的新值。行协议没有删除：删除被跳过
+（`deletes fail` 则交给 `on_error`）。`api` 选择端点：`v2`（`/api/v2/write`，`org` 和 `bucket`，令牌）、`v3`
+（`/api/v3/write_lp`，`database`，bearer 令牌）、`v1`（`/write`，`database` 和 `retention_policy`，用户名和密码或令牌）。
+请求经 gzip 压缩，大小受 `max_request_bytes` 限制；429 或 5xx 退避后重发，服务器拒绝的数据点（字段类型与列不同）只让它自己
+的记录失败：被拒绝请求中的记录会逐条重发以找出它。支持 InfluxDB 2.7 和 3 Core，以及 InfluxDB 2 的 v1 API。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines readings {
+		source kafka { brokers kafka:9092; topics readings; codec json }
+		sinks influx {
+			sink influxdb {
+				url http://influxdb:8086
+				org iot
+				bucket readings
+				token_env INFLUX_TOKEN
+				measurement "{kind}"
+				tags device site
+				time_field at
+				precision ms
+			}
+			batch { max_records 5000; max_wait 1s }
+		}
+	}
+}
+```
+
+标签只用取值有限的字段：每个标签值都是一个单独的序列。没有 `time_field` 也没有提交时间的记录用写入时的时间，重放时不会重复。
+
+### TDengine
+
+该目标经 taosAdapter 的 REST 接口（端口 6041）写入。`mode schemaless`（默认）把同样的行协议发到 `/influxdb/v1/write`：
+measurement 是超级表，标签是其子表的标签，TDengine 在首次写入时创建它们及其列。`mode sql` 向你建好的超级表写
+`INSERT INTO db.sub USING db.stable (tags) TAGS (...) (ts, columns) VALUES (...)`，子表名由 `subtable`（模板，如
+`d_{device}`）或标签的哈希给出。一行由其子表和时间戳确定：再写一次会覆盖自身。`precision` 必须与数据库的一致（默认
+`ms`）。TDengine 拒绝的行（类型不符、语法错误）只让它自己的记录失败；服务器忙时重试。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines meters {
+		source generate { namespace meters; records 1000 }
+		sinks td {
+			sink tdengine {
+				url http://tdengine:6041
+				username root
+				password_env TD_PASSWORD
+				database power
+				mode sql
+				measurement meters
+				subtable "m_{id}"
+				fields price count
+				precision ms
+			}
+		}
+	}
+}
+```
+
+### Qdrant 与 Milvus
+
+`qdrant` 目标把每条插入和更新 upsert 为 `collection`（模板，集合由你创建）中的一个数据点，向量来自 `vector_field`
+（数字数组，默认 `embedding`；命名向量用 `vector_name`），行的其余字段（或 `payload` 指定的字段）作为 payload；删除则删除该
+数据点。数据点的 ID 来自记录的键：无符号整数或 UUID 原样使用，其他键用其文本生成一个 UUID，每次都相同。写入等待 Qdrant 应用
+（`wait=true`）；API 密钥放在 `api_key_env`。
+
+`milvus` 目标经 RESTful API v2（Milvus 2.4 及以后、Zilliz Cloud）把行 upsert 为 `collection` 的一个实体，其
+`primary_key`（`id`）取自键：单个整数为 `Int64`，其他键为其文本的 `VarChar`；删除按它删除。集合由你创建，主键不能是
+`auto_id`，行的字段（或 `fields`）必须在其 schema 或动态字段中。令牌放在 `token_env`，或用 `username` 和 `password_env`。
+
+两者都只写一个批次中每个键的最后一条记录（删除和 upsert），所以一个请求中不会有重复的键；429、5xx 或 Milvus 忙时重试，被拒绝的
+实体（向量维数不同、schema 缺少的字段）只让它自己的记录失败。
+
+`embed` 变换计算向量：它把 `fields` 的文本连接起来，向兼容 OpenAI 的 embeddings API（`url`，其后加 `/embeddings`；不设置时为
+本配置的 [llm.proxy](llm.zh-CN.md)）请求其向量，并写入 `into`（`embedding`）。一个批次的文本按 `batch_records` 分成多个请求，
+同时最多 `max_parallel` 个，每个文本只发一次；向量按模型和文本的哈希缓存，上限为 `cache_bytes`，所以重放或只改了其他字段的
+更新不会再请求。重试 `attempts` 次后仍失败的请求，以及 API 拒绝或长于 `max_text_bytes` 的文本，会让其记录失败并交给
+`on_error`。删除和没有这些字段的记录原样通过。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines docs-to-vectors {
+		source postgres {
+			address db.internal:5432
+			user repl
+			password_env PG_REPL_PASSWORD
+			database app
+			create true
+			publication fit_docs
+			slot fit_docs
+			tables public.docs
+		}
+		transforms embed {
+			url https://api.openai.com/v1
+			model text-embedding-3-small
+			api_key_env OPENAI_API_KEY
+			fields title body
+		}
+		sinks qdrant {
+			sink qdrant { url http://qdrant:6333; collection docs; payload id title }
+			batch { max_records 256 }
+		}
+		sinks milvus {
+			sink milvus { url http://milvus:19530; token_env MILVUS_TOKEN; collection docs; fields title embedding }
+			batch { max_records 256 }
+		}
+	}
+}
+```
+
 ### 试用：generate、memory 和 stdout
 
 `generate` 生成涵盖所有值类型的编号记录，每次都相同，按 `tx_size` 组成事务，生成 `records` 条后结束（或永不结束）；
@@ -688,9 +1043,13 @@ sync {
 | `mssql` | 数据库与表开启 CDC（`sys.sp_cdc_enable_db`、`sys.sp_cdc_enable_table`），SQL Server Agent 在运行（其捕获作业填充变更表），清理保留时间长于流水线可能停止的时间（默认三天）；无锁快照需要 `ALLOW_SNAPSHOT_ISOLATION ON`；`mode change_tracking` 时数据库与表开启 change tracking | 表与 `cdc` 架构的 `SELECT`（`db_owner`，或给 `sp_cdc_enable_table` 的门控角色）；用 change tracking 时表的 `VIEW CHANGE TRACKING` |
 | `mqtt` | 持久会话保留足够久（EMQX 的 `session_expiry_interval`，Mosquitto 的 `persistence true` 与 `persistent_client_expiration`），fit 不在时排队的消息有足够空间（`max_mqueue_len`、`max_queued_messages`）；不要用 Mosquitto 的 `per_listener_settings true`，它会丢弃这些消息 | 主题的订阅权限 |
 | `kafka` | 保留时间长于流水线可能停止的时间 | 主题的 `Describe` 和 `Read`（不需要消费者组的权限：不加入组） |
+| `rabbitmq` | 持久队列（经典或仲裁）或流队列，由你创建；流的保留时间长于流水线可能停止的时间 | 队列的 `read`（不需要 `configure`：只做被动声明） |
+| `nats` | 一个 JetStream 流，由你创建；`create_consumer` 时消费者由 fit 创建 | 向 `$JS.API.STREAM.INFO.<stream>`、`$JS.API.CONSUMER.*.<stream>.>`、`$JS.API.CONSUMER.MSG.NEXT.<stream>.<consumer>` 和 `$JS.ACK.<stream>.>` 发布，订阅 `_INBOX.>` |
+| `pulsar` | 保留时间长于流水线可能停止的时间（`mode reader` 不在 broker 上保留任何东西） | 主题的 `consume` |
 | `redis` | 流的裁剪速度不快于流水线的读取 | 流的键上的 `+xread`（或 `+@stream`） |
 | `elasticsearch` | 每次写入都让其值比上次更晚的游标字段（更新时间），以及表示删除的软删除字段 | 索引的 `read` 和 `view_index_metadata` |
 | `clickhouse` | 随每次写入增长的游标列 | 表的 `SELECT` |
+| `doris` | 随每次写入增长的游标列 | 表的 `SELECT` |
 | `s3` | 随新增对象而增大的键 | `s3:ListBucket` 和 `s3:GetObject` |
 | `file` | 以改名或拷贝后截断的方式轮转 | 文件及其目录的读权限 |
 
@@ -736,7 +1095,7 @@ GRANT SELECT ON SCHEMA::cdc TO fit_cdc;
 ```
 
 目标只需要写权限：表的 `INSERT`、`UPDATE` 和 `DELETE`（MySQL、PostgreSQL），`checkpoint sink` 的表还需 `CREATE`；
-数据库的 `readWrite`（MongoDB）；`Write`，以及 `create_topics` 时的 `Create`（Kafka）。SQL 和 ClickHouse 目标中的表和
+数据库的 `readWrite`（MongoDB）；`Write`，以及 `create_topics` 时的 `Create`（Kafka）；表的 `LOAD`（Doris；StarRocks 为 `INSERT`）；交换机的 `write`（RabbitMQ）；主题的发布权限和 `_INBOX.>` 的订阅权限（NATS）；`produce`，`dedup read_back` 时还需 `consume`（Pulsar），其 broker 去重（`brokerDeduplicationEnabled`）让生产者的序列 ID 跨重启延续。SQL 和 ClickHouse 目标中的表和
 索引由你创建：DDL 只报告，从不重放。
 
 ## 系统之间的类型
@@ -769,7 +1128,8 @@ decimal128（须精确，否则该记录失败），time 和 date 写成精确�
 
 `transforms` 按顺序修改流向目标的记录：`filter` 按命名空间、操作和字段值保留或丢弃记录；`route` 改命名空间（表到索引、
 主题）；`fields` 展开、嵌套、改名、删除、保留和设置字段；`key` 由字段构造键；`cast` 转换类型；`mask` 用带密钥的
-HMAC-SHA256、SHA-256 或 null 替换字段；`envelope` 把变更做成文档（带元数据的扁平文档、前后两份，或 Debezium 的信封）。
+HMAC-SHA256、SHA-256 或 null 替换字段；`envelope` 把变更做成文档（带元数据的扁平文档、前后两份，或 Debezium 的信封）；`embed` 经 embeddings API 由文本字段计算向量
+（[Qdrant 与 Milvus](#qdrant-与-milvus)）。
 删除记录经过所有这些变换后仍保留它的键。各变换的参数见[参考](reference/config.md#sync-transforms)。
 
 ```fit
@@ -1036,3 +1396,22 @@ Mosquitto 2 与 EMQX 5：
 eval "$(test/sync/mssql.sh up)" && go test ./test/sync -run 'TestMSSQL' -v
 eval "$(test/sync/mqtt.sh up)" && go test ./test/sync -run 'TestMQTT' -v
 ```
+
+在 CI 的族接手之前（I222），`test/sync/olap.sh` 为 `TestDoris*` 启动 Doris 2.1（一个前端和一个后端）和 StarRocks 3.4：
+
+```sh
+eval "$(test/sync/olap.sh up)"
+go test ./test/sync -run 'TestDoris' -v
+test/sync/olap.sh down
+```
+
+`test/sync/obs.sh` 启动 Loki 3.5、OpenTelemetry Collector、InfluxDB 2.7 和 3 Core、TDengine 3.3、Qdrant 1.15 和 Milvus 2.5（单机），并运行它们的测试
+（`TestLoki*`、`TestOTLP*`、`TestInfluxDB*`、`TestTDengine*`、`TestQdrant*`、`TestMilvus*`、`TestEmbed*`）：每个目标的写入从中间和从头重放后收敛，
+服务器拒绝的记录单独失败，经 `embed`（对接一个假的 embeddings API）写入 Qdrant 和 Milvus 的流水线在随机时刻被杀掉后，最终
+每一行都在且带有其向量，删除的都已不在；经随机被杀的流水线送往 Loki 和 Collector 的文件，每一行都送达。
+`eval "$(test/sync/obs.sh up)"` 只启动它们并打印变量，`down` 移除它们。
+
+RabbitMQ、NATS JetStream 和 Pulsar 有各自的脚本，还不是 `run.sh` 的一族（I222 把它们加为 `mq`）：
+`eval "$(test/sync/rabbitmq.sh up)"` 启动 RabbitMQ 3.13 和 4.1（一个用户，一个由脚本自建 CA 的 TLS 监听），供
+`TestRabbitMQ*`；`eval "$(test/sync/nats.sh up)"` 启动 nats-server 2.10 和 2.11，各三个 JetStream 节点，供 `TestNATS*`；
+`eval "$(test/sync/pulsar.sh up)"` 启动开启去重的 Pulsar 3.0 和 4.0 单机，供 `TestPulsar*`。各自用 `down` 移除。
