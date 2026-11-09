@@ -359,8 +359,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I217 | SQL Server 作为目标：`MERGE` upsert、删除、批量导入，检查点写在目标中实现精确一次 | I215, I191 | todo |
 | I218 | Doris 与 StarRocks 作为目标（带 label 的 Stream Load、删除标记）与源（按游标轮询） | I172 | todo |
 | I219 | Loki 与 OpenTelemetry 日志作为目标（push API、OTLP/HTTP），文件到它们并对比 Promtail | I166 | todo |
-| I220 | InfluxDB（line protocol）与 TDengine（schemaless）作为目标；MQTT 到 InfluxDB 端到端 | I214 | todo |
-| I221 | Milvus 与 Qdrant 作为目标，按键 upsert 与删除，配 `embed` 变换 | I163 | todo |
+| I220 | InfluxDB（line protocol）与 TDengine（schemaless）作为目标；MQTT 到 InfluxDB 端到端 | I214 | 目标已完成；MQTT 端到端待做 |
+| I221 | Milvus 与 Qdrant 作为目标，按键 upsert 与删除，配 `embed` 变换 | I163 | done |
 | I222 | 第二批进入恢复矩阵、CI 互通分组、基准测试与文档 | I211–I221 | todo |
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
@@ -5241,6 +5241,34 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 InfluxDB 2、3 和 TDengine 3 互通；同一批写两次每个点只存一次；以 MQTT（I214）到 InfluxDB 作为
   端到端的物联网流水线。
 - **涉及**：`sync/influxdb`、`sync/tdengine`、`test/sync`、`docs`。
+- **部分完成** 2026-11-10：目标 `influxdb`（`sync/influxdb`：API v2、v3 与 v1，记录到数据点的映射与 line protocol，
+  `tdengine` 共用）与 `tdengine`（`sync/tdengine`：schemaless 行写到 taosAdapter 的 `/influxdb/v1/write`，或经 `/rest/sql`
+  以 `INSERT ... USING` 写超级表），二者与 I221 共用一个客户端（`sync/internal/fibrest`：fib 的异步客户端、TLS、密钥、
+  408/429/5xx 重试、被拒请求中的记录逐条重写以找出被拒的那条）和模板（`sync/internal/tmpl`）；连接测试；针对假服务的单元测试
+  （influxdb 99.0%、tdengine 98.6%、fibrest 98.8%、tmpl 100%）；在 Docker 中与 InfluxDB 2.7（API v2 与 v1）、InfluxDB 3 Core
+  和 TDengine 3.3.6 互通（`test/sync/tsdb_test.go`，由 `test/sync/obs.sh` 运行）：一批写入后再从中间、从头各写一次，每个点只留
+  一个且为最后的值，类型不对的点在其记录处单独失败；中英文指南中的章节。**未完成**：MQTT（I214）到 InfluxDB 端到端，待 I214
+  合并后做。
+
+**待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **删除不写**（`deletes skip`，计为已写入），或交给 `on_error`（`deletes fail`）：line protocol 没有删除，InfluxDB 3 不能删除
+   单点，InfluxDB 2 的 `/api/v2/delete`（谓词加时间范围）开销大。备选：逐点调用 v2 的删除 API；TDengine `mode sql` 中用
+   `DELETE FROM sub WHERE ts = ...`。
+2. **既无 `time_field` 也无提交时间的记录用写入时间**，重放时不会重复（如文件的行）。备选：让这类记录失败；由服务器打时间戳。
+3. **被拒的请求逐条重写**以找出被拒的记录（InfluxDB 的 400、413、422，v3 用 `accept_partial=false`；TDengine 的 0x216、
+   0x2600-0x26ff（表或库不存在除外）、0x3000-0x3fff），因为数据点幂等所以安全；InfluxDB 2 的部分写入会整批重写。备选：读取
+   InfluxDB 3 报告的行号（其他不提供）。
+4. **TDengine 的 schemaless 错误是 HTTP 500 加 `[0xNNNN]`**：由错误码区分拒绝（见上）与可重试的错误；`/rest/sql` 返回 200 加
+   `code`。不单列表示繁忙的错误码：其他错误都先退避重试，再由流水线重试。
+5. **HTTP 目标共用一个客户端包**（`sync/internal/fibrest`），供这两个目标、I221 的目标和 `embed` 变换使用，而不是把
+   elasticsearch 与 http 目标的客户端复制第五份；Doris（I218）与 Loki（I219）也可使用。备选：像第一批那样每个包一个客户端。
+6. **类型**：int 为 `i`，uint 为 `u`（v2、v3；v1 为 `i`，超出 int64 则失败），TDengine 为 `i64`、`u64`、`f64`；decimal 写为浮点数；
+   其他类型写为字符串（bytes 为 base64，map 与数组为普通 JSON）；默认开启 gzip；精度默认 `ns`（InfluxDB）和 `ms`（TDengine 的
+   默认值）。标签为文本；`measurement` 中引用的字段仍保留为字段。
+7. **TDengine `mode sql` 的默认子表名**为 `t_` 加超级表与标签的 MD5，每个请求一条 INSERT、每条记录一个子句；超级表由用户创建。
+8. **互通所用的服务器有单独的脚本 `test/sync/obs.sh`**（`FIT_SYNC_OBS` 控制 `FIT_SYNC_INTEROP=required` 是否生效），直到 I222
+   把它们并入 run.sh 的 `obs` 分组；InfluxDB 3 Core 每次写入要等约一秒落 WAL，测试耗时因此偏长。
 
 ### I221 向量数据库作为目标：Milvus 与 Qdrant
 
@@ -5250,6 +5278,35 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 Qdrant 1.x 和 Milvus 2.4+（standalone）互通；带 embedding 复制 PostgreSQL 的行，跨多次 kill
   后两者结果相同；删除到达两者。
 - **涉及**：`sync/qdrant`、`sync/milvus`、`sync/transforms`、`test/sync`、`docs`。
+- **完成** 2026-11-10：目标 `qdrant`（`sync/qdrant`）与 `milvus`（`sync/milvus`），变换 `embed`（`sync/embed`，一个
+  `BatchTransform`），基于 I220 的 `sync/internal/fibrest` 与 `sync/internal/vecutil`（把一批记录缩减为每个键的最后一条，键的
+  文本）；`module.Env.LLMProxy` 与 sync 角色的成员携带配置的 `llm.proxy.api`（`fit sync run`、`fit validate`，以及 Admin API
+  经运行中的 runtime 对提交的流水线做的测试与试运行也有）；schema、参考、模板、`schema-zh.js`；针对假服务的单元测试（qdrant
+  98.0%、milvus 96.7%、embed 99.1%、vecutil 100%）；在 Docker 中与 Qdrant 1.15 和 Milvus 2.5.17 standalone 互通
+  （`test/sync/vector_test.go`）：重放的写入收敛，删除到达两者，维数不对的向量在其记录处单独失败，generate 的插入、更新与删除经
+  `embed`（测试中的假 embeddings API）写入两者，在随机时刻多次 kill 后，每一行都在且带有其文本的向量，删除的都已不在；中英文
+  指南中的章节。**未完成**：以 PostgreSQL 作为该流水线的源并跨 kill，随 I222 的矩阵（带 PostgreSQL 的 `obs` 分组）完成。
+
+**待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **Qdrant 的点 ID**：单个无符号整数或 UUID 字符串原样使用；其他键用其文本（与 elasticsearch 目标的 `_id` 文本相同）的
+   SHA-256 前 16 字节构成 UUID，版本 8。备选：fit 自己的命名空间下的 UUIDv5；同时把键的文本存进 payload。
+2. **一批记录缩减为每个键的最后一条**，删除与 upsert 分别成请求，因为 Qdrant 和 Milvus 都不保证同一请求中同一 ID 两次写入的
+   顺序。这样批内不同键之间的顺序无关紧要。
+3. **集合由用户创建**，目标从不创建：维数、距离、索引与 schema 是 fit 无法从记录推断的选择。备选：按第一个向量的维数创建。
+4. **Milvus 的错误码**：1 到 9（未就绪、限速与配额）重试，1100 与 1800-1899 视为拒绝（逐条找出），其他错误交给流水线重试；
+   主键对单个整数键为 `Int64`，否则为键文本的 `VarChar`；删除用 `pk in [...]`；`username` 与 `password_env` 作为令牌
+   `user:password` 发送。
+5. **`embed` 作为 `BatchTransform` 运行在流水线的分发 goroutine 上**，请求走 fib 的异步客户端并在此等待（从不占用 fib worker，
+   规则 1），同时最多 `max_parallel` 个，各自受 `timeout` 与 `attempts` 限制；失败的请求让其记录失败（`on_error`），被拒的请求
+   （400、413、422）逐个文本重新请求；超过 `max_text_bytes` 的文本让记录失败而不截断；没有这些字段的记录不加向量直接通过。
+6. **缓存按字节限制**（`cache_bytes`，32 MiB），最少使用的先淘汰，键为模型、维数与文本的 SHA-256，向量存为 float32（模型本身的
+   精度，内存减半；缓存的向量与新取的相同）。备选：按条数限制。
+7. **默认使用 llm.proxy**：`module.Env` 新增 `LLMProxy`；sync 角色的成员改为 `*fitsync.Member{Sync, LLMProxy}`，序列化时只写
+   sync；经回环地址调用其 API 并固定其证书，与助手的 `llm_proxy` 提供方相同。`llm.proxy` 的变更在流水线重新加载（其自身变更）
+   时生效，不影响正在运行的流水线。备选：每批查一次；任何 llm.proxy 变更都重启流水线。
+8. **端到端互通以 `generate` 为源**并在随机时刻 kill，而不是 PostgreSQL（`obs` 的服务器中还没有）；PostgreSQL 跨 kill 属于
+   I222（见上方未完成）。
 
 ### I222 第二批进入矩阵、基准测试与文档
 

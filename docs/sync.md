@@ -145,6 +145,8 @@ sink had. Sinks therefore write idempotently, so that a replay converges on the 
 | `clickhouse` | the same deduplication token for the same records: the server drops the insert; rows of a `ReplacingMergeTree` by version otherwise |
 | `redis` | the same keys; stream entries with `entry_id key` are refused as already there |
 | `s3` | the same batch makes the same object, written over itself; a replay cut into other batches makes other objects |
+| `influxdb`, `tdengine` | the same point: a series (a subtable) and a time, written over itself; deletes are left out |
+| `qdrant`, `milvus` | upserts and deletes by an ID from the key: the same points and entities |
 | `kafka`, `http`, `file`, `stdout` | written again: Kafka's producer is not idempotent; `http` sends the same `Idempotency-Key` for the same records |
 
 **Transactions stay whole.** A checkpoint never falls inside a source transaction; the records of one
@@ -197,6 +199,9 @@ after the same backoff, for as long as it fails: a source is expected to come ba
 | [Kafka, Redpanda](#kafka-and-redpanda) | `kafka`: every partition from offsets in the checkpoint | `kafka`: keyed messages, batched, compressed |
 | [Redis, Valkey](#redis-and-valkey) | `redis`: streams with `XREAD` | `redis`: `XADD`, or a key per record |
 | [S3 and compatibles](#s3-and-compatibles) | `s3`: objects under a prefix, in key order, as lines | `s3`: objects of lines, rolled by size and time |
+| [InfluxDB](#influxdb) | | `influxdb`: line protocol to InfluxDB 1, 2 and 3, by series and time |
+| [TDengine](#tdengine) | | `tdengine`: schemaless lines, or `INSERT ... USING` a super table |
+| [Qdrant and Milvus](#qdrant-and-milvus) | | `qdrant`, `milvus`: upserts and deletes by key, vectors from `embed` |
 | [Plugins](#plugins) | `wasm`: a plugin polling through fit's HTTP client | `wasm`: a plugin writing through it |
 | [Trials](#trials-generate-memory-and-stdout) | `generate` | `memory`, `stdout` |
 
@@ -666,6 +671,137 @@ sync {
 The sink's credentials need `s3:PutObject` on the prefix; the source's `s3:ListBucket` and
 `s3:GetObject`.
 
+### InfluxDB
+
+The sink writes each insert and update as a point of the line protocol: the measurement from a template
+(`{namespace}`, or a field's value), `tags` from fields of the row, the other fields (or `fields`) as
+the point's fields, and the time from `time_field` or the commit time, cut to `precision`. A point is
+its series (measurement and tags) and its time, so a record written again writes the same point over
+itself, and an update is the point's new value. The line protocol has no deletes: they are left out
+(`deletes fail` sends them to `on_error`). `api` picks the endpoint: `v2` (`/api/v2/write`, `org` and
+`bucket`, a token), `v3` (`/api/v3/write_lp`, `database`, a bearer token), `v1` (`/write`, `database`
+and `retention_policy`, a user and password or a token). Requests are gzipped and bounded by
+`max_request_bytes`; a 429 or 5xx is sent again with a backoff, and a point the server refuses (a
+field of another type than its column's) fails its record alone: the records of a refused request are
+sent again one by one to find it. InfluxDB 2.7 and 3 Core, and InfluxDB 2's v1 API.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines readings {
+		source kafka { brokers kafka:9092; topics readings; codec json }
+		sinks influx {
+			sink influxdb {
+				url http://influxdb:8086
+				org iot
+				bucket readings
+				token_env INFLUX_TOKEN
+				measurement "{kind}"
+				tags device site
+				time_field at
+				precision ms
+			}
+			batch { max_records 5000; max_wait 1s }
+		}
+	}
+}
+```
+
+Keep tags to fields of bounded cardinality: each tag value is a series of its own. A record without a
+`time_field` or a commit time gets the time it is written, which a replay does not repeat.
+
+### TDengine
+
+The sink writes through taosAdapter's REST interface (port 6041). `mode schemaless` (the default)
+sends the same line protocol to `/influxdb/v1/write`: the measurement is the super table and the tags
+its subtable's, which TDengine makes, with their columns, as they are first written. `mode sql` writes
+`INSERT INTO db.sub USING db.stable (tags) TAGS (...) (ts, columns) VALUES (...)` into the super table
+you made, the subtable named by `subtable` (a template, as `d_{device}`) or by a hash of the tags. A row
+is its subtable and its timestamp: written again, it is written over itself. `precision` must be the
+database's (`ms` by default). A row TDengine refuses (a type mismatch, a syntax error) fails its record
+alone; a busy server is tried again.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines meters {
+		source generate { namespace meters; records 1000 }
+		sinks td {
+			sink tdengine {
+				url http://tdengine:6041
+				username root
+				password_env TD_PASSWORD
+				database power
+				mode sql
+				measurement meters
+				subtable "m_{id}"
+				fields price count
+				precision ms
+			}
+		}
+	}
+}
+```
+
+### Qdrant and Milvus
+
+The `qdrant` sink upserts each insert and update as a point of `collection` (a template, made by you),
+its vector from `vector_field` (an array of numbers, `embedding` by default; `vector_name` for a named
+vector) and the rest of the row, or `payload`'s fields, as its payload, and deletes deletes the point.
+The point's ID comes from the record's key: an unsigned integer or a UUID as it is, any other key a
+UUID made from its text, the same each time. Writes wait for Qdrant to apply them (`wait=true`); an API
+key goes in `api_key_env`.
+
+The `milvus` sink upserts the row as an entity of `collection` through the RESTful API v2 (Milvus 2.4
+and later, Zilliz Cloud), its `primary_key` (`id`) set from the key: an `Int64` from a single integer,
+a `VarChar` from any other key's text; deletes delete by it. The collection is made by you, with a
+primary key that is not `auto_id`, and the row's fields (or `fields`) must be in its schema or its
+dynamic field. A token goes in `token_env`, or `username` and `password_env`.
+
+Both write each key's last record of a batch, deletes and upserts, so a request holds no key twice; a
+429, a 5xx or a busy Milvus is tried again, and an entity refused (a vector of another size, a field the
+schema lacks) fails its record alone.
+
+The `embed` transform computes the vectors: it joins the text of `fields` and asks an OpenAI-compatible
+embeddings API (`url`, `/embeddings` added; this config's [llm.proxy](llm.md) when left out) for its
+vector, which it sets in `into` (`embedding`). A batch's texts go in requests of `batch_records`,
+`max_parallel` at once, each text once; vectors are cached by a hash of the model and the text, within
+`cache_bytes`, so a replay or an update of other fields asks for nothing. A request that fails after
+`attempts`, or a text the API refuses or longer than `max_text_bytes`, fails its records, which
+`on_error` takes. Deletes and records without the fields pass as they are.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines docs-to-vectors {
+		source postgres {
+			address db.internal:5432
+			user repl
+			password_env PG_REPL_PASSWORD
+			database app
+			create true
+			publication fit_docs
+			slot fit_docs
+			tables public.docs
+		}
+		transforms embed {
+			url https://api.openai.com/v1
+			model text-embedding-3-small
+			api_key_env OPENAI_API_KEY
+			fields title body
+		}
+		sinks qdrant {
+			sink qdrant { url http://qdrant:6333; collection docs; payload id title }
+			batch { max_records 256 }
+		}
+		sinks milvus {
+			sink milvus { url http://milvus:19530; token_env MILVUS_TOKEN; collection docs; fields title embedding }
+			batch { max_records 256 }
+		}
+	}
+}
+```
+
 ### Trials: generate, memory and stdout
 
 `generate` makes numbered records of every value type, the same each time, in transactions of
@@ -755,7 +891,8 @@ between these where a sink needs another.
 namespace, operation and fields' values; `route` renames namespaces (tables to indices, topics);
 `fields` unnests, nests, renames, drops, keeps and sets fields; `key` builds the key from fields; `cast`
 changes types; `mask` replaces fields by a keyed HMAC-SHA256, a SHA-256 or null; `envelope` makes a
-document of a change (flat with metadata, before and after, or Debezium's). A delete keeps its key
+document of a change (flat with metadata, before and after, or Debezium's); `embed` sets a vector computed from
+text fields by an embeddings API ([Qdrant and Milvus](#qdrant-and-milvus)). A delete keeps its key
 through all of them. The [reference](reference/config.md#sync-transforms) has each one's params.
 
 ```fit
@@ -1048,3 +1185,9 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 
 `SYNC_PREFIX` and the `*_PORT` variables the script lists run a second set beside the first; `KEEP=1`
 keeps the containers for the next run.
+
+`test/sync/obs.sh` starts InfluxDB 2.7 and 3 Core, TDengine 3.3, Qdrant 1.15 and Milvus 2.5
+(standalone) and runs their tests (`TestInfluxDB*`, `TestTDengine*`, `TestQdrant*`, `TestMilvus*`,
+`TestEmbed*`): each sink's writes replayed from the middle and from the start converge, a record the
+server refuses fails alone, and a pipeline through `embed` (against a fake embeddings API) into Qdrant
+and Milvus, killed at random points, ends with every row and its vector, the deletes gone.

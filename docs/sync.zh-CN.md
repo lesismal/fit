@@ -124,6 +124,8 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | `clickhouse` | 相同记录得到相同的去重令牌：服务器丢弃这次插入；否则由 `ReplacingMergeTree` 按版本合并 |
 | `redis` | 键相同；`entry_id key` 时已存在的流条目被拒绝 |
 | `s3` | 同一批次生成同一个对象，覆盖自身；重放若被切成不同的批次，会生成别的对象 |
+| `influxdb`、`tdengine` | 同一个数据点：序列（子表）加时间，覆盖自身；删除不写 |
+| `qdrant`、`milvus` | 按由键生成的 ID upsert 和 delete：数据点和实体相同 |
 | `kafka`、`http`、`file`、`stdout` | 再写一次：Kafka 的生产者不是幂等的；`http` 对相同记录发送相同的 `Idempotency-Key` |
 
 **事务保持完整。** 检查点从不落在源事务内部；一个事务的记录带有其 ID，`mysql` 和 `postgres` 目标把每个源事务写成自己的
@@ -166,6 +168,9 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [Kafka、Redpanda](#kafka-与-redpanda) | `kafka`：每个分区从检查点中的 offset 读 | `kafka`：带键消息，批量、压缩 |
 | [Redis、Valkey](#redis-与-valkey) | `redis`：用 `XREAD` 读流 | `redis`：`XADD`，或每条记录一个键 |
 | [S3 及兼容存储](#s3-及兼容存储) | `s3`：前缀下的对象，按键的顺序，逐行 | `s3`：由行组成的对象，按大小和时间滚动 |
+| [InfluxDB](#influxdb) | | `influxdb`：行协议写入 InfluxDB 1、2 和 3，按序列和时间 |
+| [TDengine](#tdengine) | | `tdengine`：schemaless 行，或 `INSERT ... USING` 超级表 |
+| [Qdrant 与 Milvus](#qdrant-与-milvus) | | `qdrant`、`milvus`：按键 upsert 和 delete，向量来自 `embed` |
 | [插件](#插件) | `wasm`：经 fit 的 HTTP 客户端轮询的插件 | `wasm`：经它写出的插件 |
 | [试用](#试用generatememory-和-stdout) | `generate` | `memory`、`stdout` |
 
@@ -585,6 +590,122 @@ sync {
 
 目标的凭据需要对该前缀有 `s3:PutObject` 权限；源的需要 `s3:ListBucket` 和 `s3:GetObject`。
 
+### InfluxDB
+
+该目标把每条插入和更新写成行协议的一个数据点：measurement 来自模板（`{namespace}`，或某个字段的值），`tags` 来自行的
+字段，其余字段（或 `fields`）作为数据点的字段，时间来自 `time_field` 或提交时间，并截断到 `precision`。数据点由其序列
+（measurement 和标签）和时间确定，所以同一记录再写一次会覆盖同一个数据点，更新就是数据点的新值。行协议没有删除：删除被跳过
+（`deletes fail` 则交给 `on_error`）。`api` 选择端点：`v2`（`/api/v2/write`，`org` 和 `bucket`，令牌）、`v3`
+（`/api/v3/write_lp`，`database`，bearer 令牌）、`v1`（`/write`，`database` 和 `retention_policy`，用户名和密码或令牌）。
+请求经 gzip 压缩，大小受 `max_request_bytes` 限制；429 或 5xx 退避后重发，服务器拒绝的数据点（字段类型与列不同）只让它自己
+的记录失败：被拒绝请求中的记录会逐条重发以找出它。支持 InfluxDB 2.7 和 3 Core，以及 InfluxDB 2 的 v1 API。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines readings {
+		source kafka { brokers kafka:9092; topics readings; codec json }
+		sinks influx {
+			sink influxdb {
+				url http://influxdb:8086
+				org iot
+				bucket readings
+				token_env INFLUX_TOKEN
+				measurement "{kind}"
+				tags device site
+				time_field at
+				precision ms
+			}
+			batch { max_records 5000; max_wait 1s }
+		}
+	}
+}
+```
+
+标签只用取值有限的字段：每个标签值都是一个单独的序列。没有 `time_field` 也没有提交时间的记录用写入时的时间，重放时不会重复。
+
+### TDengine
+
+该目标经 taosAdapter 的 REST 接口（端口 6041）写入。`mode schemaless`（默认）把同样的行协议发到 `/influxdb/v1/write`：
+measurement 是超级表，标签是其子表的标签，TDengine 在首次写入时创建它们及其列。`mode sql` 向你建好的超级表写
+`INSERT INTO db.sub USING db.stable (tags) TAGS (...) (ts, columns) VALUES (...)`，子表名由 `subtable`（模板，如
+`d_{device}`）或标签的哈希给出。一行由其子表和时间戳确定：再写一次会覆盖自身。`precision` 必须与数据库的一致（默认
+`ms`）。TDengine 拒绝的行（类型不符、语法错误）只让它自己的记录失败；服务器忙时重试。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines meters {
+		source generate { namespace meters; records 1000 }
+		sinks td {
+			sink tdengine {
+				url http://tdengine:6041
+				username root
+				password_env TD_PASSWORD
+				database power
+				mode sql
+				measurement meters
+				subtable "m_{id}"
+				fields price count
+				precision ms
+			}
+		}
+	}
+}
+```
+
+### Qdrant 与 Milvus
+
+`qdrant` 目标把每条插入和更新 upsert 为 `collection`（模板，集合由你创建）中的一个数据点，向量来自 `vector_field`
+（数字数组，默认 `embedding`；命名向量用 `vector_name`），行的其余字段（或 `payload` 指定的字段）作为 payload；删除则删除该
+数据点。数据点的 ID 来自记录的键：无符号整数或 UUID 原样使用，其他键用其文本生成一个 UUID，每次都相同。写入等待 Qdrant 应用
+（`wait=true`）；API 密钥放在 `api_key_env`。
+
+`milvus` 目标经 RESTful API v2（Milvus 2.4 及以后、Zilliz Cloud）把行 upsert 为 `collection` 的一个实体，其
+`primary_key`（`id`）取自键：单个整数为 `Int64`，其他键为其文本的 `VarChar`；删除按它删除。集合由你创建，主键不能是
+`auto_id`，行的字段（或 `fields`）必须在其 schema 或动态字段中。令牌放在 `token_env`，或用 `username` 和 `password_env`。
+
+两者都只写一个批次中每个键的最后一条记录（删除和 upsert），所以一个请求中不会有重复的键；429、5xx 或 Milvus 忙时重试，被拒绝的
+实体（向量维数不同、schema 缺少的字段）只让它自己的记录失败。
+
+`embed` 变换计算向量：它把 `fields` 的文本连接起来，向兼容 OpenAI 的 embeddings API（`url`，其后加 `/embeddings`；不设置时为
+本配置的 [llm.proxy](llm.zh-CN.md)）请求其向量，并写入 `into`（`embedding`）。一个批次的文本按 `batch_records` 分成多个请求，
+同时最多 `max_parallel` 个，每个文本只发一次；向量按模型和文本的哈希缓存，上限为 `cache_bytes`，所以重放或只改了其他字段的
+更新不会再请求。重试 `attempts` 次后仍失败的请求，以及 API 拒绝或长于 `max_text_bytes` 的文本，会让其记录失败并交给
+`on_error`。删除和没有这些字段的记录原样通过。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines docs-to-vectors {
+		source postgres {
+			address db.internal:5432
+			user repl
+			password_env PG_REPL_PASSWORD
+			database app
+			create true
+			publication fit_docs
+			slot fit_docs
+			tables public.docs
+		}
+		transforms embed {
+			url https://api.openai.com/v1
+			model text-embedding-3-small
+			api_key_env OPENAI_API_KEY
+			fields title body
+		}
+		sinks qdrant {
+			sink qdrant { url http://qdrant:6333; collection docs; payload id title }
+			batch { max_records 256 }
+		}
+		sinks milvus {
+			sink milvus { url http://milvus:19530; token_env MILVUS_TOKEN; collection docs; fields title embedding }
+			batch { max_records 256 }
+		}
+	}
+}
+```
+
 ### 试用：generate、memory 和 stdout
 
 `generate` 生成涵盖所有值类型的编号记录，每次都相同，按 `tx_size` 组成事务，生成 `records` 条后结束（或永不结束）；
@@ -667,7 +788,8 @@ decimal128（须精确，否则该记录失败），time 和 date 写成精确�
 
 `transforms` 按顺序修改流向目标的记录：`filter` 按命名空间、操作和字段值保留或丢弃记录；`route` 改命名空间（表到索引、
 主题）；`fields` 展开、嵌套、改名、删除、保留和设置字段；`key` 由字段构造键；`cast` 转换类型；`mask` 用带密钥的
-HMAC-SHA256、SHA-256 或 null 替换字段；`envelope` 把变更做成文档（带元数据的扁平文档、前后两份，或 Debezium 的信封）。
+HMAC-SHA256、SHA-256 或 null 替换字段；`envelope` 把变更做成文档（带元数据的扁平文档、前后两份，或 Debezium 的信封）；`embed` 经 embeddings API 由文本字段计算向量
+（[Qdrant 与 Milvus](#qdrant-与-milvus)）。
 删除记录经过所有这些变换后仍保留它的键。各变换的参数见[参考](reference/config.md#sync-transforms)。
 
 ```fit
@@ -925,3 +1047,8 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 ```
 
 `SYNC_PREFIX` 和脚本列出的 `*_PORT` 变量可以在第一套旁边再运行一套；`KEEP=1` 保留容器供下次运行。
+
+`test/sync/obs.sh` 启动 InfluxDB 2.7 和 3 Core、TDengine 3.3、Qdrant 1.15 和 Milvus 2.5（单机），并运行它们的测试
+（`TestInfluxDB*`、`TestTDengine*`、`TestQdrant*`、`TestMilvus*`、`TestEmbed*`）：每个目标的写入从中间和从头重放后收敛，
+服务器拒绝的记录单独失败，经 `embed`（对接一个假的 embeddings API）写入 Qdrant 和 Milvus 的流水线在随机时刻被杀掉后，最终
+每一行都在且带有其向量，删除的都已不在。

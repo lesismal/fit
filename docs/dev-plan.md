@@ -369,8 +369,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I217 | SQL Server as a sink: `MERGE` upserts, deletes, bulk load, exactly once with the checkpoint in the sink | I215, I191 | todo |
 | I218 | Doris and StarRocks as a sink (Stream Load with labels, the delete sign) and a source (a cursor polled) | I172 | todo |
 | I219 | Loki and OpenTelemetry logs as sinks (push API, OTLP/HTTP), files to them against Promtail | I166 | todo |
-| I220 | InfluxDB (line protocol) and TDengine (schemaless) as sinks; MQTT to InfluxDB end to end | I214 | todo |
-| I221 | Milvus and Qdrant as sinks, upserts and deletes by key, with an `embed` transform | I163 | todo |
+| I220 | InfluxDB (line protocol) and TDengine (schemaless) as sinks; MQTT to InfluxDB end to end | I214 | sinks done; MQTT end to end todo |
+| I221 | Milvus and Qdrant as sinks, upserts and deletes by key, with an `embed` transform | I163 | done |
 | I222 | The second round in the recovery matrix, CI's interop families, the benchmarks and the docs | I211–I221 | todo |
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
@@ -7298,6 +7298,46 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done when**: interop with InfluxDB 2 and 3 and TDengine 3 in Docker; a batch written twice leaves
   each point once; MQTT (I214) to InfluxDB as the end-to-end IoT pipeline.
 - **Touches**: `sync/influxdb`, `sync/tdengine`, `test/sync`, `docs`.
+- **Done in part** 2026-11-10: the sinks `influxdb` (`sync/influxdb`: API v2, v3 and v1, the record
+  to point mapping and the line protocol, which `tdengine` shares) and `tdengine` (`sync/tdengine`:
+  schemaless lines to taosAdapter's `/influxdb/v1/write`, or `INSERT ... USING` a super table on
+  `/rest/sql`), on a client both share with I221's (`sync/internal/fibrest`: fib's asynchronous
+  client, TLS, secrets, 408/429/5xx tried again, a refused request's records written one by one to
+  find the one refused) and templates (`sync/internal/tmpl`); connection tests; unit tests against
+  fakes (influxdb 99.0%, tdengine 98.6%, fibrest 98.8%, tmpl 100%); interop with InfluxDB 2.7 (APIs v2
+  and v1), InfluxDB 3 Core and TDengine 3.3.6 in Docker (`test/sync/tsdb_test.go`, run by
+  `test/sync/obs.sh`): a batch written, then again from its middle and from its start, leaves each
+  point once with its last value, and a point of the wrong type fails alone at its record; the guide's
+  sections in both languages. **Open**: MQTT (I214) to InfluxDB end to end, after I214 merges.
+
+**Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **Deletes are left out** (`deletes skip`, counted as written), or fail to `on_error` (`deletes
+   fail`): the line protocol has none, InfluxDB 3 deletes no point, and InfluxDB 2's
+   `/api/v2/delete` (a predicate and a time range) is a heavy call. Alternatives: v2's delete API per
+   point; `DELETE FROM sub WHERE ts = ...` in TDengine's `mode sql`.
+2. **A record with neither `time_field` nor a commit time takes the time it is written**, which a
+   replay does not repeat (a file's lines). Alternatives: fail such records; let the server stamp them.
+3. **A refused request is written again record by record** to find the record refused (InfluxDB's
+   400, 413 and 422 with `accept_partial=false` on v3; TDengine's codes 0x216, 0x2600-0x26ff but a
+   table or database missing, 0x3000-0x3fff), safe because points are idempotent; InfluxDB 2's partial
+   writes are written again whole. Alternative: read the line number InfluxDB 3 reports (the others
+   give none).
+4. **TDengine's schemaless errors come as HTTP 500 with `[0xNNNN]`**: the code decides between a
+   refusal (above) and an error tried again; `/rest/sql` answers 200 with `code`. Busy codes are not
+   singled out: any other error goes to the backoff, then the pipeline's retry.
+5. **One client package for the HTTP sinks** (`sync/internal/fibrest`), used by these, I221's and the
+   `embed` transform, rather than a fifth copy of the elasticsearch and http sinks' clients; Doris
+   (I218) and Loki (I219) could take it. Alternative: a client per package, as the first round has.
+6. **Types**: ints `i`, uints `u` (v2, v3; v1 `i`, failing past int64), TDengine `i64`, `u64`, `f64`;
+   decimals as floats; every other kind a string (bytes in base64, maps and arrays plain JSON); gzip on;
+   precision `ns` (InfluxDB) and `ms` (TDengine, its default). Tags are text; a field named in
+   `measurement` stays a field.
+7. **TDengine `mode sql`'s default subtable** is `t_` and the MD5 of the super table and the tags, one
+   INSERT a request with a clause a record; the super table is the user's.
+8. **The interop servers have their own script, `test/sync/obs.sh`** (and `FIT_SYNC_OBS` gates
+   `FIT_SYNC_INTEROP=required`), until I222 makes them run.sh's `obs` family; InfluxDB 3 Core waits
+   about a second on each write for its WAL, which the test's time shows.
 
 ### I221 Vector databases as sinks: Milvus and Qdrant
 
@@ -7309,6 +7349,48 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done when**: interop with Qdrant 1.x and Milvus 2.4+ (standalone) in Docker; PostgreSQL rows
   copied with embeddings across kills end equal in both; deletes reach both.
 - **Touches**: `sync/qdrant`, `sync/milvus`, `sync/transforms`, `test/sync`, `docs`.
+- **Done** 2026-11-10: the sinks `qdrant` (`sync/qdrant`) and `milvus` (`sync/milvus`) and the
+  transform `embed` (`sync/embed`, a `BatchTransform`), on I220's `sync/internal/fibrest`, with
+  `sync/internal/vecutil` (a batch cut to each key's last record, a key's text); `module.Env.LLMProxy`
+  and the sync role's member carrying the config's `llm.proxy.api` (also `fit sync run`, `fit
+  validate`, and the Admin API's tests and dry runs of a posted pipeline through the running runtime);
+  schema, reference, templates, `schema-zh.js`; unit tests against fakes (qdrant 98.0%, milvus 96.7%,
+  embed 99.1%, vecutil 100%); interop with Qdrant 1.15 and Milvus 2.5.17 standalone in Docker
+  (`test/sync/vector_test.go`): writes replayed converge, deletes reach both, a vector of the wrong
+  size fails alone at its record, and generate's inserts, updates and deletes through `embed` (a fake
+  embeddings API in the test) into both, killed at random points, end with every row and the vector
+  of its text, the deletes gone; the guide's sections in both languages. **Open**: PostgreSQL as the
+  source of that pipeline across kills, with I222's matrix (the `obs` family with a PostgreSQL).
+
+**Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **Qdrant's point ID**: a single unsigned integer, or a UUID string, as it is; any other key a UUID
+   of the first 16 bytes of the SHA-256 of its text (the elasticsearch sink's `_id` text), version 8.
+   Alternatives: UUIDv5 under a namespace of fit's; the key's text kept in the payload too.
+2. **A batch is cut to each key's last record**, deletes and upserts in requests of their own, since
+   neither Qdrant nor Milvus orders two writes of one ID in a request. The batch's order across keys
+   does not matter then.
+3. **Collections are made by the user**, never by the sink: size, distance, index and schema are
+   choices fit cannot make from a record. Alternative: make one from the first vector's size.
+4. **Milvus's codes**: 1 to 9 (not ready, rate and quota limits) tried again, 1100 and 1800-1899
+   refused (found record by record), others errors for the pipeline's retry; the primary key an
+   `Int64` from a single integer key, a `VarChar` of the key's text otherwise; deletes by `pk in
+   [...]`; `username` and `password_env` sent as the token `user:password`.
+5. **`embed` runs on the pipeline's dispatcher goroutine** as a `BatchTransform`, its requests on
+   fib's asynchronous client, waited there (never a fib worker, rule 1), `max_parallel` at once, each
+   bounded by `timeout` and `attempts`; a request that fails fails its records (`on_error`), one
+   refused (400, 413, 422) is asked again text by text; a text over `max_text_bytes` fails its record
+   rather than being cut; a record without the fields passes without a vector.
+6. **The cache is bounded by bytes** (`cache_bytes`, 32 MiB), least used dropped first, keyed by a
+   SHA-256 of the model, the dimensions and the text, its vectors float32 (what models make, half the
+   memory; a cached vector and a fresh one are the same). Alternative: a bound on entries.
+7. **llm.proxy as the default**: `module.Env` gained `LLMProxy`; the sync role's member is now
+   `*fitsync.Member{Sync, LLMProxy}`, written as the sync alone; the API is called on loopback with its
+   certificate pinned, as the assistant's `llm_proxy` provider does. A change of `llm.proxy` reaches a
+   pipeline when it is loaded again (a change of its own), not those running. Alternatives: a lookup at
+   each batch; a pipeline restart on any llm.proxy change.
+8. **The end-to-end interop uses `generate`** as the source, killed at random points, rather than
+   PostgreSQL, which the `obs` servers do not have yet; PostgreSQL across kills is I222's (open above).
 
 ### I222 The second round in the matrix, the benchmarks and the docs
 
