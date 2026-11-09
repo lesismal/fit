@@ -579,7 +579,18 @@ func txID(ev mongowire.Raw) string {
 // namespaces, each by _id, from where pos says; the last record of all
 // carries the stream's start as its position, so that a restart after it
 // reads the stream.
+//
+// The stream's start token can be past writes the primary has applied but
+// a majority has not yet: a snapshot read at the majority's point then
+// would not see them, and the stream, starting after them, would not
+// either. So the snapshot reads with afterClusterTime at an operation
+// time taken after the start, which waits until the majority's point has
+// reached it.
 func (s *Source) snapshot(ctx context.Context, r *fitsync.Run, pos *position) error {
+	after, err := s.operationTime(ctx)
+	if err != nil {
+		return err
+	}
 	nss, err := s.namespaces(ctx)
 	if err != nil {
 		return err
@@ -598,7 +609,7 @@ func (s *Source) snapshot(ctx context.Context, r *fitsync.Run, pos *position) er
 			lo = &id
 		}
 		start := pos.Start
-		err := s.scan(ctx, ns, lo, lo != nil, nil, func(id json.RawMessage) fitsync.Position {
+		err := s.scan(ctx, ns, after, lo, lo != nil, nil, func(id json.RawMessage) fitsync.Position {
 			return position{Start: start, NS: ns, ID: id}.marshal()
 		}, func(rec *fitsync.Record) error {
 			if held != nil {
@@ -620,6 +631,19 @@ func (s *Source) snapshot(ctx context.Context, r *fitsync.Run, pos *position) er
 	return nil
 }
 
+// operationTime returns the server's operation time now, as a command's
+// answer gives it; nil from a server that gives none.
+func (s *Source) operationTime(ctx context.Context) (*mongowire.Timestamp, error) {
+	r, err := s.client.Run(ctx, "admin", mongowire.Doc("ping", 1))
+	if err != nil {
+		return nil, fmt.Errorf("mongo: %w", err)
+	}
+	if ts, ok := rawField(r, "operationTime").Timestamp(); ok {
+		return &ts, nil
+	}
+	return nil, nil
+}
+
 // nsParts splits db.collection.
 func nsParts(ns string) (string, string) {
 	db, coll, _ := strings.Cut(ns, ".")
@@ -630,13 +654,18 @@ func nsParts(ns string) (string, string) {
 // with skip) to before hi (nil: unbounded), handing each record, its
 // position made by posOf, to each. A cursor cut by a failover, or timed out
 // while the pipeline held it, is opened again after the last _id read.
-func (s *Source) scan(ctx context.Context, ns string, lo *fitsync.Value, skip bool, hi *fitsync.Value,
+func (s *Source) scan(ctx context.Context, ns string, after *mongowire.Timestamp, lo *fitsync.Value, skip bool, hi *fitsync.Value,
 	posOf func(id json.RawMessage) fitsync.Position, each func(*fitsync.Record) error) error {
 	db, coll := nsParts(ns)
 	failures := 0
 	for {
 		cmd := mongowire.Doc("find", coll, "filter", mongowire.Doc(), "sort", mongowire.Doc("_id", 1), "hint", mongowire.Doc("_id", 1),
-			"batchSize", s.batchSize(), "readConcern", mongowire.Doc("level", "majority"))
+			"batchSize", s.batchSize())
+		rc := mongowire.Doc("level", "majority")
+		if after != nil {
+			rc = append(rc, mongowire.E{Key: "afterClusterTime", Value: *after})
+		}
+		cmd = append(cmd, mongowire.E{Key: "readConcern", Value: rc})
 		if lo != nil {
 			cmd = append(cmd, mongowire.E{Key: "min", Value: mongowire.Doc("_id", *lo)})
 		}
@@ -853,7 +882,7 @@ func (s *Source) ReadChunk(ctx context.Context, c fitsync.Chunk, from fitsync.Po
 		}
 		skip = lo != nil
 	}
-	return s.scan(ctx, c.Namespace, lo, skip, hi, func(id json.RawMessage) fitsync.Position {
+	return s.scan(ctx, c.Namespace, nil, lo, skip, hi, func(id json.RawMessage) fitsync.Position {
 		return position{ID: id}.marshal()
 	}, emit)
 }

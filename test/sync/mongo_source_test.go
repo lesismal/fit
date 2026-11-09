@@ -312,8 +312,19 @@ func TestMongoSourceFailover(t *testing.T) {
 						time.Sleep(100 * time.Millisecond)
 					}
 					if i == total/3 {
-						if _, err := c.Run(ctx, "admin", mongowire.Doc("replSetStepDown", 30, "secondaryCatchUpPeriodSecs", 15)); err != nil && !mongowire.IsNetError(err) {
-							t.Errorf("step down: %v", err)
+						// A step down soon after the last one (a test run again) finds
+						// no electable secondary for a while: it is asked again.
+						for {
+							_, err := c.Run(ctx, "admin", mongowire.Doc("replSetStepDown", 30, "secondaryCatchUpPeriodSecs", 15))
+							var ce *mongowire.CommandError
+							if err == nil || mongowire.IsNetError(err) {
+								break
+							}
+							if !errors.As(err, &ce) || ce.Code != 262 || ctx.Err() != nil {
+								t.Errorf("step down: %v", err)
+								break
+							}
+							time.Sleep(time.Second)
 						}
 					}
 				}
@@ -330,7 +341,7 @@ func TestMongoSourceFailover(t *testing.T) {
 					restarts++
 					run = runSource(src, last, false)
 				case <-guard:
-					t.Fatalf("%d of %d documents read", len(seen), total)
+					t.Fatalf("%d of %d documents read, missing %v", len(seen), total, missingIDs(seen, total))
 				}
 			}
 			writing.Wait()
@@ -541,6 +552,62 @@ func TestMongoSourceJob(t *testing.T) {
 				}
 			}
 			t.Logf("%d chunks", len(plan))
+			mongoRun(t, ctx, c, db, mongowire.Doc("dropDatabase", 1))
+		})
+	}
+}
+
+// missingIDs lists the ids from 0 to total that seen lacks.
+func missingIDs(seen map[string]bool, total int) []int {
+	var out []int
+	for i := range total {
+		if !seen[fmt.Sprint(i)] {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// TestMongoSourceStartHandover starts the source again and again while
+// documents are being written with w:majority: each is read, by the
+// snapshot or by the stream. The stream's start can be past a write the
+// primary has applied and a majority not yet; a snapshot read at the
+// majority's point before it got there missed such a write.
+func TestMongoSourceStartHandover(t *testing.T) {
+	for name, uri := range mongoSets(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // a hang guard
+			defer cancel()
+			c := mongoClient(t, uri, nil)
+			db := "fit_src_handover_" + name
+			const total = 40
+			for round := range 40 {
+				mongoRun(t, ctx, c, db, mongowire.Doc("dropDatabase", 1))
+				mongoRun(t, ctx, c, db, mongowire.Doc("create", "c"))
+				src := mongoSource(t, mongoSourceParams(t, uri, map[string]any{"database": db}))
+				var writing sync.WaitGroup
+				writing.Go(func() {
+					for i := range total {
+						mongoRun(t, ctx, c, db, mongowire.Doc("insert", "c", "documents", mongowire.A{mongowire.Doc("_id", i)}, "writeConcern", mongowire.Doc("w", "majority")))
+					}
+				})
+				time.Sleep(time.Duration(round%8) * time.Millisecond)
+				run := runSource(src, nil, false)
+				seen := map[string]bool{}
+				guard := time.After(time.Minute)
+				for len(seen) < total {
+					select {
+					case r := <-run.recs:
+						seen[recID(r)] = true
+					case err := <-run.done:
+						t.Fatalf("round %d: the source stopped: %v", round, err)
+					case <-guard:
+						t.Fatalf("round %d: %d of %d documents read, missing %v", round, len(seen), total, missingIDs(seen, total))
+					}
+				}
+				writing.Wait()
+				run.stop(t)
+			}
 			mongoRun(t, ctx, c, db, mongowire.Doc("dropDatabase", 1))
 		})
 	}

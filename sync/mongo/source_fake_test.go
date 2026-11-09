@@ -164,7 +164,7 @@ func (f *srcFake) answer(cmd mongowire.Raw) any {
 	db, _ := rawField(cmd, "$db").StringValue()
 	switch name {
 	case "ping":
-		return mongowire.Doc()
+		return mongowire.Doc("operationTime", mongowire.Timestamp{T: 5, I: 7})
 	case "hello":
 		return f.hello
 	case "getMore":

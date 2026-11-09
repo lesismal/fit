@@ -522,10 +522,10 @@ func TestSourceSnapshotErrors(t *testing.T) {
 			finds = append(finds, c.String())
 		}
 	}
-	if len(finds) != 2 || !strings.Contains(finds[1], `"min":{"_id":1}`) || !strings.Contains(finds[0], `"readConcern":{"level":"majority"}`) {
+	if len(finds) != 2 || !strings.Contains(finds[1], `"min":{"_id":1}`) || !strings.Contains(finds[0], `"readConcern":{"level":"majority","afterClusterTime":{"$timestamp":{"t":5,"i":7}}}`) {
 		t.Errorf("the finds %v", finds)
 	}
-	for _, name := range []string{"listCollections", "find", "listDatabases"} {
+	for _, name := range []string{"ping", "listCollections", "find", "listDatabases"} {
 		f.set(func() {
 			f.override = func(n string, cmd mongowire.Raw) any {
 				if n == name {
