@@ -135,7 +135,11 @@ func TestSetAgainstLinear(t *testing.T) {
 				ps = append(ps, netip.PrefixFrom(netip.AddrFrom16(b), 100+r.IntN(29)).Masked())
 			}
 		}
-		s := newSet(append([]netip.Prefix(nil), ps...))
+		var rs []Range
+		for _, p := range ps {
+			rs = append(rs, RangeOf(p))
+		}
+		s := newSet(rs)
 		for i := 0; i < 2000; i++ {
 			var a netip.Addr
 			if r.IntN(2) == 0 {

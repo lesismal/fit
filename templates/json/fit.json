@@ -152,9 +152,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -255,9 +259,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -817,6 +825,115 @@
         },
       },
     },
+    // {
+      // // A route whose handler is bt_publish, with every one of its params.
+      // "name": "bt_publish-example",
+      // "handler": {
+        // // Serves what the BitTorrent client publishes: at a path ending in / or index.json an index of
+        // // its publish entries and their torrents in JSON, at <id>.torrent a torrent's .torrent file
+        // // and at <id>.magnet its magnet link; 503 while no bittorrent.client runs.
+        // "module": "bt_publish",
+        // "params": {
+          // // The publish entries of the bittorrent.client served, by name; a name the client has not is
+          // // listed in the index with its error. Every entry when left out.
+          // // list of string.
+          // "publish": [],
+        // },
+      // },
+    // },
+    // {
+      // // A route whose handler is bt_stream, with every one of its params.
+      // "name": "bt_stream-example",
+      // "handler": {
+        // // Serves a file of a torrent of the bittorrent.client role with Range while it downloads, the
+        // // ranges asked for first, and adds a torrent by magnet link on the fly.
+        // "module": "bt_stream",
+        // "params": {
+          // // The part of the path before a torrent's info hash: with /bt/, /bt/<info hash>/<file path> is
+          // // a file of the torrent by its path as the torrent lists it, its name first, /bt/<info
+          // // hash>/<n> its file of index n, and /bt/<info hash>/ its largest file. The info hash is the
+          // // bittorrent.client role's torrent ID, 40 hex digits. /bt/ when left out.
+          // // string; default "/bt/".
+          // "prefix": "/bt/",
+
+          // // The media_auth policy every request must satisfy, play on the stream bt/<info hash>: a
+          // // bearer token, Basic, the token query parameter or the fit_media_token cookie, or, with the
+          // // policy's url_signing, a URL signed for <prefix><info hash>/. Adding a torrent by magnet link
+          // // takes publish on the same stream as well. Everyone may play when left out; magnet needs it.
+          // // string.
+          // "auth": "",
+
+          // // The most responses the handler streams at once, each with a goroutine of its own while it
+          // // reads; past it a request is answered 503. At most 4096. 32 when left out or 0.
+          // // integer, 0 or more; default 32.
+          // "max_streams": 32,
+
+          // // How long a read waits for the piece it needs to arrive: past it a response not begun is
+          // // answered 504, and one begun is cut short. 60s when left out.
+          // // duration, as "1.5s" or "2m"; default "60s".
+          // "read_timeout": "60s",
+
+          // // How far past what a response reads the pieces are fetched before all others, nearest first.
+          // // 64 KiB to 256 MiB. 8 MiB when left out or 0.
+          // // integer, 0 or more; default 8388608.
+          // "readahead_bytes": 8388608,
+
+          // // Lets a request add the torrent its path names when the role does not have it, from the
+          // // magnet link in its magnet query parameter, which must be of that torrent: /bt/<info
+          // // hash>/?magnet=<link>, escaped. Such torrents are temporary: they download only the files
+          // // streamed, are bounded by max_temporary and max_temporary_bytes, and are removed with their
+          // // data temporary_ttl after their last stream ended, and when fit starts. Needs auth, whose
+          // // publish on bt/<info hash> the request must have. Off when left out.
+          // // boolean.
+          // "magnet": true,
+
+          // // How long a request waits for the info of a torrent added from a magnet link to arrive from
+          // // peers; past it the answer is 504. 60s when left out.
+          // // duration, as "1.5s" or "2m"; default "60s".
+          // "info_timeout": "60s",
+
+          // // The most temporary torrents, added by magnet link on the fly, the role holds at once; past
+          // // it adding one is answered 503. At most 1000. 4 when left out or 0.
+          // // integer, 0 or more; default 4.
+          // "max_temporary": 4,
+
+          // // The most bytes the temporary torrents may want of the disk together: a torrent whose files
+          // // streamed would take it past this is answered 507, and removed when it was just added. 16 GiB
+          // // when left out or 0.
+          // // integer, 0 or more; default 17179869184.
+          // "max_temporary_bytes": 17179869184,
+
+          // // How long a temporary torrent stays after its last stream ended, for the next range a player
+          // // asks: then it is removed with its data. At most 7 days. 10m when left out.
+          // // duration, as "1.5s" or "2m"; default "10m".
+          // "temporary_ttl": "10m",
+
+          // // Sent as Cache-Control with every file. None when left out.
+          // // string.
+          // "cache_control": "",
+
+          // // Sent as Access-Control-Allow-Origin, as "*", for players on other origins. None when left
+          // // out.
+          // // string.
+          // "cors": "",
+        // },
+      // },
+    // },
+    // {
+      // // A route whose handler is bt_tracker, with every one of its params.
+      // "name": "bt_tracker-example",
+      // "handler": {
+        // // Serves the bittorrent.tracker role's HTTP announces and scrapes (BEP 3, 23, 7 and 48): a
+        // // request whose path ends in announce is an announce, and one ending in scrape a scrape,
+        // // whatever comes before, so that /announce, /tracker/announce and a private tracker's
+        // // /<passkey>/announce all work. Refusals are answered 200 with a failure reason, as BEP 3 has
+        // // them; 503 while the role does not run. The route's listeners, TLS and middleware apply as to
+        // // any handler; the passkey is replaced by REDACTED in the access log.
+        // "module": "bt_tracker",
+        // "params": {
+        // },
+      // },
+    // },
     // {
       // // A route whose handler is fastcgi, with every one of its params.
       // "name": "fastcgi-example",
@@ -1982,9 +2099,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -2282,9 +2403,13 @@
     // // list of string.
     // "deny": ["203.0.113.0/24"],
 
-    // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-    // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-    // // config is applied, and applied again when one changes; each at most 64 MiB.
+    // // Files of more allow entries, one on each line, each line told apart by its content: an
+    // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+    // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+    // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+    // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+    // // are left out; any other line is an error. Read when the config is applied, and applied again
+    // // when one changes; each at most 64 MiB.
     // // list of string.
     // "allow_files": [],
 
@@ -2526,9 +2651,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -2899,9 +3028,13 @@
       // // list of string.
       // "deny": ["203.0.113.0/24"],
 
-      // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-      // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-      // // config is applied, and applied again when one changes; each at most 64 MiB.
+      // // Files of more allow entries, one on each line, each line told apart by its content: an
+      // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      // // are left out; any other line is an error. Read when the config is applied, and applied again
+      // // when one changes; each at most 64 MiB.
       // // list of string.
       // "allow_files": [],
 
@@ -3263,9 +3396,13 @@
           // // list of string.
           // "deny": ["203.0.113.0/24"],
 
-          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // Files of more allow entries, one on each line, each line told apart by its content: an
+          // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+          // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+          // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+          // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+          // // are left out; any other line is an error. Read when the config is applied, and applied again
+          // // when one changes; each at most 64 MiB.
           // // list of string.
           // "allow_files": [],
 
@@ -3349,9 +3486,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -3580,9 +3721,13 @@
           // // list of string.
           // "deny": ["203.0.113.0/24"],
 
-          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // Files of more allow entries, one on each line, each line told apart by its content: an
+          // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+          // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+          // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+          // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+          // // are left out; any other line is an error. Read when the config is applied, and applied again
+          // // when one changes; each at most 64 MiB.
           // // list of string.
           // "allow_files": [],
 
@@ -3666,9 +3811,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -4006,9 +4155,13 @@
           // // list of string.
           // "deny": ["203.0.113.0/24"],
 
-          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // Files of more allow entries, one on each line, each line told apart by its content: an
+          // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+          // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+          // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+          // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+          // // are left out; any other line is an error. Read when the config is applied, and applied again
+          // // when one changes; each at most 64 MiB.
           // // list of string.
           // "allow_files": [],
 
@@ -4258,9 +4411,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -4416,9 +4573,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -4605,9 +4766,13 @@
           // // list of string.
           // "deny": ["203.0.113.0/24"],
 
-          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // Files of more allow entries, one on each line, each line told apart by its content: an
+          // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+          // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+          // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+          // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+          // // are left out; any other line is an error. Read when the config is applied, and applied again
+          // // when one changes; each at most 64 MiB.
           // // list of string.
           // "allow_files": [],
 
@@ -4835,9 +5000,13 @@
           // // list of string.
           // "deny": ["203.0.113.0/24"],
 
-          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // Files of more allow entries, one on each line, each line told apart by its content: an
+          // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+          // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+          // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+          // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+          // // are left out; any other line is an error. Read when the config is applied, and applied again
+          // // when one changes; each at most 64 MiB.
           // // list of string.
           // "allow_files": [],
 
@@ -5020,9 +5189,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -5118,9 +5291,13 @@
           // // list of string.
           // "deny": ["203.0.113.0/24"],
 
-          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // Files of more allow entries, one on each line, each line told apart by its content: an
+          // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+          // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+          // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+          // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+          // // are left out; any other line is an error. Read when the config is applied, and applied again
+          // // when one changes; each at most 64 MiB.
           // // list of string.
           // "allow_files": [],
 
@@ -5201,9 +5378,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -5372,9 +5553,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -5492,9 +5677,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -5987,9 +6176,13 @@
       // // list of string.
       // "deny": ["203.0.113.0/24"],
 
-      // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-      // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-      // // config is applied, and applied again when one changes; each at most 64 MiB.
+      // // Files of more allow entries, one on each line, each line told apart by its content: an
+      // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+      // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+      // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+      // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+      // // are left out; any other line is an error. Read when the config is applied, and applied again
+      // // when one changes; each at most 64 MiB.
       // // list of string.
       // "allow_files": [],
 
@@ -11868,8 +12061,8 @@
   // },
 
   // fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds
-  // torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on
-  // disk.
+  // torrents on one port for TCP and UDP, and a tracker. None when left out: no BitTorrent port
+  // and no state on disk.
   // object.
   // "bittorrent": {
     // // Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP
@@ -11945,9 +12138,9 @@
       // // duration, as "1.5s" or "2m"; default "5s".
       // "save_interval": "5s",
 
-      // // The client's rates and connection, seeding and torrent limits. A change applies in place,
-      // // keeping the peers connected, but those over a lowered connection limit. The defaults when
-      // // left out.
+      // // The client's rates and connection, seeding, queueing, disk and torrent limits. A change
+      // // applies in place, keeping the peers connected, but those over a lowered connection limit.
+      // // The defaults when left out.
       // // object.
       // "limits": {
         // // The most bytes per second uploaded, payload of all torrents together. Unlimited when left
@@ -11991,6 +12184,156 @@
         // // removes none. 1000 when left out or 0.
         // // integer, 0 to 100000; default 1000.
         // "max_torrents": 1000,
+
+        // // The most torrents downloading at once: past it, torrents queue, paused by the client, in the
+        // // order of the list (which the API's queue position changes), and the first of them starts
+        // // when one finishes, is paused or removed. A torrent fetching a magnet link's metadata counts
+        // // as downloading. No queue when left out or 0.
+        // // integer, 0 or more.
+        // "max_active_downloads": 0,
+
+        // // The most torrents seeding at once, queued as max_active_downloads queues downloads. No queue
+        // // when left out or 0.
+        // // integer, 0 or more.
+        // "max_active_seeds": 0,
+
+        // // The disk space a download leaves free: a torrent starts downloading only when its
+        // // directory's disk has what it still has to download and this much more free, and one
+        // // downloading pauses, with an error saying so, when less than this is left; it starts again by
+        // // itself once the space is there. Where the free space cannot be told, it is not checked. 1
+        // // GiB when left out or 0.
+        // // integer, 0 or more; default 1073741824.
+        // "min_free_bytes": 1073741824,
+      // },
+
+      // // The categories a torrent may be added in: each downloads into a directory of its own, gives
+      // // its torrents its own limits, and may name a media_library that is scanned again when a
+      // // torrent of it completes. A torrent added with no category downloads into download_dir. A
+      // // change applies in place: limits to the torrents of the category at once, a new directory to
+      // // the torrents added from then on. A torrent whose category is removed keeps its directory and
+      // // loses the category's limits. At most 1000.
+      // // list of object.
+      // "categories": [
+        // {
+          // // The category's name, which the API and watch_dir's subdirectories name it by. Letters,
+          // // digits, '_', '.' and '-'.
+          // // string; required.
+          // "name": "",
+
+          // // The directory the category's torrents download into: a relative path is below download_dir,
+          // // and may not lead out of it. A torrent keeps the directory it was added with when this
+          // // changes. <download_dir>/<name> when left out.
+          // // string.
+          // "dir": "",
+
+          // // A media_library to scan again when a torrent of the category completes, so that what it
+          // // downloaded into the library's roots appears in its catalog. None when left out.
+          // // string.
+          // "media_library": "",
+
+          // // The limits of each torrent of the category, under the client's; a torrent's own limits take
+          // // the place of those they set. The client's alone when left out.
+          // // object.
+          // "limits": {
+            // // The most bytes per second the torrent uploads, under the client's rate. The client's rate
+            // // alone when left out, 0 or negative.
+            // // integer.
+            // "upload_rate": 0,
+
+            // // The most bytes per second the torrent downloads, under the client's rate. The client's rate
+            // // alone when left out, 0 or negative.
+            // // integer.
+            // "download_rate": 0,
+
+            // // The most peer connections of the torrent, in place of max_conns_per_torrent, above or below
+            // // it; negative is the client's max_conns alone. max_conns_per_torrent when left out or 0.
+            // // integer.
+            // "max_conns": 0,
+
+            // // How many peers the torrent uploads to at once, beside one optimistic unchoke, in place of
+            // // the client's; negative unchokes every interested peer. The client's when left out or 0.
+            // // integer.
+            // "upload_slots": 0,
+
+            // // Pause the torrent once it has uploaded this many times its size, in place of the client's;
+            // // negative seeds for ever. The client's when left out or 0.
+            // // number.
+            // "seed_ratio": 0,
+
+            // // Pause the torrent once it has seeded this long, in place of the client's; negative seeds for
+            // // ever. The client's when left out or 0.
+            // // duration, as "1.5s" or "2m".
+            // "seed_time": "10s",
+          // },
+        // },
+      // ],
+
+      // // A directory looked at every watch_interval for .torrent files and .magnet files (a magnet
+      // // link on the first line that is not blank), each added once it has kept its size and
+      // // modification time across two looks, so that one being written is not taken half way: those
+      // // directly in it with no category, those in a subdirectory named after a category in that
+      // // category. A file added, or whose torrent is already held, is moved into its .done
+      // // subdirectory; one that cannot be added, being too large, not a torrent or not a link, into
+      // // .failed, beside a .error file saying why; one that may be added later (max_torrents reached,
+      // // the state not written) is left to be tried again. None when left out.
+      // // string.
+      // "watch_dir": "",
+
+      // // How often watch_dir is looked at. 10s when left out.
+      // // duration, as "1.5s" or "2m"; default "10s".
+      // "watch_interval": "10s",
+
+      // // The most files of watch_dir and its category subdirectories taken in one look, the rest left
+      // // for the next. 100 when left out or 0.
+      // // integer, 0 to 10000; default 100.
+      // "watch_max_files": 100,
+
+      // // How long the download of a .torrent file by its URL may take in all, connecting, redirects
+      // // (at most 5) and the body (at most 32 MiB) included; at most 4 run at once. 30s when left
+      // // out.
+      // // duration, as "1.5s" or "2m"; default "30s".
+      // "url_timeout": "30s",
+
+      // // Alternative rates, in place of limits' upload_rate and download_rate while one of their
+      // // schedules holds, or while the API turns them on. None when left out.
+      // // object.
+      // "alt_speed": {
+        // // The most bytes per second uploaded while the alternative rates hold, all torrents together.
+        // // Unlimited when left out or 0.
+        // // integer, 0 or more.
+        // "upload_rate": 0,
+
+        // // The most bytes per second downloaded while the alternative rates hold, all torrents
+        // // together. Unlimited when left out or 0.
+        // // integer, 0 or more.
+        // "download_rate": 0,
+
+        // // When the alternative rates hold: while any of these does. Only while the API turns them on
+        // // when left out. At most 100.
+        // // list of object.
+        // "schedules": [
+          // {
+            // // The days the range begins on: mon, tue, wed, thu, fri, sat, sun, weekdays (mon to fri) and
+            // // weekend (sat and sun). A range that runs past midnight holds into the next day. Every day
+            // // when left out.
+            // // list of string.
+            // "days": [],
+
+            // // The time the range begins at, HH:MM, 00:00 to 23:59.
+            // // string; required.
+            // "from": "",
+
+            // // The time the range ends at, HH:MM, 00:01 to 24:00, not included: one earlier than from runs
+            // // past midnight, as 22:00 to 06:00. It may not equal from.
+            // // string; required.
+            // "to": "https://{host}{uri}",
+          // },
+        // ],
+
+        // // The zone the schedules' times are in: local (the default), utc, or an IANA zone name such as
+        // // Asia/Shanghai.
+        // // string.
+        // "time_zone": "",
       // },
 
       // // The peer addresses the client deals with, deciding before the global access: a peer it
@@ -12010,9 +12353,13 @@
         // // list of string.
         // "deny": ["203.0.113.0/24"],
 
-        // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-        // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-        // // config is applied, and applied again when one changes; each at most 64 MiB.
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
         // // list of string.
         // "allow_files": [],
 
@@ -12094,9 +12441,299 @@
           // // list of string.
           // "deny": ["203.0.113.0/24"],
 
-          // // Files of more allow entries: an address or prefix on each line, with blank lines and what
-          // // follows # or ; left out, as the lists published for firewalls are written. Read when the
-          // // config is applied, and applied again when one changes; each at most 64 MiB.
+          // // Files of more allow entries, one on each line, each line told apart by its content: an
+          // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+          // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+          // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+          // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+          // // are left out; any other line is an error. Read when the config is applied, and applied again
+          // // when one changes; each at most 64 MiB.
+          // // list of string.
+          // "allow_files": [],
+
+          // // Files of more deny entries, written as allow_files.
+          // // list of string.
+          // "deny_files": [],
+        // },
+      // },
+
+      // // Directories the client publishes: each built into hybrid torrents, a torrent of each file or
+      // // one of the whole directory, on goroutines of its own, and seeded where the files are, the
+      // // .torrent files and magnet links served by the bt_publish handler. Each follows the disk: a
+      // // file added gets a torrent, and one changed or removed stops its torrent, a changed one
+      // // getting a new torrent. The torrents are kept in data_dir/publish/<name>/, so that a restart
+      // // neither builds nor checks a file that did not change. None when left out.
+      // // list of object.
+      // "publish": [
+        // {
+          // // The entry's name, which the bt_publish handler and the state in data_dir know it by.
+          // // Letters, digits, '_', '.' and '-'.
+          // // string; required.
+          // "name": "",
+
+          // // The directory published. Its files are seeded where they are, never written to, moved or
+          // // deleted: a torrent whose file changes is replaced by a new one. Files and directories whose
+          // // names start with '.' and symbolic links are left out.
+          // // string; required.
+          // "dir": "",
+
+          // // per_file makes a single-file torrent of each file below dir; whole_dir makes one torrent of
+          // // the whole directory, named as its last element, which any change of a file below it
+          // // replaces. per_file when left out.
+          // // one of: per_file, whole_dir; default "per_file".
+          // "mode": "per_file",
+
+          // // The http or https URL at which dir is served, as by a static route whose root is dir, put in
+          // // every torrent as its web seed (BEP 19): a file's own URL in mode per_file, and in mode
+          // // whole_dir the URL's parent, so the URL's last element must be dir's last element then. None
+          // // when left out.
+          // // string.
+          // "web_seed": "",
+
+          // // Tracker URLs, http, https or udp, put in every torrent, each a tier of its own, tried in
+          // // order: as fit's own bt_tracker route. None when left out: peers find the torrents by the
+          // // DHT, unless private.
+          // // list of string.
+          // "announce": [],
+
+          // // Mark the torrents private (BEP 27): clients find peers only through the trackers of
+          // // announce, not the DHT or peer exchange. A change makes new torrents, of other info hashes.
+          // // boolean.
+          // "private": true,
+
+          // // The torrents' piece length, a power of two from 16 KiB to 64 MiB. Picked for each torrent's
+          // // size when left out or 0: the smallest of at least 16 KiB that makes fewer than 2048 pieces,
+          // // up to 16 MiB. A change makes new torrents.
+          // // integer, 0 to 67108864.
+          // "piece_length": 0,
+
+          // // The files published, by pattern: a pattern without '/' matches a file's name, as *.iso, and
+          // // one with '/' its path under dir, as releases/**/*.tar.gz, where * matches within a name and
+          // // ** any run of directories. Every file when left out.
+          // // list of string.
+          // "files": [],
+
+          // // Files and directories left out, by pattern, as files writes them, as *.part or **/tmp/**; a
+          // // directory left out is not walked. None when left out.
+          // // list of string.
+          // "exclude": [],
+
+          // // How often dir is walked again for files added, changed or removed, as static files follow
+          // // the disk. A file is told by its size, modification and status change times and inode; one
+          // // new or changed is built into a torrent once it has not changed for a check_interval, so that
+          // // a file still being copied is not hashed; a file removed or changed stops its torrent at
+          // // once. 10s when left out or 0.
+          // // duration, as "1.5s" or "2m"; default "10s".
+          // "check_interval": "10s",
+
+          // // The most files published: in mode per_file the first by path are, the rest are left out and
+          // // reported; in mode whole_dir a directory with more is not published, and is reported. 1000
+          // // when left out or 0.
+          // // integer, 0 to 100000; default 1000.
+          // "max_files": 1000,
+
+          // // The most bytes published, the files' sizes together: past it, in mode per_file, the files
+          // // after are left out, and in mode whole_dir the directory is not published; either is
+          // // reported. 1 TiB when left out or 0.
+          // // integer, 0 or more; default 1099511627776.
+          // "max_total_bytes": 1099511627776,
+
+          // // How many torrents are built at once, each reading and hashing its files on a goroutine of
+          // // the entry's own, never on a fib worker. 1 when left out or 0.
+          // // integer, 0 to 16; default 1.
+          // "max_hashing": 1,
+        // },
+      // ],
+    // },
+
+    // // Run a BitTorrent tracker, on fit's engine: HTTP announces and scrapes through routes whose
+    // // handler is bt_tracker, UDP ones on its own listen, public or private (passkeys of a
+    // // media_auth policy), with an allow-list of info hashes. Its swarms are kept in memory,
+    // // bounded. None when left out.
+    // // object.
+    // "tracker": {
+      // // The host and port the tracker answers UDP announces and scrapes on (BEP 15), as ":6969".
+      // // Announces over HTTP and HTTPS come through a route whose handler is bt_tracker, on fit's
+      // // listeners. No UDP when left out. A change moves the UDP port, keeping the swarms.
+      // // string.
+      // "listen": "",
+
+      // // How often clients are told to announce. 30m when left out. A change applies at once, keeping
+      // // the swarms.
+      // // duration, as "1.5s" or "2m"; default "30m".
+      // "interval": "30m",
+
+      // // The "min interval" of HTTP answers: how soon a client may announce again of its own accord.
+      // // None when left out. At most interval. A change applies at once, keeping the swarms.
+      // // duration, as "1.5s" or "2m".
+      // "min_interval": "10s",
+
+      // // How long a peer is kept after its last announce, longer than interval so that a peer
+      // // announcing a little late is not forgotten; a torrent left without peers is forgotten, its
+      // // completed count with it. 1h when left out. A change makes a new store: the swarms start
+      // // empty and fill again as clients announce.
+      // // duration, as "1.5s" or "2m"; default "1h".
+      // "peer_ttl": "1h",
+
+      // // The most torrents tracked at once; an announce of one more is refused with "tracker is
+      // // full". 100000 when left out or 0. A change makes a new store: the swarms start empty and
+      // // fill again as clients announce.
+      // // integer, 0 to 1048576; default 100000.
+      // "max_torrents": 100000,
+
+      // // The most peers kept of one torrent; a peer past it still gets peers but is not handed out.
+      // // 10000 when left out or 0. A change makes a new store.
+      // // integer, 0 to 65536; default 10000.
+      // "max_peers_per_torrent": 10000,
+
+      // // The most peers kept of all torrents together, each about 150 bytes; a peer past it still
+      // // gets peers but is not handed out. 500000 when left out or 0. A change makes a new store.
+      // // integer, 0 to 4194304; default 500000.
+      // "max_peers": 500000,
+
+      // // The most peers an announce gets, whatever its numwant asks; 50 when it asks for none. A UDP
+      // // answer is also kept within 1400 bytes. 200 when left out or 0.
+      // // integer, 0 to 1000; default 200.
+      // "max_numwant": 200,
+
+      // // The most torrents one HTTP scrape may name; a UDP scrape is bounded to 74 by its packet. A
+      // // scrape naming none, a full scrape, gets nothing. 64 when left out or 0.
+      // // integer, 0 to 1000; default 64.
+      // "max_scrape": 64,
+
+      // // The media_auth policy whose passkeys the tracker takes, which makes it private: an announce
+      // // or scrape must carry a passkey, in its path as /<passkey>/announce or as ?passkey=, that is
+      // // one of the policy's tokens (static, or signed by fit) or a user's passkey, derived from the
+      // // policy's secret and the user's name, and whose grant plays bittorrent/<info hash in hex>
+      // // (play ["bittorrent/*"] for every torrent). Others are refused with a failure reason. Public
+      // // when left out: anyone may announce.
+      // // string.
+      // "auth": "",
+
+      // // The info hashes the tracker tracks, in hex: 40 digits for a v1 hash, or 64 for a v2 one,
+      // // tracked by its first 20 bytes as v2 clients announce it. With any here or in allow_files,
+      // // announces of other torrents are refused with "unregistered torrent", and scrapes of them get
+      // // nothing. Every torrent when both are left out.
+      // // list of string.
+      // "allow": ["*.example.com", "10.1.0.0/16"],
+
+      // // Files of more allowed info hashes: one on each line, as allow has them, with blank lines and
+      // // what follows # left out. Read when the config is applied, and read again when one changes;
+      // // each at most 64 MiB, and at most 1048576 info hashes in all.
+      // // list of string.
+      // "allow_files": [],
+
+      // // The client addresses the tracker serves, deciding before the global access: a UDP datagram
+      // // from an address it refuses is dropped before a connection is made, and an HTTP announce or
+      // // scrape through bt_tracker from one is answered with a failure reason. A change applies at
+      // // once. Every address when left out, unless the global access says otherwise.
+      // // object.
+      // "access": {
+        // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+        // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+        // // first.
+        // // list of string.
+        // "allow": ["10.0.0.0/8", "192.168.0.0/16"],
+
+        // // IP addresses and CIDR prefixes refused, whatever allow holds.
+        // // list of string.
+        // "deny": ["203.0.113.0/24"],
+
+        // // Files of more allow entries, one on each line, each line told apart by its content: an
+        // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+        // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+        // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+        // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+        // // are left out; any other line is an error. Read when the config is applied, and applied again
+        // // when one changes; each at most 64 MiB.
+        // // list of string.
+        // "allow_files": [],
+
+        // // Files of more deny entries, written as allow_files.
+        // // list of string.
+        // "deny_files": [],
+      // },
+
+      // // The tracker's web pages: its statistics, read-only. None when left out.
+      // // object.
+      // "console": {
+        // // The host and port the pages listen on. A host that is not a loopback address needs cert_file
+        // // and key_file, so that passwords never cross a network in the clear.
+        // // string; required.
+        // "address": "127.0.0.1:9000",
+
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
+
+        // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
+        // // pages are served over TLS.
+        // // string.
+        // "cert_file": "/etc/fit/example.com.pem",
+
+        // // A PEM file with the certificate's private key.
+        // // string.
+        // "key_file": "/etc/fit/example.com.key",
+
+        // // Who may log in: at least one user.
+        // // list of object; required.
+        // "users": [
+          // {
+            // // The user's name.
+            // // string; required.
+            // "username": "fit",
+
+            // // The bcrypt hash of the user's password, as fit hash-password makes it.
+            // // string; required.
+            // "password_hash": "$2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG",
+          // },
+        // ],
+
+        // // How long a login lasts without a request. 30m when left out.
+        // // duration, as "1.5s" or "2m"; default "30m".
+        // "session_timeout": "30m",
+
+        // // How long a login lasts at most, however busy. 12h when left out.
+        // // duration, as "1.5s" or "2m"; default "12h".
+        // "session_lifetime": "12h",
+
+        // // The most logins kept at once; one more ends the oldest. 64 when left out or 0.
+        // // integer, 0 or more; default 64.
+        // "max_sessions": 64,
+
+        // // The most connections the pages keep open at once, a quarter of them kept for those with a
+        // // login. When they are taken, a new connection closes the oldest of those without one, of the
+        // // client holding the most, and is closed as it is accepted only when every one has a login;
+        // // one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
+        // // when left out or 0.
+        // // integer, 0 or more; default 32.
+        // "max_conns": 32,
+
+        // // The client addresses the pages serve, deciding before the global access, which applies to
+        // // the pages too: a connection either refuses is closed as soon as it is accepted. It follows
+        // // every config applied, without restarting the pages. Set allow to "127.0.0.1" (and "::1") to
+        // // keep local access whatever the global access says. Every address is served, unless the
+        // // global access says otherwise, when left out.
+        // // object.
+        // "access": {
+          // // IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry
+          // // here or in allow_files, every address neither holds is refused, unless deny refuses it
+          // // first.
+          // // list of string.
+          // "allow": ["127.0.0.1", "::1", "10.0.0.0/8"],
+
+          // // IP addresses and CIDR prefixes refused, whatever allow holds.
+          // // list of string.
+          // "deny": ["203.0.113.0/24"],
+
+          // // Files of more allow entries, one on each line, each line told apart by its content: an
+          // // address or prefix, with what follows # or ; left out, as the lists published for firewalls
+          // // are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name,
+          // // where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4
+          // // addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or //
+          // // are left out; any other line is an error. Read when the config is applied, and applied again
+          // // when one changes; each at most 64 MiB.
           // // list of string.
           // "allow_files": [],
 

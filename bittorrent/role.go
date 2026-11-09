@@ -13,7 +13,14 @@
 //
 // A reload changes in place what fib's client changes while it runs: the
 // limits (Client.SetLimits), the access (the Filter's gate, then
-// Client.Refilter), the save interval and the console. A change of what fib
+// Client.Refilter), the categories, the queue, the disk checks, the
+// alternative rates, watch_dir, the save interval and the console.
+//
+// Beside the saver, a manager goroutine looks at the torrents every second
+// (manage.go): it starts and pauses them by the queue and the disk space,
+// switches the alternative rates by their schedules, gives each torrent its
+// limits, has a category's media library scanned when one of its torrents
+// completes, and looks at watch_dir every watch_interval (watch.go). A change of what fib
 // reads only when it makes a client (listen, encryption, dht, pex, utp, lsd,
 // disk_workers, disk_queue_bytes) makes a new client: the torrents are saved
 // from the old one once it is closed, and added to the new one with their
@@ -36,6 +43,7 @@ import (
 	"github.com/lesismal/fib"
 	fibbt "github.com/lesismal/fib/bittorrent"
 	"github.com/lesismal/fib/bittorrent/bencode"
+	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
@@ -43,6 +51,7 @@ import (
 	"github.com/lesismal/fit/app/roleconsole"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
+	"github.com/lesismal/fit/medialib"
 )
 
 // ID is the role's, and its member's path in the config.
@@ -95,6 +104,28 @@ type Role struct {
 
 	// wrap, for tests, wraps the storage of every torrent.
 	wrap func(fibbt.StorageOpener) fibbt.StorageOpener
+	// now is the clock the alternative rates' schedules are read by,
+	// diskFree tells a directory's free space, rescan asks a media library
+	// for a scan, and tick is how often the manager looks: set by New,
+	// changed by tests before the first Apply.
+	now      func() time.Time
+	diskFree func(dir string) (uint64, bool)
+	rescan   func(library string) bool
+	tick     time.Duration
+
+	// fetchSem bounds the downloads by URL.
+	fetchSem chan struct{}
+
+	// watchMu orders the looks at watch_dir and guards what follows:
+	// the files seen at the last look, and the last error of each file
+	// left to be tried again and of the directory.
+	watchMu   sync.Mutex
+	watchSeen map[string]stamp
+	watchLast map[string]string
+	watchErr  string
+
+	// pub is the publish entries (publish.go), guarded by mu.
+	pub *publisher
 
 	// mu orders Apply, Stop, the API and the saver, and guards what
 	// follows.
@@ -110,9 +141,21 @@ type Role struct {
 	listDirty bool
 	interval  time.Duration
 	lastErr   string
+	// altMode is the API's say on the alternative rates (AltSpeedOn,
+	// AltSpeedOff, or "" for the schedules), altOn whether they held at
+	// the last look, altLoc the zone of their schedules.
+	altMode string
+	altOn   bool
+	altLoc  *time.Location
+	// httpc downloads .torrent files by URL, made on first use, with the
+	// url_timeout httpTimeout.
+	httpc       *fibhttp.Client
+	httpTimeout time.Duration
 
-	saverStop chan struct{}
-	saverDone chan struct{}
+	saverStop  chan struct{}
+	saverDone  chan struct{}
+	manageStop chan struct{}
+	manageDone chan struct{}
 
 	// evMu guards storageErr, which the client's events set: never held
 	// while calling the client, whose event goroutine takes it.
@@ -123,11 +166,14 @@ type Role struct {
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Role {
 	r := &Role{host: h, engine: h.Engine, key: h.Upstream, log: h.Log, byID: map[string]*record{},
-		storageErr: map[string]string{}}
+		storageErr: map[string]string{}, now: time.Now, diskFree: medialib.DiskFree, tick: defaultTick,
+		fetchSem: make(chan struct{}, MaxURLFetches), watchSeen: map[string]stamp{}, watchLast: map[string]string{}}
+	r.rescan = r.rescanLibrary
 	if r.key == nil {
 		r.key = h.Engine
 	}
 	r.console = roleconsole.New(h, ID, r.routes)
+	r.pub = newPublisher(r)
 	return r
 }
 
@@ -162,6 +208,12 @@ func (r *Role) Apply(member any) error {
 	if err != nil {
 		return fmt.Errorf("access: %w", err)
 	}
+	var altLoc *time.Location
+	if cfg.AltSpeed != nil {
+		if altLoc, err = config.LoadTimeZone(cfg.AltSpeed.TimeZone); err != nil {
+			return fmt.Errorf("alt_speed: %w", err)
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.stopped {
@@ -170,29 +222,37 @@ func (r *Role) Apply(member any) error {
 	// Before a client starts, which goes by it from its first peer.
 	r.gate.Set(policy)
 	key := clientKey(cfg)
+	// The torrents are added by the new config's categories.
+	old := r.cfg
+	r.cfg, r.altLoc = cfg, altLoc
 	switch {
 	case r.client == nil:
 		if err := r.start(cfg); err != nil {
+			r.cfg = old
 			return err
 		}
 	case key != r.clientKey:
-		if err := r.restart(cfg); err != nil {
+		if err := r.restart(old, cfg); err != nil {
 			return fmt.Errorf("a new client: %w", err)
-		}
-	default:
-		if l := limitsOf(cfg); l != r.limits {
-			r.client.SetLimits(l)
-			r.limits = l
 		}
 	}
 	r.clientKey = key
 	// The peers connected that the policy now refuses.
 	r.client.Refilter()
-	r.cfg = cfg
 	r.interval = cfg.Save()
+	r.pub.apply(cfg.Publish)
+	if r.httpc != nil && cfg.URLFetchTimeout() != r.httpTimeout {
+		r.httpc.Close()
+		r.httpc = nil
+	}
+	// The limits, the alternative rates, the categories' limits and the
+	// queue, as the config has them now.
+	r.manageLocked()
 	if r.saverStop == nil {
 		r.saverStop, r.saverDone = make(chan struct{}), make(chan struct{})
 		go r.saveLoop(r.saverStop, r.saverDone)
+		r.manageStop, r.manageDone = make(chan struct{}), make(chan struct{})
+		go r.manageLoop(r.manageStop, r.manageDone)
 	}
 	rolesMu.Lock()
 	roles[r.key] = r
@@ -206,7 +266,7 @@ func (r *Role) Apply(member any) error {
 // start makes the first client and restores the state of data_dir into
 // it. r.mu is held.
 func (r *Role) start(cfg *config.BitTorrentClient) error {
-	recs, err := loadState(cfg.DataDir)
+	recs, alt, err := loadState(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("%w; fix it or move it away, and apply the config again", err)
 	}
@@ -214,34 +274,37 @@ func (r *Role) start(cfg *config.BitTorrentClient) error {
 	if err != nil {
 		return err
 	}
-	r.client, r.limits, r.dataDir = c, limitsOf(cfg), cfg.DataDir
+	r.client, r.limits, r.dataDir, r.altMode = c, limitsOf(cfg), cfg.DataDir, alt
 	r.setRecords(recs)
 	r.restoreAll()
+	r.dropTemporaries()
 	if r.log != nil {
-		r.log.Infof("listening on %s, %d torrents", c.Addr(), len(recs))
+		r.log.Infof("listening on %s, %d torrents", c.Addr(), len(r.recs))
 	}
 	return nil
 }
 
-// restart replaces the client with one made for cfg, the torrents moved to
-// it with their resume data, or, for a new data_dir, those of its state.
-// When the new client cannot be made, the old one is made again. r.mu is
-// held.
-func (r *Role) restart(cfg *config.BitTorrentClient) error {
+// restart replaces the client made for old with one made for cfg, the
+// torrents moved to it with their resume data, or, for a new data_dir,
+// those of its state. When the new client cannot be made, the old one is
+// made again, and r.cfg is old again. r.mu is held, and r.cfg is cfg.
+func (r *Role) restart(old, cfg *config.BitTorrentClient) error {
 	newDir := filepath.Clean(cfg.DataDir) != filepath.Clean(r.dataDir)
 	var recs []*record
+	var alt string
 	if newDir {
 		var err error
-		if recs, err = loadState(cfg.DataDir); err != nil {
+		if recs, alt, err = loadState(cfg.DataDir); err != nil {
+			r.cfg = old
 			return err
 		}
 	}
-	old := r.cfg
 	r.closeClient()
 	c, err := r.newClient(cfg)
 	if err != nil {
 		// The port may be taken: back to the client before, on the same
 		// torrents.
+		r.cfg = old
 		if back, berr := r.newClient(old); berr == nil {
 			r.client = back
 			r.client.SetLimits(r.limits)
@@ -253,10 +316,13 @@ func (r *Role) restart(cfg *config.BitTorrentClient) error {
 	}
 	r.client, r.limits = c, limitsOf(cfg)
 	if newDir {
-		r.dataDir = cfg.DataDir
+		r.dataDir, r.altMode = cfg.DataDir, alt
 		r.setRecords(recs)
 	}
 	r.restoreAll()
+	if newDir {
+		r.dropTemporaries()
+	}
 	if r.log != nil {
 		r.log.Infof("a new client listening on %s, %d torrents", c.Addr(), len(r.recs))
 	}
@@ -365,12 +431,16 @@ func (r *Role) restoreAll() {
 			}
 		}
 	}
+	r.pub.attachAll()
 }
 
-// restore adds rec to the client, with its resume data. r.mu is held.
+// restore adds rec to the client, with its resume data and its limits,
+// paused: the queue starts it (scheduleLocked), unless it is paused. r.mu
+// is held.
 func (r *Role) restore(rec *record, peers []string) error {
-	opts := &fibbt.AddOptions{Paused: rec.paused, Sequential: rec.sequential, FilePriorities: rec.priorities,
-		Resume: rec.resume, Storage: r.opener(rec.dir), Peers: peers}
+	limits := r.torrentLimitsLocked(rec)
+	opts := &fibbt.AddOptions{Paused: true, Sequential: rec.sequential, FilePriorities: rec.priorities,
+		Resume: rec.resume, Storage: r.opener(rec.dir), Peers: peers, Limits: limits}
 	var t *fibbt.Torrent
 	var err error
 	if rec.mi != nil {
@@ -381,8 +451,44 @@ func (r *Role) restore(rec *record, peers []string) error {
 	if err != nil {
 		return err
 	}
-	rec.t, rec.err, rec.genKnown = t, nil, false
+	rec.t, rec.err, rec.genKnown, rec.applied = t, nil, false, limits
+	rec.held, rec.holdMsg = holdNone, ""
+	if !rec.paused {
+		rec.held = holdStart
+	}
 	return nil
+}
+
+// dropTemporaries removes, with their data, the torrents bt_stream added
+// on the fly that a stop or a crash left in a state just read: no stream
+// reads them any more. r.mu is held.
+func (r *Role) dropTemporaries() {
+	n := 0
+	for _, rec := range slices.Clone(r.recs) {
+		if !rec.temporary {
+			continue
+		}
+		if rec.t != nil {
+			if err := rec.t.Remove(true); err != nil && r.log != nil {
+				r.log.Warnf("temporary torrent %s: removing its data: %v", rec.id, err)
+			}
+			rec.t = nil
+		}
+		r.removeRecord(rec)
+		if err := removeFiles(r.dataDir, rec.id); err != nil && r.log != nil {
+			r.log.Warnf("temporary torrent %s: %v", rec.id, err)
+		}
+		n++
+	}
+	if n == 0 {
+		return
+	}
+	if err := saveList(r.dataDir, r.recs, r.altMode); err == nil {
+		r.listDirty = false
+	}
+	if r.log != nil {
+		r.log.Infof("removed %d temporary torrents left from before", n)
+	}
 }
 
 // closeClient closes the client, then saves every torrent's resume data,
@@ -393,6 +499,7 @@ func (r *Role) closeClient() {
 	}
 	_ = r.client.Close()
 	r.client = nil
+	r.pub.detachAll()
 	r.saveLocked(true)
 	for _, rec := range r.recs {
 		rec.t = nil
@@ -408,13 +515,21 @@ func (r *Role) Stop(ctx context.Context) {
 	}
 	r.stopped = true
 	stop, done := r.saverStop, r.saverDone
+	mstop, mdone := r.manageStop, r.manageDone
 	r.mu.Unlock()
 	if stop != nil {
 		close(stop)
 		<-done
+		close(mstop)
+		<-mdone
 	}
+	r.pub.stopAll()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.httpc != nil {
+		r.httpc.Close()
+		r.httpc = nil
+	}
 	r.closeClient()
 	r.console.Stop(ctx)
 	rolesMu.Lock()
@@ -464,10 +579,8 @@ func (r *Role) saveLocked(final bool) {
 		if name := t.Name(); name != "" && name != rec.name {
 			rec.name, r.listDirty = name, true
 		}
-		if st := t.State(); (st == fibbt.StatePaused || st == fibbt.StateStopped) && !rec.paused {
-			// Paused by its seed limit: it stays paused after a restart.
-			rec.paused, rec.resumeDirty, r.listDirty = true, true, true
-		}
+		// Paused by its seed limit: it stays paused after a restart.
+		r.noteSeedLimitLocked(rec)
 		if t.Info() == nil {
 			continue
 		}
@@ -502,7 +615,7 @@ func (r *Role) saveLocked(final bool) {
 		rec.resume, rec.savedGen, rec.genKnown, rec.resumeDirty = data, gen, true, false
 	}
 	if r.listDirty || final {
-		if err := saveList(r.dataDir, r.recs); err != nil {
+		if err := saveList(r.dataDir, r.recs, r.altMode); err != nil {
 			fail(stateFile, err)
 		} else {
 			r.listDirty = false

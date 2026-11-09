@@ -365,11 +365,11 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | **BitTorrent** | | | |
 | I196 | fib A75–A79 for the BitTorrent client: storage and hashing off fib's workers, fast resume, limits that change at run time, refusing peers by address, the client on the caller's engine | — | done |
 | I197 | The `bittorrent.client` role: config, the client on the shared engine, the state file in `data_dir`, restore and reload (decision 037) | I196 | done |
-| I198 | Adding torrents (magnet, file, URL, `watch_dir`), categories with a media library rescan, queueing, disk checks | I197 | todo |
-| I199 | `alt_speed` schedules, per-torrent limits, the role's `access`, `.p2p` and `.dat` blocklists in `access` for every module | I197 | todo |
-| I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | todo |
-| I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | todo |
-| I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | todo |
+| I198 | Adding torrents (magnet, file, URL, `watch_dir`), categories with a media library rescan, queueing, disk checks | I197 | done |
+| I199 | `alt_speed` schedules, per-torrent limits, the role's `access`, `.p2p` and `.dat` blocklists in `access` for every module | I197 | done |
+| I200 | `bt_stream`: playing a torrent's file through HTTP ranges while it downloads, adding by magnet link on the fly | I197 | done |
+| I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | done |
+| I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | done |
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | todo |
 | I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | todo |
 | I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | todo |
@@ -6965,6 +6965,88 @@ takes a short lock, so the queue drains, but a bound belongs in fib (a fib reque
   download into a library's root appears in its catalog; the queue starts the next torrent when one
   finishes.
 - **Touches**: `bittorrent`, `medialib`.
+- **Done** 2026-11-09, with I199: `bittorrent/manage.go` (the manager goroutine: queue, disk checks,
+  alternative rates, each torrent's limits, completions), `fetch.go` (`AddURL` on fib's asynchronous
+  HTTP client), `watch.go` (`watch_dir`); config `categories`, `watch_dir`, `watch_interval`,
+  `watch_max_files`, `url_timeout`, `limits.max_active_downloads`, `max_active_seeds`,
+  `min_free_bytes`, with their checks; `medialib.DiskFree`; the state keeps each torrent's category,
+  own limits and completion, and the list's order is the queue's. API: `Add` with `Category` and
+  `Limits`, `AddURL`, `SetCategory`, `SetTorrentLimits`, `SetQueuePosition`, `AltSpeed`,
+  `SetAltSpeed`; a status gives the category, own and effective limits, queue position, completion
+  and why the role holds the torrent. Tests: categories (directories, limits merged, a reload of a
+  category's limits in place, kept across a restart, unknown and escaping ones refused), the
+  download queue (the next starting as one finishes, a queue position moving one ahead, the order
+  across a restart), the seed queue (pause and remove free a slot), the disk (not started short of
+  space, started once it is there, paused when it runs out mid-download over a slow peer, seeds not
+  held), a download into a library's root appearing in its catalog with one scan and none after a
+  restart, `watch_dir` (.torrent, .magnet, a category's subdirectory, bad, empty, hidden, other
+  files, one already held), its bounds (files a look, a file still being written, max_torrents left
+  for later, one too large, a missing directory), URLs (redirects, to a magnet link, a bad scheme, a
+  bad answer, a redirect loop, a server that never answers, a connection cut mid-body, a body past
+  the bound, past MaxURLFetches at once).
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **URL downloads**: the body is bounded by 32 MiB, not fib's 128 MiB metainfo bound, and at most
+   4 run at once, one more refused (`ErrBusy`) rather than queued, so that at most 128 MiB are held;
+   5 redirects, one to a magnet link included; `url_timeout` (30s) bounds the whole download. Why: a
+   .torrent body is held whole until added, and real ones are far below 32 MiB. Alternatives: fib's
+   bound; a bounded queue of URL adds.
+2. **`AddURL` waits for the download** on the caller's goroutine (never a fib worker; fib's callback
+   only hands the answer over) and returns the torrent's status. Alternative: return at once with a
+   job the Admin API reports on (I203).
+3. **No internal-address guard on URLs**: the API is the operator's (Admin API, CLI, pages behind
+   their auth). Alternative: refuse loopback, link-local and private addresses as an upstream's
+   `deny_internal` does.
+4. **`watch_dir`**: a category's files are those in a subdirectory of its name, the others have
+   none; a file is taken once its size and modification time held across two looks (rather than by
+   its age, which a fake clock or a slow copy would fool); handled files move into `.done` or
+   `.failed` beside them (a `<name>.error` file says why), a torrent held already counts as done,
+   and errors that may pass (`max_torrents`, the state not written, the client down) leave the file
+   to be tried at each look. Defaults: every 10s, at most 100 files a look (at most 10000), reading
+   at most 16 directory entries for each. Alternatives: delete handled files; one `.done` for all;
+   options for a watch directory's category or a paused add.
+5. **A category's limits are each torrent's** (fib's `TorrentLimits`), not one budget the
+   category's torrents share: fib has buckets for the client and for each torrent only. A torrent's
+   own limits take the place of the category's, field by field. Alternative: a shared bucket per
+   category (a fib request, when wanted).
+6. **A category's relative `dir` stays below `download_dir`**; an absolute one is taken as it is
+   (the config is the operator's). **`SetCategory` does not move files**: fib has no way to move a
+   running torrent's storage; the torrent takes the new category's limits and library only.
+   A category removed from the config stays recorded on its torrents, which lose its limits, and
+   regain them if it comes back. Alternatives: move the files (stop, rename, add again with resume
+   data, or a fib `Torrent.Move`); refuse a category change.
+7. **No queue by default** (`max_active_downloads` and `max_active_seeds` 0), not qBittorrent's
+   3 and 5: a server's torrents are bounded already by `max_torrents` and the connection limits.
+   The queue goes by the list's order, which `SetQueuePosition` changes and the state file keeps; a
+   torrent moved ahead of a running one pauses it; stalled torrents count as active; a magnet
+   fetching its metadata, and a torrent checking its data, count as downloading; which torrents are
+   held is not saved but worked out again at start. Alternatives: qBittorrent's defaults; leave
+   slow torrents out of the count; save the held state.
+8. **Every torrent is added paused and started by the role** (restored, added, resumed), in the
+   same hold of the role's lock, so that the queue and the disk check are one place. The manager
+   looks every second (not configurable).
+9. **Disk checks**: `min_free_bytes` defaults to 1 GiB, as a media library's uploads; a held
+   download starts when the disk has what it still has to download plus `min_free_bytes` (torrents
+   started in the same look reserving theirs, per directory, not per device), a running one pauses
+   below `min_free_bytes`, and starts again by itself once the space is there; seeds are never
+   held; what running downloads will still write is not reserved. Alternatives: no default (off);
+   reserve for running downloads too; never restart by itself.
+10. **A completion is counted once**: polled every second (the torrent's `Done`), saved in the state
+    (`completed`), counted again only after `SetFilePriority`; then the category's library, looked
+    up by name on the role's engine, is asked for a scan (`Library.Rescan`, which coalesces). A
+    library not running is logged. Alternative: fib's `EventCompleted`, which a restart's check
+    would send again.
+11. **medialib gains `DiskFree`**, a thin export of its diskfree helpers; the rescan API existed.
+
+Open from it: fib has no per-category (group) rate bucket and no way to move a torrent's storage; the
+role's new API is not on its console's HTTP routes yet (I203).
+
+**Decided when merging I198 with I200 (pending review):** a torrent `bt_stream` added on the fly is
+not queued and takes no slot of `max_active_downloads` or `max_active_seeds`, since a viewer waits
+for it and `max_temporary` and `max_temporary_bytes` bound such torrents; the disk check holds it
+as any other (`TestTemporaryNotQueued`). Alternative: queue it like the rest, which leaves the
+viewer waiting until `read_timeout`.
 
 ### I199 Schedules, per-torrent limits and blocklists
 
@@ -6975,6 +7057,48 @@ takes a short lock, so the queue drains, but a bound belongs in fib (a fib reque
   connected peer; `.p2p` and `.dat` files parse (ranges, comments, levels, bad lines) in `access`'s
   tests.
 - **Touches**: `bittorrent`, `access`, `config`, `docs`.
+- **Done** 2026-11-09, with I198: `access` reads list files line by line, each line an address or
+  prefix, a range, an eMule `ipfilter.dat` line or a PeerGuardian `.p2p` line, for every module
+  (`access/lists.go`; its sets are built from ranges); `alt_speed` (rates, weekly `schedules`,
+  `time_zone`) applied by the manager on the role's clock, with the API's `on`/`off`/`auto` kept in
+  the state; per-category and per-torrent limits through fib's `TorrentLimits`, in the API and the
+  state; the role's access already refilters at every Apply (I197), and a list file's change
+  applies the config again. Tests: `access` (ranges, `.dat` levels and leading zeros, `.p2p` names
+  with colons, commas, dashes and `#`, comments, bad lines naming the file and line, a line too
+  long, mixed files through a policy, an allow list of ranges, ranges against a linear check);
+  schedules (overnight ranges, weekends to 24:00, zones) and the role switching rates on a fake
+  clock, the API's choice across a restart, a reload without `alt_speed`; a `.p2p` deny file
+  closing a connected peer, and a `.dat` line above level 127 not denying.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **An `ipfilter.dat` line of a level above 127 is not listed**, wherever the file is used (so a
+   deny file blocks levels 0 to 127): qBittorrent's reading. eMule at its default filter level 127
+   blocks levels below 127 only, so a line of level exactly 127 is blocked here and not by eMule.
+   Alternatives: eMule's `< 127`; a configurable level.
+2. **Formats are told apart line by line**, not by file name or a header: an address or prefix
+   first, then a bare range (`first-last`, also accepted on its own), then `.dat`
+   (`first - last , level , name`), then `.p2p` (the range after the last `:`). A trailing `#` or
+   `;` comment is cut only from the plain format, since `.p2p` names may hold `#`; lines starting
+   with `#`, `;` or `//` are comments. IPv4 addresses in ranges may have leading zeros; IPv6 ranges
+   are taken too.
+3. **A bad line still fails the whole file**, naming the file and the line, as before (the config
+   is not applied, the old one stays), rather than being skipped as eMule and qBittorrent do. Why:
+   a list that silently lists less is worse for an allow list. Alternative: skip and count bad
+   lines in a log line.
+4. **`access.ReadFile` returns ranges** (`[]access.Range`) instead of prefixes, and a line may be
+   16 KiB (was 4 KiB); ranges are not split into prefixes, so a published list costs one range a
+   line.
+5. **Alternative rates**: 0 is unlimited (qBittorrent's); only the two rates switch, not the
+   connection limits; a schedule's `days` are the days it begins on, one whose `to` is earlier than
+   its `from` runs into the next day, `to` may be `24:00` (and `00:00` means midnight at the end);
+   `time_zone` is local by default, as fit's logs; the API's `on`/`off` override the schedules
+   until `auto`, and is saved in `torrents.json` (`alt_speed`); without `alt_speed` in the config
+   the rates never switch. Alternatives: a separate alternative connection limit; not saving the
+   override.
+6. **Per-torrent limits are fit's `BitTorrentTorrentLimits`**, fib's `TorrentLimits` meaning (zero
+   takes the client's, negative is no limit for the torrent), the state keeping only the torrent's
+   own, merged over its category's when applied.
 
 ### I200 `bt_stream`: playing a file while it downloads
 
@@ -6985,6 +7109,90 @@ takes a short lock, so the queue drains, but a bound belongs in fib (a fib reque
 - **Done when**: a browser-style range request of a file still downloading is answered once its
   pieces arrive; slow readers, cut connections and a full stream bound are tested.
 - **Touches**: `bittorrent`, `handler`, `mediaauth`.
+- **Done** 2026-11-09: the route handler `bt_stream` (`handler/btstream`, in `modules/standard`):
+  `<prefix><info hash>/<file path>`, `/<n>` (file index) and `/` (the largest file), `GET` and
+  `HEAD`, a single `Range` (206, 416), `If-None-Match`/`If-Range` against an `ETag` of the torrent
+  and the file, `Content-Type` by extension, `Accept-Ranges`; read through fib's `Reader` on a
+  goroutine of the stream's own, at most `max_streams`, written with `WriteNoWait` and resumed by
+  `OnWritable`; `read_timeout`, `readahead_bytes`, `info_timeout`; `auth` (play on
+  `bt/<info hash>`); with `magnet`, adding by the `magnet` query parameter (publish needed),
+  temporary torrents bounded by `max_temporary` and `max_temporary_bytes`, downloading only the
+  files streamed, removed with their data `temporary_ttl` after their last stream and at the
+  role's start. Role hooks: `AddTemporary`, `SetTemporary`, `RemoveTemporary`, `TemporaryBytes`,
+  `SetFilePriorities`, `Status.Temporary`, `temporary` in `torrents.json`. Schema, reference,
+  templates, `schema-zh.js`, [BitTorrent](bittorrent.md#playing-a-file-while-it-downloads) in both
+  languages; `test/workers` names the handler's own `TestNoWorkerBlocks`. Tests (two roles on
+  loopback, DHT and LSD off, no trackers): a range of a file with no piece yet, answered once a
+  seeder is added; whole files by path, index and as the largest; suffix and open ranges, 416,
+  HEAD, 304, `If-Range`, several ranges; a 24 MiB file read by a client that stops (what is handed
+  to the connection settles far below the file, 768 KiB in a run on macOS, then the file arrives
+  whole); connections cut while
+  waiting for a piece and while streaming (the stream and its hold on the torrent end);
+  `max_streams` full; `read_timeout`; the role not running; the temporary lifecycle (401/403 for
+  adding without publish, a magnet link of another torrent, priorities, `max_temporary`, removal
+  with the data after the linger, added again), kept while another stream reads it,
+  `max_temporary_bytes`; play auth by header and query; `Drain`; ServeHTTP returning while its
+  stream waits; `parseRange`; the params' checks; the role's hooks, and temporary torrents removed
+  at the next start.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **URLs**: `<prefix><info hash>/<file path>` (the path as fib's `File.Path` gives it, the
+   torrent's name first), `<prefix><info hash>/<n>` for the file of index `n`, a path winning over
+   an index when a file is named with digits alone, and `<prefix><info hash>/` for the largest
+   file. Why: a player sees the file's name and extension, the index serves scripts, the largest
+   file is what a magnet link usually means. Alternatives: the index in a query (`?file=n`) or
+   under its own segment (`/i/<n>`); no largest-file form.
+2. **Adding on the fly is the `magnet` query parameter of a file's URL**, which must be a link of
+   the path's torrent (400 otherwise); the request then needs `publish` on `bt/<info hash>`
+   besides `play`, and `magnet` needs `auth` (a config without it is refused). Why: the URL a
+   player keeps works for every range whether or not the torrent is there yet; downloading from
+   the internet is a stronger right than playing. Alternatives: a path form
+   (`<prefix>magnet/<link>`); a separate add request, then plain URLs; play being enough; `magnet`
+   allowed without `auth`.
+3. **The bounded pool is a goroutine per stream, at most `max_streams`**, with no queue: past it
+   503. A goroutine waits for pieces (bounded by `read_timeout`) but never for the client: when
+   `WriteNoWait` reports the watermark passed it ends, and `OnWritable` starts another. Why: a
+   read can only block, and one at a time per stream is all a stream needs; a shared pool with a
+   queue would let one torrent's missing pieces delay other streams. Alternatives: a shared
+   `filepool` of fixed workers and a queue; a goroutine that also waits for the client.
+4. **`max_streams` counts a handler's own streams**, a route's, not shared across a reload: the
+   old config's streams end at its drain. Alternative: a count shared by engine and prefix.
+5. **A response begins with its first chunk**: a first read past `read_timeout` is a 504, a later
+   one cuts the response short of its `Content-Length`. Alternative: send the header at once, as
+   soon as the range is known.
+6. **Temporary torrents download only the files streamed** (the others priority 0, raised as
+   another is asked for); `max_temporary_bytes` counts what they want (fib's `Stats.Wanted`), and
+   past it the answer is **507** and a torrent just added is removed. Two torrents added at once
+   may both be refused near the bound. Alternatives: download whole torrents; count their total
+   length; check the disk's free space (I198's diskfree, when it lands).
+7. **Temporary torrents are marked in the role's state** (`temporary` in `torrents.json`) and
+   removed with their data when the role reads a state (start, a new `data_dir`). Why: otherwise a
+   restart would turn them into ordinary torrents that are never removed. Alternatives: not
+   persisted; kept across a restart with a new linger.
+8. **The linger is shared** by every `bt_stream` handler and across reloads, by role and torrent;
+   the `temporary_ttl` is that of the handler whose stream ended last; `RemoveTemporary` removes a
+   torrent only while it is still temporary, so one made ordinary (`SetTemporary(id, false)`)
+   stays; a stream that comes while its torrent is being removed waits, then adds it again or gets
+   404.
+9. **Several ranges are answered with the whole file** (200), not `multipart/byteranges`: players
+   ask for one range at a time. The `ETag` is strong, `"<info hash>-<index>"`; no
+   `Last-Modified`.
+10. **Defaults**: `max_streams` 32 (at most 4096), `read_timeout` 60s, `readahead_bytes` 8 MiB
+    (64 KiB to 256 MiB), `info_timeout` 60s, `max_temporary` 4 (at most 1000),
+    `max_temporary_bytes` 16 GiB, `temporary_ttl` 10m (at most 7 days); a chunk is 64 KiB, fib's
+    watermark.
+11. **Answers**: the role not running 503 (`Retry-After: 5`); `max_temporary` or `max_torrents`
+    reached 503 (`Retry-After: 30`); `magnet` off 403; a torrent the role has not got, without a
+    magnet link, 404; the torrent removed under a stream not begun 503.
+12. **`Content-Type` from a table of the handler's own** (video, audio, subtitles, pictures),
+    not Go's `mime`, which reads the system's files on first use.
+
+Open from it: adding a torrent already held as temporary through the API answers `ErrExists`;
+making it an ordinary torrent (`SetTemporary(id, false)`) belongs to I198/I203's add paths. fib's
+`Reader.Close` waits for a `Read` under way (both take its lock), so the handler cancels the read's
+context first; an interrupting `Close` would be a small fib request if another user needs it.
+Not run: the Linux race run, and the full suite (left to the main session).
 
 ### I201 The `bittorrent.tracker` role
 
@@ -6994,6 +7202,79 @@ takes a short lock, so the queue drains, but a bound belongs in fib (a fib reque
 - **Done when**: libtorrent and anacrolix announce to it over HTTP and UDP; a private tracker refuses
   unknown passkeys and info hashes; bounds tested.
 - **Touches**: `bittorrent`, `handler`, `mediaauth`.
+- **Done** 2026-11-09: package `bittorrent/tracker` (`tracker.go`, `hooks.go`, `handler.go`,
+  `api.go`), the role `bittorrent.tracker` and the handler `bt_tracker` registered by
+  `app/standard` and `modules/standard`; config `bittorrent.tracker` (`config/bittorrent_tracker.go`:
+  `listen`, `interval`, `min_interval`, `peer_ttl`, `max_torrents`, `max_peers_per_torrent`,
+  `max_peers`, `max_numwant`, `max_scrape`, `auth`, `allow`, `allow_files`, `access`, `console`)
+  with its checks, its UDP port in the address clash check, its files watched (`app.Info.CertFiles`);
+  users' passkeys and `AllowPasskey` in `mediaauth` (`passkey.go`); schema, reference, templates,
+  `schema-zh.js`; a tracker section in [BitTorrent](bittorrent.md) in both languages. Tests: the
+  role through the app Manager; announces and scrapes over HTTP (through the `bt_tracker` module)
+  and UDP with fib's tracker client, the role's statistics; two fib clients downloading a private
+  torrent that find each other only through the tracker (the seeder over HTTP with a token, the
+  leecher over UDP with a user's passkey); passkeys of users and tokens in the path and the query,
+  over HTTP and UDP, refused when missing, unknown or without the grant, scrapes too, and a policy not
+  loaded failing closed; the allow-list inline and in a file, refused hashes, the file changed and
+  applied again, a bad line and a missing file refusing the reload with the list before kept; the
+  store's bounds and `max_numwant`; access refusing UDP before a connection and HTTP with a failure,
+  lifted by a reload; reloads in place (the interval keeping the swarms, a taken port leaving all as
+  it was, `listen` moved and removed, new bounds starting a new store); a client sending its
+  announce a byte at a time, clients cut midway, garbage datagrams; the console's routes; the
+  passkey redaction; `mediaauth`'s passkeys (keyrings, other secrets, public play); the config's
+  checks and clashes. libtorrent and anacrolix interop is I205.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **A user's passkey is derived, not stored**: the first 32 hex digits of HMAC-SHA256(the policy's
+   signing key, "fit bittorrent passkey\0" + name); tokens, static or signed, are passkeys as they
+   are; a passkey's grant must play `bittorrent/<info hash in hex>`. Why: `media_auth` already has
+   users, tokens, grants by pattern and key rotation, and a password cannot ride in a URL a .torrent
+   file keeps for ever; deriving needs no new state and rotating the secret revokes every passkey.
+   With a keyring every key's passkey is taken and the default key's handed out. Alternatives: a
+   `passkey` field per user in `media_auth`; passkeys kept in a file of the role; long-lived signed
+   tokens only.
+2. **A private tracker fails closed** while its policy is not loaded ("the tracker's passkeys are not
+   available"); a policy whose `public` has `play` lets everyone in, as it does for streams.
+3. **The store's default bounds are fit's, below fib's**: `max_torrents` 100000 (fib 1048576),
+   `max_peers_per_torrent` 10000 (65536), `max_peers` 500000 (2097152), about 80 MiB at most; the
+   maxima are fib's defaults (`max_peers` up to 4194304). Alternative: fib's defaults.
+4. **A change of the store's bounds or `peer_ttl` makes a new store**, the swarms starting empty
+   (clients announce again within their interval), since fib's `MemoryStore` takes them only when
+   made; the interval, `min_interval`, `max_numwant` and `max_scrape` make a new fib `Server` on the
+   same store, with the role's one UDP secret, so swarms and UDP connection IDs survive.
+   Alternatives: refuse such a change until a restart; wait for fib to set bounds at run time.
+5. **An allow-list file with a bad line, or one that does not read, refuses the reload**, the list
+   before staying in force. Why: a typo would otherwise silently refuse a torrent, or with a missing
+   file, every torrent. Alternative: skip bad lines with a warning.
+6. **The role's `access` is checked in the `bt_tracker` handler for HTTP** (a failure "refused", BEP 3
+   style), and by the UDP binding's `Filter` before a connection is made; HTTP is accepted by fit's
+   listeners, whose access is the global one and the listener's. Alternative: the role's access for
+   UDP only.
+7. **The access log never holds a passkey**: `?passkey=` is always replaced by `REDACTED` in the
+   request URI; the path segment before `announce`/`scrape` only when the tracker is private, so that
+   a public tracker's `/tracker/announce` stays readable.
+8. **Per-torrent statistics are for a torrent named, and listed for the allow-list's torrents**;
+   a public tracker cannot list what it tracks, because fib's `MemoryStore` has no way to enumerate
+   its torrents. Keeping our own index beside the store would work around fib (rule 15), so it is a
+   fib request instead (below). Counters: announces and scrapes served, refusals by reason
+   (`unregistered`, counted per refused hash, scrapes included; `passkey`; `access`).
+9. **A user's passkey is read on the role's console**, `GET /api/passkey?user=`, behind its login,
+   until I203's Admin API and I204's pages; the console's other routes are `GET /api/stats`,
+   `/api/torrents` (`offset`, `limit` ≤ 1000) and `/api/torrents/<hash>`.
+10. **A private scrape needs a passkey whose grant plays every torrent it names**; a scrape naming
+    none gets nothing, as fib serves it, whoever asks.
+11. **`bt_tracker` has no params**: fib's dispatch by the path's last segment, so the route's match
+    decides where the tracker lives (`/announce`, `/tracker/*`).
+12. **Not configurable**: fib's `TrustIPParam` (off: a peer is recorded at the address its request
+    came from), the default numwant (fib's 50), the UDP secret (random per role, kept across reloads,
+    not restarts: UDP clients connect again).
+
+Open from it: fib requests to file — `MemoryStore` cannot list its torrents (a `Range(func(InfoHash,
+Stats) bool)` would give a public tracker's per-torrent statistics) nor change its bounds while
+it runs (a `SetConfig(MemoryStoreConfig)` would keep the swarms across such a reload); fib's client
+announces `started` while a seeder checks its existing data, then `completed` when the check ends,
+so a seeder counts as a completed download. No metrics of the tracker yet (I203's metrics).
 
 ### I202 Publishing a directory as torrents
 
@@ -7003,6 +7284,98 @@ takes a short lock, so the queue drains, but a bound belongs in fib (a fib reque
 - **Done when**: a client downloads a published file from fit's seed alone and from the web seed
   alone; a changed file gets a new torrent and the old one stops.
 - **Touches**: `bittorrent`, `handler`.
+- **Done** 2026-11-09: `bittorrent.client.publish` entries (`config/bittorrent_publish.go`: `name`,
+  `dir`, `mode` `per_file`|`whole_dir`, `web_seed`, `announce`, `private`, `piece_length`, `files`,
+  `exclude`, `check_interval`, `max_files`, `max_total_bytes`, `max_hashing`, with their checks);
+  the role's publisher (`bittorrent/publish.go`, `publish_walk.go`): a walker goroutine and
+  `max_hashing` builder goroutines per entry, hybrid torrents by fib's `metainfo.Builder`, seeded in
+  place through read-only storage, kept in `data_dir/publish/<name>/` and restored by file stamp;
+  the role's code touched only by six hook lines (`role.go`: the field, `New`, `Apply`,
+  `restoreAll`, `closeClient`, `Stop`). The handler `bt_publish` (`handler/btpublish`, in
+  `modules/standard`): the JSON index, `<id>.torrent`, `<id>.magnet`, `503` without a client.
+  Schema, reference, templates, `schema-zh.js`, the module's chapter, a publishing section in
+  [BitTorrent](bittorrent.md) in both languages. Tests: each file of a directory downloaded by a
+  fib client from the role's seed alone, a `whole_dir` torrent downloaded (dotfiles and symbolic
+  links left out) and replaced when a file is added, a file downloaded from fit's own `static` route
+  as the web seed alone with the publishing role stopped, a restart that builds nothing and reads no
+  data (storage reads counted), a reload of bounds that builds nothing, an entry removed (torrents
+  stopped, state gone, files kept), a changed file getting a new torrent while the old one leaves
+  the client and is no longer served, a removed and an added file, `max_files`, `max_total_bytes`,
+  `files`/`exclude`, empty files, a `whole_dir` entry past its bounds, a duplicate file, a missing
+  directory, a failed build not retried until the file changes, web seed URLs of both modes,
+  trackers and the private flag, read-only storage, the routes (index, .torrent, magnet, HEAD,
+  404, 405, named entries), and the config's checks.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **Where the entries are: `bittorrent.client.publish`**, not a top-level `bittorrent.publish`.
+   Why: publishing runs on the client and keeps its state in its `data_dir`, so nesting makes the
+   dependency structural and the role's member stays one struct (no shared-code change). The
+   handler answers `503` while no client runs. Alternatives: `bittorrent.publish` read by the client
+   role (its member type changes); a role of its own looking the client up.
+2. **Names**: `mode` is `per_file` (default) or `whole_dir`; the include patterns are **`files`**,
+   as a media library's, because `include` is a directive of fit's .conf format. Alternatives:
+   `each`/`whole`; `match`.
+3. **Published torrents are the publisher's, not the role's list**: not in `torrents.json` or
+   `List`, not counted by `max_torrents`, seeding for ever whatever the seed limits say
+   (`TorrentLimits` −1). Why: their life follows the config and the disk, not the API.
+   Alternatives: records in `torrents.json` tagged with their entry, under `max_torrents`.
+4. **State and its key**: per entry `data_dir/publish/<name>/` with `index.json` (each torrent's
+   files and their fib `filewatch.Stamp`: size, modification and status change times, inode,
+   device) and `<id>.torrent`/`<id>.resume`; the index is kept only under the same build key
+   (`dir`, `mode`, `web_seed`, `announce`, `private`, `piece_length`). The index is written at the
+   walk after a change and when the client closes or the role stops, not after every build (that
+   would rewrite it once per file, quadratic for many); a crash in between builds those again.
+   Resume data is saved once a torrent has every piece. Alternatives: size and modification time
+   only, as fib's resume data (misses a replacement of the same size and time); writing the index
+   after every build.
+5. **Settling**: a new or changed file is built once its stamp has held for a `check_interval`
+   (its status change time is that old, or the walk before saw it the same), so that a file being
+   copied is not hashed again and again. Alternatives: build at once; a `settle` option of its own.
+6. **Walks, no watch**: the disk is followed by walking `dir` every `check_interval` (10s), not by
+   fib's `filewatch` watch, since a walk must stat every file anyway to compare stamps and builds
+   wait to settle. Alternative: on Linux, a watch that brings the next walk forward.
+7. **Read-only storage**: writes are refused (empty ones, creating an empty file, are a no-op), so
+   a piece that fails its check is never downloaded over a published file; such a torrent stays,
+   its state showing it, until its file changes. Alternative: remove a torrent whose check fails.
+8. **What is left out**: names starting with a dot, symbolic links (never followed: a link could
+   publish what lies outside `dir`), names fib's storage would write differently, and in
+   `per_file` empty files. Alternative: `follow_symlinks` within `dir`, as a media library's.
+9. **Bounds**: `max_files` 1000 (≤100000), `max_total_bytes` 1 TiB, `max_hashing` 1 (≤16) per
+   entry, at most 64 entries, a walk at most 10×`max_files`+10000 entries; past a bound `per_file`
+   publishes the first files by path, `whole_dir` publishes nothing; every problem reported, at most
+   20. No pool shared by the entries. Alternative: one hashing pool for the role.
+10. **Walk errors**: a `dir` that cannot be read leaves the torrents as they are; a walk that could
+    not read part of `dir` stops no torrent (and `whole_dir` is not rebuilt from it). Alternative:
+    stop the torrents of files not seen.
+11. **Failures and duplicates**: a build that fails is remembered with its files' stamps and not
+    tried again until they change; a torrent of an info hash the client already has (the same file
+    twice, two entries, a torrent added by hand) is listed with its error and seeded once.
+12. **`bt_publish`**: requests told apart by their last path element (`/` or `index.json`,
+    `<id>.torrent`, `<id>.magnet` as text), the index's URLs relative to it, `.torrent` files held
+    in memory in the entries' snapshot (bounded by `max_files` × fib's metainfo bound), no lock of
+    the role's on a worker (`ClientRunning` is an atomic). Alternatives: a `strip_prefix` param; the
+    magnet link as a redirect; .torrent files read from disk on a pool.
+13. **Torrents' fields**: trackers each a tier of their own, `created by` `fit`, the creation date
+    the build's; the web seed of `whole_dir` is the URL's parent, so its last element must be the
+    directory's name (checked in the config).
+14. **An entry renamed or removed** drops its state (a renamed one builds again under its new
+    name); a change of only its bounds or `check_interval` restarts it from its state, building
+    nothing.
+
+Open from it (fib, reported, not worked around):
+
+- **A torrent built is checked again when first added**: fib has no way to add a torrent as
+  complete, so a newly built torrent is hashed twice (by the Builder, then by the client's initial
+  check); restarts are not, through resume data. A fib request: `AddOptions.Seed` (trust the storage
+  as complete, as libtorrent's seed mode) or resume data from a Builder's result.
+- **`metainfo.Builder` holds every 16 KiB block's v2 leaf hash of a file until the file ends**,
+  1/512 of its size (a 1 TiB file takes 2 GiB while hashed, per `max_hashing`); a fib request to
+  fold leaves into piece roots as it goes.
+- **`metainfo.Builder` cannot be cancelled**: fit stops a build through the reads of the `fs.FS` it
+  gives it; a `Builder.BuildContext` would be cleaner.
+- Not run: Windows (name sanitizing), Linux CI, libtorrent or anacrolix fetching from fit's static
+  web seed; the Admin API and pages for publishing are I203/I204's.
 
 ### I203 Admin API, events, `fit bt`, metrics
 

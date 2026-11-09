@@ -34,7 +34,7 @@ func (c *Config) HasApps() bool {
 	return a != nil && (a.Hub != nil || a.Node != nil || a.Proxy != nil) ||
 		t != nil && (t.Hub != nil || t.Node != nil || t.Proxy != nil) ||
 		w != nil && (w.TURN != nil || w.Media != nil || w.Proxy != nil) ||
-		c.Streaming != nil || c.Sync != nil || c.BitTorrent != nil && c.BitTorrent.Client != nil
+		c.Streaming != nil || c.Sync != nil || c.BitTorrent != nil && (c.BitTorrent.Client != nil || c.BitTorrent.Tracker != nil)
 }
 
 // RoleConsole is a role's web pages, behind logins as admin.console's are,
@@ -100,6 +100,9 @@ func (c *Config) RoleConsoles() []*RoleConsole {
 	}
 	if b := c.BitTorrent; b != nil && b.Client != nil {
 		add(b.Client.Console)
+	}
+	if b := c.BitTorrent; b != nil && b.Tracker != nil {
+		add(b.Tracker.Console)
 	}
 	return out
 }

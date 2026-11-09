@@ -45,9 +45,9 @@ a config against it and more.
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc), [`streaming.channels[]`](#config-streamchannel), [`streaming.channels[].schedule[]`](#config-channelslot), [`streaming.channels[].push[]`](#config-streampush)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
-- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits)
+- [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits), [`bittorrent.client.categories[]`](#config-bittorrentcategory), [`bittorrent.client.categories[].limits`](#config-bittorrenttorrentlimits), [`bittorrent.client.alt_speed`](#config-bittorrentaltspeed), [`bittorrent.client.alt_speed.schedules[]`](#config-bittorrentschedule), [`bittorrent.client.publish[]`](#config-bittorrentpublish), [`bittorrent.tracker`](#config-bittorrenttracker)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mysql`](#sync-sources-mysql), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
@@ -133,7 +133,7 @@ In JSON:
 | `streaming` | [object](#config-streaming) |  | fit's streaming role, beside the gateway on its engine: one media hub where a stream is published once, over RTMP, RTSP, SRT or WHIP, and played over any of them, HTTP-FLV and HLS too, each listener and handler with its media_auth policy. None when left out. |
 | `media_library` | list of [object](#config-medialibrary) |  | Named libraries of media files: directories scanned into a catalog of items, each a title with its renditions, audio, subtitles and poster, probed off fib's workers on a bounded file pool of the library's own, and read by the Admin API's /media/library. None when left out: no files are scanned or served. |
 | `sync` | [object](#config-sync) |  | fit's sync role: pipelines that read records from a source (a database's changes, files, a queue) and write them to sinks, each with a checkpoint saved only once every sink has acknowledged the records it covers, kept in state_dir. None when left out: no connections out and no state on disk. |
-| `bittorrent` | [object](#config-bittorrent) |  | fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on disk. |
+| `bittorrent` | [object](#config-bittorrent) |  | fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP, and a tracker. None when left out: no BitTorrent port and no state on disk. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -302,13 +302,13 @@ Also at `webrtc.turn.tls.certificates[]`.
 
 ### `listeners[].access`
 
-Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`, `llm.hub.access`, `llm.node.access`, `llm.proxy.access`, `tunnel.hub.access`, `tunnel.proxy.access`, `webrtc.turn.access`, `webrtc.media.access`, `webrtc.proxy.access`, `streaming.access`, `bittorrent.client.access`.
+Also at `routes[].access`, `services[].access`, `access`, `admin.console.access`, `admin.access`, `llm.hub.console.access`, `llm.hub.access`, `llm.node.access`, `llm.proxy.access`, `tunnel.hub.access`, `tunnel.proxy.access`, `webrtc.turn.access`, `webrtc.media.access`, `webrtc.proxy.access`, `streaming.access`, `bittorrent.client.access`, `bittorrent.tracker.access`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `allow` | list of string |  | IP addresses and CIDR prefixes served, as "10.0.0.0/8" or "2001:db8::/32": with any entry here or in allow_files, every address neither holds is refused, unless deny refuses it first. |
 | `deny` | list of string |  | IP addresses and CIDR prefixes refused, whatever allow holds. |
-| `allow_files` | list of string |  | Files of more allow entries: an address or prefix on each line, with blank lines and what follows # or ; left out, as the lists published for firewalls are written. Read when the config is applied, and applied again when one changes; each at most 64 MiB. |
+| `allow_files` | list of string |  | Files of more allow entries, one on each line, each line told apart by its content: an address or prefix, with what follows # or ; left out, as the lists published for firewalls are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name, where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4 addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or // are left out; any other line is an error. Read when the config is applied, and applied again when one changes; each at most 64 MiB. |
 | `deny_files` | list of string |  | Files of more deny entries, written as allow_files. |
 
 <a id="config-proxyprotocol"></a>
@@ -1225,8 +1225,15 @@ first. An Admin API on a Unix socket is never checked: its peers have no address
 `admin.access` with one is an error. A config applied with an allow list that leaves out the address
 the change came from does not close that connection, but the next one is refused.
 
-A list file has an address or prefix on each line, with blank lines and what follows `#` or `;`
-left out; it is read when the config is applied, and the config applied again when it changes.
+A list file has one entry on each line, each line told apart by its content, so that one file may
+mix them: an address or prefix, with what follows `#` or `;` left out; a range, `first-last`; an
+eMule `ipfilter.dat` line, `first - last , level , name`, where a line of a level above 127 is not
+listed (qBittorrent's reading, and eMule's at its default filter level); or a PeerGuardian `.p2p`
+line, `name:first-last`. IPv4 addresses in ranges may have leading zeros, as `ipfilter.dat` writes
+them. Blank lines and lines that begin with `#`, `;` or `//` are left out; any other line is an
+error naming the file and the line, and the config is not applied. A file is read when the config
+is applied, and the config applied again when it changes; each file is at most 64 MiB. The same
+files serve every module with an `access`, the BitTorrent client's included.
 An allow list on a listener that obtains certificates with ACME's HTTP-01 or TLS-ALPN-01 challenges
 must serve the CA's validation servers, or the certificates cannot be obtained.
 
@@ -2188,7 +2195,7 @@ In JSON:
 
 ### `llm.hub.console`
 
-Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.node.console`, `tunnel.proxy.console`, `bittorrent.client.console`.
+Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.node.console`, `tunnel.proxy.console`, `bittorrent.client.console`, `bittorrent.tracker.console`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -3846,8 +3853,9 @@ are hashed, on the client's bounded disk pool (`disk_workers`, `disk_queue_bytes
 worker; past `disk_queue_bytes` of received blocks waiting, the peers sending them are not read
 from until half is written.
 
-The torrents are kept in files under `data_dir`: `torrents.json`, the list (each torrent's source,
-directory, file priorities, and whether it is paused or sequential), `torrents/<id>.torrent`, its
+The torrents are kept in files under `data_dir`: `torrents.json`, the list in queue order (each
+torrent's source, directory, category, own limits, file priorities, and whether it is paused,
+sequential or complete), `torrents/<id>.torrent`, its
 .torrent file (a magnet link's once its info has arrived), and `resume/<id>.resume`, its resume
 data, each written to a temporary file, synced and renamed. Changes to the list are saved at once,
 resume data at most every `save_interval` when pieces were verified, and everything when the role
@@ -3858,12 +3866,50 @@ the error, rather than being overwritten; a torrent whose own files do not read 
 its error, until it is removed. Downloads go below `download_dir` (`<data_dir>/downloads` when left
 out), each torrent's paths made safe for the system, none leading out of it.
 
-A reload changes `limits`, `access`, `save_interval` and `console` in place, keeping the peers
+Torrents are added from magnet links and .torrent files through the role's API, from .torrent URLs
+(fib's asynchronous HTTP client, at most 5 redirects, 32 MiB, `url_timeout`, 4 at once), and from
+`watch_dir`, whose `.torrent` and `.magnet` files, and those of subdirectories named after a
+category, are added once they stop changing and moved into `.done` or `.failed`. `categories` give
+torrents a directory below `download_dir` (or an absolute one), their own limits (fib's
+`TorrentLimits`, a torrent's own taking their place) and a `media_library` scanned again when one of
+them completes. `limits.max_active_downloads` and `max_active_seeds` queue the torrents past them,
+paused, in the list's order; `limits.min_free_bytes` (1 GiB) keeps a download from starting, or
+pauses it, when its disk would be left with less free, and starts it again once the space is there.
+`alt_speed` takes the place of the rates on weekly schedules, or while the API turns it on. The
+access's list files may be eMule `ipfilter.dat` or PeerGuardian `.p2p` lists, as every module's.
+
+A reload changes `limits`, `access`, `categories`, `alt_speed`, `watch_dir`, `save_interval` and
+`console` in place, keeping the peers
 connected (but those over a lowered connection limit, and those the access now refuses); a change
 of `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers` or `disk_queue_bytes` makes
 a new client, the torrents saved from the old one and added to the new one without a check. A new
-`data_dir` starts from that directory's state, as a restart would. See
-[decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
+`data_dir` starts from that directory's state, as a restart would.
+
+`publish` entries publish directories: each file of `dir` (mode `per_file`), or the whole directory
+(mode `whole_dir`), is built into a hybrid torrent, with `web_seed` (the URL of a static route of `dir`)
+as its web seed, `announce` as its trackers and `private` if set, on `max_hashing` goroutines of the
+entry's own, and seeded in place, through storage that never writes. The `bt_publish` handler serves
+an index of them, their .torrent files and their magnet links. An entry walks `dir` every
+`check_interval` (10s): a file added gets a torrent once it has not changed for a `check_interval`,
+and a file changed or removed stops its torrent, a changed one getting a new one. Names starting
+with a dot and symbolic links are left out, and `files`, `exclude`, `max_files` and
+`max_total_bytes` bound what is published. The torrents are kept in `data_dir/publish/<name>/`, so
+that a restart takes those whose files kept their size, times and inode without building or checking
+them again. See [decision 037](../decisions/037-bittorrent.md) and [BitTorrent](../bittorrent.md).
+
+`bittorrent.tracker` is a BitTorrent tracker on fib's tracker, one a process: HTTP and HTTPS
+announces and scrapes come through any route whose handler is `bt_tracker`, on fit's listeners
+and TLS, and UDP ones (BEP 15) on the role's own `listen`, which may be left out. The swarms are
+kept in memory, bounded by `max_torrents`, `max_peers_per_torrent` and `max_peers`; a peer is
+forgotten `peer_ttl` after its last announce. With `auth`, a `media_auth` policy, the tracker is
+private: each announce and scrape carries a passkey, as `/<passkey>/announce` or `?passkey=`, one
+of the policy's tokens or a user's passkey (derived from the policy's secret and the user's name,
+read on the console's `/api/passkey?user=`), whose grant must play `bittorrent/<info hash>`.
+With `allow` or `allow_files`, only the info hashes listed are tracked; the files are read again
+when they change. A reload changes the allow-list, `auth`, `access` and `console` in place; the
+interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms; the store's bounds and
+`peer_ttl` start them empty. See [decision 037](../decisions/037-bittorrent.md) and
+[BitTorrent](../bittorrent.md).
 
 In a .conf file:
 
@@ -3876,17 +3922,37 @@ bittorrent {
 		data_dir /var/lib/fit/bittorrent
 		download_dir /srv/downloads
 		encryption prefer
+		watch_dir /srv/torrents/watch
 		limits {
 			upload_rate 1048576
 			max_conns 200
 			seed_ratio 2
 			max_torrents 500
+			max_active_downloads 3
+			min_free_bytes 10GiB
 		}
-		access { deny 10.0.0.0/8 }
+		categories iso { dir /srv/iso; limits { seed_ratio -1 } }
+		alt_speed {
+			upload_rate 131072
+			schedules { days weekdays; from 08:00; to 18:00 }
+		}
+		access { deny 10.0.0.0/8; deny_files /etc/fit/level1.p2p }
+		publish releases {
+			dir /srv/releases
+			web_seed https://example.com/releases/
+			files *.iso *.tar.gz
+		}
 	}
+	tracker { listen :6969; interval 30m; max_torrents 10000 }
 }
 
-route { handler respond { body fit } }
+route {
+	match { path /releases/* }
+	handler static { root /srv/releases; strip_prefix /releases }
+}
+
+route { match { path /torrents/* }; handler bt_publish }
+route { match { path /announce /scrape }; handler bt_tracker }
 ```
 
 In YAML:
@@ -3901,19 +3967,62 @@ bittorrent:
     data_dir: /var/lib/fit/bittorrent
     download_dir: /srv/downloads
     encryption: prefer
+    watch_dir: /srv/torrents/watch
     limits:
       upload_rate: 1048576
       max_conns: 200
       seed_ratio: 2
       max_torrents: 500
+      max_active_downloads: 3
+      min_free_bytes: 10737418240
+    categories:
+      - name: iso
+        dir: /srv/iso
+        limits:
+          seed_ratio: -1
+    alt_speed:
+      upload_rate: 131072
+      schedules:
+        - days:
+            - weekdays
+          from: 08:00
+          to: 18:00
     access:
       deny:
         - 10.0.0.0/8
+      deny_files:
+        - /etc/fit/level1.p2p
+    publish:
+      - name: releases
+        dir: /srv/releases
+        web_seed: https://example.com/releases/
+        files:
+          - '*.iso'
+          - '*.tar.gz'
+  tracker:
+    listen: :6969
+    interval: 30m
+    max_torrents: 10000
 routes:
-  - handler:
-      module: respond
+  - match:
+      path:
+        - /releases/*
+    handler:
+      module: static
       params:
-        body: fit
+        root: /srv/releases
+        strip_prefix: /releases
+  - match:
+      path:
+        - /torrents/*
+    handler:
+      module: bt_publish
+  - match:
+      path:
+        - /announce
+        - /scrape
+    handler:
+      module: bt_tracker
 ```
 
 In JSON:
@@ -3927,16 +4036,36 @@ In JSON:
       "data_dir": "/var/lib/fit/bittorrent",
       "download_dir": "/srv/downloads",
       "encryption": "prefer",
+      "watch_dir": "/srv/torrents/watch",
       "limits": {
         "upload_rate": 1048576,
         "max_conns": 200,
         "seed_ratio": 2,
-        "max_torrents": 500
+        "max_torrents": 500,
+        "max_active_downloads": 3,
+        "min_free_bytes": 10737418240
       },
-      "access": {"deny": ["10.0.0.0/8"]}
+      "categories": [{"name": "iso", "dir": "/srv/iso", "limits": {"seed_ratio": -1}}],
+      "alt_speed": {"upload_rate": 131072, "schedules": [{"days": ["weekdays"], "from": "08:00", "to": "18:00"}]},
+      "access": {"deny": ["10.0.0.0/8"], "deny_files": ["/etc/fit/level1.p2p"]},
+      "publish": [{
+        "name": "releases",
+        "dir": "/srv/releases",
+        "web_seed": "https://example.com/releases/",
+        "files": ["*.iso", "*.tar.gz"]
+      }]
+    },
+    "tracker": {
+      "listen": ":6969",
+      "interval": "30m",
+      "max_torrents": 10000
     }
   },
-  "routes": [{"handler": {"module": "respond", "params": {"body": "fit"}}}]
+  "routes": [
+    {"match": {"path": ["/releases/*"]}, "handler": {"module": "static", "params": {"root": "/srv/releases", "strip_prefix": "/releases"}}},
+    {"match": {"path": ["/torrents/*"]}, "handler": {"module": "bt_publish"}},
+    {"match": {"path": ["/announce", "/scrape"]}, "handler": {"module": "bt_tracker"}}
+  ]
 }
 ```
 
@@ -3947,6 +4076,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `client` | [object](#config-bittorrentclient) |  | Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP trackers), downloading and seeding torrents kept in data_dir across restarts. None when left out. |
+| `tracker` | [object](#config-bittorrenttracker) |  | Run a BitTorrent tracker, on fit's engine: HTTP announces and scrapes through routes whose handler is bt_tracker, UDP ones on its own listen, public or private (passkeys of a media_auth policy), with an allow-list of info hashes. Its swarms are kept in memory, bounded. None when left out. |
 
 <a id="config-bittorrentclient"></a>
 
@@ -3965,9 +4095,16 @@ In JSON:
 | `disk_workers` | integer, 0 to 64 |  | How many goroutines read and write the torrents' files and hash their pieces, which never happens on a fib worker. The number of CPUs, at most 8, when left out or 0. A change makes a new client. |
 | `disk_queue_bytes` | integer, 0 or more | `67108864` | The most bytes of received blocks waiting to be written: past it the client stops reading from the peers that sent them until half has been written, so that a slow disk slows the peers rather than growing memory. 64 MiB when left out or 0. A change makes a new client. |
 | `save_interval` | duration | `"5s"` | How often, at most, the state is saved when something changed: a piece verified, a torrent added, removed, paused or its metadata received. It is saved when the role stops too, and changes to the list of torrents are saved at once. 5s when left out. |
-| `limits` | [object](#config-bittorrentlimits) |  | The client's rates and connection, seeding and torrent limits. A change applies in place, keeping the peers connected, but those over a lowered connection limit. The defaults when left out. |
+| `limits` | [object](#config-bittorrentlimits) |  | The client's rates and connection, seeding, queueing, disk and torrent limits. A change applies in place, keeping the peers connected, but those over a lowered connection limit. The defaults when left out. |
+| `categories` | list of [object](#config-bittorrentcategory) |  | The categories a torrent may be added in: each downloads into a directory of its own, gives its torrents its own limits, and may name a media_library that is scanned again when a torrent of it completes. A torrent added with no category downloads into download_dir. A change applies in place: limits to the torrents of the category at once, a new directory to the torrents added from then on. A torrent whose category is removed keeps its directory and loses the category's limits. At most 1000. |
+| `watch_dir` | string |  | A directory looked at every watch_interval for .torrent files and .magnet files (a magnet link on the first line that is not blank), each added once it has kept its size and modification time across two looks, so that one being written is not taken half way: those directly in it with no category, those in a subdirectory named after a category in that category. A file added, or whose torrent is already held, is moved into its .done subdirectory; one that cannot be added, being too large, not a torrent or not a link, into .failed, beside a .error file saying why; one that may be added later (max_torrents reached, the state not written) is left to be tried again. None when left out. |
+| `watch_interval` | duration | `"10s"` | How often watch_dir is looked at. 10s when left out. |
+| `watch_max_files` | integer, 0 to 10000 | `100` | The most files of watch_dir and its category subdirectories taken in one look, the rest left for the next. 100 when left out or 0. |
+| `url_timeout` | duration | `"30s"` | How long the download of a .torrent file by its URL may take in all, connecting, redirects (at most 5) and the body (at most 32 MiB) included; at most 4 run at once. 30s when left out. |
+| `alt_speed` | [object](#config-bittorrentaltspeed) |  | Alternative rates, in place of limits' upload_rate and download_rate while one of their schedules holds, or while the API turns them on. None when left out. |
 | `access` | [object](#config-access) |  | The peer addresses the client deals with, deciding before the global access: a peer it refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and are not asked about. A change applies at once, closing the connected peers it now refuses. Every address when left out, unless the global access says otherwise. |
 | `console` | [object](#config-roleconsole) |  | The client's web pages; none when left out. |
+| `publish` | list of [object](#config-bittorrentpublish) |  | Directories the client publishes: each built into hybrid torrents, a torrent of each file or one of the whole directory, on goroutines of its own, and seeded where the files are, the .torrent files and magnet links served by the bt_publish handler. Each follows the disk: a file added gets a torrent, and one changed or removed stops its torrent, a changed one getting a new torrent. The torrents are kept in data_dir/publish/<name>/, so that a restart neither builds nor checks a file that did not change. None when left out. |
 
 <a id="config-bittorrentlimits"></a>
 
@@ -3984,6 +4121,95 @@ In JSON:
 | `seed_ratio` | number, 0 or more |  | Pause a torrent once it has uploaded this many times its size since it was added or fit started. Seeds for ever when left out or 0. |
 | `seed_time` | duration |  | Pause a torrent once it has seeded this long since it was added or fit started. Seeds for ever when left out. |
 | `max_torrents` | integer, 0 to 100000 | `1000` | The most torrents the client holds, running or paused; one more is refused. Lowering it removes none. 1000 when left out or 0. |
+| `max_active_downloads` | integer, 0 or more |  | The most torrents downloading at once: past it, torrents queue, paused by the client, in the order of the list (which the API's queue position changes), and the first of them starts when one finishes, is paused or removed. A torrent fetching a magnet link's metadata counts as downloading. No queue when left out or 0. |
+| `max_active_seeds` | integer, 0 or more |  | The most torrents seeding at once, queued as max_active_downloads queues downloads. No queue when left out or 0. |
+| `min_free_bytes` | integer, 0 or more | `1073741824` | The disk space a download leaves free: a torrent starts downloading only when its directory's disk has what it still has to download and this much more free, and one downloading pauses, with an error saying so, when less than this is left; it starts again by itself once the space is there. Where the free space cannot be told, it is not checked. 1 GiB when left out or 0. |
+
+<a id="config-bittorrentcategory"></a>
+
+### `bittorrent.client.categories[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The category's name, which the API and watch_dir's subdirectories name it by. Letters, digits, '_', '.' and '-'. |
+| `dir` | string |  | The directory the category's torrents download into: a relative path is below download_dir, and may not lead out of it. A torrent keeps the directory it was added with when this changes. <download_dir>/<name> when left out. |
+| `media_library` | string |  | A media_library to scan again when a torrent of the category completes, so that what it downloaded into the library's roots appears in its catalog. None when left out. |
+| `limits` | [object](#config-bittorrenttorrentlimits) |  | The limits of each torrent of the category, under the client's; a torrent's own limits take the place of those they set. The client's alone when left out. |
+
+<a id="config-bittorrenttorrentlimits"></a>
+
+### `bittorrent.client.categories[].limits`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `upload_rate` | integer |  | The most bytes per second the torrent uploads, under the client's rate. The client's rate alone when left out, 0 or negative. |
+| `download_rate` | integer |  | The most bytes per second the torrent downloads, under the client's rate. The client's rate alone when left out, 0 or negative. |
+| `max_conns` | integer |  | The most peer connections of the torrent, in place of max_conns_per_torrent, above or below it; negative is the client's max_conns alone. max_conns_per_torrent when left out or 0. |
+| `upload_slots` | integer |  | How many peers the torrent uploads to at once, beside one optimistic unchoke, in place of the client's; negative unchokes every interested peer. The client's when left out or 0. |
+| `seed_ratio` | number |  | Pause the torrent once it has uploaded this many times its size, in place of the client's; negative seeds for ever. The client's when left out or 0. |
+| `seed_time` | duration |  | Pause the torrent once it has seeded this long, in place of the client's; negative seeds for ever. The client's when left out or 0. |
+
+<a id="config-bittorrentaltspeed"></a>
+
+### `bittorrent.client.alt_speed`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `upload_rate` | integer, 0 or more |  | The most bytes per second uploaded while the alternative rates hold, all torrents together. Unlimited when left out or 0. |
+| `download_rate` | integer, 0 or more |  | The most bytes per second downloaded while the alternative rates hold, all torrents together. Unlimited when left out or 0. |
+| `schedules` | list of [object](#config-bittorrentschedule) |  | When the alternative rates hold: while any of these does. Only while the API turns them on when left out. At most 100. |
+| `time_zone` | string |  | The zone the schedules' times are in: local (the default), utc, or an IANA zone name such as Asia/Shanghai. |
+
+<a id="config-bittorrentschedule"></a>
+
+### `bittorrent.client.alt_speed.schedules[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `days` | list of string |  | The days the range begins on: mon, tue, wed, thu, fri, sat, sun, weekdays (mon to fri) and weekend (sat and sun). A range that runs past midnight holds into the next day. Every day when left out. |
+| `from` | string |  | Required. The time the range begins at, HH:MM, 00:00 to 23:59. |
+| `to` | string |  | Required. The time the range ends at, HH:MM, 00:01 to 24:00, not included: one earlier than from runs past midnight, as 22:00 to 06:00. It may not equal from. |
+
+<a id="config-bittorrentpublish"></a>
+
+### `bittorrent.client.publish[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The entry's name, which the bt_publish handler and the state in data_dir know it by. Letters, digits, '_', '.' and '-'. |
+| `dir` | string |  | Required. The directory published. Its files are seeded where they are, never written to, moved or deleted: a torrent whose file changes is replaced by a new one. Files and directories whose names start with '.' and symbolic links are left out. |
+| `mode` | string: `per_file`, `whole_dir` | `"per_file"` | per_file makes a single-file torrent of each file below dir; whole_dir makes one torrent of the whole directory, named as its last element, which any change of a file below it replaces. per_file when left out. |
+| `web_seed` | string |  | The http or https URL at which dir is served, as by a static route whose root is dir, put in every torrent as its web seed (BEP 19): a file's own URL in mode per_file, and in mode whole_dir the URL's parent, so the URL's last element must be dir's last element then. None when left out. |
+| `announce` | list of string |  | Tracker URLs, http, https or udp, put in every torrent, each a tier of its own, tried in order: as fit's own bt_tracker route. None when left out: peers find the torrents by the DHT, unless private. |
+| `private` | boolean |  | Mark the torrents private (BEP 27): clients find peers only through the trackers of announce, not the DHT or peer exchange. A change makes new torrents, of other info hashes. |
+| `piece_length` | integer, 0 to 67108864 |  | The torrents' piece length, a power of two from 16 KiB to 64 MiB. Picked for each torrent's size when left out or 0: the smallest of at least 16 KiB that makes fewer than 2048 pieces, up to 16 MiB. A change makes new torrents. |
+| `files` | list of string |  | The files published, by pattern: a pattern without '/' matches a file's name, as *.iso, and one with '/' its path under dir, as releases/**/*.tar.gz, where * matches within a name and ** any run of directories. Every file when left out. |
+| `exclude` | list of string |  | Files and directories left out, by pattern, as files writes them, as *.part or **/tmp/**; a directory left out is not walked. None when left out. |
+| `check_interval` | duration | `"10s"` | How often dir is walked again for files added, changed or removed, as static files follow the disk. A file is told by its size, modification and status change times and inode; one new or changed is built into a torrent once it has not changed for a check_interval, so that a file still being copied is not hashed; a file removed or changed stops its torrent at once. 10s when left out or 0. |
+| `max_files` | integer, 0 to 100000 | `1000` | The most files published: in mode per_file the first by path are, the rest are left out and reported; in mode whole_dir a directory with more is not published, and is reported. 1000 when left out or 0. |
+| `max_total_bytes` | integer, 0 or more | `1099511627776` | The most bytes published, the files' sizes together: past it, in mode per_file, the files after are left out, and in mode whole_dir the directory is not published; either is reported. 1 TiB when left out or 0. |
+| `max_hashing` | integer, 0 to 16 | `1` | How many torrents are built at once, each reading and hashing its files on a goroutine of the entry's own, never on a fib worker. 1 when left out or 0. |
+
+<a id="config-bittorrenttracker"></a>
+
+### `bittorrent.tracker`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | The host and port the tracker answers UDP announces and scrapes on (BEP 15), as ":6969". Announces over HTTP and HTTPS come through a route whose handler is bt_tracker, on fit's listeners. No UDP when left out. A change moves the UDP port, keeping the swarms. |
+| `interval` | duration | `"30m"` | How often clients are told to announce. 30m when left out. A change applies at once, keeping the swarms. |
+| `min_interval` | duration |  | The "min interval" of HTTP answers: how soon a client may announce again of its own accord. None when left out. At most interval. A change applies at once, keeping the swarms. |
+| `peer_ttl` | duration | `"1h"` | How long a peer is kept after its last announce, longer than interval so that a peer announcing a little late is not forgotten; a torrent left without peers is forgotten, its completed count with it. 1h when left out. A change makes a new store: the swarms start empty and fill again as clients announce. |
+| `max_torrents` | integer, 0 to 1048576 | `100000` | The most torrents tracked at once; an announce of one more is refused with "tracker is full". 100000 when left out or 0. A change makes a new store: the swarms start empty and fill again as clients announce. |
+| `max_peers_per_torrent` | integer, 0 to 65536 | `10000` | The most peers kept of one torrent; a peer past it still gets peers but is not handed out. 10000 when left out or 0. A change makes a new store. |
+| `max_peers` | integer, 0 to 4194304 | `500000` | The most peers kept of all torrents together, each about 150 bytes; a peer past it still gets peers but is not handed out. 500000 when left out or 0. A change makes a new store. |
+| `max_numwant` | integer, 0 to 1000 | `200` | The most peers an announce gets, whatever its numwant asks; 50 when it asks for none. A UDP answer is also kept within 1400 bytes. 200 when left out or 0. |
+| `max_scrape` | integer, 0 to 1000 | `64` | The most torrents one HTTP scrape may name; a UDP scrape is bounded to 74 by its packet. A scrape naming none, a full scrape, gets nothing. 64 when left out or 0. |
+| `auth` | string |  | The media_auth policy whose passkeys the tracker takes, which makes it private: an announce or scrape must carry a passkey, in its path as /<passkey>/announce or as ?passkey=, that is one of the policy's tokens (static, or signed by fit) or a user's passkey, derived from the policy's secret and the user's name, and whose grant plays bittorrent/<info hash in hex> (play ["bittorrent/*"] for every torrent). Others are refused with a failure reason. Public when left out: anyone may announce. |
+| `allow` | list of string |  | The info hashes the tracker tracks, in hex: 40 digits for a v1 hash, or 64 for a v2 one, tracked by its first 20 bytes as v2 clients announce it. With any here or in allow_files, announces of other torrents are refused with "unregistered torrent", and scrapes of them get nothing. Every torrent when both are left out. |
+| `allow_files` | list of string |  | Files of more allowed info hashes: one on each line, as allow has them, with blank lines and what follows # left out. Read when the config is applied, and read again when one changes; each at most 64 MiB, and at most 1048576 info hashes in all. |
+| `access` | [object](#config-access) |  | The client addresses the tracker serves, deciding before the global access: a UDP datagram from an address it refuses is dropped before a connection is made, and an HTTP announce or scrape through bt_tracker from one is answered with a failure reason. A change applies at once. Every address when left out, unless the global access says otherwise. |
+| `console` | [object](#config-roleconsole) |  | The tracker's web pages: its statistics, read-only. None when left out. |
 
 <a id="providers"></a>
 
@@ -4154,6 +4380,182 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 | [`respond`](#http-handlers-respond) | A fixed status, fields and body |
 | [`static`](#http-handlers-static) | Files from a directory |
 | [`sync_ingest`](#http-handlers-sync_ingest) | Records posted into a sync pipeline's `http` source, answered once its sinks have them |
+
+<a id="http-handlers-bt_publish"></a>
+
+### `bt_publish`
+
+Serves what the BitTorrent client publishes: at a path ending in / or index.json an index of its publish entries and their torrents in JSON, at <id>.torrent a torrent's .torrent file and at <id>.magnet its magnet link; 503 while no bittorrent.client runs.
+
+Serves what the `bittorrent.client` role publishes, its `publish` entries: at a path ending in `/`
+or in `index.json`, an index in JSON of the entries (`publish` names them; every entry when left
+out) and their torrents, each with its path under the entry's `dir`, its info hashes (v1 and v2:
+the torrents are hybrid), its magnet link, its state in the client (`seeding`, `checking`, or
+`stopped` while no client runs it), and `torrent_url` and `magnet_url`, relative to the index; at
+`<id>.torrent`, a torrent's .torrent file (`application/x-bittorrent`, as an attachment named after
+the torrent); at `<id>.magnet`, its magnet link as plain text. The index also says what each
+entry left out and why (`problems`): files past its bounds, a build that failed, a duplicate.
+
+It answers `503` while no `bittorrent.client` runs, `404` for a torrent not published, or not of the
+entries it names, and `405` for a method other than `GET` and `HEAD`. It reads a snapshot of the
+role's entries, swapped as they change, and takes no lock of the role's: nothing waits on a fib
+worker. A torrent's ID is its v1 info hash in hex; a file changed on disk gets a new torrent, of a
+new ID, and the old ID is answered `404` from then on.
+
+The route's middleware applies as to any handler: a `basic_auth` or `jwt` before it keeps a private
+entry's .torrent files, which carry its trackers' URLs, to those who may have them.
+
+In a .conf file:
+
+```fit
+route { match { path /torrents/* }; handler bt_publish { publish releases } }
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /torrents/*
+handler:
+  module: bt_publish
+  params:
+    publish:
+      - releases
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/torrents/*"]},
+  "handler": {"module": "bt_publish", "params": {"publish": ["releases"]}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `publish` | list of string |  | The publish entries of the bittorrent.client served, by name; a name the client has not is listed in the index with its error. Every entry when left out. |
+
+<a id="http-handlers-bt_stream"></a>
+
+### `bt_stream`
+
+Serves a file of a torrent of the bittorrent.client role with Range while it downloads, the ranges asked for first, and adds a torrent by magnet link on the fly.
+
+Serves a file of a torrent of the [`bittorrent.client`](#bittorrent) role over HTTP while it
+downloads, so that a browser or a player plays it as it streams in: `/bt/<info hash>/<file path>`
+is a file by its path as the torrent lists it, its name first, `/bt/<info hash>/<n>` its file of
+index `n`, and `/bt/<info hash>/` its largest file, after `prefix` (`/bt/` when left out). The
+info hash is the role's torrent ID. `Range` asks for a single range (`206`, `416` past the end),
+`HEAD` is answered, `Content-Type` comes from the file's extension, and the `ETag` from the
+torrent and the file, which never change. The pieces of the range asked for, and `readahead_bytes`
+past it, are fetched before all others; a read waits at most `read_timeout` for its piece (`504`
+before the response begins). At most `max_streams` responses stream at once (`503` past it), each
+read on a goroutine of its own and written only as fast as its client takes it. `auth` names a
+[`media_auth`](#media-auth) policy every request must satisfy with `play` on `bt/<info hash>`.
+With `magnet`, a request whose `magnet` query parameter is a magnet link of the torrent its path
+names adds the torrent when the role does not have it, if the request also has `publish` on
+`bt/<info hash>`: such torrents are temporary, download only the files streamed, are bounded by
+`max_temporary` and `max_temporary_bytes`, and are removed with their data `temporary_ttl` after
+their last stream ended. See [BitTorrent](../bittorrent.md#playing-a-file-while-it-downloads).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /bt/* }
+	handler bt_stream {
+		auth site
+		magnet true
+		max_streams 16
+		temporary_ttl 15m
+	}
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /bt/*
+handler:
+  module: bt_stream
+  params:
+    auth: site
+    magnet: true
+    max_streams: 16
+    temporary_ttl: 15m
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/bt/*"]},
+  "handler": {"module": "bt_stream", "params": {"auth": "site", "magnet": true, "max_streams": 16, "temporary_ttl": "15m"}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `prefix` | string | `"/bt/"` | The part of the path before a torrent's info hash: with /bt/, /bt/<info hash>/<file path> is a file of the torrent by its path as the torrent lists it, its name first, /bt/<info hash>/<n> its file of index n, and /bt/<info hash>/ its largest file. The info hash is the bittorrent.client role's torrent ID, 40 hex digits. /bt/ when left out. |
+| `auth` | string |  | The media_auth policy every request must satisfy, play on the stream bt/<info hash>: a bearer token, Basic, the token query parameter or the fit_media_token cookie, or, with the policy's url_signing, a URL signed for <prefix><info hash>/. Adding a torrent by magnet link takes publish on the same stream as well. Everyone may play when left out; magnet needs it. |
+| `max_streams` | integer, 0 or more | `32` | The most responses the handler streams at once, each with a goroutine of its own while it reads; past it a request is answered 503. At most 4096. 32 when left out or 0. |
+| `read_timeout` | duration | `"60s"` | How long a read waits for the piece it needs to arrive: past it a response not begun is answered 504, and one begun is cut short. 60s when left out. |
+| `readahead_bytes` | integer, 0 or more | `8388608` | How far past what a response reads the pieces are fetched before all others, nearest first. 64 KiB to 256 MiB. 8 MiB when left out or 0. |
+| `magnet` | boolean |  | Lets a request add the torrent its path names when the role does not have it, from the magnet link in its magnet query parameter, which must be of that torrent: /bt/<info hash>/?magnet=<link>, escaped. Such torrents are temporary: they download only the files streamed, are bounded by max_temporary and max_temporary_bytes, and are removed with their data temporary_ttl after their last stream ended, and when fit starts. Needs auth, whose publish on bt/<info hash> the request must have. Off when left out. |
+| `info_timeout` | duration | `"60s"` | How long a request waits for the info of a torrent added from a magnet link to arrive from peers; past it the answer is 504. 60s when left out. |
+| `max_temporary` | integer, 0 or more | `4` | The most temporary torrents, added by magnet link on the fly, the role holds at once; past it adding one is answered 503. At most 1000. 4 when left out or 0. |
+| `max_temporary_bytes` | integer, 0 or more | `17179869184` | The most bytes the temporary torrents may want of the disk together: a torrent whose files streamed would take it past this is answered 507, and removed when it was just added. 16 GiB when left out or 0. |
+| `temporary_ttl` | duration | `"10m"` | How long a temporary torrent stays after its last stream ended, for the next range a player asks: then it is removed with its data. At most 7 days. 10m when left out. |
+| `cache_control` | string |  | Sent as Cache-Control with every file. None when left out. |
+| `cors` | string |  | Sent as Access-Control-Allow-Origin, as "*", for players on other origins. None when left out. |
+
+<a id="http-handlers-bt_tracker"></a>
+
+### `bt_tracker`
+
+Serves the bittorrent.tracker role's HTTP announces and scrapes (BEP 3, 23, 7 and 48): a request whose path ends in announce is an announce, and one ending in scrape a scrape, whatever comes before, so that /announce, /tracker/announce and a private tracker's /<passkey>/announce all work. Refusals are answered 200 with a failure reason, as BEP 3 has them; 503 while the role does not run. The route's listeners, TLS and middleware apply as to any handler; the passkey is replaced by REDACTED in the access log.
+
+Serves the `bittorrent.tracker` role's announces and scrapes over HTTP, and HTTPS on a TLS
+listener, through fib's tracker: a request whose path's last segment begins with `announce` is an
+announce, one beginning with `scrape` a scrape, whatever comes before: a route matching
+`/tracker/*` serves `/tracker/announce` and a private tracker's `/tracker/<passkey>/announce`
+alike. Refusals (an info hash the allow-list lacks, a passkey refused, an address the role's `access` refuses, a full store) are answered `200` with a
+bencoded failure reason, as BEP 3 has them; another path is `404`, and `503` while the role does
+not run. It answers on the worker that read the request, never waiting. The passkey is replaced by
+`REDACTED` in the request URI the access log writes.
+
+In a .conf file:
+
+```fit
+route { match { path /announce /scrape /tracker/* }; handler bt_tracker }
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /announce
+    - /scrape
+    - /tracker/*
+handler:
+  module: bt_tracker
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/announce", "/scrape", "/tracker/*"]},
+  "handler": {"module": "bt_tracker"}
+}
+```
+
+It has no fields: `{}` turns it on.
 
 <a id="http-handlers-fastcgi"></a>
 

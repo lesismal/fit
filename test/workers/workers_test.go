@@ -176,6 +176,13 @@ func cases(e *env) []tc {
 		// an HMAC token at once.
 		{module: "media_tokens", middleware: jwt.middleware, header: jwt.header,
 			handler: `{"module": "media_tokens", "params": {"auth": "live"}}`, status: 404, inline: true},
+		// Without the bittorrent.tracker role it answers 503 at once; with
+		// it, an announce is served inline too, the store's lock held
+		// briefly, which bittorrent/tracker's tests drive.
+		{module: "bt_tracker", handler: `{"module": "bt_tracker"}`, status: 503, inline: true},
+		// Without a client role; with one, its index and files come from a
+		// snapshot in memory (handler/btpublish's tests).
+		{module: "bt_publish", handler: `{"module": "bt_publish"}`, status: 503, inline: true},
 		{module: "test_late", handler: lateHandler, status: 200},
 	}
 }
@@ -216,6 +223,12 @@ var notCovered = map[string]string{
 	// handler/vod's TestNoWorkerBlocks holds the pool up and checks that
 	// ServeHTTP returns at once and the answer comes once the pool goes on.
 	"vod": "handler/vod's TestNoWorkerBlocks",
+	// It needs the role bittorrent.client and a torrent: the role's API
+	// and fib's Reader run on a goroutine of the stream's own, at most
+	// max_streams, a request retained meanwhile. handler/btstream's
+	// TestNoWorkerBlocks checks that ServeHTTP returns while its stream
+	// waits for a torrent's info, answered from there.
+	"bt_stream": "handler/btstream's TestNoWorkerBlocks",
 	// It needs a running sync pipeline with an http source: the body is
 	// offered to the source without waiting and answered from the
 	// pipeline's goroutine or the timeout's timer. handler/syncingest's

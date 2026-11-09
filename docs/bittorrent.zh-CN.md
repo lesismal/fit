@@ -6,20 +6,37 @@ fit 在网关旁运行一个 BitTorrent 客户端：`bittorrent.client` 角色�
 下载和做种，并在重启后保留种子（[决定 037](decisions/037-bittorrent.zh-CN.md)）。它就是 fib 的客户端
 （[fib 的 BitTorrent 文档](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)）：v1、v2 和混合种子，磁力链接，
 TCP 和 uTP，MSE 加密，DHT，对端交换，本地服务发现，HTTP 和 UDP tracker，以及 web seed。本页讲这个角色：配置、状态保存
-在哪里、重载改变什么，以及它的上限。按 URL 和 `watch_dir` 添加种子、分类与排队、时间表、边下边播、tracker、发布、Admin API
-和页面，随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
+在哪里、添加种子（磁力链接、.torrent 文件和 URL、`watch_dir`）、分类、队列、磁盘检查、备用速率、每个种子的限制、屏蔽列表、
+重载改变什么、发布目录和它的上限；边下载边播放种子文件的 `bt_stream` 处理器；以及 `bittorrent.tracker` 角色。Admin API 和
+页面随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
 
 默认关闭：不写 `bittorrent.client` 时，fit 不打开 BitTorrent 端口，也不保存状态。
 
 ```fit
+media_library films { roots /srv/downloads/films }
+
 bittorrent {
 	client {
 		listen :6881
 		data_dir /var/lib/fit/bittorrent
 		download_dir /srv/downloads
+		watch_dir /srv/torrents/watch
 		limits {
 			upload_rate 1048576
 			seed_ratio 2
+			max_active_downloads 3
+			max_active_seeds 5
+			min_free_bytes 10GiB
+		}
+		categories { name films; dir films; media_library films; limits { seed_ratio 1 } }
+		categories { name iso; dir /srv/iso }
+		alt_speed {
+			upload_rate 131072
+			download_rate 524288
+			schedules { days weekdays; from 08:00; to 18:00 }
+		}
+		access {
+			deny_files [/etc/fit/level1.p2p]
 		}
 	}
 }
@@ -42,7 +59,8 @@ bittorrent {
 
 | 文件 | 内容 |
 | --- | --- |
-| `torrents.json` | 列表：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、文件优先级、是否暂停或顺序下载，以及添加时间 |
+| `torrents.json` | 列表：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、文件优先级、是否暂停或顺序下载、是否由 `bt_stream` 即时添加（`temporary`），以及添加时间 |
+| `torrents.json` | 列表，按队列顺序：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、分类、自己的限制、文件优先级、是否暂停或顺序下载、是否已完成，以及添加时间；还有 API 对备用速率的选择 |
 | `torrents/<id>.torrent` | 其 .torrent 文件：添加时的字节，或磁力链接的种子从对端收到 info 后的元数据 |
 | `resume/<id>.resume` | 其续传数据（fib 的 `Torrent.ResumeData`）：已有的分片，以及每个文件的大小和修改时间 |
 
@@ -68,15 +86,145 @@ metainfo 拒绝含 `..`、`.`、空或含 `/` 的路径段，其文件存储把�
 `download_dir` 更改时，已有种子保留添加时的目录。存储错误（如文件无法写入）不会停止种子；它出现在种子的状态中，直到
 再有分片校验通过，并写入日志。
 
+## 添加种子
+
+- **磁力链接或 .torrent 文件**，经角色的 API（`Add`），可指定分类、是否暂停及自己的限制。
+- **.torrent 的 URL**（`AddURL`），http 或 https：用 fib 的异步 HTTP 客户端在 fit 的引擎上下载，回调只把应答交出去，
+  因此没有 fib 的 worker 等待。最多跟随 5 次重定向（包括重定向到磁力链接）；整个下载（连接与响应体）受 `url_timeout`
+  （30s）约束，响应体最多 32 MiB，同时最多 4 个下载（再多一个立即拒绝），因此持有的 .torrent 响应体最多 128 MiB。
+- **`watch_dir`**：每 `watch_interval`（10s）查看一次其中的 `.torrent` 文件和 `.magnet` 文件（第一个非空行是磁力链接）。
+  直接在其中的文件不带分类添加，在以分类命名的子目录中的文件归入该分类；其他文件、子目录和以 `.` 开头的名称不动。
+  文件在连续两次查看中大小和修改时间都不变后才被取走，正在写入的文件不会被读到一半。添加成功或其种子已存在的文件移入
+  旁边的 `.done` 子目录；无法添加的（不是种子、不是链接、超过大小上限）移入 `.failed`，旁边写一个说明原因的
+  `<name>.error` 文件；之后可能加得上的（已达 `max_torrents`、状态写不进去）留在原处，每次查看再试。每次查看最多取
+  `watch_max_files`（100）个文件，并只读取有限数量的目录项。
+
+## 分类
+
+`categories` 为种子指定目录和限制。分类的 `dir` 为相对路径时位于 `download_dir` 之下（不写时为
+`<download_dir>/<name>`），且不能跑出它；绝对路径的 `dir` 按原样使用。其 `limits` 是每个种子的限制（fib 的
+`TorrentLimits`：受客户端速率约束的速率、连接数、上传槽位、做种比例和时间），种子自己的限制取代它所设置的那些；
+0 采用客户端的限制，负的连接数、做种比例或做种时间表示该种子不受限。`media_library` 指定一个媒体库，该分类的种子
+完成时重新扫描它（`Library.Rescan`），使下载到其根目录中的内容出现在目录（catalog）中；一个种子只算完成一次，完成
+状态跨重启保存在状态中，文件优先级改变后才会再算一次。`SetCategory` 把种子移到另一个分类的限制和媒体库下；其文件仍
+留在添加时的目录中。
+
+## 队列
+
+`limits.max_active_downloads` 和 `limits.max_active_seeds` 限制同时下载和做种的种子数；超出的种子排队，由角色暂停
+（状态 `queued`），按列表顺序排列，`SetQueuePosition` 改变顺序，状态文件保存顺序。角色每秒一次、并在添加、暂停、恢复、
+移除或移动后立即，启动列表中排得下的前几个种子并暂停其余的，因此种子完成、暂停或移除都会给下一个让出位置；被移到正在
+运行的种子之前的种子会取代它。获取磁力链接元数据或仍在校验数据的种子算作下载中。经 API 暂停或因做种上限暂停的种子不计数，
+队列也从不启动它们。不写时不排队。
+
+## 磁盘空间
+
+`limits.min_free_bytes`（1 GiB，与媒体库上传保留的相同）是下载在其目录所在磁盘上留出的空间：只有当磁盘上空闲的空间
+够它还要下载的量再加这么多时，种子才开始下载（同一次查看中先启动的种子所需的量也计入），正在下载的种子在剩余空间少于
+`min_free_bytes` 时暂停，状态中的错误说明还有多少空闲。角色每秒再看一次，空间够了就自行启动它。做种不需要空间，不检查。
+无法得知空闲空间的系统（Linux、macOS、FreeBSD、Windows 以外）不检查。
+
+## 备用速率
+
+`alt_speed` 设置上传和下载速率（0 表示不限），在它的某个 `schedules` 生效期间取代 `limits` 的速率：每个是一个每周的
+时间段，`days` 是开始的日子（`mon` 到 `sun`、`weekdays`、`weekend`；不写时每天），`from` 和 `to` 为 `time_zone`
+（默认本地）中的 `HH:MM`，`to` 早于 `from` 的时间段跨过午夜进入第二天。角色每秒检查一次，更改就地生效
+（`Client.SetLimits`）。API 的 `SetAltSpeed` 可不顾时间表地打开（`on`）或关闭（`off`）它们，或回到 `auto`；该选择跨
+重启保存在状态中。
+
+## 屏蔽列表
+
+角色的 `access` 和全局的 `access` 决定它与哪些对端打交道（fib 的 `Config.Filter`）：被拒绝的对端经 TCP 连接后立即
+关闭，其 uTP 连接被忽略，从不被拨号，也得不到 DHT 应答。它们的 `deny_files` 和 `allow_files`（与每个模块的相同）除地址、
+前缀和范围外，还读取 eMule 的 `ipfilter.dat` 行（`first - last , level , name`，level 大于 127 的行不列入）和
+PeerGuardian 的 `.p2p` 行（`name:first-last`），逐行按内容区分（[access](reference/config.md#access)）。策略或列表文件
+的更改立即生效：角色重新过滤（`Client.Refilter`），关闭现在被拒绝的已连接对端。
+
 ## 重载
 
 | 更改 | 结果 |
 | --- | --- |
 | `limits` | 就地生效（fib 的 `Client.SetLimits`）：新速率在四分之一秒内生效，对端保持连接，超出调低后连接上限的除外 |
 | `access` | 就地生效：客户端的过滤从下一个对端起按新策略判断，现在被拒绝的已连接对端被关闭（`Client.Refilter`） |
-| `save_interval`、`console`、`download_dir` | 就地生效 |
+| `save_interval`、`console`、`download_dir`、`watch_dir`、`watch_interval`、`watch_max_files`、`url_timeout` | 就地生效 |
+| `categories` | 就地生效：限制立即作用于该分类的种子，新的 `dir` 作用于此后添加的种子；分类被删除的种子保留其目录、失去其限制 |
+| `max_active_downloads`、`max_active_seeds`、`min_free_bytes`、`alt_speed` | 就地生效，种子按它们立即启动或暂停 |
 | `listen`、`encryption`、`dht`、`pex`、`utp`、`lsd`、`disk_workers`、`disk_queue_bytes` | 新建客户端：关闭旧客户端、保存每个种子的续传数据，再把种子无需校验地加入新客户端。新客户端无法创建（端口被占）时，重新创建旧客户端，重载报告错误 |
 | `data_dir` | 像重启一样，在新目录的状态上新建客户端；旧目录保留已保存的内容 |
+
+## 发布
+
+`publish` 条目把目录发布成种子（I202）。每个条目用 fib 的 `metainfo.Builder` 为其 `dir` 生成 hybrid 种子：每个文件一个
+单文件种子（`per_file` 模式，默认），或整个目录一个种子、以目录的最后一段命名（`whole_dir` 模式），并在文件所在处做种：
+种子的存储在原处读取文件、拒绝一切写入，因此校验失败的分片绝不会被下载并覆盖发布的文件，移除种子也绝不删除其文件。
+发布的种子一直做种，不受 `limits.seed_ratio` 和 `seed_time` 影响；它们不在角色的种子列表（`List`）中，也不计入
+`max_torrents`，由 `bt_publish` 处理器提供。
+
+```fit
+bittorrent {
+	client {
+		listen :6881
+		data_dir /var/lib/fit/bittorrent
+		publish {
+			name releases
+			dir /srv/releases
+			web_seed https://example.com/releases/
+			announce https://example.com/announce
+			files *.iso *.tar.gz
+		}
+	}
+}
+
+route {
+	match { path /releases/* }
+	handler static { root /srv/releases; strip_prefix /releases }
+}
+
+route { match { path /torrents/* }; handler bt_publish }
+```
+
+- **`web_seed`** 是提供 `dir` 的 URL（如上面 fit 自己的 `static` 路由），作为 web seed（BEP 19）写入每个种子：`per_file`
+  模式下是文件自己的 URL（`https://example.com/releases/sub/a.iso`），`whole_dir` 模式下是该 URL 的上一级，因为客户端请求
+  `<url>/<name>/<path>`，而种子以目录命名；URL 不以目录名结尾的 `whole_dir` 条目会被配置检查拒绝。这样客户端可以从 fit 的
+  做种、从 web seed、或两者一起下载发布的文件。
+- **`announce`** 是 tracker URL（http、https、udp），每个自成一层，例如 fit 自己的 `bt_tracker` 路由；**`private`** 把种子
+  标为私有（BEP 27）。没有 tracker 时，peer 经 DHT 找到这些种子。
+- **`piece_length`** 是 16 KiB 到 64 MiB 之间的 2 的幂，或按每个种子的大小选取（少于 2048 个分片，最大 16 MiB）。
+- **`files`** 和 **`exclude`** 是模式，与媒体库的相同：不含 `/` 匹配名称，含 `/` 匹配在 `dir` 下的路径，`**` 匹配任意层
+  目录。名称以点开头的文件和符号链接总是不发布，后者是因为链接可能发布 `dir` 之外的内容；客户端存储会改写的名称（Windows
+  上的 `<>:"\|?*`）以及 `per_file` 模式下的空文件也不发布。
+
+**跟随磁盘。** 每个条目在自己的 goroutine 上每隔 `check_interval`（10s）遍历一次 `dir`。文件以大小、修改时间、状态改变时间
+和 inode 识别，与静态文件相同，因此被另一个大小和时间都相同的文件替换也能发现。新增或改变的文件在一个 `check_interval`
+内不再变化后才生成种子（其状态改变时间已经这么久，或上一次遍历看到的相同），以免对仍在复制的文件做哈希；哈希在条目的
+`max_hashing`（1）个 goroutine 之一上进行，从不在 fib worker 上，且只有在哈希之后文件的标记仍未改变时才保留结果。改变或
+删除的文件立即停止其种子，改变的文件在稳定后得到 info hash 不同的新种子；`whole_dir` 模式下任何变化都会取代种子。生成
+失败的文件（无法读取）会被报告，在文件改变前不再重试。无法读取的目录会被报告，其种子保持原样；目录中无法读取的部分下的
+种子也一样。
+
+**状态。** 种子保存在 `data_dir/publish/<name>/` 中：`index.json`（每个种子的文件及其标记）、`<id>.torrent`，以及做种后保存
+一次的续传数据 `<id>.resume`。重启时从这里取回文件标记未变的种子及其续传数据，既不重新生成也不重新校验；只改变条目的上限
+或 `check_interval` 的 reload 也一样。改变 `dir`、`mode`、`web_seed`、`announce`、`private` 或 `piece_length` 会重新生成种子
+（种子的字节变了）；从配置中移除的条目会停止其种子并删除其状态，从不删除其文件。第一次生成的种子在加入客户端时仍会被校验
+一次，因为 fib 还不能以"已完整"的方式添加种子（见开发计划中 I202 的遗留项）。
+
+**`bt_publish` 处理器** 在以 `/` 或 `index.json` 结尾的路径上返回 JSON 索引：每个条目（`publish` 指定提供哪些，不设置时为
+全部）的种子，各带路径、名称、大小、info hash、磁力链接、状态（`seeding`、`checking`，没有客户端运行时为 `stopped`）以及
+相对于索引的 `torrent_url` 和 `magnet_url`，等待生成的文件数（`pending`），以及未发布的内容和原因（`problems`，最多 20 条）。
+`<id>.torrent` 是 .torrent 文件，`<id>.magnet` 是文本形式的磁力链接，ID 是十六进制的 v1 info hash。没有 `bittorrent.client`
+运行时它返回 `503`，因此在没有客户端的配置中保留这条路由也是安全的。它读取条目的快照，不取角色的任何锁。
+
+| 上限 | 默认值 |
+| --- | --- |
+| `publish`，条目数 | 最多 64 |
+| `max_files`，一个条目发布的文件数 | 1000（最多 100000） |
+| `max_total_bytes`，这些文件的大小之和 | 1 TiB |
+| `max_hashing`，每个条目同时生成的种子数 | 1（最多 16） |
+| 一次遍历 | 10 × `max_files` + 10000 个条目 |
+| `index.json` | 64 MiB |
+
+超过 `max_files` 或 `max_total_bytes` 时，`per_file` 模式按路径发布前面的文件并报告其余的；`whole_dir` 模式什么也不发布并
+报告。两个条目共有的文件（或一个文件与手动添加的种子相同）只做种一次；第二个连同错误一起列出。
 
 ## 上限
 
@@ -89,6 +237,12 @@ metainfo 拒绝含 `..`、`.`、空或含 `/` 的路径段，其文件存储把�
 | `limits.upload_slots`，每个种子 | 4 |
 | `limits.upload_rate`、`limits.download_rate` | 不限 |
 | `limits.seed_ratio`、`limits.seed_time` | 一直做种 |
+| `limits.max_active_downloads`、`limits.max_active_seeds` | 不排队 |
+| `limits.min_free_bytes`，下载留出的磁盘空间 | 1 GiB |
+| `categories`、`alt_speed.schedules` | 最多 1000、100 |
+| 经 URL 下载的 .torrent 文件；同时进行的 URL 下载；重定向 | 32 MiB；4；5 |
+| `url_timeout` | 30s |
+| `watch_max_files`，每次查看 `watch_dir` 取走的文件数 | 100（最多 10000） |
 | `disk_queue_bytes`，等待写盘的已接收块 | 64 MiB |
 | .torrent 文件 | 128 MiB（fib 的 metainfo 上限） |
 | 磁力链接 | 64 KiB |
@@ -96,7 +250,136 @@ metainfo 拒绝含 `..`、`.`、空或含 `/` 的路径段，其文件存储把�
 
 ## 角色的 API
 
-角色有一组 Go API，供之后的条目（Admin API、`fit bt`、页面）使用：`Add` 磁力链接或 .torrent 字节，`List`，`Get`（含文件），
-`Pause`，`Resume`，`Remove`（可同时删除数据），`SetFilePriority`，`SetSequential`，`Save`，以及取得 fib 种子的 `Torrent`。
+角色有一组 Go API，供之后的条目（Admin API、`fit bt`、页面）使用：`Add` 磁力链接或 .torrent 字节（可带分类和限制），
+`AddURL`，`List`（按队列顺序），`Get`（含文件），`Pause`，`Resume`，`Remove`（可同时删除数据），`SetFilePriority`，
+`SetSequential`，`SetCategory`，`SetTorrentLimits`，`SetQueuePosition`，`AltSpeed` 和 `SetAltSpeed`，`Save`，以及取得 fib
+种子的 `Torrent`。状态给出种子的分类、自己的和实际生效的限制、队列位置、是否已完成，以及角色暂停它的原因（`queued`、
+`disk`）。
 设置了角色的控制台时，它目前只读地提供 `GET /api/torrents` 和 `GET /api/torrents/<id>`；显示该角色模块的任何控制台以
 `/api/m/bittorrent.client/torrents` 和 `/api/m/bittorrent.client/torrents/<id>` 提供它们。
+
+API 还为 `bt_stream` 的临时种子提供了钩子：`AddTemporary`（受调用者的 `max_temporary` 限制）、`SetTemporary`、
+`RemoveTemporary`（仅当仍是临时种子时，连同数据一起移除）、`TemporaryBytes` 和 `SetFilePriorities`（一次设置每个文件的
+优先级，只保存一次）。
+
+## 边下载边播放
+
+路由处理器 `bt_stream` 在种子下载期间通过 HTTP 提供该角色某个种子的文件，使浏览器的 `<video>` 或播放器能随数据到来而
+播放，并任意拖动：
+
+```json
+{
+  "media_auth": [{"name": "site", "tokens": [{"name": "player", "token": "a-long-random-token", "play": ["bt/*"], "publish": ["bt/*"]}]}],
+  "routes": [{"match": {"path": ["/bt/*"]}, "handler": {"module": "bt_stream", "params": {"auth": "site", "magnet": true}}}]
+}
+```
+
+| URL | 提供什么 |
+| --- | --- |
+| `/bt/<info hash>/<file path>` | 种子中按其列出的路径（以种子名称开头）指定的文件：`/bt/<hash>/Show/S01E01.mkv` |
+| `/bt/<info hash>/<n>` | info 字典文件列表中索引为 `n` 的文件（文件名只由数字组成时，路径优先于索引） |
+| `/bt/<info hash>/` | 其中最大的文件，即带一段样片和几张图片的种子里的影片 |
+
+info hash 即角色的种子 ID（v1 info hash，或截断的 v2 hash），40 位十六进制数字；`prefix` 可改变 `/bt/`。请求可以是
+`GET` 或 `HEAD`，带单个 `Range`（`206 Partial Content`，超出末尾时为 `416` 并带 `Content-Range: bytes */<size>`；多个范围
+或格式错误的范围按 RFC 9110 的许可以整个文件回答），以及针对 `ETag` 的 `If-None-Match` 和 `If-Range`；`ETag` 由种子和
+文件索引组成，因为种子的数据从不改变。`Content-Type` 按扩展名确定（视频、音频、字幕、图片，其他为
+`application/octet-stream`）；总是发送 `Accept-Ranges: bytes`；`cache_control` 和 `cors` 添加相应字段。
+
+**范围如何读取。** 每个响应通过 fib 的文件 `Reader` 读取：从其位置到其后 `readahead_bytes`（8 MiB）内的分块优先于其他
+所有分块下载，近者优先，因此所请求的范围最先下载；一次读取最多等待其分块 `read_timeout`（60s）。响应随第一个数据块
+开始，因此第一个分块始终不到的范围得到 `504`；之后中断的响应在达到 `Content-Length` 之前被关闭，客户端能察觉。仍在
+等待 info 的种子（磁力链接）最多等待 `info_timeout`（60s），之后为 `504`。
+
+**不阻塞任何 fib worker。** 读写状态文件的角色 API，以及等待分块并读盘的 `Reader`，都运行在流自己的 goroutine 上：最多
+`max_streams`（32）个，即处理器的有界池，超过时请求得到带 `Retry-After` 的 `503`。流每次读取 64 KiB，不等待地交给连接；
+当客户端排队的数据超过 fib 的水位线时，其 goroutine 结束，待客户端取走一半后由 `OnWritable` 重新启动：慢客户端只占用一个
+名额和大约两个数据块，从不占用一个等待它的 goroutine，每次这样的等待受 `limits` 的 `write_stall_timeout` 限制。客户端
+离开时其流立即结束，即使正在等待分块：其 reader 被关闭，名额被归还。被换下的配置在排空超时后结束其流。
+
+**授权。** 设置 `auth` 时，每个请求都必须在该 `media_auth` 策略下对 `bt/<info hash>` 有 `play` 权限：bearer token、
+Basic、`token` 查询参数、`fit_media_token` cookie，或在设置了 `url_signing` 时为 `<prefix><info hash>/` 签名的 URL。
+
+**即时通过磁力链接添加。** 设置 `magnet`（需要 `auth`）时，若请求的 `magnet` 查询参数是其路径所指种子的磁力链接，而角色
+没有该种子，且请求还对 `bt/<info hash>` 有 `publish` 权限，则添加该种子：
+`/bt/<hash>/?magnet=magnet%3A%3Fxt%3Durn%3Abtih%3A...`。链接必须属于路径中的种子（否则为 `400`）；对角色已有种子的请求
+照常播放。这样的种子是**临时的**：
+
+- 只下载被流式播放的文件：其他文件的优先级设为 0，请求到别的文件时再提高；
+- 同时最多持有 `max_temporary`（4）个（超过时为 `503`），合计最多占用 `max_temporary_bytes`（16 GiB）磁盘：若某个种子的
+  文件会使总量超过它，请求得到 `507`，刚添加的该种子会被移除；它们也计入角色的 `max_torrents`；
+- 最后一个流结束 `temporary_ttl`（10m）之后，除非期间又有流到来，它连同数据一起被移除：播放器在这段时间内请求下一个范围
+  时它仍在；
+- 角色启动时，会连同数据移除停止或崩溃时遗留的临时种子。
+
+| 参数 | 默认值 |
+| --- | --- |
+| `prefix` | `/bt/` |
+| `max_streams` | 32（最多 4096） |
+| `read_timeout` | 60s |
+| `readahead_bytes` | 8 MiB（64 KiB 到 256 MiB） |
+| `info_timeout` | 60s |
+| `max_temporary` | 4（最多 1000） |
+| `max_temporary_bytes` | 16 GiB |
+| `temporary_ttl` | 10m（最多 7 天） |
+## Tracker
+
+`bittorrent.tracker` 角色是一个 BitTorrent tracker，即 fib 的
+（[`fib/bittorrent/tracker`](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)），每个进程一个，配置不设置时关闭。
+HTTP 和 HTTPS 的 announce 与 scrape（BEP 3、23、7 和 48）经由处理器为 `bt_tracker` 的任何路由到来，走 fit 的监听器及其
+TLS、access 和中间件；UDP 的（BEP 15，带 BEP 41 的 URL 数据）到角色自己的 `listen`，只用 HTTP 的 tracker 可以不设它。
+路径最后一段以 `announce` 开头的请求是 announce，以 `scrape` 开头的是 scrape，所以匹配 `/tracker/*` 的路由同样服务
+`/tracker/announce` 和 `/tracker/<passkey>/announce`。每个 announce 和 scrape 都在读到它的 worker 上服务：存储只短暂
+锁住 64 个分片之一，下面的钩子都是对配置编译结果的查找。
+
+```fit
+bittorrent {
+	tracker {
+		listen :6969
+		auth members
+		allow_files /etc/fit/torrents.txt
+	}
+}
+routes {
+	route { match { path /tracker/* }; handler bt_tracker }
+}
+```
+
+**Swarm** 保存在内存中，即 fib 的 `MemoryStore`，重启后不保留：客户端会在其间隔内再次 announce。peer 在最后一次 announce
+之后 `peer_ttl`（1h）被遗忘，它必须长于 `interval`（30m）；没有 peer 的种子连同其完成次数一起被遗忘。
+
+| 上限 | 默认 | 最多 |
+| --- | --- | --- |
+| `max_torrents`，同时跟踪的种子；再多一个以 "tracker is full" 拒绝 | 100000 | 1048576 |
+| `max_peers_per_torrent`；超出的 peer 能获得 peer，但不会被分发 | 10000 | 65536 |
+| `max_peers`，所有种子合计，每个约 150 字节 | 500000 | 4194304 |
+| `max_numwant`，一次应答中的 peer（客户端未指定时 50；UDP 应答限制在 1400 字节内） | 200 | 1000 |
+| `max_scrape`，一次 HTTP scrape 的种子（UDP 的最多 74 个） | 64 | 1000 |
+| 允许列表，内联和文件合计 | | 1048576 个 info hash，每个文件 64 MiB |
+
+**私有。** 设置 `auth`（一个 `media_auth` 策略的名字）后，每个 announce 和 scrape 都需要 passkey，放在路径中
+（`/<passkey>/announce`）或查询中（`?passkey=`），且 passkey 的授权须能播放流 `bittorrent/<十六进制 info hash>`：
+`play: ["bittorrent/*"]` 表示所有种子，或写一个哈希只表示一个种子。passkey 是策略的令牌之一（静态的，或 fit 签发的：
+`fit media-token`、媒体页面），或用户的 passkey：由策略的签名密钥和用户名派生的 32 位十六进制数，角色的控制台在
+`/api/passkey?user=<name>` 给出。轮换策略的 secret 或其 keyring 的默认密钥会改变每个用户的 passkey；没有 secret 时，
+passkey 在 fit 重启后改变。UDP 上 passkey 在客户端依 tracker URL 发送的 URL 数据中：`udp://host:6969/<passkey>/announce`。
+拒绝以失败原因应答："a passkey is required"、"unknown passkey"、"the passkey may not use this torrent"。访问日志中的
+passkey 被替换为 `REDACTED`。`public` 含 `play` 的策略让所有人进入。策略未加载时 tracker 拒绝所有请求。
+
+**允许列表。** 设置 `allow`（十六进制 info hash：v1 为 40 位，v2 为 64 位，按前 20 字节跟踪）或 `allow_files`（每行一个，
+`#` 注释）后，只跟踪这些种子：其他的以 "unregistered torrent" 拒绝，对它们的 scrape 得不到任何内容。文件像证书和 access
+列表文件一样被监视：变化时重新应用配置并重新读取。有一行不是 info hash 或无法读取的文件会使重载失败，之前的列表继续生效。
+
+**Access。** 角色的 `access`，然后是全局的，在 fib 为被拒地址的 UDP 数据报建立连接之前将其丢弃，并以失败原因 "refused"
+应答来自被拒地址的 HTTP announce 和 scrape（路由的监听器也有全局 access）。
+
+**重载。** 允许列表、`auth`、`access` 和控制台原地改变。`interval`、`min_interval`、`max_numwant` 和 `max_scrape` 在同一
+存储上新建 fib tracker，swarm 保留，UDP 连接 ID 仍然有效（角色保持同一个密钥）。`max_torrents`、`max_peers_per_torrent`、
+`max_peers` 和 `peer_ttl` 会新建存储，因为 fib 的 `MemoryStore` 只在创建时接受它们：swarm 从空开始，随客户端再次 announce
+而填充。`listen` 的更改会移动 UDP 端口；无法绑定时重载失败，tracker 保持原样。
+
+**统计。** 角色的 Go API 有 `Stats`（保存的种子和 peer、已服务的 announce 和 scrape、按原因的拒绝次数、上限）、
+`Torrent(hash)`（做种者、下载者、完成次数）以及 `Torrents`（允许列表中种子的 swarm）；其控制台只读地提供
+`GET /api/stats`、`/api/torrents`（`offset`、`limit`，最多 1000）和 `/api/torrents/<hash>`，作为模块时为
+`/api/m/bittorrent.tracker/...`。公开的 tracker 无法列出它跟踪的种子：fib 的 `MemoryStore` 只对指名的种子作答。
+Admin API 的 `/bittorrent/tracker/stats` 随 I203 而来。

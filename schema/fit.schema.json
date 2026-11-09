@@ -125,7 +125,7 @@
           "type": "array"
         },
         "allow_files": {
-          "description": "Files of more allow entries: an address or prefix on each line, with blank lines and what follows # or ; left out, as the lists published for firewalls are written. Read when the config is applied, and applied again when one changes; each at most 64 MiB.",
+          "description": "Files of more allow entries, one on each line, each line told apart by its content: an address or prefix, with what follows # or ; left out, as the lists published for firewalls are written; a range, first-last; an eMule ipfilter.dat line, first - last , level , name, where a level above 127 is not listed; or a PeerGuardian .p2p line, name:first-last. IPv4 addresses of ranges may have leading zeros. Blank lines and lines that begin with #, ; or // are left out; any other line is an error. Read when the config is applied, and applied again when one changes; each at most 64 MiB.",
           "items": {
             "type": "string"
           },
@@ -688,8 +688,64 @@
         "client": {
           "$ref": "#/$defs/config.BitTorrentClient",
           "description": "Run a BitTorrent client, on fit's engine: one port for TCP and UDP (uTP, the DHT and UDP trackers), downloading and seeding torrents kept in data_dir across restarts. None when left out."
+        },
+        "tracker": {
+          "$ref": "#/$defs/config.BitTorrentTracker",
+          "description": "Run a BitTorrent tracker, on fit's engine: HTTP announces and scrapes through routes whose handler is bt_tracker, UDP ones on its own listen, public or private (passkeys of a media_auth policy), with an allow-list of info hashes. Its swarms are kept in memory, bounded. None when left out."
         }
       },
+      "type": "object"
+    },
+    "config.BitTorrentAltSpeed": {
+      "additionalProperties": false,
+      "properties": {
+        "download_rate": {
+          "description": "The most bytes per second downloaded while the alternative rates hold, all torrents together. Unlimited when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schedules": {
+          "description": "When the alternative rates hold: while any of these does. Only while the API turns them on when left out. At most 100.",
+          "items": {
+            "$ref": "#/$defs/config.BitTorrentSchedule"
+          },
+          "type": "array"
+        },
+        "time_zone": {
+          "description": "The zone the schedules' times are in: local (the default), utc, or an IANA zone name such as Asia/Shanghai.",
+          "type": "string"
+        },
+        "upload_rate": {
+          "description": "The most bytes per second uploaded while the alternative rates hold, all torrents together. Unlimited when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "config.BitTorrentCategory": {
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "description": "The directory the category's torrents download into: a relative path is below download_dir, and may not lead out of it. A torrent keeps the directory it was added with when this changes. <download_dir>/<name> when left out.",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/config.BitTorrentTorrentLimits",
+          "description": "The limits of each torrent of the category, under the client's; a torrent's own limits take the place of those they set. The client's alone when left out."
+        },
+        "media_library": {
+          "description": "A media_library to scan again when a torrent of the category completes, so that what it downloaded into the library's roots appears in its catalog. None when left out.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The category's name, which the API and watch_dir's subdirectories name it by. Letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
       "type": "object"
     },
     "config.BitTorrentClient": {
@@ -698,6 +754,17 @@
         "access": {
           "$ref": "#/$defs/config.Access",
           "description": "The peer addresses the client deals with, deciding before the global access: a peer it refuses is closed as soon as it connects over TCP, has its uTP connection ignored, is never dialed, and as a DHT node gets no answers. Trackers and web seeds are URLs, not peers, and are not asked about. A change applies at once, closing the connected peers it now refuses. Every address when left out, unless the global access says otherwise."
+        },
+        "alt_speed": {
+          "$ref": "#/$defs/config.BitTorrentAltSpeed",
+          "description": "Alternative rates, in place of limits' upload_rate and download_rate while one of their schedules holds, or while the API turns them on. None when left out."
+        },
+        "categories": {
+          "description": "The categories a torrent may be added in: each downloads into a directory of its own, gives its torrents its own limits, and may name a media_library that is scanned again when a torrent of it completes. A torrent added with no category downloads into download_dir. A change applies in place: limits to the torrents of the category at once, a new directory to the torrents added from then on. A torrent whose category is removed keeps its directory and loses the category's limits. At most 1000.",
+          "items": {
+            "$ref": "#/$defs/config.BitTorrentCategory"
+          },
+          "type": "array"
         },
         "console": {
           "$ref": "#/$defs/config.RoleConsole",
@@ -740,7 +807,7 @@
         },
         "limits": {
           "$ref": "#/$defs/config.BitTorrentLimits",
-          "description": "The client's rates and connection, seeding and torrent limits. A change applies in place, keeping the peers connected, but those over a lowered connection limit. The defaults when left out."
+          "description": "The client's rates and connection, seeding, queueing, disk and torrent limits. A change applies in place, keeping the peers connected, but those over a lowered connection limit. The defaults when left out."
         },
         "listen": {
           "description": "The host and port peers reach the client at, the same port for TCP and UDP (uTP, the DHT and UDP trackers share it), as in \":6881\". Port 0 picks one free for both. A change makes a new client: the torrents are saved, the client closed, and the torrents added to the new one, resuming without a check.",
@@ -755,9 +822,22 @@
           "description": "Exchange peers with connected peers (BEP 11). On when left out. A change makes a new client.",
           "type": "boolean"
         },
+        "publish": {
+          "description": "Directories the client publishes: each built into hybrid torrents, a torrent of each file or one of the whole directory, on goroutines of its own, and seeded where the files are, the .torrent files and magnet links served by the bt_publish handler. Each follows the disk: a file added gets a torrent, and one changed or removed stops its torrent, a changed one getting a new torrent. The torrents are kept in data_dir/publish/<name>/, so that a restart neither builds nor checks a file that did not change. None when left out.",
+          "items": {
+            "$ref": "#/$defs/config.BitTorrentPublish"
+          },
+          "type": "array"
+        },
         "save_interval": {
           "default": "5s",
           "description": "How often, at most, the state is saved when something changed: a piece verified, a torrent added, removed, paused or its metadata received. It is saved when the role stops too, and changes to the list of torrents are saved at once. 5s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "url_timeout": {
+          "default": "30s",
+          "description": "How long the download of a .torrent file by its URL may take in all, connecting, redirects (at most 5) and the body (at most 32 MiB) included; at most 4 run at once. 30s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
@@ -765,6 +845,23 @@
           "default": true,
           "description": "Speak uTP (BEP 29) beside TCP: peers are dialed over uTP first, then TCP. On when left out. A change makes a new client.",
           "type": "boolean"
+        },
+        "watch_dir": {
+          "description": "A directory looked at every watch_interval for .torrent files and .magnet files (a magnet link on the first line that is not blank), each added once it has kept its size and modification time across two looks, so that one being written is not taken half way: those directly in it with no category, those in a subdirectory named after a category in that category. A file added, or whose torrent is already held, is moved into its .done subdirectory; one that cannot be added, being too large, not a torrent or not a link, into .failed, beside a .error file saying why; one that may be added later (max_torrents reached, the state not written) is left to be tried again. None when left out.",
+          "type": "string"
+        },
+        "watch_interval": {
+          "default": "10s",
+          "description": "How often watch_dir is looked at. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "watch_max_files": {
+          "default": 100,
+          "description": "The most files of watch_dir and its category subdirectories taken in one look, the rest left for the next. 100 when left out or 0.",
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
@@ -778,6 +875,16 @@
       "properties": {
         "download_rate": {
           "description": "The most bytes per second downloaded, payload of all torrents together. Unlimited when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_active_downloads": {
+          "description": "The most torrents downloading at once: past it, torrents queue, paused by the client, in the order of the list (which the API's queue position changes), and the first of them starts when one finishes, is paused or removed. A torrent fetching a magnet link's metadata counts as downloading. No queue when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_active_seeds": {
+          "description": "The most torrents seeding at once, queued as max_active_downloads queues downloads. No queue when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },
@@ -806,6 +913,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "min_free_bytes": {
+          "default": 1073741824,
+          "description": "The disk space a download leaves free: a torrent starts downloading only when its directory's disk has what it still has to download and this much more free, and one downloading pauses, with an error saying so, when less than this is left; it starts again by itself once the space is there. Where the free space cannot be told, it is not checked. 1 GiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "seed_ratio": {
           "description": "Pause a torrent once it has uploaded this many times its size since it was added or fit started. Seeds for ever when left out or 0.",
           "minimum": 0,
@@ -826,6 +939,238 @@
           "description": "How many peers a torrent uploads to at once, beside one optimistic unchoke. 4 when left out or 0.",
           "minimum": 0,
           "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "config.BitTorrentPublish": {
+      "additionalProperties": false,
+      "properties": {
+        "announce": {
+          "description": "Tracker URLs, http, https or udp, put in every torrent, each a tier of its own, tried in order: as fit's own bt_tracker route. None when left out: peers find the torrents by the DHT, unless private.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "check_interval": {
+          "default": "10s",
+          "description": "How often dir is walked again for files added, changed or removed, as static files follow the disk. A file is told by its size, modification and status change times and inode; one new or changed is built into a torrent once it has not changed for a check_interval, so that a file still being copied is not hashed; a file removed or changed stops its torrent at once. 10s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "dir": {
+          "description": "The directory published. Its files are seeded where they are, never written to, moved or deleted: a torrent whose file changes is replaced by a new one. Files and directories whose names start with '.' and symbolic links are left out.",
+          "type": "string"
+        },
+        "exclude": {
+          "description": "Files and directories left out, by pattern, as files writes them, as *.part or **/tmp/**; a directory left out is not walked. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "files": {
+          "description": "The files published, by pattern: a pattern without '/' matches a file's name, as *.iso, and one with '/' its path under dir, as releases/**/*.tar.gz, where * matches within a name and ** any run of directories. Every file when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_files": {
+          "default": 1000,
+          "description": "The most files published: in mode per_file the first by path are, the rest are left out and reported; in mode whole_dir a directory with more is not published, and is reported. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_hashing": {
+          "default": 1,
+          "description": "How many torrents are built at once, each reading and hashing its files on a goroutine of the entry's own, never on a fib worker. 1 when left out or 0.",
+          "maximum": 16,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "default": 1099511627776,
+          "description": "The most bytes published, the files' sizes together: past it, in mode per_file, the files after are left out, and in mode whole_dir the directory is not published; either is reported. 1 TiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "default": "per_file",
+          "description": "per_file makes a single-file torrent of each file below dir; whole_dir makes one torrent of the whole directory, named as its last element, which any change of a file below it replaces. per_file when left out.",
+          "enum": [
+            "per_file",
+            "whole_dir"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "description": "The entry's name, which the bt_publish handler and the state in data_dir know it by. Letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        },
+        "piece_length": {
+          "description": "The torrents' piece length, a power of two from 16 KiB to 64 MiB. Picked for each torrent's size when left out or 0: the smallest of at least 16 KiB that makes fewer than 2048 pieces, up to 16 MiB. A change makes new torrents.",
+          "maximum": 67108864,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "private": {
+          "description": "Mark the torrents private (BEP 27): clients find peers only through the trackers of announce, not the DHT or peer exchange. A change makes new torrents, of other info hashes.",
+          "type": "boolean"
+        },
+        "web_seed": {
+          "description": "The http or https URL at which dir is served, as by a static route whose root is dir, put in every torrent as its web seed (BEP 19): a file's own URL in mode per_file, and in mode whole_dir the URL's parent, so the URL's last element must be dir's last element then. None when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "dir"
+      ],
+      "type": "object"
+    },
+    "config.BitTorrentSchedule": {
+      "additionalProperties": false,
+      "properties": {
+        "days": {
+          "description": "The days the range begins on: mon, tue, wed, thu, fri, sat, sun, weekdays (mon to fri) and weekend (sat and sun). A range that runs past midnight holds into the next day. Every day when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "from": {
+          "description": "The time the range begins at, HH:MM, 00:00 to 23:59.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The time the range ends at, HH:MM, 00:01 to 24:00, not included: one earlier than from runs past midnight, as 22:00 to 06:00. It may not equal from.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "config.BitTorrentTorrentLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "download_rate": {
+          "description": "The most bytes per second the torrent downloads, under the client's rate. The client's rate alone when left out, 0 or negative.",
+          "type": "integer"
+        },
+        "max_conns": {
+          "description": "The most peer connections of the torrent, in place of max_conns_per_torrent, above or below it; negative is the client's max_conns alone. max_conns_per_torrent when left out or 0.",
+          "type": "integer"
+        },
+        "seed_ratio": {
+          "description": "Pause the torrent once it has uploaded this many times its size, in place of the client's; negative seeds for ever. The client's when left out or 0.",
+          "type": "number"
+        },
+        "seed_time": {
+          "description": "Pause the torrent once it has seeded this long, in place of the client's; negative seeds for ever. The client's when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "upload_rate": {
+          "description": "The most bytes per second the torrent uploads, under the client's rate. The client's rate alone when left out, 0 or negative.",
+          "type": "integer"
+        },
+        "upload_slots": {
+          "description": "How many peers the torrent uploads to at once, beside one optimistic unchoke, in place of the client's; negative unchokes every interested peer. The client's when left out or 0.",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "config.BitTorrentTracker": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/config.Access",
+          "description": "The client addresses the tracker serves, deciding before the global access: a UDP datagram from an address it refuses is dropped before a connection is made, and an HTTP announce or scrape through bt_tracker from one is answered with a failure reason. A change applies at once. Every address when left out, unless the global access says otherwise."
+        },
+        "allow": {
+          "description": "The info hashes the tracker tracks, in hex: 40 digits for a v1 hash, or 64 for a v2 one, tracked by its first 20 bytes as v2 clients announce it. With any here or in allow_files, announces of other torrents are refused with \"unregistered torrent\", and scrapes of them get nothing. Every torrent when both are left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allow_files": {
+          "description": "Files of more allowed info hashes: one on each line, as allow has them, with blank lines and what follows # left out. Read when the config is applied, and read again when one changes; each at most 64 MiB, and at most 1048576 info hashes in all.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "auth": {
+          "description": "The media_auth policy whose passkeys the tracker takes, which makes it private: an announce or scrape must carry a passkey, in its path as /<passkey>/announce or as ?passkey=, that is one of the policy's tokens (static, or signed by fit) or a user's passkey, derived from the policy's secret and the user's name, and whose grant plays bittorrent/<info hash in hex> (play [\"bittorrent/*\"] for every torrent). Others are refused with a failure reason. Public when left out: anyone may announce.",
+          "type": "string"
+        },
+        "console": {
+          "$ref": "#/$defs/config.RoleConsole",
+          "description": "The tracker's web pages: its statistics, read-only. None when left out."
+        },
+        "interval": {
+          "default": "30m",
+          "description": "How often clients are told to announce. 30m when left out. A change applies at once, keeping the swarms.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "listen": {
+          "description": "The host and port the tracker answers UDP announces and scrapes on (BEP 15), as \":6969\". Announces over HTTP and HTTPS come through a route whose handler is bt_tracker, on fit's listeners. No UDP when left out. A change moves the UDP port, keeping the swarms.",
+          "type": "string"
+        },
+        "max_numwant": {
+          "default": 200,
+          "description": "The most peers an announce gets, whatever its numwant asks; 50 when it asks for none. A UDP answer is also kept within 1400 bytes. 200 when left out or 0.",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_peers": {
+          "default": 500000,
+          "description": "The most peers kept of all torrents together, each about 150 bytes; a peer past it still gets peers but is not handed out. 500000 when left out or 0. A change makes a new store.",
+          "maximum": 4194304,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_peers_per_torrent": {
+          "default": 10000,
+          "description": "The most peers kept of one torrent; a peer past it still gets peers but is not handed out. 10000 when left out or 0. A change makes a new store.",
+          "maximum": 65536,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_scrape": {
+          "default": 64,
+          "description": "The most torrents one HTTP scrape may name; a UDP scrape is bounded to 74 by its packet. A scrape naming none, a full scrape, gets nothing. 64 when left out or 0.",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_torrents": {
+          "default": 100000,
+          "description": "The most torrents tracked at once; an announce of one more is refused with \"tracker is full\". 100000 when left out or 0. A change makes a new store: the swarms start empty and fill again as clients announce.",
+          "maximum": 1048576,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_interval": {
+          "description": "The \"min interval\" of HTTP answers: how soon a client may announce again of its own accord. None when left out. At most interval. A change applies at once, keeping the swarms.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "peer_ttl": {
+          "default": "1h",
+          "description": "How long a peer is kept after its last announce, longer than interval so that a peer announcing a little late is not forgotten; a torrent left without peers is forgotten, its completed count with it. 1h when left out. A change makes a new store: the swarms start empty and fill again as clients announce.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
         }
       },
       "type": "object"
@@ -5121,6 +5466,54 @@
           "if": {
             "properties": {
               "module": {
+                "const": "bt_publish"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.bt_publish"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "bt_stream"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.bt_stream"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "bt_tracker"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.bt_tracker"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "fastcgi"
               }
             }
@@ -5378,6 +5771,9 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "bt_publish",
+            "bt_stream",
+            "bt_tracker",
             "fastcgi",
             "forward_proxy",
             "hls",
@@ -5404,6 +5800,93 @@
       "required": [
         "module"
       ],
+      "type": "object"
+    },
+    "http.handlers.bt_publish": {
+      "additionalProperties": false,
+      "properties": {
+        "publish": {
+          "description": "The publish entries of the bittorrent.client served, by name; a name the client has not is listed in the index with its error. Every entry when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "http.handlers.bt_stream": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "description": "The media_auth policy every request must satisfy, play on the stream bt/<info hash>: a bearer token, Basic, the token query parameter or the fit_media_token cookie, or, with the policy's url_signing, a URL signed for <prefix><info hash>/. Adding a torrent by magnet link takes publish on the same stream as well. Everyone may play when left out; magnet needs it.",
+          "type": "string"
+        },
+        "cache_control": {
+          "description": "Sent as Cache-Control with every file. None when left out.",
+          "type": "string"
+        },
+        "cors": {
+          "description": "Sent as Access-Control-Allow-Origin, as \"*\", for players on other origins. None when left out.",
+          "type": "string"
+        },
+        "info_timeout": {
+          "default": "60s",
+          "description": "How long a request waits for the info of a torrent added from a magnet link to arrive from peers; past it the answer is 504. 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "magnet": {
+          "description": "Lets a request add the torrent its path names when the role does not have it, from the magnet link in its magnet query parameter, which must be of that torrent: /bt/<info hash>/?magnet=<link>, escaped. Such torrents are temporary: they download only the files streamed, are bounded by max_temporary and max_temporary_bytes, and are removed with their data temporary_ttl after their last stream ended, and when fit starts. Needs auth, whose publish on bt/<info hash> the request must have. Off when left out.",
+          "type": "boolean"
+        },
+        "max_streams": {
+          "default": 32,
+          "description": "The most responses the handler streams at once, each with a goroutine of its own while it reads; past it a request is answered 503. At most 4096. 32 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_temporary": {
+          "default": 4,
+          "description": "The most temporary torrents, added by magnet link on the fly, the role holds at once; past it adding one is answered 503. At most 1000. 4 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_temporary_bytes": {
+          "default": 17179869184,
+          "description": "The most bytes the temporary torrents may want of the disk together: a torrent whose files streamed would take it past this is answered 507, and removed when it was just added. 16 GiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefix": {
+          "default": "/bt/",
+          "description": "The part of the path before a torrent's info hash: with /bt/, /bt/<info hash>/<file path> is a file of the torrent by its path as the torrent lists it, its name first, /bt/<info hash>/<n> its file of index n, and /bt/<info hash>/ its largest file. The info hash is the bittorrent.client role's torrent ID, 40 hex digits. /bt/ when left out.",
+          "type": "string"
+        },
+        "read_timeout": {
+          "default": "60s",
+          "description": "How long a read waits for the piece it needs to arrive: past it a response not begun is answered 504, and one begun is cut short. 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "readahead_bytes": {
+          "default": 8388608,
+          "description": "How far past what a response reads the pieces are fetched before all others, nearest first. 64 KiB to 256 MiB. 8 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "temporary_ttl": {
+          "default": "10m",
+          "description": "How long a temporary torrent stays after its last stream ended, for the next range a player asks: then it is removed with its data. At most 7 days. 10m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "http.handlers.bt_tracker": {
+      "additionalProperties": false,
+      "properties": {},
       "type": "object"
     },
     "http.handlers.fastcgi": {
@@ -10827,7 +11310,7 @@
     },
     "bittorrent": {
       "$ref": "#/$defs/config.BitTorrent",
-      "description": "fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP. None when left out: no BitTorrent port and no state on disk."
+      "description": "fit's BitTorrent roles, beside the gateway on its engine: a client that downloads and seeds torrents on one port for TCP and UDP, and a tracker. None when left out: no BitTorrent port and no state on disk."
     },
     "engine": {
       "$ref": "#/$defs/config.Engine",
