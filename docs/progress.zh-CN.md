@@ -4627,6 +4627,20 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **缺口**：计划 I191 一节中的决策，待审查：只有每个目标都保存检查点时才恰好一次；分块读取的作业只用文件；分几部分提交的源事务
   仍可能写两次。
 
+### I194 同步的文档与示例 — 已完成
+
+- **指南**：`docs/sync.md` 与 `docs/sync.zh-CN.md`：记录、流水线、检查点、至少一次与 I191 的恰好一次、错误；每个连接器及一份
+  .conf 配置（均用 `fit validate` 检查，MySQL 源的待 I174 落地后）；每个源对服务端的要求（MySQL 的 binlog 设置与权限、
+  PostgreSQL 的 `wal_level` 与 publication、MongoDB 的副本集、Kafka 的 ACL 等）；系统之间的类型映射；变换、编解码器与 WASM
+  插件；作业；Admin API、`fit sync` 与工作台；指标与死信；快照、重置、迁移、故障、上限。从 README 和配置页的 `sync` 一行链接。
+  MySQL 源（I174、I175）和 I192 的矩阵以 `MERGE CHECK` 标出，供合并时检查。
+- **示例**在 fit-examples 的 `sync-examples` 分支（未推送）：文件到 Elasticsearch、MySQL 到 PostgreSQL（恰好一次）、PostgreSQL
+  到 Kafka、用 Go 写的 WASM 变换；其测试把密码变量设为替代值并构建插件；go.mod 在 fit `7a793de`。
+- **测试**：`go test ./docs`（TestLinks、TestConfigExamples）；fit-examples 的 `go test` 经本地 `replace` 针对本 fit；WASM 示例用
+  `fit sync run --once` 运行。
+- **缺口**：计划 I194 一节中的决策，待审查；fit-examples 的 go.mod 需移到含 I179、I185 和 I174 的已推送 fit，届时把
+  `sync-mysql-to-postgres` 移出 `noValidate`。
+
 ### I186 Redis 作为源与目标 — 已完成
 
 - **客户端**（`sync/redis/wire`，包 `wire`）：经 TCP 或 TLS 的 RESP2 与 RESP3；带 `AUTH` 与 `SETNAME` 的 `HELLO 3`，服务器

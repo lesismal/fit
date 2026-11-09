@@ -349,7 +349,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I191 | 写入 MySQL、TiDB 和 PostgreSQL 时恰好一次：检查点写在目标的事务中 | I176, I180 | done |
 | I192 | CI 中的互通与恢复矩阵 | I176, I180, I183, I185 | todo |
 | I193 | 对比 Filebeat、Canal、Debezium 和 DataX 的基准测试 | I192 | todo |
-| I194 | 同步的文档与示例 | I190 | todo |
+| I194 | 同步的文档与示例 | I190 | done |
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |
 | **BitTorrent** | | | |
@@ -4740,6 +4740,28 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
   PostgreSQL 到 Kafka、一个 WASM 变换。
 - **完成标准**：链接检查通过；每个示例都在 fit-examples 的 CI 中运行。
 - **涉及**：`docs`、fit-examples。
+
+**待审查的决策**（实现时所做，2026-11-09；在用户裁定前按此执行）：
+
+1. **一份指南，`docs/sync.md` 及其中文版**，从 README 和配置页的 `sync` 一行链接过来：概念、每个连接器及一份能加载的 .conf
+   配置、每个源对服务端的要求、类型映射、变换与编解码器、插件、作业、Admin API、`fit sync` 与工作台、指标、死信、运维和互通。
+   每个字段的说明留在生成的参考中，指南链接过去而不重复。备选：每个连接器一页。
+2. **fit-examples 中的四个示例**（`sync-files-to-elasticsearch`、带 `checkpoint: "sink"` 的 `sync-mysql-to-postgres`、
+   `sync-postgres-to-kafka`、`sync-wasm-transform`），在那里的 `sync-examples` 分支上，未推送。「在 fit-examples 的 CI 中运行」
+   理解为其测试中的 `fit validate`，与那里的每个示例相同；只有 WASM 示例不需要服务器即可运行（文件到 stdout，已用
+   `fit sync run --once` 手工检查）。其余示例对真实服务器的运行属于 I192 的矩阵，或以后的 Compose 示例。备选：每个示例一个
+   Compose 文件，在 fit-examples 的 CI 中运行。
+3. **fit-examples 的测试把示例的密码变量**（`ES_PASSWORD`、`KAFKA_PASSWORD`、`MYSQL_PASSWORD`、`PG_PASSWORD`）设为替代值，
+   因为 `fit validate` 像 `fit run` 一样读取 `password_env`；并在验证前**从 Go 源码构建 WASM 插件**（`GOOS=wasip1`）；4.5 MB 的
+   `.wasm` 不提交（`.gitignore`）。备选：提交 `.wasm`，或 TinyGo 构建的更小的（I165b）。
+4. **`sync-mysql-to-postgres` 只做 adapt**（fit-examples 的 `noValidate`），直到其 go.mod 所需的 fit 有 `mysql` 源（I174）；其
+   go.mod 已移到 fit `7a793de`（origin 的 main），它缺少 I179 和 I185，所以固定版本的任务要等 go.mod 移到含 I179、I185 和 I174
+   的已推送 fit 后才能通过验证。sync-examples 分支应连同这次升级一起推送。
+5. **MySQL 源的部分按 I174 和 I175 的规格写成**，早于它们合并，I192 的矩阵也尚未描述：两处在指南中都以 `MERGE CHECK` 注释
+   （GitHub 上不显示）标出，供合并时对照合并后的代码检查。备选：合并前先不写。
+6. **指南中的配置在编写时用 `fit validate` 检查过**，而不是由常设测试检查：`TestConfigExamples` 覆盖配置各页，而指南中 MySQL
+   源的配置在 I174 之前无法加载。能加载之后，`sync*.md` 可以加入该测试。备选：跳过未注册模块的配置块的测试。
+7. **规模**：英文指南约 1000 行，中文约 890 行；fit-examples 中四个示例和 30 行测试。计划的内容没有遗漏，只有决策 2 中对服务器的运行除外。
 
 ### 待审查的决策（2026-11-08）
 
