@@ -224,12 +224,7 @@ func (n *Node) jobTimeout() time.Duration { return n.settings().JobTimeout }
 func (n *Node) changed() { n.push.mark() }
 
 // Info returns the current NodeInfo with a new Seq.
-func (n *Node) Info() model.NodeInfo {
-	info := n.snapshot()
-	info.Seq = n.push.nextSeq()
-	info.UpdatedAt = time.Now().Unix()
-	return info
-}
+func (n *Node) Info() model.NodeInfo { return n.push.info() }
 
 // snapshot is NodeInfo without Seq and UpdatedAt.
 func (n *Node) snapshot() model.NodeInfo {
