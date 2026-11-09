@@ -7344,7 +7344,7 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
   by hand: logproto's `PushRequest`, OTLP's `ExportLogsServiceRequest`, a reader of the partial
   success) and `sync/internal/rectmpl` (the label and attribute templates). Unit tests against fake
   receivers that decode both encodings: streams, labels, metadata, tenants, times, the bad record
-  found by splitting, partial successes, typed bodies; 99.0% of `loki`, 99.3% of `otlp`. Interop
+  found by splitting, partial successes, typed bodies; 99.0% of `loki` and of `otlp`. Interop
   (`test/sync/obs.sh`, `test/sync/obs_test.go`) with Loki 3.5.5 and the OpenTelemetry Collector
   (contrib 0.137.0, its file exporter read back): both encodings, a replay Loki stores once, files to
   Loki and to OTLP through pipelines killed at random points with every line delivered. The

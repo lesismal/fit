@@ -5270,7 +5270,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成** 2026-11-10：`sync/loki` 与 `sync/otlp`（目标 `otlp_logs`）包，在 `modules/standard` 注册，基于 I218 的
   `sync/internal/httpconn`，以及 `sync/internal/pb`（手写 protobuf：logproto 的 `PushRequest`、OTLP 的
   `ExportLogsServiceRequest`、部分成功的读取）和 `sync/internal/rectmpl`（标签与属性模板）。单元测试针对能解码两种编码的
-  假接收端：流、标签、元数据、租户、时间、拆分找出坏记录、部分成功、带类型的 body；`loki` 覆盖率 99.0%，`otlp` 99.3%。
+  假接收端：流、标签、元数据、租户、时间、拆分找出坏记录、部分成功、带类型的 body；`loki` 与 `otlp` 覆盖率均为 99.0%。
   互操作（`test/sync/obs.sh`、`test/sync/obs_test.go`）：Loki 3.5.5 与 OpenTelemetry Collector（contrib 0.137.0，读回其文件
   导出器的输出）：两种编码，重放后 Loki 只存一份，文件经随机被杀的流水线送到 Loki 和 OTLP，每一行都送达。基准场景
   `files-loki` 与 `files` 并列（fit 对比 Promtail 3.5.5，按 Loki 的 `loki_distributor_lines_received_total` 计数），此处未运行。
