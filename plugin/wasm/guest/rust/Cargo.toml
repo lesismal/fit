@@ -9,4 +9,10 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[features]
+# Takes the binary form of records fit offers; without it records cross as
+# their canonical JSON.
+default = ["binary"]
+binary = []
+
 [dependencies]

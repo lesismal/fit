@@ -4468,6 +4468,89 @@ stands until the user rules on it; the item stays todo until that run):
    TinyGo 0.44 too (checked), which the comments show. No Rust example there: its CI builds only Go.
    Alternative: a Rust example, with a Rust toolchain in fit-examples' test.
 
+**The binary record form** (planning decision 8, built 2026-11-09 before the benchmark host's run,
+since the local numbers already asked for it; pending review as the rest):
+
+6. **The form.** `fitsync` gains a binary form of records beside the canonical JSON
+   (`sync/binary.go`): strings are a uvarint length and bytes; a value is a tag, `0x10` plus its
+   kind (null, bool as a byte, int as a zigzag varint, uint as a uvarint, float as its 8 bytes,
+   decimal, string, bytes and json as strings, time as Unix seconds, nanoseconds and offset, date
+   as year, month, day), arrays and maps with their length in 4 bytes before their count so that a
+   plugin passes over any value without reading into it, and `0x1F` a value in canonical JSON, so
+   that one written by hand still goes; the tags are control characters no JSON text starts with,
+   so a value tells its form by its first byte. A record is its op and transaction flags as bytes,
+   source and namespace, key, before and after, the commit time as RFC 3339 text, the
+   transaction id and the position's JSON. A batch is a count and records; what a plugin hands
+   back is any number of an index and a record. Alternative: JSON for the records' frame and
+   binary values only; an off-the-shelf format (CBOR, protobuf, FlatBuffers), which every guest
+   would need a library for.
+7. **Negotiated per plugin, both directions.** A plugin that exports `fit_sync_form(offered)`
+   gets offered form 1 when an instance is made and returns the form it takes, at most the one
+   offered (more fails the load, as a trap does); one that takes it reads its batches (transform,
+   encode, write) in it and hands records back through the new import `records_emit(buf, len)`,
+   many at once. A plugin that exports none, every one built before, reads JSON and calls
+   `record_emit` as before, unchanged; `record_emit` stays JSON in either form. Every instance
+   must take what the first took. A plugin built on the new SDKs imports `records_emit`, so it
+   needs a fit that has it; the other way round holds. Alternative: a version in a custom section;
+   a second set of exports.
+8. **A host decoder that allocates little.** `fitsync.BinaryReader` copies what a plugin hands
+   back once, as a string its records' strings, positions and bytes are slices of, and carves
+   records, map fields and array values out of blocks; `fitsync.BinaryBatch` writes a batch and
+   notes where each record's values, commit time and position are, and a record handed back for
+   input record i whose part is byte for byte what record i had takes record i's part (values are
+   not changed once made) without reading it: a transform that changes the namespace decodes no
+   value at all. The plugin's calls keep their buffers in a pool of the plugin's, and the caller
+   of `ApplyBatch` is one of its workers. Host allocations a record: about 209 before, 0.18 to
+   0.21 now. Alternative: records over the plugin's memory without a copy, unsafe once the
+   instance runs again.
+9. **The Go SDK speaks it, and keeps a call's memory.** `guest.Value` (a `[]byte` of either form)
+   replaces `json.RawMessage` for `Record.Key`, `Before`, `After` and a `Row`'s fields; code that
+   uses the helpers and `[]byte` literals builds as it was, code naming `json.RawMessage` for a
+   value does not. The helpers read either form and make values in the one taken; `Decimal` and
+   `AsDecimal` are new, `Value.MarshalJSON` (and `Record.MarshalJSON`) writes canonical JSON;
+   `JSONForm()` in an init keeps a plugin on JSON. `Emit` gathers records in the binary form and
+   hands them over as the export returns (or every 64 KiB). The input and the batch's records
+   are reused by the next call, which spared TinyGo's allocator most (a batch of 64 went from
+   6 µs a record to 0.45 µs): a handler's batch, and what its records hold, are the call's, to be
+   copied if kept. fit-examples' `sync-wasm-codec` reads a price by scanning the value's JSON,
+   which finds nothing in the binary form: it should use `guest.AsDecimal` (or call
+   `guest.JSONForm()`), left to fit-examples. Alternative: fresh memory for each call; values
+   converted to JSON for the plugin.
+10. **TinyGo plugins built with `-scheduler=none`.** TinyGo's default scheduler starts a
+    goroutine for each exported call, which cost about 430 µs a call here whatever the form; a
+    sync plugin needs no goroutines, so the tests build with `-scheduler=none` and the module's
+    chapter says so. This replaces decision 1's "default flags". Alternative: default flags, and
+    a TinyGo plugin ten to a hundred times slower.
+11. **The Rust crate speaks it by a default feature.** `fit-guest` exports `fit_sync_form` with its
+    default feature `binary`; `default-features = false` keeps JSON, for a plugin that splits a
+    batch with `records` and parses it with a JSON library. `parse_batch`, `Row` and the helpers
+    read either form and make the one taken (`decimal`, `as_decimal`, `value_json` are new);
+    `emit_record` hands a record over at once, `Emitter` gathers them and hands them over when it
+    is dropped at the export's end. Alternative: binary only when a plugin opts in.
+12. **The tests run each guest in both forms**: every `TestSync*` of decision 1 runs as
+    `<guest>/binary` and `<guest>/json`, the latter offering no form (`offerForm`), as fit did
+    before, which is what an old plugin sees; `TestSyncBinaryEmit` and `TestSyncFormNegotiation`
+    use hand-built modules for what the SDKs would not do; `sync/binary_test.go` covers
+    `binary.go` whole. `BenchmarkSyncTransform` is `wasm-<guest>-<form>-<instances>`, with
+    `allocs/record`.
+13. **Measured, and the gap left.** `BenchmarkSyncTransform`, per record, batches of 64, on an
+    Apple M4 Pro (not the benchmark host). Before, in a container (Docker Desktop, 8 CPUs):
+    built-in 279 ns; Go 49.3 µs on one instance, 15.2 µs on four; TinyGo 44.9 / 14.7 µs; Rust
+    30.8 / 11.4 µs; 209 host allocations a record. After, binary form, the same container:
+    built-in 255 ns; Go 3.1 / 2.6 µs; TinyGo 1.5 / 1.4 µs; Rust 1.1 / 1.06 µs; 0.18 to 0.21
+    allocations. Four instances barely help in the container: its VM wakes an idle thread so
+    late that the other workers start when the first call ends (seen by timing each call), so
+    the same build was run natively too (TinyGo and Rust plugins built in the container): built-in
+    89 ns; Go 3.2 µs / 1.03 µs; TinyGo 1.5 µs / 502 ns; Rust 1.08 µs / 437 ns. The JSON form is
+    as before (Go 51.8 / 12.8 µs natively). So four instances are 4.9 (Rust) to 11.6 (Go) times
+    the built-in, not within 20%: what is left is the plugin's own work, reading a batch and
+    writing each record back in its memory (Go's WebAssembly code most), and the host's writing
+    of the batch (about 110 ns a record); the host's reading is mostly comparisons now. More
+    instances, larger `batch_records`, a guest that reads a record's parts only when asked, or a
+    mark for "this value as it came" so a guest copies nothing it did not change, would narrow it;
+    a plugin that sees every record is unlikely to come within 20% of a built-in that clones a
+    record and looks up a map. The benchmark host's run decides.
+
 ### I166 Files as a source and a sink
 
 - **Do**: source `file`: paths and globs, scanned each `scan_interval`; each file known by its device,

@@ -148,6 +148,19 @@ The plan's I165 section lists them all; these change the record above.
 5. **JSON is slow in a Go plugin**: locally, 46.5 µs a record against the built-in's 81 ns, so the
    binary form of planning decision 8 is asked for, with the benchmark host's run (I165b).
 
+## Decisions made while building I165b (pending review)
+
+The plan's I165b section lists them all; these change the record above.
+
+1. **Records cross in a binary form when a plugin takes it** (planning decision 8): a plugin that
+   exports `fit_sync_form(offered)` is offered form 1 and may take it; it then reads its batches
+   in `fitsync`'s binary form (lengths and tags; a value's first byte tells its form) and hands
+   records back through `records_emit`, many at once. One that exports none, every plugin built
+   before, keeps the canonical JSON and `record_emit`. The host reads what comes back out of one
+   copy, and takes a value a plugin handed back unchanged from the batch's record.
+2. **A Go plugin's batch is its call's**: the guest SDK reuses a call's input and records in the
+   next call, and TinyGo plugins are built with `-scheduler=none`.
+
 ## Decisions made while building I166 (pending review)
 
 The plan's I166 section lists them all; these change the record above.

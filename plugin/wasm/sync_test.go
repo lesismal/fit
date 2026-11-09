@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,9 @@ func TestSyncTransform(t *testing.T) { eachGuest(t, testSyncTransform) }
 func testSyncTransform(t *testing.T, plugin string) {
 	for _, params := range []map[string]any{nil, {"batch_records": 3, "instances": 3}} {
 		tr := mustTransform(t, plugin, map[string]any{"mode": "transform", "fail": -1}, params)
+		if tr.pool.form != offerForm {
+			t.Fatalf("the plugin took form %d, offered %d", tr.pool.form, offerForm)
+		}
 		in := records(0, 12)
 		var got []string
 		var fails int
@@ -487,6 +491,7 @@ func BenchmarkSyncTransform(b *testing.B) {
 		}
 		tr := m.(fitsync.Transform)
 		b.ReportAllocs()
+		done := perRecord(b, len(in))
 		for b.Loop() {
 			for _, r := range in {
 				if err := tr.Apply(r, func(*fitsync.Record) {}); err != nil {
@@ -494,21 +499,40 @@ func BenchmarkSyncTransform(b *testing.B) {
 				}
 			}
 		}
-		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(in)), "ns/record")
+		done()
 	})
 	for _, g := range syncGuests {
-		for _, instances := range []int{1, 4} {
-			b.Run(fmt.Sprintf("wasm-%s-%d", g.name, instances), func(b *testing.B) {
-				tr := mustTransform(b, g.plugin(b), map[string]any{"mode": "route", "fail": -1}, map[string]any{"instances": instances, "batch_records": 64})
-				b.ReportAllocs()
-				for b.Loop() {
-					if err := tr.ApplyBatch(in, func(int, *fitsync.Record) {}, func(_ int, err error) { b.Fatal(err) }); err != nil {
-						b.Fatal(err)
+		for _, fm := range syncForms {
+			for _, instances := range []int{1, 4} {
+				b.Run(fmt.Sprintf("wasm-%s-%s-%d", g.name, fm.name, instances), func(b *testing.B) {
+					var tr *SyncTransform
+					withForm(fm.form, func() {
+						tr = mustTransform(b, g.plugin(b), map[string]any{"mode": "route", "fail": -1}, map[string]any{"instances": instances, "batch_records": 64})
+					})
+					b.ReportAllocs()
+					done := perRecord(b, len(in))
+					for b.Loop() {
+						if err := tr.ApplyBatch(in, func(int, *fitsync.Record) {}, func(_ int, err error) { b.Fatal(err) }); err != nil {
+							b.Fatal(err)
+						}
 					}
-				}
-				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(in)), "ns/record")
-			})
+					done()
+				})
+			}
 		}
+	}
+}
+
+// perRecord starts counting allocations; what it returns reports the time
+// and the allocations of a record, of the n each op runs.
+func perRecord(b *testing.B, n int) func() {
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	return func() {
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
+		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*n), "ns/record")
+		b.ReportMetric(float64(after.Mallocs-before.Mallocs)/float64(b.N*n), "allocs/record")
 	}
 }
 

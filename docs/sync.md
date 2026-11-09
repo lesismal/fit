@@ -785,14 +785,16 @@ the error, so nothing read is lost.
 What the built-in connectors do not cover is a WebAssembly plugin, a WASI reactor run by wazero in
 fit: a `wasm` transform (over each batch: drop, change, split, route), a `wasm` codec (a format of your
 own), a `wasm` source (polling an API from its checkpoint) and a `wasm` sink (writing each batch).
-Records cross as their canonical JSON. A source's and a sink's only way out is fit's asynchronous HTTP
+Records cross in a binary form of lengths and tags, which plugins built on the guest SDKs take, or as
+their canonical JSON for a plugin that does not take it, one built before it among them. A source's and a sink's only way out is fit's asynchronous HTTP
 client, to the hosts `allow_hosts` names, and a sleep: no sockets. Each plugin runs on `instances` of
 its own memory, bounded by `max_memory_bytes` and `timeout`; a call that traps or runs past them fails
 its records, which `on_error` takes.
 
 Package `plugin/wasm/guest` is the Go side of the calls (`OnTransform`, `OnDecode`, `OnEncode`,
 `OnPoll`, `OnWrite`, `Emit`, `Fail`, `Row`), built by Go or by TinyGo
-(`tinygo build -target=wasip1 -buildmode=c-shared`), and the crate `plugin/wasm/guest/rust`
+(`tinygo build -target=wasip1 -buildmode=c-shared -scheduler=none`: TinyGo's default scheduler costs
+each call hundreds of microseconds), and the crate `plugin/wasm/guest/rust`
 (`fit-guest`) the Rust one; fit's tests run a plugin of each. fit-examples has a transform
 (`sync-wasm-transform`), a codec (`sync-wasm-codec`), a source (`sync-wasm-source`) and a sink
 (`sync-wasm-sink`). A transform that drops test accounts:

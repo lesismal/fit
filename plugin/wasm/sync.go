@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +36,10 @@ const (
 	exportEncode    = "fit_sync_encode"
 	exportPoll      = "fit_sync_poll"
 	exportWrite     = "fit_sync_write"
+	// exportForm is what a plugin that reads and writes records in a form
+	// besides their canonical JSON exports: fit_sync_form(offered) returns
+	// the form it takes, at most the one offered, 0 for JSON.
+	exportForm = "fit_sync_form"
 
 	syncOK       = 0
 	syncCaughtUp = 1
@@ -44,6 +49,17 @@ const (
 	maxCheckpoint = 64 << 10
 )
 
+// The forms records cross in: their canonical JSON, or the binary form
+// (fitsync.AppendBatchBinary) of a plugin whose fit_sync_form took it.
+const (
+	formJSON   = 0
+	formBinary = 1
+)
+
+// offerForm is the form a pool offers its plugin; the tests set formJSON
+// to run plugins that would take the binary form as old ones.
+var offerForm uint32 = formBinary
+
 // instantiateSyncHost adds the host module fit_sync to rt:
 //
 //	input(buf, buf_len) i32  the call's input written to buf, up to buf_len
@@ -52,6 +68,8 @@ const (
 //	record_emit(index, rec, rec_len)  a record, in canonical JSON, that the
 //	    input's record index becomes (0 for decode and poll); indexes never
 //	    go back
+//	records_emit(buf, buf_len)  records in the binary form, each after the
+//	    uvarint index record_emit takes
 //	fail(index, msg, msg_len)  the input's record index failed, or, for
 //	    -1, the call: msg says why
 //	output(buf, buf_len)  bytes encode makes, appended
@@ -66,7 +84,10 @@ const (
 //	    field, or -1
 //	sleep(ms)  a connector waits, within its call's timeout
 //
-// The plugin's config and its log are fit's own request_get(5) and log.
+// The plugin's config and its log are fit's own request_get(5) and log. A
+// plugin that exports fit_sync_form and takes the binary form there reads
+// its batches (transform, encode, write) in that form; it hands records
+// back through records_emit or record_emit, as it likes.
 func instantiateSyncHost(ctx context.Context, rt wazero.Runtime) error {
 	i32 := api.ValueTypeI32
 	b := rt.NewHostModuleBuilder(syncModule)
@@ -75,6 +96,7 @@ func instantiateSyncHost(ctx context.Context, rt wazero.Runtime) error {
 	}
 	export("input", syncInput, []api.ValueType{i32, i32}, []api.ValueType{i32})
 	export("record_emit", recordEmit, []api.ValueType{i32, i32, i32}, nil)
+	export("records_emit", recordsEmit, []api.ValueType{i32, i32}, nil)
 	export("fail", failRecord, []api.ValueType{i32, i32, i32}, nil)
 	export("output", syncOutput, []api.ValueType{i32, i32}, nil)
 	export("checkpoint", syncCheckpoint, []api.ValueType{i32, i32}, nil)
@@ -91,7 +113,11 @@ type syncKey struct{}
 // syncCall is a call to a sync plugin, as its host functions see it.
 type syncCall struct {
 	p     *syncPool
+	in    *syncInstance
 	input []byte
+	// bin is the input in the binary form, which batch points to then.
+	bin   fitsync.BinaryBatch
+	batch *fitsync.BinaryBatch
 	// n is how many records the input holds, which record_emit and fail
 	// may name; last the index record_emit named last.
 	n, last int
@@ -162,21 +188,49 @@ func syncInput(ctx context.Context, mod api.Module, stack []uint64) {
 	stack[0] = api.EncodeI32(writeBytes(mod, api.DecodeU32(stack[0]), api.DecodeU32(stack[1]), sc.input))
 }
 
+// index checks i is an index a record may be emitted for, and no earlier
+// than the last.
+func (sc *syncCall) index(fn string, i int) {
+	if i < 0 || i >= sc.n {
+		panic(errABI(fmt.Sprintf("%s names record %d of %d", fn, i, sc.n)))
+	}
+	if i < sc.last {
+		panic(errABI(fn + " went back, to record " + fmt.Sprint(i)))
+	}
+	sc.last = i
+}
+
 func recordEmit(ctx context.Context, mod api.Module, stack []uint64) {
 	sc := mustSync(ctx)
 	i := int(api.DecodeI32(stack[0]))
-	if i < 0 || i >= sc.n {
-		panic(errABI(fmt.Sprintf("record_emit names record %d of %d", i, sc.n)))
-	}
-	if i < sc.last {
-		panic(errABI("record_emit went back, to record " + fmt.Sprint(i)))
-	}
-	sc.last = i
+	sc.index("record_emit", i)
 	rec, err := fitsync.ParseRecord(sc.take(mod, api.DecodeU32(stack[1]), api.DecodeU32(stack[2])))
 	if err != nil {
 		panic(errABI("record_emit: " + err.Error()))
 	}
 	sc.outs = append(sc.outs, syncOut{i, rec})
+}
+
+// recordsEmit reads records in the binary form, each after its index, out
+// of one copy of what the plugin wrote, with the instance's reader.
+func recordsEmit(ctx context.Context, mod api.Module, stack []uint64) {
+	sc := mustSync(ctx)
+	r := &sc.in.reader
+	r.Reset(sc.take(mod, api.DecodeU32(stack[0]), api.DecodeU32(stack[1])))
+	defer r.Reset(nil)
+	for r.More() {
+		u, err := r.Uvarint()
+		if err != nil {
+			panic(errABI("records_emit: " + err.Error()))
+		}
+		i := int(min(u, 1<<31))
+		sc.index("records_emit", i)
+		rec, err := r.RecordOf(sc.batch, i)
+		if err != nil {
+			panic(errABI(fmt.Sprintf("records_emit: record %d: %v", i, err)))
+		}
+		sc.outs = append(sc.outs, syncOut{i, rec})
+	}
 }
 
 func failRecord(ctx context.Context, mod api.Module, stack []uint64) {
@@ -368,9 +422,15 @@ type syncOpts struct {
 // are the pipeline's goroutines, never a fib worker, and wait for an
 // instance; a call is bounded by the timeout and the instance's memory.
 type syncPool struct {
-	opts      syncOpts
-	plugin    *plugin
-	idle      chan *syncInstance
+	opts   syncOpts
+	plugin *plugin
+	idle   chan *syncInstance
+	// offer is the form the pool offers its plugin, form the one the
+	// plugin took, which every instance takes alike.
+	offer, form uint32
+	// calls keeps calls whose input the pool's batches were written into,
+	// and their buffers, for the next.
+	calls     sync.Pool
 	client    *fibhttp.Client
 	logs      atomic.Int64
 	logSecond atomic.Int64
@@ -380,6 +440,8 @@ type syncInstance struct {
 	mod   api.Module
 	fn    api.Function
 	stack [1]uint64
+	// reader reads the records records_emit hands back.
+	reader fitsync.BinaryReader
 }
 
 func newSyncPool(o syncOpts) (*syncPool, error) {
@@ -395,12 +457,14 @@ func newSyncPool(o syncOpts) (*syncPool, error) {
 		pl.close()
 		return nil, fmt.Errorf("the plugin does not export %s", o.export)
 	}
-	p := &syncPool{opts: o, plugin: pl, idle: make(chan *syncInstance, o.instances)}
+	p := &syncPool{opts: o, plugin: pl, idle: make(chan *syncInstance, o.instances), offer: offerForm}
 	first := &syncInstance{}
-	if err := p.instantiate(first); err != nil {
+	form, err := p.instantiate(first)
+	if err != nil {
 		pl.close()
 		return nil, err
 	}
+	p.form = form
 	p.idle <- first
 	for range o.instances - 1 {
 		p.idle <- &syncInstance{}
@@ -416,15 +480,74 @@ func newSyncPool(o syncOpts) (*syncPool, error) {
 	return p, nil
 }
 
-func (p *syncPool) instantiate(in *syncInstance) error {
+// instantiate makes in's module and returns the form it took.
+func (p *syncPool) instantiate(in *syncInstance) (uint32, error) {
 	cfg := wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize").
 		WithStdout(io.Discard).WithStderr(io.Discard).WithSysWalltime().WithSysNanotime()
 	mod, err := p.plugin.runtime.InstantiateModule(context.Background(), p.plugin.compiled, cfg)
 	if err != nil {
-		return err
+		return 0, err
+	}
+	form, err := p.negotiate(mod)
+	if err != nil {
+		_ = mod.Close(context.Background())
+		return 0, err
 	}
 	in.mod, in.fn = mod, mod.ExportedFunction(p.opts.export)
-	return nil
+	return form, nil
+}
+
+// negotiate offers mod the pool's form, when it exports fit_sync_form, and
+// returns the one it took: JSON for a plugin that exports none.
+func (p *syncPool) negotiate(mod api.Module) (uint32, error) {
+	fn := mod.ExportedFunction(exportForm)
+	if fn == nil || p.offer == formJSON {
+		return formJSON, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), p.opts.timeout)
+	defer cancel()
+	res, err := fn.Call(ctx, uint64(p.offer))
+	if err != nil {
+		msg, _, _ := strings.Cut(err.Error(), "\n")
+		return 0, fmt.Errorf("%s: %s", exportForm, msg)
+	}
+	if len(res) != 1 || uint32(res[0]) > p.offer {
+		return 0, fmt.Errorf("%s took a form fit did not offer", exportForm)
+	}
+	return uint32(res[0]), nil
+}
+
+// getCall returns a call for a batch, with the buffers of one before.
+func (p *syncPool) getCall() *syncCall {
+	if sc, ok := p.calls.Get().(*syncCall); ok {
+		return sc
+	}
+	return &syncCall{}
+}
+
+// putCall keeps sc's buffers for the next call, letting go of what it
+// held: the records it made are its caller's now.
+func (p *syncPool) putCall(sc *syncCall) {
+	clear(sc.outs)
+	bin := sc.bin
+	bin.Reset(nil)
+	*sc = syncCall{input: sc.input[:0], outs: sc.outs[:0], fails: sc.fails[:0], output: sc.output[:0], bin: bin}
+	p.calls.Put(sc)
+}
+
+// setBatch makes recs sc's input, in the form the plugin took: in the
+// binary form, records the plugin hands back take what it left as it was
+// from recs.
+func (sc *syncCall) setBatch(p *syncPool, recs []*fitsync.Record) error {
+	sc.n = len(recs)
+	if p.form == formBinary {
+		sc.bin.Reset(recs)
+		sc.input, sc.batch = sc.bin.Buf, &sc.bin
+		return nil
+	}
+	var err error
+	sc.input, err = fitsync.AppendBatchJSON(sc.input[:0], recs)
+	return err
 }
 
 // close stops the instances and gives the plugin back; no call may be
@@ -455,11 +578,17 @@ func (p *syncPool) call(ctx context.Context, sc *syncCall) (uint32, error) {
 	}
 	defer func() { p.idle <- in }()
 	if in.mod == nil {
-		if err := p.instantiate(in); err != nil {
+		form, err := p.instantiate(in)
+		if err != nil {
 			return 0, err
 		}
+		if form != p.form {
+			_ = in.mod.Close(context.Background())
+			in.mod = nil
+			return 0, errors.New("an instance of the plugin took another record form than the first")
+		}
 	}
-	sc.p = p
+	sc.p, sc.in = p, in
 	cctx, cancel := context.WithTimeout(context.WithValue(ctx, syncKey{}, sc), p.opts.timeout)
 	defer cancel()
 	in.stack[0] = uint64(len(sc.input))

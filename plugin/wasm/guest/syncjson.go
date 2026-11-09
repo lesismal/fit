@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// A batch is read and records are written by hand rather than by
-// encoding/json, whose reflection is slow in WebAssembly: a record's
-// values stay the JSON they were, sliced out of the input.
+// In the JSON form, a batch is read and records are written by hand
+// rather than by encoding/json, whose reflection is slow in WebAssembly: a
+// record's values stay the JSON they were, sliced out of the input.
 
 var errSyntax = errors.New("a batch that is not an array of records")
 
@@ -20,7 +20,8 @@ func parseBatch(b []byte) ([]Record, error) {
 	if i >= len(b) || b[i] != '[' {
 		return nil, errSyntax
 	}
-	var recs []Record
+	recs := records(0)
+	defer func() { recBuf = recs[:0] }()
 	i = skipSpace(b, i+1)
 	if i < len(b) && b[i] == ']' {
 		return recs, nil
@@ -52,7 +53,7 @@ func parseBatch(b []byte) ([]Record, error) {
 // parse reads r from an object of its parts.
 func (r *Record) parse(b []byte) error {
 	return members(b, func(name string, val []byte) error {
-		v := json.RawMessage(val)
+		v := Value(val)
 		switch name {
 		case "source":
 			r.Source = unquote(v)
@@ -69,7 +70,7 @@ func (r *Record) parse(b []byte) error {
 		case "after":
 			r.After = v
 		case "position":
-			r.Position = v
+			r.Position = json.RawMessage(v)
 		case "tx":
 			r.Tx = new(Tx)
 			return json.Unmarshal(v, r.Tx)
@@ -138,11 +139,11 @@ func (r *Record) appendJSON(b []byte) []byte {
 	}
 	for _, v := range []struct {
 		name string
-		v    json.RawMessage
+		v    Value
 	}{{"key", r.Key}, {"before", r.Before}, {"after", r.After}} {
-		if len(v.v) > 0 && string(v.v) != "null" {
+		if !v.v.IsNull() {
 			field(v.name)
-			b = append(b, v.v...)
+			b = v.v.AppendJSON(b)
 		}
 	}
 	if r.CommitTime != "" {
