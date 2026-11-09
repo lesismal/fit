@@ -43,6 +43,7 @@ var skillRuns = map[string][2]string{
 	"channel-scheduler":     {`{"members": ["streaming"]}`, `{"summary": "Loop the films on tv/films", "members": {"media_library": [{"name": "films", "roots": ["/srv/media/films"]}], "streaming": {"channels": [{"name": "tv/films", "library": "films", "items": ["films/bbb", "films/news"]}]}}}`},
 	"library-health":        {`{"library": "films", "errors": true}`, `{"summary": "Keep the broken file aside", "library": "films", "item": "films/broken", "op": "rename", "name": "broken-old.mp4"}`},
 	"playback-troubleshoot": {`{}`, `{"summary": "End bob's old player", "policy": "site", "sessions": [{"subject": "{{bob}}", "id": "s3"}]}`},
+	"sync-pipeline":         {`{"members": ["sync"]}`, ""},
 }
 
 // skillProposes is the propose tool a skill's run calls, when not

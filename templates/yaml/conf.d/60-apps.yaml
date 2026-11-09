@@ -3418,6 +3418,20 @@
           # # after's line.
           # # module.
           # codec:
+            # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+            # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+            # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+            # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+            # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+            # # a record is a message of one row in the same form.
+            # module: "canal_json"
+            # params:
+              # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+              # # server's for Canal. UTC when left out.
+              # # string; default "UTC".
+              # time_zone: "UTC"
+
+            # # Or csv, with every one of its params:
             # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
             # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
             # # (or before's) fields, those columns names or all of them, as text.
@@ -3432,6 +3446,16 @@
               # # The separator, one character other than a quote or a line break. A comma when left out.
               # # string; default ",".
               # comma: ","
+
+            # # Or debezium, with every one of its params:
+            # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+            # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+            # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+            # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+            # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+            # # key event, is the record's key. Encoded, a record is an event without a schema.
+            # module: "debezium"
+            # params:
 
             # # Or json, with every one of its params:
             # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -3454,6 +3478,32 @@
               # # The field of after that holds the line. line when left out.
               # # string; default "line".
               # field: "line"
+
+            # # Or raw, with every one of its params:
+            # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+            # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+            # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+            # module: "raw"
+            # params:
+              # # The field of after that holds the value. value when left out.
+              # # string; default "value".
+              # field: "value"
+
+            # # Or ticdc_simple, with every one of its params:
+            # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+            # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+            # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+            # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+            # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+            # # started after its bootstrap) keeps its values as text and has no key, until the next
+            # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+            # # decodes.
+            # module: "ticdc_simple"
+            # params:
+              # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+              # # their own. UTC when left out.
+              # # string; default "UTC".
+              # time_zone: "UTC"
 
             # # Or wasm, with every one of its params:
             # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
@@ -3529,6 +3579,20 @@
           # # application/jsonl, a +json type, text/plain or none.
           # # module.
           # codec:
+            # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+            # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+            # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+            # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+            # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+            # # a record is a message of one row in the same form.
+            # module: "canal_json"
+            # params:
+              # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+              # # server's for Canal. UTC when left out.
+              # # string; default "UTC".
+              # time_zone: "UTC"
+
+            # # Or csv, with every one of its params:
             # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
             # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
             # # (or before's) fields, those columns names or all of them, as text.
@@ -3543,6 +3607,16 @@
               # # The separator, one character other than a quote or a line break. A comma when left out.
               # # string; default ",".
               # comma: ","
+
+            # # Or debezium, with every one of its params:
+            # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+            # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+            # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+            # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+            # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+            # # key event, is the record's key. Encoded, a record is an event without a schema.
+            # module: "debezium"
+            # params:
 
             # # Or json, with every one of its params:
             # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -3565,6 +3639,32 @@
               # # The field of after that holds the line. line when left out.
               # # string; default "line".
               # field: "line"
+
+            # # Or raw, with every one of its params:
+            # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+            # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+            # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+            # module: "raw"
+            # params:
+              # # The field of after that holds the value. value when left out.
+              # # string; default "value".
+              # field: "value"
+
+            # # Or ticdc_simple, with every one of its params:
+            # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+            # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+            # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+            # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+            # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+            # # started after its bootstrap) keeps its values as text and has no key, until the next
+            # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+            # # decodes.
+            # module: "ticdc_simple"
+            # params:
+              # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+              # # their own. UTC when left out.
+              # # string; default "UTC".
+              # time_zone: "UTC"
 
             # # Or wasm, with every one of its params:
             # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
@@ -3620,6 +3720,229 @@
           # # at once. The records are bounded by the pipeline's queue. 64 MiB when left out or 0.
           # # integer, 0 or more; default 67108864.
           # max_pending_bytes: 67108864
+
+        # # Or kafka, with every one of its params:
+        # # Reads Kafka or Redpanda topics, every partition of each, from the offsets in the pipeline's
+        # # checkpoint: no consumer group is joined or committed, so the checkpoint is the only cursor,
+        # # saved with the rest once every sink has the records. Each message goes through a codec (raw
+        # # when none is named; json, canal_json, debezium, ticdc_simple or any other) into records,
+        # # whose key is the message's key unless the codec sets one, and whose namespace is the topic
+        # # unless the codec or namespace sets one. In a job (mode once) it reads up to each partition's
+        # # end as it was when the job started.
+        # module: "kafka"
+        # params:
+          # # The bootstrap brokers, host:port each; the others are found from them.
+          # # list of string; required.
+          # brokers: []
+
+          # # The client ID the brokers see, in their logs and quotas. fit-sync when left out.
+          # # string; default "fit-sync".
+          # client_id: "fit-sync"
+
+          # # Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's;
+          # # the check cannot be turned off.
+          # # boolean.
+          # tls: true
+
+          # # A PEM file of the certificates the brokers' are checked against, in place of the system's
+          # # roots; needs tls.
+          # # string.
+          # ca_file: "/etc/fit/ca.pem"
+
+          # # A PEM file of a client certificate, and the chain after it, for brokers that ask for one;
+          # # needs tls and key_file.
+          # # string.
+          # cert_file: "/etc/fit/example.com.pem"
+
+          # # The PEM file of cert_file's private key.
+          # # string.
+          # key_file: "/etc/fit/example.com.key"
+
+          # # The name the brokers' certificates must have; each broker's host when left out.
+          # # string.
+          # server_name: ""
+
+          # # The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or
+          # # the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out.
+          # # one of: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512.
+          # sasl: "PLAIN"
+
+          # # The SASL user.
+          # # string.
+          # username: "fit"
+
+          # # The environment variable holding the SASL password, read when the pipeline loads.
+          # # string.
+          # password_env: ""
+
+          # # How long connecting, each answer beyond the fetch's wait, and the retries of a leader that
+          # # moved may take. 30s when left out or 0.
+          # # duration, as "1.5s" or "2m"; default "30s".
+          # timeout: "30s"
+
+          # # The topics read, every partition of each; partitions added to them are found within a minute
+          # # and read from their start.
+          # # list of string; required.
+          # topics: []
+
+          # # What makes records of a message's value: raw when left out, a message record holding it as
+          # # after's value.
+          # # module.
+          # codec:
+            # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+            # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+            # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+            # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+            # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+            # # a record is a message of one row in the same form.
+            # module: "canal_json"
+            # params:
+              # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+              # # server's for Canal. UTC when left out.
+              # # string; default "UTC".
+              # time_zone: "UTC"
+
+            # # Or csv, with every one of its params:
+            # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+            # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+            # # (or before's) fields, those columns names or all of them, as text.
+            # module: "csv"
+            # params:
+              # # The columns' names, in order. Read, a row's values are named by them, and those past them
+              # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+              # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+              # # list of string.
+              # columns: []
+
+              # # The separator, one character other than a quote or a line break. A comma when left out.
+              # # string; default ",".
+              # comma: ","
+
+            # # Or debezium, with every one of its params:
+            # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+            # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+            # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+            # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+            # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+            # # key event, is the record's key. Encoded, a record is an event without a schema.
+            # module: "debezium"
+            # params:
+
+            # # Or json, with every one of its params:
+            # # A line is a JSON object: with form plain, a message record whose after holds its members,
+            # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+            # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+            # # null) as plain JSON or the whole record in its canonical form.
+            # module: "json"
+            # params:
+              # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+              # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+              # # when left out.
+              # # one of: plain, record; default "plain".
+              # form: "plain"
+
+            # # Or line, with every one of its params:
+            # # A line is a message record whose after holds the line as a string, in the field field names
+            # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+            # module: "line"
+            # params:
+              # # The field of after that holds the line. line when left out.
+              # # string; default "line".
+              # field: "line"
+
+            # # Or raw, with every one of its params:
+            # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+            # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+            # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+            # module: "raw"
+            # params:
+              # # The field of after that holds the value. value when left out.
+              # # string; default "value".
+              # field: "value"
+
+            # # Or ticdc_simple, with every one of its params:
+            # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+            # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+            # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+            # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+            # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+            # # started after its bootstrap) keeps its values as text and has no key, until the next
+            # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+            # # decodes.
+            # module: "ticdc_simple"
+            # params:
+              # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+              # # their own. UTC when left out.
+              # # string; default "UTC".
+              # time_zone: "UTC"
+
+            # # Or wasm, with every one of its params:
+            # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+            # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+            # # sinks that read and write bytes.
+            # module: "wasm"
+            # params:
+              # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+              # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+              # # GOARCH=wasm go build -buildmode=c-shared.
+              # # string; required.
+              # path: "/etc/fit/plugins/filter.wasm"
+
+              # # A string the plugin reads, for settings of its own.
+              # # string.
+              # config: "{}"
+
+              # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+              # # duration, as "1.5s" or "2m"; default "1s".
+              # timeout: "1s"
+
+              # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+              # # integer, 0 or more; default 134217728.
+              # max_memory_bytes: 134217728
+
+              # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+              # # 0.
+              # # integer, 0 or more; default 16777216.
+              # max_output_bytes: 16777216
+
+          # # The records' namespace. The codec's (canal_json's db.table, say), or the topic, when left
+          # # out.
+          # # string.
+          # namespace: ""
+
+          # # Where a partition the checkpoint does not hold starts, when the pipeline has no checkpoint:
+          # # earliest, the oldest message kept; latest, after the newest, reading only what comes after.
+          # # A partition found later, or missing from a checkpoint, starts at its earliest. earliest when
+          # # left out.
+          # # one of: earliest, latest; default "earliest".
+          # start: "earliest"
+
+          # # What happens when the checkpoint's offset of a partition is no longer in its log, its
+          # # messages deleted by retention before they were read: error, the pipeline fails and says so,
+          # # for a person to decide; earliest or latest, it goes on from there, the messages between
+          # # lost. error when left out.
+          # # one of: error, earliest, latest; default "error".
+          # offset_reset: "error"
+
+          # # What a message with a null value is: delete, a delete record of the message's key, as a
+          # # compacted topic means it; skip, nothing, as after a Debezium delete event. delete when left
+          # # out.
+          # # one of: delete, skip; default "delete".
+          # tombstones: "delete"
+
+          # # Read transactional producers' messages before they commit, and those of aborted
+          # # transactions; otherwise only committed ones, up to the last stable offset.
+          # # boolean.
+          # read_uncommitted: true
+
+          # # How long a broker holds a fetch waiting for messages. 500ms when left out or 0.
+          # # duration, as "1.5s" or "2m"; default "500ms".
+          # max_wait: "500ms"
+
+          # # The most bytes a fetch reads of a partition, though a partition's first batch comes whole.
+          # # 1048576 when left out or 0.
+          # # integer, 0 or more; default 1048576.
+          # partition_max_bytes: 1048576
 
         # # Or mongo, with every one of its params:
         # # Reads MongoDB (6.0 and later, a replica set or a sharded cluster): a snapshot of the
@@ -3750,12 +4073,14 @@
         # # Or postgres, with every one of its params:
         # # Follows PostgreSQL's changes (13 to 17, wal_level logical) through logical replication: a
         # # slot and a publication, created when missing with create, read with pgoutput, large
-        # # transactions streamed and kept on disk until they commit. Inserts, updates, deletes and
-        # # truncates become records of db.table namespaces (schema.table), typed by the columns' types,
-        # # keyed by the primary key or the replica identity, whole transactions at a time. Its position
-        # # is the LSN at a transaction's end, confirmed to the slot only once every sink has it and the
-        # # checkpoint is saved, so the server keeps the WAL until then; the slot's lag is logged past
-        # # lag_warning.
+        # # transactions streamed and kept on disk until they commit. With snapshot initial, the tables
+        # # are first read whole, in chunks by key in parallel, from a snapshot exported at the point
+        # # the stream then starts from, so that the hand-over is exact; a job (mode once) reads that
+        # # snapshot alone. Inserts, updates, deletes and truncates become records of db.table
+        # # namespaces (schema.table), typed by the columns' types, keyed by the primary key or the
+        # # replica identity, whole transactions at a time. Its position is the LSN at a transaction's
+        # # end, confirmed to the slot only once every sink has it and the checkpoint is saved, so the
+        # # server keeps the WAL until then; the slot's lag is logged past lag_warning.
         # module: "postgres"
         # params:
           # # The server's host and port, the port 5432 when only a host is given. 127.0.0.1:5432 when
@@ -3827,10 +4152,31 @@
           # # list of string.
           # tables: []
 
-          # # Create the publication and the slot when they do not exist, rather than fail. The slot is
-          # # made with no snapshot: changes come from its creation on.
+          # # Create the publication and the slot when they do not exist, rather than fail. With snapshot
+          # # initial, the slot made exports the snapshot the tables are read from; with never, changes
+          # # come from its creation on.
           # # boolean.
           # create: true
+
+          # # Where a pipeline without a checkpoint starts: initial, every row of the tables, read from a
+          # # snapshot exported at the point the stream then starts from (the slot's own when create makes
+          # # it, a temporary slot's otherwise), then the changes after it; never, the changes from the
+          # # slot's position on. A job (mode once) reads the snapshot and stops, or, with never, the
+          # # changes up to the server's end. initial when left out.
+          # # one of: initial, never; default "initial".
+          # snapshot: "initial"
+
+          # # How many chunks of the snapshot are read at once, each on a connection of its own, before
+          # # the stream; a job reads job.max_parallel at a time instead. 4 when left out or 0.
+          # # integer, 0 to 64; default 4.
+          # snapshot_parallel: 4
+
+          # # The rows of a chunk of the snapshot: a table with a primary key, or a replica identity
+          # # index, is split into ranges of that key of this many rows, each read in a transaction of its
+          # # own and resumed after its last row; a table without one is read whole. 100000 when left out
+          # # or 0.
+          # # integer, 0 or more; default 100000.
+          # chunk_rows: 100000
 
           # # Large transactions streamed by the server while they run (PostgreSQL 14 and later), kept in
           # # files under spool_dir until they commit, rather than spilled by the server and sent at their
@@ -4018,6 +4364,20 @@
           # # message record of the line and the error.
           # # module.
           # codec:
+            # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+            # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+            # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+            # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+            # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+            # # a record is a message of one row in the same form.
+            # module: "canal_json"
+            # params:
+              # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+              # # server's for Canal. UTC when left out.
+              # # string; default "UTC".
+              # time_zone: "UTC"
+
+            # # Or csv, with every one of its params:
             # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
             # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
             # # (or before's) fields, those columns names or all of them, as text.
@@ -4032,6 +4392,16 @@
               # # The separator, one character other than a quote or a line break. A comma when left out.
               # # string; default ",".
               # comma: ","
+
+            # # Or debezium, with every one of its params:
+            # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+            # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+            # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+            # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+            # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+            # # key event, is the record's key. Encoded, a record is an event without a schema.
+            # module: "debezium"
+            # params:
 
             # # Or json, with every one of its params:
             # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -4054,6 +4424,32 @@
               # # The field of after that holds the line. line when left out.
               # # string; default "line".
               # field: "line"
+
+            # # Or raw, with every one of its params:
+            # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+            # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+            # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+            # module: "raw"
+            # params:
+              # # The field of after that holds the value. value when left out.
+              # # string; default "value".
+              # field: "value"
+
+            # # Or ticdc_simple, with every one of its params:
+            # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+            # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+            # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+            # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+            # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+            # # started after its bootstrap) keeps its values as text and has no key, until the next
+            # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+            # # decodes.
+            # module: "ticdc_simple"
+            # params:
+              # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+              # # their own. UTC when left out.
+              # # string; default "UTC".
+              # time_zone: "UTC"
 
             # # Or wasm, with every one of its params:
             # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
@@ -4108,6 +4504,296 @@
           # # when left out or 0.
           # # integer, 0 to 67108864; default 1048576.
           # max_line_bytes: 1048576
+
+        # # Or tidb, with every one of its params:
+        # # Reads TiDB: first a snapshot of tables over MySQL's protocol, all at one TiDB timestamp
+        # # (tidb_snapshot), in pages by primary key, then the changes a TiCDC changefeed writes to
+        # # Kafka in canal-json or the simple protocol, read by the kafka source from offsets in the
+        # # checkpoint, those committed at or before the snapshot's timestamp left out. The changefeed
+        # # must have started at or before the snapshot, and the topic must keep its messages since.
+        # # Records carry their commit TS as their transaction and commit time.
+        # module: "tidb"
+        # params:
+          # # TiDB's MySQL host and port, for the snapshot and the tables' schemas. 127.0.0.1:4000 when
+          # # left out.
+          # # string; default "127.0.0.1:4000".
+          # address: "127.0.0.1:4000"
+
+          # # The user to log in as; it needs SELECT on the tables. root when left out.
+          # # string.
+          # username: "fit"
+
+          # # The environment variable holding the password, read when the pipeline loads; none when left
+          # # out.
+          # # string.
+          # password_env: ""
+
+          # # Connect over TLS, required and verified against the system's roots or ca_file's.
+          # # boolean.
+          # tls: true
+
+          # # A PEM file of the certificates TiDB's is checked against, in place of the system's roots;
+          # # needs tls.
+          # # string.
+          # ca_file: "/etc/fit/ca.pem"
+
+          # # A PEM file of a client certificate, and the chain after it; needs tls and key_file.
+          # # string.
+          # cert_file: "/etc/fit/example.com.pem"
+
+          # # The PEM file of cert_file's private key.
+          # # string.
+          # key_file: "/etc/fit/example.com.key"
+
+          # # The name TiDB's certificate must have; address's host when left out.
+          # # string.
+          # server_name: ""
+
+          # # How long connecting and each statement of the snapshot may take. 60s when left out or 0.
+          # # duration, as "1.5s" or "2m"; default "60s".
+          # timeout: "60s"
+
+          # # The tables, as db.table, the snapshot reads and the changes are kept of; each needs a
+          # # primary key. Every table the changefeed writes, with no snapshot, when left out.
+          # # list of string.
+          # tables: []
+
+          # # What a pipeline without a checkpoint does first: initial, read tables at a timestamp, then
+          # # the changes after it; never, only the changes, from the kafka source's start. initial when
+          # # left out; it needs tables.
+          # # one of: initial, never; default "initial".
+          # snapshot: "initial"
+
+          # # The rows one SELECT of the snapshot reads. 1000 when left out or 0.
+          # # integer, 0 to 100000; default 1000.
+          # page_rows: 1000
+
+          # # The changefeed's protocol: canal-json (with enable-tidb-extension=true, for the commit TS)
+          # # or simple. canal-json when left out.
+          # # one of: canal-json, simple; default "canal-json".
+          # protocol: "canal-json"
+
+          # # The changefeed's time-zone, in which it writes DATETIME values (and canal-json TIMESTAMP
+          # # ones). UTC when left out.
+          # # string; default "UTC".
+          # time_zone: "UTC"
+
+          # # Where the changefeed writes: the kafka source's params (brokers, topics, TLS, SASL, start),
+          # # without codec, which protocol picks.
+          # # object; required.
+          # kafka:
+            # # The bootstrap brokers, host:port each; the others are found from them.
+            # # list of string; required.
+            # brokers: []
+
+            # # The client ID the brokers see, in their logs and quotas. fit-sync when left out.
+            # # string; default "fit-sync".
+            # client_id: "fit-sync"
+
+            # # Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's;
+            # # the check cannot be turned off.
+            # # boolean.
+            # tls: true
+
+            # # A PEM file of the certificates the brokers' are checked against, in place of the system's
+            # # roots; needs tls.
+            # # string.
+            # ca_file: "/etc/fit/ca.pem"
+
+            # # A PEM file of a client certificate, and the chain after it, for brokers that ask for one;
+            # # needs tls and key_file.
+            # # string.
+            # cert_file: "/etc/fit/example.com.pem"
+
+            # # The PEM file of cert_file's private key.
+            # # string.
+            # key_file: "/etc/fit/example.com.key"
+
+            # # The name the brokers' certificates must have; each broker's host when left out.
+            # # string.
+            # server_name: ""
+
+            # # The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or
+            # # the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out.
+            # # one of: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512.
+            # sasl: "PLAIN"
+
+            # # The SASL user.
+            # # string.
+            # username: "fit"
+
+            # # The environment variable holding the SASL password, read when the pipeline loads.
+            # # string.
+            # password_env: ""
+
+            # # How long connecting, each answer beyond the fetch's wait, and the retries of a leader that
+            # # moved may take. 30s when left out or 0.
+            # # duration, as "1.5s" or "2m"; default "30s".
+            # timeout: "30s"
+
+            # # The topics read, every partition of each; partitions added to them are found within a minute
+            # # and read from their start.
+            # # list of string; required.
+            # topics: []
+
+            # # What makes records of a message's value: raw when left out, a message record holding it as
+            # # after's value.
+            # # module.
+            # codec:
+              # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+              # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+              # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+              # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+              # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+              # # a record is a message of one row in the same form.
+              # module: "canal_json"
+              # params:
+                # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                # # server's for Canal. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
+
+              # # Or csv, with every one of its params:
+              # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+              # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+              # # (or before's) fields, those columns names or all of them, as text.
+              # module: "csv"
+              # params:
+                # # The columns' names, in order. Read, a row's values are named by them, and those past them
+                # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                # # list of string.
+                # columns: []
+
+                # # The separator, one character other than a quote or a line break. A comma when left out.
+                # # string; default ",".
+                # comma: ","
+
+              # # Or debezium, with every one of its params:
+              # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+              # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+              # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+              # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+              # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+              # # key event, is the record's key. Encoded, a record is an event without a schema.
+              # module: "debezium"
+              # params:
+
+              # # Or json, with every one of its params:
+              # # A line is a JSON object: with form plain, a message record whose after holds its members,
+              # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+              # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+              # # null) as plain JSON or the whole record in its canonical form.
+              # module: "json"
+              # params:
+                # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                # # when left out.
+                # # one of: plain, record; default "plain".
+                # form: "plain"
+
+              # # Or line, with every one of its params:
+              # # A line is a message record whose after holds the line as a string, in the field field names
+              # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+              # module: "line"
+              # params:
+                # # The field of after that holds the line. line when left out.
+                # # string; default "line".
+                # field: "line"
+
+              # # Or raw, with every one of its params:
+              # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+              # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+              # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+              # module: "raw"
+              # params:
+                # # The field of after that holds the value. value when left out.
+                # # string; default "value".
+                # field: "value"
+
+              # # Or ticdc_simple, with every one of its params:
+              # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+              # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+              # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+              # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+              # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+              # # started after its bootstrap) keeps its values as text and has no key, until the next
+              # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+              # # decodes.
+              # module: "ticdc_simple"
+              # params:
+                # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                # # their own. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
+
+              # # Or wasm, with every one of its params:
+              # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+              # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+              # # sinks that read and write bytes.
+              # module: "wasm"
+              # params:
+                # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                # # GOARCH=wasm go build -buildmode=c-shared.
+                # # string; required.
+                # path: "/etc/fit/plugins/filter.wasm"
+
+                # # A string the plugin reads, for settings of its own.
+                # # string.
+                # config: "{}"
+
+                # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+                # # duration, as "1.5s" or "2m"; default "1s".
+                # timeout: "1s"
+
+                # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                # # integer, 0 or more; default 134217728.
+                # max_memory_bytes: 134217728
+
+                # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                # # 0.
+                # # integer, 0 or more; default 16777216.
+                # max_output_bytes: 16777216
+
+            # # The records' namespace. The codec's (canal_json's db.table, say), or the topic, when left
+            # # out.
+            # # string.
+            # namespace: ""
+
+            # # Where a partition the checkpoint does not hold starts, when the pipeline has no checkpoint:
+            # # earliest, the oldest message kept; latest, after the newest, reading only what comes after.
+            # # A partition found later, or missing from a checkpoint, starts at its earliest. earliest when
+            # # left out.
+            # # one of: earliest, latest; default "earliest".
+            # start: "earliest"
+
+            # # What happens when the checkpoint's offset of a partition is no longer in its log, its
+            # # messages deleted by retention before they were read: error, the pipeline fails and says so,
+            # # for a person to decide; earliest or latest, it goes on from there, the messages between
+            # # lost. error when left out.
+            # # one of: error, earliest, latest; default "error".
+            # offset_reset: "error"
+
+            # # What a message with a null value is: delete, a delete record of the message's key, as a
+            # # compacted topic means it; skip, nothing, as after a Debezium delete event. delete when left
+            # # out.
+            # # one of: delete, skip; default "delete".
+            # tombstones: "delete"
+
+            # # Read transactional producers' messages before they commit, and those of aborted
+            # # transactions; otherwise only committed ones, up to the last stable offset.
+            # # boolean.
+            # read_uncommitted: true
+
+            # # How long a broker holds a fetch waiting for messages. 500ms when left out or 0.
+            # # duration, as "1.5s" or "2m"; default "500ms".
+            # max_wait: "500ms"
+
+            # # The most bytes a fetch reads of a partition, though a partition's first batch comes whole.
+            # # 1048576 when left out or 0.
+            # # integer, 0 or more; default 1048576.
+            # partition_max_bytes: 1048576
 
         # # Or wasm, with every one of its params:
         # # Runs a WebAssembly plugin that exports fit_sync_poll: given its checkpoint, it returns
@@ -4654,6 +5340,20 @@
               # # values.
               # # module.
               # codec:
+                # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+                # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+                # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+                # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+                # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+                # # a record is a message of one row in the same form.
+                # module: "canal_json"
+                # params:
+                  # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                  # # server's for Canal. UTC when left out.
+                  # # string; default "UTC".
+                  # time_zone: "UTC"
+
+                # # Or csv, with every one of its params:
                 # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
                 # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
                 # # (or before's) fields, those columns names or all of them, as text.
@@ -4668,6 +5368,16 @@
                   # # The separator, one character other than a quote or a line break. A comma when left out.
                   # # string; default ",".
                   # comma: ","
+
+                # # Or debezium, with every one of its params:
+                # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+                # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+                # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+                # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+                # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+                # # key event, is the record's key. Encoded, a record is an event without a schema.
+                # module: "debezium"
+                # params:
 
                 # # Or json, with every one of its params:
                 # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -4690,6 +5400,32 @@
                   # # The field of after that holds the line. line when left out.
                   # # string; default "line".
                   # field: "line"
+
+                # # Or raw, with every one of its params:
+                # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+                # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+                # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+                # module: "raw"
+                # params:
+                  # # The field of after that holds the value. value when left out.
+                  # # string; default "value".
+                  # field: "value"
+
+                # # Or ticdc_simple, with every one of its params:
+                # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+                # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+                # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+                # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+                # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+                # # started after its bootstrap) keeps its values as text and has no key, until the next
+                # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+                # # decodes.
+                # module: "ticdc_simple"
+                # params:
+                  # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                  # # their own. UTC when left out.
+                  # # string; default "UTC".
+                  # time_zone: "UTC"
 
                 # # Or wasm, with every one of its params:
                 # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
@@ -4798,6 +5534,20 @@
               # # makes of them, sent with content_type.
               # # module.
               # codec:
+                # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+                # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+                # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+                # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+                # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+                # # a record is a message of one row in the same form.
+                # module: "canal_json"
+                # params:
+                  # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                  # # server's for Canal. UTC when left out.
+                  # # string; default "UTC".
+                  # time_zone: "UTC"
+
+                # # Or csv, with every one of its params:
                 # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
                 # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
                 # # (or before's) fields, those columns names or all of them, as text.
@@ -4812,6 +5562,16 @@
                   # # The separator, one character other than a quote or a line break. A comma when left out.
                   # # string; default ",".
                   # comma: ","
+
+                # # Or debezium, with every one of its params:
+                # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+                # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+                # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+                # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+                # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+                # # key event, is the record's key. Encoded, a record is an event without a schema.
+                # module: "debezium"
+                # params:
 
                 # # Or json, with every one of its params:
                 # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -4834,6 +5594,32 @@
                   # # The field of after that holds the line. line when left out.
                   # # string; default "line".
                   # field: "line"
+
+                # # Or raw, with every one of its params:
+                # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+                # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+                # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+                # module: "raw"
+                # params:
+                  # # The field of after that holds the value. value when left out.
+                  # # string; default "value".
+                  # field: "value"
+
+                # # Or ticdc_simple, with every one of its params:
+                # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+                # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+                # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+                # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+                # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+                # # started after its bootstrap) keeps its values as text and has no key, until the next
+                # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+                # # decodes.
+                # module: "ticdc_simple"
+                # params:
+                  # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                  # # their own. UTC when left out.
+                  # # string; default "UTC".
+                  # time_zone: "UTC"
 
                 # # Or wasm, with every one of its params:
                 # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
@@ -4921,6 +5707,235 @@
               # # record larger alone fails for good. 8 MiB when left out or 0.
               # # integer, 0 or more; default 8388608.
               # max_request_bytes: 8388608
+
+            # # Or kafka, with every one of its params:
+            # # Produces records to Kafka or Redpanda: each a message of the topic its namespace names (or
+            # # topic's template), its key the record's key (a string or bytes as they are, any other key as
+            # # plain JSON), its value what the codec makes of it (raw when none is named), and a delete a
+            # # tombstone; a key goes to the partition the Java client's partitioner gives it, so a key's
+            # # messages stay in order in one partition. A batch's messages go out together, a record batch
+            # # per partition, compressed, acknowledged by every in-sync replica by default. Delivery is at
+            # # least once: a batch written again after a crash, or a produce whose answer was lost, writes
+            # # its messages again.
+            # module: "kafka"
+            # params:
+              # # The bootstrap brokers, host:port each; the others are found from them.
+              # # list of string; required.
+              # brokers: []
+
+              # # The client ID the brokers see, in their logs and quotas. fit-sync when left out.
+              # # string; default "fit-sync".
+              # client_id: "fit-sync"
+
+              # # Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's;
+              # # the check cannot be turned off.
+              # # boolean.
+              # tls: true
+
+              # # A PEM file of the certificates the brokers' are checked against, in place of the system's
+              # # roots; needs tls.
+              # # string.
+              # ca_file: "/etc/fit/ca.pem"
+
+              # # A PEM file of a client certificate, and the chain after it, for brokers that ask for one;
+              # # needs tls and key_file.
+              # # string.
+              # cert_file: "/etc/fit/example.com.pem"
+
+              # # The PEM file of cert_file's private key.
+              # # string.
+              # key_file: "/etc/fit/example.com.key"
+
+              # # The name the brokers' certificates must have; each broker's host when left out.
+              # # string.
+              # server_name: ""
+
+              # # The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or
+              # # the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out.
+              # # one of: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512.
+              # sasl: "PLAIN"
+
+              # # The SASL user.
+              # # string.
+              # username: "fit"
+
+              # # The environment variable holding the SASL password, read when the pipeline loads.
+              # # string.
+              # password_env: ""
+
+              # # How long connecting, each answer, and the retries of a leader that moved may take. 30s when
+              # # left out or 0.
+              # # duration, as "1.5s" or "2m"; default "30s".
+              # timeout: "30s"
+
+              # # The topic a record goes to: text with {namespace}, the record's namespace (a route transform
+              # # can map namespaces to topics first). A record whose topic is not a name Kafka takes fails.
+              # # {namespace} when left out.
+              # # string; default "{namespace}".
+              # topic: "{namespace}"
+
+              # # What makes a message's value of a record: raw when left out, after's value field as it is,
+              # # or the record's canonical JSON when it has none; json for the row as plain JSON (form plain)
+              # # or the whole record (form record); canal_json or debezium for those formats.
+              # # module.
+              # codec:
+                # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+                # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+                # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+                # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+                # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+                # # a record is a message of one row in the same form.
+                # module: "canal_json"
+                # params:
+                  # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                  # # server's for Canal. UTC when left out.
+                  # # string; default "UTC".
+                  # time_zone: "UTC"
+
+                # # Or csv, with every one of its params:
+                # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+                # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+                # # (or before's) fields, those columns names or all of them, as text.
+                # module: "csv"
+                # params:
+                  # # The columns' names, in order. Read, a row's values are named by them, and those past them
+                  # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                  # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                  # # list of string.
+                  # columns: []
+
+                  # # The separator, one character other than a quote or a line break. A comma when left out.
+                  # # string; default ",".
+                  # comma: ","
+
+                # # Or debezium, with every one of its params:
+                # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+                # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+                # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+                # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+                # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+                # # key event, is the record's key. Encoded, a record is an event without a schema.
+                # module: "debezium"
+                # params:
+
+                # # Or json, with every one of its params:
+                # # A line is a JSON object: with form plain, a message record whose after holds its members,
+                # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+                # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+                # # null) as plain JSON or the whole record in its canonical form.
+                # module: "json"
+                # params:
+                  # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                  # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                  # # when left out.
+                  # # one of: plain, record; default "plain".
+                  # form: "plain"
+
+                # # Or line, with every one of its params:
+                # # A line is a message record whose after holds the line as a string, in the field field names
+                # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+                # module: "line"
+                # params:
+                  # # The field of after that holds the line. line when left out.
+                  # # string; default "line".
+                  # field: "line"
+
+                # # Or raw, with every one of its params:
+                # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+                # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+                # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+                # module: "raw"
+                # params:
+                  # # The field of after that holds the value. value when left out.
+                  # # string; default "value".
+                  # field: "value"
+
+                # # Or ticdc_simple, with every one of its params:
+                # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+                # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+                # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+                # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+                # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+                # # started after its bootstrap) keeps its values as text and has no key, until the next
+                # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+                # # decodes.
+                # module: "ticdc_simple"
+                # params:
+                  # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                  # # their own. UTC when left out.
+                  # # string; default "UTC".
+                  # time_zone: "UTC"
+
+                # # Or wasm, with every one of its params:
+                # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+                # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+                # # sinks that read and write bytes.
+                # module: "wasm"
+                # params:
+                  # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                  # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                  # # GOARCH=wasm go build -buildmode=c-shared.
+                  # # string; required.
+                  # path: "/etc/fit/plugins/filter.wasm"
+
+                  # # A string the plugin reads, for settings of its own.
+                  # # string.
+                  # config: "{}"
+
+                  # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+                  # # duration, as "1.5s" or "2m"; default "1s".
+                  # timeout: "1s"
+
+                  # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                  # # integer, 0 or more; default 134217728.
+                  # max_memory_bytes: 134217728
+
+                  # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                  # # 0.
+                  # # integer, 0 or more; default 16777216.
+                  # max_output_bytes: 16777216
+
+              # # What a delete with a key is: tombstone, a message of the key with a null value, which a
+              # # compacted topic takes as the key gone and the source kafka reads back as a delete; encode, a
+              # # message of what the codec makes of it. tombstone when left out.
+              # # one of: tombstone, encode; default "tombstone".
+              # deletes: "tombstone"
+
+              # # Who acknowledges a batch: all, every in-sync replica (min.insync.replicas of them at least);
+              # # leader, the partition's leader alone, so a leader lost before its followers copy the batch
+              # # loses it; none, no one, the batch counted as written once sent. all when left out.
+              # # one of: all, leader, none; default "all".
+              # acks: "all"
+
+              # # How record batches are compressed. zstd needs Kafka 2.1 or later. lz4 when left out.
+              # # one of: none, gzip, snappy, lz4, zstd; default "lz4".
+              # compression: "lz4"
+
+              # # The codec's level: gzip 1 to 9, zstd 1 to 22; the codec's default when left out or 0.
+              # # integer, 0 to 22.
+              # compression_level: 0
+
+              # # The most bytes, keys and values before compression, of one record batch to a partition; a
+              # # sink batch with more for a partition sends several, in order. Keep it below the topic's
+              # # max.message.bytes. 1048576 when left out or 0.
+              # # integer, 0 or more; default 1048576.
+              # max_batch_bytes: 1048576
+
+              # # Create a topic that does not exist when a record first goes to it, with these settings; a
+              # # record for a missing topic fails when left out.
+              # # object.
+              # create_topics:
+                # # The topic's partitions; the brokers' num.partitions when left out or 0.
+                # # integer, 0 or more.
+                # partitions: 0
+
+                # # The copies of each partition; the brokers' default.replication.factor when left out or 0.
+                # # integer, 0 or more.
+                # replication_factor: 0
+
+                # # The topic's configs, as cleanup.policy compact or retention.ms.
+                # # object of string.
+                # configs: {}
 
             # # Or memory, with every one of its params:
             # # Keeps the records written in memory, in a store named by store, up to max_records: for tests
@@ -5471,6 +6486,20 @@
               # # values.
               # # module.
               # codec:
+                # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+                # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+                # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+                # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+                # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+                # # a record is a message of one row in the same form.
+                # module: "canal_json"
+                # params:
+                  # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                  # # server's for Canal. UTC when left out.
+                  # # string; default "UTC".
+                  # time_zone: "UTC"
+
+                # # Or csv, with every one of its params:
                 # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
                 # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
                 # # (or before's) fields, those columns names or all of them, as text.
@@ -5485,6 +6514,16 @@
                   # # The separator, one character other than a quote or a line break. A comma when left out.
                   # # string; default ",".
                   # comma: ","
+
+                # # Or debezium, with every one of its params:
+                # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+                # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+                # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+                # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+                # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+                # # key event, is the record's key. Encoded, a record is an event without a schema.
+                # module: "debezium"
+                # params:
 
                 # # Or json, with every one of its params:
                 # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -5507,6 +6546,32 @@
                   # # The field of after that holds the line. line when left out.
                   # # string; default "line".
                   # field: "line"
+
+                # # Or raw, with every one of its params:
+                # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+                # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+                # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+                # module: "raw"
+                # params:
+                  # # The field of after that holds the value. value when left out.
+                  # # string; default "value".
+                  # field: "value"
+
+                # # Or ticdc_simple, with every one of its params:
+                # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+                # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+                # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+                # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+                # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+                # # started after its bootstrap) keeps its values as text and has no key, until the next
+                # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+                # # decodes.
+                # module: "ticdc_simple"
+                # params:
+                  # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                  # # their own. UTC when left out.
+                  # # string; default "UTC".
+                  # time_zone: "UTC"
 
                 # # Or wasm, with every one of its params:
                 # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
@@ -5871,6 +6936,20 @@
             # # values.
             # # module.
             # codec:
+              # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+              # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+              # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+              # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+              # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+              # # a record is a message of one row in the same form.
+              # module: "canal_json"
+              # params:
+                # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                # # server's for Canal. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
+
+              # # Or csv, with every one of its params:
               # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
               # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
               # # (or before's) fields, those columns names or all of them, as text.
@@ -5885,6 +6964,16 @@
                 # # The separator, one character other than a quote or a line break. A comma when left out.
                 # # string; default ",".
                 # comma: ","
+
+              # # Or debezium, with every one of its params:
+              # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+              # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+              # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+              # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+              # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+              # # key event, is the record's key. Encoded, a record is an event without a schema.
+              # module: "debezium"
+              # params:
 
               # # Or json, with every one of its params:
               # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -5907,6 +6996,32 @@
                 # # The field of after that holds the line. line when left out.
                 # # string; default "line".
                 # field: "line"
+
+              # # Or raw, with every one of its params:
+              # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+              # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+              # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+              # module: "raw"
+              # params:
+                # # The field of after that holds the value. value when left out.
+                # # string; default "value".
+                # field: "value"
+
+              # # Or ticdc_simple, with every one of its params:
+              # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+              # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+              # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+              # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+              # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+              # # started after its bootstrap) keeps its values as text and has no key, until the next
+              # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+              # # decodes.
+              # module: "ticdc_simple"
+              # params:
+                # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                # # their own. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
 
               # # Or wasm, with every one of its params:
               # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
@@ -6015,6 +7130,20 @@
             # # makes of them, sent with content_type.
             # # module.
             # codec:
+              # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+              # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+              # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+              # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+              # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+              # # a record is a message of one row in the same form.
+              # module: "canal_json"
+              # params:
+                # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                # # server's for Canal. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
+
+              # # Or csv, with every one of its params:
               # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
               # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
               # # (or before's) fields, those columns names or all of them, as text.
@@ -6029,6 +7158,16 @@
                 # # The separator, one character other than a quote or a line break. A comma when left out.
                 # # string; default ",".
                 # comma: ","
+
+              # # Or debezium, with every one of its params:
+              # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+              # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+              # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+              # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+              # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+              # # key event, is the record's key. Encoded, a record is an event without a schema.
+              # module: "debezium"
+              # params:
 
               # # Or json, with every one of its params:
               # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -6051,6 +7190,32 @@
                 # # The field of after that holds the line. line when left out.
                 # # string; default "line".
                 # field: "line"
+
+              # # Or raw, with every one of its params:
+              # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+              # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+              # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+              # module: "raw"
+              # params:
+                # # The field of after that holds the value. value when left out.
+                # # string; default "value".
+                # field: "value"
+
+              # # Or ticdc_simple, with every one of its params:
+              # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+              # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+              # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+              # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+              # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+              # # started after its bootstrap) keeps its values as text and has no key, until the next
+              # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+              # # decodes.
+              # module: "ticdc_simple"
+              # params:
+                # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                # # their own. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
 
               # # Or wasm, with every one of its params:
               # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
@@ -6138,6 +7303,235 @@
             # # record larger alone fails for good. 8 MiB when left out or 0.
             # # integer, 0 or more; default 8388608.
             # max_request_bytes: 8388608
+
+          # # Or kafka, with every one of its params:
+          # # Produces records to Kafka or Redpanda: each a message of the topic its namespace names (or
+          # # topic's template), its key the record's key (a string or bytes as they are, any other key as
+          # # plain JSON), its value what the codec makes of it (raw when none is named), and a delete a
+          # # tombstone; a key goes to the partition the Java client's partitioner gives it, so a key's
+          # # messages stay in order in one partition. A batch's messages go out together, a record batch
+          # # per partition, compressed, acknowledged by every in-sync replica by default. Delivery is at
+          # # least once: a batch written again after a crash, or a produce whose answer was lost, writes
+          # # its messages again.
+          # module: "kafka"
+          # params:
+            # # The bootstrap brokers, host:port each; the others are found from them.
+            # # list of string; required.
+            # brokers: []
+
+            # # The client ID the brokers see, in their logs and quotas. fit-sync when left out.
+            # # string; default "fit-sync".
+            # client_id: "fit-sync"
+
+            # # Connect over TLS, the brokers' certificates checked against the system's roots or ca_file's;
+            # # the check cannot be turned off.
+            # # boolean.
+            # tls: true
+
+            # # A PEM file of the certificates the brokers' are checked against, in place of the system's
+            # # roots; needs tls.
+            # # string.
+            # ca_file: "/etc/fit/ca.pem"
+
+            # # A PEM file of a client certificate, and the chain after it, for brokers that ask for one;
+            # # needs tls and key_file.
+            # # string.
+            # cert_file: "/etc/fit/example.com.pem"
+
+            # # The PEM file of cert_file's private key.
+            # # string.
+            # key_file: "/etc/fit/example.com.key"
+
+            # # The name the brokers' certificates must have; each broker's host when left out.
+            # # string.
+            # server_name: ""
+
+            # # The SASL mechanism to authenticate with, with username and password_env: PLAIN (over TLS, or
+            # # the password goes in clear), SCRAM-SHA-256 or SCRAM-SHA-512. None when left out.
+            # # one of: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512.
+            # sasl: "PLAIN"
+
+            # # The SASL user.
+            # # string.
+            # username: "fit"
+
+            # # The environment variable holding the SASL password, read when the pipeline loads.
+            # # string.
+            # password_env: ""
+
+            # # How long connecting, each answer, and the retries of a leader that moved may take. 30s when
+            # # left out or 0.
+            # # duration, as "1.5s" or "2m"; default "30s".
+            # timeout: "30s"
+
+            # # The topic a record goes to: text with {namespace}, the record's namespace (a route transform
+            # # can map namespaces to topics first). A record whose topic is not a name Kafka takes fails.
+            # # {namespace} when left out.
+            # # string; default "{namespace}".
+            # topic: "{namespace}"
+
+            # # What makes a message's value of a record: raw when left out, after's value field as it is,
+            # # or the record's canonical JSON when it has none; json for the row as plain JSON (form plain)
+            # # or the whole record (form record); canal_json or debezium for those formats.
+            # # module.
+            # codec:
+              # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+              # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+              # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+              # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+              # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+              # # a record is a message of one row in the same form.
+              # module: "canal_json"
+              # params:
+                # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                # # server's for Canal. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
+
+              # # Or csv, with every one of its params:
+              # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
+              # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
+              # # (or before's) fields, those columns names or all of them, as text.
+              # module: "csv"
+              # params:
+                # # The columns' names, in order. Read, a row's values are named by them, and those past them
+                # # c<n>, counting from 1; written, a record's fields of these names are written, a missing one
+                # # empty. Left out, they are c1, c2 and so on read, and every field of the row written.
+                # # list of string.
+                # columns: []
+
+                # # The separator, one character other than a quote or a line break. A comma when left out.
+                # # string; default ",".
+                # comma: ","
+
+              # # Or debezium, with every one of its params:
+              # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+              # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+              # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+              # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+              # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+              # # key event, is the record's key. Encoded, a record is an event without a schema.
+              # module: "debezium"
+              # params:
+
+              # # Or json, with every one of its params:
+              # # A line is a JSON object: with form plain, a message record whose after holds its members,
+              # # numbers as ints, or floats when they have a fraction or exponent; with form record, a record
+              # # in its canonical JSON. Encoded, a record is the same, its after (or before, when after is
+              # # null) as plain JSON or the whole record in its canonical form.
+              # module: "json"
+              # params:
+                # # plain reads and writes a row as a plain JSON object; record reads and writes whole records
+                # # in their canonical JSON, which keeps every type, the operation, key and namespace. plain
+                # # when left out.
+                # # one of: plain, record; default "plain".
+                # form: "plain"
+
+              # # Or line, with every one of its params:
+              # # A line is a message record whose after holds the line as a string, in the field field names
+              # # (line). Encoded, a record is that field's text, or its canonical JSON when it has none.
+              # module: "line"
+              # params:
+                # # The field of after that holds the line. line when left out.
+                # # string; default "line".
+                # field: "line"
+
+              # # Or raw, with every one of its params:
+              # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+              # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+              # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+              # module: "raw"
+              # params:
+                # # The field of after that holds the value. value when left out.
+                # # string; default "value".
+                # field: "value"
+
+              # # Or ticdc_simple, with every one of its params:
+              # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+              # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+              # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+              # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+              # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+              # # started after its bootstrap) keeps its values as text and has no key, until the next
+              # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+              # # decodes.
+              # module: "ticdc_simple"
+              # params:
+                # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                # # their own. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
+
+              # # Or wasm, with every one of its params:
+              # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a
+              # # body) into records, and fit_sync_encode, turning records into bytes, for the sources and
+              # # sinks that read and write bytes.
+              # module: "wasm"
+              # params:
+                # # The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_decode,
+                # # fit_sync_encode, or both; package plugin/wasm/guest builds one from Go with GOOS=wasip1
+                # # GOARCH=wasm go build -buildmode=c-shared.
+                # # string; required.
+                # path: "/etc/fit/plugins/filter.wasm"
+
+                # # A string the plugin reads, for settings of its own.
+                # # string.
+                # config: "{}"
+
+                # # How long a call may run; past it the call is stopped and fails. 1s when left out.
+                # # duration, as "1.5s" or "2m"; default "1s".
+                # timeout: "1s"
+
+                # # The most memory the plugin's instance may have. 128 MiB when left out or 0.
+                # # integer, 0 or more; default 134217728.
+                # max_memory_bytes: 134217728
+
+                # # The most bytes, of records or of encoded data, a call may hand back. 16 MiB when left out or
+                # # 0.
+                # # integer, 0 or more; default 16777216.
+                # max_output_bytes: 16777216
+
+            # # What a delete with a key is: tombstone, a message of the key with a null value, which a
+            # # compacted topic takes as the key gone and the source kafka reads back as a delete; encode, a
+            # # message of what the codec makes of it. tombstone when left out.
+            # # one of: tombstone, encode; default "tombstone".
+            # deletes: "tombstone"
+
+            # # Who acknowledges a batch: all, every in-sync replica (min.insync.replicas of them at least);
+            # # leader, the partition's leader alone, so a leader lost before its followers copy the batch
+            # # loses it; none, no one, the batch counted as written once sent. all when left out.
+            # # one of: all, leader, none; default "all".
+            # acks: "all"
+
+            # # How record batches are compressed. zstd needs Kafka 2.1 or later. lz4 when left out.
+            # # one of: none, gzip, snappy, lz4, zstd; default "lz4".
+            # compression: "lz4"
+
+            # # The codec's level: gzip 1 to 9, zstd 1 to 22; the codec's default when left out or 0.
+            # # integer, 0 to 22.
+            # compression_level: 0
+
+            # # The most bytes, keys and values before compression, of one record batch to a partition; a
+            # # sink batch with more for a partition sends several, in order. Keep it below the topic's
+            # # max.message.bytes. 1048576 when left out or 0.
+            # # integer, 0 or more; default 1048576.
+            # max_batch_bytes: 1048576
+
+            # # Create a topic that does not exist when a record first goes to it, with these settings; a
+            # # record for a missing topic fails when left out.
+            # # object.
+            # create_topics:
+              # # The topic's partitions; the brokers' num.partitions when left out or 0.
+              # # integer, 0 or more.
+              # partitions: 0
+
+              # # The copies of each partition; the brokers' default.replication.factor when left out or 0.
+              # # integer, 0 or more.
+              # replication_factor: 0
+
+              # # The topic's configs, as cleanup.policy compact or retention.ms.
+              # # object of string.
+              # configs: {}
 
           # # Or memory, with every one of its params:
           # # Keeps the records written in memory, in a store named by store, up to max_records: for tests
@@ -6688,6 +8082,20 @@
             # # values.
             # # module.
             # codec:
+              # # Canal's JSON, as Canal and TiCDC (protocol canal-json) write it: each row of a message a
+              # # record of the table db.table, an INSERT an insert, an UPDATE an update whose before is the
+              # # row with old's values, a DELETE a delete, keyed by pkNames, values typed by mysqlType; a DDL
+              # # a ddl record holding its sql; TiCDC's watermarks nothing. With TiCDC's
+              # # enable-tidb-extension, _tidb.commitTs is the records' transaction and commit time. Encoded,
+              # # a record is a message of one row in the same form.
+              # module: "canal_json"
+              # params:
+                # # The zone DATETIME and TIMESTAMP values are written in: TiCDC's changefeed's time-zone, the
+                # # server's for Canal. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
+
+              # # Or csv, with every one of its params:
               # # A line is a row of comma-separated values, quoted as RFC 4180 has them: a message record
               # # whose after holds the values as strings, named by columns. Encoded, a record is its after's
               # # (or before's) fields, those columns names or all of them, as text.
@@ -6702,6 +8110,16 @@
                 # # The separator, one character other than a quote or a line break. A comma when left out.
                 # # string; default ",".
                 # comma: ","
+
+              # # Or debezium, with every one of its params:
+              # # Debezium's JSON change events, with or without the schema envelope, as Debezium's connectors
+              # # and TiCDC (protocol debezium) write them: op c and r an insert, u an update, d a delete, of
+              # # source's db.table (schema.table when source has a schema), committed at source.ts_ms; with a
+              # # schema, values are typed by it (bytes from base64, Kafka Connect's Decimal, Debezium's
+              # # dates, times and timestamps, JSON), without one as plain JSON. The message's key, Debezium's
+              # # key event, is the record's key. Encoded, a record is an event without a schema.
+              # module: "debezium"
+              # params:
 
               # # Or json, with every one of its params:
               # # A line is a JSON object: with form plain, a message record whose after holds its members,
@@ -6724,6 +8142,32 @@
                 # # The field of after that holds the line. line when left out.
                 # # string; default "line".
                 # field: "line"
+
+              # # Or raw, with every one of its params:
+              # # A message's value as it is: a message record whose after holds it, as bytes, in the field
+              # # field names (value). Encoded, a record is that field's bytes or text, or its canonical JSON
+              # # when it has none, so a Kafka topic copied through raw is copied byte for byte.
+              # module: "raw"
+              # params:
+                # # The field of after that holds the value. value when left out.
+                # # string; default "value".
+                # field: "value"
+
+              # # Or ticdc_simple, with every one of its params:
+              # # TiCDC's simple protocol, in JSON: a table's schema from its BOOTSTRAP and DDL messages,
+              # # kept, types each row's values (binary columns from base64, ENUM and SET as their labels,
+              # # TIMESTAMP in its zone) and names its key, the primary key; INSERT, UPDATE and DELETE become
+              # # records of db.table whose transaction and commit time are the commitTs; a DDL a ddl record
+              # # of its sql; watermarks nothing. A row of a table whose schema has not come yet (a source
+              # # started after its bootstrap) keeps its values as text and has no key, until the next
+              # # bootstrap (send-bootstrap-interval-in-sec), unless the tidb source gave the schema. It only
+              # # decodes.
+              # module: "ticdc_simple"
+              # params:
+                # # The zone DATETIME values are written in, the changefeed's time-zone; TIMESTAMP values carry
+                # # their own. UTC when left out.
+                # # string; default "UTC".
+                # time_zone: "UTC"
 
               # # Or wasm, with every one of its params:
               # # Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a

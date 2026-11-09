@@ -2,8 +2,28 @@ Follows a PostgreSQL database (13 to 17, `wal_level = logical`) as a logical rep
 `publication` names the tables and operations, a `slot` keeps the server's WAL until the source has
 confirmed it, and the stream is read with the built-in `pgoutput` plugin (protocol 1 on 13, 2 with
 streaming from 14). With `create`, a missing publication is made `FOR TABLE` the `tables`, and a
-missing slot is made with no snapshot, so changes come from its creation on; neither is changed or
-dropped later. Without `create`, both must exist: the slot of plugin `pgoutput` on `database`.
+missing slot is made; neither is changed or dropped later. Without `create`, both must exist: the
+slot of plugin `pgoutput` on `database`.
+
+With `snapshot: "initial"` (the default), a pipeline without a checkpoint first reads every row of
+the published tables, then the changes after them, and the hand-over is exact: the rows come from a
+snapshot exported at a point of the WAL, and the stream starts at that very point, so no change is
+both in the snapshot and in the stream, and none is in neither. A slot made by `create` exports the
+snapshot itself; when the slot exists already, a temporary slot is made beside it for the snapshot
+and dropped with its connection. Each table with a primary key (or a `REPLICA IDENTITY USING INDEX`
+index) is split into chunks of `chunk_rows` (100,000) rows by that key, read `snapshot_parallel`
+(4) at a time, each in a `REPEATABLE READ` transaction that takes the exported snapshot
+(`SET TRANSACTION SNAPSHOT`); a table without one is read whole. Snapshot records are inserts with
+no transaction, keyed as the stream keys the table's changes, and the publication's column lists
+and row filters (PostgreSQL 15 and later) apply to them. The position records the chunks done; a
+run that fails keeps the exported snapshot for five minutes, and the next resumes in it at its next
+chunk. Once the snapshot is gone (fit restarted), the tables not finished are read again whole from
+a new snapshot, which a warning says, and the stream starts at the first snapshot's point, so the
+changes between the two are replayed over them: sinks writing by key converge on the tables. The
+snapshot holds back vacuum on the server while it is read. `snapshot: "never"` reads the changes
+alone, from the slot's position. A job (`mode: "once"`) reads the snapshot in chunks, as `job`
+says, each chunk in a transaction of its own and not one snapshot, and needs no slot; with `never`
+it reads the changes up to the server's end at its start.
 
 Each insert, update and delete becomes a record of namespace `schema.table`; a truncate becomes a
 `ddl` record of each table whose `after` holds the `statement` and `truncate: true`. Values are typed

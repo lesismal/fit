@@ -69,7 +69,7 @@ func (f *pgSrcFixture) table(name string) string { return name + "_" + f.suffix 
 func (f *pgSrcFixture) params(extra map[string]any) map[string]any {
 	p := map[string]any{"address": f.s.addr, "user": os.Getenv("FIT_SYNC_PG_USER"), "password_env": "FIT_TEST_SYNC_PG_PASSWORD",
 		"database": "fit", "ca_file": filepath.Join(os.Getenv("FIT_SYNC_PG_CA_DIR"), f.s.version+".pem"),
-		"publication": f.pub, "slot": f.slot, "create": true, "status_interval": "100ms"}
+		"publication": f.pub, "slot": f.slot, "create": true, "status_interval": "100ms", "snapshot": "never"}
 	for k, v := range extra {
 		p[k] = v
 	}

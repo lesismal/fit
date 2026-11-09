@@ -332,20 +332,20 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I176 | MySQL 与 TiDB 作为目标：按键 upsert 与 delete，保持源事务 | I172 | done |
 | I177 | PostgreSQL 客户端：启动、TLS、SCRAM-SHA-256、两种查询协议、`COPY`、复制命令 | I163 | done |
 | I178 | PostgreSQL 作为源：从 slot 读取 `pgoutput`，LSN 只在目标确认后才确认 | I177 | done |
-| I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | todo |
+| I179 | 取自 slot 导出快照的 PostgreSQL 快照，精确交接 | I178 | done |
 | I180 | PostgreSQL 作为目标：`ON CONFLICT` upsert、delete，快照用 `COPY` | I177 | done |
 | I181 | MongoDB 客户端：BSON、`OP_MSG`、主节点发现、SCRAM-SHA-256、TLS | I163 | done |
 | I182 | MongoDB 作为源：从 resume token 读取 change stream，按 `_id` 的快照 | I181 | done |
 | I183 | MongoDB 作为目标：按 `_id` 批量 upsert 与 delete | I181 | done |
 | I183b | 源与目标共用一套 MongoDB 连接参数 | I182, I183 | done |
 | I184 | Kafka 客户端：metadata、produce、fetch、offset、所有压缩、SASL、TLS | I163 | done |
-| I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | todo |
+| I185 | Kafka 作为源与目标，offset 存在 fit 的检查点中；经 TiCDC 的 TiDB | I184, I176 | done |
 | I186 | Redis 作为源（stream）与目标（stream 或键） | I163 | done |
 | I187 | S3 及兼容存储作为目标（滚动的对象）与源（按键顺序的对象） | I163 | done |
 | I188 | Admin API 与 `fit sync`：状态、暂停、恢复、检查点、连接测试、试运行 | I163 | done |
 | I188b | 早先连接器的连接测试 | I188 | done |
 | I189 | 指标、日志与死信，可从 Admin API 重放 | I188 | done |
-| I190 | workbench 的 Sync 页面，以及助手的同步工具 | I188, I189, I123 | todo |
+| I190 | workbench 的 Sync 页面，以及助手的同步工具 | I188, I189, I123 | done |
 | I191 | 写入 MySQL、TiDB 和 PostgreSQL 时恰好一次：检查点写在目标的事务中 | I176, I180 | done |
 | I192 | CI 中的互通与恢复矩阵 | I176, I180, I183, I185 | todo |
 | I193 | 对比 Filebeat、Canal、Debezium 和 DataX 的基准测试 | I192 | todo |
@@ -4038,6 +4038,46 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 - **完成标准**：在写入进行中做的快照，结束时目标与源的校验和相同；恢复的快照若其导出快照已不存在，则该表从头开始并说明原因。
 - **涉及**：`sync/postgres`、`test/sync`。
 
+**待审阅的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **`snapshot`：`initial`（默认）或 `never`。** `initial` 在没有检查点时读取各表；I178 的行为（只读变更）即 `never`，其测试现已
+   设置它。没有 `always`：新的快照由 Admin API 发起（I188 的 `Snapshot`，它会删除检查点）。备选：默认 `never`，保持 I178 的行为。
+2. **快照从哪里来。** `create` 新建的 slot 用 `EXPORT_SNAPSHOT` 创建，读表期间本次运行的复制连接保持空闲，之后在其一致点
+   `START_REPLICATION`。slot 已存在时（手工创建，或为新快照删除了检查点），在第二条复制连接上用 `EXPORT_SNAPSHOT` 创建一个
+   **临时 slot**，流从*它的*一致点开始，服务器以此为解码起点（之前提交的事务被跳过），因此这里的交接同样精确；快照结束时临时
+   slot 随其连接消失。永久 slot 从不删除或重建（I178 决定 3）。备选：删除并重建 slot，或者不用 slot 取当时的快照、从 slot 的
+   位置重放。
+3. **按键分块并行读取。** 表按主键或其 `REPLICA IDENTITY USING INDEX` 索引（与流的键一致）切成每段 `chunk_rows`（100,000）行
+   的范围：先 `count(*)`，再按键做 `row_number()` 取每第 `chunk_rows` 行的键，二者都在导出快照中，因此在该快照中何时规划都
+   相同。两者都没有的表（无键的 `FULL`，或只发布插入）是一个整表读取的块。同时读取 `snapshot_parallel`（4，最多 64）个块，
+   每个读者用自己的普通连接，每块在 `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TRANSACTION SNAPSHOT` 中通过游标读取
+   （每次 `FETCH` 至多 1,000 行，行大时更少，每次约 16 MiB）。边界是键的文本，作为行与无类型字面量比较，因此服务器能读回的
+   任何键类型都可用。备选：`ctid` 范围（PostgreSQL 14+），或用抽样定边界。
+4. **快照记录**是没有事务（`Tx` 为空）、没有提交时间的 insert，其键和值与流对同一行给出的完全相同（按类型 OID 解析文本值，
+   列相同：不含生成列，保留 publication 的列列表），并应用 publication 的行过滤（15+）。备选：每块一个事务。
+5. **快照期间的位置**为 `{"lsn": <流的起点>, "snapshot": {"id", "tables": [{"name", "chunks"}], "done": "0-41,43", "at":
+   [{"chunk", "key"}]}}`，与 I167 的作业一样放在每块的最后一条记录和每 100 条中的一条上，记录经同一把锁发出，每块扣留一条；
+   快照的最后一条记录只带 `{"lsn": ...}`。因此检查点从不声称目标缺少的块或行已完成。备选：把整个规划放进位置。
+6. **续传。** 快照中途失败的运行保留其临时 slot 的连接，从而保留导出快照，以及规划，五分钟（`holdFor`）；检查点指向该快照的
+   下一次运行在其中精确续传，从每块最后的键之后继续。否则（fit 重启、超过五分钟、slot 由本次运行自己创建而运行会关闭其连接、
+   或 `SET TRANSACTION SNAPSHOT` 返回 22023）快照已不存在：所有块都已完成的表保持完成，其余各表从新的临时 slot 的快照**整表
+   重读**，并用一条警告列出它们，而流仍从第一个快照的点开始，因此两者之间的变更在重读的表上重放，在按键写入的目标中收敛
+   （与 I175 的 MySQL 快照收敛一样）。备选：无论完成多少，都从新的临时 slot 精确地重做整个快照。
+7. **作业**（`mode: "once"`）实现 I167 的 `Chunker`：`Chunks` 规划 publication 的各表（publication 不存在时用 `tables`；不需要也
+   不创建 slot），`ReadChunk` 在自己连接上的独立 `REPEATABLE READ` 事务中读一个块，从 `{"key": [...]}` 之后续传；无键表的块
+   整块重读。作业的各块不在同一个导出快照中（之后没有可交接的流，而快照会在整个作业期间阻挡 vacuum）：每块自身一致，与 MySQL
+   和 MongoDB 的相同。`never` 时作业读到服务器末端的变更，与 I178 相同。备选：作业用一个导出快照，由一条从 `Chunks` 到作业结束
+   的连接持有。
+8. **目录查询**除主键外还读取副本标识索引的列和非生成列；15+ 上读 `pg_publication_tables` 的 `attnames` 和 `rowfilter`。
+   备选：`SELECT *`，包含生成列，忽略列列表和行过滤。
+9. **互通测试**（`test/sync/postgres_snapshot_test.go`，PostgreSQL 13 到 17）：一边插入一边读 3,000 行的表，分别经 `create`
+   新建的 slot 和已存在 slot 旁的临时 slot，每行恰好一次（没有既在快照又在流中的）；三张表（int 键、text 加 int 的复合键、
+   `REPLICA IDENTITY FULL` 无键）在被更新、删除、插入和改键的同时，写往内存目标的管道在第五次保存检查点时被杀掉（通常在快照
+   中途）后再运行，此时快照已不存在、各表重读，最终与各表逐行相等；作业的各块各读一次，以及从某个键之后续传一个块。各版本
+   连续三次通过。
+10. **规模**：约 790 行代码、580 行单元测试（伪造服务器的 SQL 和 slot，无容器时覆盖包内 98.1% 的语句）和 300 行互通测试；
+    没有剩余工作，没有 I179b。
+
 ### I180 PostgreSQL 作为目标
 
 - **做什么**：目标 `postgres`：`INSERT ... ON CONFLICT (key) DO UPDATE` 和按键 delete，按表批量写入，快照用 `COPY` 写入临时表
@@ -4313,6 +4353,52 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
   PostgreSQL，结束时校验和相同。
 - **涉及**：`sync/kafka`、`sync/tidb`、`test/sync`、`docs`。
 
+**待审的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **位置。** 包 `sync/kafka`（`synckafka`）：源与目标 `kafka`，以及编解码器 `raw`、`canal_json`、`debezium` 和
+   `ticdc_simple`；它们是 Kafka 上的变更格式，但作为 `sync.codecs` 的模块也可读文件、HTTP 请求体和 S3 对象。包 `sync/tidb`
+   （`synctidb`）：源 `tidb`。`syncmysql` 导出 `ConnParams` 与 `WireConfig`（两行），使 tidb 源的连接沿用 mysql 连接器的参数和
+   检查。备选：编解码器放进 `sync/cdc` 包。
+2. **offset 只存在检查点中，不提交到消费组。** 计划中“可选地提交到消费组以便观察”未实现（I184 的客户端没有消费组 API）；源改为报告
+   延迟：每次拉取后调用 `Run.ReportLag`，单位 `offsets`（I189 的 `LagOffsets`），即各分区高水位减下一个 offset 之和。offset 包含
+   控制批次和压缩留下的空洞，因此只是大约落后的记录数。备选：向参数中指定的消费组 `OffsetCommit`。
+3. **位置** 为 `{"offsets": {topic: {partition: 下一个 offset}}}`，包含所有分区，设在每条消息的最后一条记录上。一条消息变成的
+   多条记录是一个事务（编解码器给的 ID、TiCDC 的提交 TS 或 `topic/partition@offset`），检查点不会落在一条消息内部。不产生记录的
+   消息（TiCDC 每秒一次的 watermark、bootstrap）本身不推进检查点：由下一条记录的位置覆盖；长时间无数据后重启会重读这些
+   watermark。备选：由运行时不经目标直接确认的“位置占位”记录。
+4. **每个源一个编解码器**，而非计划中的每个 topic 一个：一种格式一条流水线。两侧默认 `raw`，Kafka 到 Kafka 的复制逐字节相同；
+   值为 null 的消息是对其键的删除（`tombstones: "delete"`，Debezium 删除后的墓碑用 `skip`），目标把带键的删除写成墓碑
+   （`deletes: "tombstone"`，或 `encode`）。编解码器也可以解码键（新增 `KeyDecoder`）：`debezium` 把 Debezium 的键事件读成键的
+   各列。编解码器拒绝的值成为一条含该值与错误的 message 记录，与文件源的行相同。
+5. **键与分区。** 记录的键为字符串、字节、decimal 或 JSON 时按其文本发出，否则写成普通 JSON（`{"id":1}`），并按 Java 客户端的
+   murmur2 对这些字节选分区；一个批次中无键的记录发往同一分区，下一批次发往下一个分区。分区数一分钟后重新读取。
+6. **目标是至少一次，不是幂等生产者**（I184 的决定 5 不变）：Kafka 到 Kafka 的互通测试在 12 次杀进程中把 3,000 条消息复制成
+   3,076 条，每个键首次出现的副本保持顺序。备选：幂等生产者（`InitProducerId` 与序号），它也只在一个生产者会话内去重。
+7. **批次。** 每个分区的消息按不超过 `max_batch_bytes`（1 MiB，压缩前）的记录批次发送，各分区的第一批在一次 produce 中，第二批在
+   下一次；某分区被拒绝即在该处停止，`BatchError` 指向批次中最早未写入的记录。多条消息的批次遇到 `MESSAGE_TOO_LARGE` 时逐条
+   重发；单条消息则该记录永久失败（`Permanent`）。默认 `acks: "all"`、`compression: "lz4"`；只有设置 `create_topics` 才创建 topic。
+8. **从哪里开始读。** 没有检查点时从 `start`（`earliest`）开始；检查点中没有的分区或之后新增的分区（每分钟检查一次）从最早处开始。
+   被保留策略删除的 offset 使流水线停止（`offset_reset: "error"`），而不是静默跳过。默认只读已提交的消息（`read_uncommitted` 可改）。
+   作业在每个分区开始时的末尾处停止。
+9. **tidb 源** 以嵌套的 `kafka` 接收 kafka 源的参数，编解码器由 `protocol` 决定（`canal-json`，需 `enable-tidb-extension=true` 以带
+   提交 TS；或 `simple`）。快照在为此开启的事务的 `@@tidb_current_ts` 上用 `tidb_snapshot` 读取，按主键分页（`page_rows`），每行的
+   位置为表及其键；提交 TS 不大于该 TS 的变更被丢弃。changefeed 必须早于快照创建，快照必须在 `tidb_gc_life_time` 内读完；二者都
+   不检查。只保留 `tables` 的变更；不设 `tables` 时不做快照。备选：经 TiCDC 的 API 从快照 TS 启动 changefeed，这需要 TiCDC 的地址与
+   权限。
+10. **值。** TiCDC 的 canal-json 把 ENUM 和 SET 写成数字、二进制列写成 ISO-8859-1 文本；`canal_json` 把二进制读回字节，ENUM 和 SET
+    保留为数字文本，tidb 源再按启动时读到的表结构换成标签，与其快照一致。BIT 为 uint，TIME 为文本，DATETIME 与 TIMESTAMP 为
+    `time_zone`（UTC）中的时间，bool 编码为 tinyint `1`/`0`。simple 协议按其 bootstrap 与 DDL 消息中的表结构定型；在此之前的行
+    （源在两次 bootstrap 之间启动）保持文本且无键，除非 tidb 源已从 `information_schema` 预置表结构。TiCDC 的 Debezium 把二进制
+    列写成 base64 字符串且没有表明类型（仍为字符串），decimal 写成 double（float）；`debezium` 编解码器在有 schema 时解码 Kafka
+    Connect 的 `Decimal` 和 Debezium 的时间类型，写出时不带 schema。
+11. **互通。** `test/sync/tidb.sh` 在 `kafka.sh` 的网络上启动 PD、TiKV、TiDB 和 TiCDC v8.5.3（TiDB 在 `TIDB_CDC_PORT`，29690），
+    `run.sh` 在 Kafka 之后启动它，CI 的 `sync-interop` 因此会运行这些测试：在 Kafka 与 Redpanda 上把 3,000 条带键消息从一个 topic
+    复制到另一个，随机位置杀进程；`generate` 的记录以 `json`、`canal_json` 和 `debezium` 经目标写入再经源读回；TiDB 经两种协议同步
+    到 PostgreSQL 17：先快照 300 行，再写入 600 次混合负载（插入、更新、删除、事务中改键），随机位置杀进程，最终校验和相同。
+    在 Docker 中运行 TiCDC 可行；其消息保存在 `sync/kafka/testdata` 中，供编解码器的单元测试使用。
+12. **规模**：约 2,300 行代码（编解码器 1,040 行），1,600 行针对模拟集群和模拟 TiDB 的单元测试（不用容器时分别覆盖 97.5% 和 96.7%
+    的语句），520 行互通测试；无 I185b。
+
 ### I186 Redis 作为源与目标
 
 - **做什么**：支持 TLS 与 ACL 认证的 RESP2/RESP3 客户端（`sync/redis/wire`）；源 `redis`，从检查点的 ID 起用 `XREAD` 读取
@@ -4555,6 +4641,40 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
   一个同步技能（I124 的注册表）。
 - **完成标准**：在 workbench 的测试中，完全通过页面新建、测试、试运行、保存并观察一条流水线，中英文均可。
 - **涉及**：`app/workbench`、`assistant`、`docs`。
+
+**待审查的决策**（实现时做出，2026-11-09；在用户裁定之前有效）：
+
+1. **一个模块 `sync`**，使用 Admin API 的服务端模块，菜单中排在网关各功能之后，菜单中有两页（**管道**、**同步配置**），单个
+   管道的四页以链接形式的标签页呈现（`#/sync/pipeline/<name>`、`/edit/<name>`、`.../checkpoint`、`.../dead_letters`）。只要有
+   `admin.console` 就显示，不论 sync 角色是否运行：没有运行时，列表会说明并列出草稿中的管道，因此第一条管道也能在页面上创建。
+   `sync` 不再出现在“其他”配置页。备选：仅在角色运行时显示该模块。
+2. **迷你走势图来自页面自身的轮询**：每 2 秒 `GET /sync/pipelines`，工作台打开期间保留最近 60 次（两分钟），吞吐取
+   `throughput`，延迟取 `lag_seconds`；页面打开之前没有历史。备选：像集群图表那样取 `/metrics` 的序列。
+3. **编辑器就是配置编辑器**：在共享草稿中用 `C.subsection('sync.pipelines[i]')`，带 `sync` 的 UI/.conf/.yaml/.json 标签页
+   及配置栏的“检查”与“保存并应用”；**测试连接**与**试运行**把草稿中的管道原样发给 `POST /sync/test` 与 `/sync/dry-run`
+   （从源的起点开始），因此保存前即可检查；运行中管道自己的按钮测试并试运行正在运行的配置。**新建管道**询问名称、取自 schema
+   模块的源与 sink（默认 generate 与 memory），配置尚无 `sync` 时还询问 `state_dir`，然后打开编辑器。**移除管道**将其从草稿中
+   删除；其检查点文件保留。
+4. **确认**：重新快照、设置或重置检查点、重放与丢弃都先询问，说明哪些记录会被跳过、重写或丢失，然后发送 `confirm`，因此不会
+   显示 API 的 409；暂停与恢复不询问。检查点页只在点击“刷新”时重新读取，不会在编辑时刷新。死信每页 50 条，可加载更多。
+5. **助手的同步工具是四个只读工具**，分组 `sync`，级别 read：`sync_pipelines`（全部的摘要，或单个的完整状态及运行中的配置）、
+   `sync_test`、`sync_dry_run`（5 条，至多 20 条，5 秒）与 `sync_dead_letters`（20 条，至多 100 条）。测试与试运行会像页面按钮
+   一样连接源与 sink 的服务器，但不写入任何内容，因此级别为 read。没有任何工具修改管道：暂停、恢复、快照、检查点、重放与丢弃
+   都留给人在页面上操作，技能中也如此说明。备选：像媒体工具那样，以这些操作为步骤的提案工具。
+6. **默认不发送记录的值**：试运行与死信中的记录交给模型时，其 key、before、after 中的每个值都替换为其类型（`(string)`、
+   `(int)`，map 按字段名），除非新设置 `admin.assistant.data.send_records`（设置页中的复选框）允许；命名空间、操作、位置与
+   错误始终发送。备选：始终原样发送，像其他结果一样脱敏。
+7. **在管理端**，`sync_pipelines` 与 `sync_dead_letters` 接受 `member`（GET，管理端会转发）；测试与试运行不接受，因为管理端
+   只转发读取。
+8. **一个技能 `sync-pipeline`**：创建管道（用页面工具在页面上起草，或作为提案），以及找出管道停滞、延迟、停止或积压死信的
+   原因。管道最近的错误与死信旁有运行它的“问 AI”按钮。
+9. **密钥仍是环境变量**：页面像编辑其他字段一样编辑 `password_env` 等；从页面把密钥写入 `admin.store`（I168 的决策 12 等待
+   I190）需要连接器读取 store 引用，这不是对 `sync` 包或连接器的小改动，因此留给后续条目。
+10. **页面的测试**：workbench 没有 JavaScript 运行器，因此其测试像 `TestAskSkills` 一样以文本读取页面：`TestSyncWords` 检查
+    同步页面显示的每个词都有中英文且占位符一致、管道的每种状态都有词、页面调用了其提供的每个接口；`TestAskSkills` 检查“问 AI”
+    的 spec。整个流程（创建、测试、试运行、保存、观察、暂停、恢复、快照、设置与重置检查点、重放与丢弃死信）在浏览器中以两种语言
+    手工检查，针对运行 `generate`→`memory` 与 `generate`→`http`（连接被拒）→`dead_letters` 的 fit。备选：CI 中的无头浏览器。
+11. **规模**：页面约 650 行、CSS 20 行，`assistant` 中 Go 代码约 330 行，技能 50 行；测试 330 行。
 
 ### I191 写入事务型目标时恰好一次
 

@@ -29,11 +29,13 @@ import (
 	_ "github.com/lesismal/fit/sync/elasticsearch"
 	_ "github.com/lesismal/fit/sync/file"
 	_ "github.com/lesismal/fit/sync/httpsync"
+	_ "github.com/lesismal/fit/sync/kafka"
 	_ "github.com/lesismal/fit/sync/mongo"
 	_ "github.com/lesismal/fit/sync/mysql"
 	_ "github.com/lesismal/fit/sync/postgres"
 	_ "github.com/lesismal/fit/sync/postgres/sink"
 	_ "github.com/lesismal/fit/sync/redis"
 	_ "github.com/lesismal/fit/sync/s3"
+	_ "github.com/lesismal/fit/sync/tidb"
 	_ "github.com/lesismal/fit/webrtc/media"
 )

@@ -168,3 +168,14 @@ func (c wireConn) QueryRow(ctx context.Context, query string, args ...any) ([]an
 	}
 	return out, nil
 }
+
+// ConnParams are a MySQL connection's params as a connector declares them,
+// for connectors outside the package that speak MySQL's protocol (the tidb
+// source's snapshot).
+type ConnParams = connParams
+
+// WireConfig checks p and makes the client's config from it, as the mysql
+// connectors do.
+func WireConfig(ctx *module.Context, p ConnParams) (mysqlwire.Config, config.Errors) {
+	return wireConfig(ctx, p)
+}

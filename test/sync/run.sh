@@ -70,6 +70,7 @@ cleanup() {
 	if [ "${KEEP:-}" != 1 ]; then
 		docker rm -f fit-sync-es fit-sync-os fit-sync-ch fit-sync-redis fit-sync-valkey fit-sync-minio fit-sync-seaweed $(pg_names) >/dev/null 2>&1 || true
 		rm_mongos fit-sync
+		test/sync/tidb.sh down
 		test/sync/kafka.sh down
 	fi
 }
@@ -206,6 +207,8 @@ until_up fit-sync-minio "http://localhost:$MINIO_PORT/minio/health/ready"
 until_up fit-sync-seaweed "http://localhost:$SEAWEED_PORT/"
 
 eval "$(test/sync/kafka.sh up)"
+# PD, TiKV, TiDB and TiCDC on Kafka's network, for the tidb source (test/sync/tidb.sh).
+eval "$(test/sync/tidb.sh up)"
 
 FIT_SYNC_INTEROP=required \
 	FIT_SYNC_ES_URL="https://localhost:$ES_PORT" FIT_SYNC_ES_CA="$CERTS/es-ca.pem" FIT_SYNC_ES_PASSWORD="$PASSWORD" \

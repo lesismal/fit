@@ -5810,6 +5810,37 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   pending review.
 
 
+### I185 Kafka as a source and a sink; TiDB through TiCDC — done
+
+- **Package `sync/kafka`** (`synckafka`), on I184's client: the source `kafka`, every partition of
+  its topics read from offsets in the checkpoint (no consumer group), each message through a codec,
+  a message's records one transaction, tombstones as deletes, partitions added found each minute,
+  `offset_reset`, read committed by default, a job stopping at the ends it started with, its lag in
+  offsets reported after each fetch (I189); the sink `kafka`, keyed messages to the partition the
+  Java client's murmur2 gives, topics from the namespace (`create_topics` to make them), values by a
+  codec, deletes as tombstones, record batches per partition bounded by `max_batch_bytes`,
+  compressed (`lz4`), `acks: "all"`, a message too large found and failed alone. Codecs: `raw`,
+  `canal_json` (Canal's and TiCDC's canal-json, read and written), `debezium` (with or without the
+  schema envelope, Kafka Connect's and Debezium's types, key events through the new `KeyDecoder`;
+  written without a schema) and `ticdc_simple` (typed by the schemas of its bootstrap and DDL
+  messages; decoded only). Both connectors are `Tester`s.
+- **Package `sync/tidb`** (`synctidb`): the source `tidb`, a snapshot of `tables` at one TSO with
+  `tidb_snapshot` in keyset pages, then the changefeed's changes through a nested kafka source, those
+  committed at or before the snapshot dropped; schemas read at start label canal-json's ENUM and SET
+  numbers and seed the simple codec. `syncmysql` exports `ConnParams` and `WireConfig` for it.
+- **Interop** (`test/sync/kafka_sync_test.go`, `tidb_test.go`, `tidb.sh`, `run.sh`): PD, TiKV, TiDB
+  and TiCDC v8.5.3 on Kafka's network; a Kafka-to-Kafka copy across random kills keeps each key's
+  order on Kafka 3.9 and Redpanda (3,000 messages, 3,076 written across 12 kills); `generate`'s
+  records through the sink and back through the source in `json`, `canal_json` and `debezium`; TiDB
+  into PostgreSQL 17 through canal-json and the simple protocol, a snapshot then a mixed load, killed
+  at random points, equal by checksum.
+- **Tests**: unit tests on a fake cluster and a fake TiDB, and the codecs against TiCDC's recorded
+  messages (`sync/kafka/testdata`): 97.5% (`sync/kafka`) and 96.7% (`sync/tidb`) of statements
+  without containers; under the race detector; staticcheck clean.
+- **Differs from the plan**: no group commit for visibility, lag reported instead; one codec per
+  source rather than per topic.
+- **Gaps**: the decisions in the plan's I185 section, pending review.
+
 ### I189 Metrics, logs and dead letters — done
 
 - **Runtime** (`sync/metrics.go`, `sync/deadletters.go`, small additions to `connector.go`,
@@ -6017,6 +6048,34 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I178 section, pending review. No snapshot (I179); no
   `binary` pgoutput, no protocol 3 or 4 (two-phase, parallel apply); a streamed transaction's spool
   has no bound of its own; the slot is never dropped by fit.
+### I179 The PostgreSQL snapshot — done
+
+- **Snapshot** (`sync/postgres/source_snapshot.go`): with `snapshot: "initial"` (the default; I178's
+  behaviour is `never`), a pipeline without a checkpoint reads the published tables from an
+  exported snapshot, then streams from the point it was exported at: the slot's own when `create`
+  makes it (`EXPORT_SNAPSHOT`, the replication connection idle meanwhile), a temporary slot's on a
+  second connection when the slot exists. Tables split by the primary key or replica identity index
+  into ranges of `chunk_rows` rows, planned in the snapshot, read `snapshot_parallel` at a time,
+  each in a `REPEATABLE READ` transaction that sets the snapshot, through a cursor; keyless tables
+  whole. Records keyed and valued as the stream's; column lists and row filters (15+) applied. The
+  position carries the chunks done and where those under way are; a failed run keeps the exporter
+  five minutes and the next resumes in it; once it is gone, unfinished tables are read again from a
+  new snapshot with a warning, the stream starting at the first one's point, converging. Jobs
+  implement `Chunker`, a transaction per chunk, no slot.
+- **Tests**: unit tests against fakes of the server's SQL, cursors and slots (new slot, temporary
+  slot, resumed in the held snapshot, resumed after it is gone, every failure, jobs, ranges, column
+  lists and filters), 98.1% of the package's statements without containers, under the race
+  detector. Interop (`test/sync/postgres_snapshot_test.go`) with PostgreSQL 13 to 17: rows inserted
+  during the snapshot each come exactly once, through a new slot and a temporary one; three tables
+  under updates, deletes, inserts and key changes, a pipeline killed mid-snapshot and resumed after
+  its snapshot is gone, ending equal to the tables; a job's chunks; three runs in a row pass, and
+  every other PostgreSQL interop test still passes. Not run on Linux nor in the full suite.
+- **Differs from the plan**: a slot that exists gets its snapshot from a temporary slot (the plan's
+  "new slot for a new snapshot"), not by being made again; a resumed snapshot is exact only while
+  this fit holds the exporter, after which unfinished tables converge by replay; a job's chunks
+  are not in one snapshot. About 790 lines of code, 580 of unit tests and 300 of interop; no I179b.
+- **Gaps**: the decisions in the plan's I179 section, pending review. A snapshot holds back vacuum
+  while it is read; a keyless table is re-read whole when interrupted.
 ### I181 A MongoDB client: BSON and OP_MSG — done
 
 - **BSON** (`sync/mongo/wire`, package `mongowire`): `Raw` documents read in place (`Validate`,
@@ -6445,6 +6504,36 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   I178's and I174's sources (I192's matrix); the mixed load is a source of the test's own.
 - **Gaps**: the decisions in the plan's I180 section, pending review. The connection params are the
   sink's own until I178's source can share them.
+
+### I190 The workbench's Sync pages, and the assistant's tools for sync — done
+
+- **Pages** (`app/workbench/web/sync/sync.js`, `sync.css`): a **Sync** menu entry. **Pipelines**:
+  each pipeline's state, throughput and lag sparklines from the page's polls, records read and
+  acknowledged, errors and the last one, the queue against its bounds and the dead letters kept, with
+  the draft's pipelines that do not run; **New pipeline**. A pipeline's **Overview** (pause, resume,
+  a new snapshot after a confirm, Test connection, Dry run with the records shown before and after
+  the transforms, the counters, the queue, the source's lag, a job's progress, each sink's counters,
+  the last error with Ask AI), **Edit** (its form made from the schema in the shared draft, with the
+  raw tabs, Test connection and Dry run of the draft before Save and apply), **Checkpoint** (shown,
+  set and reset after confirms) and **Dead letters** (paged, replayed or dropped, picked or all,
+  after confirms); **Sync config** for the whole member. In English and Chinese.
+- **Assistant** (`assistant/tools_sync.go`, `assistant/skills/sync-pipeline.md`): read tools
+  `sync_pipelines`, `sync_test`, `sync_dry_run` and `sync_dead_letters` through the Admin API in
+  process, the first and last taking `member` on a manager; records' values shown as their kinds
+  unless the new `admin.assistant.data.send_records` allows them (a checkbox on the settings page);
+  the skill `sync-pipeline`, run by the pages' Ask AI buttons.
+- **Docs**: the plan's I190 section; `docs/console.md` (both languages); the schema, reference and
+  templates for `send_records`, its Chinese description.
+- **Tests**: `assistant/sync_test.go` against a fake Admin API (every tool, every argument's
+  refusal, the values hidden and sent, answers that are not JSON, no sync role); the built-in
+  skills' run; `app/workbench/sync_test.go` (`TestSyncWords`: both languages, placeholders, states,
+  endpoints) and `TestAskSkills`. `tools_sync.go` 100% covered; `./assistant` and `./app/workbench`
+  under the race detector. The flow checked by hand in a browser, in both languages, on fit running
+  `generate`→`memory` and `generate`→`http` (refused) with `dead_letters`: made, tested, dry-run,
+  saved and watched; paused, resumed, snapshot; the checkpoint set and reset; letters replayed while
+  failing (kept), dropped, then replayed after the sink was changed (written).
+- **Gaps**: the decisions in the plan's I190 section, pending review; secrets written to
+  `admin.store` from the pages wait for the connectors to read store references.
 
 ### I191 Exactly once into transactional sinks — done
 

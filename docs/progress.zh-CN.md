@@ -4132,6 +4132,27 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
 
 
+### I185 Kafka 作为源与目标；经 TiCDC 的 TiDB — 已完成
+
+- **包 `sync/kafka`**（`synckafka`），基于 I184 的客户端：源 `kafka`，从检查点中的 offset 读取各 topic 的所有分区（不用消费组），
+  每条消息经编解码器变成记录，一条消息的记录为一个事务，墓碑为删除，每分钟发现新增分区，`offset_reset`，默认只读已提交消息，作业
+  在开始时的末尾处停止，每次拉取后按 offset 报告延迟（I189）；目标 `kafka`，带键消息按 Java 客户端的 murmur2 选分区，topic 取自
+  命名空间（`create_topics` 可创建），值由编解码器生成，删除写成墓碑，每分区的记录批次受 `max_batch_bytes` 限制、压缩（`lz4`）、
+  `acks: "all"`，过大的消息被找出并单独失败。编解码器：`raw`、`canal_json`（Canal 与 TiCDC 的 canal-json，可读可写）、`debezium`
+  （带或不带 schema 外壳，Kafka Connect 与 Debezium 的类型，经新增的 `KeyDecoder` 读取键事件；写出不带 schema）和 `ticdc_simple`
+  （按 bootstrap 与 DDL 消息中的表结构定型；只解码）。两个连接器都实现 `Tester`。
+- **包 `sync/tidb`**（`synctidb`）：源 `tidb`，在一个 TSO 上用 `tidb_snapshot` 按主键分页读取 `tables` 的快照，再经嵌套的 kafka 源读取
+  changefeed 的变更，丢弃提交 TS 不晚于快照的变更；启动时读取表结构，把 canal-json 的 ENUM 与 SET 数字换成标签，并预置 simple 编解码器。
+  `syncmysql` 为此导出 `ConnParams` 与 `WireConfig`。
+- **互通**（`test/sync/kafka_sync_test.go`、`tidb_test.go`、`tidb.sh`、`run.sh`）：在 Kafka 的网络上运行 PD、TiKV、TiDB 与 TiCDC
+  v8.5.3；Kafka 到 Kafka 的复制在随机杀进程后仍保持每个键的顺序，Kafka 3.9 与 Redpanda 均通过（3,000 条消息，12 次杀进程中写出
+  3,076 条）；`generate` 的记录以 `json`、`canal_json` 与 `debezium` 经目标写入再经源读回；TiDB 经 canal-json 与 simple 协议同步到
+  PostgreSQL 17，先快照后混合负载，随机位置杀进程，最终校验和相同。
+- **测试**：针对模拟集群与模拟 TiDB 的单元测试，编解码器用录下的 TiCDC 消息（`sync/kafka/testdata`）测试：不用容器时
+  `sync/kafka` 覆盖 97.5%、`sync/tidb` 覆盖 96.7% 的语句；通过竞态检测；staticcheck 无告警。
+- **与计划的不同**：不提交到消费组，改为报告延迟；每个源一个编解码器，而非每个 topic 一个。
+- **遗留**：计划 I185 一节中的决定，待审。
+
 ### I189 指标、日志与死信 — 已完成
 
 - **运行时**（`sync/metrics.go`、`sync/deadletters.go`，以及对 `connector.go`、`control.go`、`runtime.go`、`pipeline.go`、
@@ -4270,6 +4291,23 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   （决定 036 中 I178 的说明）。代码约 1,360 行，单元测试约 970 行，互通测试约 510 行；没有 I178b。
 - **不足**：计划 I178 一节中的决定，待审阅。没有快照（I179）；不用 `binary` 的 pgoutput，不用协议 3 或 4（两阶段、并行应用）；
   流式事务的暂存文件没有自己的上限；fit 从不删除 slot。
+### I179 PostgreSQL 快照 — 已完成
+
+- **快照**（`sync/postgres/source_snapshot.go`）：`snapshot: "initial"`（默认；I178 的行为即 `never`）时，没有检查点的管道先从
+  导出快照读取发布的各表，再从导出之处开始跟随流：`create` 新建 slot 时用它自己的（`EXPORT_SNAPSHOT`，其间复制连接保持空闲），
+  slot 已存在时用第二条连接上临时 slot 的。各表按主键或副本标识索引切成每段 `chunk_rows` 行的范围，在快照中规划，同时读
+  `snapshot_parallel` 块，每块在设置该快照的 `REPEATABLE READ` 事务中经游标读取；无键表整表读取。记录的键和值与流的相同；
+  应用列列表和行过滤（15+）。位置记录已完成的块和进行中块的位置；失败的运行保留导出者五分钟，下一次运行在其中续传；导出快照
+  不存在后，未完成的表从新快照重读并给出警告，流仍从第一个快照的点开始，最终收敛。作业实现 `Chunker`，每块一个事务，不用 slot。
+- **测试**：针对伪造的服务器 SQL、游标和 slot 的单元测试（新 slot、临时 slot、在保留的快照中续传、快照不存在后续传、各种失败、
+  作业、范围、列列表和过滤），无容器时覆盖包内 98.1% 的语句，在竞态检测下运行。互通测试（`test/sync/postgres_snapshot_test.go`）
+  针对 PostgreSQL 13 到 17：快照期间插入的行各恰好出现一次，分别经新 slot 和临时 slot；三张表在更新、删除、插入和改键的同时，
+  管道在快照中途被杀掉、在快照不存在后续传，最终与各表相等；作业的各块；连续三次通过，其余 PostgreSQL 互通测试仍全部通过。
+  未在 Linux 上或完整测试套件中运行。
+- **与计划的差异**：已存在的 slot 从临时 slot 取得快照（计划中的“为新快照创建新 slot”），而不是重建；续传的快照只在本 fit
+  持有导出者时精确，之后未完成的表靠重放收敛；作业的各块不在同一个快照中。代码约 790 行，单元测试约 580 行，互通测试约 300 行；
+  没有 I179b。
+- **不足**：计划 I179 一节中的决定，待审阅。读取快照期间会阻挡 vacuum；无键表被中断后整表重读。
 ### I181 MongoDB 客户端：BSON 与 OP_MSG — 已完成
 
 - **BSON**（`sync/mongo/wire`，包 `mongowire`）：`Raw` 文档原地读取（`Validate`、`Each`、`Lookup`、带类型的访问器），嵌套
@@ -4551,6 +4589,25 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   运行，使用为此创建并已删除的 `fit-i180-pg*` 容器。
 - **与计划的不同**：PostgreSQL 到 PostgreSQL、MySQL 到 PostgreSQL 的流水线等 I178 和 I174 的源（I192 的矩阵）；混合负载由测试自己的源产生。
 - **缺口**：计划 I180 一节中的决策，待审查。连接参数暂为目标自己的，等 I178 的源完成后可共用。
+
+### I190 workbench 的 Sync 页面，以及助手的同步工具 — 已完成
+
+- **页面**（`app/workbench/web/sync/sync.js`、`sync.css`）：菜单项 **数据同步**。**管道**：各管道的状态、来自页面轮询的吞吐与
+  延迟迷你走势图、已读取与已确认的记录、错误数与最近的错误、队列相对上限的占用与保留的死信，以及草稿中未运行的管道；
+  **新建管道**。单个管道的**概览**（暂停、恢复、确认后重新快照、测试连接、显示转换前后记录的试运行、计数、队列、源端延迟、作业
+  进度、各 sink 的计数、带“问 AI”的最近错误）、**编辑**（共享草稿中由 schema 生成的表单，带原始文本标签页，保存并应用前可对
+  草稿测试连接与试运行）、**检查点**（显示，确认后设置与重置）与**死信**（分页，选中或全部，确认后重放或丢弃）；**同步配置**
+  编辑整个成员。中英文。
+- **助手**（`assistant/tools_sync.go`、`assistant/skills/sync-pipeline.md`）：只读工具 `sync_pipelines`、`sync_test`、
+  `sync_dry_run` 与 `sync_dead_letters`，经进程内的 Admin API；首尾两个在管理端接受 `member`；记录的值只显示其类型，除非新设置
+  `admin.assistant.data.send_records` 允许（设置页中的复选框）；技能 `sync-pipeline`，由页面的“问 AI”按钮运行。
+- **文档**：计划的 I190 一节；`docs/console.md`（两种语言）；`send_records` 的 schema、参考与模板及其中文描述。
+- **测试**：`assistant/sync_test.go` 针对假 Admin API（每个工具、每个参数的拒绝、值的隐藏与发送、非 JSON 的应答、没有 sync
+  角色）；内置技能的运行；`app/workbench/sync_test.go`（`TestSyncWords`：两种语言、占位符、状态、接口）与 `TestAskSkills`。
+  `tools_sync.go` 覆盖率 100%；`./assistant` 与 `./app/workbench` 在竞态检测下运行。整个流程在浏览器中以两种语言手工检查，针对
+  运行 `generate`→`memory` 与 `generate`→`http`（连接被拒）加 `dead_letters` 的 fit：创建、测试、试运行、保存与观察；暂停、
+  恢复、快照；设置与重置检查点；失败时重放死信（保留）、丢弃，换掉 sink 后再重放（写入）。
+- **缺口**：计划 I190 一节中的决策，待审查；从页面把密钥写入 `admin.store` 需等连接器能读取 store 引用。
 
 ### I191 写入事务型目标时恰好一次 — 已完成
 
