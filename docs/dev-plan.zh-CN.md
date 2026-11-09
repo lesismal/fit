@@ -354,7 +354,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I212 | NATS JetStream 作为源（持久 pull consumer，序号存入检查点）与目标（`Nats-Msg-Id` 去重） | I163 | todo |
 | I213 | Apache Pulsar 作为源（按消息 ID 的 reader，或订阅）与目标（序列号与代理去重） | I163 | todo |
 | I214 | MQTT 3.1.1 与 5 作为源（持久会话，QoS 1/2 在目标拿到后确认）与目标 | I163 | todo |
-| I215 | SQL Server 客户端：TDS 7.4、TLS、SQL 认证、带类型参数的 RPC、批量导入、取消 | I163 | todo |
+| I215 | SQL Server 客户端：TDS 7.4、TLS、SQL 认证、带类型参数的 RPC、批量导入、取消 | I163 | done |
 | I216 | SQL Server 作为源：按 LSN 读 CDC 变更表，不加锁的快照在其 LSN 处衔接 | I215 | todo |
 | I217 | SQL Server 作为目标：`MERGE` upsert、删除、批量导入，检查点写在目标中实现精确一次 | I215, I191 | todo |
 | I218 | Doris 与 StarRocks 作为目标（带 label 的 Stream Load、删除标记）与源（按游标轮询） | I172 | todo |
@@ -5196,6 +5196,56 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 SQL Server 2019 和 2022（Linux 镜像）互通：每种类型往返一致；被取消的查询在服务端被取消；
   服务端在结果中途关闭连接时返回错误而不是挂起。
 - **涉及**：`sync/mssql/wire`、`test/sync`。
+- **已完成** 2026-11-10：包 `sync/mssql/wire`（`mssqlwire`）：`Dial`（prelogin，加密方式 `on`、`strict` 或 `off`，
+  使用 SQL 认证的 LOGIN7）、`Exec`、`Query` 与 `QueryAll`（一个批，或经 `sp_executesql` 带类型参数：
+  `Param{Name, Value, Type, Output}`、`ParseType`）、`Call`（存储过程，及其返回状态与输出参数）、`Rows`（逐行读取结果集，
+  `NextResultSet`，`Close` 取消其余部分）、`BulkInsert`（`INSERT BULK` 与 BULK LOAD 包，使用表自身的列类型，支持提示）、
+  `Begin`、`Commit` 与 `Rollback`（ENVCHANGE 给出的事务描述符放进每个请求的头部），调用的 context 结束时以 attention
+  取消，`Config.Timeout` 约束每次等待与写入。针对进程内假服务器的单元测试（prelogin 内的 TLS 与 TDS 8 的 TLS，每种类型
+  双向，每种类型与 token 的每个截断前缀，attention 的应答迟到、永不到来或在应答之后，服务器在结果中途关闭或沉默）：语句
+  覆盖率 98.0%，race 检查无误。互通（`test/sync/mssql_test.go`、`test/sync/mssql.sh`）在 SQL Server 2019 与 2022（Linux
+  镜像，amd64 模拟运行）上通过：每种类型作为参数写入并读回，服务器生成的字面量，`encrypt` 为 on 与 off，错误密码，
+  含 max 类型与 text 的 5000 行批量导入，回滚与提交的事务，被取消的 `WAITFOR`（服务端不留请求，连接继续可用），提前关闭
+  的结果，以及结果中途被 KILL 的会话返回错误而不是挂起。
+
+**待审查的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **包及其形态**：`sync/mssql/wire`，包名 `mssqlwire`，一个供单个 goroutine 使用的阻塞式 `Conn`，与 MySQL 和 PostgreSQL
+   客户端一致（决定 036）：无连接池、无 MARS、一次一个请求。备选：在一个连接上用 MARS 会话，源与目标都不需要。
+2. **加密方式 `on`（默认）、`strict` 与 `off`**：`on` 为整个连接使用 TLS，在 prelogin 中协商、握手放在 TDS 包内，证书
+   必须验证（没有"信任服务器证书"）；`strict` 为 TDS 8（先 TLS，ALPN `tds/8.0`）；`off` 完全不用 TLS，服务器要求加密时
+   拒绝连接。不提供 TDS 的仅登录加密（密码加密、数据不加密）：看似加密实则不然。`strict` 通过单元测试但未通过互通：镜像
+   在证书未按 TDS 8 的要求配置前拒绝它（`mssql.sh` 的证书尚未如此），因此其互通测试只在 `FIT_SYNC_MSSQL_STRICT=1` 时运行。
+   备选：把仅登录加密作为第四种方式。
+3. **TDS 7.4 内的 TLS 为 1.2，每个包一个 record**：互通发现 SQL Server 会断开包被 Go 的动态 record 大小拆到多个 record 的
+   连接，且 TLS 1.3 的大 ClientHello 放进 prelogin 包时握手偶尔失败；客户端关闭动态 record 大小，并在 prelogin 内把版本
+   上限设为 1.2（若给了 `TLS.MaxVersion` 则保留），prelogin 包为 4096 字节。
+4. **值的 Go 类型**：所有整数为 `int64`；`real` 为 `float32`，`float` 为 `float64`；`bit` 为 `bool`；`decimal`、`numeric`、
+   `money` 与 `smallmoney` 为 `Decimal`（其精确文本）；`date`、`datetime`、`smalldatetime` 与 `datetime2` 为 UTC 的
+   `time.Time`（其钟面时间，无时区）；`datetimeoffset` 为带其偏移固定时区的 `time.Time`；`time` 为自午夜起的
+   `time.Duration`；`uniqueidentifier` 为按文本字节序的 `UUID`；char、nchar、text、ntext 与 xml 为 `string`（去掉 xml 的
+   字节序标记）；binary、image、rowversion 与 CLR 类型为 `[]byte`；`sql_variant` 为其基础类型的值。备选：`time` 作为
+   第一天的 `time.Time`，decimal 作为 `*big.Rat`。
+5. **不加依赖的代码页**：UTF-8 排序规则或代码页 1252（拉丁排序规则，SQL Server 的默认）的 varchar 会被解码；其他代码页中
+   含非 ASCII 字节的值以 `[]byte` 返回，varchar 参数拒绝其代码页没有的字符。原因：fit 没有 `golang.org/x/text`，而多数
+   模式对非拉丁文本使用 UTF-16 的 nvarchar。备选：用 `x/text` 支持所有代码页；或由源在查询中把这类列转为 nvarchar。
+6. **由 Go 类型决定参数类型**（`Param.Type` 未指定时）：整数 `bigint`，`float32` `real`，`float64` `float`，`string`
+   `nvarchar(4000)` 或 `nvarchar(max)`，`[]byte` `varbinary(8000)` 或 `varbinary(max)`，`time.Time` `datetimeoffset(7)`
+   （无论列类型都保留时刻），`time.Duration` `time(7)`，`Decimal` `decimal(38, 其小数位)`，`UUID` `uniqueidentifier`，nil
+   `nvarchar(4000)`。备选：`time.Time` 作为其 UTC 钟面时间的 `datetime2(7)`。
+7. **PLP 值以未知长度发送**，单个 chunk：互通发现批量导入拒绝已知长度的 PLP（错误 4804），而参数可以接受。
+8. **批量导入读取表的列类型**（`SELECT TOP 0`，以及从 `sys.columns` 读排序规则，在 `INSERT BULK` 中写为 `COLLATE`），并把
+   text、ntext、image 与 xml 列作为 `varchar(max)`、`nvarchar(max)`、`varbinary(max)` 与 `nvarchar(max)` 发送，由服务器转换：
+   互通发现服务器拒绝这些类型自身的行格式。拒绝 `sql_variant` 列；列无法接受的值返回错误，导入继续、该行不写入。不提供
+   `KEEP_IDENTITY` 提示（标识值由服务器生成，除非调用方设置 `IDENTITY_INSERT`）。
+9. **取消**：调用的 context 结束时发送 attention；其应答最多等待 10 秒，之后关闭连接。请求仍在发送时 context 结束则关闭
+   连接，因为 TDS 消息不能截断。与应答交错的 attention 在下一次调用前读完。`Rows.Close` 在结尾前以同样方式取消其余部分。
+10. **超时**：`Config.Timeout`（60 秒）约束连接与登录、每次等待服务器下一个包以及每次写入；调用的总时长由其 context 决定，
+    因此调用方按自己的节奏读取长结果时，只要服务器还在发送就不会超时。
+11. **事务经 SQL 完成**（`BEGIN TRANSACTION`、`COMMIT`、`ROLLBACK`，先设置隔离级别），ENVCHANGE 给出的描述符放进每个请求的
+    ALL_HEADERS，不使用 TDS 的事务管理器请求。备选：TM_BEGIN_XACT 等。
+12. **未包括**：Windows、Kerberos 与 Entra ID 认证，Azure 的 routing ENVCHANGE（忽略），MARS，Always Encrypted，UTF-8 功能
+    扩展，表值参数。
 
 ### I216 SQL Server 作为源
 

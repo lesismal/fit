@@ -6756,6 +6756,26 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the decisions in the plan's I194 section, pending review; fit-examples' go.mod to move to a
   pushed fit with I179, I185 and I174 (`sync-mysql-to-postgres` is validated since I174 merged).
 
+### I215 A SQL Server client: TDS, authentication and queries — done
+
+- **Package `sync/mssql/wire`** (`mssqlwire`): `Dial` (TDS 7.4 pre-login, encryption `on` with the
+  TLS handshake inside pre-login packets, TDS 8's `strict`, or `off`; LOGIN7 with SQL
+  authentication), `Exec`, `Query`/`QueryAll` (a batch, or `sp_executesql` with typed parameters,
+  `Param` and `ParseType`), `Call` (stored procedures, return status, output parameters), `Rows`
+  (result sets row by row, `NextResultSet`), `BulkInsert` (`INSERT BULK` with BULK LOAD packets),
+  `Begin`/`Commit`/`Rollback`, attention on a context's end, `Config.Timeout` on every wait. Every
+  type read (PLP streams, text, `sql_variant`) and written; values bounded by `MaxValueBytes`.
+- **Tests**: unit tests against an in-process fake server, 98.0 % of statements, race-clean.
+  Interop (`test/sync/mssql_test.go`, `test/sync/mssql.sh`): SQL Server 2019 and 2022, every type,
+  bulk load, transactions, cancellation, a session killed mid-result.
+- **Found by interop and fixed**: a TDS packet split across TLS records (Go's dynamic record sizing)
+  drops the connection; TLS 1.3's ClientHello in pre-login packets fails now and then; xml
+  parameters need a byte order mark; bulk load wants PLPs of unknown length and text, ntext, image
+  and xml as the max types.
+- **Gaps**: `strict` is not verified against a server (the images need a TDS 8 certificate setup);
+  varchar outside UTF-8 and code page 1252 comes as bytes; no Windows or Entra ID authentication;
+  the decisions in the plan's I215 section, pending review.
+
 ### I186 Redis as a source and a sink — done
 
 - **Client** (`sync/redis/wire`, package `wire`): RESP2 and RESP3 over TCP or TLS; `HELLO 3` with

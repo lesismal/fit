@@ -4766,6 +4766,21 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **缺口**：计划 I194 一节中的决策，待审查；fit-examples 的 go.mod 需移到含 I179、I185 和 I174 的已推送 fit（I174 合并后
   `sync-mysql-to-postgres` 已移出 `noValidate`，参与验证）。
 
+### I215 SQL Server 客户端：TDS、认证与查询 — 已完成
+
+- **包 `sync/mssql/wire`**（`mssqlwire`）：`Dial`（TDS 7.4 prelogin，加密方式 `on` 时 TLS 握手放在 prelogin 包内，TDS 8 的
+  `strict`，或 `off`；使用 SQL 认证的 LOGIN7）、`Exec`、`Query`/`QueryAll`（一个批，或经 `sp_executesql` 带类型参数，
+  `Param` 与 `ParseType`）、`Call`（存储过程、返回状态、输出参数）、`Rows`（逐行读结果集，`NextResultSet`）、`BulkInsert`
+  （`INSERT BULK` 与 BULK LOAD 包）、`Begin`/`Commit`/`Rollback`，context 结束时发送 attention，`Config.Timeout` 约束每次
+  等待。所有类型都能读（PLP 流、text、`sql_variant`）和写；值的大小受 `MaxValueBytes` 约束。
+- **测试**：针对进程内假服务器的单元测试，语句覆盖率 98.0%，race 检查无误。互通（`test/sync/mssql_test.go`、
+  `test/sync/mssql.sh`）：SQL Server 2019 与 2022，所有类型、批量导入、事务、取消、结果中途被 KILL 的会话。
+- **互通发现并修复**：被拆到多个 TLS record 的 TDS 包（Go 的动态 record 大小）会让连接断开；TLS 1.3 的 ClientHello 放进
+  prelogin 包时偶尔失败；xml 参数需要字节序标记；批量导入要求未知长度的 PLP，并要求 text、ntext、image 与 xml 以 max 类型
+  发送。
+- **缺口**：`strict` 尚未对真实服务器验证（镜像需要按 TDS 8 配置证书）；UTF-8 与代码页 1252 以外的 varchar 以字节返回；
+  不支持 Windows 与 Entra ID 认证；计划 I215 一节中的决定，待审查。
+
 ### I186 Redis 作为源与目标 — 已完成
 
 - **客户端**（`sync/redis/wire`，包 `wire`）：经 TCP 或 TLS 的 RESP2 与 RESP3；带 `AUTH` 与 `SETNAME` 的 `HELLO 3`，服务器

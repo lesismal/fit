@@ -364,7 +364,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I212 | NATS JetStream as a source (a durable pull consumer, the sequence in the checkpoint) and a sink (`Nats-Msg-Id` deduplication) | I163 | todo |
 | I213 | Apache Pulsar as a source (readers from message IDs, or a subscription) and a sink (sequence IDs, broker deduplication) | I163 | todo |
 | I214 | MQTT 3.1.1 and 5 as a source (persistent sessions, QoS 1/2 acknowledged after the sinks) and a sink | I163 | todo |
-| I215 | A SQL Server client: TDS 7.4, TLS, SQL authentication, RPC with typed parameters, bulk load, cancellation | I163 | todo |
+| I215 | A SQL Server client: TDS 7.4, TLS, SQL authentication, RPC with typed parameters, bulk load, cancellation | I163 | done |
 | I216 | SQL Server as a source: CDC change tables by LSN, a snapshot without locks handed over at its LSN | I215 | todo |
 | I217 | SQL Server as a sink: `MERGE` upserts, deletes, bulk load, exactly once with the checkpoint in the sink | I215, I191 | todo |
 | I218 | Doris and StarRocks as a sink (Stream Load with labels, the delete sign) and a source (a cursor polled) | I172 | todo |
@@ -7243,6 +7243,79 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
   round-trips; a cancelled query is cancelled on the server; a server closing mid-result is an error,
   not a hang.
 - **Touches**: `sync/mssql/wire`, `test/sync`.
+- **Done** 2026-11-10: package `sync/mssql/wire` (`mssqlwire`): `Dial` (pre-login, encryption
+  `on`, `strict` or `off`, LOGIN7 with SQL authentication), `Exec`, `Query` and `QueryAll` (a batch,
+  or `sp_executesql` with typed parameters: `Param{Name, Value, Type, Output}`, `ParseType`),
+  `Call` (a stored procedure, its return status and output parameters), `Rows` (result sets read
+  row by row, `NextResultSet`, `Close` cancelling the rest), `BulkInsert` (`INSERT BULK` and BULK
+  LOAD packets, the table's own column types, hints), `Begin`, `Commit` and `Rollback` (the
+  transaction descriptor from ENVCHANGE in every request's headers), cancellation by attention when
+  a call's context ends, `Config.Timeout` on every wait and write. Unit tests against an in-process
+  fake server (TLS inside the pre-login and TDS 8's, every type both ways, every prefix of every
+  type and token cut short, attention answered late, never, or after the answer, servers closing or
+  falling silent mid-result): 98.0 % of statements, race-clean. Interop (`test/sync/mssql_test.go`,
+  `test/sync/mssql.sh`) passed on SQL Server 2019 and 2022 (Linux images, amd64 under emulation):
+  every type written as a parameter and read back, literals the server made, `encrypt` on and off,
+  a wrong password, bulk load of 5000 rows with max types and text, a rolled-back and a committed
+  transaction, `WAITFOR` cancelled (no request left on the server, the connection goes on), a
+  result closed early, and a session killed mid-result failing rather than hanging.
+
+**Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **The package and its shape**: `sync/mssql/wire`, named `mssqlwire`, a blocking `Conn` for one
+   goroutine, as the MySQL and PostgreSQL clients are (decision 036): no pool, no MARS, one request
+   at a time. Alternative: MARS sessions on one connection, which the source and sink do not need.
+2. **Encryption modes `on` (the default), `strict` and `off`**: `on` is TLS for the whole
+   connection, negotiated in the pre-login with the handshake inside TDS packets, the certificate
+   verified (no "trust server certificate"); `strict` is TDS 8 (TLS first, ALPN `tds/8.0`); `off` is
+   no TLS at all, and a server that requires encryption is refused. TDS's login-only encryption
+   (the password encrypted, the rows not) is not offered: it reads as encrypted and is not.
+   `strict` passes the unit tests but not interop: the images refuse it until a certificate is set
+   up the way TDS 8 wants (`mssql.sh`'s is not), so its interop test runs only with
+   `FIT_SYNC_MSSQL_STRICT=1`. Alternative: login-only encryption as a fourth mode.
+3. **TLS inside TDS 7.4 is 1.2, one record per packet**: interop found SQL Server dropping a
+   connection whose packet Go's dynamic record sizing split across records, and handshakes failing
+   now and then with TLS 1.3's large ClientHello in pre-login packets; the client turns dynamic
+   record sizing off and caps the version at 1.2 inside the pre-login (a `TLS.MaxVersion` given is
+   kept), and pre-login packets are 4096 bytes.
+4. **Go types of values**: every integer `int64`; `real` `float32`, `float` `float64`; `bit` `bool`;
+   `decimal`, `numeric`, `money` and `smallmoney` `Decimal` (their exact text); `date`, `datetime`,
+   `smalldatetime` and `datetime2` `time.Time` in UTC (their clock, no zone); `datetimeoffset` a
+   `time.Time` in a fixed zone of its offset; `time` a `time.Duration` from midnight;
+   `uniqueidentifier` a `UUID` in its text's byte order; char, nchar, text, ntext and xml `string`
+   (xml's byte order mark dropped); binary, image, rowversion and CLR types `[]byte`; `sql_variant`
+   its base type's value. Alternative: `time` as a `time.Time` on day one, decimals as `*big.Rat`.
+5. **Code pages without a dependency**: varchar in a UTF-8 collation or code page 1252 (the Latin
+   collations, SQL Server's default) is decoded; a value of another code page with non-ASCII bytes
+   comes as `[]byte`, and a varchar parameter refuses a character its code page lacks. Why: fit has
+   no `golang.org/x/text`, and nvarchar, which most schemas use for text that is not Latin, is
+   UTF-16. Alternative: `x/text` for every code page; or the source casting such columns to
+   nvarchar in its queries.
+6. **Parameter types from Go types**, when `Param.Type` names none: integers `bigint`, `float32`
+   `real`, `float64` `float`, `string` `nvarchar(4000)` or `nvarchar(max)`, `[]byte` `varbinary(8000)`
+   or `varbinary(max)`, `time.Time` `datetimeoffset(7)` (the instant kept whatever the column),
+   `time.Duration` `time(7)`, `Decimal` `decimal(38, its scale)`, `UUID` `uniqueidentifier`, nil
+   `nvarchar(4000)`. Alternative: `time.Time` as `datetime2(7)` of its UTC clock.
+7. **PLP values are sent with an unknown length**, in one chunk: interop found a bulk load refusing a
+   PLP of a known length (error 4804) that parameters took.
+8. **Bulk load reads the table's column types** (`SELECT TOP 0`, and `sys.columns` for collations,
+   written as `COLLATE` in `INSERT BULK`), and sends text, ntext, image and xml columns as
+   `varchar(max)`, `nvarchar(max)`, `varbinary(max)` and `nvarchar(max)`, which the server converts:
+   interop found it refusing those types' own row formats. `sql_variant` columns are refused; a value
+   a column cannot take is an error that leaves the load going without the row. No `KEEP_IDENTITY`
+   hint (identity values are the server's unless the caller sets `IDENTITY_INSERT`).
+9. **Cancellation**: a call's context ending sends an attention; its answer is read with a 10 s
+   bound, then the connection is closed. A context ending while a request is still being sent closes
+   the connection, since a TDS message cannot be cut short. An attention that crosses the answer is
+   read before the next call. `Rows.Close` before the end cancels the rest the same way.
+10. **Timeouts**: `Config.Timeout` (60 s) bounds connecting and logging in, each wait for the
+    server's next packet and each write; a call's whole length is its context's, so a long result
+    read at the caller's pace never times out while the server keeps sending.
+11. **Transactions through SQL** (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`, an isolation level set
+    first), the descriptor from ENVCHANGE carried in every request's ALL_HEADERS, not TDS's
+    transaction manager requests. Alternative: TM_BEGIN_XACT and friends.
+12. **Left out**: Windows, Kerberos and Entra ID authentication, Azure's routing ENVCHANGE (ignored),
+    MARS, Always Encrypted, the UTF-8 feature extension, table-valued parameters.
 
 ### I216 SQL Server as a source
 
