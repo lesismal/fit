@@ -135,7 +135,7 @@ func TestDrain(t *testing.T) {
 	h.Drain()
 	r := <-got
 	if r.err != nil || r.resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("%+v", r)
+		t.Fatalf("status %d len %d cl %d hdr %v", r.resp.StatusCode, len(r.body), r.resp.ContentLength, r.resp.Header)
 	}
 	waitFor(t, "the stream to end", func() bool { return h.Streams() == 0 })
 	f.must(t, "GET", "/bt/"+c.id+"/show/ep1.mp4", http.StatusServiceUnavailable)
