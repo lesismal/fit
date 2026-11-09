@@ -99,6 +99,7 @@ for v in $MSSQL_VERSIONS; do
 	done
 	sqlcmd "$name" "IF DB_ID('fit_sync') IS NULL BEGIN CREATE DATABASE fit_sync; ALTER DATABASE fit_sync SET ALLOW_SNAPSHOT_ISOLATION ON; END" >/dev/null
 	sqlcmd "$name" "USE fit_sync; IF (SELECT is_cdc_enabled FROM sys.databases WHERE name = 'fit_sync') = 0 EXEC sys.sp_cdc_enable_db" >/dev/null
+	sqlcmd "$name" "IF NOT EXISTS (SELECT 1 FROM sys.change_tracking_databases WHERE database_id = DB_ID('fit_sync')) ALTER DATABASE fit_sync SET CHANGE_TRACKING = ON (CHANGE_RETENTION = 2 DAYS, AUTO_CLEANUP = ON)" >/dev/null
 done
 
 echo "export FIT_SYNC_MSSQL='${ADDRS#,}' FIT_SYNC_MSSQL_PASSWORD='$PASSWORD' FIT_SYNC_MSSQL_CA='$STATE/ca.pem'"

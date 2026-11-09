@@ -9676,6 +9676,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "mssql"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sync.sources.mssql"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "mysql"
               }
             }
@@ -9781,6 +9797,7 @@
             "kafka",
             "mongo",
             "mqtt",
+            "mssql",
             "mysql",
             "postgres",
             "redis",
@@ -10541,6 +10558,127 @@
         "servers",
         "client_id",
         "topics"
+      ],
+      "type": "object"
+    },
+    "sync.sources.mssql": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:1433",
+          "description": "The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out.",
+          "type": "string"
+        },
+        "batch_size": {
+          "default": 1000,
+          "description": "The rows a snapshot's query reads, by key, each in a transaction of its own. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ca_file": {
+          "description": "A PEM file of the certificates the server's is checked against, in place of the system's roots.",
+          "type": "string"
+        },
+        "database": {
+          "description": "The database whose tables are read.",
+          "type": "string"
+        },
+        "encrypt": {
+          "default": "on",
+          "description": "How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out.",
+          "enum": [
+            "on",
+            "strict",
+            "off"
+          ],
+          "type": "string"
+        },
+        "exclude": {
+          "description": "Tables left out of those tables names, as schema.table globs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "keys": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "The key's columns of tables, by schema.table, in place of the primary key (or the unique index CDC was enabled with): for a table without one. A table with neither has records without a key, and its snapshot is read in one query.",
+          "type": "object"
+        },
+        "mode": {
+          "default": "cdc",
+          "description": "Where changes come from: cdc, the change tables, with whole rows before and after each change, every change in order; change_tracking, the keys changed since the last version, each row read back as it is then, an absent row a delete (lighter on the server, but changes between two polls are merged and rows have no before). cdc when left out.",
+          "enum": [
+            "cdc",
+            "change_tracking"
+          ],
+          "type": "string"
+        },
+        "password_env": {
+          "description": "The environment variable holding username's password, read when the pipeline loads; none when left out.",
+          "type": "string"
+        },
+        "poll_interval": {
+          "default": "1s",
+          "description": "How long the source waits, once it has read every change, before it looks again. 1s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the server's certificate must have; address's host when left out.",
+          "type": "string"
+        },
+        "snapshot": {
+          "default": "initial",
+          "description": "Whether the tables' rows are read before the changes: initial, when the pipeline has no checkpoint; always, at every start of the source, unless its checkpoint is inside a snapshot, which it goes on with; never, the changes alone, from the checkpoint or from now. The position is read first and the changes start there, so what changes during the snapshot comes again. initial when left out.",
+          "enum": [
+            "initial",
+            "always",
+            "never"
+          ],
+          "type": "string"
+        },
+        "tables": {
+          "description": "The tables read, as schema.table globs (* and ? within a name, [ranges]): dbo.orders, sales.*. A table named whole must have CDC (or change tracking) on, or the pipeline fails saying how to turn it on; a glob matches the tables that have it, and picks up a table CDC begins to capture later. Every table CDC (or change tracking) follows when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "default": "60s",
+          "description": "How long connecting, and each wait for the server, may take. 60s when left out or 0.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "username": {
+          "description": "The SQL login, which needs SELECT on the tables, and on the cdc schema (db_owner, or the role CDC was enabled with) or VIEW CHANGE TRACKING on them.",
+          "type": "string"
+        },
+        "window_rows": {
+          "default": 10000,
+          "description": "With cdc, the most changed rows held at once to put the change tables' rows in order: a window of transactions with more is read again smaller, and a single transaction with more is read in pages of this many. 10000 when left out or 0.",
+          "maximum": 1000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "window_transactions": {
+          "default": 1000,
+          "description": "With cdc, the most transactions read from the change tables at once. 1000 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "username",
+        "database"
       ],
       "type": "object"
     },
