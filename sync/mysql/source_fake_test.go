@@ -33,6 +33,8 @@ type srcFake struct {
 	queryCols func(q string) []mysqlwire.Column
 	execErr   func(q string) error
 	dialErr   func(n int) error
+	// cmdErr, when set, is what Command answers.
+	cmdErr error
 	// streams are what each dump reads: events, then an error, or, past
 	// them, a wait for the context's end.
 	streams [][]evItem
@@ -125,7 +127,7 @@ func (c *srcFakeConn) Command(ctx context.Context, cmd byte, body []byte) error 
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
 	c.f.cmds = append(c.f.cmds, append([]byte{cmd}, body...))
-	return nil
+	return c.f.cmdErr
 }
 
 func (c *srcFakeConn) StartBinlog(ctx context.Context, cmd byte, body []byte) error {

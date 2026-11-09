@@ -1,6 +1,7 @@
 package synctidb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -69,7 +70,15 @@ func queryAll(ctx context.Context, c db, query string, args ...any) ([][]any, er
 	}
 	var out [][]any
 	for rs.Next() {
-		out = append(out, append([]any(nil), rs.Values()...))
+		// A row's bytes are the connection's buffer until the next row:
+		// they are copied.
+		vals := append([]any(nil), rs.Values()...)
+		for i, v := range vals {
+			if b, ok := v.([]byte); ok {
+				vals[i] = bytes.Clone(b)
+			}
+		}
+		out = append(out, vals)
 	}
 	err = rs.Err()
 	if cerr := rs.Close(); err == nil {

@@ -33,13 +33,20 @@ type wasmFunc struct {
 	body            []byte
 }
 
+// wasmData is bytes a module's memory holds at off when it starts.
+type wasmData struct {
+	off int32
+	b   []byte
+}
+
 // wasmModule describes a module: its imports and functions, a memory of
-// pages exported as "memory" unless pages is 0, and, when global is set, a
-// mutable i32 global of that value exported as "global".
+// pages exported as "memory" unless pages is 0, holding data, and, when
+// global is set, a mutable i32 global of that value exported as "global".
 type wasmModule struct {
 	imports []wasmImport
 	funcs   []wasmFunc
 	pages   int
+	data    []wasmData
 	global  *int32
 }
 
@@ -148,5 +155,14 @@ func (m wasmModule) encode() []byte {
 		body := append(append([]byte{0x00}, f.body...), opEnd) // no locals
 		code = append(uleb(code, uint64(len(body))), body...)
 	}
-	return wasmSection(b, 10, len(m.funcs), code)
+	b = wasmSection(b, 10, len(m.funcs), code)
+	if len(m.data) > 0 {
+		var segs []byte
+		for _, d := range m.data {
+			segs = append(cat(segs, []byte{0x00}, i32(d.off)), opEnd)
+			segs = append(uleb(segs, uint64(len(d.b))), d.b...)
+		}
+		b = wasmSection(b, 11, len(m.data), segs)
+	}
+	return b
 }
