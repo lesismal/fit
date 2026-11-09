@@ -191,8 +191,14 @@ func TestRoleEvents(t *testing.T) {
 	if added.Torrent != st.ID || added.Name != "movie.bin" || added.ID == 0 || added.Time.IsZero() || added.State == "" {
 		t.Fatalf("added %+v", added)
 	}
-	w.wait("completed", func(e Event) bool { return e.Type == EventCompleted && e.Torrent == st.ID })
-	w.wait("seeding", func(e Event) bool { return e.Type == EventState && e.State == "seeding" && e.Previous != "" })
+	// Completed and the state change to seeding, in either order: a fast
+	// download may report one before the other.
+	completed, seeding := false, false
+	w.wait("completed and seeding", func(e Event) bool {
+		completed = completed || (e.Type == EventCompleted && e.Torrent == st.ID)
+		seeding = seeding || (e.Type == EventState && e.State == "seeding" && e.Previous != "")
+		return completed && seeding
+	})
 	if err := l.Pause(st.ID); err != nil {
 		t.Fatal(err)
 	}
