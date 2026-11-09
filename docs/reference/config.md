@@ -50,8 +50,8 @@ a config against it and more.
 - [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mysql`](#sync-sources-mysql), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`wasm`](#sync-sinks-wasm)
-- [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`influxdb`](#sync-sinks-influxdb), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`milvus`](#sync-sinks-milvus), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`qdrant`](#sync-sinks-qdrant), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`tdengine`](#sync-sinks-tdengine), [`wasm`](#sync-sinks-wasm)
+- [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`embed`](#sync-transforms-embed), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`canal_json`](#sync-codecs-canal_json), [`csv`](#sync-codecs-csv), [`debezium`](#sync-codecs-debezium), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`raw`](#sync-codecs-raw), [`ticdc_simple`](#sync-codecs-ticdc_simple), [`wasm`](#sync-codecs-wasm)
 
 ## The config
@@ -8687,6 +8687,37 @@ In JSON:
 | `timeout` | duration | `"30s"` | How long one request may take, from connecting to the end of its answer; one that takes longer is tried again. 30s when left out or 0. |
 | `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one request's body; a batch larger is sent in several, in order, and a record larger alone fails for good. 8 MiB when left out or 0. |
 
+<a id="sync-sinks-influxdb"></a>
+
+### `influxdb`
+
+Writes records to InfluxDB as points of the line protocol: InfluxDB 2's /api/v2/write (or 3's /api/v3/write_lp, or 1's /write), the measurement from a template, tags and fields from the row's fields, the time from a field or the commit time, gzipped, through fib's asynchronous HTTP client. A point is its series and its time, so a record written again writes the same point over itself. Deletes are left out (or fail, as deletes says); a 429 or 5xx is tried again with a backoff, and a point the server refuses fails its record, which on_error takes.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | string |  | Required. The server's HTTP endpoint, as http://influxdb:8086 (InfluxDB 2), http://influxdb3:8181 (InfluxDB 3). fib's client does not follow redirects. |
+| `api` | string: `v2`, `v3`, `v1` | `"v2"` | The write API: v2, /api/v2/write with org and bucket (InfluxDB 2, and 3's compatibility); v3, /api/v3/write_lp with database (InfluxDB 3); v1, /write with database and retention_policy (InfluxDB 1, and 2's compatibility). v2 when left out. |
+| `org` | string |  | The organization of api v2, its name or ID. |
+| `bucket` | string |  | The bucket api v2 writes to; required with it. |
+| `database` | string |  | The database api v3 and v1 write to; required with them. |
+| `retention_policy` | string |  | api v1's retention policy; the database's default when left out. |
+| `token_env` | string |  | The environment variable holding an API token, read when the pipeline loads: sent as Authorization: Token (v2, v1) or Bearer (v3). Not with username. |
+| `username` | string |  | The user of api v1's basic authentication, with password_env. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; the URL's host when left out. |
+| `timeout` | duration | `"30s"` | How long one request may take, from connecting to the end of its answer. 30s when left out or 0. |
+| `measurement` | string | `"{namespace}"` | The measurement a record's point goes to: text with placeholders, {namespace} the record's namespace and {name} the row's field name (which the point still has as a field or tag); {{ is a brace. {namespace} when left out. |
+| `tags` | list of string |  | The row's fields that are the point's tags, as text; a field missing, null or empty is left out of them. Tags and the measurement are the series, which with the time is the point: keep them to fields that do not change, or bounded ones. None when left out. |
+| `fields` | list of string |  | The row's fields written as the point's fields; every field of the row but the tags and time_field when left out. Ints, uints, floats, decimals (as floats) and bools are written as such, any other value as a string of its text (bytes in base64, maps and arrays as JSON). Null fields are left out; a point with no field fails its record. |
+| `time_field` | string |  | The row's field the point's time is read from: a time, a date, an int of Unix nanoseconds, or a string in RFC 3339. The record's commit time when left out, or the time it is written when the source gives none, which a replay does not repeat. |
+| `precision` | string: `ns`, `us`, `ms`, `s` | `"ns"` | The precision of the points' times, which are cut to it: ns, us, ms or s. Two records of a series within one unit are one point. ns when left out. |
+| `deletes` | string: `skip`, `fail` | `"skip"` | What a delete does: skip leaves it out, counted as written (the line protocol has no deletes); fail fails it, which on_error takes. skip when left out. |
+| `gzip` | boolean | `true` | Send requests gzipped. On when left out. |
+| `max_request_bytes` | integer, 0 or more | `4194304` | The most bytes of points, before gzip, one request carries; a batch larger is sent in several, in order, and a point larger fails its record. 4 MiB when left out or 0. |
+
 <a id="sync-sinks-kafka"></a>
 
 ### `kafka`
@@ -8846,6 +8877,29 @@ Keeps the records written in memory, in a store named by store, up to max_record
 | --- | --- | --- | --- |
 | `store` | string | `"default"` | The store's name: sinks naming the same store write into it. default when left out. |
 | `max_records` | integer, 0 or more | `100000` | The most records the store keeps; a write past it fails, as a full disk would. 100000 when left out or 0. |
+
+<a id="sync-sinks-milvus"></a>
+
+### `milvus`
+
+Writes records to Milvus (2.4 and later) collections over its RESTful API v2, through fib's asynchronous HTTP client: inserts and updates upsert the row as an entity, its primary key from the record's key, deletes delete by it. A batch's records of one key are written as its last; a 429, a 5xx or a Milvus error of a busy server is tried again with a backoff, and an entity Milvus refuses (a vector of the wrong size, a field the schema lacks) fails its record, which on_error takes.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | string |  | Required. Milvus's RESTful endpoint, as http://milvus:19530 (Zilliz Cloud's cluster endpoint too). fib's client does not follow redirects. |
+| `token_env` | string |  | The environment variable holding a token, sent as Authorization: Bearer, read when the pipeline loads: an API key, or user:password. Not with username. |
+| `username` | string |  | The user, with password_env, sent as the token user:password. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; the URL's host when left out. |
+| `timeout` | duration | `"30s"` | How long one request may take, from connecting to the end of its answer. 30s when left out or 0. |
+| `database` | string |  | The database of the collections; default when left out. |
+| `collection` | string |  | Required. The collection a record's entity goes to, which must exist with a primary key that is not auto_id: text with placeholders, {namespace} the record's namespace and {name} the row's field name; {{ is a brace. |
+| `primary_key` | string | `"id"` | The collection's primary key field, set from the record's key: an Int64 key from a single int or uint, a VarChar from any other key's text (a single value's, or a map's values joined by ':'). id when left out. |
+| `fields` | list of string |  | The row's fields written, the vector fields among them, beside the primary key; every field of the row when left out, which the collection takes when its schema has them or its dynamic field is on. Vectors are arrays of numbers, as the embed transform makes. |
+| `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one request; a batch larger is sent in several, and an entity larger fails its record. 8 MiB when left out or 0. |
 
 <a id="sync-sinks-mongo"></a>
 
@@ -9282,6 +9336,27 @@ In JSON:
 | `copy_min_rows` | integer, 0 or more | `100` | With copy auto, the fewest rows of a run that is copied. 100 when left out or 0. |
 | `max_statement_rows` | integer, 0 to 65535 | `1000` | The most rows of one INSERT or DELETE (and fewer when its parameters would pass PostgreSQL's 65535); a longer run is written in several. 1000 when left out or 0. |
 
+<a id="sync-sinks-qdrant"></a>
+
+### `qdrant`
+
+Writes records to Qdrant collections over its REST API, through fib's asynchronous HTTP client: inserts and updates upsert a point of the row's vector field and the rest of the row as payload, deletes delete it, by an ID from the record's key (an unsigned integer or a UUID as they are, any other key a UUID made from its text, the same each time), waiting for each write to be applied. A batch's records of one ID are written as its last; a 429 or 5xx is tried again with a backoff, and a point Qdrant refuses (a vector of the wrong size) fails its record, which on_error takes.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | string |  | Required. Qdrant's REST endpoint, as http://qdrant:6333. fib's client does not follow redirects. |
+| `api_key_env` | string |  | The environment variable holding an API key, sent as the api-key header, read when the pipeline loads. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; the URL's host when left out. |
+| `timeout` | duration | `"30s"` | How long one request may take, from connecting to the end of its answer. 30s when left out or 0. |
+| `collection` | string |  | Required. The collection a record's point goes to, which must exist: text with placeholders, {namespace} the record's namespace and {name} the row's field name; {{ is a brace. |
+| `vector_field` | string | `"embedding"` | The row's field holding the point's vector: an array of numbers, or JSON of one, as the embed transform makes. A record without it fails. embedding when left out. |
+| `vector_name` | string |  | The collection's named vector the vector is, for a collection of several; its one unnamed vector when left out. |
+| `payload` | list of string |  | The row's fields kept in the point's payload; every field but vector_field when left out. |
+| `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one request; a batch larger is sent in several, and a point larger fails its record. Below Qdrant's service.max_request_size_mb (32 MiB). 8 MiB when left out or 0. |
+
 <a id="sync-sinks-redis"></a>
 
 ### `redis`
@@ -9557,6 +9632,34 @@ Writes each record to fit's standard output as a line of its canonical JSON: for
 
 It has no fields: `{}` turns it on.
 
+<a id="sync-sinks-tdengine"></a>
+
+### `tdengine`
+
+Writes records to TDengine 3 through taosAdapter's REST interface: as schemaless line protocol, the measurement a super table and the tags its subtable's, made as they are first written; or as SQL INSERTs into subtables of an existing super table, named by a template, through fib's asynchronous HTTP client. A row is its subtable and its timestamp, so a record written again writes the same row over itself. Deletes are left out (or fail, as deletes says); a 429 or 5xx the server does not explain is tried again with a backoff, and a row it refuses fails its record, which on_error takes.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | string |  | Required. taosAdapter's HTTP endpoint, as http://tdengine:6041. fib's client does not follow redirects. |
+| `username` | string |  | Required. The user, as root. |
+| `password_env` | string |  | Required. The environment variable holding username's password, read when the pipeline loads. |
+| `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots. The check cannot be turned off. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to a server that asks for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; the URL's host when left out. |
+| `timeout` | duration | `"30s"` | How long one request may take, from connecting to the end of its answer. 30s when left out or 0. |
+| `database` | string |  | Required. The database written to, which must exist; its precision must be precision's. |
+| `mode` | string: `schemaless`, `sql` | `"schemaless"` | How rows are written: schemaless, as InfluxDB's line protocol, TDengine making the super tables, subtables and columns as they are first written (tags as NCHAR, ints as BIGINT, floats as DOUBLE, strings as VARCHAR; the timestamp column _ts); sql, as INSERT ... USING the super table TAGS (...) VALUES (...) into the subtable subtable names, made at its first row, the super table yours. schemaless when left out. |
+| `measurement` | string | `"{namespace}"` | The super table a record's row goes to: text with placeholders, {namespace} the record's namespace and {name} the row's field name; {{ is a brace. {namespace} when left out. |
+| `subtable` | string |  | mode sql's subtable a record's row goes to: a template as measurement's, as d_{device}. When left out, t_ and the MD5, in hex, of the super table and the tags' names and values, so that a series keeps its subtable. |
+| `tags` | list of string |  | The row's fields that are the subtable's tags. In mode schemaless a field missing, null or empty is left out of them; in mode sql it is NULL. Tags are fixed when a subtable is made. None when left out. |
+| `fields` | list of string |  | The row's fields written as columns; every field of the row but the tags and time_field when left out. Null fields are left out. In mode schemaless ints are BIGINT, uints BIGINT UNSIGNED, floats and decimals DOUBLE, bools BOOL, and any other value a VARCHAR of its text (bytes in base64, maps and arrays as JSON). |
+| `time_field` | string |  | The row's field the row's timestamp is read from: a time, a date, an int of Unix nanoseconds, or a string in RFC 3339. The record's commit time when left out, or the time it is written when the source gives none, which a replay does not repeat. |
+| `time_column` | string | `"ts"` | mode sql's timestamp column, the super table's first. ts when left out. |
+| `precision` | string: `ns`, `us`, `ms` | `"ms"` | The database's precision, which timestamps are cut to: ns, us or ms. Two records of a subtable within one unit are one row. ms, TDengine's default, when left out. |
+| `deletes` | string: `skip`, `fail` | `"skip"` | What a delete does: skip leaves it out, counted as written; fail fails it, which on_error takes. skip when left out. |
+| `max_request_bytes` | integer, 0 or more | `1048576` | The most bytes of one request: lines, or an INSERT, which TDengine's maxSQLLength bounds (1 MiB by default); a batch larger is sent in several, in order, and a row larger fails its record. 1 MiB when left out or 0. |
+
 <a id="sync-sinks-wasm"></a>
 
 ### `wasm`
@@ -9696,6 +9799,30 @@ Changes fields' types, in the rows before and after and in the key, by defined c
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `fields` | object of string |  | Required. The fields cast, each to a type: string, int, uint, float, decimal, bool, bytes, time, date or json. Null stays null, and a value of the type already stays as it is. Numbers convert among themselves when the value fits exactly (1.5 is no int); strings parse as the type writes them (an int in decimal, a bool as true or false, a time in RFC 3339, a date as 2006-01-02, json as a document); a time takes an int or uint as Unix seconds, and a date; a date takes a time, its day in the time's own offset; json takes any value, as plain JSON; bytes take a string, decimal or json's text, and give a string their text when it is UTF-8. Anything else fails the record. |
+
+<a id="sync-transforms-embed"></a>
+
+### `embed`
+
+Computes a vector from text fields of each insert and update, through an OpenAI-compatible embeddings API (fit's own llm.proxy when given no url, or any endpoint), and sets it in a field of the row, as the qdrant and milvus sinks read it. A batch's texts go in requests of batch_records, max_parallel at once, through fib's asynchronous HTTP client; vectors are cached by a hash of the model and the text, within cache_bytes. A request that fails, after attempts, fails its records, which on_error takes.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | string |  | The API's base URL, to which /embeddings is added, as https://api.openai.com/v1 or http://ollama:11434/v1. This config's llm.proxy's api, on loopback, when left out; one or the other is needed. |
+| `model` | string |  | Required. The model the vectors are computed by, as text-embedding-3-small. |
+| `api_key_env` | string |  | The environment variable holding the API's key, sent as Authorization: Bearer, read when the pipeline loads: one of llm.proxy's api_keys for it. None when left out. |
+| `fields` | list of string |  | Required. The row's fields whose text is embedded, joined by separator in this order; a field missing or null is left out. A record with none of them passes without a vector. |
+| `separator` | string |  | What joins the fields' texts. A line break when left out. |
+| `into` | string | `"embedding"` | The row's field the vector is set in, an array of floats, replacing what is there. embedding when left out. |
+| `dimensions` | integer, 0 or more |  | The vectors' size asked of a model that can shorten them (OpenAI's text-embedding-3 models); the model's own when left out or 0. |
+| `batch_records` | integer, 0 to 2048 | `64` | The most texts one request carries. 64 when left out or 0. |
+| `max_parallel` | integer, 0 to 16 | `4` | The most requests a batch sends at once. 4 when left out or 0. |
+| `max_text_bytes` | integer, 0 or more | `32768` | The longest text embedded; a record whose text is longer fails, which on_error takes, rather than be cut. Keep it within the model's input tokens. 32 KiB when left out or 0. |
+| `cache_bytes` | integer, 0 or more | `33554432` | The most bytes of vectors kept, by a hash of the model, the dimensions and the text, the least used dropped first, so that a text seen again is not sent again: a replay, an update that leaves the text as it was. 32 MiB when left out or 0. |
+| `timeout` | duration | `"30s"` | How long one request may take, from connecting to the end of its answer. 30s when left out or 0. |
+| `attempts` | integer, 0 to 10 | `3` | How many times a request is sent while it fails to be answered or is answered 408, 429 or 5xx, with a backoff between, before its records fail. 3 when left out or 0. |
+| `ca_file` | string |  | A PEM file of the certificates the API's is checked against, in place of the system's roots. The check cannot be turned off; llm.proxy's own certificate is pinned. |
+| `server_name` | string |  | The name the API's certificate must have, and the TLS server name sent; the URL's host when left out. |
 
 <a id="sync-transforms-envelope"></a>
 
