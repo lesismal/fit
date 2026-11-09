@@ -3,8 +3,9 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 The sync benchmark (dev-plan I193) measures fit's [sync](../../docs/sync.md) against the tools it
-stands in for: Filebeat for files, Canal and Debezium for MySQL's and PostgreSQL's changes, DataX for
-a batch copy. Every mover runs in Docker against fresh servers of the same pinned images and
+stands in for: Filebeat for files, Promtail for files to Loki, Canal and Debezium for MySQL's,
+PostgreSQL's and SQL Server's changes, Kafka Connect for RabbitMQ and MQTT into Kafka, DataX for a
+batch copy. Every mover runs in Docker against fresh servers of the same pinned images and
 settings, pinned to the same CPUs, and is measured the same way: the records it moves are counted
 where it writes them.
 
@@ -16,9 +17,15 @@ where it writes them.
 | `mysql-kafka` | MySQL 8.0's binlog → Kafka 3.9 | fit (`mysql` → `kafka`, Debezium's envelope), Canal 1.1.8 (canal-server in Kafka mode, flat messages), Debezium 3.0.8 (MySQL connector, JSON without schemas) |
 | `pg-kafka` | PostgreSQL 17's logical replication → Kafka 3.9 | fit (`postgres` → `kafka`), Debezium 3.0.8 (PostgreSQL connector, `pgoutput`) |
 | `mysql-batch` | a MySQL table → another MySQL server | fit (a job: `mysql` snapshot → `mysql`), DataX 202309 (`mysqlreader` → `mysqlwriter`) |
+| `rabbitmq-kafka` | messages of a RabbitMQ 4.1 queue → Kafka 3.9 | fit (`rabbitmq` → `kafka`, the codec `raw`), Kafka Connect (Debezium's 3.0.8 image) with Apache Camel's `spring-rabbitmq-source` connector 4.14.5 |
+| `mqtt-kafka` | messages of a Mosquitto 2.0 topic at QoS 1 → Kafka 3.9 | fit (`mqtt` → `kafka`, the codec `raw`), Kafka Connect with Apache Camel's `mqtt5-source` connector 4.14.5 |
+| `mssql-kafka` | SQL Server 2022's CDC tables → Kafka 3.9 | fit (`mssql` → `kafka`, Debezium's envelope), Debezium 3.0.8 (SQL Server connector, JSON without schemas) |
 
 The rows are sysbench's (`id`, `k`, `c CHAR(120)`, `pad CHAR(60)`, about 200 bytes), written as
-transactions of `TX_ROWS` single-row INSERTs; the lines are a log line's head and filler.
+transactions of `TX_ROWS` single-row INSERTs; the lines are a log line's head and filler; the
+messages are the rows as JSON, published by syncbench, persistent and confirmed (RabbitMQ) or at QoS 1
+(MQTT), while the mover is paused as for the streams. SQL Server's CDC capture job polls every second
+and takes up to 5,000 transactions a scan, so that it bounds neither mover.
 
 ## Running it
 
@@ -157,11 +164,15 @@ go run ./bench/cmd/benchreport -scores bench/results/sync-DATE
 
 | Workload | Weight | Items | Throughput | CPU | Memory | Lag |
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
-| S1, files | 25% | 128 B and 1 KiB lines, 1 and 16 files | 50% | 25% | 15% | 10% |
-| S2, MySQL to Elasticsearch | 20% | | 50% | 25% | 15% | 10% |
-| S3, MySQL to Kafka | 20% | | 50% | 25% | 15% | 10% |
-| S4, PostgreSQL to Kafka | 15% | | 50% | 25% | 15% | 10% |
-| S5, a MySQL batch copy | 20% | | 55% | 25% | 20% | — |
+| S1, files | 20% | 128 B and 1 KiB lines, 1 and 16 files | 50% | 25% | 15% | 10% |
+| S2, MySQL to Elasticsearch | 15% | | 50% | 25% | 15% | 10% |
+| S3, MySQL to Kafka | 15% | | 50% | 25% | 15% | 10% |
+| S4, PostgreSQL to Kafka | 10% | | 50% | 25% | 15% | 10% |
+| S5, a MySQL batch copy | 15% | | 55% | 25% | 20% | — |
+| S6, files to Loki | 5% | | 50% | 25% | 15% | 10% |
+| S7, RabbitMQ to Kafka | 7% | | 50% | 25% | 15% | 10% |
+| S8, MQTT to Kafka | 6% | | 50% | 25% | 15% | 10% |
+| S9, SQL Server to Kafka | 7% | | 50% | 25% | 15% | 10% |
 
 A mover's score for an item is 100 times the weighted sum of its shares of the item's best; one whose
 records did not all reach the sink in time scores 0.

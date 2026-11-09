@@ -1,0 +1,13 @@
+{
+  "name": "bench",
+  "config": {
+    "connector.class": "org.apache.camel.kafkaconnector.mqtt5source.CamelMqtt5sourceSourceConnector",
+    "tasks.max": "1",
+    "topics": "bench",
+    "key.converter": "org.apache.kafka.connect.converters.ByteArrayConverter",
+    "value.converter": "org.apache.kafka.connect.converters.ByteArrayConverter",
+    "camel.kamelet.mqtt5-source.brokerUrl": "tcp://mosquitto:1883",
+    "camel.kamelet.mqtt5-source.topic": "bench",
+    "camel.kamelet.mqtt5-source.clientId": "connect-bench"
+  }
+}

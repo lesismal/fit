@@ -207,6 +207,9 @@ type sqlSource struct {
 	table  string
 	txRows int
 	multi  bool
+	// begin and commit bound a multi transaction: BEGIN; and COMMIT when
+	// empty, SQL Server's BEGIN TRANSACTION; and COMMIT TRANSACTION.
+	begin, commit string
 }
 
 func (s *sqlSource) write(ctx context.Context, first, n int) error {
@@ -240,12 +243,16 @@ func (s *sqlSource) write(ctx context.Context, first, n int) error {
 // tx writes rows lo+1..hi as one transaction.
 func (s *sqlSource) tx(ctx context.Context, c execer, lo, hi int) error {
 	if s.multi {
+		begin, commit := s.begin, s.commit
+		if begin == "" {
+			begin, commit = "BEGIN;", "COMMIT"
+		}
 		var b strings.Builder
-		b.WriteString("BEGIN;")
+		b.WriteString(begin)
 		for i := lo; i < hi; i++ {
 			b.WriteString("INSERT INTO " + s.table + " (id,k,c,pad) VALUES " + row(i+1) + ";")
 		}
-		b.WriteString("COMMIT")
+		b.WriteString(commit)
 		return c.exec(ctx, b.String())
 	}
 	if err := c.exec(ctx, "START TRANSACTION"); err != nil {
@@ -330,6 +337,16 @@ func openSource(ctx context.Context, o *options, n int) (source, error) {
 	switch o.sc.source {
 	case "files":
 		return &fileSource{dir: o.inDir, files: o.files, size: o.lineBytes}, nil
+	case "rabbitmq", "mqtt":
+		return openPubSource(ctx, o, n)
+	case "mssql":
+		conns, err := dialPool(ctx, n, func(ctx context.Context) (execer, error) {
+			return mssqlDial(ctx, o.mssql, o.mssqlPassword, "shop")
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &sqlSource{conns: conns, table: "dbo.items", txRows: o.txRows, multi: true, begin: "BEGIN TRANSACTION;", commit: "COMMIT TRANSACTION"}, nil
 	case "pg":
 		conns, err := dialPool(ctx, n, func(ctx context.Context) (execer, error) {
 			return pgDial(ctx, o.pg, o.pgUser, o.pgPassword, o.pgDB)

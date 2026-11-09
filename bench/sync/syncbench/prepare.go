@@ -35,6 +35,16 @@ func prepare(ctx context.Context, o *options) error {
 		}
 		src := &fileSource{dir: o.inDir, files: o.files, size: o.lineBytes}
 		return src.write(ctx, 0, o.records)
+	case "rabbitmq":
+		if err := rabbitPrepare(ctx, o.rabbitmq, o.rabbitmqUser, o.rabbitmqPassword); err != nil {
+			return err
+		}
+	case "mqtt":
+		// The topic is the movers' to subscribe to: nothing to make.
+	case "mssql":
+		if err := mssqlPrepare(ctx, o); err != nil {
+			return err
+		}
 	case "pg":
 		c, err := pgDial(ctx, o.pg, o.pgUser, o.pgPassword, o.pgDB)
 		if err != nil {

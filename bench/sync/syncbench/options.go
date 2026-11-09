@@ -26,7 +26,15 @@ var scenarios = map[string]scenario{
 	"mysql-kafka": {source: "mysql", sink: "kafka", stream: true},
 	"pg-kafka":    {source: "pg", sink: "kafka", stream: true},
 	"mysql-batch": {source: "mysql", sink: "mysql"},
+	// The second round's (I222): messages of RabbitMQ and MQTT, and SQL
+	// Server's changes, into Kafka.
+	"rabbitmq-kafka": {source: "rabbitmq", sink: "kafka", stream: true},
+	"mqtt-kafka":     {source: "mqtt", sink: "kafka", stream: true},
+	"mssql-kafka":    {source: "mssql", sink: "kafka", stream: true},
 }
+
+// scenarioNames lists the scenarios, for the usage.
+const scenarioNames = "files, files-loki, mysql-es, mysql-kafka, pg-kafka, mysql-batch, rabbitmq-kafka, mqtt-kafka or mssql-kafka"
 
 // options are prepare's and measure's flags.
 type options struct {
@@ -38,6 +46,9 @@ type options struct {
 	// The source.
 	mysql, mysqlUser, mysqlPassword string
 	pg, pgUser, pgPassword, pgDB    string
+	rabbitmq, rabbitmqUser          string
+	rabbitmqPassword, mqtt          string
+	mssql, mssqlPassword            string
 	inDir                           string
 	files, lineBytes                int
 	records, txRows                 int
@@ -67,7 +78,7 @@ func parseOptions(cmd string, args []string, stderr io.Writer) (*options, error)
 	o := &options{}
 	fs := flag.NewFlagSet("syncbench "+cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&o.scenario, "scenario", "", "files, files-loki, mysql-es, mysql-kafka, pg-kafka or mysql-batch")
+	fs.StringVar(&o.scenario, "scenario", "", scenarioNames)
 	fs.StringVar(&o.mover, "mover", "", "the mover's name in the results")
 	fs.StringVar(&o.variant, "variant", "", "the scenario's variant, as its results name it")
 
@@ -78,6 +89,12 @@ func parseOptions(cmd string, args []string, stderr io.Writer) (*options, error)
 	fs.StringVar(&o.pgUser, "pg-user", "postgres", "")
 	fs.StringVar(&o.pgPassword, "pg-password", "", "")
 	fs.StringVar(&o.pgDB, "pg-db", "shop", "")
+	fs.StringVar(&o.rabbitmq, "rabbitmq", "rabbitmq:5672", "the source RabbitMQ's address")
+	fs.StringVar(&o.rabbitmqUser, "rabbitmq-user", "bench", "")
+	fs.StringVar(&o.rabbitmqPassword, "rabbitmq-password", "", "")
+	fs.StringVar(&o.mqtt, "mqtt", "mosquitto:1883", "the source MQTT broker's address")
+	fs.StringVar(&o.mssql, "mssql", "mssql:1433", "the source SQL Server's address")
+	fs.StringVar(&o.mssqlPassword, "mssql-password", "", "sa's password")
 	fs.StringVar(&o.inDir, "in", "/data/in", "the directory the files scenario's files are written to")
 	fs.IntVar(&o.files, "files", 1, "the files the lines are spread over")
 	fs.IntVar(&o.lineBytes, "line-bytes", 128, "each line's size, its newline included")
@@ -114,7 +131,7 @@ func parseOptions(cmd string, args []string, stderr io.Writer) (*options, error)
 	}
 	sc, ok := scenarios[o.scenario]
 	if !ok {
-		fmt.Fprintf(stderr, "syncbench %s: -scenario %q is not one of files, files-loki, mysql-es, mysql-kafka, pg-kafka, mysql-batch\n", cmd, o.scenario)
+		fmt.Fprintf(stderr, "syncbench %s: -scenario %q is not one of %s\n", cmd, o.scenario, scenarioNames)
 		return nil, errUsage
 	}
 	o.sc = sc
