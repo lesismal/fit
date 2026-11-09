@@ -7072,6 +7072,17 @@ Docker 29.1.3) and what came of it:
   flush); the other items stand (a stream's one writer always holds the oldest record, and its
   queue of 10,000 records always fills a 1,000-record batch, so the flush does not change them). The lag columns are filled for every stream and files item, and the batch has none, as
   designed.
+- **The re-run's `s2-mysql-es` failed every round** (2026-11-09: the backlog drained, then the
+  sink stopped at 509,010 of 540,010 for 30 minutes, fit logging nothing): the host's disk was 99%
+  full (5.6 GB free of 458), and Elasticsearch's log said "flood stage disk watermark [95%]
+  exceeded ... all indices on this node will be marked read-only". The read-only index answers
+  every write 429, which the sink waits out as backpressure, by design, at debug level. Not fit's
+  pipeline: a stream has one writer per sink (the lanes and the queue's flush act only with a job's
+  several), and the same build passed the item at full size locally. Fixed in fit: a 429 that lasts
+  `busyWarnEvery` (30s), whole bulks or items, is logged as a warning with the cluster's answer, and
+  again every 30s while it lasts (`TestBusyWarns`). **On the host: free the disk** (at least below
+  ES's 85% low watermark) before re-running `s2-mysql-es`; a full disk also endangers every other
+  item's servers.
 
 ### I194 Sync's documentation and examples
 

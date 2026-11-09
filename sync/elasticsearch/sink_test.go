@@ -353,6 +353,61 @@ func TestBusyCluster(t *testing.T) {
 	}
 }
 
+// TestBusyWarns: a 429 that lasts, to whole bulks or to items, as a
+// read-only index of the flood-stage disk watermark answers, is logged as a
+// warning with the cluster's answer, not waited out in silence.
+func TestBusyWarns(t *testing.T) {
+	var mu sync.Mutex
+	var warned []string
+	every, old := busyWarnEvery, warnf
+	busyWarnEvery = 10 * time.Millisecond
+	warnf = func(format string, args ...any) {
+		mu.Lock()
+		warned = append(warned, fmt.Sprintf(format, args...))
+		mu.Unlock()
+	}
+	t.Cleanup(func() { busyWarnEvery, warnf = every, old })
+	got := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		s := strings.Join(warned, "\n")
+		warned = nil
+		return s
+	}
+	f := newFake(t)
+	s := load(t, fmt.Sprintf(`{"urls": [%q]}`, f.srv.URL))
+	// Whole bulks: the 5ms backoff, 30 times past 10ms.
+	f.busy = 30
+	if err := s.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpInsert, 1, "a")}); err != nil {
+		t.Fatal(err)
+	}
+	if w := got(); !strings.Contains(w, "answered 429 for") || !strings.Contains(w, `{"status": 429}`) {
+		t.Fatalf("warned %q", w)
+	}
+	// Items.
+	f.item = func(id string, seen int) int {
+		if seen <= 30 {
+			return 429
+		}
+		return 0
+	}
+	if err := s.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpInsert, 2, "b")}); err != nil {
+		t.Fatal(err)
+	}
+	if w := got(); !strings.Contains(w, "answered 429 for") || !strings.Contains(w, "e429: status 429") {
+		t.Fatalf("warned %q", w)
+	}
+	// A short 429 is not warned of.
+	busyWarnEvery = time.Hour
+	f.busy = 2
+	if err := s.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpInsert, 3, "c")}); err != nil {
+		t.Fatal(err)
+	}
+	if w := got(); w != "" {
+		t.Fatalf("warned %q", w)
+	}
+}
+
 // TestFailover goes on to the next URL when one does not answer, or
 // answers 503, and splits a batch into bulks of max_request_bytes.
 func TestFailover(t *testing.T) {

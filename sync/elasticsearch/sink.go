@@ -39,6 +39,32 @@ var (
 	backoffMost  = 30 * time.Second
 )
 
+// busyWarnEvery is how long the cluster may answer 429 before the wait is
+// logged as a warning, and again each time as long while it lasts: a 429
+// that lasts is often no load but a block a person must lift, as the
+// read-only index of the flood-stage disk watermark, which would
+// otherwise stall the pipeline without a word.
+var busyWarnEvery = 30 * time.Second
+
+// warnf logs a warning of the sink's; the tests watch it.
+var warnf = func(format string, args ...any) { logs.Named(config.LoggerSync).Warnf(format, args...) }
+
+// busyStreak is a run of 429s, warned of once it lasts busyWarnEvery.
+type busyStreak struct{ since, warned time.Time }
+
+// busy notes a 429 the cluster answered, why being its answer.
+func (b *busyStreak) busy(why string) {
+	now := time.Now()
+	if b.since.IsZero() {
+		b.since = now
+		return
+	}
+	if now.Sub(b.since) >= busyWarnEvery && now.Sub(b.warned) >= busyWarnEvery {
+		b.warned = now
+		warnf("sync elasticsearch: the cluster has answered 429 for %s, and the writes wait for it: %s", now.Sub(b.since).Round(time.Second), why)
+	}
+}
+
 // Sink is the sink elasticsearch.
 type Sink struct {
 	URLs            []string        `json:"urls" fit:"required" doc:"The cluster's HTTP endpoints, as https://es1:9200, each a node or a load balancer: the one that answered last is used, and the next in turn when it fails to (a connection's error, a timeout, a 502, 503 or 504). fib's client does not follow redirects."`
@@ -363,6 +389,7 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 			pending = append(pending, i)
 		}
 	}
+	var streak busyStreak
 	for round := 0; len(pending) > 0; round++ {
 		retry, busy, err := s.send(ctx, items, pending)
 		if err != nil {
@@ -370,6 +397,14 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 		}
 		if len(retry) == 0 || !busy && round+1 >= DefaultItemAttempts || refusedFirst(items, retry) {
 			break
+		}
+		if busy {
+			for _, i := range retry {
+				if errors.Is(items[i].err, errBusy) {
+					streak.busy(items[i].err.Error())
+					break
+				}
+			}
 		}
 		if !sleep(ctx, backoff(round)) {
 			return ctx.Err()
@@ -472,7 +507,7 @@ func (s *Sink) send(ctx context.Context, items []item, pending []int) (retry []i
 				st == stdhttp.StatusConflict && s.Action == "create" && !items[i].delete:
 				items[i].done, items[i].err = true, nil
 			case st == stdhttp.StatusTooManyRequests:
-				items[i].err, busy = errBusy, true
+				items[i].err, busy = fmt.Errorf("%w: %s", errBusy, e), true
 				retry = append(retry, i)
 			case st >= 500:
 				items[i].err = fmt.Errorf("the cluster answered %d: %s", st, e)
@@ -495,6 +530,7 @@ type itemResult struct {
 // bulk sends one _bulk request, again with a backoff for as long as the
 // cluster answers 429, and returns its n items' results.
 func (s *Sink) bulk(ctx context.Context, body []byte, n int) ([]itemResult, error) {
+	var streak busyStreak
 	for round := 0; ; round++ {
 		resp, err := s.conn.Do(ctx, stdhttp.MethodPost, "/_bulk", s.query, body, "application/x-ndjson")
 		if err != nil {
@@ -502,6 +538,7 @@ func (s *Sink) bulk(ctx context.Context, body []byte, n int) ([]itemResult, erro
 		}
 		if resp.Status == stdhttp.StatusTooManyRequests {
 			logs.Named(config.LoggerSync).Debugf("sync elasticsearch: the cluster is busy (429), the bulk waits")
+			streak.busy(clip(resp.Body))
 			if !sleep(ctx, backoff(round)) {
 				return nil, ctx.Err()
 			}
