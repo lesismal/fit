@@ -10122,7 +10122,8 @@
               // // Or doris, with every one of its params:
               // // Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says,
               // // with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON
-              // // (or CSV) rows whose label is made from the run's first and last positions, so a run loaded
+              // // (or CSV) rows whose label is made from the run's first and last records' origins (Kafka
+              // // offsets, Pulsar message IDs, a CDC transaction and place) or positions, so a run loaded
               // // again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a
               // // table of the unique or primary key model; a delete is the row (or its key) with Doris's
               // // __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is
@@ -10694,8 +10695,9 @@
                 // "bearer_token_env": "",
 
                 // // The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's
-                // // records' positions and its body, the same each time the request is sent again, so a receiver
-                // // can drop a request it already took. Idempotency-Key when left out.
+                // // records' origins (or positions, for a source without them) and its body, the same each time
+                // // the request is sent again, so a receiver can drop a request it already took. Idempotency-Key
+                // // when left out.
                 // // string; default "Idempotency-Key".
                 // "idempotency_header": "Idempotency-Key",
 
@@ -11987,11 +11989,12 @@
               // // Or nats, with every one of its params:
               // // Publishes records to NATS JetStream: each a message to the subject its namespace names (or
               // // subject's template), its data what the codec makes of it (raw when none is named), with a
-              // // Nats-Msg-Id made from the record's position, so that a batch written again within the
-              // // stream's duplicate window (2 minutes by default) is stored once; a batch's messages are
-              // // published together, max_in_flight at a time, and acknowledged by the stream before the batch
-              // // is. With mode core, published to core NATS, confirmed only as far as the server reading
-              // // them: at most once.
+              // // Nats-Msg-Id made from the record's origin (a Kafka offset, a Pulsar message ID, a stream
+              // // sequence, a CDC transaction and place) or, without one, its position, so that a batch
+              // // written again within the stream's duplicate window (2 minutes by default) is stored once; a
+              // // batch's messages are published together, max_in_flight at a time, and acknowledged by the
+              // // stream before the batch is. With mode core, published to core NATS, confirmed only as far as
+              // // the server reading them: at most once.
               // "module": "nats",
               // "params": {
                 // // The servers, host:port each; the others of the cluster are learnt from them, and the client
@@ -12571,12 +12574,13 @@
               // // none is named), and a delete a message with a null value. A batch's messages for a partition
               // // go out as Pulsar batches, compressed (lz4), from a producer of producer_name, whose sequence
               // // IDs carry on from the broker's, for its deduplication. Each message carries the property
-              // // fit-id, made from the record's position; with dedup read_back the sink reads back the last
-              // // messages it stored of each partition when it makes its producer, and drops the records of a
-              // // batch written again that are stored already, so a batch sent twice after a crash is stored
-              // // once, when the source reads it again at the same positions (a database, a file, one
-              // // partition; not a source of several partitions, as kafka and pulsar, whose positions hold
-              // // every partition as the run interleaved them).
+              // // fit-id, made from the record's origin (a Kafka offset, a Pulsar message ID, a CDC
+              // // transaction and place) or, without one, its position; with dedup read_back the sink reads
+              // // back the last messages it stored of each partition when it makes its producer, and drops the
+              // // records of a batch written again that are stored already, so a batch sent twice after a
+              // // crash is stored once: a record with an origin keeps its fit-id however a replay interleaves
+              // // partitions, one without one when the source reads it again at the same position (a database,
+              // // a file, one partition).
               // "module": "pulsar",
               // "params": {
                 // // The service URL: pulsar://host:6650, or pulsar+ssl://host:6651 for TLS, the broker's
@@ -13273,8 +13277,9 @@
                 // // The objects' keys: text with placeholders, of the object's first record: {namespace} (a
                 // // leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as
                 // // 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when
-                // // it has none), {position}, 20 hex digits from its position, and {ext}, the codec's extension
-                // // (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have
+                // // it has none), {position}, 20 hex digits from its origin (a Kafka offset, a Pulsar message
+                // // ID, a CDC transaction and place) or, without one, its position, and {ext}, the codec's
+                // // extension (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have
                 // // {position}, so that two objects do not have one name.
                 // // {namespace}/{date}/{timestamp}-{position}{ext} when left out.
                 // // string; default "{namespace}/{date}/{timestamp}-{position}{ext}".
@@ -13761,7 +13766,8 @@
             // // Or doris, with every one of its params:
             // // Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says,
             // // with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON
-            // // (or CSV) rows whose label is made from the run's first and last positions, so a run loaded
+            // // (or CSV) rows whose label is made from the run's first and last records' origins (Kafka
+            // // offsets, Pulsar message IDs, a CDC transaction and place) or positions, so a run loaded
             // // again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a
             // // table of the unique or primary key model; a delete is the row (or its key) with Doris's
             // // __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is
@@ -14333,8 +14339,9 @@
               // "bearer_token_env": "",
 
               // // The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's
-              // // records' positions and its body, the same each time the request is sent again, so a receiver
-              // // can drop a request it already took. Idempotency-Key when left out.
+              // // records' origins (or positions, for a source without them) and its body, the same each time
+              // // the request is sent again, so a receiver can drop a request it already took. Idempotency-Key
+              // // when left out.
               // // string; default "Idempotency-Key".
               // "idempotency_header": "Idempotency-Key",
 
@@ -15626,11 +15633,12 @@
             // // Or nats, with every one of its params:
             // // Publishes records to NATS JetStream: each a message to the subject its namespace names (or
             // // subject's template), its data what the codec makes of it (raw when none is named), with a
-            // // Nats-Msg-Id made from the record's position, so that a batch written again within the
-            // // stream's duplicate window (2 minutes by default) is stored once; a batch's messages are
-            // // published together, max_in_flight at a time, and acknowledged by the stream before the batch
-            // // is. With mode core, published to core NATS, confirmed only as far as the server reading
-            // // them: at most once.
+            // // Nats-Msg-Id made from the record's origin (a Kafka offset, a Pulsar message ID, a stream
+            // // sequence, a CDC transaction and place) or, without one, its position, so that a batch
+            // // written again within the stream's duplicate window (2 minutes by default) is stored once; a
+            // // batch's messages are published together, max_in_flight at a time, and acknowledged by the
+            // // stream before the batch is. With mode core, published to core NATS, confirmed only as far as
+            // // the server reading them: at most once.
             // "module": "nats",
             // "params": {
               // // The servers, host:port each; the others of the cluster are learnt from them, and the client
@@ -16210,12 +16218,13 @@
             // // none is named), and a delete a message with a null value. A batch's messages for a partition
             // // go out as Pulsar batches, compressed (lz4), from a producer of producer_name, whose sequence
             // // IDs carry on from the broker's, for its deduplication. Each message carries the property
-            // // fit-id, made from the record's position; with dedup read_back the sink reads back the last
-            // // messages it stored of each partition when it makes its producer, and drops the records of a
-            // // batch written again that are stored already, so a batch sent twice after a crash is stored
-            // // once, when the source reads it again at the same positions (a database, a file, one
-            // // partition; not a source of several partitions, as kafka and pulsar, whose positions hold
-            // // every partition as the run interleaved them).
+            // // fit-id, made from the record's origin (a Kafka offset, a Pulsar message ID, a CDC
+            // // transaction and place) or, without one, its position; with dedup read_back the sink reads
+            // // back the last messages it stored of each partition when it makes its producer, and drops the
+            // // records of a batch written again that are stored already, so a batch sent twice after a
+            // // crash is stored once: a record with an origin keeps its fit-id however a replay interleaves
+            // // partitions, one without one when the source reads it again at the same position (a database,
+            // // a file, one partition).
             // "module": "pulsar",
             // "params": {
               // // The service URL: pulsar://host:6650, or pulsar+ssl://host:6651 for TLS, the broker's
@@ -16912,8 +16921,9 @@
               // // The objects' keys: text with placeholders, of the object's first record: {namespace} (a
               // // leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as
               // // 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when
-              // // it has none), {position}, 20 hex digits from its position, and {ext}, the codec's extension
-              // // (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have
+              // // it has none), {position}, 20 hex digits from its origin (a Kafka offset, a Pulsar message
+              // // ID, a CDC transaction and place) or, without one, its position, and {ext}, the codec's
+              // // extension (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have
               // // {position}, so that two objects do not have one name.
               // // {namespace}/{date}/{timestamp}-{position}{ext} when left out.
               // // string; default "{namespace}/{date}/{timestamp}-{position}{ext}".

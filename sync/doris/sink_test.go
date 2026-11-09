@@ -373,4 +373,13 @@ func TestLabel(t *testing.T) {
 	if Label("fit", "d", "t", []*fitsync.Record{none}) != "" || Label("fit", "d", "t", []*fitsync.Record{none, a}) == "" || Label("fit", "d", "t", []*fitsync.Record{a, none}) == "" {
 		t.Fatal("labels without positions")
 	}
+	// A record with an origin is labelled by it, at whatever position.
+	o1, o2 := *a, *b
+	o1.Origin = fitsync.Origin{Stream: "orders", N: [4]uint64{1, 7}}
+	o2.Origin = fitsync.Origin{Stream: "orders", N: [4]uint64{2, 3}}
+	l2 := Label("fit", "d", "t", []*fitsync.Record{&o1, &o2})
+	o1.Position, o2.Position = fitsync.Position(`{"x":1}`), nil
+	if l2 == l1 || l2 != Label("fit", "d", "t", []*fitsync.Record{&o1, &o2}) {
+		t.Fatal("labels of origins")
+	}
 }

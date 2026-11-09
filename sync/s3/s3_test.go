@@ -393,6 +393,15 @@ func TestSinkNamespaces(t *testing.T) {
 	if positionToken(none, object{data: []byte("a")}) == positionToken(none, object{data: []byte("b")}) {
 		t.Error("objects without positions are named by their lines")
 	}
+	// A first record with an origin names the object, at whatever
+	// position.
+	o := *batch[3]
+	o.Origin = fitsync.Origin{Stream: "orders", N: [4]uint64{0, 42}}
+	b := positionToken([]*fitsync.Record{&o}, object{})
+	o.Position = fitsync.Position(`{"elsewhere":1}`)
+	if b == a || b != positionToken([]*fitsync.Record{&o}, object{}) {
+		t.Error("an origin's token")
+	}
 }
 
 // collect runs src from from until it has emitted n records (all of them

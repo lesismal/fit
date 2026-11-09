@@ -258,6 +258,17 @@ func TestIdempotencyKey(t *testing.T) {
 	if k := IdempotencyKey(a, nil); len(k) != 32 {
 		t.Errorf("%q", k)
 	}
+	// Records with an origin keep the key at other positions, as a Kafka
+	// source's records replayed after a restart.
+	c, d := recs(2), recs(2)
+	for i := range c {
+		c[i].Origin = fitsync.Origin{Stream: "orders", N: [4]uint64{0, uint64(i)}}
+		d[i].Origin = c[i].Origin
+	}
+	d[1].Position = fitsync.Position(`{"n":9}`)
+	if IdempotencyKey(c, []byte("x")) != IdempotencyKey(d, []byte("x")) || IdempotencyKey(c, []byte("x")) == IdempotencyKey(a, []byte("x")) {
+		t.Error("records with origins: their key follows the positions")
+	}
 }
 
 // TestSinkBasicAuthAndCodec checks basic authentication and a codec's body.

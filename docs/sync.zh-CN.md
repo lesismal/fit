@@ -143,6 +143,16 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | `rabbitmq` | 再发布一次，`message_id` 相同，消费者可据此丢弃 |
 | `kafka`、`http`、`otlp_logs`、`file`、`stdout` | 再写一次：Kafka 的生产者不是幂等的，OTLP 也不是；`http` 对相同记录发送相同的 `Idempotency-Key` |
 
+**记录 ID。** `nats`、`pulsar` 和 `rabbitmq` 目标给每条记录一个 ID（`Nats-Msg-Id`、`fit-id`、`message_id`），`http` 的
+`Idempotency-Key`、`doris` 的 label 和 `s3` 的对象名也以同样方式生成，以便认出再次写入的记录。源若对每条记录有自己的名字，
+且不论运行怎样读到它都不变，就把这个名字作为记录的来源（origin）：`kafka` 是主题、分区和偏移；`pulsar` 是分区和消息 ID
+（ledger、entry、批内序号）；`nats` 是流序列号；`rabbitmq` 是 stream 的偏移；`mysql` 是事务的 GTID（或 binlog 文件和偏移）
+加行在其中的序号；`postgres` 是提交 LSN 加变更的序号；`mssql`（CDC）是事务的 LSN 加变更的序号；`mongo` 是 resume token。
+一条消息的多条记录（编解码器生成的）和转换由一条记录生成的多条记录按序号区分，于是 ID 跟着记录而不是位置：崩溃后的重放
+得到原来的 ID，不论运行以什么顺序遇到各分区（`kafka`、`pulsar` 源在每个位置中按这个顺序写入所有分区的进度）。没有来源的
+记录（队列的消息、MQTT、文件、快照、变更跟踪）按其处或其后的位置及与它的距离命名，源以相同位置再次读到记录时才重复：
+数据库日志、文件、单个分区。
+
 **事务保持完整。** 检查点从不落在源事务内部；一个事务的记录带有其 ID，`mysql` 和 `postgres` 目标把每个源事务写成自己的
 一个事务（`transactions source`），所以目标的读者永远不会看到半个事务。
 
@@ -175,7 +185,7 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [文件](#文件) | `file`：跨轮转跟踪路径和通配符，多行合并 | `file`：按编解码器或模板写行，像日志一样轮转 |
 | [Elasticsearch、OpenSearch](#elasticsearch-与-opensearch) | `elasticsearch`：经时间点读快照，再轮询游标字段 | `elasticsearch`：按 `_id` 用 `_bulk` 写 |
 | [ClickHouse](#clickhouse) | `clickhouse`：按键读表或查询，再轮询游标列 | `clickhouse`：`JSONEachRow` 插入，去重，`ReplacingMergeTree` |
-| [Doris、StarRocks](#doris-与-starrocks) | `doris`：经 MySQL 协议按键读表或查询，再轮询游标列 | `doris`：Stream Load，按位置生成 label，删除标记 |
+| [Doris、StarRocks](#doris-与-starrocks) | `doris`：经 MySQL 协议按键读表或查询，再轮询游标列 | `doris`：Stream Load，按来源或位置生成 label，删除标记 |
 | [Loki](#loki) | | `loki`：推送 API，protobuf 或 JSON，流取自配置的字段 |
 | [OpenTelemetry 日志](#opentelemetry-日志) | | `otlp_logs`：OTLP/HTTP 日志记录，protobuf 或 JSON |
 | [HTTP](#http) | `http`：POST 到 `sync_ingest` 路由的记录 | `http`：以 NDJSON 或 JSON 批量 POST |
@@ -316,7 +326,7 @@ sync {
 
 一个连接器 `doris` 同时服务 Apache Doris（2.1 及以上）和 StarRocks（3 及以上）；`flavor` 指明系统，两者在这里的区别只有
 删除列和部分列更新的请求头。目标用 HTTP 上的 Stream Load 导入一个批次中同一张表的每段连续记录，行为 JSON（或 CSV），
-`label` 由这段记录的第一个和最后一个位置生成：崩溃后再次导入的同一段会被以“已导入”拒绝，所以即使是 Duplicate Key 表，
+`label` 由这段记录的第一条和最后一条记录的来源生成，没有来源的源用位置（见[投递保证](#投递保证)）：崩溃后再次导入的同一段会被以“已导入”拒绝，所以即使是 Duplicate Key 表，
 一个批次也只存一份。更新和删除需要 merge on write 的 Unique Key 表（Doris）或主键表（StarRocks）：删除写出行或其键，
 并把 `__DORIS_DELETE_SIGN__`（或 `__op`）设为 1。`partial_columns` 只更新记录带有的列。前端到后端的重定向会带着凭据跟随，
 所以后端地址必须是 fit 能访问到的；`urls` 也可以直接写后端的 HTTP 端口。因行而被拒绝的导入会被拆分，直到找出它不能
@@ -821,7 +831,7 @@ sync {
 编解码器生成的行。报告的延迟是消费者待处理的消息数。`mode core` 改为订阅 core NATS 的 `subjects`（`queue` 组可分担），
 至多一次，用于遥测：fit 停机时、或到来得比它处理得快（`buffer`）的消息会丢失。
 
-`nats` 目标为每条记录向 `subject`（`{namespace}`）发布一条消息，数据来自 `codec`，带由记录位置生成的 `Nats-Msg-Id`，
+`nats` 目标为每条记录向 `subject`（`{namespace}`）发布一条消息，数据来自 `codec`，带由记录来源生成的 `Nats-Msg-Id`（见[投递保证](#投递保证)），
 所以在流的去重窗口（`duplicate_window`，默认 2 分钟）内再次写入的批次只存一次；最多 `max_in_flight` 个发布同时等待流的
 确认，批次在其每条消息都被确认后才确认。`mode core` 发布到 core NATS，只确认到服务器读到为止。
 
@@ -863,10 +873,9 @@ sync {
 `pulsar` 目标为每条记录向 `topic`（`{namespace}`）发送一条消息，以记录的键为消息键，由 Java 客户端的默认路由（键的 Java
 字符串哈希）分配分区，所以同一个键的消息保持顺序；删除的值为 null，供主题压缩。一个分区的消息作为 Pulsar 批次发出
 （`max_batch_messages`、`max_batch_bytes`），压缩（`lz4`；`zlib`、`zstd`、`snappy`），生产者名为 `producer_name`，其序列 ID
-接着 broker 的继续。每条消息带属性 `fit-id`，由记录的位置生成：`dedup read_back`（默认）时目标在创建生产者时读回每个分区
+接着 broker 的继续。每条消息带属性 `fit-id`，由记录的来源生成（见[投递保证](#投递保证)）：`dedup read_back`（默认）时目标在创建生产者时读回每个分区
 最后 64 个条目，丢弃其中已存储的记录，所以崩溃后再次写入的批次只存一次（这需要消费该主题的权限；`dedup off` 全部发送）。
-这在源以相同位置再次读到记录时成立：数据库日志、文件、单个分区。多分区的源（`kafka`、`pulsar`）在每个位置中写入所有分区
-的进度，按运行时交错的顺序，所以重放的位置不同，会再存一次：至少一次。`pulsar+ssl://` 的 URL 走 TLS；`token_env` 以令牌
+`pulsar+ssl://` 的 URL 走 TLS；`token_env` 以令牌
 认证。
 
 ```fit

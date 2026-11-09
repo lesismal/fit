@@ -211,7 +211,7 @@ func (rd *reader) read(ctx context.Context, at lsn, txs []tx, since time.Time) (
 		for _, t := range txs {
 			times[t.lsn] = t.at
 		}
-		e := &emitter{r: rd.r, since: since}
+		e := &emitter{r: rd.r, since: since, origin: true}
 		for i := 0; i < len(changes); i++ {
 			c := &changes[i]
 			if c.ddl != "" {
@@ -341,7 +341,7 @@ func (rd *reader) gather(ctx context.Context, at, to lsn, limit int) ([]change, 
 // of window_rows (an update's two rows never split), for a transaction
 // too large to hold.
 func (rd *reader) readLone(ctx context.Context, t tx, since time.Time) error {
-	e := &emitter{r: rd.r, since: since}
+	e := &emitter{r: rd.r, since: since, origin: true}
 	n := rd.s.windowRows()
 	for ti, tb := range rd.tables {
 		for _, sg := range tb.segments(t.lsn.prev(), t.lsn) {
@@ -421,6 +421,9 @@ type emitter struct {
 	held  *fitsync.Record
 	lsn   lsn
 	n     int
+	// origin says to name each record by its transaction's LSN and its
+	// place in it, which CDC's change tables give the same each time.
+	origin bool
 }
 
 // push hands on the record held, if any, and holds rec, of the transaction
@@ -436,6 +439,9 @@ func (e *emitter) push(rec *fitsync.Record, l lsn) error {
 		if err := e.r.Emit(e.held); err != nil {
 			return err
 		}
+	}
+	if e.origin {
+		rec.Origin = fitsync.Origin{Stream: string(l), N: [4]uint64{uint64(e.n)}}
 	}
 	e.held, e.lsn = rec, l
 	e.n++

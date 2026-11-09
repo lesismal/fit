@@ -8623,14 +8623,15 @@ Keeps a pipeline's dead letters in a file of its state_dir, bounded by max_recor
 
 ### `doris`
 
-Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says, with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON (or CSV) rows whose label is made from the run's first and last positions, so a run loaded again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a table of the unique or primary key model; a delete is the row (or its key) with Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is followed. A load refused for its data is split until the record it cannot take is found, which fails, on_error taking it, those before it loaded.
+Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says, with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON (or CSV) rows whose label is made from the run's first and last records' origins (Kafka offsets, Pulsar message IDs, a CDC transaction and place) or positions, so a run loaded again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a table of the unique or primary key model; a delete is the row (or its key) with Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is followed. A load refused for its data is split until the record it cannot take is found, which fails, on_error taking it, those before it loaded.
 
 Loads records into Apache Doris or StarRocks with Stream Load (`PUT /api/<db>/<table>/_stream_load`),
 through fib's asynchronous HTTP client, with `Expect: 100-continue`; a frontend's redirect to a
 backend is followed with the credentials. Each run of a batch's records for one table is one load,
 its rows JSON (a row a line on Doris, an array on StarRocks) or CSV, and its `columns` header the union
 of the run's columns. The load's `label` is `label_prefix`, `_` and a hash of the database, the table,
-the run's first and last positions and its count: written again after a crash, the same records make
+the run's first and last records' origins (a Kafka partition and offset, a Pulsar message ID, a CDC
+transaction and the record's place in it), or positions for a source without them, and its count: written again after a crash, the same records make
 the same label and the server answers `Label Already Exists`, which counts as loaded once the earlier
 load has finished (and is asked again while it runs).
 
@@ -8829,9 +8830,12 @@ good.
 Every request carries `headers`, the authentication the config gives (`username` with
 `password_env` for basic authentication, or `bearer_token_env`, read from the environment when the
 pipeline loads) and an idempotency key in `idempotency_header` (`Idempotency-Key`): 32 hex digits of
-a SHA-256 of the request's records' positions and its body. A request sent again carries the same
-key, so a receiver that keeps the keys it has taken can drop a request it already has; the same
-records at other positions, or other records, get another.
+a SHA-256 of the request's records' origins (a Kafka partition and offset, a Pulsar message ID, a
+CDC transaction and the record's place in it), or positions for a source without them, and its body.
+A request sent again carries the same key, so a receiver that keeps the keys it has taken can drop a
+request it already has; the same records at other positions, or other records, get another. An
+origin keeps the key after a restart where a Kafka or Pulsar source's position, which holds every
+partition's progress in the order the run read them, does not.
 
 Any `2xx` acknowledges the request's records. A `5xx`, `408` or `429`, a timeout (`timeout`, 30s)
 or a connection's error fails the write, and the pipeline's `retry` sends it again with its backoff,
@@ -8928,7 +8932,7 @@ In JSON:
 | `username` | string |  | The user for basic authentication, with password_env. |
 | `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
 | `bearer_token_env` | string |  | The environment variable holding a token sent as Authorization: Bearer, read when the pipeline loads. Not with username. |
-| `idempotency_header` | string | `"Idempotency-Key"` | The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' positions and its body, the same each time the request is sent again, so a receiver can drop a request it already took. Idempotency-Key when left out. |
+| `idempotency_header` | string | `"Idempotency-Key"` | The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' origins (or positions, for a source without them) and its body, the same each time the request is sent again, so a receiver can drop a request it already took. Idempotency-Key when left out. |
 | `ca_file` | string |  | A PEM file of the certificates the endpoint's is checked against, in place of the system's roots. The check cannot be turned off. |
 | `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to an endpoint that asks for one; needs key_file. |
 | `key_file` | string |  | The PEM file of cert_file's private key. |
@@ -9538,7 +9542,7 @@ In JSON:
 
 ### `nats`
 
-Publishes records to NATS JetStream: each a message to the subject its namespace names (or subject's template), its data what the codec makes of it (raw when none is named), with a Nats-Msg-Id made from the record's position, so that a batch written again within the stream's duplicate window (2 minutes by default) is stored once; a batch's messages are published together, max_in_flight at a time, and acknowledged by the stream before the batch is. With mode core, published to core NATS, confirmed only as far as the server reading them: at most once.
+Publishes records to NATS JetStream: each a message to the subject its namespace names (or subject's template), its data what the codec makes of it (raw when none is named), with a Nats-Msg-Id made from the record's origin (a Kafka offset, a Pulsar message ID, a stream sequence, a CDC transaction and place) or, without one, its position, so that a batch written again within the stream's duplicate window (2 minutes by default) is stored once; a batch's messages are published together, max_in_flight at a time, and acknowledged by the stream before the batch is. With mode core, published to core NATS, confirmed only as far as the server reading them: at most once.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -9762,7 +9766,7 @@ In JSON:
 
 ### `pulsar`
 
-Sends records to Apache Pulsar: each a message of the topic its namespace names (or topic's template), its key the record's key (a string as it is, bytes in base64, any other key as plain JSON), which the Java client's default router (the key's Java string hash) places in a partition, so a key's messages stay in order; its value what the codec makes of it (raw when none is named), and a delete a message with a null value. A batch's messages for a partition go out as Pulsar batches, compressed (lz4), from a producer of producer_name, whose sequence IDs carry on from the broker's, for its deduplication. Each message carries the property fit-id, made from the record's position; with dedup read_back the sink reads back the last messages it stored of each partition when it makes its producer, and drops the records of a batch written again that are stored already, so a batch sent twice after a crash is stored once, when the source reads it again at the same positions (a database, a file, one partition; not a source of several partitions, as kafka and pulsar, whose positions hold every partition as the run interleaved them).
+Sends records to Apache Pulsar: each a message of the topic its namespace names (or topic's template), its key the record's key (a string as it is, bytes in base64, any other key as plain JSON), which the Java client's default router (the key's Java string hash) places in a partition, so a key's messages stay in order; its value what the codec makes of it (raw when none is named), and a delete a message with a null value. A batch's messages for a partition go out as Pulsar batches, compressed (lz4), from a producer of producer_name, whose sequence IDs carry on from the broker's, for its deduplication. Each message carries the property fit-id, made from the record's origin (a Kafka offset, a Pulsar message ID, a CDC transaction and place) or, without one, its position; with dedup read_back the sink reads back the last messages it stored of each partition when it makes its producer, and drops the records of a batch written again that are stored already, so a batch sent twice after a crash is stored once: a record with an origin keeps its fit-id however a replay interleaves partitions, one without one when the source reads it again at the same position (a database, a file, one partition).
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -9979,9 +9983,10 @@ so the server stores it only if every byte arrived. A line is made by `codec` (`
 
 An object's key comes from the `key` template and its first record: `{namespace}`, the date and
 time parts of its commit time in UTC (`{date}`, `{yyyy}`, `{mm}`, `{dd}`, `{hh}`, `{timestamp}`),
-`{position}` (20 hex digits of a SHA-256 of its namespace and position) and `{ext}`. A batch written
-again, after a failed write or a crash before the checkpoint, is the same records with the same
-positions, so it makes the same keys and the same bytes and is written over itself. A replay cut
+`{position}` (20 hex digits of a SHA-256 of its namespace and origin, a Kafka partition and offset,
+a Pulsar message ID or a CDC transaction and place, or its position for a source without one) and
+`{ext}`. A batch written again, after a failed write or a crash before the checkpoint, is the same
+records with the same origins and positions, so it makes the same keys and the same bytes and is written over itself. A replay cut
 into other batches (the batch's `max_wait` may close it at another record) writes objects of other
 names, so records between the checkpoint and the crash can be in two objects: at least once, as
 every sink. A record without a commit time is named by the time of the write, which a replay does
@@ -10094,7 +10099,7 @@ In JSON:
 | `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
 | `server_name` | string |  | The name the server's certificate must have, and the TLS server name sent; the endpoint's host when left out. |
 | `timeout` | duration | `"60s"` | How long one request may take, from connecting to the end of its answer. 60s when left out or 0. |
-| `key` | string | `"{namespace}/{date}/{timestamp}-{position}{ext}"` | The objects' keys: text with placeholders, of the object's first record: {namespace} (a leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when it has none), {position}, 20 hex digits from its position, and {ext}, the codec's extension (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have {position}, so that two objects do not have one name. {namespace}/{date}/{timestamp}-{position}{ext} when left out. |
+| `key` | string | `"{namespace}/{date}/{timestamp}-{position}{ext}"` | The objects' keys: text with placeholders, of the object's first record: {namespace} (a leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when it has none), {position}, 20 hex digits from its origin (a Kafka offset, a Pulsar message ID, a CDC transaction and place) or, without one, its position, and {ext}, the codec's extension (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have {position}, so that two objects do not have one name. {namespace}/{date}/{timestamp}-{position}{ext} when left out. |
 | `codec` | [codec](#sync codecs) |  | What makes a line of a record: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated values. |
 | `gzip` | boolean |  | Gzip each object, its key ending in .gz through {ext}, with Content-Type application/gzip. false when left out. |
 | `max_object_bytes` | integer, 0 to 5368709120 | `67108864` | The most bytes of lines (before gzip) in one object: a batch larger is written as several, in order. A record larger is an object of its own. 64 MiB when left out or 0. |

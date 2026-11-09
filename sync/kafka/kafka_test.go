@@ -195,6 +195,11 @@ func TestSourceDecode(t *testing.T) {
 	if e, _ := recs[2].After.Get("error"); e.Text() == "" || recs[2].Op != fitsync.OpMessage {
 		t.Fatalf("%+v", recs[2])
 	}
+	// Each record is named by its topic, partition, offset and place in
+	// its message, whatever the position.
+	if o := (fitsync.Origin{Stream: "cdc", N: [4]uint64{0, 0, 1}}); recs[1].Origin != o || recs[2].Origin.N[1] != 1 || recs[2].Origin.N[2] != 0 {
+		t.Fatalf("%+v %+v", recs[1].Origin, recs[2].Origin)
+	}
 	// Debezium's key events give the key.
 	f.addTopic("dbz", 1)
 	f.append("dbz", 0, msg(`{"id":7}`, `{"op":"c","after":{"id":7},"source":{"db":"d","table":"t"}}`),

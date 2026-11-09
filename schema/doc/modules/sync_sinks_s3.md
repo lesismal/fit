@@ -8,9 +8,10 @@ so the server stores it only if every byte arrived. A line is made by `codec` (`
 
 An object's key comes from the `key` template and its first record: `{namespace}`, the date and
 time parts of its commit time in UTC (`{date}`, `{yyyy}`, `{mm}`, `{dd}`, `{hh}`, `{timestamp}`),
-`{position}` (20 hex digits of a SHA-256 of its namespace and position) and `{ext}`. A batch written
-again, after a failed write or a crash before the checkpoint, is the same records with the same
-positions, so it makes the same keys and the same bytes and is written over itself. A replay cut
+`{position}` (20 hex digits of a SHA-256 of its namespace and origin, a Kafka partition and offset,
+a Pulsar message ID or a CDC transaction and place, or its position for a source without one) and
+`{ext}`. A batch written again, after a failed write or a crash before the checkpoint, is the same
+records with the same origins and positions, so it makes the same keys and the same bytes and is written over itself. A replay cut
 into other batches (the batch's `max_wait` may close it at another record) writes objects of other
 names, so records between the checkpoint and the crash can be in two objects: at least once, as
 every sink. A record without a commit time is named by the time of the write, which a replay does

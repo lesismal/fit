@@ -505,7 +505,8 @@ func (s *Source) event(ev mongowire.Raw) (*fitsync.Record, string, error) {
 	tok := jsonOf(valueOf(idv.Document()))
 	nsv, _ := ev.Lookup("ns")
 	ns := eventNS(nsv.Document())
-	rec := &fitsync.Record{Source: "mongo", Namespace: ns, Position: position{Token: tok}.marshal()}
+	rec := &fitsync.Record{Source: "mongo", Namespace: ns, Position: position{Token: tok}.marshal(),
+		Origin: fitsync.Origin{Stream: string(tok)}}
 	if t, ok := rawField(ev, "wallTime").Time(); ok {
 		rec.CommitTime = t
 	} else if ts, ok := rawField(ev, "clusterTime").Timestamp(); ok {

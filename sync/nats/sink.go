@@ -16,7 +16,7 @@ import (
 
 func init() {
 	module.Register(module.Info{ID: fitsync.Sinks + ".nats", New: func() any { return new(Sink) },
-		Doc: "Publishes records to NATS JetStream: each a message to the subject its namespace names (or subject's template), its data what the codec makes of it (raw when none is named), with a Nats-Msg-Id made from the record's position, so that a batch written again within the stream's duplicate window (2 minutes by default) is stored once; a batch's messages are published together, max_in_flight at a time, and acknowledged by the stream before the batch is. With mode core, published to core NATS, confirmed only as far as the server reading them: at most once."})
+		Doc: "Publishes records to NATS JetStream: each a message to the subject its namespace names (or subject's template), its data what the codec makes of it (raw when none is named), with a Nats-Msg-Id made from the record's origin (a Kafka offset, a Pulsar message ID, a stream sequence, a CDC transaction and place) or, without one, its position, so that a batch written again within the stream's duplicate window (2 minutes by default) is stored once; a batch's messages are published together, max_in_flight at a time, and acknowledged by the stream before the batch is. With mode core, published to core NATS, confirmed only as far as the server reading them: at most once."})
 }
 
 // The defaults of the sink's params.

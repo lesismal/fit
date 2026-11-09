@@ -846,6 +846,9 @@ func (st *streamer) push(rec *fitsync.Record) error {
 	}
 	rec.CommitTime = st.commit
 	rec.Tx = fitsync.Tx{ID: st.txID, First: st.n == 1}
+	// The transaction's GTID, or its binlog file and offset, and the
+	// record's place in it.
+	rec.Origin = fitsync.Origin{Stream: st.txID, N: [4]uint64{uint64(st.n)}}
 	if h := st.held; h != nil {
 		st.held = nil
 		if err := st.r.Emit(h); err != nil {

@@ -379,6 +379,7 @@ func (rd *reader) decode(recs []*fitsync.Record, p *partState, m kafkawire.Recor
 	}
 	for i, r := range recs {
 		r.Source, r.Position = "kafka", nil
+		r.Origin = fitsync.Origin{Stream: p.topic, N: [4]uint64{uint64(p.partition), uint64(m.Offset), uint64(i)}}
 		if rd.s.Namespace != "" || r.Namespace == "" {
 			r.Namespace = rd.namespace(p.topic)
 		}

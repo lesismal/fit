@@ -3,7 +3,8 @@ through fib's asynchronous HTTP client, with `Expect: 100-continue`; a frontend'
 backend is followed with the credentials. Each run of a batch's records for one table is one load,
 its rows JSON (a row a line on Doris, an array on StarRocks) or CSV, and its `columns` header the union
 of the run's columns. The load's `label` is `label_prefix`, `_` and a hash of the database, the table,
-the run's first and last positions and its count: written again after a crash, the same records make
+the run's first and last records' origins (a Kafka partition and offset, a Pulsar message ID, a CDC
+transaction and the record's place in it), or positions for a source without them, and its count: written again after a crash, the same records make
 the same label and the server answers `Label Already Exists`, which counts as loaded once the earlier
 load has finished (and is asked again while it runs).
 

@@ -417,6 +417,7 @@ func (rd *reader) decode(p *part, m pulsarwire.Message) []*fitsync.Record {
 	var meta []fitsync.Field
 	for i, r := range recs {
 		r.Source, r.Position = "pulsar", nil
+		r.Origin = fitsync.Origin{Stream: p.name, N: [4]uint64{uint64(m.ID.Ledger), uint64(m.ID.Entry), uint64(int64(m.ID.BatchIndex)), uint64(i)}}
 		if s.Namespace != "" {
 			r.Namespace = s.Namespace
 		} else if r.Namespace == "" {

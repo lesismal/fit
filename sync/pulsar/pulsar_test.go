@@ -345,6 +345,12 @@ func TestSourceDecode(t *testing.T) {
 	if v, _ := recs[2].After.Get("error"); v.Text() != "bad value" || recs[2].Tx.ID != "" {
 		t.Fatalf("%+v", recs[2])
 	}
+	// Each record is named by its partition, message ID and place in its
+	// message, whatever the position.
+	if o0, o1, o2 := recs[0].Origin, recs[1].Origin, recs[2].Origin; o0.Stream == "" || o0.Stream != o1.Stream ||
+		[3]uint64(o0.N[:3]) != [3]uint64(o1.N[:3]) || o0.N[3] != 0 || o1.N[3] != 1 || [3]uint64(o2.N[:3]) == [3]uint64(o0.N[:3]) {
+		t.Fatalf("%+v %+v %+v", o0, o1, o2)
+	}
 	if _, ok := recs[2].After.Get("message_id"); !ok {
 		t.Fatalf("%+v", recs[2].After)
 	}

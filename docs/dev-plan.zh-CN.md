@@ -5224,7 +5224,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    ack 策略 all 在开始时报错：fit 无法重建它，其重投会乱序，只有显式确认和服务器自己的下限是安全的。备选：接受 all 并告警。
 4. **一次拉取取走 consumer 现有的（no_wait，至多 batch），只有在没有时才以拉取一条等待至多 max_wait**：消息一到即读，而非整批
    拉取等到 max_wait（nats.go 的 Fetch 也如此）。备选：短过期的一次整批拉取；心跳（idle_heartbeat）——短拉取下不需要。
-5. **`Nats-Msg-Id` 来自 `fitsync.RecordIDs`**（记录的锚定位置及与它的距离的哈希）：流的去重窗口（默认 2 分钟）丢弃重写的
+5. **`Nats-Msg-Id` 来自 `fitsync.RecordIDs`**（记录来源的哈希；没有来源的源，为记录的锚定位置及与它的距离的哈希；见决策 12）：流的去重窗口（默认 2 分钟）丢弃重写的
    一批；更长中断后的重放会存下副本（至少一次）。窗口属于流，写入文档，fit 不设置。备选：按记录内容生成 ID（两条相同的记录
    会被丢弃）。
 6. **消息中没有键**：NATS 没有消息键；目标只发送 `Nats-Msg-Id`，源的记录除非编解码器设置否则没有键（`key` 变换可从字段生成）。
@@ -5241,7 +5241,9 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 11. **假服务器是一个包 `sync/nats/natstest`**，供 wire 与连接器的测试共用；它计入仓库的覆盖率（两包测试合计 98%）。
 12. **在 I213 的互通中发现，这里同样成立**：`fitsync.RecordIDs` 只对在相同位置被再次读到的记录重复；`kafka` 与 `pulsar` 源在
     每个位置中写入所有分区的进度，按运行时交错的顺序，所以由它们供给的 NATS 流会再次存下重放的记录（至少一次）。修复属于
-    `RecordIDs` 与这些源（I213 的决策 1）。
+    `RecordIDs` 与这些源（I213 的决策 1）。**已修复** 2026-11-10（分支 `fix-recordid`，I213 的决策 1 与 10-13）：记录带有源设置的
+    `Origin`，不论运行怎样交错各分区都不变，`RecordIDs` 先按它命名记录，再按位置；`kafka`、`pulsar` 源设置它，`nats`（流与
+    序列号）也设置，所以由它们任一供给的 NATS 流在去重窗口内丢弃重放。
 
 ### I213 Apache Pulsar 作为源与目标
 
@@ -5273,6 +5275,12 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    复制有每条消息、每个键的首份按序，其后有重放的副本（TestPulsarAcrossKills 与 Kafka 测试一样检查这一点；观察到 0 到 22%
    的副本）。位置可重复的源（generate、数据库日志、文件）的一批只存一次（TestPulsarBatchTwice）。修复属于 `RecordIDs` 与多分区
    源两者，例如源可设置的逐记录标识（分区与偏移，或消息 ID），`RecordIDs` 优先于位置使用它。
+   **已修复** 2026-11-10（分支 `fix-recordid`；下面的决策 10-13 待审阅）：`fitsync.Record` 有 `Origin`（`Stream string`、
+   `N [4]uint64`），由源设置的固定结构；`RecordIDs` 对源、来源以及记录在转换由其源记录生成的记录中的序号做哈希，只有没有来源的
+   记录才退回位置。`kafka` 设置主题、分区、偏移和记录在消息中的序号；`pulsar` 设置分区全名、ledger、entry、批内序号和序号。
+   跨 kill 的 Pulsar 互通现在 68 次运行中有 65 次把 2000 条消息复制为 2000 条（Pulsar 3.0.11 与 4.0.5，两种模式）；其余三次有 2、
+   4、13 份副本（136,000 条消息中的 19 条，单次最多 0.65%，修复前为 0-22%），来自此修复不涉及之处：被 kill 的进程的一次发送，
+   代理在新生产者读回之后才存下。
 2. **按 Java 客户端的默认方式路由分区**：`JavaStringHash`（分区键的 Java `String.hashCode`，`& Integer.MAX_VALUE`，对分区数
    取模），pulsar-client-go 默认也用它；字节键按 Java 客户端发送时的 base64 计算哈希。没有键的记录每个目标批次去一个分区，下一批
    换下一个。备选：Murmur3_32Hash（Java 客户端的另一方案，C++ 客户端的默认又不同）。
@@ -5296,6 +5304,28 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    `authenticationEnabled` 与脚本生成密钥的 standalone。
 9. **LZ4 使用 kafkawire 的块代码**，导出为 `kafkawire.LZ4Block` 与 `LZ4Unblock`（Pulsar 的 LZ4 是原始块，大小在元数据中）；
    zstd 与 snappy 用 klauspost/compress（已是依赖），zlib 用标准库。备选：把 LZ4 代码移入两者共用的 internal 包。
+
+`RecordIDs` 修复的决策（决策 1 的，2026-11-10，分支 `fix-recordid`；待审阅）：
+
+10. **`Origin` 是 `Record` 上的固定结构，`Stream string` 与 `N [4]uint64`**，由源设置；`Stream` 非空即有来源。只比较相等，所以
+    各源自选内容：`kafka` 主题 / 分区、偏移、消息内序号；`pulsar` 分区名 / ledger、entry、批内序号、序号；`nats` 流 / 序列号、
+    序号；`rabbitmq` stream 队列 / 偏移、序号（classic 与 quorum 队列没有：再次投递的消息可能换了 tag）；`mysql` 事务的 GTID 或
+    binlog 文件与偏移（其 `Tx.ID`）/ 记录在其中的序号；`postgres` `"lsn"` / 提交 LSN、变更序号；`mssql` CDC 事务的 LSN / 变更
+    序号（变更跟踪没有：之后读同一版本范围会合并出别的变更）；`mongo` resume token。Kafka、Pulsar、NATS、RabbitMQ、MySQL、
+    PostgreSQL 与 SQL Server 设置它不分配内存（用已有的字符串）；MongoDB 每条记录一个字符串。未设置：MQTT（没有坐标）、文件、
+    快照与作业的分块（它们的位置已是逐记录的），以及未要求的源（Redis streams、TiDB、Elasticsearch、ClickHouse、Doris、S3、
+    HTTP）。备选：每条记录构造一个字符串（热路径上的分配）；`func() []byte`（每条记录一个闭包）；由 `RecordIDs` 计算记录在消息
+    中的序号（批次在消息内被切开时会变）。
+11. **转换由一条源记录生成的多条记录按序号区分**，即 `Record.sub`，管道在一条源记录生成多条时、在它们到达目标之前设置；它是
+    ID 的一部分，所以批次在一条源记录的记录中间切开时 ID 不变。备选：像位置那样用到这段最后一条记录的距离（切开会让两条记录
+    同一个 ID）。
+12. **ID 是 `'o'` 加 `Record.AppendOrigin`**（源、来源的流与数字、序号）**的 SHA-256 的 32 位十六进制**，用栈上缓冲：一次分配，
+    即字符串本身。没有来源的记录的 ID 逐字节不变，所以重放中途升级的管道只改变带来源的记录的 ID，一次。备选：来源的可读文本
+    （更长，目标还得限制属性或头的长度）。
+13. **其他按位置命名记录的目标也用来源**：`http` 的 `Idempotency-Key` 用每条记录的来源代替位置做哈希（长度的最高位置 1，没有
+    来源的记录的键不变）；`doris` 的 label 用这段第一条和最后一条记录的来源定位；`s3` 的 `{position}` 取第一条记录的来源。来自
+    Kafka 或 Pulsar、切法相同的重放于是重复同样的键、label 或对象名。Loki 不按位置命名任何东西，不变。备选：保持原样，那里
+    至少一次。
 
 ### I214 MQTT 作为源与目标
 

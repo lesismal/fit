@@ -321,6 +321,12 @@ func (r *run) dispatch() {
 				}
 				outs = nil
 			}
+			if len(outs) > 1 {
+				// The records of one source record share its Origin.
+				for j, o := range outs {
+					o.rec.sub = uint32(j)
+				}
+			}
 			r.mu.Lock()
 			r.pending[rec.seq-r.base].left = len(outs) * len(r.groups)
 			for _, g := range r.groups {

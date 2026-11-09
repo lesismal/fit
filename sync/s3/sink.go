@@ -42,7 +42,7 @@ type Sink struct {
 	CAFile             string            `json:"ca_file,omitempty" doc:"A PEM file of the certificates the server's is checked against, in place of the system's roots, for a CA of its own. The check cannot be turned off."`
 	ServerName         string            `json:"server_name,omitempty" doc:"The name the server's certificate must have, and the TLS server name sent; the endpoint's host when left out."`
 	Timeout            config.Duration   `json:"timeout,omitempty" default:"\"60s\"" doc:"How long one request may take, from connecting to the end of its answer. 60s when left out or 0."`
-	Key                string            `json:"key,omitempty" default:"\"{namespace}/{date}/{timestamp}-{position}{ext}\"" doc:"The objects' keys: text with placeholders, of the object's first record: {namespace} (a leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when it has none), {position}, 20 hex digits from its position, and {ext}, the codec's extension (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have {position}, so that two objects do not have one name. {namespace}/{date}/{timestamp}-{position}{ext} when left out."`
+	Key                string            `json:"key,omitempty" default:"\"{namespace}/{date}/{timestamp}-{position}{ext}\"" doc:"The objects' keys: text with placeholders, of the object's first record: {namespace} (a leading / dropped), {date} as 2006-01-02, {yyyy}, {mm}, {dd}, {hh}, {timestamp} as 20060102T150405.000000000Z, all from its commit time in UTC (or the time of the write, when it has none), {position}, 20 hex digits from its origin (a Kafka offset, a Pulsar message ID, a CDC transaction and place) or, without one, its position, and {ext}, the codec's extension (.txt for line, .jsonl for json, .csv for csv) and .gz when gzipped. It must have {position}, so that two objects do not have one name. {namespace}/{date}/{timestamp}-{position}{ext} when left out."`
 	Codec              *config.ModuleRef `json:"codec,omitempty" module:"sync.codecs" doc:"What makes a line of a record: line when left out, which writes after's line field, or the record's canonical JSON when it has none; json writes it as JSON, csv as comma-separated values."`
 	Gzip               bool              `json:"gzip,omitempty" doc:"Gzip each object, its key ending in .gz through {ext}, with Content-Type application/gzip. false when left out."`
 	MaxObjectBytes     int64             `json:"max_object_bytes,omitempty" min:"0" max:"5368709120" default:"67108864" doc:"The most bytes of lines (before gzip) in one object: a batch larger is written as several, in order. A record larger is an object of its own. 64 MiB when left out or 0."`
@@ -308,7 +308,9 @@ func (s *Sink) render(batch []*fitsync.Record, o object) (string, []byte, error)
 }
 
 // positionToken names an object by its first record: 20 hex digits of a
-// SHA-256 of its namespace and position, or, when it has none, of the
+// SHA-256 of its namespace and origin (Record.AppendOrigin), which stays
+// the same when a Kafka or Pulsar source's positions differ after a
+// restart, or, without one, its position, or, when it has none, of the
 // nearest position before it in the batch and how far it is past it (+n),
 // or the nearest after it (-n), or, in a batch with no position at all, of
 // the object's lines.
@@ -318,6 +320,11 @@ func positionToken(batch []*fitsync.Record, o object) string {
 	h.Write([]byte(first.Namespace))
 	h.Write([]byte{0})
 	found := false
+	if org := first.AppendOrigin(nil); len(org) > 0 {
+		h.Write([]byte("origin"))
+		h.Write(org)
+		found = true
+	}
 	for j := o.lo; j >= 0 && !found; j-- {
 		if batch[j].Position != nil {
 			h.Write(batch[j].Position)

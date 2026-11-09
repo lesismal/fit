@@ -550,7 +550,10 @@ func (s *Source) records(m *natswire.Msg, meta *natswire.Meta) []*fitsync.Record
 		}
 	}
 	for i, r := range recs {
-		r.Source, r.Position = "nats", nil
+		r.Source, r.Position, r.Origin = "nats", nil, fitsync.Origin{}
+		if meta != nil {
+			r.Origin = fitsync.Origin{Stream: s.Stream, N: [4]uint64{meta.StreamSeq, uint64(i)}}
+		}
 		if s.Namespace != "" || r.Namespace == "" {
 			r.Namespace = s.Namespace
 			if r.Namespace == "" {

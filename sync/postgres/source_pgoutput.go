@@ -113,6 +113,7 @@ type decoder struct {
 	inTx    bool
 	skip    bool
 	xid     uint32
+	final   pgwire.LSN
 	at      time.Time
 	n       int
 	pending *fitsync.Record
@@ -198,7 +199,7 @@ func (d *decoder) handle(msg []byte) error {
 }
 
 func (d *decoder) begin(xid uint32, final pgwire.LSN, at time.Time) {
-	d.inTx, d.xid, d.at, d.n, d.pending = true, xid, at, 0, nil
+	d.inTx, d.xid, d.final, d.at, d.n, d.pending = true, xid, final, at, 0, nil
 	// A transaction committed before the checkpoint was read; the server
 	// starts at the slot's confirmed position, which may be earlier.
 	d.skip = final < d.from
@@ -436,6 +437,8 @@ func (d *decoder) add(r *fitsync.Record) error {
 	}
 	r.Source, r.CommitTime = "postgres", d.at
 	r.Tx = fitsync.Tx{ID: strconv.FormatUint(uint64(d.xid), 10), First: d.n == 0}
+	// The transaction's commit LSN and the record's place in it.
+	r.Origin = fitsync.Origin{Stream: "lsn", N: [4]uint64{uint64(d.final), uint64(d.n)}}
 	d.n++
 	if p := d.pending; p != nil {
 		d.pending = r

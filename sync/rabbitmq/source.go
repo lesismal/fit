@@ -338,19 +338,27 @@ func (rd *reader) drain(ctx context.Context) error {
 // delivery that makes none is acknowledged at once.
 func (rd *reader) take(d *amqpwire.Delivery) error {
 	q := rd.queues[d.ConsumerTag]
+	off := int64(-1)
 	if rd.streams[q] {
-		if off, ok := d.Properties.Headers[offsetHeader].(int64); ok {
-			if off < rd.offsets[q] {
+		if o, ok := d.Properties.Headers[offsetHeader].(int64); ok {
+			if o < rd.offsets[q] {
 				// Before the offset asked: a stream starts at its chunk's
 				// first message.
 				return rd.ss.c.Ack(d.DeliveryTag, false)
 			}
-			rd.offsets[q] = off + 1
+			rd.offsets[q], off = o+1, o
 		}
 	}
 	recs := rd.decode(q, d)
 	if len(recs) == 0 {
 		return rd.ss.c.Ack(d.DeliveryTag, false)
+	}
+	if off >= 0 {
+		// A stream's message keeps its offset; a queue's has no such
+		// name: a message delivered again may come with another tag.
+		for i, r := range recs {
+			r.Origin = fitsync.Origin{Stream: q, N: [4]uint64{uint64(off), uint64(i)}}
+		}
 	}
 	rd.last = d.DeliveryTag
 	pos := position{Run: rd.ss.run, Tag: d.DeliveryTag}

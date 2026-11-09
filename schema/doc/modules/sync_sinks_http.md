@@ -9,9 +9,12 @@ good.
 Every request carries `headers`, the authentication the config gives (`username` with
 `password_env` for basic authentication, or `bearer_token_env`, read from the environment when the
 pipeline loads) and an idempotency key in `idempotency_header` (`Idempotency-Key`): 32 hex digits of
-a SHA-256 of the request's records' positions and its body. A request sent again carries the same
-key, so a receiver that keeps the keys it has taken can drop a request it already has; the same
-records at other positions, or other records, get another.
+a SHA-256 of the request's records' origins (a Kafka partition and offset, a Pulsar message ID, a
+CDC transaction and the record's place in it), or positions for a source without them, and its body.
+A request sent again carries the same key, so a receiver that keeps the keys it has taken can drop a
+request it already has; the same records at other positions, or other records, get another. An
+origin keeps the key after a restart where a Kafka or Pulsar source's position, which holds every
+partition's progress in the order the run read them, does not.
 
 Any `2xx` acknowledges the request's records. A `5xx`, `408` or `429`, a timeout (`timeout`, 30s)
 or a connection's error fails the write, and the pipeline's `retry` sends it again with its backoff,

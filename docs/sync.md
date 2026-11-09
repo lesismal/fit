@@ -164,6 +164,22 @@ sink had. Sinks therefore write idempotently, so that a replay converges on the 
 | `rabbitmq` | published again, with the same `message_id`, by which a consumer can drop it |
 | `kafka`, `http`, `otlp_logs`, `file`, `stdout` | written again: Kafka's producer is not idempotent, nor is OTLP; `http` sends the same `Idempotency-Key` for the same records |
 
+**Record IDs.** The `nats`, `pulsar` and `rabbitmq` sinks give each record an ID (`Nats-Msg-Id`,
+`fit-id`, `message_id`), and `http`'s `Idempotency-Key`, `doris`'s labels and `s3`'s object names
+are made the same way, so that a record written again is known. A source that has a name for each
+record of its own, the same however a run reads it, gives the record that name, its origin: `kafka`
+the topic, partition and offset; `pulsar` the partition and message ID (ledger, entry, batch index);
+`nats` the stream sequence; `rabbitmq` a stream's offset; `mysql` the transaction's GTID (or binlog
+file and offset) and the row's place in it; `postgres` the commit LSN and the change's place;
+`mssql` (CDC) the transaction's LSN and the change's place; `mongo` the resume token. With a
+message's records (a codec's) and a transform's records of one record numbered by their place, the
+ID follows the record, not the position: a replay after a crash gets the IDs it had, whatever order
+the run met the partitions in (a `kafka` or `pulsar` source writes every partition's place in each
+position, in that order). A record without an origin (a queue's message, MQTT, files, snapshots,
+change tracking) is named by the position at or after it and its distance from it, which repeats
+when the source reads the record again at the same position: a database's log, files, a single
+partition.
+
 **Transactions stay whole.** A checkpoint never falls inside a source transaction; the records of one
 carry its ID, and the `mysql` and `postgres` sinks write each source transaction as one of their own
 (`transactions source`), so a reader of the sink never sees half of one.
@@ -206,7 +222,7 @@ after the same backoff, for as long as it fails: a source is expected to come ba
 | [Files](#files) | `file`: paths and globs tailed across rotations, multiline | `file`: lines by a codec or a template, rotated as a log |
 | [Elasticsearch, OpenSearch](#elasticsearch-and-opensearch) | `elasticsearch`: a point-in-time snapshot, then a cursor field polled | `elasticsearch`: `_bulk` by `_id` |
 | [ClickHouse](#clickhouse) | `clickhouse`: a table or query by key, then a cursor column polled | `clickhouse`: `JSONEachRow` inserts, deduplicated, `ReplacingMergeTree` |
-| [Doris, StarRocks](#doris-and-starrocks) | `doris`: a table or query by key over MySQL's protocol, then a cursor column polled | `doris`: Stream Load, labelled by positions, delete signs |
+| [Doris, StarRocks](#doris-and-starrocks) | `doris`: a table or query by key over MySQL's protocol, then a cursor column polled | `doris`: Stream Load, labelled by origins or positions, delete signs |
 | [Loki](#loki) | | `loki`: the push API, protobuf or JSON, streams from configured fields |
 | [OpenTelemetry logs](#opentelemetry-logs) | | `otlp_logs`: OTLP/HTTP log records, protobuf or JSON |
 | [HTTP](#http) | `http`: records posted to a `sync_ingest` route | `http`: batches posted as NDJSON or JSON |
@@ -359,7 +375,8 @@ sync {
 One connector, `doris`, serves Apache Doris (2.1 and later) and StarRocks (3 and later); `flavor`
 names the system, whose only differences here are the delete column and the partial update's header.
 The sink loads each run of a batch's records for one table with Stream Load over HTTP, JSON (or CSV)
-rows, and a `label` made from the run's first and last positions: a run loaded again after a crash
+rows, and a `label` made from the run's first and last records' origins, or positions for a source
+without them (see [Delivery guarantees](#delivery-guarantees)): a run loaded again after a crash
 is refused as already loaded, so a batch is stored once even in a duplicate key table. Updates and
 deletes need a table of the unique key model with merge on write (Doris) or the primary key model
 (StarRocks): a delete is the row, or its key, with `__DORIS_DELETE_SIGN__` (or `__op`) set to 1.
@@ -947,7 +964,7 @@ core NATS `subjects` instead (a `queue` group to share them), at most once, for 
 while fit is down, or faster than it keeps up (`buffer`), is lost.
 
 The `nats` sink publishes a message per record to `subject` (`{namespace}`), its data from `codec`,
-with a `Nats-Msg-Id` made from the record's position, so that a batch written again within the stream's
+with a `Nats-Msg-Id` made from the record's origin (see [Delivery guarantees](#delivery-guarantees)), so that a batch written again within the stream's
 duplicate window (`duplicate_window`, 2 minutes by default) is stored once; up to `max_in_flight`
 publishes wait for the stream's acknowledgement at once, and a batch is acknowledged only once each of
 its messages is. `mode core` publishes to core NATS, confirmed as far as the server reading them.
@@ -998,14 +1015,11 @@ which the Java client's default router (the key's Java string hash) places in a 
 messages stay in order; deletes have a null value, for topic compaction. A partition's messages go out
 as Pulsar batches (`max_batch_messages`, `max_batch_bytes`), compressed (`lz4`; `zlib`, `zstd`,
 `snappy`), from producers named `producer_name`, whose sequence IDs carry on from the broker's. Each
-message carries the property `fit-id`, made from the record's position: with `dedup read_back` (the
-default) the sink reads back the last 64 entries of each partition when it makes its producer, and drops
-the records it finds there stored, so a batch written again after a crash is stored once (this needs the
-permission to consume the topic; `dedup off` sends everything). That holds when the source reads the
-records again at the same positions: a database's log, files, a single partition. A source of several
-partitions (`kafka`, `pulsar`) writes every partition's place in each position, as the run
-interleaved them, so a replay has other positions, and is stored again: at least once. A `pulsar+ssl://` URL is TLS; `token_env`
-authenticates with a token.
+message carries the property `fit-id`, made from the record's origin (see [Delivery guarantees](#delivery-guarantees)):
+with `dedup read_back` (the default) the sink reads back the last 64 entries of each partition when it
+makes its producer, and drops the records it finds there stored, so a batch written again after a crash
+is stored once (this needs the permission to consume the topic; `dedup off` sends everything). A
+`pulsar+ssl://` URL is TLS; `token_env` authenticates with a token.
 
 ```fit
 sync {

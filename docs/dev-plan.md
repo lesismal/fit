@@ -7301,8 +7301,8 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
    with a pull of one up to max_wait**: a message is read as soon as it comes, rather than a pull
    holding its whole batch until max_wait (nats.go's Fetch does the same). Alternative: one pull of the
    batch with a short expiry; heartbeats (idle_heartbeat) — not needed with short pulls.
-5. **Nats-Msg-Id from `fitsync.RecordIDs`** (a hash of the record's anchor position and its distance
-   from it): a batch written again is dropped by the stream's duplicate window, 2 minutes by default;
+5. **Nats-Msg-Id from `fitsync.RecordIDs`** (a hash of the record's origin, or, for a source without
+   one, of its anchor position and its distance from it; see decision 12): a batch written again is dropped by the stream's duplicate window, 2 minutes by default;
    a replay after a longer outage stores copies (at least once). The window is the stream's, documented,
    not set by fit. Alternative: IDs from the record's content (two equal records would be dropped).
 6. **No key in the messages**: NATS has no message key; the sink sends only `Nats-Msg-Id`, and the
@@ -7328,6 +7328,10 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
     at the same position; the `kafka` and `pulsar` sources write every partition's place in each
     position, as the run interleaved them, so a NATS stream fed by them stores replayed records again
     (at least once). The fix is for `RecordIDs` and those sources together (I213's decision 1).
+    **Fixed** 2026-11-10 (branch `fix-recordid`, I213's decisions 1 and 10-13): a record carries an
+    `Origin` its source sets, the same however the run interleaves partitions, and `RecordIDs` names it
+    by that before its position; the `kafka` and `pulsar` sources set it, and so does `nats` (stream
+    and sequence), so a NATS stream fed by any of them drops a replay within its duplicate window.
 
 ### I213 Apache Pulsar as a source and a sink
 
@@ -7376,6 +7380,15 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
    (generate, a database's log, files) is stored once (TestPulsarBatchTwice). Fixing it is for
    `RecordIDs` and the multi-partition sources together, e.g. a per-record identity a source can set
    (partition and offset, or message ID) that `RecordIDs` prefers to the position.
+   **Fixed** 2026-11-10 (branch `fix-recordid`; decisions 10-13 below pending review): `fitsync.Record`
+   has `Origin` (`Stream string`, `N [4]uint64`), a fixed struct its source sets; `RecordIDs` hashes
+   the source, the origin and the record's place among the records the transforms made of its source
+   record, and falls back to the position only for a record without one. `kafka` sets topic, partition,
+   offset and the record's place in its message; `pulsar` the partition's full name, ledger, entry,
+   batch index and place. The Pulsar interop across kills now ends with 2000 messages copied as 2000 in
+   65 of 68 runs (Pulsar 3.0.11 and 4.0.5, both modes); the three others had 2, 4 and 13 copies (19
+   of 136,000 messages, at most 0.65% of a run, against 0-22% before), from what the fix does not
+   touch: a send of the killed process the broker stores after the new producer has read back.
 2. **Partition routing by the Java client's default**, `JavaStringHash` (Java's `String.hashCode` of
    the partition key, `& Integer.MAX_VALUE`, modulo the partitions), which pulsar-client-go also uses by
    default; a key of bytes is hashed as the base64 the Java client sends it as. A record without a key
@@ -7414,6 +7427,39 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
    a raw block, its size in the metadata); zstd and snappy are klauspost/compress's (already a
    dependency), zlib the standard library's. Alternative: move the LZ4 code into an internal package
    both use.
+
+Decisions of the `RecordIDs` fix (decision 1's, 2026-11-10, branch `fix-recordid`; pending review):
+
+10. **`Origin` is a fixed struct on `Record`, `Stream string` and `N [4]uint64`**, set by the source;
+    a record has one when `Stream` is not empty. Only equality counts, so each source picks what goes
+    in: `kafka` topic / partition, offset, place in the message; `pulsar` partition name / ledger,
+    entry, batch index, place; `nats` stream / sequence, place; `rabbitmq` the stream queue / offset,
+    place (a classic or quorum queue has none: a message delivered again may get another tag);
+    `mysql` the transaction's GTID, or binlog file and offset (its `Tx.ID`) / the record's place in
+    it; `postgres` `"lsn"` / the commit LSN, the change's place; `mssql` CDC the transaction's LSN /
+    the change's place (change tracking has none: a later read of a version range nets other
+    changes); `mongo` the resume token. Kafka, Pulsar, NATS, RabbitMQ, MySQL, PostgreSQL and SQL
+    Server set it without an allocation (strings they already hold); MongoDB's is one string a record.
+    Not set: MQTT (no coordinate), files, snapshots and jobs' chunks (their positions are per record
+    already), and the sources not asked for (Redis streams, TiDB, Elasticsearch, ClickHouse, Doris,
+    S3, HTTP). Alternatives: a string built per record (an allocation on the hot path); a
+    `func() []byte` (a closure per record); the place among the message's records counted by
+    `RecordIDs` (it changes when a batch is cut inside a message).
+11. **A transform's records of one source record are told apart by their place**, `Record.sub`, which
+    the pipeline sets when a source record makes more than one, before they reach a sink; it is part of
+    the ID, so a batch cut inside one source record's records keeps the IDs. Alternative: the distance
+    from the run's last record, as positions do (a cut inside the run makes two records one ID).
+12. **The ID is 32 hex digits of a SHA-256 of `'o'`, then `Record.AppendOrigin`** (the source, the
+    origin's stream and numbers, the place), on a stack buffer: one allocation, the string. Records
+    without an origin keep the position-based IDs byte for byte, so a pipeline upgraded mid-replay
+    changes only its origin records' IDs, once. Alternative: the origin as readable text (longer, and
+    a property or header length the sinks would have to bound).
+13. **The other sinks that named records by position use the origin too**: `http`'s
+    `Idempotency-Key` hashes each record's origin in place of its position (the length's top bit set,
+    so keys of records without one do not change); `doris`'s label anchors the run's first and last
+    records by their origins; `s3`'s `{position}` is the first record's origin. A replay from Kafka or
+    Pulsar cut the same way then repeats the key, label or object name. Loki names nothing by position
+    and is unchanged. Alternative: leave them, as at least once there.
 
 ### I214 MQTT as a source and a sink
 

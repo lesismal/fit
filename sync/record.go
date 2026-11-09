@@ -62,6 +62,21 @@ type Tx struct {
 // from. It must be JSON, so that the checkpoint file stays readable.
 type Position []byte
 
+// Origin is a record's own coordinate in its source, which does not change
+// however the source's reads of its partitions or streams interleave: a
+// Kafka topic, partition, offset and the record's place among the
+// message's records; a Pulsar partition and message ID; a binlog
+// transaction and the row's place in it. Stream and N mean what the source
+// says; only their equality counts. A record has an origin when Stream is
+// not empty. It is a fixed struct, set without an allocation where the
+// source already holds Stream's string.
+type Origin struct {
+	// Stream is what N counts in: a topic, a stream, a transaction.
+	Stream string
+	// N are the numbers that place the record in Stream.
+	N [4]uint64
+}
+
 // Record is what a source reads, transforms change and sinks write: one
 // row, document, line or message, as one model for every connector.
 type Record struct {
@@ -83,10 +98,18 @@ type Record struct {
 	Tx         Tx
 	// Position is where the source is once this record is read.
 	Position Position
+	// Origin names the record in its source, the same each time the source
+	// reads it again, for sinks that drop a record written twice by an ID
+	// (RecordIDs); zero when the source has no such name for it.
+	Origin Origin
 
 	// seq is the number of the source's record this one comes from, which
 	// acknowledgements count by; a transform's records keep it.
 	seq uint64
+	// sub is r's place among the records the transforms made of its
+	// source record, which the pipeline sets before r reaches a sink, so
+	// that records sharing an Origin have IDs of their own.
+	sub uint32
 	// made says a transform made r, with Clone, so that the transforms
 	// after it may change it in place.
 	made bool
