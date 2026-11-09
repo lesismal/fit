@@ -6713,10 +6713,9 @@ review:
    run` does, and **builds the WASM plugin from its Go source** (`GOOS=wasip1`) before validating; the
    4.5 MB `.wasm` is not committed (`.gitignore`). Alternative: a committed `.wasm`, or TinyGo's
    smaller one (I165b).
-4. **`sync-mysql-to-postgres` is only adapted** (fit-examples' `noValidate`) until the fit its go.mod
-   requires has the `mysql` source (I174); its go.mod is moved to fit `7a793de` (origin's main),
-   which lacks I179 and I185, so the pinned job validates only once go.mod moves to a pushed fit
-   with I179, I185 and I174. The sync-examples branch is to be pushed with that bump.
+4. **`sync-mysql-to-postgres` is validated** like the others since I174 merged (it left
+   `noValidate`); fit-examples' go.mod moves to a pushed fit with I174, I179 and I185, and the
+   sync-examples branch is pushed with that bump.
 5. **The MySQL source's parts were written from I174's and I175's specs** before they merged, and
    I192's matrix is not described yet: both are marked in the guide with `MERGE CHECK` comments
    (hidden on GitHub) for the merge to check against the merged code. Alternative: leave them out

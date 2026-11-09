@@ -4839,9 +4839,8 @@ I182 的源和 I183 的目标是同时做的，连接参数不同：源有 `uri`
 3. **fit-examples 的测试把示例的密码变量**（`ES_PASSWORD`、`KAFKA_PASSWORD`、`MYSQL_PASSWORD`、`PG_PASSWORD`）设为替代值，
    因为 `fit validate` 像 `fit run` 一样读取 `password_env`；并在验证前**从 Go 源码构建 WASM 插件**（`GOOS=wasip1`）；4.5 MB 的
    `.wasm` 不提交（`.gitignore`）。备选：提交 `.wasm`，或 TinyGo 构建的更小的（I165b）。
-4. **`sync-mysql-to-postgres` 只做 adapt**（fit-examples 的 `noValidate`），直到其 go.mod 所需的 fit 有 `mysql` 源（I174）；其
-   go.mod 已移到 fit `7a793de`（origin 的 main），它缺少 I179 和 I185，所以固定版本的任务要等 go.mod 移到含 I179、I185 和 I174
-   的已推送 fit 后才能通过验证。sync-examples 分支应连同这次升级一起推送。
+4. **`sync-mysql-to-postgres` 自 I174 合并后与其他示例一样做验证**（已移出 `noValidate`）；fit-examples 的 go.mod 移到
+   含 I174、I179 和 I185 的已推送 fit，sync-examples 分支随这次升级一起推送。
 5. **MySQL 源的部分按 I174 和 I175 的规格写成**，早于它们合并，I192 的矩阵也尚未描述：两处在指南中都以 `MERGE CHECK` 注释
    （GitHub 上不显示）标出，供合并时对照合并后的代码检查。备选：合并前先不写。
 6. **指南中的配置由 `TestConfigExamples` 加载检查**，该测试现在也读取 `sync*.md`（I174 合并后每个配置块都能加载；编写时还逐个用
