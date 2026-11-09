@@ -98,8 +98,10 @@ func main() {
 
 // run is the part of a fitbench report that the tables need.
 type run struct {
-	// name is the results file's name, without .json.
+	// name is the results file's name, without .json; Kind is "sync" for
+	// the sync benchmark's results (sync.go).
 	name   string
+	Kind   string `json:"kind"`
 	Params struct {
 		Connections   int `json:"connections"`
 		H2Connections int `json:"h2_connections"`
@@ -148,6 +150,8 @@ type result struct {
 	Rate       int `json:"rate"`
 	IdleHeld   int `json:"idle_held"`
 	IdleClosed int `json:"idle_closed"`
+	// sync is the sync benchmark's result this one was made of (sync.go).
+	sync *syncResult
 }
 
 func load(path string) (*run, error) {
@@ -158,6 +162,11 @@ func load(path string) (*run, error) {
 	var r run
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	if r.Kind == "sync" {
+		if err := loadSync(&r, data); err != nil {
+			return nil, fmt.Errorf("%s: %v", path, err)
+		}
 	}
 	r.name = strings.TrimSuffix(filepath.Base(path), ".json")
 	return &r, nil
@@ -225,6 +234,10 @@ func (r result) memEER() float64 {
 var protocolNames = map[string]string{"http/1.1": "HTTP/1.1", "https/1.1": "HTTP/1.1 over TLS", "h2c": "h2c", "h2": "h2", "h3": "HTTP/3"}
 
 func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, idleHeading string) {
+	if cur.Kind == "sync" {
+		renderSync(w, cur, level)
+		return
+	}
 	var servers []string
 	type key struct{ scenario, protocol string }
 	var keys []key

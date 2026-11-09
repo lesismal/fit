@@ -1,0 +1,42 @@
+# Canal's client adapter in the sync benchmark's mysql-es scenario: the
+# rows canal-server reads from mysql (instance example, over TCP) into
+# Elasticsearch over REST, by the mapping in es7/items.yml. Its defaults
+# otherwise; the logger adapter, which logs every row, left out.
+server:
+  port: 8081
+spring:
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+    default-property-inclusion: non_null
+
+canal.conf:
+  mode: tcp
+  flatMessage: true
+  zookeeperHosts:
+  syncBatchSize: 1000
+  retries: -1
+  timeout:
+  accessKey:
+  secretKey:
+  consumerProperties:
+    canal.tcp.server.host: canal:11111
+    canal.tcp.zookeeper.hosts:
+    canal.tcp.batch.size: 500
+    canal.tcp.username:
+    canal.tcp.password:
+  srcDataSources:
+    defaultDS:
+      url: jdbc:mysql://mysql:3306/shop?useUnicode=true&useSSL=false
+      username: root
+      password: fit-syncbench-1
+  canalAdapters:
+  - instance: example
+    groups:
+    - groupId: g1
+      outerAdapters:
+      - name: es7
+        hosts: http://es:9200
+        properties:
+          mode: rest
+          cluster.name: docker-cluster
