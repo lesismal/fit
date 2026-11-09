@@ -503,7 +503,7 @@ func RunPipeline(ctx context.Context, s *config.Sync, name string, opts Options)
 		return Status{}, fmt.Errorf("the config has no pipeline %q", name)
 	}
 	cfg := &s.Pipelines[i]
-	m, err := load(cfg, &module.Env{Engine: opts.Engine})
+	m, err := load(cfg, &module.Env{Engine: opts.Engine, LLMProxy: opts.LLMProxy})
 	if err != nil {
 		return Status{}, err
 	}

@@ -23,20 +23,6 @@ import (
 	_ "github.com/lesismal/fit/sync/otlp"
 )
 
-// obsEnv returns the environment variable name, skipping the test when it
-// is not set (test/sync/obs.sh sets the obs family's).
-func obsEnv(t *testing.T, name string) string {
-	t.Helper()
-	v := os.Getenv(name)
-	if v == "" {
-		if os.Getenv("FIT_SYNC_INTEROP") == "required" {
-			t.Fatalf("%s is not set", name)
-		}
-		t.Skipf("%s is not set (test/sync/obs.sh sets it)", name)
-	}
-	return v
-}
-
 // loadSink loads a sink module with params, as a pipeline's config does.
 func loadSinkModule(t *testing.T, mod string, params map[string]any) fitsync.Sink {
 	t.Helper()

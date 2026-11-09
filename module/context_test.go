@@ -16,6 +16,12 @@ func TestContextWithoutEnv(t *testing.T) {
 	if c.MediaLibrary("a") != nil {
 		t.Error("a media library without an Env")
 	}
+	if c.LLMProxy() != nil {
+		t.Error("an llm.proxy without an Env")
+	}
+	if api := (&Context{env: &Env{LLMProxy: &config.LLMProxyAPI{Address: "127.0.0.1:1"}}}).LLMProxy(); api == nil || api.Address != "127.0.0.1:1" {
+		t.Errorf("the llm.proxy %v", api)
+	}
 	if _, ok := c.Upstream("a"); ok {
 		t.Error("an upstream without an Env")
 	}
