@@ -62,15 +62,21 @@ var workloads = []workload{
 }
 
 // syncWorkloads are the sync benchmark's plan (bench/sync/plan.sh), whose
-// results files are named s1-... to s5-...: the files and the two MySQL
+// results files are named s1-... to s9-...: the files and the two MySQL
 // streams count most, being what Filebeat and Canal are most used for; a
-// batch copy is scored without a lag, which it has none of.
+// batch copy is scored without a lag, which it has none of. The second
+// round's (I222), files to Loki, RabbitMQ, MQTT and SQL Server to Kafka,
+// count a quarter between them.
 var syncWorkloads = []workload{
-	{"s1", "S1, files to a file", 0.25, defaultMetrics},
-	{"s2", "S2, MySQL to Elasticsearch", 0.20, defaultMetrics},
-	{"s3", "S3, MySQL to Kafka", 0.20, defaultMetrics},
-	{"s4", "S4, PostgreSQL to Kafka", 0.15, defaultMetrics},
-	{"s5", "S5, a MySQL batch copy", 0.20, batchMetrics},
+	{"s1", "S1, files to a file", 0.20, defaultMetrics},
+	{"s2", "S2, MySQL to Elasticsearch", 0.15, defaultMetrics},
+	{"s3", "S3, MySQL to Kafka", 0.15, defaultMetrics},
+	{"s4", "S4, PostgreSQL to Kafka", 0.10, defaultMetrics},
+	{"s5", "S5, a MySQL batch copy", 0.15, batchMetrics},
+	{"s6", "S6, files to Loki", 0.05, defaultMetrics},
+	{"s7", "S7, RabbitMQ to Kafka", 0.07, defaultMetrics},
+	{"s8", "S8, MQTT to Kafka", 0.06, defaultMetrics},
+	{"s9", "S9, SQL Server to Kafka", 0.07, defaultMetrics},
 }
 
 // batchMetrics is a batch copy's: no lag, so throughput and what it costs.

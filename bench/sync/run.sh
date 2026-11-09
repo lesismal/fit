@@ -8,8 +8,8 @@
 #
 #   bench/sync/run.sh [-n ROUNDS] [-movers LIST] [-o DIR] [-name NAME] SCENARIO
 #
-# SCENARIO is files, files-loki, mysql-es, mysql-kafka, pg-kafka or
-# mysql-batch. The
+# SCENARIO is files, files-loki, mysql-es, mysql-kafka, pg-kafka,
+# mysql-batch, rabbitmq-kafka, mqtt-kafka or mssql-kafka. The
 # results go in DIR (bench/results/sync) as NAME.json (NAME is the scenario
 # and its variant), with NAME/: each round's result, fit's profiles, and the
 # movers' logs. The environment sets the rest (defaults in brackets):
@@ -58,8 +58,10 @@ files-loki) all=fit,promtail ;;
 mysql-es | mysql-kafka) all=fit,canal,debezium ;;
 pg-kafka) all=fit,debezium ;;
 mysql-batch) all=fit,datax ;;
+rabbitmq-kafka | mqtt-kafka) all=fit,kafka-connect ;;
+mssql-kafka) all=fit,debezium ;;
 *)
-	echo "run.sh: unknown scenario $sc: files, files-loki, mysql-es, mysql-kafka, pg-kafka or mysql-batch" >&2
+	echo "run.sh: unknown scenario $sc: files, files-loki, mysql-es, mysql-kafka, pg-kafka, mysql-batch, rabbitmq-kafka, mqtt-kafka or mssql-kafka" >&2
 	exit 2
 	;;
 esac
@@ -77,10 +79,14 @@ PROMTAIL_IMAGE=${PROMTAIL_IMAGE:-grafana/promtail:3.5.5}
 CANAL_IMAGE=${CANAL_IMAGE:-canal/canal-server:v1.1.8}
 DEBEZIUM_IMAGE=${DEBEZIUM_IMAGE:-quay.io/debezium/connect:3.0.8.Final}
 JRE_IMAGE=${JRE_IMAGE:-eclipse-temurin:8u452-b09-jre-jammy}
+RABBITMQ_IMAGE=${RABBITMQ_IMAGE:-rabbitmq:4.1.4}
+MOSQUITTO_IMAGE=${MOSQUITTO_IMAGE:-eclipse-mosquitto:2.0.22}
+MSSQL_IMAGE=${MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04}
 # Built here from the pinned images and the pinned downloads below.
 ADAPTER_IMAGE=fit-syncbench/canal-adapter:1.1.8-2
 DATAX_IMAGE=fit-syncbench/datax:202309
 CONNECT_ES_IMAGE=fit-syncbench/connect-es:3.0.8-14.1.2
+CONNECT_CAMEL_IMAGE=fit-syncbench/connect-camel:3.0.8-4.14.5
 
 ADAPTER_URL=https://github.com/alibaba/canal/releases/download/canal-1.1.8/canal.adapter-1.1.8.tar.gz
 ADAPTER_SHA=e9366226860b6939ace0eb6d46a1a365d71ab45b4292c66e73bba8d9f067a340
@@ -88,6 +94,11 @@ DATAX_URL=http://datax-opensource.oss-cn-hangzhou.aliyuncs.com/202309/datax.tar.
 DATAX_SHA=5f3d8cbdf25fd8476c8124f6ca3c892a7f4c2286e55da629771848adff944788
 ES_SINK_URL=https://hub-downloads.confluent.io/api/plugins/confluentinc/kafka-connect-elasticsearch/versions/14.1.2/confluentinc-kafka-connect-elasticsearch-14.1.2.zip
 ES_SINK_SHA=4d806e31764b5a0e5b3d9ab9fbf047bf35aa3a2470ba28ae92bc81991b251aa0
+CAMEL_URL=https://repo1.maven.org/maven2/org/apache/camel/kafkaconnector
+CAMEL_RABBITMQ_URL=$CAMEL_URL/camel-spring-rabbitmq-source-kafka-connector/4.14.5/camel-spring-rabbitmq-source-kafka-connector-4.14.5-package.tar.gz
+CAMEL_RABBITMQ_SHA=d973fe3e4fc068f2c6e6253d92ebfb36e57bfd6a40f241a3eabe96e255326188
+CAMEL_MQTT_URL=$CAMEL_URL/camel-mqtt5-source-kafka-connector/4.14.5/camel-mqtt5-source-kafka-connector-4.14.5-package.tar.gz
+CAMEL_MQTT_SHA=cd62d3b88079d999e0023a812158c061cb3fab409b0388ae0bc90e738013171a
 
 SIZE=${SIZE:-full}
 case $SIZE in
@@ -178,6 +189,7 @@ build_images() {
 	case ,$movers, in *,canal,*) [ "$sc" = mysql-es ] && need_adapter=1 ;; esac
 	case ,$movers, in *,debezium,*) [ "$sc" = mysql-es ] && need_es_sink=1 ;; esac
 	case ,$movers, in *,datax,*) need_datax=1 ;; esac
+	case ,$movers, in *,kafka-connect,*) need_camel=1 ;; esac
 	if [ "${need_adapter:-}" = 1 ] && ! docker image inspect "$ADAPTER_IMAGE" >/dev/null 2>&1; then
 		fetch "$ADAPTER_URL" "$ADAPTER_SHA" canal.adapter-1.1.8.tar.gz
 		ctx=$CACHE/canal-adapter-ctx
@@ -196,6 +208,18 @@ build_images() {
 		cp "$here/images/connect-es.Dockerfile" "$ctx/Dockerfile"
 		log "building $CONNECT_ES_IMAGE"
 		docker build -q --build-arg "DEBEZIUM_IMAGE=$DEBEZIUM_IMAGE" -t "$CONNECT_ES_IMAGE" "$ctx" >/dev/null
+		rm -rf "$ctx"
+	fi
+	if [ "${need_camel:-}" = 1 ] && ! docker image inspect "$CONNECT_CAMEL_IMAGE" >/dev/null 2>&1; then
+		fetch "$CAMEL_RABBITMQ_URL" "$CAMEL_RABBITMQ_SHA" camel-spring-rabbitmq-source-4.14.5.tar.gz
+		fetch "$CAMEL_MQTT_URL" "$CAMEL_MQTT_SHA" camel-mqtt5-source-4.14.5.tar.gz
+		ctx=$CACHE/connect-camel-ctx
+		rm -rf "$ctx" && mkdir -p "$ctx"
+		cp "$CACHE/camel-spring-rabbitmq-source-4.14.5.tar.gz" "$ctx/rabbitmq.tar.gz"
+		cp "$CACHE/camel-mqtt5-source-4.14.5.tar.gz" "$ctx/mqtt.tar.gz"
+		cp "$here/images/connect-camel.Dockerfile" "$ctx/Dockerfile"
+		log "building $CONNECT_CAMEL_IMAGE"
+		docker build -q --build-arg "DEBEZIUM_IMAGE=$DEBEZIUM_IMAGE" -t "$CONNECT_CAMEL_IMAGE" "$ctx" >/dev/null
 		rm -rf "$ctx"
 	fi
 	if [ "${need_datax:-}" = 1 ] && ! docker image inspect "$DATAX_IMAGE" >/dev/null 2>&1; then
@@ -284,6 +308,17 @@ servers_up() {
 		return
 		;;
 	mysql-es | mysql-kafka | mysql-batch) mysql_up mysql ;;
+	rabbitmq-kafka)
+		run_d rabbitmq --cpuset-cpus "$SERVER_CPUS" -e RABBITMQ_DEFAULT_USER=bench -e RABBITMQ_DEFAULT_PASS=$PW "$RABBITMQ_IMAGE"
+		;;
+	mqtt-kafka)
+		run_d mosquitto --cpuset-cpus "$SERVER_CPUS" -v "$here/configs/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" "$MOSQUITTO_IMAGE"
+		;;
+	mssql-kafka)
+		# SQL Server Agent runs CDC's capture job.
+		run_d mssql --cpuset-cpus "$SERVER_CPUS" -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=$PW -e MSSQL_AGENT_ENABLED=true \
+			-e MSSQL_MEMORY_LIMIT_MB=2048 "$MSSQL_IMAGE"
+		;;
 	pg-kafka)
 		run_d postgres --cpuset-cpus "$SERVER_CPUS" -e POSTGRES_PASSWORD=$PW -e POSTGRES_DB=shop "$PG_IMAGE" \
 			-c wal_level=logical -c max_wal_senders=10 -c max_replication_slots=10 -c shared_buffers=1GB \
@@ -296,7 +331,7 @@ servers_up() {
 		run_d es --cpuset-cpus "$SERVER_CPUS" $ES_JAVA -e discovery.type=single-node -e xpack.security.enabled=false -e ingest.geoip.downloader.enabled=false \
 			-e ES_JAVA_OPTS="-Xms1g -Xmx1g" "$ES_IMAGE"
 	fi
-	if [ "$sc" = mysql-kafka ] || [ "$sc" = pg-kafka ] || { [ "$sc" = mysql-es ] && [ "$1" = debezium ]; }; then
+	if [ "$sc" = mysql-kafka ] || [ "$sc" = pg-kafka ] || [ "${sc%-kafka}" != "$sc" ] || { [ "$sc" = mysql-es ] && [ "$1" = debezium ]; }; then
 		run_d kafka --cpuset-cpus "$SERVER_CPUS" -e KAFKA_NODE_ID=1 -e KAFKA_PROCESS_ROLES=broker,controller \
 			-e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092 \
 			-e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
@@ -310,6 +345,11 @@ servers_up() {
 	mysql-es | mysql-kafka) mysql_wait mysql || return 1 ;;
 	mysql-batch) mysql_wait mysql && mysql_wait mysql2 || return 1 ;;
 	pg-kafka) wait_for postgres 120 docker exec "$PREFIX-postgres" pg_isready -q -h 127.0.0.1 -U postgres || return 1 ;;
+	rabbitmq-kafka) wait_for rabbitmq 180 docker exec "$PREFIX-rabbitmq" rabbitmqctl await_startup || return 1 ;;
+	mqtt-kafka) wait_for mosquitto 60 sh -c "docker logs '$PREFIX-mosquitto' 2>&1 | grep -q running" || return 1 ;;
+	mssql-kafka)
+		wait_for mssql 300 docker exec "$PREFIX-mssql" /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$PW" -Q 'SELECT 1' || return 1
+		;;
 	esac
 	if [ "$sc" = mysql-es ]; then
 		wait_for es 180 docker exec "$PREFIX-es" curl -fs 'localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s' || return 1
@@ -333,12 +373,13 @@ agent() {
 		"$BASE_IMAGE" syncbench "$@"
 }
 
-# The connectors Debezium's Kafka Connect runs, from configs/debezium.
+# The connectors Kafka Connect runs, from configs: debezium/ (Debezium's)
+# and connect/ (Camel's).
 register() {
 	wait_for connect 300 docker exec "$PREFIX-connect" curl -fs localhost:8083/connectors || return 1
 	for f in "$@"; do
 		docker exec -i "$PREFIX-connect" curl -fsS -X POST -H 'Content-Type: application/json' \
-			--data-binary @- localhost:8083/connectors <"$here/configs/debezium/$f" >/dev/null || return 1
+			--data-binary @- localhost:8083/connectors <"$here/configs/$f" >/dev/null || return 1
 	done
 }
 
@@ -352,7 +393,8 @@ mover_up() {
 		# shellcheck disable=SC2086
 		run_d fit --cpuset-cpus "$MOVER_CPUS" $vol -v "$PREFIX-run:/run/fit" \
 			-v "$bindir/fit:/usr/local/bin/fit:ro" -v "$here/configs/fit/$sc.conf:/etc/fit/fit.conf:ro" \
-			-e MYSQL_PASSWORD=$PW -e PG_PASSWORD=$PW "$BASE_IMAGE" fit run -c /etc/fit/fit.conf
+			-e MYSQL_PASSWORD=$PW -e PG_PASSWORD=$PW -e RABBITMQ_PASSWORD=$PW -e MSSQL_PASSWORD=$PW \
+			"$BASE_IMAGE" fit run -c /etc/fit/fit.conf
 		containers=$PREFIX-fit pprof=unix:///run/fit/admin.sock
 		;;
 	filebeat)
@@ -388,9 +430,10 @@ mover_up() {
 			containers=$containers,$PREFIX-canal-adapter
 		fi
 		;;
-	debezium)
+	debezium | kafka-connect)
 		img=$DEBEZIUM_IMAGE
 		[ "$sc" = mysql-es ] && img=$CONNECT_ES_IMAGE
+		[ "$1" = kafka-connect ] && img=$CONNECT_CAMEL_IMAGE
 		# shellcheck disable=SC2086
 		run_d connect --cpuset-cpus "$MOVER_CPUS" $JVM_ENV -e BOOTSTRAP_SERVERS=kafka:9092 -e GROUP_ID=bench \
 			-e CONFIG_STORAGE_TOPIC=connect-configs -e OFFSET_STORAGE_TOPIC=connect-offsets \
@@ -400,9 +443,12 @@ mover_up() {
 			-e CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false "$img"
 		containers=$PREFIX-connect
 		case $sc in
-		mysql-es) register mysql-es.json es-sink.json || return 1 ;;
-		mysql-kafka) register mysql.json && topic=bench.shop.items || return 1 ;;
-		pg-kafka) register postgres.json && topic=bench.public.items || return 1 ;;
+		mysql-es) register debezium/mysql-es.json debezium/es-sink.json || return 1 ;;
+		mysql-kafka) register debezium/mysql.json && topic=bench.shop.items || return 1 ;;
+		pg-kafka) register debezium/postgres.json && topic=bench.public.items || return 1 ;;
+		mssql-kafka) register debezium/mssql.json && topic=bench.shop.dbo.items || return 1 ;;
+		rabbitmq-kafka) register connect/rabbitmq.json || return 1 ;;
+		mqtt-kafka) register connect/mqtt.json || return 1 ;;
 		esac
 		;;
 	datax)
@@ -430,7 +476,7 @@ run_one() {
 		return 1
 	fi
 	common="-scenario $sc -records $RECORDS -files $FILES -line-bytes $LINE_BYTES -tx-rows $TX_ROWS
-		-mysql-password $PW -pg-password $PW"
+		-mysql-password $PW -pg-password $PW -rabbitmq-password $PW -mssql-password $PW"
 	# shellcheck disable=SC2086
 	agent -v "$PREFIX-data:/data" -- prepare $common || {
 		log "$name round $r: $m: prepare failed"
@@ -503,6 +549,9 @@ mysql-es) pull "$MYSQL_IMAGE" "$ES_IMAGE" "$KAFKA_IMAGE" "$CANAL_IMAGE" "$DEBEZI
 mysql-kafka) pull "$MYSQL_IMAGE" "$KAFKA_IMAGE" "$CANAL_IMAGE" "$DEBEZIUM_IMAGE" ;;
 pg-kafka) pull "$PG_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
 mysql-batch) pull "$MYSQL_IMAGE" "$JRE_IMAGE" ;;
+rabbitmq-kafka) pull "$RABBITMQ_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
+mqtt-kafka) pull "$MOSQUITTO_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
+mssql-kafka) pull "$MSSQL_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
 esac
 build_images
 
@@ -529,6 +578,9 @@ mysql-es) images="$images -image mysql=$MYSQL_IMAGE -image es=$ES_IMAGE -image k
 mysql-kafka) images="$images -image mysql=$MYSQL_IMAGE -image kafka=$KAFKA_IMAGE -image canal=$CANAL_IMAGE -image debezium=$DEBEZIUM_IMAGE" ;;
 pg-kafka) images="$images -image postgres=$PG_IMAGE -image kafka=$KAFKA_IMAGE -image debezium=$DEBEZIUM_IMAGE" ;;
 mysql-batch) images="$images -image mysql=$MYSQL_IMAGE -image datax=$DATAX_IMAGE" ;;
+rabbitmq-kafka) images="$images -image rabbitmq=$RABBITMQ_IMAGE -image kafka=$KAFKA_IMAGE -image kafka-connect=$CONNECT_CAMEL_IMAGE" ;;
+mqtt-kafka) images="$images -image mosquitto=$MOSQUITTO_IMAGE -image kafka=$KAFKA_IMAGE -image kafka-connect=$CONNECT_CAMEL_IMAGE" ;;
+mssql-kafka) images="$images -image mssql=$MSSQL_IMAGE -image kafka=$KAFKA_IMAGE -image debezium=$DEBEZIUM_IMAGE" ;;
 esac
 cpu=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^ //' || true)
 fit_rev=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo "${FIT_REV:-unknown}")

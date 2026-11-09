@@ -156,13 +156,19 @@ func TestLokiFilesAcrossKills(t *testing.T) {
 			"sink": map[string]any{"module": "loki", "params": map[string]any{"urls": []string{base},
 				"encoding": []string{"protobuf", "json"}[rnd.IntN(2)], "labels": map[string]any{"job": job}}}}}})
 	kills := runKilled(t, cfg, rnd, 8)
-	got := waitLines(t, base, `{job="`+job+`"}`, len(want))
+	// Lines written again at another time are Loki's twice, so the count
+	// waited for is of the lines' distinct texts.
+	var got []string
 	seen := map[string]bool{}
-	for _, l := range got {
-		if !want[l] {
-			t.Fatalf("a line not written: %q", l)
+	for deadline := time.Now().Add(time.Minute); len(seen) < len(want) && time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		got = waitLines(t, base, `{job="`+job+`"}`, len(want))
+		clear(seen)
+		for _, l := range got {
+			if !want[l] {
+				t.Fatalf("a line not written: %q", l)
+			}
+			seen[l] = true
 		}
-		seen[l] = true
 	}
 	if len(seen) != len(want) {
 		t.Fatalf("%d of %d lines in Loki", len(seen), len(want))

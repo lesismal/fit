@@ -10,8 +10,8 @@
 #   test/sync/nats.sh down             remove them
 #
 # PREFIX names the containers and the networks (fit-sync-); NATS_PORT is
-# the first of the host ports (29420: 2.10's nodes on 29420-29422, 2.11's on
-# 29423-29425). The tests read FIT_SYNC_NATS_210 and FIT_SYNC_NATS_211 (each
+# the first of the host ports (29440: 2.10's nodes on 29440-29442, 2.11's on
+# 29443-29445); NATS_VERSIONS picks the clusters ("210 211"). The tests read FIT_SYNC_NATS_210 and FIT_SYNC_NATS_211 (each
 # cluster's servers, host:port, comma separated), FIT_SYNC_NATS_USER,
 # FIT_SYNC_NATS_PASSWORD, and FIT_SYNC_NATS_CONTAINERS_210 and _211 (the
 # nodes' containers, for restarting one).
@@ -19,10 +19,14 @@ set -eu
 cd "$(dirname "$0")/../.."
 
 PREFIX=${PREFIX:-fit-sync-}
-NATS_PORT=${NATS_PORT:-29420}
+NATS_PORT=${NATS_PORT:-29440}
+NATS_VERSIONS=${NATS_VERSIONS:-210 211}
 PASSWORD='Fit-sync-1nterop!'
 STATE=${TMPDIR:-/tmp}/${PREFIX}nats
-VERSIONS="210:nats:2.10-alpine 211:nats:2.11-alpine"
+VERSIONS=""
+for v in $NATS_VERSIONS; do
+	VERSIONS="$VERSIONS $v:nats:${v%??}.${v#?}-alpine"
+done
 
 if [ "${1:-}" = down ]; then
 	for v in 210 211; do
@@ -40,6 +44,7 @@ k=0
 for entry in $VERSIONS; do
 	v=${entry%%:*}
 	image=${entry#*:}
+	k=$(((${v#?} - 10) * 3))
 	net=${PREFIX}nats$v-net
 	docker network inspect "$net" >/dev/null 2>&1 || docker network create "$net" >/dev/null
 	routes=""
@@ -76,7 +81,7 @@ done
 
 # Wait until each cluster's JetStream has a meta leader: the server's
 # healthz says so once JetStream is ready.
-for v in 210 211; do
+for v in $NATS_VERSIONS; do
 	i=0
 	until docker exec "${PREFIX}nats$v-1" wget -qO- 'http://127.0.0.1:8222/healthz?js-enabled-only=true' >/dev/null 2>&1 ||
 		docker logs "${PREFIX}nats$v-1" 2>&1 | grep -q 'JetStream cluster new metadata leader\|is the new metadata leader\|Self is new JetStream cluster metadata leader'; do
@@ -89,5 +94,7 @@ for v in 210 211; do
 		sleep 1
 	done
 done
-echo "export FIT_SYNC_NATS_210='$SERVERS_210' FIT_SYNC_NATS_211='$SERVERS_211' FIT_SYNC_NATS_USER=fit FIT_SYNC_NATS_PASSWORD='$PASSWORD'"
-echo "export FIT_SYNC_NATS_CONTAINERS_210='$CONTAINERS_210' FIT_SYNC_NATS_CONTAINERS_211='$CONTAINERS_211'"
+for v in $NATS_VERSIONS; do
+	eval "echo \"export FIT_SYNC_NATS_$v='\$SERVERS_$v' FIT_SYNC_NATS_CONTAINERS_$v='\$CONTAINERS_$v'\""
+done
+echo "export FIT_SYNC_NATS_USER=fit FIT_SYNC_NATS_PASSWORD='$PASSWORD'"

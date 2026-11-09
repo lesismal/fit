@@ -33,9 +33,6 @@ func natsClusters(t *testing.T) []natsCluster {
 	for _, v := range []string{"210", "211"} {
 		s := os.Getenv("FIT_SYNC_NATS_" + v)
 		if s == "" {
-			if os.Getenv("FIT_SYNC_INTEROP") == "required" {
-				t.Fatalf("FIT_SYNC_NATS_%s is not set", v)
-			}
 			continue
 		}
 		out = append(out, natsCluster{name: "nats-" + v, servers: strings.Split(s, ","),
@@ -43,6 +40,10 @@ func natsClusters(t *testing.T) []natsCluster {
 			user:       os.Getenv("FIT_SYNC_NATS_USER"), password: os.Getenv("FIT_SYNC_NATS_PASSWORD")})
 	}
 	if len(out) == 0 {
+		// Required, one at least: a light run (the matrix's) starts one.
+		if os.Getenv("FIT_SYNC_INTEROP") == "required" {
+			t.Fatal("neither FIT_SYNC_NATS_210 nor FIT_SYNC_NATS_211 is set")
+		}
 		t.Skip("no NATS: FIT_SYNC_NATS_210 and FIT_SYNC_NATS_211 are not set (test/sync/nats.sh sets them)")
 	}
 	return out
@@ -168,10 +169,12 @@ func TestNATSStreamAcrossKills(t *testing.T) {
 				"sinks": []any{map[string]any{"name": "n", "batch": map[string]any{"max_records": 1 + rnd.IntN(100), "max_wait": "1ms"},
 					"sink": map[string]any{"module": "nats", "params": sink}}}})
 			// A node restarts while the pipeline runs.
+			// Its node and time are drawn here: rnd is runKilled's.
 			restarted := make(chan error, 1)
+			after := time.Duration(200+rnd.IntN(800)) * time.Millisecond
+			node := n.containers[rnd.IntN(len(n.containers))]
 			go func() {
-				time.Sleep(time.Duration(200+rnd.IntN(800)) * time.Millisecond)
-				node := n.containers[rnd.IntN(len(n.containers))]
+				time.Sleep(after)
 				restarted <- exec.Command("docker", "restart", "-t", "1", node).Run()
 			}()
 			kills := runKilled(t, cfg, rnd, 12)

@@ -15,7 +15,16 @@
 [fit-examples](https://github.com/lesismal/fit-examples) 仓库中有
 [文件到 Elasticsearch](https://github.com/lesismal/fit-examples/tree/main/sync-files-to-elasticsearch)、
 [MySQL 到 PostgreSQL](https://github.com/lesismal/fit-examples/tree/main/sync-mysql-to-postgres)、
-[PostgreSQL 到 Kafka](https://github.com/lesismal/fit-examples/tree/main/sync-postgres-to-kafka) 和
+[PostgreSQL 到 Kafka](https://github.com/lesismal/fit-examples/tree/main/sync-postgres-to-kafka)、
+[RabbitMQ 到 Kafka](https://github.com/lesismal/fit-examples/tree/main/sync-rabbitmq-to-kafka)、
+[PostgreSQL 到 NATS](https://github.com/lesismal/fit-examples/tree/main/sync-postgres-to-nats)、
+[Pulsar 到 Elasticsearch](https://github.com/lesismal/fit-examples/tree/main/sync-pulsar-to-elasticsearch)、
+[MQTT 到 InfluxDB](https://github.com/lesismal/fit-examples/tree/main/sync-mqtt-to-influxdb)、
+[MQTT 到 TDengine](https://github.com/lesismal/fit-examples/tree/main/sync-mqtt-to-tdengine)、
+[SQL Server 到 Kafka](https://github.com/lesismal/fit-examples/tree/main/sync-mssql-to-kafka)、
+[MySQL 到 Doris](https://github.com/lesismal/fit-examples/tree/main/sync-mysql-to-doris)、
+[文件到 Loki](https://github.com/lesismal/fit-examples/tree/main/sync-files-to-loki)、
+[PostgreSQL 到向量数据库](https://github.com/lesismal/fit-examples/tree/main/sync-postgres-to-vectors) 和
 [WASM 变换](https://github.com/lesismal/fit-examples/tree/main/sync-wasm-transform)的示例。
 
 ## 第一条流水线
@@ -1389,7 +1398,9 @@ WAL，MySQL 会保留 binlog，所以请关注 `fit_sync_source_lag` 和 `lag_wa
 
 `test/sync/run.sh` 在 Docker 中启动这些服务器，并针对它们运行连接器的互操作测试：Elasticsearch 8 和 OpenSearch 2、
 ClickHouse 25.8、MySQL 5.7、8.0 和 8.4、MariaDB 10.11 和 11、TiDB（单机，以及 PD、TiKV、TiDB 和 TiCDC 组成的集群）、
-PostgreSQL 13 到 17、MongoDB 6、7 和 8（副本集）、Kafka 3.9 和 Redpanda、Redis 7 和 Valkey 8、MinIO 和 SeaweedFS。每个测试
+PostgreSQL 13 到 17、MongoDB 6、7 和 8（副本集）、Kafka 3.9 和 Redpanda、Redis 7 和 Valkey 8、MinIO 和 SeaweedFS；以及第二批的
+RabbitMQ 3.13 和 4.1、NATS 2.10 和 2.11（三节点集群）、Pulsar 3 和 4、Mosquitto 2 和 EMQX 5、SQL Server 2019 和 2022、Doris 2.1 和
+StarRocks 3.4、Loki 3.5、OpenTelemetry Collector、InfluxDB 2.7 和 3 Core、TDengine 3.3、Qdrant 1.15 和 Milvus 2.5。每个测试
 在随机时刻杀掉流水线，并在最后把目标与源比较；`test/sync/exactly_once_test.go` 统计写入的每一行，以检查恰好一次。
 
 **互操作与恢复矩阵**（`TestMatrix`，`test/sync/matrix_test.go`）让每个源同时写入一组固定的目标：PostgreSQL 17、MySQL 8.4、
@@ -1408,10 +1419,22 @@ MongoDB 8、Elasticsearch、ClickHouse（目标的默认值：按提交时间做
 | `mongo` | MongoDB 6、7 和 8 | `TestMongo*` |
 | `kafka` | Kafka（三个 broker）、Redpanda | `TestKafka*` |
 | `tidb` | PD、TiKV、TiDB、TiCDC，在 Kafka 上；PostgreSQL 17 | `TestTiDB*` |
+| `mq` | RabbitMQ 3.13 和 4.1、NATS 2.10 和 2.11、Pulsar 3 和 4、Mosquitto 2、EMQX 5 | `TestRabbitMQ*`、`TestNATS*`、`TestPulsar*`、`TestMQTT*` |
+| `mssql` | SQL Server 2022 和 2019（开启 SQL Server Agent、CDC 与 change tracking） | `TestMSSQL*` |
+| `olap` | Doris 2.1（一个前端和一个后端）、StarRocks 3.4 | `TestDoris*` |
+| `obs` | Loki、OpenTelemetry Collector、InfluxDB 2 和 3、TDengine、Qdrant、Milvus；PostgreSQL 17 与 Mosquitto | `TestLoki*`、`TestOTLP*`、`TestInfluxDB*`、`TestTDengine*`、`TestQdrant*`、`TestMilvus*`、`TestEmbed*` |
 | `matrix` | 每种一个：PostgreSQL 17、MySQL 8.4、MongoDB 8、Elasticsearch、ClickHouse、Redis、Kafka、带 TiCDC 的 TiDB | `TestMatrix`，每个源一次 |
+| `matrix-mq` | 矩阵的目标；RabbitMQ 4.1、NATS 2.11、Pulsar 4、Mosquitto | `TestMatrix`，各队列的源 |
+| `matrix-db` | 矩阵的目标；SQL Server 2022、Doris | `TestMatrix`，SQL Server 与 Doris 的源 |
+
+`matrix-mq` 与 `matrix-db` 即 `SYNC_FAMILIES=matrix`，`MATRIX_SERVERS` 中写上 `mq`，或 `mssql` 与 `olap`：写上第二批的族时只运行
+其源。第二批的源是 RabbitMQ、NATS JetStream、Pulsar 和 MQTT 中的 Debezium 事件（键由 id 构造，因为它们的消息没有键）、经 CDC
+读取的 SQL Server，以及按游标列轮询的 Doris（删除用 deleted 标记）。在 `obs` 中，`TestEmbedPostgresAcrossKills` 让矩阵的
+PostgreSQL 源经 `embed` 写入 Qdrant 和 Milvus，`TestInfluxDBFromMQTT` 是物联网流水线（MQTT 到 InfluxDB），两者都跨多次 kill。
 
 工作流 `sync-matrix.yml` 每晚完整运行矩阵：每个源一个任务，在同类的每个服务器上运行（PostgreSQL 13 到 17、MySQL 5.7
-到 MariaDB 11、MongoDB 6 到 8、TiDB、Kafka 和 Redpanda），负载更大、杀得更多（`FIT_SYNC_MATRIX=full`）。在本地运行：
+到 MariaDB 11、MongoDB 6 到 8、TiDB、Kafka 和 Redpanda、RabbitMQ 3.13 和 4.1、NATS 2.10 和 2.11、Pulsar 3 和 4、Mosquitto 与
+EMQX、SQL Server 2019 和 2022、Doris），负载更大、杀得更多（`FIT_SYNC_MATRIX=full`）。在本地运行：
 
 ```sh
 test/sync/run.sh -v                          # 所有族、所有测试，包括矩阵
@@ -1423,30 +1446,13 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 
 `SYNC_PREFIX` 和脚本列出的 `*_PORT` 变量可以在第一套旁边再运行一套；`KEEP=1` 保留容器供下次运行。
 
-第二批的服务器在加入这些家族（I222）之前有各自的脚本：`test/sync/mssql.sh` 启动 SQL Server 2022 与 2019（带 SQL Server
-Agent，在数据库 `fit_sync` 上开启 CDC 与 change tracking；amd64 镜像，在 arm64 上模拟运行），`test/sync/mqtt.sh` 启动
-Mosquitto 2 与 EMQX 5：
+每族的服务器都有自己的脚本，由 `run.sh` 调用，也可单独运行：`eval "$(test/sync/<脚本>.sh up)"` 启动它们并打印测试读取的
+变量，`down` 移除它们。`mq` 是 `rabbitmq.sh`、`nats.sh`、`pulsar.sh` 和 `mqtt.sh`（`MQ_SYSTEMS` 可选其中一些），`mssql` 是
+`mssql.sh`（amd64 镜像，在 arm64 上模拟运行），`olap` 是 `olap.sh`（Doris 原样占用其端口：一次只能运行一套），`obs` 是
+`obs.sh`，它也可以单独运行其测试：
 
 ```sh
+SYNC_FAMILIES="mq obs" test/sync/run.sh -v
 eval "$(test/sync/mssql.sh up)" && go test ./test/sync -run 'TestMSSQL' -v
-eval "$(test/sync/mqtt.sh up)" && go test ./test/sync -run 'TestMQTT' -v
+test/sync/obs.sh -v
 ```
-
-在 CI 的族接手之前（I222），`test/sync/olap.sh` 为 `TestDoris*` 启动 Doris 2.1（一个前端和一个后端）和 StarRocks 3.4：
-
-```sh
-eval "$(test/sync/olap.sh up)"
-go test ./test/sync -run 'TestDoris' -v
-test/sync/olap.sh down
-```
-
-`test/sync/obs.sh` 启动 Loki 3.5、OpenTelemetry Collector、InfluxDB 2.7 和 3 Core、TDengine 3.3、Qdrant 1.15 和 Milvus 2.5（单机），并运行它们的测试
-（`TestLoki*`、`TestOTLP*`、`TestInfluxDB*`、`TestTDengine*`、`TestQdrant*`、`TestMilvus*`、`TestEmbed*`）：每个目标的写入从中间和从头重放后收敛，
-服务器拒绝的记录单独失败，经 `embed`（对接一个假的 embeddings API）写入 Qdrant 和 Milvus 的流水线在随机时刻被杀掉后，最终
-每一行都在且带有其向量，删除的都已不在；经随机被杀的流水线送往 Loki 和 Collector 的文件，每一行都送达。
-`eval "$(test/sync/obs.sh up)"` 只启动它们并打印变量，`down` 移除它们。
-
-RabbitMQ、NATS JetStream 和 Pulsar 有各自的脚本，还不是 `run.sh` 的一族（I222 把它们加为 `mq`）：
-`eval "$(test/sync/rabbitmq.sh up)"` 启动 RabbitMQ 3.13 和 4.1（一个用户，一个由脚本自建 CA 的 TLS 监听），供
-`TestRabbitMQ*`；`eval "$(test/sync/nats.sh up)"` 启动 nats-server 2.10 和 2.11，各三个 JetStream 节点，供 `TestNATS*`；
-`eval "$(test/sync/pulsar.sh up)"` 启动开启去重的 Pulsar 3.0 和 4.0 单机，供 `TestPulsar*`。各自用 `down` 移除。

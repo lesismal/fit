@@ -15,6 +15,9 @@ Docker 中运行，面对使用相同固定镜像与设置的全新服务器，�
 | `mysql-kafka` | MySQL 8.0 的 binlog → Kafka 3.9 | fit（Debezium 信封）、Canal 1.1.8（Kafka 模式，flat message）、Debezium 3.0.8（无 schema 的 JSON） |
 | `pg-kafka` | PostgreSQL 17 的逻辑复制 → Kafka 3.9 | fit、Debezium 3.0.8（`pgoutput`） |
 | `mysql-batch` | 一张 MySQL 表 → 另一台 MySQL | fit（作业：`mysql` 快照 → `mysql`）、DataX 202309（`mysqlreader` → `mysqlwriter`） |
+| `rabbitmq-kafka` | RabbitMQ 4.1 队列中的消息 → Kafka 3.9 | fit（`rabbitmq` → `kafka`，编解码器 `raw`）、Kafka Connect（Debezium 3.0.8 镜像）加 Apache Camel 的 `spring-rabbitmq-source` 连接器 4.14.5 |
+| `mqtt-kafka` | Mosquitto 2.0 主题上 QoS 1 的消息 → Kafka 3.9 | fit（`mqtt` → `kafka`，编解码器 `raw`）、Kafka Connect 加 Apache Camel 的 `mqtt5-source` 连接器 4.14.5 |
+| `mssql-kafka` | SQL Server 2022 的 CDC 表 → Kafka 3.9 | fit（`mssql` → `kafka`，Debezium 信封）、Debezium 3.0.8（SQL Server 连接器） |
 
 行为 sysbench 的表结构（`id`、`k`、`c CHAR(120)`、`pad CHAR(60)`，约 200 字节），以每个事务 `TX_ROWS` 条单行
 INSERT 写入。
@@ -69,5 +72,6 @@ bench/sync/plan.sh 2026-11-09           # 整个计划：每个场景 3 轮，�
 ## 报告
 
 `benchreport` 将同步结果渲染为每个场景一张表；`-plan` 给出权重与得分，`-scores` 给出总排名（规则 24）。
-权重：S1 文件 25%，S2 MySQL→Elasticsearch 20%，S3 MySQL→Kafka 20%，S4 PostgreSQL→Kafka 15%，
-S5 MySQL 批量复制 20%（无延迟项）。
+权重：S1 文件 20%，S2 MySQL→Elasticsearch 15%，S3 MySQL→Kafka 15%，S4 PostgreSQL→Kafka 10%，
+S5 MySQL 批量复制 15%（无延迟项），S6 文件→Loki 5%，S7 RabbitMQ→Kafka 7%，S8 MQTT→Kafka 6%，
+S9 SQL Server→Kafka 7%。

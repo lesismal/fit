@@ -1,0 +1,19 @@
+{
+  "name": "bench",
+  "config": {
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+    "tasks.max": "1",
+    "database.hostname": "mssql",
+    "database.port": "1433",
+    "database.user": "sa",
+    "database.password": "fit-syncbench-1",
+    "database.names": "shop",
+    "database.encrypt": "false",
+    "topic.prefix": "bench",
+    "table.include.list": "dbo.items",
+    "snapshot.mode": "no_data",
+    "include.schema.changes": "false",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "bench-schema-history"
+  }
+}

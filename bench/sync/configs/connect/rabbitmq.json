@@ -1,0 +1,18 @@
+{
+  "name": "bench",
+  "config": {
+    "connector.class": "org.apache.camel.kafkaconnector.springrabbitmqsource.CamelSpringrabbitmqsourceSourceConnector",
+    "tasks.max": "1",
+    "topics": "bench",
+    "key.converter": "org.apache.kafka.connect.converters.ByteArrayConverter",
+    "value.converter": "org.apache.kafka.connect.converters.ByteArrayConverter",
+    "camel.kamelet.spring-rabbitmq-source.host": "rabbitmq",
+    "camel.kamelet.spring-rabbitmq-source.port": "5672",
+    "camel.kamelet.spring-rabbitmq-source.username": "bench",
+    "camel.kamelet.spring-rabbitmq-source.password": "fit-syncbench-1",
+    "camel.kamelet.spring-rabbitmq-source.exchangeName": "bench",
+    "camel.kamelet.spring-rabbitmq-source.queues": "bench",
+    "camel.kamelet.spring-rabbitmq-source.routingKey": "bench",
+    "camel.kamelet.spring-rabbitmq-source.autoDeclare": "true"
+  }
+}

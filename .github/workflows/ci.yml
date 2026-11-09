@@ -359,7 +359,7 @@ jobs:
   # every sink through pipelines killed at random points, on one server of
   # each kind (sync-matrix.yml runs it whole, nightly).
   sync-interop:
-    name: Sync interop (${{ matrix.family }})
+    name: Sync interop (${{ matrix.label || matrix.family }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.minutes }}
     strategy:
@@ -367,7 +367,11 @@ jobs:
       # go test's -timeout per family, about five times a local run's
       # (2026-11-09, images pulled: search 80s, mysql 277s, postgres 31s,
       # mongo 91s, kafka 66s, tidb 208s, matrix 91s), the job's limit
-      # past it for the pulls and the servers' start.
+      # past it for the pulls and the servers' start. The second round's
+      # (I222): mq, mssql, olap and obs, and the matrix of its sources on
+      # one server each, the queues' and the databases', beside the first
+      # round's; the servers' starts dominate them (SQL Server, Doris and
+      # Pulsar a minute or two each).
       matrix:
         include:
           - {family: search, timeout: 15m, minutes: 30}
@@ -377,13 +381,19 @@ jobs:
           - {family: kafka, timeout: 15m, minutes: 30}
           - {family: tidb, timeout: 25m, minutes: 45}
           - {family: matrix, timeout: 20m, minutes: 40}
+          - {family: mq, timeout: 25m, minutes: 45}
+          - {family: mssql, timeout: 25m, minutes: 45}
+          - {family: olap, timeout: 20m, minutes: 40}
+          - {family: obs, timeout: 20m, minutes: 40}
+          - {family: matrix, label: matrix-mq, servers: "search mysql postgres mongo mq", timeout: 25m, minutes: 45}
+          - {family: matrix, label: matrix-db, servers: "search mysql postgres mongo mssql olap", timeout: 25m, minutes: 50}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: test/sync/run.sh
-        run: SYNC_FAMILIES=${{ matrix.family }} SYNC_TIMEOUT=${{ matrix.timeout }} test/sync/run.sh -v
+        run: SYNC_FAMILIES=${{ matrix.family }} MATRIX_SERVERS="${{ matrix.servers }}" SYNC_TIMEOUT=${{ matrix.timeout }} test/sync/run.sh -v
 
   # The container image with the Docker Compose example, and the systemd
   # units, each run as deploy/README.md and the examples' READMEs say (I66).

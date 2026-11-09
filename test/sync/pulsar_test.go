@@ -32,14 +32,15 @@ func pulsarServers(t *testing.T) []pulsarServer {
 	for _, v := range []string{"3", "4"} {
 		url, admin := os.Getenv("FIT_SYNC_PULSAR_"+v+"_URL"), os.Getenv("FIT_SYNC_PULSAR_"+v+"_ADMIN")
 		if url == "" || admin == "" {
-			if os.Getenv("FIT_SYNC_INTEROP") == "required" {
-				t.Fatalf("FIT_SYNC_PULSAR_%s_URL or _ADMIN is not set", v)
-			}
 			continue
 		}
 		out = append(out, pulsarServer{name: "pulsar" + v, url: url, admin: admin})
 	}
 	if len(out) == 0 {
+		// Required, one at least: a light run (the matrix's) starts one.
+		if os.Getenv("FIT_SYNC_INTEROP") == "required" {
+			t.Fatal("neither FIT_SYNC_PULSAR_3_URL nor FIT_SYNC_PULSAR_4_URL is set")
+		}
 		t.Skip("no Pulsar: FIT_SYNC_PULSAR_3_URL and FIT_SYNC_PULSAR_4_URL are not set (eval \"$(test/sync/pulsar.sh up)\" sets them)")
 	}
 	return out

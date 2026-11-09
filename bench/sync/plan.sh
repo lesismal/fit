@@ -7,7 +7,7 @@
 #   bench/sync/plan.sh [-n ROUNDS] DATE
 #
 # The results go in bench/results/sync-DATE: a results file for each item
-# (s1-files-128b-1f.json ... s5-mysql-batch.json) with its folder of
+# (s1-files-128b-1f.json ... s9-mssql-kafka.json) with its folder of
 # rounds, profiles and logs; tables.md, every item's table with its weight
 # and scores (benchreport -plan); scores.md, the ranking (benchreport
 # -scores). Progress is in plan.log there, each item's output in
@@ -55,6 +55,11 @@ item s2-mysql-es mysql-es
 item s3-mysql-kafka mysql-kafka
 item s4-pg-kafka pg-kafka
 item s5-mysql-batch mysql-batch
+# S6, files to Loki; S7-S9, the second round's sources (I222) into Kafka.
+item s6-files-loki files-loki
+item s7-rabbitmq-kafka rabbitmq-kafka
+item s8-mqtt-kafka mqtt-kafka
+item s9-mssql-kafka mssql-kafka
 
 report() {
 	if [ -n "${BENCHREPORT:-}" ]; then

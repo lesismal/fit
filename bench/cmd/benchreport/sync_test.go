@@ -52,7 +52,7 @@ func TestSyncTables(t *testing.T) {
 		}
 	}
 	text = runMain(t, "-in", filepath.Join(dir, "s5-mysql-batch.json"), "-plan", dir)
-	for _, want := range []string{"(weight 20.00%)", "| Score |", "| datax |   0.0 |         failed |", "datax failed: the sink had 40"} {
+	for _, want := range []string{"(weight 15.00%)", "| Score |", "| datax |   0.0 |         failed |", "datax failed: the sink had 40"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)
 		}
@@ -71,7 +71,7 @@ func TestSyncScores(t *testing.T) {
 	if len(p.runs) != 2 || &p.family[0] != &syncWorkloads[0] {
 		t.Fatalf("%d runs, family %v", len(p.runs), p.family)
 	}
-	if w := p.weights[item{"s1-files-128b-1f", "files", "s1-files-128b-1f"}]; math.Abs(w-0.25) > 1e-12 {
+	if w := p.weights[item{"s1-files-128b-1f", "files", "s1-files-128b-1f"}]; math.Abs(w-0.20) > 1e-12 {
 		t.Errorf("S1 weight %v", w)
 	}
 	text := runMain(t, "-scores", dir)

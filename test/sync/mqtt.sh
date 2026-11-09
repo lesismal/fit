@@ -13,7 +13,7 @@
 #   test/sync/mqtt.sh down             remove them
 #
 # PREFIX names the containers (fit-sync-); MQTT_PORT is the first of the
-# host ports (29420: Mosquitto's three, then EMQX's at 29425). The tests
+# host ports (29450: Mosquitto's three, then EMQX's at 29455). The tests
 # read FIT_SYNC_MQTT_MOSQUITTO, FIT_SYNC_MQTT_MOSQUITTO_AUTH,
 # FIT_SYNC_MQTT_MOSQUITTO_TLS, FIT_SYNC_MQTT_CA, FIT_SYNC_MQTT_USER,
 # FIT_SYNC_MQTT_PASSWORD and FIT_SYNC_MQTT_EMQX. EMQX=0 leaves EMQX out, and
@@ -24,7 +24,7 @@ cd "$(dirname "$0")/../.."
 PREFIX=${PREFIX:-fit-sync-}
 MOSQUITTO_IMAGE=${MOSQUITTO_IMAGE:-eclipse-mosquitto:2.0.22}
 EMQX_IMAGE=${EMQX_IMAGE:-emqx/emqx:5.8.6}
-MQTT_PORT=${MQTT_PORT:-29420}
+MQTT_PORT=${MQTT_PORT:-29450}
 PASSWORD='Fit-sync-1nterop!'
 STATE=${TMPDIR:-/tmp}/${PREFIX}mqtt
 
