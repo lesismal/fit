@@ -8003,6 +8003,11 @@ has no `bt`/`distribute` commands yet (the Admin API serves them); the `.torrent
 `max_response_bytes` (4 MiB by default; a 1 TiB hybrid torrent with small pieces exceeds it). No fib
 gap found. Not run: the Linux race run, the full suite, the pages in a browser.
 
+**Fixed after I206 (main session, 2026-11-09):** the role keeps the peers a torrent was added with
+(`AddRequest.Peers`) in `torrents.json`, at most 128 of up to 256 bytes each, and gives them to it
+again at each start, so a target restarted during a distribution finds its peers again
+(`TestPeersKeptAcrossRestart`).
+
 ### I207 (second phase) A tracker store the cluster shares
 
 - **Do**: a `tracker.Store` on fit's shared storage (redis, etcd), so trackers on several members

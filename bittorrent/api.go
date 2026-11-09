@@ -302,6 +302,7 @@ func (r *Role) add(req AddRequest, maxTemp int) (Status, error) {
 		}
 		rec.torrentSaved = true
 	}
+	rec.peers = keptPeers(req.Peers)
 	if err := r.restore(rec, req.Peers); err != nil {
 		if torrentBytes != nil {
 			_ = removeFiles(r.dataDir, rec.id)

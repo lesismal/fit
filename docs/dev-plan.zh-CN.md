@@ -5687,6 +5687,9 @@ race 测试与完整测试套件（留给主会话）。
 尚无 `bt`/`distribute` 命令（Admin API 已提供）；`.torrent` 文件受 `max_response_bytes` 限制（默认 4 MiB；小分片的 1 TiB 混合种子
 会超出）。未发现 fib 的缺口。未运行：Linux 上的 race、完整测试、浏览器中的页面。
 
+**I206 之后修复（主会话，2026-11-09）：** 角色把种子添加时给的 peer（`AddRequest.Peers`）保存在 `torrents.json` 中，最多 128 个、
+每个最长 256 字节，并在每次启动时再交给它，这样分发途中重启的目标能重新找到它的 peer（`TestPeersKeptAcrossRestart`）。
+
 ### I207 （第二阶段）集群共享的 tracker Store
 
 - **做什么**：基于 fit 共享存储（redis、etcd）的 `tracker.Store`，让多个成员上的 tracker 如同一个。

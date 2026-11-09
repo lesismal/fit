@@ -124,7 +124,7 @@ own goroutines, never on a worker.
 
 | File | What it holds |
 | --- | --- |
-| `torrents.json` | The list, in queue order: each torrent's ID (its v1 info hash, or its v2 hash truncated), name, the magnet link it came from, its download directory, its category, its own limits, file priorities, whether it is paused or sequential, whether it completed, whether `bt_stream` added it on the fly (`temporary`), and when it was added; and the API's choice for the alternative rates |
+| `torrents.json` | The list, in queue order: each torrent's ID (its v1 info hash, or its v2 hash truncated), name, the magnet link it came from, its download directory, its category, its own limits, file priorities, whether it is paused or sequential, whether it completed, whether `bt_stream` added it on the fly (`temporary`), the peers it was added with (given to it again at each start), and when it was added; and the API's choice for the alternative rates |
 | `torrents/<id>.torrent` | Its .torrent file: the bytes it was added with, or, for a magnet link, the metainfo once its info has arrived from peers |
 | `resume/<id>.resume` | Its resume data (fib's `Torrent.ResumeData`): the pieces it has, and each file's size and modification time |
 

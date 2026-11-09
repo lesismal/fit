@@ -471,7 +471,7 @@ func (r *Role) restoreAll() {
 		if rec.mi == nil && rec.magnet == "" {
 			continue // its error says why
 		}
-		if err := r.restore(rec, nil); err != nil {
+		if err := r.restore(rec, rec.peers); err != nil {
 			rec.err = err
 			if r.log != nil {
 				r.log.Warnf("torrent %s (%s) not added: %v", rec.id, rec.name, err)

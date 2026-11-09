@@ -108,7 +108,7 @@ route stream { match { path /bt/* }; handler bt_stream { auth viewers; magnet tr
 
 | 文件 | 内容 |
 | --- | --- |
-| `torrents.json` | 列表，按队列顺序：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、分类、自己的限制、文件优先级、是否暂停或顺序下载、是否已完成、是否由 `bt_stream` 即时添加（`temporary`），以及添加时间；还有 API 对备用速率的选择 |
+| `torrents.json` | 列表，按队列顺序：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、分类、自己的限制、文件优先级、是否暂停或顺序下载、是否已完成、是否由 `bt_stream` 即时添加（`temporary`）、添加时给的 peer（每次启动时再交给它），以及添加时间；还有 API 对备用速率的选择 |
 | `torrents/<id>.torrent` | 其 .torrent 文件：添加时的字节，或磁力链接的种子从对端收到 info 后的元数据 |
 | `resume/<id>.resume` | 其续传数据（fib 的 `Torrent.ResumeData`）：已有的分片，以及每个文件的大小和修改时间 |
 

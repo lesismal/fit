@@ -88,6 +88,32 @@ type stateEntry struct {
 	// Completed says it had every piece it wants when last looked at, so
 	// that a restart does not take it for a new completion.
 	Completed bool `json:"completed,omitempty"`
+	// Peers are the addresses it was added with (AddRequest.Peers), given
+	// to it again at each start: a cluster's distribution names its peers
+	// so, a private torrent having no other way to find them (I206).
+	Peers []string `json:"peers,omitempty"`
+}
+
+// maxKeptPeers and maxPeerLen bound the peers a torrent keeps in the
+// state file.
+const (
+	maxKeptPeers = 128
+	maxPeerLen   = 256
+)
+
+// keptPeers is peers as the state file keeps them: at most maxKeptPeers,
+// each at most maxPeerLen bytes, the rest left out.
+func keptPeers(peers []string) []string {
+	var out []string
+	for _, p := range peers {
+		if len(out) == maxKeptPeers {
+			break
+		}
+		if p != "" && len(p) <= maxPeerLen {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // record is a torrent of the role: what the state keeps of it, and the
@@ -105,6 +131,7 @@ type record struct {
 	category   string
 	limits     TorrentLimits
 	completed  bool
+	peers      []string // the addresses it was added with, kept
 
 	// held is why the role keeps the torrent paused, when it does, beside
 	// paused (the API's or its seed limit's): holdStart until the role's
@@ -145,7 +172,7 @@ type record struct {
 func (r *record) entry() stateEntry {
 	e := stateEntry{ID: r.id, Name: r.name, Magnet: r.magnet, Dir: r.dir, Priorities: r.priorities,
 		Sequential: r.sequential, Paused: r.paused, Added: r.added, Category: r.category, Completed: r.completed,
-		Temporary: r.temporary}
+		Temporary: r.temporary, Peers: r.peers}
 	if !r.limits.IsZero() {
 		l := r.limits
 		e.Limits = &l
@@ -234,7 +261,7 @@ func loadState(dir string) ([]*record, string, error) {
 		}
 		rec := &record{id: e.ID, name: e.Name, magnet: e.Magnet, dir: e.Dir, priorities: e.Priorities,
 			sequential: e.Sequential, paused: e.Paused, added: e.Added, category: e.Category, completed: e.Completed,
-			temporary: e.Temporary}
+			temporary: e.Temporary, peers: keptPeers(e.Peers)}
 		if e.Limits != nil {
 			rec.limits = *e.Limits
 		}
