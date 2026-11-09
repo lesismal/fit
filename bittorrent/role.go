@@ -165,6 +165,9 @@ type Role struct {
 	// while calling the client, whose event goroutine takes it.
 	evMu       sync.Mutex
 	storageErr map[string]string
+	// torrentIDs are the IDs of the torrents the role added, which their
+	// events are kept under (torrentID), guarded by evMu.
+	torrentIDs map[*fibbt.Torrent]string
 
 	// events are the role's events (events.go); banned counts the peers
 	// the clients banned; acct are the categories' counters, guarded by
@@ -183,7 +186,7 @@ type Role struct {
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Role {
 	r := &Role{host: h, engine: h.Engine, key: h.Upstream, log: h.Log, byID: map[string]*record{},
-		storageErr: map[string]string{}, events: newHub(), acct: map[string]*catTotals{}, now: time.Now, diskFree: medialib.DiskFree, tick: defaultTick,
+		storageErr: map[string]string{}, torrentIDs: map[*fibbt.Torrent]string{}, events: newHub(), acct: map[string]*catTotals{}, now: time.Now, diskFree: medialib.DiskFree, tick: defaultTick,
 		fetchSem: make(chan struct{}, MaxURLFetches), watchSeen: map[string]stamp{}, watchLast: map[string]string{}}
 	r.rescan = r.rescanLibrary
 	if r.key == nil {
@@ -418,7 +421,7 @@ func (r *Role) onEvent(e fibbt.Event) {
 			}
 			return
 		}
-		id := idOf(e.Torrent.InfoHash(), e.Torrent.InfoHashV2())
+		id := r.torrentID(e.Torrent)
 		msg := e.Err.Error()
 		r.evMu.Lock()
 		changed := r.storageErr[id] != msg
@@ -431,13 +434,40 @@ func (r *Role) onEvent(e fibbt.Event) {
 			r.event(Event{Type: EventError, Torrent: id, Name: e.Torrent.Name(), Error: msg})
 		}
 	case fibbt.EventSeedLimit:
-		r.event(Event{Type: EventSeedLimit, Torrent: idOf(e.Torrent.InfoHash(), e.Torrent.InfoHashV2()), Name: e.Torrent.Name()})
+		r.event(Event{Type: EventSeedLimit, Torrent: r.torrentID(e.Torrent), Name: e.Torrent.Name()})
 	case fibbt.EventPieceVerified, fibbt.EventCompleted, fibbt.EventStateChanged:
-		id := idOf(e.Torrent.InfoHash(), e.Torrent.InfoHashV2())
+		id := r.torrentID(e.Torrent)
 		r.evMu.Lock()
 		delete(r.storageErr, id)
 		r.evMu.Unlock()
 	}
+}
+
+// torrentID returns the ID of torrent t: its record's, which the role
+// keeps the storage errors under, or, for one it did not add (a published
+// torrent, or one whose event came before AddMagnet returned), its info's.
+func (r *Role) torrentID(t *fibbt.Torrent) string {
+	r.evMu.Lock()
+	id, ok := r.torrentIDs[t]
+	r.evMu.Unlock()
+	if ok {
+		return id
+	}
+	return idOf(torrentHashes(t, ""))
+}
+
+// setTorrent makes t rec's torrent, or forgets rec's when t is nil. r.mu
+// is held.
+func (r *Role) setTorrent(rec *record, t *fibbt.Torrent) {
+	r.evMu.Lock()
+	if rec.t != nil {
+		delete(r.torrentIDs, rec.t)
+	}
+	if t != nil {
+		r.torrentIDs[t] = rec.id
+	}
+	r.evMu.Unlock()
+	rec.t = t
 }
 
 // lastStorageErr returns the storage error kept for torrent id, or "".
@@ -498,7 +528,8 @@ func (r *Role) restore(rec *record, peers []string) error {
 	if err != nil {
 		return err
 	}
-	rec.t, rec.err, rec.genKnown, rec.applied = t, nil, false, limits
+	r.setTorrent(rec, t)
+	rec.err, rec.genKnown, rec.applied = nil, false, limits
 	rec.held, rec.holdMsg = holdNone, ""
 	if !rec.paused {
 		rec.held = holdStart
@@ -519,7 +550,7 @@ func (r *Role) dropTemporaries() {
 			if err := rec.t.Remove(true); err != nil && r.log != nil {
 				r.log.Warnf("temporary torrent %s: removing its data: %v", rec.id, err)
 			}
-			rec.t = nil
+			r.setTorrent(rec, nil)
 		}
 		r.removeRecord(rec)
 		if err := removeFiles(r.dataDir, rec.id); err != nil && r.log != nil {
@@ -551,7 +582,7 @@ func (r *Role) closeClient() {
 	r.pub.detachAll()
 	r.saveLocked(true)
 	for _, rec := range r.recs {
-		rec.t = nil
+		r.setTorrent(rec, nil)
 	}
 }
 
