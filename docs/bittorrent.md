@@ -2,23 +2,54 @@
 
 [English](bittorrent.md) | [简体中文](bittorrent.zh-CN.md)
 
-fit runs a BitTorrent client beside its gateway: the `bittorrent.client` role downloads and seeds
-torrents on fit's own fib engine, on one port for TCP and UDP, and keeps them across restarts
-([decision 037](decisions/037-bittorrent.md)). It is fib's client
+fit runs BitTorrent beside its gateway ([decision 037](decisions/037-bittorrent.md)), on fit's own
+fib engine, with fib's BitTorrent packages
 ([fib's BitTorrent docs](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)): v1, v2 and
 hybrid torrents, magnet links, TCP and uTP, MSE encryption, the DHT, peer exchange, local service
-discovery, HTTP and UDP trackers and web seeds. This page covers the role: its config, where it
-keeps its state, adding torrents (magnet links, .torrent files and URLs, `watch_dir`), categories,
-the queue, the disk checks, the alternative rates, each torrent's limits, the blocklists, what a
-reload changes, publishing a directory, and its bounds; the Admin API, the event stream, `fit bt`
-and the metrics; the `bt_stream` handler that plays a torrent's file while it downloads; and the
-`bittorrent.tracker` role. The pages come with a later item of the
-[development plan](dev-plan.md#bittorrent-downloading-and-seeding-a-tracker-publishing).
+discovery, HTTP and UDP trackers and web seeds. It has four parts:
 
-Off by default: without `bittorrent.client`, fit opens no BitTorrent port and keeps no state.
+- **The `bittorrent.client` role** downloads and seeds torrents on one port for TCP and UDP, and
+  keeps them across restarts: torrents added from magnet links, .torrent files and URLs, or a
+  `watch_dir`; categories with their own directories, limits and media library; a queue; disk
+  checks; alternative rates by schedule; each torrent's limits; blocklists.
+- **Publishing**: the client's `publish` entries build a directory's files into hybrid torrents and
+  seed them, with fit's own static files as their web seed, following the disk; the `bt_publish`
+  handler serves their .torrent files and magnet links.
+- **The `bt_stream` handler** plays a torrent's file over HTTP ranges while it downloads, and may add
+  a torrent by magnet link on the fly.
+- **The `bittorrent.tracker` role** is an HTTP (through the `bt_tracker` handler) and UDP tracker,
+  public or private with passkeys, with an allow-list.
+
+They are steered through the [Admin API](#the-admin-api), its [event stream](#events) and
+[`fit bt`](#fit-bt), the workbench's [pages](#the-pages) and the [assistant](#the-assistant), and
+measured by [metrics](#metrics). They are checked against libtorrent and anacrolix ([interoperability](#interoperability))
+and measured on the benchmark host ([performance](#performance)); [limits and security](#limits-and-security)
+says what to watch when running them on the internet.
+
+Off by default: without `bittorrent.client`, fit opens no BitTorrent port and keeps no state; without
+`bittorrent.tracker`, it tracks nothing.
+
+A config with every part (fit's .conf format; the same in JSON and YAML, as every config;
+[fit-examples' `bittorrent`](https://github.com/lesismal/fit-examples/tree/main/bittorrent) is a
+runnable version of it):
 
 ```fit
+listener web :8080 http/1.1 h2c
+admin { address 127.0.0.1:2019 }
+
 media_library films { roots /srv/downloads/films }
+
+# Passkeys of the private tracker: a static token, or a user's passkey, which
+# the Admin API derives from the secret and the user's name.
+media_auth members {
+	secret replace-with-a-long-random-secret
+	tokens seeder { token replace-with-a-long-random-token; play bittorrent/* }
+	users alice { password replace-with-a-password; play bittorrent/* }
+}
+# Who may play a torrent's file at /bt/, and add one there by magnet link.
+media_auth viewers {
+	tokens player { token replace-with-another-long-random-token; play bt/*; publish bt/* }
+}
 
 bittorrent {
 	client {
@@ -26,6 +57,7 @@ bittorrent {
 		data_dir /var/lib/fit/bittorrent
 		download_dir /srv/downloads
 		watch_dir /srv/torrents/watch
+		encryption prefer
 		limits {
 			upload_rate 1048576
 			seed_ratio 2
@@ -43,9 +75,32 @@ bittorrent {
 		access {
 			deny_files [/etc/fit/level1.p2p]
 		}
+		publish {
+			name releases
+			dir /srv/releases
+			web_seed https://example.com/releases/
+			announce https://example.com/tracker/announce
+		}
+	}
+	tracker {
+		listen :6969
+		auth members
+		allow_files /etc/fit/torrents.txt
 	}
 }
+
+route tracker { match { path /tracker/* }; handler bt_tracker }
+route torrents { match { path /torrents/* }; handler bt_publish }
+route releases {
+	match { path /releases/* }
+	handler static { root /srv/releases; strip_prefix /releases }
+}
+route stream { match { path /bt/* }; handler bt_stream { auth viewers; magnet true } }
 ```
+
+Here the client seeds `/srv/releases` with `https://example.com/releases/` as the web seed and the
+tracker's public announce URL; a private tracker (`auth`) needs a passkey in that URL, which every
+downloader of the published torrents then shares (see [limits and security](#limits-and-security)).
 
 ## The client
 
@@ -69,8 +124,7 @@ own goroutines, never on a worker.
 
 | File | What it holds |
 | --- | --- |
-| `torrents.json` | The list: each torrent's ID (its v1 info hash, or its v2 hash truncated), name, the magnet link it came from, its download directory, file priorities, whether it is paused or sequential, whether `bt_stream` added it on the fly (`temporary`), and when it was added |
-| `torrents.json` | The list, in queue order: each torrent's ID (its v1 info hash, or its v2 hash truncated), name, the magnet link it came from, its download directory, its category, its own limits, file priorities, whether it is paused or sequential, whether it completed, and when it was added; and the API's choice for the alternative rates |
+| `torrents.json` | The list, in queue order: each torrent's ID (its v1 info hash, or its v2 hash truncated), name, the magnet link it came from, its download directory, its category, its own limits, file priorities, whether it is paused or sequential, whether it completed, whether `bt_stream` added it on the fly (`temporary`), and when it was added; and the API's choice for the alternative rates |
 | `torrents/<id>.torrent` | Its .torrent file: the bytes it was added with, or, for a magnet link, the metainfo once its info has arrived from peers |
 | `resume/<id>.resume` | Its resume data (fib's `Torrent.ResumeData`): the pieces it has, and each file's size and modification time |
 
@@ -328,7 +382,7 @@ data), `TemporaryBytes` and `SetFilePriorities` (every file's priority, saved on
 
 The Admin API serves the client and the tracker under `/bittorrent/`, behind its token and
 `admin.access` as every endpoint, and the console passes them on as `/api/m/admin/bittorrent/...`
-(the event stream excepted). `/node` lists the capability `bittorrent`. Each call of the role's
+(the event stream on a route of its own, below). `/node` lists the capability `bittorrent`. Each call of the role's
 API runs on the request's goroutine (net/http's on the Admin API, the console's pool behind the
 console), never on a fib worker.
 
@@ -345,6 +399,7 @@ console), never on a fib worker.
 | `GET /bittorrent/torrents/<id>/trackers` | `{"trackers": [{"url", "tier"}], "web_seeds"}`, as its .torrent file or magnet link lists them |
 | `GET /bittorrent/alt_speed` | the alternative rates: mode, configured, active, the rates in force; `PUT` `{"mode": "auto"}`, `"on"` or `"off"` |
 | `GET /bittorrent/publish` | the publish entries and their torrents; `/bittorrent/publish/<name>` one |
+| `GET /bittorrent/publish/<name>/torrents/<id>` | a published torrent's .torrent file (`application/x-bittorrent`, as an attachment), which the pages offer |
 | `GET /bittorrent/events` | the events, as server-sent events (below) |
 | `GET /bittorrent/tracker/stats` | the tracker's totals |
 | `GET /bittorrent/tracker/torrents` | the allow-list's swarms (`offset`, `limit` at most 1000); `/bittorrent/tracker/torrents/<info hash>` one torrent's |
@@ -397,8 +452,13 @@ stream begins with an event `reset`, after which the client reads the torrents a
 has a buffer of 256 events: a client that does not take them fast enough is not skipped silently
 but sent an event `lagged` and disconnected, to reconnect from the last ID it had. At most 32
 streams run at once (`503` past them). When the role stops, an event `end` closes the stream; when
-the Admin API shuts down, too. The stream needs a connection of its own, so it is served on the
-Admin API's address and not through the console (`501` there).
+the Admin API shuts down, too. The stream needs a connection of its own: the Admin API serves it on
+its address, and the console on a route of its own, `GET /api/m/admin/bittorrent/events`, behind
+the session, since its proxy answers whole responses. There it is written on fib's connection: the
+worker subscribes and writes the stream's start, then one goroutine of the stream's own writes each
+event without waiting and, past the connection's watermark, waits for it to drain, at most 30s, after
+which the stream is cut; the same 32 streams bound both. A manager's pass-through to its members
+(the node switcher) answers whole responses too, so the pages poll there.
 
 The events go to fit's log too, under the logger `bittorrent`: torrents added and removed, bans and
 seed limits at info, completions and the alternative rates at info as before, storage errors at
@@ -449,6 +509,73 @@ so the counters keep what removed torrents counted and never go back while fit r
 | `fit_bittorrent_tracker_torrents`, `fit_bittorrent_tracker_peers`, `fit_bittorrent_tracker_max_torrents`, `fit_bittorrent_tracker_max_peers`, `fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`, `fit_bittorrent_tracker_scrapes_total` | counter | |
 | `fit_bittorrent_tracker_refused_total` | counter | `reason`: `unregistered`, `passkey`, `access` |
+
+## The pages
+
+The workbench has a **BitTorrent** menu (I204), beside Sync, for the config's console: it calls the
+Admin API's `/bittorrent/` endpoints through the console, and edits the shared draft.
+
+- **Torrents**: every torrent in queue order, with its name (and error), size, a progress bar, its
+  state and why the role holds it (queued, short of disk space), download and upload rates, the
+  time left at the present rate, its ratio (uploaded over size, as `seed_ratio` counts it), peers
+  and seeders, and category; filtered by state, category (or none) and a part of the name, the
+  filters the Admin API's own. Torrents picked are paused, resumed or removed, a removal asking
+  first whether their downloaded files go too. **Add torrent** takes a magnet link, a .torrent file
+  (sent raw as `application/x-bittorrent`, at most 32 MiB) or a URL fit downloads, with a category,
+  paused and sequential. **Recent events** lists the client's last 30 events since the page opened.
+- **A torrent** (`#/bittorrent/torrent/<id>`): **Overview**, its progress, rates, totals, peers,
+  ratio and time left, the pieces it has of all, its ID and hashes, directory, the date it was
+  added and its magnet link to copy; its category, queue position and sequential download, changed
+  at once, and its own limits (rates, connections, upload slots, seed ratio and time, saved together
+  or cleared), beside the limits in force; Pause or Resume, Recheck (after a confirm: it stops while
+  its files are checked again) and Remove. **Files**, each file's progress and priority (skip, low,
+  normal, high), set one by one or for the files picked. **Peers**, each peer's address, client,
+  connection (direction, uTP, encryption, seed, choked) and rates. **Trackers**, its trackers by
+  tier and its web seeds, as its .torrent file or magnet link names them.
+- The **alternative rates** are in the top bar of the client's pages: auto (the schedules), on or
+  off, and whether they hold now, with the rates.
+- **Tracker**: the tracker's torrents and peers against its bounds, announces and scrapes, refusals
+  by reason, private or public with its allow-list and UDP address; the allow-list's swarms, 100 a
+  page; and, for a private tracker, a user's passkey looked up for their announce URL, shown to
+  the person signed in and never kept.
+- **Publishing**: each publish entry, its directory, mode, web seed, last walk, files pending and
+  problems, and its torrents with their size, files, state and age, a **.torrent** download (the
+  Admin API's `/bittorrent/publish/<name>/torrents/<id>`) and the magnet link, opened or copied.
+- **BitTorrent config**: the whole `bittorrent` member, the client with its categories, limits,
+  `alt_speed` and `publish`, and the tracker, made from the schema; a save's problems under
+  `bittorrent` link here.
+
+The pages read the list every two seconds, for the rates and the progress, which no event carries;
+beside it they read the client's events from the console's stream, so that a torrent added,
+removed or changing state shows at once and a completion or a storage error is told. A break
+reconnects with `Last-Event-ID`; a `reset` reads the list again; without the stream (a member opened
+through a manager, the bound of streams, a fit without the role) they poll only, and the list says
+which (**live** or **polling**). A role that does not run here is said, with a link to the config
+page. The role's own `console` serves only its read-only module; these pages need `admin.console`.
+
+### The assistant
+
+The assistant reads the client and the tracker, and proposes changes to the torrents, under its
+levels as every tool ([the console](console.md#bittorrent)):
+
+| Tool | Level | What it does |
+| --- | --- | --- |
+| `bt_torrents` | `read` | the torrents in short (state, held, error, progress, size, rates, peers, ratio, time left), filtered by state, category and name (50, at most 200), with the alternative rates |
+| `bt_torrent` | `read` | a torrent's status, its first 100 files with their priorities, its first 50 peers and its trackers and web seeds |
+| `bt_tracker_stats` | `read` | the tracker's totals and refusals, and the allow-list's first 50 swarms |
+| `bt_add_propose` | `propose` | a torrent added by magnet link or .torrent URL, in a category, paused or sequential |
+| `bt_pause_propose` | `propose` | torrents paused, by ID (at most 100) |
+| `bt_resume_propose` | `propose` | torrents resumed, by ID (at most 100) |
+
+No passkey reaches a model: a torrent's magnet link is left out (its trackers' URLs may carry a
+private tracker's passkey), a tracker's URL is given as its scheme, host and last path element,
+a web seed's without its user or query, peers without their IDs, and a user's passkey is never
+read by a tool. The propose tools add steps to the conversation's one pending proposal, as the
+media ones do: checked on what runs now (the role and its client run, the category exists, the
+torrent is not held already, those named exist and are not paused, or paused, already, leaving out
+with a note those that are), applied after any config change of the proposal, in order, through
+the Admin API as the person who applies it after the second confirm. A step that fails leaves the
+others applied, the outcome `partial`.
 
 ## Playing a file while it downloads
 
@@ -529,6 +656,7 @@ does not have it, provided the request also has `publish` on `bt/<info hash>`:
 | `max_temporary` | 4 (at most 1000) |
 | `max_temporary_bytes` | 16 GiB |
 | `temporary_ttl` | 10m (at most 7 days) |
+
 ## The tracker
 
 The `bittorrent.tracker` role is a BitTorrent tracker, fib's
@@ -610,3 +738,99 @@ and as `/api/m/bittorrent.tracker/...` as a module. A public tracker cannot list
 tracks: fib's `MemoryStore` answers only for a torrent named. The Admin API serves them as
 `/bittorrent/tracker/stats`, `/bittorrent/tracker/torrents[/<hash>]` and
 `/bittorrent/tracker/passkey?user=`, with [metrics](#metrics).
+
+## Interoperability
+
+fit's roles are checked against two other clients by `test/btinterop`, a module of its own (so
+that anacrolix is never fit's dependency), in CI's `bittorrent-interop` job and locally with
+`test/btinterop/run.sh` (docker; a container with libtorrent's Python binding and cgo). Its tests
+build fit from the checkout and run it as a user does, steering it through the Admin API:
+[anacrolix/torrent](https://github.com/anacrolix/torrent) 1.61 in the test's process (uTP through
+go-libutp, so cgo) and [libtorrent-rasterbar](https://www.libtorrent.org/) 2.0.11 through
+`libtorrent_peer.py`. Every case passed on 2026-11-09 (fit 12f4795e with I205's tests, fib
+c82b427).
+
+| Case | anacrolix | libtorrent |
+| --- | --- | --- |
+| fit downloads from its seed: v1 and hybrid, .torrent file and magnet link, TCP and uTP, MSE off, preferred and RC4 required (8 cases) | passes | passes |
+| the same for v2 torrents (`btmh` magnet links, piece layers by BEP 52 hash requests; 3 cases) | (no v2-only torrents) | passes |
+| it downloads from fit's seed, the same cases | passes | passes |
+| a private torrent found only through fit's tracker: a seeder over HTTP with a token's passkey, a leecher over UDP (BEP 41 URL data) with a user's passkey from the Admin API; an unknown passkey refused | passes (v1) | passes (v1, hybrid, v2; fit's own client as the UDP leecher beside libtorrent over HTTP) |
+| `bt_stream` plays a 24 MiB file while it downloads from anacrolix: a range in the middle answered at 8% of the torrent, then the whole file; a magnet link added on the fly (temporary) | passes | |
+| a publish entry's web seed (fit's `static` route) alone, no BitTorrent peer: `per_file` and `whole_dir` torrents | `whole_dir` passes | both pass |
+
+The peers each case saw are checked through the Admin API: uTP or TCP as the case says, encrypted
+when required, plaintext when off. Quirks of the other clients found on the way, not fit's, so the
+tests go around them:
+
+- anacrolix takes the single file of a v2 or hybrid torrent for a directory (its file tree holds the
+  file's name), so it looks for the data below the name and refuses a single-file web seed URL not
+  ending in `/`: fit's `per_file` published torrents cannot be fetched from their web seed by
+  anacrolix. Nor does anacrolix's web seed ask for a torrent's last piece when it is short.
+- anacrolix 1.61 panics in its announcer (`panicif.False` in `updateTorrentInput`) while checking a
+  hybrid torrent it announces under both hashes; the tracker case uses a v1 torrent with it.
+
+## Performance
+
+`bench/bt.sh` runs `test/btinterop/btbench` on the benchmark host (rules 16-18; never locally): one
+1 GiB v1 torrent (1 MiB pieces) in `/dev/shm`, the client measured pinned to 4 CPUs (0-3), four fib
+clients on the other side pinned to CPUs 8-15, over loopback TCP, plaintext and with MSE (RC4). The
+client measured is fit, anacrolix 1.61, or fib's client alone in a process (fit's client is fib's,
+so the difference is fit's). CPU time and peak resident memory are the measured process's, from
+`/proc`. Results of 2026-11-09 are in
+[bench/results/bt-2026-11-09](../bench/results/bt-2026-11-09/summary.md), medians of 3 alternating
+rounds:
+
+| Scenario | Client | MiB/s | CPU % (of 400) | CPU s per GiB | Peak RSS MiB |
+| --- | --- | --- | --- | --- | --- |
+| download from 4 seeders, plaintext | fit | 705 | 158 | 2.28 | 179 |
+| | fib alone | 478 | 106 | 2.28 | 163 |
+| | anacrolix | 1039 | 225 | 2.23 | 1050 |
+| download from 4 seeders, RC4 | fit | 553 | 199 | 3.67 | 176 |
+| | fib alone | 363 | 137 | 3.85 | 152 |
+| | anacrolix | 759 | 283 | 3.81 | 1052 |
+| seed to 4 leechers, plaintext (MiB/s of all four) | fit | 1688 | 98 | 0.60 | 46 |
+| | fib alone | 1670 | 93 | 0.57 | 34 |
+| | anacrolix | 1110 | 133 | 1.23 | 1058 |
+| seed to 4 leechers, RC4 | fit | 933 | 215 | 2.35 | 56 |
+| | fib alone | 937 | 217 | 2.36 | 43 |
+| | anacrolix | 744 | 199 | 2.74 | 1060 |
+
+Seeding, fit is fib: 1.5 times anacrolix's rate plaintext at half its CPU per byte, 1.25 times with
+RC4, in a twentieth of its memory (anacrolix maps the whole file). Downloading, fit takes the same
+CPU per byte as anacrolix but reaches 0.68 (plaintext) and 0.73 (RC4) of its rate, using under two
+of its four CPUs: the download is bound by fib's torrent lock, under which every block received
+picks the next request by scanning the pieces (`pickPiece`, a fifth of the CPU in a profile of fib
+alone), and each 16 KiB block is its own `pwrite`. fib alone is slower still (0.68 of fit's rate),
+likely its own engine's defaults against fit's shared engine (not profiled further). Both are fib requests (see
+I205's open items in the development plan); the rounds spread under 2%, except anacrolix's
+plaintext download (7%).
+
+## Limits and security
+
+- **Ports.** The client's `listen` is open to every peer on the internet unless `access` says
+  otherwise; it accepts TCP and uTP, the DHT and UDP trackers' replies on the same UDP port.
+  `encryption require` refuses plaintext peers (some ISPs throttle plain BitTorrent), at the cost of
+  RC4 on every byte (see [performance](#performance)). `dht: false` and no trackers keep a
+  client off the public swarms entirely: it then talks only to the peers it is given.
+- **What may add torrents.** The Admin API (behind its token and `admin.access`), `fit bt`, a
+  `watch_dir` (whoever may write to it) and `bt_stream` with `magnet` (who has `publish` on
+  `bt/<info hash>`). A torrent added downloads from the internet into the server's disk, bounded by
+  `max_torrents`, `min_free_bytes` and, for `bt_stream`'s, `max_temporary` and
+  `max_temporary_bytes`. A .torrent URL is fetched from wherever it points, loopback and private
+  addresses included: the Admin API is the operator's (I198's decision 3).
+- **Paths.** No torrent writes outside its directory: fib refuses `..` and absolute components, and
+  the storage makes names safe; a category's relative `dir` stays below `download_dir`. Published
+  torrents' storage refuses writes, so a published file is never overwritten by a peer.
+- **Private trackers.** A passkey rides in the announce URL of every .torrent file that carries it:
+  whoever has such a file can announce as its owner. Give each user their own passkey (a user's
+  passkey, derived and revoked by rotating the policy's secret, or a token per user) rather than a
+  shared token; a `publish` entry's `announce` with a passkey hands that passkey to every
+  downloader of the published torrents, so publish to a public tracker (no `auth`, with `allow` or
+  `allow_files` restricting what it tracks) or with no tracker (web seed and DHT). The access log
+  never holds a passkey.
+- **Streams.** `bt_stream` without `auth` serves every torrent the client holds to whoever reaches the
+  route; with `auth`, a token's `play` grant names the torrents (`bt/*` for all).
+- **Not bounded here.** fib's client queues its events without a bound (fit's handler drains them
+  at once); fib's tracker store cannot change its bounds without a new store (swarms start again).
+  Both are fib requests in the development plan's open items.

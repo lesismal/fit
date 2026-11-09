@@ -41,6 +41,9 @@ TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或�
   转推到 RTMP 和 SRT 服务器。
 - [同步](docs/sync.zh-CN.md)：把文件、数据库的变更、主题、索引和存储桶中的记录搬到其他系统的流水线，就像 Filebeat、
   Canal、Debezium 和 DataX 那样，检查点不丢数据，对有事务的目标恰好一次，并有批处理作业和 WASM 插件。
+- [BitTorrent](docs/bittorrent.zh-CN.md)：在 fit 的引擎上下载和做种、重启后保留种子的客户端，以 fit 的静态文件作为
+  web seed 把目录发布为种子，边下载边通过 HTTP 播放种子里的文件，以及私有的 HTTP 和 UDP tracker；已与 libtorrent 和
+  anacrolix 互通验证。
 - [编写模块](docs/modules.zh-CN.md)：用 Go 扩展 fit，通过 `fit build` 编入。
 - [nginx、Caddy、Traefik 对比](docs/comparison.zh-CN.md)：fit 从三者各借鉴什么。
 - [路线图](docs/roadmap.zh-CN.md)：目标、设计原则和里程碑。

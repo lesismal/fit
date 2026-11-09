@@ -371,8 +371,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I201 | The `bittorrent.tracker` role: `bt_tracker` over HTTP, UDP, private passkeys, an allow-list, statistics | I196 | done |
 | I202 | Publishing a directory as hybrid torrents with web seeds, following the disk | I197 | done |
 | I203 | The Admin API, an SSE stream of events, `fit bt`, metrics | I198 | done |
-| I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | todo |
-| I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | todo |
+| I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | done |
+| I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | done |
 | I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
 | I207 | (second phase) A tracker store the cluster shares | I201 | todo |
 | I208 | (second phase) RSS auto-download | I198 | todo |
@@ -7548,6 +7548,94 @@ run: the Linux race run and the full suite (left to the main session).
   add dialog, the tracker's page, publishing's page; schema descriptions in `schema-zh.js`; the AI
   assistant's functions (list, add, pause) under its approval rules.
 - **Touches**: `app/workbench`, `assistant`.
+- **Done** 2026-11-09: a **BitTorrent** menu (`app/workbench/web/bittorrent/`, after Sync):
+  Torrents (state, why held, size, a progress bar, rates, time left, ratio, peers, category;
+  filtered by state, category and name through the Admin API; picked torrents paused, resumed or
+  removed with or without their data; Add torrent by magnet link, .torrent file sent raw, or URL,
+  with category, paused, sequential; the client's recent events), a torrent's Overview (numbers,
+  pieces had, hashes, directory, magnet link; category, queue position, sequential and its own
+  limits edited in place beside those in force; pause, resume, recheck, remove), Files (priorities
+  one by one or for the files picked), Peers and Trackers; the alternative rates (auto, on, off) in
+  the client pages' top bar; Tracker (totals against bounds, refusals by reason, the allow-list's
+  swarms paged, a user's passkey looked up for a private tracker); Publishing (entries, problems,
+  torrents with a .torrent download and the magnet link); BitTorrent config. English and Chinese.
+  Live updates: the console's own route `GET /api/m/admin/bittorrent/events` (`admin/btconsole.go`),
+  the role's stream written on fib's connection (the worker subscribes and writes the start, a
+  goroutine of the stream's own writes with `WriteNoWait` and waits for `OnWritable` past the
+  watermark, at most 30s), with `Last-Event-ID`, the role's 32 subscribers bounding it; the pages
+  read it beside a poll every 2s for rates, and poll only where it cannot stream. A new Admin API
+  endpoint `GET /bittorrent/publish/<name>/torrents/<id>` serves a published .torrent file.
+  `schema-zh.js` already had every BitTorrent description (I197–I203 added them; the test passes).
+  The assistant (`assistant/tools_bittorrent.go`, `proposals_bt.go`): read tools `bt_torrents`,
+  `bt_torrent`, `bt_tracker_stats` (no magnet link, trackers by scheme, host and last element, web
+  seeds without user or query, no peer IDs, no passkey), and propose tools `bt_add_propose`,
+  `bt_pause_propose`, `bt_resume_propose`, whose steps join the proposal's media steps, checked on
+  what runs now and applied after the config by the person who confirms; a group `bittorrent` on
+  the Functions page, words for the proposals' cards, the system prompt, `member` on a manager.
+  Docs: [BitTorrent](bittorrent.md#the-pages) (the pages, the assistant, the console's stream, the
+  .torrent endpoint), [the console](console.md#bittorrent) (the pages and the tools), the reference's
+  chapter, in both languages. Tests: `admin` (the console's stream behind a session, an add's
+  events, heartbeats, replay by `Last-Event-ID` and `?after`, reset, a bad ID, 404 without the role,
+  the bound of 32 and 503 with `Retry-After`, a slot freed, a client reading nothing dropped with
+  `lagged`, `end` when the role stops; the .torrent endpoint and its 404s), `assistant` (each read
+  tool, its arguments and errors, the role not running, nothing secret in the results; the propose
+  tools in a chat and over MCP, applied in order as the person, with a config change, a torrent gone,
+  a failure making the outcome `partial`; every check refusing a step; the levels and groups),
+  `app/workbench` (every word in both languages and used, every state, hold, event and priority
+  worded, the endpoints the pages call, the assistant's tools worded). Checked in the browser
+  pane against a local fit: list, add, live events, resume, remove with data, a torrent's overview
+  and limits, alternative rates, tracker, publishing and its .torrent download, config, in English
+  and Chinese.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **Live updates by a streaming console route, and a poll**: the console serves the event stream on
+   a route of its own on fib's connection, rather than the pages polling alone, since events say at
+   once what a poll says late (a completion, an error, a ban); the list is still read every 2s for
+   rates and progress, which no event carries. Alternatives: poll only; a streaming mode of the
+   console's proxy for every endpoint.
+2. **The console's stream waits at most 30s for a client past the watermark** (`btStall`), then is
+   cut; it shares the role's 32 subscribers with the Admin API's stream. Not configurable.
+   Alternatives: a bound of the console's own; the console's `write_stall_timeout`.
+3. **Through a manager's node switcher the pages poll only**: its pass-through answers whole
+   responses. Alternative: a streaming pass-through in `cluster`.
+4. **One module, `bittorrent`, on the server module `admin`**, shown wherever `admin.console` is (as
+   Sync), each page saying when its role does not run, with a link to BitTorrent config; the role's
+   own `console` serves only its read-only routes, without these pages. Alternatives: a module per
+   role, shown only while it runs; pages on the role's own console.
+5. **The alternative rates are in the top bar of the client's pages** (Torrents and a torrent), not
+   of every page. Alternative: a `topbar` on every page.
+6. **The assistant's writes are propose tools** (add, pause, resume), whose steps join the
+   proposal's media steps (`MediaAction`, `media` in the view and the apply's answer): checked on
+   what runs now, applied by a person whose level is apply after the second confirm, as the media
+   steps are. No tool removes, rechecks or limits a torrent: those stay the person's, on the pages.
+   Alternatives: a `bittorrent` member of its own in the view; `bt_remove_propose` and the like.
+7. **What reaches the model**: no magnet link, trackers as scheme, host and last path element (a
+   private tracker's passkey sits in the path), web seeds without user or query, peers without IDs,
+   no passkey (the Tracker page reads them for the person); peers' addresses go as they are, as the
+   media tools send addresses. Alternative: hash the peers' addresses as playback subjects are.
+8. **Ratio is uploaded over size**, as `seed_ratio` counts it, and the time left is what it wants at
+   its present rate while it downloads, both computed by the pages and the tools, not the role.
+   Alternative: uploaded over downloaded (qBittorrent's).
+9. **Pieces are shown as had of all, with a bar**, not as a map: the role's status gives the counts
+   only. Alternative: a piece map from fib's `Torrent.HavePiece` in the role's API (open).
+10. **A published torrent's .torrent file comes from a new Admin API endpoint**,
+    `GET /bittorrent/publish/<name>/torrents/<id>`, read from the role's snapshot, rather than a link
+    to a `bt_publish` route, which the config may not have and which is served on a listener's origin.
+    Published torrents are seeded beside the client's list, so they link to no torrent page.
+11. **Categories offered come from the running config** (`GET /config`), not the draft: a category
+    only in the draft is refused by the role. Alternative: the draft's.
+12. **The page adds a .torrent file raw** (`application/x-bittorrent`, options in the query),
+    checked against 32 MiB before it is sent. Alternative: a form.
+13. **Files take four priorities**: skip, low, normal, high (0, 1, 4, 7), fib's named ones, though the
+    role takes 0–7. Alternative: all eight.
+14. **`bt_add_propose` of a torrent `bt_stream` added on the fly is allowed, with a warning** that it
+    is kept as an ordinary torrent as it is (I203's decision 10).
+15. `TestChatSummarizes`'s window grew from 5600 to 6200 tokens for the new tools' descriptions.
+
+Open from it: a piece map (the role's API, from fib's `Torrent.HavePiece`); pages on the role's own
+console; a streaming pass-through for the node switcher. Not run: the Linux race run and the full
+suite (left to the main session).
 
 ### I205 Interop, failure tests, benchmarks and docs
 
@@ -7555,6 +7643,94 @@ run: the Linux race run and the full suite (left to the main session).
   way); disk full, restarts and reloads under load; throughput and CPU on the benchmark host only;
   `docs/bittorrent*.md`, the reference, an example in fit-examples.
 - **Touches**: `test`, `bench`, `docs`, fit-examples.
+- **Done** 2026-11-09 (branch `bt-i205`; fit-examples branch `bittorrent-example`):
+  - **Interop**: `test/btinterop`, a module of its own (anacrolix/torrent 1.61 and fib's metainfo
+    builder; decision 037 covers the dependency), whose tests build fit from the checkout and run it,
+    steered through the Admin API, against anacrolix in the test's process and libtorrent-rasterbar
+    2.0.11 through `libtorrent_peer.py` (`FIT_LIBTORRENT=1`); `run.sh` runs it all in docker, CI's
+    `bittorrent-interop` job on the runner with Ubuntu's python3-libtorrent and cgo. 46 cases, all
+    passing: fit downloading from and seeding to both (v1, hybrid and, with libtorrent, v2; .torrent
+    files and magnet links; TCP and uTP; MSE off, preferred and RC4 required; the peers' transport and
+    encryption checked through the Admin API); the private tracker over HTTP (a token's passkey) and
+    UDP (a user's passkey from the Admin API, BEP 41) for anacrolix and libtorrent swarms, fit's own
+    client among them, an unknown passkey refused; `bt_stream` playing a 24 MiB file while it
+    downloads from anacrolix (a middle range answered at 8% of the torrent) and a magnet link added on
+    the fly; a publish entry's web seed (fit's `static` route) alone, `per_file` and `whole_dir`, by
+    libtorrent, `whole_dir` by anacrolix.
+  - **Failure tests** (`bittorrent/failure_test.go`), beside I197–I203's: the disk filling during a
+    download (ENOSPC writes while the free-space check still finds room: the error in the status, the
+    blocks asked for again; then the check pausing it; then completing, no hash failure); a stop and
+    restart in the middle of three downloads (every piece had again with no read, then completing); a
+    `listen` change while downloading (the pieces kept, no read, completing); the only seeder cut in the
+    middle of a piece's block, then back; one of two seeders stalled mid-piece (the download done from
+    the other in about 2s, far before fib's 60s snub).
+  - **Benchmarks** on the benchmark host: `bench/bt.sh`, `bench/bt/host.sh`, `bench/bt/summary.py`
+    and `test/btinterop/btbench`; one 1 GiB torrent in `/dev/shm`, the client measured on 4 CPUs, four
+    fib peers on 8 others, fit beside anacrolix and fib's client alone, plaintext and RC4, 3 alternating
+    rounds; results in `bench/results/bt-2026-11-09` (medians). Seeding to 4 leechers fit does 1688
+    MiB/s plaintext (anacrolix 1110) at 0.60 CPU s/GiB (1.23), 933 with RC4 (744), peak RSS 46–56 MiB
+    (anacrolix about 1050). Downloading from 4 seeders fit does 705 MiB/s plaintext (anacrolix 1039,
+    fib alone 478) and 553 with RC4 (759, 363), at anacrolix's CPU per byte, under 2 of its 4 CPUs:
+    bound by fib's torrent lock (below).
+  - **Docs**: [BitTorrent](bittorrent.md) in both languages: an overview of the four parts, a config
+    with every part (validated with `fit validate`), the duplicated state row merged, and new
+    sections Interoperability, Performance and Limits and security; the configuration overview's
+    rows and the README's docs list, both languages. **Example**: fit-examples' `bittorrent/`
+    (client with categories, `alt_speed`, `watch_dir` and a publish entry, the private tracker,
+    `bt_tracker`, `bt_publish`, `static`, `bt_stream` with `magnet`, the Admin API), listed in its
+    READMEs; fit-examples' pin already had the roles.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **The interop tests drive the fit binary through its Admin API**, as test/mcpsdk does, rather
+   than the roles in-process: they check what a user runs, need no `replace` of fit in the module,
+   and the same harness serves the benchmark. The module requires fib at fit's version for the test
+   torrents only. Alternative: in-process roles with `replace github.com/lesismal/fit => ../..`.
+2. **The anacrolix cases run in every `go test` of the module; the libtorrent cases need
+   `FIT_LIBTORRENT=1`**, as fib's; CI runs both, with `-race`, within 25 minutes. The module is not in
+   fit's main `go test ./...` (a module of its own).
+3. **Interop transfers run at 2 MiB/s** (fit's own `limits`), so that a case lasts the seconds it
+   takes to see its peers through the Admin API, which lists only connected peers. Alternative: an
+   event for each peer connected.
+4. **The other clients' bugs are gone around in the tests and recorded, not fixed upstream yet**:
+   anacrolix takes a v2/hybrid single-file torrent for a directory (its web seed refuses a URL not
+   ending in `/`, so `per_file` web seeds are not fetched by anacrolix, and it looks for the file below
+   its name), its web seed skips a short last piece, and 1.61 panics announcing a hybrid torrent it
+   checks; the cases use v1 or `whole_dir` with it. Alternative: report them to anacrolix and skip
+   the cases until fixed.
+5. **The benchmark's baseline is anacrolix, beside fib's client alone**; libtorrent is not installed
+   on the host, and through its Python binding the harness would measure Python too. The other side is
+   fib's client (its seeders take the first one's resume data, checking nothing); data in `/dev/shm`
+   so the disk is not measured; 1 GiB, v1, 1 MiB pieces, TCP; CPU and peak RSS from `/proc`. Not a
+   plan report: no scores or ranking (rule 24 is for the full plan). The host's LLM service was left
+   running (idle; 13 GiB free), as the user prefers.
+6. **btbench lives in test/btinterop** (`btbench/`), the module that already has anacrolix, not in
+   `bench/` (whose Go is fit's module). It waits for fit's `pieces_have` rather than `complete`, which
+   the role sets at its manager's look every second (see open items).
+7. **The failure tests fake a full disk with a storage wrapper and the free-space function**, not a
+   tmpfs or loop device (root, Linux only); cut and stalled peers through a TCP relay of the test's.
+8. **The docs' config example is .conf with placeholders** (no `${...}`), the tracker public in it
+   so that the published torrents carry no passkey; the security notes say why.
+
+Open from it:
+
+- **fib: a torrent's download is bound by its lock** (a fib request to file): every block received
+  takes `Torrent.mu` and refills the peer's requests, `nextRequest`/`pickPiece` scanning pieces with
+  `math/rand` (24% of fib alone's CPU in a profile of a 1 GiB download from 4 seeders, `pickPiece`
+  21%), and each 16 KiB block is a `pwrite` of its own (30%). Suggested: a peer reserves a piece and
+  requests its blocks without picking again, refilling when its pipeline falls below half its reqq;
+  rarest-first kept in buckets updated on have/bitfield rather than scanned; blocks written per piece
+  or per run (`pwritev`) on the disk pool. fit would gain the download rate with no API change.
+- **fib alone downloads at 0.68 of fit's rate** on its own engine: its engine defaults for a client
+  made without `SharedEngine` are worth a look in fib.
+- **fit: `Status.Complete` lags up to a second** (the manager's look, I198's decision 10): an API
+  client polling for completion waits for it; computing it from fib's torrent when asked would not
+  count a completion twice if the count stays the manager's.
+- Report the anacrolix bugs above upstream. fit-examples' `bittorrent/` announces published torrents
+  to its private tracker with a static token, which every downloader then shares (its comments call
+  the token a placeholder; the docs' security notes say to publish to a public tracker).
+- Not run: the full `go test -race ./...` and the Linux race run (left to the main session); the
+  interop tests ran in docker (Linux) and anacrolix's on macOS.
 
 ### I206 (second phase) The cluster and BitTorrent distribution
 

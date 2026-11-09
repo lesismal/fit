@@ -2,18 +2,44 @@
 
 [English](bittorrent.md) | [简体中文](bittorrent.zh-CN.md)
 
-fit 在网关旁运行一个 BitTorrent 客户端：`bittorrent.client` 角色在 fit 自己的 fib 引擎上、以 TCP 和 UDP 共用的一个端口
-下载和做种，并在重启后保留种子（[决定 037](decisions/037-bittorrent.zh-CN.md)）。它就是 fib 的客户端
-（[fib 的 BitTorrent 文档](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)）：v1、v2 和混合种子，磁力链接，
-TCP 和 uTP，MSE 加密，DHT，对端交换，本地服务发现，HTTP 和 UDP tracker，以及 web seed。本页讲这个角色：配置、状态保存
-在哪里、添加种子（磁力链接、.torrent 文件和 URL、`watch_dir`）、分类、队列、磁盘检查、备用速率、每个种子的限制、屏蔽列表、
-重载改变什么、发布目录和它的上限；Admin API、事件流、`fit bt` 和指标；边下载边播放种子文件的 `bt_stream` 处理器；以及
-`bittorrent.tracker` 角色。页面随[开发计划](dev-plan.zh-CN.md)中之后的条目而来。
+fit 在网关旁运行 BitTorrent（[决定 037](decisions/037-bittorrent.zh-CN.md)），运行在 fit 自己的 fib 引擎上，使用 fib 的
+BitTorrent 包（[fib 的 BitTorrent 文档](https://github.com/lesismal/fib/blob/main/docs/bittorrent.md)）：v1、v2 和混合种子，
+磁力链接，TCP 和 uTP，MSE 加密，DHT，对端交换，本地服务发现，HTTP 和 UDP tracker，以及 web seed。它分四部分：
 
-默认关闭：不写 `bittorrent.client` 时，fit 不打开 BitTorrent 端口，也不保存状态。
+- **`bittorrent.client` 角色**以 TCP 和 UDP 共用的一个端口下载和做种，并在重启后保留种子：种子可从磁力链接、.torrent
+  文件和 URL 或 `watch_dir` 添加；分类有自己的目录、限制和媒体库；队列；磁盘检查；按时间表的备用速率；每个种子的限制；
+  屏蔽列表。
+- **发布**：客户端的 `publish` 条目把目录中的文件生成 hybrid 种子并做种，以 fit 自己的静态文件作为 web seed，跟随磁盘
+  变化；`bt_publish` 处理器提供它们的 .torrent 文件和磁力链接。
+- **`bt_stream` 处理器**在种子下载的同时经 HTTP Range 播放其中的文件，并可按磁力链接即时添加种子。
+- **`bittorrent.tracker` 角色**是 HTTP（经 `bt_tracker` 处理器）和 UDP 的 tracker，可公开，也可用 passkey 设为私有，并带
+  允许列表。
+
+它们经 [Admin API](#admin-api)、其[事件流](#事件)、[`fit bt`](#fit-bt)、工作台的[页面](#页面)和[助手](#助手)操控，由[指标](#指标)度量。它们与 libtorrent 和 anacrolix 做过互通检查（[互通](#互通)），并在基准主机上测量过（[性能](#性能)）；
+[限制与安全](#限制与安全)说明在互联网上运行时要注意什么。
+
+默认关闭：不写 `bittorrent.client` 时，fit 不打开 BitTorrent 端口，也不保存状态；不写 `bittorrent.tracker` 时，它不跟踪任何种子。
+
+包含所有部分的配置（fit 的 .conf 格式；JSON 和 YAML 中相同，与所有配置一样；
+[fit-examples 的 `bittorrent`](https://github.com/lesismal/fit-examples/tree/main/bittorrent) 是它可运行的版本）：
 
 ```fit
+listener web :8080 http/1.1 h2c
+admin { address 127.0.0.1:2019 }
+
 media_library films { roots /srv/downloads/films }
+
+# 私有 tracker 的 passkey：静态令牌，或用户的 passkey，
+# 后者由 Admin API 从 secret 和用户名派生。
+media_auth members {
+	secret replace-with-a-long-random-secret
+	tokens seeder { token replace-with-a-long-random-token; play bittorrent/* }
+	users alice { password replace-with-a-password; play bittorrent/* }
+}
+# 谁可以在 /bt/ 播放种子的文件，并在那里按磁力链接添加种子。
+media_auth viewers {
+	tokens player { token replace-with-another-long-random-token; play bt/*; publish bt/* }
+}
 
 bittorrent {
 	client {
@@ -21,6 +47,7 @@ bittorrent {
 		data_dir /var/lib/fit/bittorrent
 		download_dir /srv/downloads
 		watch_dir /srv/torrents/watch
+		encryption prefer
 		limits {
 			upload_rate 1048576
 			seed_ratio 2
@@ -38,9 +65,31 @@ bittorrent {
 		access {
 			deny_files [/etc/fit/level1.p2p]
 		}
+		publish {
+			name releases
+			dir /srv/releases
+			web_seed https://example.com/releases/
+			announce https://example.com/tracker/announce
+		}
+	}
+	tracker {
+		listen :6969
+		auth members
+		allow_files /etc/fit/torrents.txt
 	}
 }
+
+route tracker { match { path /tracker/* }; handler bt_tracker }
+route torrents { match { path /torrents/* }; handler bt_publish }
+route releases {
+	match { path /releases/* }
+	handler static { root /srv/releases; strip_prefix /releases }
+}
+route stream { match { path /bt/* }; handler bt_stream { auth viewers; magnet true } }
 ```
+
+这里客户端为 `/srv/releases` 做种，以 `https://example.com/releases/` 作为 web seed，并使用 tracker 的公开 announce URL；
+私有 tracker（`auth`）需要在该 URL 中放 passkey，发布种子的每个下载者便会共用它（见[限制与安全](#限制与安全)）。
 
 ## 客户端
 
@@ -59,8 +108,7 @@ bittorrent {
 
 | 文件 | 内容 |
 | --- | --- |
-| `torrents.json` | 列表：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、文件优先级、是否暂停或顺序下载、是否由 `bt_stream` 即时添加（`temporary`），以及添加时间 |
-| `torrents.json` | 列表，按队列顺序：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、分类、自己的限制、文件优先级、是否暂停或顺序下载、是否已完成，以及添加时间；还有 API 对备用速率的选择 |
+| `torrents.json` | 列表，按队列顺序：每个种子的 ID（v1 info hash，或截断的 v2 hash）、名称、来源磁力链接、下载目录、分类、自己的限制、文件优先级、是否暂停或顺序下载、是否已完成、是否由 `bt_stream` 即时添加（`temporary`），以及添加时间；还有 API 对备用速率的选择 |
 | `torrents/<id>.torrent` | 其 .torrent 文件：添加时的字节，或磁力链接的种子从对端收到 info 后的元数据 |
 | `resume/<id>.resume` | 其续传数据（fib 的 `Torrent.ResumeData`）：已有的分片，以及每个文件的大小和修改时间 |
 
@@ -265,7 +313,7 @@ API 还为 `bt_stream` 的临时种子提供了钩子：`AddTemporary`（受调�
 ## Admin API
 
 Admin API 在 `/bittorrent/` 下提供客户端和 tracker 的端点，与所有端点一样受其令牌和 `admin.access` 保护；控制台以
-`/api/m/admin/bittorrent/...` 转发它们（事件流除外）。`/node` 列出能力 `bittorrent`。角色 API 的每次调用都运行在请求自己的
+`/api/m/admin/bittorrent/...` 转发它们（事件流由控制台自己的路由提供，见下）。`/node` 列出能力 `bittorrent`。角色 API 的每次调用都运行在请求自己的
 goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的池），从不在 fib worker 上。
 
 | 端点 | 作用 |
@@ -281,6 +329,7 @@ goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的�
 | `GET /bittorrent/torrents/<id>/trackers` | `{"trackers": [{"url", "tier"}], "web_seeds"}`，即其 .torrent 文件或磁力链接所列 |
 | `GET /bittorrent/alt_speed` | 备用速率：模式、是否配置、是否生效、当前生效的速率；`PUT` `{"mode": "auto"}`、`"on"` 或 `"off"` |
 | `GET /bittorrent/publish` | 发布条目及其种子；`/bittorrent/publish/<name>` 一个 |
+| `GET /bittorrent/publish/<name>/torrents/<id>` | 已发布种子的 .torrent 文件（`application/x-bittorrent`，作为附件），页面提供下载 |
 | `GET /bittorrent/events` | 事件，以 server-sent events 推送（见下） |
 | `GET /bittorrent/tracker/stats` | tracker 的总计 |
 | `GET /bittorrent/tracker/torrents` | 允许列表中种子的 swarm（`offset`，`limit` 最多 1000）；`/bittorrent/tracker/torrents/<info hash>` 一个种子的 |
@@ -326,8 +375,11 @@ URL 下载的相同，边到达边读取，超出时以 `413` 拒绝（表单的
 `Last-Event-ID`（或 `?after=<id>`）重连的客户端会先收到它错过的事件，取自角色保留的最近 1024 个；其中有些已不再保留，或
 fit 此后重启过（ID 每次启动从 1 开始）时，事件流以事件 `reset` 开头，客户端此后应重新读取种子。每个事件流有 256 个事件的
 缓冲：取得不够快的客户端不会被悄悄跳过事件，而是收到事件 `lagged` 后被断开，从它拿到的最后一个 ID 重连。最多同时运行
-32 个事件流（超出为 `503`）。角色停止时以事件 `end` 关闭事件流；Admin API 关闭时也是。事件流需要独占一个连接，因此在
-Admin API 的地址上提供，不经控制台（控制台上为 `501`）。
+32 个事件流（超出为 `503`）。角色停止时以事件 `end` 关闭事件流；Admin API 关闭时也是。事件流需要独占一个连接：Admin API
+在其地址上提供，控制台则以自己的路由 `GET /api/m/admin/bittorrent/events` 在会话之后提供，因为它的代理只回答完整的应答。
+控制台在 fib 的连接上写出事件流：worker 订阅并写出流的开头，之后由该流自己的一个 goroutine 不等待地写出每个事件，超过连接
+的水位时等待其排空，最多 30s，超时即断开；两者共用 32 个事件流的上限。管理端到成员的转发（节点切换器）同样只回答完整的
+应答，因此页面在那里只轮询。
 
 事件也写入 fit 的日志，logger 为 `bittorrent`：添加、移除种子，封禁和做种限制为 info，完成和备用速率照旧为 info，存储错误
 为 error，状态变化为 debug。
@@ -374,6 +426,54 @@ fit bt alt on                           # auto、on、off；不带参数时显�
 | `fit_bittorrent_tracker_torrents`、`fit_bittorrent_tracker_peers`、`fit_bittorrent_tracker_max_torrents`、`fit_bittorrent_tracker_max_peers`、`fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`、`fit_bittorrent_tracker_scrapes_total` | counter | |
 | `fit_bittorrent_tracker_refused_total` | counter | `reason`：`unregistered`、`passkey`、`access` |
+
+## 页面
+
+工作台有一个 **BitTorrent** 菜单（I204），位于“数据同步”之后，供配置本身的控制台使用：它经控制台调用 Admin API 的
+`/bittorrent/` 端点，并编辑共享草稿。
+
+- **种子**：按队列顺序列出每个种子：名称（及错误）、大小、进度条、状态及角色保持它的原因（排队、磁盘空间不足）、下载与上传
+  速率、按当前速率的剩余时间、分享率（已上传量除以大小，与 `seed_ratio` 的计算一致）、peer 与做种者数、分类；可按状态、分类
+  （或无分类）和名称的一部分筛选，筛选由 Admin API 完成。所选种子可暂停、恢复或删除，删除前询问是否同时删除已下载的文件。
+  **添加种子**接受磁力链接、.torrent 文件（以 `application/x-bittorrent` 原样发送，最多 32 MiB）或由 fit 下载的 URL，可指定
+  分类、暂停与顺序下载。**最近事件**列出页面打开以来客户端最近的 30 个事件。
+- **单个种子**（`#/bittorrent/torrent/<id>`）：**概览**显示进度、速率、总量、peer、分享率与剩余时间、已有分片数与总分片数、
+  ID 与 hash、目录、添加时间以及可复制的磁力链接；分类、队列位置与顺序下载即改即生效，自身限制（速率、连接数、上传槽位、
+  做种分享率与时长）一起保存或清除，旁边显示当前生效的限制；暂停或恢复、重新校验（需确认：校验文件期间它会停止）与删除。
+  **文件**显示各文件的进度与优先级（不下载、低、普通、高），可逐个或对所选文件设置。**Peer**显示各 peer 的地址、客户端、
+  连接（方向、uTP、加密、做种、阻塞）与速率。**Tracker**按层级列出其 tracker 及其 Web 种子，即其 .torrent 文件或磁力链接所列。
+- **备用速率**位于客户端各页面的顶栏：自动（按计划）、开或关，以及当前是否生效及其速率。
+- **Tracker**：tracker 的种子与 peer 数及其上限、announce 与 scrape 数、按原因统计的拒绝、私有或公开及其白名单与 UDP 地址；
+  白名单中种子的 swarm，每页 100 个；私有 tracker 还可按用户查询其 passkey，用于该用户的 announce URL，只显示给登录者，
+  从不保存。
+- **发布**：各发布条目的目录、模式、Web 种子、上次遍历时间、待处理文件与问题，以及其种子的大小、文件数、状态与构建时间，
+  提供 **.torrent** 下载（Admin API 的 `/bittorrent/publish/<name>/torrents/<id>`）与磁力链接（打开或复制）。
+- **BitTorrent 配置**：整个 `bittorrent` 成员，由 schema 生成：客户端及其分类、限制、`alt_speed` 与 `publish`，以及 tracker；
+  保存时 `bittorrent` 下的问题链接到此页。
+
+页面每两秒读取一次列表，以更新事件不携带的速率与进度；同时从控制台的事件流读取客户端的事件，使添加、删除或状态变化的种子
+即时显示，并提示完成与存储错误。断开后带 `Last-Event-ID` 重连；收到 `reset` 时重新读取列表；没有事件流时（经管理端打开的
+成员、事件流已达上限、没有该角色的 fit）只轮询，列表上标出是哪一种（**实时**或**轮询**）。角色未在此运行时会说明，并链接到
+配置页。角色自己的 `console` 只提供其只读模块；这些页面需要 `admin.console`。
+
+### 助手
+
+助手读取客户端与 tracker，并提议对种子的修改，与所有工具一样受其级别约束（[控制台](console.zh-CN.md#bittorrent)）：
+
+| 工具 | 级别 | 作用 |
+| --- | --- | --- |
+| `bt_torrents` | `read` | 种子的简要信息（状态、保持原因、错误、进度、大小、速率、peer、分享率、剩余时间），可按状态、分类与名称筛选（50 个，最多 200 个），并附备用速率 |
+| `bt_torrent` | `read` | 种子的状态、前 100 个文件及其优先级、前 50 个 peer，以及其 tracker 与 Web 种子 |
+| `bt_tracker_stats` | `read` | tracker 的总计与拒绝，以及白名单中前 50 个种子的 swarm |
+| `bt_add_propose` | `propose` | 按磁力链接或 .torrent URL 添加种子，可指定分类、暂停或顺序下载 |
+| `bt_pause_propose` | `propose` | 按 ID 暂停种子（最多 100 个） |
+| `bt_resume_propose` | `propose` | 按 ID 恢复种子（最多 100 个） |
+
+passkey 不会到达模型：种子的磁力链接被省略（其 tracker URL 可能带有私有 tracker 的 passkey），tracker 的 URL 只给出协议、
+主机与路径的最后一段，Web 种子的 URL 去掉用户与查询，peer 不带 ID，工具也从不读取用户的 passkey。提议工具与媒体工具一样
+向对话中唯一待处理的提案加入步骤：按当前运行状态检查（角色及其客户端在运行、分类存在、种子尚未持有、所列种子存在且尚未
+暂停或尚未恢复，已处于该状态的会附说明后略去），在提案的配置修改之后按顺序、经 Admin API 以二次确认后应用提案的人的身份
+执行。某一步失败时其余步骤仍会完成，结果为 `partial`。
 
 ## 边下载边播放
 
@@ -435,6 +535,7 @@ Basic、`token` 查询参数、`fit_media_token` cookie，或在设置了 `url_s
 | `max_temporary` | 4（最多 1000） |
 | `max_temporary_bytes` | 16 GiB |
 | `temporary_ttl` | 10m（最多 7 天） |
+
 ## Tracker
 
 `bittorrent.tracker` 角色是一个 BitTorrent tracker，即 fib 的
@@ -497,3 +598,79 @@ passkey 被替换为 `REDACTED`。`public` 含 `play` 的策略让所有人进�
 `/api/m/bittorrent.tracker/...`。公开的 tracker 无法列出它跟踪的种子：fib 的 `MemoryStore` 只对指名的种子作答。
 Admin API 以 `/bittorrent/tracker/stats`、`/bittorrent/tracker/torrents[/<hash>]` 和 `/bittorrent/tracker/passkey?user=`
 提供它们，另有[指标](#指标)。
+
+## 互通
+
+fit 的角色由 `test/btinterop` 与另外两个客户端做互通检查。它是独立的模块（因此 anacrolix 永远不会成为 fit 的依赖），在 CI 的
+`bittorrent-interop` 任务中运行，本地用 `test/btinterop/run.sh` 运行（docker；容器中有 libtorrent 的 Python 绑定和 cgo）。
+它的测试从检出的代码构建 fit，像用户那样运行它，经 Admin API 操控：[anacrolix/torrent](https://github.com/anacrolix/torrent)
+1.61 在测试进程中（uTP 经 go-libutp，因此需要 cgo），[libtorrent-rasterbar](https://www.libtorrent.org/) 2.0.11 经
+`libtorrent_peer.py`。2026-11-09 所有用例均通过（fit 12f4795e 加 I205 的测试，fib c82b427）。
+
+| 用例 | anacrolix | libtorrent |
+| --- | --- | --- |
+| fit 从对方的做种下载：v1 和混合种子，.torrent 文件和磁力链接，TCP 和 uTP，MSE 关闭、优先和要求 RC4（8 个用例） | 通过 | 通过 |
+| v2 种子的同样用例（`btmh` 磁力链接，按 BEP 52 哈希请求取得 piece layers；3 个用例） | （不支持纯 v2 种子） | 通过 |
+| 对方从 fit 的做种下载，同样的用例 | 通过 | 通过 |
+| 只能经 fit 的 tracker 找到的私有种子：做种方经 HTTP 用令牌的 passkey，下载方经 UDP（BEP 41 URL 数据）用 Admin API 给出的用户 passkey；未知 passkey 被拒绝 | 通过（v1） | 通过（v1、混合、v2；fit 自己的客户端作为 UDP 下载方，libtorrent 经 HTTP） |
+| `bt_stream` 在从 anacrolix 下载 24 MiB 文件的同时播放它：中间的一段 Range 在种子下载到 8% 时得到应答，然后是整个文件；按磁力链接即时添加（临时） | 通过 | |
+| 只用发布条目的 web seed（fit 的 `static` 路由），没有 BitTorrent 对端：`per_file` 和 `whole_dir` 种子 | `whole_dir` 通过 | 都通过 |
+
+每个用例见到的对端经 Admin API 检查：uTP 或 TCP 与用例相符，要求加密时为加密，关闭时为明文。途中发现的其他客户端的怪癖
+（不是 fit 的），测试绕开了它们：
+
+- anacrolix 把 v2 或混合种子的单个文件当作目录（其文件树中包含文件名），因此在名称下面寻找数据，并拒绝不以 `/` 结尾的
+  单文件 web seed URL：anacrolix 无法从 web seed 获取 fit 以 `per_file` 发布的种子。anacrolix 的 web seed 也不会请求较短的
+  最后一个分片。
+- anacrolix 1.61 在校验一个它以两个哈希 announce 的混合种子时，会在其 announcer 中 panic（`updateTorrentInput` 中的
+  `panicif.False`）；tracker 用例与它一起时使用 v1 种子。
+
+## 性能
+
+`bench/bt.sh` 在基准主机上运行 `test/btinterop/btbench`（规则 16-18；从不在本地运行）：一个 1 GiB 的 v1 种子（1 MiB 分片）
+放在 `/dev/shm` 中，被测客户端绑定在 4 个 CPU（0-3）上，另一端是绑定在 CPU 8-15 上的四个 fib 客户端，经回环 TCP，明文和 MSE
+（RC4）各一组。被测客户端是 fit、anacrolix 1.61，或单独在一个进程中的 fib 客户端（fit 的客户端就是 fib 的，所以差异来自
+fit）。CPU 时间和峰值常驻内存取自 `/proc`，属于被测进程。2026-11-09 的结果在
+[bench/results/bt-2026-11-09](../bench/results/bt-2026-11-09/summary.md)，为 3 轮交替运行的中位数：
+
+| 场景 | 客户端 | MiB/s | CPU %（共 400） | 每 GiB CPU 秒 | 峰值 RSS MiB |
+| --- | --- | --- | --- | --- | --- |
+| 从 4 个做种方下载，明文 | fit | 705 | 158 | 2.28 | 179 |
+| | 单独的 fib | 478 | 106 | 2.28 | 163 |
+| | anacrolix | 1039 | 225 | 2.23 | 1050 |
+| 从 4 个做种方下载，RC4 | fit | 553 | 199 | 3.67 | 176 |
+| | 单独的 fib | 363 | 137 | 3.85 | 152 |
+| | anacrolix | 759 | 283 | 3.81 | 1052 |
+| 向 4 个下载方做种，明文（四者合计 MiB/s） | fit | 1688 | 98 | 0.60 | 46 |
+| | 单独的 fib | 1670 | 93 | 0.57 | 34 |
+| | anacrolix | 1110 | 133 | 1.23 | 1058 |
+| 向 4 个下载方做种，RC4 | fit | 933 | 215 | 2.35 | 56 |
+| | 单独的 fib | 937 | 217 | 2.36 | 43 |
+| | anacrolix | 744 | 199 | 2.74 | 1060 |
+
+做种时 fit 就是 fib：明文速率是 anacrolix 的 1.5 倍，每字节 CPU 只有其一半，RC4 时为 1.25 倍，内存只有其二十分之一
+（anacrolix 映射整个文件）。下载时 fit 每字节 CPU 与 anacrolix 相同，但速率只达到其 0.68（明文）和 0.73（RC4），四个 CPU
+用了不到两个：下载受 fib 的种子锁限制，在这把锁下每收到一个块都要扫描分片来挑选下一个请求（`pickPiece`，在单独 fib 的
+profile 中占 CPU 的五分之一），而且每个 16 KiB 块各是一次 `pwrite`。单独的 fib 更慢（fit 速率的 0.68），可能是它自己引擎的
+默认值不如 fit 的共享引擎（未进一步 profile）。两者都是 fib 请求（见开发计划中 I205 的遗留项）；各轮之间的差异在 2% 以内，
+只有 anacrolix 的明文下载为 7%。
+
+## 限制与安全
+
+- **端口。** 除非 `access` 另有规定，客户端的 `listen` 对互联网上的每个对端开放；它在同一个 UDP 端口上接受 TCP 和 uTP、
+  DHT 以及 UDP tracker 的应答。`encryption require` 拒绝明文对端（有些 ISP 会限速明文 BitTorrent），代价是每个字节都要
+  RC4（见[性能](#性能)）。`dht: false` 且不设 tracker 可使客户端完全不进入公共 swarm：它只与给定的对端通信。
+- **谁可以添加种子。** Admin API（在其令牌和 `admin.access` 之后）、`fit bt`、`watch_dir`（谁能写入它）以及带 `magnet` 的
+  `bt_stream`（谁对 `bt/<info hash>` 有 `publish`）。添加的种子从互联网下载到服务器的磁盘，受 `max_torrents`、
+  `min_free_bytes` 约束，`bt_stream` 添加的还受 `max_temporary` 和 `max_temporary_bytes` 约束。.torrent URL 从它指向的任何
+  地方获取，包括回环和私有地址：Admin API 属于运维者（I198 的决定 3）。
+- **路径。** 种子不会写到其目录之外：fib 拒绝 `..` 和绝对路径段，存储把名称处理为安全的名称；分类的相对 `dir` 留在
+  `download_dir` 之下。发布的种子的存储拒绝写入，因此发布的文件绝不会被对端覆盖。
+- **私有 tracker。** passkey 位于每个携带它的 .torrent 文件的 announce URL 中：持有这样文件的人都能以其所有者的身份 announce。
+  给每个用户自己的 passkey（用户的 passkey，由策略的 secret 派生，轮换 secret 即吊销；或每个用户一个令牌），而不是共享的
+  令牌；`publish` 条目的 `announce` 若带 passkey，会把该 passkey 交给发布种子的每个下载者，因此应发布到公开的 tracker（不设
+  `auth`，用 `allow` 或 `allow_files` 限制它跟踪什么）或不用 tracker（web seed 和 DHT）。访问日志中从不出现 passkey。
+- **流。** 不设 `auth` 的 `bt_stream` 把客户端持有的每个种子提供给能到达该路由的任何人；设了 `auth` 时，令牌的 `play` 授权
+  指定哪些种子（`bt/*` 表示全部）。
+- **此处未限制的。** fib 的客户端无上限地排队其事件（fit 的处理器立即取走它们）；fib 的 tracker 存储不新建存储就无法改变其
+  上限（swarm 重新开始）。两者都是开发计划遗留项中的 fib 请求。

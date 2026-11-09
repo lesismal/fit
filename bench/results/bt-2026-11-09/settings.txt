@@ -1,0 +1,4 @@
+host: ubuntu-System-Product-Name, 16 CPUs, 7.0.0-38-generic
+size=1073741824 peers=4 rounds=3 server_cpus=0-3 client_cpus=8-15
+fit: fit v1.0.1-0.20261109020149-12f4795eaf16+dirty
+2026-11-09T02:40:16Z

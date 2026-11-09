@@ -268,6 +268,11 @@ HTTP/3、按需证书与客户端证书）。菜单可以筛选、收起为图�
   标签页为 `media_auth`）；无论从哪个页面保存，这些成员的问题都链接到这里。由于控制台的源与监听的源不同，预览需要路由设置
   `cors`（缺少时页面会提示）；控制台的 Content-Security-Policy 只允许其页面访问提供 `vod` 与 `hls` 路由的监听。hls.js
   （1.5.20，Apache-2.0）随工作台一起提供，仅在播放器首次需要时加载。
+- **BitTorrent**（标签为“客户端 / tracker”），位于数据同步之后：[BitTorrent](bittorrent.zh-CN.md#页面) 角色的页面（I204）。
+  **种子**页可筛选并批量操作，带**添加种子**（磁力链接、.torrent 文件或其 URL）、顶栏中的备用速率与客户端的最近事件；单个种子的
+  概览、文件及其优先级、peer 与 tracker，其分类、队列位置、顺序下载与限制可就地修改；**Tracker** 页显示总计、swarm 与用户的
+  passkey；**发布**页列出各条目的种子及其 .torrent 文件与磁力链接；以及 **BitTorrent 配置**。页面从控制台自己的路由
+  `GET /api/m/admin/bittorrent/events`（控制台在其连接上写出的事件流）读取客户端事件，并轮询速率。
 - **账户**：已登录用户的密码，以及控制台用户的密码（见下）；**本节点**：本 fit 是谁，即 `GET /api/node` 的内容：节点 ID
   （点击即可复制）、ID 的保存位置、主机、fit、fib 与 Go 的版本、启动时间与运行时长、运行中配置的版本、ETag 与来源、运行中的
   角色、schema 摘要，以及管理端会检查的能力。
@@ -645,6 +650,28 @@ fit 内置 18 个技能，嵌入在二进制中：`explain`、`route-builder`、
 `admin.assistant.data.send_records`（设置页的 **原样发送同步试运行与死信中的记录**）；命名空间、操作、位置与错误始终发送。在
 管理端上，`sync_pipelines` 与 `sync_dead_letters` 接受 `member`。技能 `sync-pipeline` 根据一句话描述生成管道，并找出管道停滞、
 延迟、停止或积压死信的原因；管道最近的错误与死信旁的 **问 AI** 按钮会运行它。
+
+### BitTorrent
+
+[BitTorrent 页面](bittorrent.zh-CN.md#页面)（I204）配有三个只读工具和三个提议工具：它们经 Admin API 读取
+`bittorrent.client` 与 `bittorrent.tracker` 角色，并像媒体工具一样向对话的提案加入步骤：
+
+| 工具 | 级别 | 作用 |
+| --- | --- | --- |
+| `bt_torrents` | `read` | 种子的简要信息（状态、保持原因、错误、进度、大小、速率、peer、分享率、剩余时间），可按状态、分类与名称筛选（50 个，最多 200 个），并附备用速率 |
+| `bt_torrent` | `read` | 种子的状态、前 100 个文件及其优先级、前 50 个 peer，以及其 tracker 与 Web 种子 |
+| `bt_tracker_stats` | `read` | tracker 的总计与按原因统计的拒绝，以及白名单中前 50 个种子的 swarm |
+| `bt_add_propose` | `propose` | 按磁力链接或 .torrent URL 添加种子，可指定分类、暂停或顺序下载 |
+| `bt_pause_propose` | `propose` | 按 ID 暂停种子（最多 100 个） |
+| `bt_resume_propose` | `propose` | 按 ID 恢复种子（最多 100 个） |
+
+**交给模型的内容。** 不含 passkey：种子的磁力链接被省略，tracker 的 URL 只保留协议、主机与路径最后一段
+（`https://tracker.example/[redacted]/announce`），Web 种子的 URL 去掉用户与查询，peer 去掉 ID，也没有工具读取用户的
+passkey（由 Tracker 页面为人读取）。**BitTorrent 步骤**与提案的媒体步骤放在一起（视图与应用应答中的 `media`）：按当前运行
+状态检查（角色及其客户端在运行；磁力链接指明其种子且客户端尚未持有，或仅以 `bt_stream` 即时添加的方式持有，此时会转为普通
+种子保留；URL 为 http 或 https；分类属于客户端；所列种子存在，已暂停或未暂停的会附说明后略去），然后在任何配置修改之后、
+按顺序经 `/bittorrent/torrents` 以应用提案的人的身份执行。期间被移除的种子会使提案不再通过检查；在检查与该步骤之间被移除的
+计为已不存在。在管理端上，只读工具接受 `member`。
 
 ### 跨集群
 

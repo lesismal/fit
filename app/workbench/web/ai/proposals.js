@@ -49,6 +49,10 @@
     ['tool.rollback_propose', 'Rollback', '回滚'], ['tool.cache_purge_propose', 'Cache purge', '缓存清除'],
     ['tool.media_scan_propose', 'Library rescan', '媒体库重新扫描'], ['tool.media_session_end_propose', 'End playback sessions', '结束播放会话'],
     ['tool.media_key_rotate_propose', 'Key rotation', '密钥轮换'], ['tool.media_file_propose', 'Library files', '媒体库文件'],
+    ['tool.bt_add_propose', 'Add a torrent', '添加种子'], ['tool.bt_pause_propose', 'Pause torrents', '暂停种子'], ['tool.bt_resume_propose', 'Resume torrents', '恢复种子'],
+    ['pr.m.btAdd', 'Add the torrent {what} to the BitTorrent client.', '向 BitTorrent 客户端添加种子 {what}。'],
+    ['pr.m.btIn', 'in the category {category}', '分类 {category}'], ['pr.m.btPaused', 'paused', '暂停'], ['pr.m.btSeq', 'sequential', '顺序下载'],
+    ['pr.m.btPause', 'Pause {n} torrents:', '暂停 {n} 个种子：'], ['pr.m.btResume', 'Resume {n} torrents:', '恢复 {n} 个种子：'],
     ['pr.m.scan', 'Scan the library {lib} again.', '重新扫描媒体库 {lib}。'],
     ['pr.m.end', 'End {n} playback sessions of {policy}:', '结束 {policy} 的 {n} 个播放会话：'],
     ['pr.m.rotate', 'Rotate the key {key} of {policy}: URLs and grants signed with the old one are refused from then on.', '轮换 {policy} 的密钥 {key}：此后用旧密钥签名的 URL 与授权都会被拒绝。'],
@@ -67,8 +71,8 @@
     ['pr.m.why.sidecar', 'A sidecar that changes its ID loses it to what names it by the old one.', '若 sidecar 改变其 ID，按旧 ID 引用它的地方将找不到它。'],
     ['pr.m.sidecarDiff', 'Sidecar', 'Sidecar'],
     ['pr.confirmActions', 'The steps below run in order, as you, through the Admin API: one that fails leaves the others done, and says why.', '以下步骤以你的身份经 Admin API 依次执行：某一步失败时其余步骤仍会完成，并说明原因。'],
-    ['pr.confirmMedia', 'The media steps run after the config, in order, as you; one that fails leaves the others done.', '媒体步骤在配置之后以你的身份依次执行；某一步失败时其余步骤仍会完成。'],
-    ['pr.appliedMedia', 'Applied: the media steps ran.', '已应用：媒体步骤已执行。'],
+    ['pr.confirmMedia', 'The media and BitTorrent steps run after the config, in order, as you; one that fails leaves the others done.', '媒体与 BitTorrent 步骤在配置之后以你的身份依次执行；某一步失败时其余步骤仍会完成。'],
+    ['pr.appliedMedia', 'Applied: the media and BitTorrent steps ran.', '已应用：媒体与 BitTorrent 步骤已执行。'],
     ['pr.partialMedia', 'Applied, but step {step} failed: {error}', '已应用，但第 {step} 步失败：{error}']
   ];
   var en = {}, zh = {};
@@ -112,6 +116,14 @@
       case 'end_sessions': what = t('pr.m.end', { n: (m.sessions || []).length, policy: m.policy }); break;
       case 'rotate': what = m.all ? t('pr.m.rotateAll', { policy: m.policy }) : m.key ? t('pr.m.rotate', { key: m.key, policy: m.policy }) : t('pr.m.rotateOne', { policy: m.policy }); break;
       case 'move': what = t('pr.m.move', { item: m.item, lib: m.library, dir: m.dir || t('pr.m.top') }); break;
+      case 'bt_add': {
+        var src = (m.torrents && m.torrents[0] && m.torrents[0].name) || m.url || (m.torrents && m.torrents[0] && m.torrents[0].id) || m.magnet;
+        var opts = [m.category ? t('pr.m.btIn', { category: m.category }) : '', m.paused ? t('pr.m.btPaused') : '', m.sequential ? t('pr.m.btSeq') : ''].filter(Boolean);
+        what = t('pr.m.btAdd', { what: src }) + (opts.length ? ' (' + opts.join(', ') + ')' : '');
+        break;
+      }
+      case 'bt_pause': what = t('pr.m.btPause', { n: (m.torrents || []).length }); break;
+      case 'bt_resume': what = t('pr.m.btResume', { n: (m.torrents || []).length }); break;
       default: what = t('pr.m.' + m.op, { item: m.item, lib: m.library, name: m.name || '' });
     }
     var u = m.usage, use = null;
@@ -126,6 +138,9 @@
       h('div', h('b', '#' + m.step + ' '), what),
       (m.sessions || []).length ? h('ul.ai-prop__sessions', m.sessions.map(function (x) {
         return h('li', h('code', x.subject), ' · ', h('code', x.id), ' · ', x.resource, x.address ? ' · ' + x.address : '');
+      })) : null,
+      m.op !== 'bt_add' && (m.torrents || []).length ? h('ul.ai-prop__sessions', m.torrents.map(function (x) {
+        return h('li', x.name || x.id, ' · ', h('code', x.id.slice(0, 12)));
       })) : null,
       m.warning && !use ? h('div.small.muted', m.warning) : null,
       use,

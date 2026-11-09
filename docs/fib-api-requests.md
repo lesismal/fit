@@ -86,15 +86,17 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A77 | BitTorrent limits that change at run time, and per torrent | done, fib `1f1d2e7` | 11 | I196, I199 |
 | A78 | `bittorrent.Config.Filter`: refusing peers by address | done, fib `1f1d2e7` | 11 | I196, I199 |
 | A79 | The BitTorrent client on the caller's engine | done, fib `1f1d2e7` | 11 | I196, I197 |
-| A80 | The BitTorrent client's event queue bounded | requested | 11 | I197 |
-| A81 | Adding a torrent as complete (seed mode) | requested | — | I202 |
-| A82 | A Builder that keeps a piece's leaves, not a file's, and stops on a context | requested | 11 | I202 |
-| A83 | Reader.Close interrupts a Read | requested | 1, 10 | I200 |
-| A84 | Piece layers for a hybrid torrent added from a magnet link | requested | — | I196 |
-| A85 | A tracker store that lists its torrents and changes its bounds in place | requested | 11 | I201 |
-| A86 | A seed does not announce a completed download | requested | — | I201 |
+| A80 | The BitTorrent client's event queue bounded | done, fib `ecdcec0` | 11 | I197 |
+| A81 | Adding a torrent as complete (seed mode) | done, fib `ecdcec0` | — | I202 |
+| A82 | A Builder that keeps a piece's leaves, not a file's, and stops on a context | done, fib `ecdcec0` | 11 | I202 |
+| A83 | Reader.Close interrupts a Read | done, fib `ecdcec0` | 1, 10 | I200 |
+| A84 | Piece layers for a hybrid torrent added from a magnet link | done, fib `ecdcec0` | — | I196 |
+| A85 | A tracker store that lists its torrents and changes its bounds in place | done, fib `ecdcec0` | 11 | I201 |
+| A86 | A seed does not announce a completed download | done, fib `ecdcec0` | — | I201 |
 | A87 | A BitTorrent torrent's trackers and their announces | requested | — | I203 |
 | A88 | Checking a running torrent's data again | requested | — | I203 |
+| A89 | One torrent's download not held back by its lock and its picker | requested | 11 | I205 |
+| A90 | The defaults of a client's own engine | requested | — | I205 |
 
 ## Evidence
 
@@ -2569,7 +2571,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A80: The BitTorrent client's event queue bounded
 
-**Status.** Requested on 2026-11-09, from I197 (the BitTorrent track); not made yet.
+**Status.** Requested on 2026-11-09, from I197 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
 
 **Problem.** `bittorrent.Client` queues the events `Config.OnEvent` hears in a slice with no bound; a handler that falls behind, or a burst of piece events, grows it without limit.
 
@@ -2579,7 +2581,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A81: Adding a torrent as complete (seed mode)
 
-**Status.** Requested on 2026-11-09, from I202 (the BitTorrent track); not made yet.
+**Status.** Requested on 2026-11-09, from I202 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
 
 **Problem.** A torrent just built from files on disk is hashed twice: by `metainfo.Builder`, then by the client's initial check, since the client cannot be told the storage already holds every piece.
 
@@ -2589,7 +2591,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A82: A Builder that keeps a piece's leaves, not a file's, and stops on a context
 
-**Status.** Requested on 2026-11-09, from I202 (the BitTorrent track); not made yet.
+**Status.** Requested on 2026-11-09, from I202 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
 
 **Problem.** `metainfo.Builder` keeps every 16 KiB leaf hash of a v2 file until the file ends: size/512 bytes, 2 GiB for a 1 TiB file; and it cannot be cancelled except by failing its reads.
 
@@ -2599,7 +2601,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A83: Reader.Close interrupts a Read
 
-**Status.** Requested on 2026-11-09, from I200 (the BitTorrent track); not made yet.
+**Status.** Requested on 2026-11-09, from I200 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
 
 **Problem.** `bittorrent.Reader.Close` waits for a `Read` under way, both taking one lock; a stream whose client went away waits for a piece it no longer wants unless its context was cancelled first.
 
@@ -2609,7 +2611,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A84: Piece layers for a hybrid torrent added from a magnet link
 
-**Status.** Requested on 2026-11-09, from I196 (the BitTorrent track); not made yet.
+**Status.** Requested on 2026-11-09, from I196 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
 
 **Problem.** fib's docs say the client computes v2 piece layers after a hybrid magnet download, but `Torrent.computeLayers` is never called: such a torrent cannot answer v2 peers' hash requests as a seed.
 
@@ -2619,7 +2621,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A85: A tracker store that lists its torrents and changes its bounds in place
 
-**Status.** Requested on 2026-11-09, from I201 (the BitTorrent track); not made yet.
+**Status.** Requested on 2026-11-09, from I201 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
 
 **Problem.** `tracker.MemoryStore` cannot list the torrents it keeps, and its bounds and peer TTL are fixed when made, so a reload that changes them starts the swarms empty.
 
@@ -2629,7 +2631,7 @@ done in fib at `1f1d2e7`, made by fit's session; fit is on `1f1d2e7`.
 
 ## A86: A seed does not announce a completed download
 
-**Status.** Requested on 2026-11-09, from I201 (the BitTorrent track); not made yet.
+**Status.** Requested on 2026-11-09, from I201 (the BitTorrent track); done in fib at `ecdcec0` (merged with `cab3d6a`), made by fit's session; fit is on `ecdcec0`.
 
 **Problem.** The client announces `started` while a seed checks its data and `completed` when the check ends, so trackers count every seed as a finished download.
 
@@ -2672,3 +2674,22 @@ running), keeping its peers, counters and limits; an `EventChecked` at the end.
 **How fit uses it.** `Role.Recheck` calls it, and the Admin API's `{"action": "recheck"}` and
 `fit bt` keep their meaning.
 
+## A89: One torrent's download not held back by its lock and its picker
+
+**Status.** Requested on 2026-11-09, from I205 (the BitTorrent track's benchmarks); not made yet.
+
+**Problem.** On the benchmark host fib's client downloads one torrent from 4 seeders at 478 MiB/s (fit's role 705 MiB/s, anacrolix 1039 MiB/s) on under 2 of 4 CPUs: every block received takes `Torrent.mu` and refills that peer's requests; `nextRequest`/`pickPiece` scan the pieces with `math/rand` (24% of CPU, `pickPiece` 21%); each 16 KiB block is a `pwrite` of its own (30%).
+
+**Suggested API.** No API: a peer reserves a piece and requests its blocks, refilling only below half its reqq; rarest-first kept in buckets updated on have and bitfield messages; blocks written per piece or run (`pwritev`) on the disk pool.
+
+**How fit uses it.** The `bittorrent.client` role downloads faster with no change of its own.
+
+## A90: The defaults of a client's own engine
+
+**Status.** Requested on 2026-11-09, from I205 (the BitTorrent track's benchmarks); not made yet.
+
+**Problem.** fib's client made without `Config.SharedEngine` downloads at 0.68 of the rate of the same client on fit's shared engine on the benchmark host; its own engine's defaults were not profiled.
+
+**Suggested API.** Review the defaults `NewClient` gives the engine it makes (pollers, task pool, read buffers) against the shared engine's, and document or change them.
+
+**How fit uses it.** None directly (fit uses `SharedEngine`); other users of fib's client.

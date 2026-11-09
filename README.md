@@ -51,6 +51,10 @@ iterations are done, 1.0's included, and 1.0's external security review is still
 - [Sync](docs/sync.md): pipelines that move records from files, databases' changes, topics, indices
   and buckets to other systems, as Filebeat, Canal, Debezium and DataX do, with checkpoints that lose
   nothing, exactly once into transactional sinks, batch jobs and WASM plugins.
+- [BitTorrent](docs/bittorrent.md): a client that downloads and seeds on fit's engine and keeps its
+  torrents across restarts, a directory published as torrents with fit's static files as web seeds,
+  a torrent's file played over HTTP while it downloads, and a private HTTP and UDP tracker; checked
+  against libtorrent and anacrolix.
 - [Writing modules](docs/modules.md): extending fit with Go, built in with `fit build`.
 - [nginx, Caddy and Traefik compared](docs/comparison.md): what fit takes from each.
 - [Roadmap](docs/roadmap.md): goals, design principles and milestones.
