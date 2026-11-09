@@ -254,7 +254,19 @@ func (r *Role) add(req AddRequest, maxTemp int) (Status, error) {
 	if r.client == nil {
 		return Status{}, ErrNotRunning
 	}
-	if r.byID[rec.id] != nil {
+	if old := r.byID[rec.id]; old != nil {
+		// A torrent bt_stream added on the fly, added by hand now: it is
+		// kept as any other, as it is.
+		if maxTemp == 0 && old.temporary {
+			old.temporary = false
+			if err := r.saveListLocked(); err != nil {
+				return Status{}, err
+			}
+			if r.log != nil {
+				r.log.Infof("torrent %s (%s), added on the fly, is kept now", old.id, old.name)
+			}
+			return r.status(old, false, slices.Index(r.recs, old)), nil
+		}
 		return Status{}, ErrExists
 	}
 	if len(r.recs) >= r.cfg.Torrents() {
@@ -311,6 +323,10 @@ func (r *Role) add(req AddRequest, maxTemp int) (Status, error) {
 	} else {
 		r.listDirty = false
 	}
+	e := torrentEvent(EventAdded, rec)
+	e.State, _ = r.stateLocked(rec)
+	rec.lastState = e.State
+	r.event(e)
 	return r.status(rec, false, len(r.recs)-1), nil
 }
 
@@ -375,6 +391,7 @@ func (r *Role) change(id string, fn func(rec *record) error) error {
 	if err := fn(rec); err != nil {
 		return err
 	}
+	r.noteStatesLocked()
 	return r.saveListLocked()
 }
 
@@ -458,6 +475,7 @@ func (r *Role) SetQueuePosition(id string, pos int) error {
 	pos = min(pos, len(r.recs))
 	r.recs = slices.Insert(r.recs, pos, rec)
 	r.scheduleLocked()
+	r.noteStatesLocked()
 	return r.saveListLocked()
 }
 
@@ -595,6 +613,8 @@ func (r *Role) removeLocked(id string, deleteData bool) error {
 		return ErrNotFound
 	}
 	var errs []error
+	// What it counted, before fib forgets it.
+	r.accountLocked(rec, nil)
 	if rec.t != nil {
 		if err := rec.t.Remove(deleteData); err != nil {
 			errs = append(errs, fmt.Errorf("removing its data: %w", err))
@@ -615,6 +635,10 @@ func (r *Role) removeLocked(id string, deleteData bool) error {
 	if err := removeFiles(r.dataDir, id); err != nil {
 		errs = append(errs, err)
 	}
+	e := torrentEvent(EventRemoved, rec)
+	e.DataDeleted = deleteData
+	r.event(e)
+	r.noteStatesLocked()
 	return errors.Join(errs...)
 }
 

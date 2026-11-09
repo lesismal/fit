@@ -101,6 +101,7 @@ func (r *Role) manageLocked() {
 	r.applyTorrentLimitsLocked()
 	r.completionsLocked()
 	r.scheduleLocked()
+	r.metricsLocked()
 }
 
 // altActiveLocked reports whether the alternative rates hold now. r.mu is
@@ -163,6 +164,10 @@ func (r *Role) applyLimitsLocked() {
 	on := r.altActiveLocked()
 	if on != r.altOn {
 		r.altOn = on
+		state := "off"
+		if on {
+			state = "on"
+		}
 		if r.log != nil {
 			if on {
 				r.log.Infof("the alternative rates hold: upload %d B/s, download %d B/s (0 is unlimited)", l.UploadRate, l.DownloadRate)
@@ -170,6 +175,7 @@ func (r *Role) applyLimitsLocked() {
 				r.log.Infof("the alternative rates no longer hold")
 			}
 		}
+		r.event(Event{Type: EventAltSpeed, State: state})
 	}
 	if l != r.limits {
 		r.client.SetLimits(l)
@@ -231,6 +237,7 @@ func (r *Role) completionsLocked() {
 		if r.log != nil {
 			r.log.Infof("torrent %s (%s) completed", rec.id, rec.name)
 		}
+		r.event(torrentEvent(EventCompleted, rec))
 		if c := r.cfg.Category(rec.category); c != nil && c.MediaLibrary != "" {
 			scan[c.MediaLibrary] = true
 		}
