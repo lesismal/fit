@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,16 +66,28 @@ func TestHubBounds(t *testing.T) {
 	// A subscriber that takes nothing is dropped once its buffer is full,
 	// and emitting never waits for it.
 	fast, _, _, _ := h.subscribe(0)
-	got := 0
+	var got atomic.Int64
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for range fast.Events() {
-			got++
+			got.Add(1)
 		}
 	}()
+	// One that keeps up: emitting waits for it every half buffer, so that
+	// a slow machine's scheduler does not make it lag.
+	sent := int64(0)
+	paced := func(e Event) {
+		h.emit(e)
+		if sent++; sent%(SubscriberBuffer/2) == 0 {
+			deadline := time.Now().Add(time.Minute)
+			for got.Load() < sent && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}
 	for i := range SubscriberBuffer + 1 {
-		h.emit(Event{Type: EventAdded, Torrent: strconv.Itoa(i)})
+		paced(Event{Type: EventAdded, Torrent: strconv.Itoa(i)})
 	}
 	if !slow.Lagged() || h.dropped.Load() != 1 {
 		t.Fatalf("lagged %v, dropped %d", slow.Lagged(), h.dropped.Load())
@@ -99,7 +112,7 @@ func TestHubBounds(t *testing.T) {
 	}
 	s.Close()
 	for range EventHistory {
-		h.emit(Event{Type: EventState})
+		paced(Event{Type: EventState})
 	}
 	// Event 11 is no longer kept: a gap, and the oldest kept.
 	s, replay, gap, _ = h.subscribe(10)
@@ -108,8 +121,8 @@ func TestHubBounds(t *testing.T) {
 	}
 	h.close()
 	<-done
-	if got != SubscriberBuffer+1+EventHistory || fast.Lagged() {
-		t.Fatalf("the subscriber that kept up had %d events, lagged %v", got, fast.Lagged())
+	if got.Load() != SubscriberBuffer+1+EventHistory || fast.Lagged() {
+		t.Fatalf("the subscriber that kept up had %d events, lagged %v", got.Load(), fast.Lagged())
 	}
 	if _, ok := <-s.Events(); ok {
 		t.Fatal("a subscription is open after close")
