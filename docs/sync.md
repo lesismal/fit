@@ -147,6 +147,9 @@ sink had. Sinks therefore write idempotently, so that a replay converges on the 
 | `s3` | the same batch makes the same object, written over itself; a replay cut into other batches makes other objects |
 | `influxdb`, `tdengine` | the same point: a series (a subtable) and a time, written over itself; deletes are left out |
 | `qdrant`, `milvus` | upserts and deletes by an ID from the key: the same points and entities |
+| `nats` | the same `Nats-Msg-Id` for the same records: the stream's duplicate window drops it (2 minutes by default) |
+| `pulsar` | the same `fit-id` property for the same records: with `dedup read_back`, a record the producer stored lately is dropped |
+| `rabbitmq` | published again, with the same `message_id`, by which a consumer can drop it |
 | `kafka`, `http`, `file`, `stdout` | written again: Kafka's producer is not idempotent; `http` sends the same `Idempotency-Key` for the same records |
 
 **Transactions stay whole.** A checkpoint never falls inside a source transaction; the records of one
@@ -197,6 +200,9 @@ after the same backoff, for as long as it fails: a source is expected to come ba
 | [PostgreSQL](#postgresql) | `postgres`: logical replication with `pgoutput`, an exact snapshot | `postgres`: `ON CONFLICT` upserts, `COPY` |
 | [MongoDB](#mongodb) | `mongo`: a snapshot by `_id`, then the change stream | `mongo`: bulk upserts and deletes by `_id` |
 | [Kafka, Redpanda](#kafka-and-redpanda) | `kafka`: every partition from offsets in the checkpoint | `kafka`: keyed messages, batched, compressed |
+| [RabbitMQ](#rabbitmq) | `rabbitmq`: queues acknowledged after the sinks, stream queues from offsets in the checkpoint | `rabbitmq`: persistent messages, a batch held for publisher confirms |
+| [NATS JetStream](#nats-jetstream) | `nats`: a durable pull consumer, acknowledged after the sinks; core subjects | `nats`: JetStream publishes deduplicated by `Nats-Msg-Id`; core |
+| [Apache Pulsar](#apache-pulsar) | `pulsar`: every partition as a reader from message IDs in the checkpoint, or a durable subscription | `pulsar`: keyed messages, batched, compressed, deduplicated |
 | [Redis, Valkey](#redis-and-valkey) | `redis`: streams with `XREAD` | `redis`: `XADD`, or a key per record |
 | [S3 and compatibles](#s3-and-compatibles) | `s3`: objects under a prefix, in key order, as lines | `s3`: objects of lines, rolled by size and time |
 | [InfluxDB](#influxdb) | | `influxdb`: line protocol to InfluxDB 1, 2 and 3, by series and time |
@@ -602,6 +608,153 @@ sync {
 }
 ```
 
+### RabbitMQ
+
+The `rabbitmq` source consumes `queues` (classic and quorum, RabbitMQ 3.13 and 4.x) over AMQP 0-9-1
+with a `prefetch` (`basic.qos`, 1000 by default), and acknowledges each delivery only once every sink
+has its records: a queue's place is the broker's, nothing of it is in the checkpoint, and what was not
+acknowledged when fit stopped is delivered again. `streams` are stream queues, read from the offset
+after the last one in the checkpoint (or `stream_start`, `first` by default, without one). Each body
+goes through `codec` (`raw` by default); a message record holds `exchange`, `routing_key`, `queue`,
+`redelivered`, `headers` and the properties set beside its `value`, and `metadata_field` puts them in
+a field of the rows a codec makes. The record's key is the `fit-key` header the `rabbitmq` sink
+writes. In a job (`mode once`) the source ends once no message has come for `idle_end` (2s), every
+record acknowledged.
+
+The `rabbitmq` sink publishes a persistent message per record to `exchange` (the default exchange
+when left out) with `routing_key` (`{namespace}`; `{key}` too), its `message_id` the same each time
+the record is written again, and holds a batch until the broker confirms all of it (publisher
+confirms). A message no queue takes fails its record (`unroutable error`, the default; `drop` lets
+the broker drop it). Delivery is at least once: a consumer can drop repeats by `message_id`. TLS
+(`ca_file`, `cert_file`), PLAIN and EXTERNAL authenticate; heartbeats, and the broker's memory and
+disk alarms, which hold publishing for up to `timeout`, are honoured.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-queue {
+		source rabbitmq {
+			addresses rabbit-1:5671 rabbit-2:5671
+			tls true
+			username fit
+			password_env RABBITMQ_PASSWORD
+			queues orders
+			prefetch 500
+			codec json
+		}
+		sinks archive {
+			sink rabbitmq {
+				addresses archive:5672
+				username fit
+				password_env RABBITMQ_PASSWORD
+				exchange archive
+				routing_key orders.{namespace}
+				content_type application/json
+				codec json
+			}
+		}
+	}
+}
+```
+
+### NATS JetStream
+
+The `nats` source reads a JetStream `stream` (nats-server 2.10 and later) through a durable pull
+`consumer`, acknowledging each message only once every sink has it, so a message is never lost to a
+crash: at least once. With `create_consumer` fit makes the consumer (ack policy all, `subjects` as its
+filter, `start` all or new, `ack_wait`, `max_ack_pending`); the stream sequence is in each record's
+position and in the checkpoint, and a consumer fit makes is made again from the checkpoint when it is
+lost, or when a run finds it holding messages delivered and not acknowledged, so that they come again
+first and in order. A consumer of your own is read from its acknowledgement floor and needs ack policy
+`explicit`. Each message goes through `codec` (`raw` by default); a message record holds the subject,
+the headers, the stream, the sequence and the time beside its `value`, and `metadata_field` puts them
+in rows a codec makes. The lag reported is the consumer's pending messages. `mode core` subscribes to
+core NATS `subjects` instead (a `queue` group to share them), at most once, for telemetry: what arrives
+while fit is down, or faster than it keeps up (`buffer`), is lost.
+
+The `nats` sink publishes a message per record to `subject` (`{namespace}`), its data from `codec`,
+with a `Nats-Msg-Id` made from the record's position, so that a batch written again within the stream's
+duplicate window (`duplicate_window`, 2 minutes by default) is stored once; up to `max_in_flight`
+publishes wait for the stream's acknowledgement at once, and a batch is acknowledged only once each of
+its messages is. `mode core` publishes to core NATS, confirmed as far as the server reading them.
+
+Both connect to `servers` (the cluster's others are learnt, and the client moves to another when one
+fails), over TLS with `tls`, and authenticate with a token (`token_env`), a user and password
+(`username`, `password_env`), an NKey seed (`nkey_file`) or a creds file of a JWT and its seed
+(`creds_file`).
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-search {
+		source nats {
+			servers nats-1:4222 nats-2:4222 nats-3:4222
+			tls true
+			username fit
+			password_env NATS_PASSWORD
+			stream ORDERS
+			consumer fit-orders-to-search
+			create_consumer true
+			subjects orders.>
+			codec json
+		}
+		transforms key { fields order_id }
+		sinks search {
+			sink elasticsearch { urls https://es:9200; username fit; password_env ES_PASSWORD }
+		}
+	}
+}
+```
+
+### Apache Pulsar
+
+The `pulsar` source reads every partition of `topics` (Pulsar 2.10 and later; a bare name is
+`public/default`'s). By default (`mode reader`) each partition is read by a non-durable reader from the
+message IDs in the pipeline's checkpoint, so nothing is kept on the broker, and messages that retention
+removed before they were read are lost; `mode subscription` reads through the durable `subscription`
+(`exclusive` or `failover`), acknowledged cumulatively once every sink has the records, the message
+IDs still in the checkpoint so that what the broker sends again is passed over. Each message goes
+through `codec` (`raw` by default); a message record also holds the message's `topic`, `message_id`,
+`properties`, `producer`, `publish_time` and `event_time`, and a row a codec makes holds them under
+`metadata_field` when it is set. A null value is a delete of the message's key. Encrypted and chunked
+messages are not read.
+
+The `pulsar` sink sends a message per record to `topic` (`{namespace}`), keyed by the record's key,
+which the Java client's default router (the key's Java string hash) places in a partition, so a key's
+messages stay in order; deletes have a null value, for topic compaction. A partition's messages go out
+as Pulsar batches (`max_batch_messages`, `max_batch_bytes`), compressed (`lz4`; `zlib`, `zstd`,
+`snappy`), from producers named `producer_name`, whose sequence IDs carry on from the broker's. Each
+message carries the property `fit-id`, made from the record's position: with `dedup read_back` (the
+default) the sink reads back the last 64 entries of each partition when it makes its producer, and drops
+the records it finds there stored, so a batch written again after a crash is stored once (this needs the
+permission to consume the topic; `dedup off` sends everything). That holds when the source reads the
+records again at the same positions: a database's log, files, a single partition. A source of several
+partitions (`kafka`, `pulsar`) writes every partition's place in each position, as the run
+interleaved them, so a replay has other positions, and is stored again: at least once. A `pulsar+ssl://` URL is TLS; `token_env`
+authenticates with a token.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-pulsar {
+		source kafka {
+			brokers kafka-1:9092
+			topics shop.orders
+			codec debezium
+		}
+		sinks events {
+			sink pulsar {
+				url pulsar+ssl://pulsar.internal:6651
+				token_env PULSAR_TOKEN
+				topic shop/orders/{namespace}
+				producer_name orders-to-pulsar
+				codec json
+			}
+		}
+	}
+}
+```
+
 ### Redis and Valkey
 
 The `redis` source reads `streams` with `XREAD` from the last entry IDs read (no consumer group, nothing
@@ -818,6 +971,9 @@ They are the [first pipeline](#a-first-pipeline)'s, and a quick way to try a tra
 | `mongo` | a replica set or a sharded cluster (change streams need one); `changeStreamPreAndPostImages` on the collections for `full_document whenAvailable` or `full_document_before_change`; an oplog window longer than a pipeline may stop | `read` on the database (`readAnyDatabase` for every database) |
 | `tidb` | a TiCDC changefeed to Kafka (`canal-json` with `enable-tidb-extension=true`, or `simple`) started before the snapshot; `tidb_gc_life_time` longer than the snapshot | `SELECT` on the tables; the Kafka source's rights on the topic |
 | `kafka` | retention longer than a pipeline may stop | `Describe` and `Read` on the topics (no group rights: no group is joined) |
+| `rabbitmq` | durable queues (classic or quorum) or stream queues, made by you; a stream's retention longer than a pipeline may stop | `read` on the queues (`configure` is not needed: nothing is declared but passively) |
+| `nats` | a JetStream stream, made by you; with `create_consumer`, the consumer is fit's | publish to `$JS.API.STREAM.INFO.<stream>`, `$JS.API.CONSUMER.*.<stream>.>`, `$JS.API.CONSUMER.MSG.NEXT.<stream>.<consumer>` and `$JS.ACK.<stream>.>`, subscribe to `_INBOX.>` |
+| `pulsar` | retention longer than a pipeline may stop (`mode reader` keeps nothing on the broker) | `consume` on the topics |
 | `redis` | streams trimmed no faster than the pipeline reads | `+xread` (or `+@stream`) on the streams' keys |
 | `elasticsearch` | a cursor field every write sets later than the last (an update time), and a soft-delete field for deletes | `read` and `view_index_metadata` on the indices |
 | `clickhouse` | a cursor column that grows with each write | `SELECT` on the table |
@@ -853,7 +1009,7 @@ CREATE PUBLICATION fit_orders FOR TABLE public.orders, public.order_items;  -- o
 
 The sinks need write rights only: `INSERT`, `UPDATE` and `DELETE` on the tables (MySQL, PostgreSQL),
 `CREATE` too for `checkpoint sink`'s table; `readWrite` on the database (MongoDB); `Write` and, with
-`create_topics`, `Create` (Kafka). Tables and indexes in SQL and ClickHouse sinks are made by you: DDL
+`create_topics`, `Create` (Kafka); `write` on the exchange (RabbitMQ); publish on the subjects and subscribe to `_INBOX.>` (NATS); `produce`, and `consume` too with `dedup read_back` (Pulsar), whose broker deduplication (`brokerDeduplicationEnabled`) carries the producers' sequence IDs across restarts. Tables and indexes in SQL and ClickHouse sinks are made by you: DDL
 is reported, never replayed.
 
 ## Types between systems
@@ -1191,3 +1347,9 @@ keeps the containers for the next run.
 `TestEmbed*`): each sink's writes replayed from the middle and from the start converge, a record the
 server refuses fails alone, and a pipeline through `embed` (against a fake embeddings API) into Qdrant
 and Milvus, killed at random points, ends with every row and its vector, the deletes gone.
+
+RabbitMQ, NATS JetStream and Pulsar have scripts of their own, not yet a family of `run.sh` (I222 adds
+them as `mq`): `eval "$(test/sync/rabbitmq.sh up)"` starts RabbitMQ 3.13 and 4.1 (a user, a TLS listener
+of a CA the script makes) for `TestRabbitMQ*`; `eval "$(test/sync/nats.sh up)"` nats-server 2.10 and
+2.11, three JetStream nodes each, for `TestNATS*`; `eval "$(test/sync/pulsar.sh up)"` Pulsar 3.0 and 4.0
+standalone with deduplication on, for `TestPulsar*`. Each takes `down` to remove them.

@@ -49,8 +49,8 @@ a config against it and more.
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
-- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mysql`](#sync-sources-mysql), [`postgres`](#sync-sources-postgres), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
-- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`influxdb`](#sync-sinks-influxdb), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`milvus`](#sync-sinks-milvus), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`postgres`](#sync-sinks-postgres), [`qdrant`](#sync-sinks-qdrant), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`tdengine`](#sync-sinks-tdengine), [`wasm`](#sync-sinks-wasm)
+- [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mysql`](#sync-sources-mysql), [`nats`](#sync-sources-nats), [`postgres`](#sync-sources-postgres), [`pulsar`](#sync-sources-pulsar), [`rabbitmq`](#sync-sources-rabbitmq), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
+- [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`influxdb`](#sync-sinks-influxdb), [`kafka`](#sync-sinks-kafka), [`memory`](#sync-sinks-memory), [`milvus`](#sync-sinks-milvus), [`mongo`](#sync-sinks-mongo), [`mysql`](#sync-sinks-mysql), [`nats`](#sync-sinks-nats), [`postgres`](#sync-sinks-postgres), [`pulsar`](#sync-sinks-pulsar), [`qdrant`](#sync-sinks-qdrant), [`rabbitmq`](#sync-sinks-rabbitmq), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`tdengine`](#sync-sinks-tdengine), [`wasm`](#sync-sinks-wasm)
 - [Sync transforms](#sync-transforms): [`cast`](#sync-transforms-cast), [`embed`](#sync-transforms-embed), [`envelope`](#sync-transforms-envelope), [`fields`](#sync-transforms-fields), [`filter`](#sync-transforms-filter), [`key`](#sync-transforms-key), [`mask`](#sync-transforms-mask), [`route`](#sync-transforms-route), [`wasm`](#sync-transforms-wasm)
 - [Sync codecs](#sync-codecs): [`canal_json`](#sync-codecs-canal_json), [`csv`](#sync-codecs-csv), [`debezium`](#sync-codecs-debezium), [`json`](#sync-codecs-json), [`line`](#sync-codecs-line), [`raw`](#sync-codecs-raw), [`ticdc_simple`](#sync-codecs-ticdc_simple), [`wasm`](#sync-codecs-wasm)
 
@@ -7669,6 +7669,43 @@ In JSON:
 | `batch_size` | integer, 0 to 100000 | `1000` | The rows a snapshot's query reads, by key, each in a transaction of its own with a consistent snapshot. 1000 when left out or 0. |
 | `chunk_rows` | integer, 0 or more | `100000` | In a job (mode once), the rows of a chunk of the snapshot: each table is split into ranges of its key this many rows each, read job.max_parallel at a time. 100000 when left out or 0. |
 
+<a id="sync-sources-nats"></a>
+
+### `nats`
+
+Reads a NATS JetStream stream through a durable pull consumer, each message acknowledged once every sink has it, so that none is lost to a crash: at least once. The stream sequence is in the record's position and the pipeline's checkpoint; a consumer fit makes (create_consumer) is made again from the checkpoint when it is lost, or when a run finds it holding messages delivered and not acknowledged, so that they come again first and in order. Or, with mode core, core NATS subjects, at most once: what arrives while fit is down, or faster than it keeps up, is lost, for telemetry. Each message goes through a codec (raw when none is named) into records, the subject their namespace unless the codec or namespace sets one; a message record holds the subject, headers, stream, sequence and time beside its value. In a job (mode once) it reads up to the stream's last message as it was when the job started.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `servers` | list of string |  | Required. The servers, host:port each; the others of the cluster are learnt from them, and the client connects to another when one fails. |
+| `name` | string | `"fit-sync"` | The connection's name, in the servers' monitoring. fit-sync when left out. |
+| `tls` | boolean |  | Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the servers' are checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for servers that verify clients; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the servers' certificates must have; each server's host when left out. |
+| `token_env` | string |  | The environment variable holding a token to authenticate with, read when the pipeline loads. |
+| `username` | string |  | The user to authenticate as, with password_env. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `nkey_file` | string |  | A file holding a user's NKey seed (SU...), whose key signs the server's nonce. |
+| `creds_file` | string |  | A creds file, as nsc writes it, holding a user's JWT and NKey seed, for servers in operator mode. |
+| `timeout` | duration | `"10s"` | How long connecting, and each answer of JetStream's API beyond a pull's wait, may take. 10s when left out or 0. |
+| `mode` | string: `jetstream`, `core` | `"jetstream"` | jetstream, a stream read through a durable consumer, at least once; core, subjects subscribed to, at most once. jetstream when left out. |
+| `stream` | string |  | The stream read; needed with mode jetstream. |
+| `consumer` | string |  | The durable pull consumer the stream is read through; needed with mode jetstream. One pipeline a consumer. A consumer fit does not make is read from its acknowledgement floor, and needs ack policy explicit (none reads at most once). |
+| `create_consumer` | boolean |  | Make the consumer when it does not exist, and make it again when it is lost or a run finds it holding messages delivered and not acknowledged: from after the checkpoint's sequence (or its acknowledgement floor, when later), its ack policy all, its filter subjects, start, ack_wait and max_ack_pending these params'. A consumer that does not exist is an error when left out. |
+| `subjects` | list of string |  | With mode jetstream, the filter subjects of a consumer made (the whole stream when left out); with mode core, the subjects subscribed to, which are needed; * and > are wildcards. |
+| `queue` | string |  | With mode core, the queue group the subscriptions join, so that several fits share the messages. |
+| `start` | string: `all`, `new` | `"all"` | Where a consumer made without a checkpoint starts: all, the stream's first message; new, after its last, reading only what comes after. all when left out. |
+| `ack_wait` | duration | `"1m"` | A consumer made's ack_wait: how long the server waits for a message's acknowledgement before it delivers it again. Keep it above the time the sinks take. 1m when left out or 0. |
+| `max_ack_pending` | integer, 0 or more | `10000` | A consumer made's max_ack_pending: the most messages delivered and not acknowledged. 10000 when left out or 0. |
+| `batch` | integer, 0 to 10000 | `256` | The most messages one pull asks for. 256 when left out or 0. |
+| `max_wait` | duration | `"5s"` | How long a pull waits for messages. 5s when left out or 0. |
+| `buffer` | integer, 0 to 1000000 | `10000` | With mode core, the most messages held between the connection and the pipeline; more are dropped. 10000 when left out or 0. |
+| `codec` | [codec](#sync codecs) |  | What makes records of a message's data: raw when left out, a message record holding it as after's value. |
+| `namespace` | string |  | The records' namespace. The codec's, or the message's subject, when left out. |
+| `metadata_field` | string |  | A field of after that the message's subject, headers, stream, sequence and time go in, as a map, in records a codec makes rows of; a message record holds them beside its value without it. |
+
 <a id="sync-sources-postgres"></a>
 
 ### `postgres`
@@ -7834,6 +7871,63 @@ In JSON:
 | `spool_dir` | string |  | The directory streamed transactions are kept in until they commit or abort, a file each, removed then. The system's temporary directory when left out. |
 | `status_interval` | duration | `"10s"` | How often the source tells the server the position the sinks have, also when it has not moved, which keeps the connection alive (below the server's wal_sender_timeout). 10s when left out or 0. |
 | `lag_warning` | integer, 0 or more | `1073741824` | The slot's lag, in bytes of WAL between the server's end and the position confirmed, past which a warning is logged: the WAL the server keeps for the pipeline. 1 GiB when left out or 0. |
+
+<a id="sync-sources-pulsar"></a>
+
+### `pulsar`
+
+Reads Apache Pulsar topics, every partition of each. As a reader (mode reader), from the message IDs in the pipeline's checkpoint, with nothing kept on the broker; or through a durable subscription (mode subscription), acknowledged cumulatively once every sink has the records, the message IDs still in the checkpoint so that nothing read before is emitted again. Each message goes through a codec (raw when none is named) into records, whose key is the message's key unless the codec sets one, and whose namespace is the topic unless the codec or namespace sets one; a message record also holds the message's topic, ID, properties, producer and times. A message with a null value is a delete of its key. In a job (mode once) it reads up to each partition's last message as it was when the job started.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | string |  | Required. The service URL: pulsar://host:6650, or pulsar+ssl://host:6651 for TLS, the broker's certificate checked against the system's roots or ca_file's (the check cannot be turned off); several hosts separated by commas are tried in order. Topics are looked up from it, and their brokers connected to, or a proxy, as the lookup says. |
+| `ca_file` | string |  | A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs a pulsar+ssl:// url. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the brokers' certificates must have; each broker's host when left out. |
+| `token_env` | string |  | The environment variable holding a token (a JWT) to authenticate with, read when the pipeline loads; no authentication when left out. |
+| `timeout` | duration | `"30s"` | How long connecting and each answer may take. 30s when left out or 0. |
+| `topics` | list of string |  | Required. The topics read: a name (public/default's), tenant/namespace/name or persistent://tenant/namespace/name; every partition of a partitioned topic, partitions added found within a minute and read from their start. |
+| `mode` | string: `reader`, `subscription` | `"reader"` | How the topics are read: reader, a non-durable reader of each partition from the checkpoint's message IDs, which needs nothing kept on the broker (messages the topic's retention removed before they are read are lost); subscription, the durable subscription named by subscription, which keeps the messages until it acknowledges them, cumulatively, once every sink has them. reader when left out. |
+| `subscription` | string |  | The durable subscription's name, for mode subscription. |
+| `subscription_type` | string: `exclusive`, `failover` | `"exclusive"` | The subscription's type: exclusive, one consumer, a second pipeline refused; failover, one active consumer of each partition and others standing by. exclusive when left out. |
+| `start` | string: `earliest`, `latest` | `"earliest"` | Where a partition starts when the pipeline has no checkpoint (and, in mode subscription, the subscription is new): earliest, the oldest message kept; latest, after the newest. A partition found later starts at its earliest. earliest when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes records of a message's value: raw when left out, a message record holding it as after's value. |
+| `namespace` | string |  | The records' namespace. The codec's (canal_json's db.table, say), or the topic as written in topics, when left out. |
+| `metadata_field` | string |  | The field of after that holds the message's metadata (topic, message_id, properties, producer, publish_time, event_time) in the records a codec makes of rows. A message record has them as fields of its own, beside value; a row has them only when this is set. |
+| `tombstones` | string: `delete`, `skip` | `"delete"` | What a message with a null value is: delete, a delete record of the message's key, as a compacted topic means it; skip, nothing. delete when left out. |
+| `receiver_queue` | integer, 0 to 100000 | `1000` | How many messages of each partition the broker may send ahead of what the source has taken. 1000 when left out or 0. |
+
+<a id="sync-sources-rabbitmq"></a>
+
+### `rabbitmq`
+
+Consumes RabbitMQ queues, classic and quorum (queues), and stream queues (streams), with a prefetch, each delivery acknowledged only once every sink has its records: a queue's position is the broker's, so its unacknowledged messages are delivered again after a restart, and nothing of it is in the checkpoint; a stream's offset is, and a restart reads on after it. Each message goes through a codec (raw when none is named) into records; a message record holds the exchange, routing key, headers and properties beside its value. In a job (mode once) it ends once no message has come for idle_end.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `addresses` | list of string |  | Required. The nodes, host:port each (5672, or 5671 for TLS), tried in order until one answers. |
+| `vhost` | string | `"/"` | The virtual host. / when left out. |
+| `auth` | string: `PLAIN`, `EXTERNAL` | `"PLAIN"` | How to authenticate: PLAIN, with username and password_env (over TLS, or the password goes in clear); EXTERNAL, with the TLS client certificate of cert_file, as the rabbitmq_auth_mechanism_ssl plugin takes it. PLAIN when left out. |
+| `username` | string |  | The user, for PLAIN. |
+| `password_env` | string |  | The environment variable holding the password, read when the pipeline loads. |
+| `tls` | boolean |  | Connect over TLS, the nodes' certificates checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the nodes' are checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for nodes that ask for one or for EXTERNAL; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the nodes' certificates must have; each node's host when left out. |
+| `timeout` | duration | `"30s"` | How long connecting, each answer of the broker, each write and closing may take. 30s when left out or 0. |
+| `heartbeat` | duration | `"30s"` | The heartbeat interval asked for, the broker's when lower: a connection silent for two of them is lost. 30s when left out or 0. |
+| `frame_max` | integer, 0 or more | `131072` | The largest frame asked for, the broker's when lower; larger messages come in several frames. 131072 when left out or 0. |
+| `max_message_bytes` | integer, 0 or more | `16777216` | The largest message body taken: a larger one ends the connection, as a broken one would. 16 MiB when left out or 0. |
+| `queues` | list of string |  | The classic and quorum queues consumed, by name; they are not declared, and must exist. Their messages are acknowledged once every sink has them, so a restart delivers again what was not. |
+| `streams` | list of string |  | The stream queues consumed, by name, each from the offset after the last one in the checkpoint, or from stream_start without one. At least one of queues and streams. |
+| `stream_start` | string: `first`, `last`, `next` | `"first"` | Where a stream the checkpoint has no offset of starts: first, its oldest message kept; last, its last chunk; next, after its end, reading only what comes after. first when left out. |
+| `prefetch` | integer, 0 to 65535 | `1000` | How many deliveries of each queue may be unacknowledged at once (basic.qos): bounds what the broker sends ahead of the sinks. 1000 when left out or 0. |
+| `codec` | [codec](#sync codecs) |  | What makes records of a message's body: raw when left out, a message record holding it as after's value. |
+| `namespace` | string |  | The records' namespace. The codec's, or the queue's name, when left out. |
+| `metadata_field` | string |  | A field of after to put the message's metadata in (exchange, routing_key, queue, redelivered, headers and the properties set), on the records a codec makes rows of; a message record has them as fields of its own. None when left out. |
+| `idle_end` | duration | `"2s"` | In a job (mode once), the source ends once no message has come for this long, every record acknowledged. 2s when left out or 0. |
 
 <a id="sync-sources-redis"></a>
 
@@ -9186,6 +9280,32 @@ In JSON:
 | `checkpoint_table` | string | `"_fit_sync_checkpoints"` | With checkpoint sink, the table the checkpoint is kept in, a row a pipeline, made when missing (which needs CREATE on it); db.table names the database too, database's otherwise. _fit_sync_checkpoints when left out. |
 | `max_transaction_bytes` | integer, 0 or more |  | The most bytes of values one of the server's transactions holds: past it, a transaction is committed at the next record that ends a source transaction, and a source transaction larger than this alone is committed in parts, with a warning. Against TiDB, whose transactions are bounded by txn-total-size-limit, 16 MiB when left out or 0; no bound against MySQL and MariaDB. |
 
+<a id="sync-sinks-nats"></a>
+
+### `nats`
+
+Publishes records to NATS JetStream: each a message to the subject its namespace names (or subject's template), its data what the codec makes of it (raw when none is named), with a Nats-Msg-Id made from the record's position, so that a batch written again within the stream's duplicate window (2 minutes by default) is stored once; a batch's messages are published together, max_in_flight at a time, and acknowledged by the stream before the batch is. With mode core, published to core NATS, confirmed only as far as the server reading them: at most once.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `servers` | list of string |  | Required. The servers, host:port each; the others of the cluster are learnt from them, and the client connects to another when one fails. |
+| `name` | string | `"fit-sync"` | The connection's name, in the servers' monitoring. fit-sync when left out. |
+| `tls` | boolean |  | Connect over TLS, the servers' certificates checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the servers' are checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for servers that verify clients; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the servers' certificates must have; each server's host when left out. |
+| `token_env` | string |  | The environment variable holding a token to authenticate with, read when the pipeline loads. |
+| `username` | string |  | The user to authenticate as, with password_env. |
+| `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
+| `nkey_file` | string |  | A file holding a user's NKey seed (SU...), whose key signs the server's nonce. |
+| `creds_file` | string |  | A creds file, as nsc writes it, holding a user's JWT and NKey seed, for servers in operator mode. |
+| `timeout` | duration | `"10s"` | How long connecting, and each publish's acknowledgement, may take. 10s when left out or 0. |
+| `mode` | string: `jetstream`, `core` | `"jetstream"` | jetstream, each message acknowledged by the stream that takes its subject, deduplicated by its Nats-Msg-Id; core, published to core NATS, at most once. jetstream when left out. |
+| `subject` | string | `"{namespace}"` | The subject a record goes to: text with {namespace}, the record's namespace (a route transform can map namespaces to subjects first). A record whose subject is empty or holds a wildcard fails. {namespace} when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes a message's data of a record: raw when left out, after's value field as it is, or the record's canonical JSON when it has none; json for the row as plain JSON (form plain) or the whole record (form record). |
+| `max_in_flight` | integer, 0 to 100000 | `256` | With mode jetstream, the most publishes waiting for the stream's acknowledgement at once. 256 when left out or 0. |
+
 <a id="sync-sinks-postgres"></a>
 
 ### `postgres`
@@ -9336,6 +9456,30 @@ In JSON:
 | `copy_min_rows` | integer, 0 or more | `100` | With copy auto, the fewest rows of a run that is copied. 100 when left out or 0. |
 | `max_statement_rows` | integer, 0 to 65535 | `1000` | The most rows of one INSERT or DELETE (and fewer when its parameters would pass PostgreSQL's 65535); a longer run is written in several. 1000 when left out or 0. |
 
+<a id="sync-sinks-pulsar"></a>
+
+### `pulsar`
+
+Sends records to Apache Pulsar: each a message of the topic its namespace names (or topic's template), its key the record's key (a string as it is, bytes in base64, any other key as plain JSON), which the Java client's default router (the key's Java string hash) places in a partition, so a key's messages stay in order; its value what the codec makes of it (raw when none is named), and a delete a message with a null value. A batch's messages for a partition go out as Pulsar batches, compressed (lz4), from a producer of producer_name, whose sequence IDs carry on from the broker's, for its deduplication. Each message carries the property fit-id, made from the record's position; with dedup read_back the sink reads back the last messages it stored of each partition when it makes its producer, and drops the records of a batch written again that are stored already, so a batch sent twice after a crash is stored once, when the source reads it again at the same positions (a database, a file, one partition; not a source of several partitions, as kafka and pulsar, whose positions hold every partition as the run interleaved them).
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | string |  | Required. The service URL: pulsar://host:6650, or pulsar+ssl://host:6651 for TLS, the broker's certificate checked against the system's roots or ca_file's (the check cannot be turned off); several hosts separated by commas are tried in order. |
+| `ca_file` | string |  | A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs a pulsar+ssl:// url. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for brokers that ask for one; needs key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the brokers' certificates must have; each broker's host when left out. |
+| `token_env` | string |  | The environment variable holding a token (a JWT) to authenticate with, read when the pipeline loads; no authentication when left out. |
+| `timeout` | duration | `"30s"` | How long connecting and each answer, the broker's receipt of a batch among them, may take. 30s when left out or 0. |
+| `topic` | string | `"{namespace}"` | The topic a record goes to: text with {namespace}, the record's namespace (a route transform can map namespaces to topics first), a name (public/default's), tenant/namespace/name or persistent://tenant/namespace/name. A record whose topic is not a name Pulsar takes fails. The topic is not made by the sink, unless the brokers make topics when first used. {namespace} when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes a message's value of a record: raw when left out, after's value field as it is, or the record's canonical JSON when it has none; json for the row as plain JSON (form plain) or the whole record (form record). |
+| `deletes` | string: `tombstone`, `encode` | `"tombstone"` | What a delete with a key is: tombstone, a message of the key with a null value, which topic compaction takes as the key gone and the source pulsar reads back as a delete; encode, a message of what the codec makes of it. tombstone when left out. |
+| `producer_name` | string | `"fit-sync"` | The producers' name, the same for every partition: the brokers deduplicate by it, so it must stay the same across restarts, and differ between two sinks writing one topic (the broker refuses a second producer of a name). fit-sync when left out. |
+| `compression` | string: `none`, `lz4`, `zlib`, `zstd`, `snappy` | `"lz4"` | How batches are compressed. lz4 when left out. |
+| `max_batch_bytes` | integer, 0 or more | `1048576` | The most bytes, keys and values before compression, of one Pulsar batch; a sink batch with more for a partition sends several, in order. Keep it below the brokers' maxMessageSize (5 MiB by default). 1048576 when left out or 0. |
+| `max_batch_messages` | integer, 0 or more | `1000` | The most messages of one Pulsar batch. 1000 when left out or 0. |
+| `dedup` | string: `read_back`, `off` | `"read_back"` | How a batch written again is kept from being stored twice: read_back, the last 64 entries (Pulsar batches) of each partition read back when the producer is made (which needs the permission to consume the topic), and the records of a batch whose fit-id it, or a message stored since, has dropped; off, nothing, every record sent, so a batch written again after a crash is stored again. read_back when left out. |
+
 <a id="sync-sinks-qdrant"></a>
 
 ### `qdrant`
@@ -9356,6 +9500,35 @@ Writes records to Qdrant collections over its REST API, through fib's asynchrono
 | `vector_name` | string |  | The collection's named vector the vector is, for a collection of several; its one unnamed vector when left out. |
 | `payload` | list of string |  | The row's fields kept in the point's payload; every field but vector_field when left out. |
 | `max_request_bytes` | integer, 0 or more | `8388608` | The most bytes of one request; a batch larger is sent in several, and a point larger fails its record. Below Qdrant's service.max_request_size_mb (32 MiB). 8 MiB when left out or 0. |
+
+<a id="sync-sinks-rabbitmq"></a>
+
+### `rabbitmq`
+
+Publishes records to a RabbitMQ exchange, each a message of the routing key routing_key's template makes of it, its body what the codec makes of it (raw when none is named), persistent, its message_id the same each time the record is written again (from the record's position), its key in the fit-key header. A batch is held until the broker has confirmed every message of it (publisher confirms); a message the broker nacks fails, from there, to be written again; one it cannot route to any queue fails its record, which on_error takes, unless unroutable is drop. Delivery is at least once: a batch written again after a crash publishes its messages again, which a consumer can drop by their message_id.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `addresses` | list of string |  | Required. The nodes, host:port each (5672, or 5671 for TLS), tried in order until one answers. |
+| `vhost` | string | `"/"` | The virtual host. / when left out. |
+| `auth` | string: `PLAIN`, `EXTERNAL` | `"PLAIN"` | How to authenticate: PLAIN, with username and password_env (over TLS, or the password goes in clear); EXTERNAL, with the TLS client certificate of cert_file, as the rabbitmq_auth_mechanism_ssl plugin takes it. PLAIN when left out. |
+| `username` | string |  | The user, for PLAIN. |
+| `password_env` | string |  | The environment variable holding the password, read when the pipeline loads. |
+| `tls` | boolean |  | Connect over TLS, the nodes' certificates checked against the system's roots or ca_file's; the check cannot be turned off. |
+| `ca_file` | string |  | A PEM file of the certificates the nodes' are checked against, in place of the system's roots; needs tls. |
+| `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, for nodes that ask for one or for EXTERNAL; needs tls and key_file. |
+| `key_file` | string |  | The PEM file of cert_file's private key. |
+| `server_name` | string |  | The name the nodes' certificates must have; each node's host when left out. |
+| `timeout` | duration | `"30s"` | How long connecting, each answer of the broker, each write, the wait for a batch's confirms (from the last one), the wait while the broker blocks publishing (a memory or disk alarm), and closing may take. 30s when left out or 0. |
+| `heartbeat` | duration | `"30s"` | The heartbeat interval asked for, the broker's when lower: a connection silent for two of them is lost. 30s when left out or 0. |
+| `frame_max` | integer, 0 or more | `131072` | The largest frame asked for, the broker's when lower; larger messages go in several frames. 131072 when left out or 0. |
+| `max_message_bytes` | integer, 0 or more | `16777216` | The largest message body published: a record that makes a larger one fails, and on_error takes it. Keep it at or below the broker's max_message_size. 16 MiB when left out or 0. |
+| `exchange` | string |  | The exchange published to, which must exist; the default exchange when left out, which routes a message to the queue its routing key names. |
+| `routing_key` | string | `"{namespace}"` | The routing key of a record's message: text with {namespace}, the record's namespace, and {key}, its key (a string as it is, anything else as JSON). At most 255 bytes once made. {namespace} when left out. |
+| `codec` | [codec](#sync codecs) |  | What makes a message's body of a record: raw when left out, after's value field as it is, or the record's canonical JSON when it has none; json for the row as plain JSON (form plain) or the whole record (form record). |
+| `content_type` | string |  | The content_type property of every message, as application/json; none when left out. |
+| `transient` | boolean |  | Publish messages as transient (delivery mode 1), which a classic queue keeps in memory alone; persistent when left out. Quorum and stream queues keep every message on disk. |
+| `unroutable` | string: `error`, `drop` | `"error"` | What a message the exchange routes to no queue is: error, its record fails (the message is published mandatory and returned), on_error then taking it; drop, it is dropped by the broker unseen. error when left out. |
 
 <a id="sync-sinks-redis"></a>
 

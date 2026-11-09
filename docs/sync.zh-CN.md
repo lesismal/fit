@@ -126,6 +126,9 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | `s3` | 同一批次生成同一个对象，覆盖自身；重放若被切成不同的批次，会生成别的对象 |
 | `influxdb`、`tdengine` | 同一个数据点：序列（子表）加时间，覆盖自身；删除不写 |
 | `qdrant`、`milvus` | 按由键生成的 ID upsert 和 delete：数据点和实体相同 |
+| `nats` | 相同记录得到相同的 `Nats-Msg-Id`：流的去重窗口丢弃它（默认 2 分钟） |
+| `pulsar` | 相同记录得到相同的 `fit-id` 属性：`dedup read_back` 时，生产者最近存过的记录被丢弃 |
+| `rabbitmq` | 再发布一次，`message_id` 相同，消费者可据此丢弃 |
 | `kafka`、`http`、`file`、`stdout` | 再写一次：Kafka 的生产者不是幂等的；`http` 对相同记录发送相同的 `Idempotency-Key` |
 
 **事务保持完整。** 检查点从不落在源事务内部；一个事务的记录带有其 ID，`mysql` 和 `postgres` 目标把每个源事务写成自己的
@@ -166,6 +169,9 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [PostgreSQL](#postgresql) | `postgres`：用 `pgoutput` 做逻辑复制，精确的快照 | `postgres`：`ON CONFLICT` upsert，`COPY` |
 | [MongoDB](#mongodb) | `mongo`：按 `_id` 读快照，再读 change stream | `mongo`：按 `_id` 批量 upsert 和 delete |
 | [Kafka、Redpanda](#kafka-与-redpanda) | `kafka`：每个分区从检查点中的 offset 读 | `kafka`：带键消息，批量、压缩 |
+| [RabbitMQ](#rabbitmq) | `rabbitmq`：队列在目标拿到后确认，流队列从检查点中的 offset 读 | `rabbitmq`：持久消息，批次等发布确认 |
+| [NATS JetStream](#nats-jetstream) | `nats`：持久拉取消费者，在目标拿到后确认；core 主题 | `nats`：JetStream 发布，按 `Nats-Msg-Id` 去重；core |
+| [Apache Pulsar](#apache-pulsar) | `pulsar`：每个分区作为读者从检查点中的消息 ID 读，或持久订阅 | `pulsar`：带键消息，批量、压缩、去重 |
 | [Redis、Valkey](#redis-与-valkey) | `redis`：用 `XREAD` 读流 | `redis`：`XADD`，或每条记录一个键 |
 | [S3 及兼容存储](#s3-及兼容存储) | `s3`：前缀下的对象，按键的顺序，逐行 | `s3`：由行组成的对象，按大小和时间滚动 |
 | [InfluxDB](#influxdb) | | `influxdb`：行协议写入 InfluxDB 1、2 和 3，按序列和时间 |
@@ -527,6 +533,128 @@ sync {
 }
 ```
 
+### RabbitMQ
+
+`rabbitmq` 源通过 AMQP 0-9-1 消费 `queues`（经典队列和仲裁队列，RabbitMQ 3.13 和 4.x），带 `prefetch`（`basic.qos`，默认
+1000），每条投递只在所有目标都拿到其记录后才确认：队列的位置在 broker 那里，检查点中没有它，fit 停止时未确认的消息会被
+再次投递。`streams` 是流队列，从检查点中最后一个 offset 之后读（没有检查点时从 `stream_start`，默认 `first`）。消息体经
+`codec` 处理（默认 `raw`）；消息记录在 `value` 旁还有 `exchange`、`routing_key`、`queue`、`redelivered`、`headers` 以及已设置
+的属性，`metadata_field` 把它们放进编解码器生成的行的一个字段。记录的键是 `rabbitmq` 目标写入的 `fit-key` 头。在作业
+（`mode once`）中，源在 `idle_end`（2s）内没有消息到来、且所有记录都已确认时结束。
+
+`rabbitmq` 目标为每条记录向 `exchange`（不写时为默认交换机）以 `routing_key`（`{namespace}`；也可用 `{key}`）发布一条持久
+消息，其 `message_id` 在记录再次写入时不变，并在 broker 确认整批之前一直持有该批次（发布确认）。没有队列接收的消息使其
+记录失败（`unroutable error`，默认；`drop` 让 broker 丢弃它）。投递至少一次：消费者可以按 `message_id` 丢弃重复。支持 TLS
+（`ca_file`、`cert_file`）以及 PLAIN 和 EXTERNAL 认证；遵守心跳，以及 broker 的内存和磁盘告警（发布最多被挡 `timeout`）。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-queue {
+		source rabbitmq {
+			addresses rabbit-1:5671 rabbit-2:5671
+			tls true
+			username fit
+			password_env RABBITMQ_PASSWORD
+			queues orders
+			prefetch 500
+			codec json
+		}
+		sinks archive {
+			sink rabbitmq {
+				addresses archive:5672
+				username fit
+				password_env RABBITMQ_PASSWORD
+				exchange archive
+				routing_key orders.{namespace}
+				content_type application/json
+				codec json
+			}
+		}
+	}
+}
+```
+
+### NATS JetStream
+
+`nats` 源通过持久拉取 `consumer` 读取 JetStream 的 `stream`（nats-server 2.10 及以后），每条消息只在所有目标都拿到后才确认，
+所以崩溃不会丢消息：至少一次。设置 `create_consumer` 时由 fit 创建消费者（ack 策略 all，`subjects` 为其过滤，`start` 为 all
+或 new，`ack_wait`、`max_ack_pending`）；流序号在每条记录的位置和检查点中，fit 创建的消费者丢失时，或某次运行发现它持有已投递
+未确认的消息时，会从检查点重新创建，使这些消息先来且有序。你自己的消费者从其确认下限读起，且需要 ack 策略 `explicit`。
+每条消息经 `codec` 处理（默认 `raw`）；消息记录在 `value` 旁还有主题、头、流、序号和时间，`metadata_field` 把它们放进
+编解码器生成的行。报告的延迟是消费者待处理的消息数。`mode core` 改为订阅 core NATS 的 `subjects`（`queue` 组可分担），
+至多一次，用于遥测：fit 停机时、或到来得比它处理得快（`buffer`）的消息会丢失。
+
+`nats` 目标为每条记录向 `subject`（`{namespace}`）发布一条消息，数据来自 `codec`，带由记录位置生成的 `Nats-Msg-Id`，
+所以在流的去重窗口（`duplicate_window`，默认 2 分钟）内再次写入的批次只存一次；最多 `max_in_flight` 个发布同时等待流的
+确认，批次在其每条消息都被确认后才确认。`mode core` 发布到 core NATS，只确认到服务器读到为止。
+
+两者都连接 `servers`（集群的其他服务器会被获知，一台失败时客户端换到另一台），`tls` 时走 TLS，用令牌（`token_env`）、
+用户名和密码（`username`、`password_env`）、NKey 种子（`nkey_file`）或 JWT 及其种子的 creds 文件（`creds_file`）认证。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-search {
+		source nats {
+			servers nats-1:4222 nats-2:4222 nats-3:4222
+			tls true
+			username fit
+			password_env NATS_PASSWORD
+			stream ORDERS
+			consumer fit-orders-to-search
+			create_consumer true
+			subjects orders.>
+			codec json
+		}
+		transforms key { fields order_id }
+		sinks search {
+			sink elasticsearch { urls https://es:9200; username fit; password_env ES_PASSWORD }
+		}
+	}
+}
+```
+
+### Apache Pulsar
+
+`pulsar` 源读取 `topics` 的每个分区（Pulsar 2.10 及以后；裸名属于 `public/default`）。默认（`mode reader`）每个分区由一个
+非持久的读者从流水线检查点中的消息 ID 读起，所以 broker 上不保留任何东西，保留策略在读之前删掉的消息会丢失；
+`mode subscription` 通过持久的 `subscription`（`exclusive` 或 `failover`）读取，在所有目标拿到记录后累积确认，消息 ID 仍在
+检查点中，以便跳过 broker 再次发送的内容。每条消息经 `codec` 处理（默认 `raw`）；消息记录还带有消息的 `topic`、
+`message_id`、`properties`、`producer`、`publish_time` 和 `event_time`，设置 `metadata_field` 时编解码器生成的行把它们放在该
+字段下。值为 null 的消息是对其键的删除。加密和分块的消息不读取。
+
+`pulsar` 目标为每条记录向 `topic`（`{namespace}`）发送一条消息，以记录的键为消息键，由 Java 客户端的默认路由（键的 Java
+字符串哈希）分配分区，所以同一个键的消息保持顺序；删除的值为 null，供主题压缩。一个分区的消息作为 Pulsar 批次发出
+（`max_batch_messages`、`max_batch_bytes`），压缩（`lz4`；`zlib`、`zstd`、`snappy`），生产者名为 `producer_name`，其序列 ID
+接着 broker 的继续。每条消息带属性 `fit-id`，由记录的位置生成：`dedup read_back`（默认）时目标在创建生产者时读回每个分区
+最后 64 个条目，丢弃其中已存储的记录，所以崩溃后再次写入的批次只存一次（这需要消费该主题的权限；`dedup off` 全部发送）。
+这在源以相同位置再次读到记录时成立：数据库日志、文件、单个分区。多分区的源（`kafka`、`pulsar`）在每个位置中写入所有分区
+的进度，按运行时交错的顺序，所以重放的位置不同，会再存一次：至少一次。`pulsar+ssl://` 的 URL 走 TLS；`token_env` 以令牌
+认证。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-pulsar {
+		source kafka {
+			brokers kafka-1:9092
+			topics shop.orders
+			codec debezium
+		}
+		sinks events {
+			sink pulsar {
+				url pulsar+ssl://pulsar.internal:6651
+				token_env PULSAR_TOKEN
+				topic shop/orders/{namespace}
+				producer_name orders-to-pulsar
+				codec json
+			}
+		}
+	}
+}
+```
+
 ### Redis 与 Valkey
 
 `redis` 源用 `XREAD` 从上次读到的条目 ID 之后读取 `streams`（没有消费者组，不确认也不删除任何东西），每个条目是一条由其
@@ -721,6 +849,9 @@ sync {
 | `mongo` | 副本集或分片集群（change stream 需要）；`full_document whenAvailable` 或 `full_document_before_change` 需在集合上开启 `changeStreamPreAndPostImages`；oplog 窗口长于流水线可能停止的时间 | 数据库的 `read`（所有数据库则为 `readAnyDatabase`） |
 | `tidb` | 在快照之前已启动的、写到 Kafka 的 TiCDC changefeed（`canal-json` 带 `enable-tidb-extension=true`，或 `simple`）；`tidb_gc_life_time` 长于快照所需时间 | 表的 `SELECT`；Kafka 源在该主题上的权限 |
 | `kafka` | 保留时间长于流水线可能停止的时间 | 主题的 `Describe` 和 `Read`（不需要消费者组的权限：不加入组） |
+| `rabbitmq` | 持久队列（经典或仲裁）或流队列，由你创建；流的保留时间长于流水线可能停止的时间 | 队列的 `read`（不需要 `configure`：只做被动声明） |
+| `nats` | 一个 JetStream 流，由你创建；`create_consumer` 时消费者由 fit 创建 | 向 `$JS.API.STREAM.INFO.<stream>`、`$JS.API.CONSUMER.*.<stream>.>`、`$JS.API.CONSUMER.MSG.NEXT.<stream>.<consumer>` 和 `$JS.ACK.<stream>.>` 发布，订阅 `_INBOX.>` |
+| `pulsar` | 保留时间长于流水线可能停止的时间（`mode reader` 不在 broker 上保留任何东西） | 主题的 `consume` |
 | `redis` | 流的裁剪速度不快于流水线的读取 | 流的键上的 `+xread`（或 `+@stream`） |
 | `elasticsearch` | 每次写入都让其值比上次更晚的游标字段（更新时间），以及表示删除的软删除字段 | 索引的 `read` 和 `view_index_metadata` |
 | `clickhouse` | 随每次写入增长的游标列 | 表的 `SELECT` |
@@ -755,7 +886,7 @@ CREATE PUBLICATION fit_orders FOR TABLE public.orders, public.order_items;  -- o
 ```
 
 目标只需要写权限：表的 `INSERT`、`UPDATE` 和 `DELETE`（MySQL、PostgreSQL），`checkpoint sink` 的表还需 `CREATE`；
-数据库的 `readWrite`（MongoDB）；`Write`，以及 `create_topics` 时的 `Create`（Kafka）。SQL 和 ClickHouse 目标中的表和
+数据库的 `readWrite`（MongoDB）；`Write`，以及 `create_topics` 时的 `Create`（Kafka）；交换机的 `write`（RabbitMQ）；主题的发布权限和 `_INBOX.>` 的订阅权限（NATS）；`produce`，`dedup read_back` 时还需 `consume`（Pulsar），其 broker 去重（`brokerDeduplicationEnabled`）让生产者的序列 ID 跨重启延续。SQL 和 ClickHouse 目标中的表和
 索引由你创建：DDL 只报告，从不重放。
 
 ## 系统之间的类型
@@ -1052,3 +1183,8 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 （`TestInfluxDB*`、`TestTDengine*`、`TestQdrant*`、`TestMilvus*`、`TestEmbed*`）：每个目标的写入从中间和从头重放后收敛，
 服务器拒绝的记录单独失败，经 `embed`（对接一个假的 embeddings API）写入 Qdrant 和 Milvus 的流水线在随机时刻被杀掉后，最终
 每一行都在且带有其向量，删除的都已不在。
+
+RabbitMQ、NATS JetStream 和 Pulsar 有各自的脚本，还不是 `run.sh` 的一族（I222 把它们加为 `mq`）：
+`eval "$(test/sync/rabbitmq.sh up)"` 启动 RabbitMQ 3.13 和 4.1（一个用户，一个由脚本自建 CA 的 TLS 监听），供
+`TestRabbitMQ*`；`eval "$(test/sync/nats.sh up)"` 启动 nats-server 2.10 和 2.11，各三个 JetStream 节点，供 `TestNATS*`；
+`eval "$(test/sync/pulsar.sh up)"` 启动开启去重的 Pulsar 3.0 和 4.0 单机，供 `TestPulsar*`。各自用 `down` 移除。
