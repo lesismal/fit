@@ -121,7 +121,9 @@ func decode(data []byte) error {
 			return err
 		}
 		guest.Emit(0, &guest.Record{Namespace: "lines", Op: "insert",
-			Key:   guest.Row{f("id", guest.Int(n))}.Value(),
+			Key: guest.Row{f("id", guest.Int(n))}.Value(),
+			// The price written as canonical JSON by hand, which goes in
+			// either form.
 			After: guest.Row{f("id", guest.Int(n)), f("name", guest.String(parts[1])), f("price", []byte(`{"decimal":"`+parts[2]+`"}`))}.Value()})
 	}
 	return nil
@@ -139,9 +141,8 @@ func encode(batch []guest.Record) ([]byte, error) {
 		namev, _ := row.Get("name")
 		name, _ := guest.AsString(namev)
 		pricev, _ := row.Get("price")
-		var price struct{ Decimal string }
-		_ = json.Unmarshal(pricev, &price)
-		fmt.Fprintf(&b, "%d|%s|%s\n", n, name, price.Decimal)
+		price, _ := guest.AsDecimal(pricev)
+		fmt.Fprintf(&b, "%d|%s|%s\n", n, name, price)
 	}
 	return b.Bytes(), nil
 }
@@ -210,6 +211,6 @@ func write(batch []guest.Record) error {
 	return nil
 }
 
-func f(name string, v []byte) guest.Field { return guest.Field{Name: name, Value: v} }
+func f(name string, v guest.Value) guest.Field { return guest.Field{Name: name, Value: v} }
 
 func main() {}

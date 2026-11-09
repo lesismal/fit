@@ -8658,8 +8658,9 @@
           // {
             // // Runs a WebAssembly plugin that exports fit_sync_transform over the records, a batch at a
             // // time: it emits zero or more records for each, so it drops, changes, splits and routes them.
-            // // The records cross as canonical JSON; a call that fails, traps, or runs past its time or
-            // // memory fails its batch, which on_error then takes.
+            // // The records cross in a binary form, or as canonical JSON for a plugin that does not take it;
+            // // a call that fails, traps, or runs past its time or memory fails its batch, which on_error
+            // // then takes.
             // "module": "wasm",
             // "params": {
               // // The plugin: a WebAssembly module, a WASI reactor, that exports fit_sync_transform; package

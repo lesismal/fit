@@ -10,9 +10,10 @@
 //
 // or by TinyGo (0.44 or later, which the tests build the sync plugin with):
 //
-//	tinygo build -target=wasip1 -buildmode=c-shared -o plugin.wasm .
+//	tinygo build -target=wasip1 -buildmode=c-shared -scheduler=none -o plugin.wasm .
 //
-// A plugin's main is never called. Calls come one at a time, so a plugin
+// -scheduler=none spares each call TinyGo's goroutine, which costs it
+// hundreds of microseconds; a plugin needs none. A plugin's main is never called. Calls come one at a time, so a plugin
 // may keep state in package variables, its own for each instance fit
 // runs.
 package guest

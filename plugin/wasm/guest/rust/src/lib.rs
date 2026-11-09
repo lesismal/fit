@@ -8,9 +8,13 @@
 //! ```ignore
 //! #[no_mangle]
 //! pub extern "C" fn fit_sync_transform(n: u32) -> i32 {
-//!     let batch = fit_guest::input(n);
-//!     for (i, rec) in fit_guest::records(&batch).iter().enumerate() {
-//!         fit_guest::emit(i, rec); // as it is: a record in canonical JSON
+//!     let Ok(batch) = fit_guest::parse_batch(&fit_guest::input(n)) else {
+//!         fit_guest::fail(None, "not a batch");
+//!         return fit_guest::FAILED;
+//!     };
+//!     let mut out = fit_guest::Emitter::new();
+//!     for (i, rec) in batch.iter().enumerate() {
+//!         out.emit(i, rec); // as it is
 //!     }
 //!     fit_guest::OK
 //! }
@@ -19,13 +23,19 @@
 //! The exports are `fit_sync_transform`, `fit_sync_decode`,
 //! `fit_sync_encode`, `fit_sync_poll` and `fit_sync_write`; each returns
 //! [`OK`], [`CAUGHT_UP`] (a poll with nothing more for now) or [`FAILED`].
-//! Records are their canonical JSON: [`parse_batch`] reads a batch into
-//! [`Record`]s, [`Row`] and the value helpers ([`int`], [`string`],
-//! [`as_int`], ...) read and make their typed values, and [`emit_record`]
-//! hands one on, without a JSON library; [`records`] splits a batch into
-//! its records' JSON for a plugin that parses them with one of its own.
+//! The crate exports `fit_sync_form` too, with its default feature
+//! `binary`, so that records cross in the binary form; without it
+//! (`default-features = false`), as their canonical JSON. Either way
+//! [`parse_batch`] reads a batch into [`Record`]s, [`Row`] and the value
+//! helpers ([`int`], [`string`], [`decimal`], [`as_int`], ...) read and
+//! make their typed values, and [`emit_record`] and [`Emitter`] hand them
+//! on, without a JSON library. [`records`] splits a batch of the JSON form
+//! into its records' JSON, and [`emit`] hands one on, for a plugin built
+//! without `binary` that parses records with a JSON library of its own.
 
+mod binary;
 mod record;
+pub use binary::{append_value_json, form, is_binary, is_null, parse_batch_binary, take_form, value_json, FORM_BINARY, FORM_JSON};
 pub use record::*;
 
 /// What an export returns when it went well.
@@ -47,6 +57,7 @@ extern "C" {
     #[link_name = "input"]
     fn sync_input(buf: *mut u8, buf_len: u32) -> i32;
     fn record_emit(index: i32, rec: *const u8, rec_len: u32);
+    fn records_emit(buf: *const u8, buf_len: u32);
     #[link_name = "fail"]
     fn sync_fail(index: i32, msg: *const u8, msg_len: u32);
     #[link_name = "output"]
@@ -89,19 +100,82 @@ pub fn input(n: u32) -> Vec<u8> {
 }
 
 /// Hands on `rec`, a record's canonical JSON, as what the input's record
-/// `i` becomes (0 for a decode or a poll). Indexes never go back.
+/// `i` becomes (0 for a decode or a poll), in either form. Indexes never go
+/// back.
 pub fn emit(i: usize, rec: &[u8]) {
     unsafe { record_emit(i as i32, rec.as_ptr(), rec.len() as u32) }
 }
 
-/// Hands on `r` as what the input's record `i` becomes, as [`emit`] does.
+/// Hands on `r` as what the input's record `i` becomes, as [`emit`] does,
+/// in the form the plugin took. An [`Emitter`] hands on many in one go.
 pub fn emit_record(i: usize, r: &Record) {
     EMIT_BUF.with(|b| {
         let mut b = b.borrow_mut();
         b.clear();
-        r.append_json(&mut b);
-        emit(i, &b);
+        if form() == FORM_BINARY {
+            binary::append_uvarint(&mut b, i as u64);
+            r.append_binary(&mut b);
+            unsafe { records_emit(b.as_ptr(), b.len() as u32) };
+        } else {
+            r.append_json(&mut b);
+            emit(i, &b);
+        }
     })
+}
+
+/// Hands on records as [`emit_record`] does, but in the binary form many in
+/// one go, when it holds enough or is dropped: make one at the start of an
+/// export, and let it go at its end.
+///
+/// ```ignore
+/// let mut out = fit_guest::Emitter::new();
+/// for (i, r) in batch.iter().enumerate() {
+///     out.emit(i, r);
+/// }
+/// fit_guest::OK // out goes, with the records it holds, before the export returns
+/// ```
+#[derive(Default)]
+pub struct Emitter {
+    buf: Vec<u8>,
+}
+
+impl Emitter {
+    /// An emitter holding nothing.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Hands on `r` as what the input's record `i` becomes.
+    pub fn emit(&mut self, i: usize, r: &Record) {
+        if form() != FORM_BINARY {
+            emit_record(i, r);
+            return;
+        }
+        binary::append_uvarint(&mut self.buf, i as u64);
+        r.append_binary(&mut self.buf);
+        if self.buf.len() >= 64 << 10 {
+            self.flush();
+        }
+    }
+
+    /// Hands on what it holds.
+    pub fn flush(&mut self) {
+        if !self.buf.is_empty() {
+            unsafe { records_emit(self.buf.as_ptr(), self.buf.len() as u32) };
+            self.buf.clear();
+        }
+    }
+
+    /// Drops what it holds, for an export that fails.
+    pub fn discard(&mut self) {
+        self.buf.clear();
+    }
+}
+
+impl Drop for Emitter {
+    fn drop(&mut self) {
+        self.flush();
+    }
 }
 
 std::thread_local! {
@@ -193,8 +267,8 @@ pub fn sleep(ms: u32) {
     unsafe { sync_sleep(ms) }
 }
 
-/// The records of a batch, a JSON array of objects, each its canonical
-/// JSON as a slice of `batch`.
+/// The records of a batch in the JSON form, a JSON array of objects, each
+/// its canonical JSON as a slice of `batch`.
 pub fn records(batch: &[u8]) -> Vec<&[u8]> {
     let mut out = Vec::new();
     let (mut depth, mut start, mut in_str, mut esc) = (0usize, 0usize, false, false);

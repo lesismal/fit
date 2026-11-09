@@ -3370,6 +3370,55 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
    也能用 TinyGo 0.44 构建（已验证），注释中有说明。那里没有 Rust 示例：它的 CI 只构建 Go。备选：增加 Rust 示例，并在
    fit-examples 的测试中加入 Rust 工具链。
 
+**记录的二进制形式**（规划决定 8，2026-11-09 在压测主机运行之前完成，因为本地数字已经要求它；与其余各项一样待审）：
+
+6. **形式。** `fitsync` 在规范 JSON 之外新增记录的二进制形式（`sync/binary.go`）：字符串是 uvarint 长度加字节；值是一个
+   标签（`0x10` 加其种类：null；bool 一个字节；int 为 zigzag varint；uint 为 uvarint；float 为 8 字节；decimal、
+   string、bytes 和 json 为字符串；time 为 Unix 秒、纳秒和偏移；date 为年、月、日），数组和映射在计数前有 4 字节的长度，
+   插件无需读入即可越过任何值；`0x1F` 表示以规范 JSON 写的值，手写的值依然可用；这些标签是任何 JSON 文本都不会以之开头的
+   控制字符，值的首字节即说明其形式。记录依次是 op 和事务标志字节、source 与 namespace、key、before 与 after、RFC 3339
+   文本的提交时间、事务 id 和位置的 JSON。批是计数加记录；插件交回的是任意多个“下标加记录”。备选：记录框架仍用 JSON，
+   只有值用二进制；现成格式（CBOR、protobuf、FlatBuffers），每种客体都需要相应的库。
+7. **按插件协商，双向使用。** 导出 `fit_sync_form(offered)` 的插件在实例创建时被提供形式 1，返回它采用的形式，不超过所提供
+   的（超过则加载失败，与 trap 一样）；采用者以该形式读取批（变换、编码、写入），并通过新的导入 `records_emit(buf, len)`
+   一次交回多条记录。不导出它的插件（之前构建的所有插件）照旧读取 JSON、调用 `record_emit`，不受影响；`record_emit` 在
+   两种形式下都是 JSON。每个实例必须采用与第一个相同的形式。基于新 SDK 构建的插件导入 `records_emit`，因此需要有它的 fit；
+   反过来则成立。备选：在自定义段中写版本；另一套导出。
+8. **分配很少的宿主解码器。** `fitsync.BinaryReader` 把插件交回的内容复制一次，作为字符串，记录中的字符串、位置和字节都是
+   它的切片，记录、映射字段和数组元素从块中切出；`fitsync.BinaryBatch` 写批时记下每条记录的值、提交时间和位置所在，
+   为输入记录 i 交回的记录中，与记录 i 逐字节相同的部分直接取记录 i 的（值一经创建不再改变），不再读取：只改 namespace
+   的变换完全不解码值。插件调用的缓冲放在该插件的池中复用，`ApplyBatch` 的调用者自己也是工作者之一。每条记录的宿主分配：
+   之前约 209 次，现在 0.18 到 0.21 次。备选：不复制、直接在插件内存上建记录，实例再次运行后即不安全。
+9. **Go SDK 使用它，并复用调用的内存。** `guest.Value`（任一形式的 `[]byte`）取代 `Record.Key`、`Before`、`After` 和
+   `Row` 字段中的 `json.RawMessage`；使用辅助函数和 `[]byte` 字面量的代码照常编译，把值写成 `json.RawMessage` 的代码需要
+   修改。辅助函数读取两种形式，按采用的形式构造值；新增 `Decimal` 和 `AsDecimal`，`Value.MarshalJSON`（以及
+   `Record.MarshalJSON`）写出规范 JSON；在 init 中调用 `JSONForm()` 可让插件保持 JSON。`Emit` 以二进制形式汇集记录，在
+   导出返回时（或每 64 KiB）交出。输入和批的记录由下一次调用复用，这对 TinyGo 的分配器帮助最大（64 条一批，从每条 6 µs
+   降到 0.45 µs）：处理函数拿到的批及其记录中的内容只属于本次调用，要保留就复制。fit-examples 的 `sync-wasm-codec` 通过
+   扫描值的 JSON 文本读取价格，在二进制形式下读不到：应改用 `guest.AsDecimal`（或调用 `guest.JSONForm()`），留给
+   fit-examples。备选：每次调用都用新内存；把值转换成 JSON 交给插件。
+10. **TinyGo 插件以 `-scheduler=none` 构建。** TinyGo 默认调度器为每次导出调用启动一个 goroutine，此处每次调用约 430 µs，
+    与形式无关；同步插件不需要 goroutine，所以测试以 `-scheduler=none` 构建，模块章节中也作此说明。这取代决定 1 中的
+    “默认参数”。备选：默认参数，TinyGo 插件慢十到一百倍。
+11. **Rust crate 通过默认 feature 使用它。** `fit-guest` 在默认 feature `binary` 下导出 `fit_sync_form`；
+    `default-features = false` 保持 JSON，供用 `records` 拆批并用 JSON 库解析的插件使用。`parse_batch`、`Row` 和辅助
+    函数读取两种形式、构造采用的形式（新增 `decimal`、`as_decimal`、`value_json`）；`emit_record` 立即交出一条记录，
+    `Emitter` 汇集记录，在导出结束时被 drop 时交出。备选：仅当插件选择时才用二进制。
+12. **测试以两种形式运行每种客体**：决定 1 中的每个 `TestSync*` 以 `<guest>/binary` 和 `<guest>/json` 运行，后者不提供
+    任何形式（`offerForm`），与以前的 fit 一样，也就是旧插件所见；`TestSyncBinaryEmit` 和 `TestSyncFormNegotiation`
+    用手工构造的模块测试 SDK 不会做的事；`sync/binary_test.go` 覆盖整个 `binary.go`。`BenchmarkSyncTransform` 改为
+    `wasm-<guest>-<form>-<instances>`，并报告 `allocs/record`。
+13. **测量结果与剩余差距。** `BenchmarkSyncTransform`，每条记录，64 条一批，Apple M4 Pro（不是压测主机）。之前，在容器中
+    （Docker Desktop，8 CPU）：内置 279 ns；Go 单实例 49.3 µs、四实例 15.2 µs；TinyGo 44.9 / 14.7 µs；Rust
+    30.8 / 11.4 µs；每条 209 次宿主分配。之后，二进制形式，同一容器：内置 255 ns；Go 3.1 / 2.6 µs；TinyGo 1.5 / 1.4 µs；
+    Rust 1.1 / 1.06 µs；0.18 到 0.21 次分配。容器中四实例几乎无益：其虚拟机唤醒空闲线程太慢，其他工作者要等第一次调用结束
+    才开始（逐次计时可见），所以同一构建也在本机运行了（TinyGo 和 Rust 插件在容器中构建）：内置 89 ns；Go 3.2 µs / 1.03 µs；
+    TinyGo 1.5 µs / 502 ns；Rust 1.08 µs / 437 ns。JSON 形式与以前相同（本机 Go 51.8 / 12.8 µs）。因此四实例是内置的
+    4.9 倍（Rust）到 11.6 倍（Go），不在 20% 以内：剩下的是插件自己的工作，即在其内存中读取批并逐条写回记录（Go 的
+    WebAssembly 代码最慢），以及宿主写批（每条约 110 ns）；宿主读取现在主要是比较。更多实例、更大的 `batch_records`、
+    只在被问到时才读取记录各部分的客体，或者一个“该值原样”的标记让客体不复制未改的值，都能缩小差距；对每条记录都经过的
+    插件来说，很难达到只克隆一条记录、查一次映射的内置变换的 20% 以内。由压测主机的运行决定。
+
 ### I166 文件作为源与目标
 
 - **做什么**：源 `file`：路径与通配，每 `scan_interval` 扫描一次；每个文件以设备号、inode 和文件开头字节的指纹识别，因此

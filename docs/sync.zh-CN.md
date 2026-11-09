@@ -694,12 +694,14 @@ sync {
 
 内置连接器覆盖不到的，用 WebAssembly 插件：在 fit 中由 wazero 运行的 WASI reactor。`wasm` 变换（处理每个批次：丢弃、
 修改、拆分、改路由）、`wasm` 编解码器（自己的格式）、`wasm` 源（从检查点开始轮询 API）和 `wasm` 目标（写出每个批次）。
-记录以规范 JSON 跨越边界。源和目标唯一的出口是 fit 的异步 HTTP 客户端（只能访问 `allow_hosts` 列出的主机）和 sleep：没有
+记录以长度加标签的二进制形式跨越边界，基于 guest SDK 构建的插件都采用它；不采用的插件（包括此前构建的）仍用规范
+JSON。源和目标唯一的出口是 fit 的异步 HTTP 客户端（只能访问 `allow_hosts` 列出的主机）和 sleep：没有
 套接字。每个插件运行在 `instances` 个各自独立内存的实例上，受 `max_memory_bytes` 和 `timeout` 限制；陷入 trap 或超出
 限制的调用会让其记录失败，交给 `on_error`。
 
 `plugin/wasm/guest` 包是这些调用的 Go 端（`OnTransform`、`OnDecode`、`OnEncode`、`OnPoll`、`OnWrite`、`Emit`、`Fail`、
-`Row`），可用 Go 或 TinyGo（`tinygo build -target=wasip1 -buildmode=c-shared`）构建；crate
+`Row`），可用 Go 或 TinyGo（`tinygo build -target=wasip1 -buildmode=c-shared -scheduler=none`：TinyGo 默认的调度器让每次调用
+多花数百微秒）构建；crate
 `plugin/wasm/guest/rust`（`fit-guest`）是 Rust 端；fit 的测试会各运行一个这样的插件。fit-examples 中有变换
 （`sync-wasm-transform`）、编解码器（`sync-wasm-codec`）、源（`sync-wasm-source`）和目标（`sync-wasm-sink`）的示例。
 一个丢弃测试账号的变换：

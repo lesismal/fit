@@ -1,7 +1,10 @@
 //! Records, rows and values in their canonical JSON (see
-//! docs/decisions/036-sync.md), read and written by hand, as the Go guest
-//! does, so that a plugin needs no JSON library: a record's values stay the
-//! JSON they were, sliced out of the input.
+//! docs/decisions/036-sync.md), or in the binary form the plugin took (see
+//! the module binary), read and written by hand, as the Go guest does, so
+//! that a plugin needs no JSON library: a record's values stay as they
+//! came, copied out of the input.
+
+use crate::binary::{self, canonical, is_null, FORM_BINARY};
 
 /// A JSON text that is not what was asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,8 +17,8 @@ impl core::fmt::Display for SyntaxError {
 }
 
 /// A record's parts: its strings read, its values (`key`, `before`,
-/// `after`), `tx` and `position` left as their JSON, empty when it has
-/// none.
+/// `after`) left as they came, in either form, and `tx` and `position` as
+/// their JSON; empty when it has none.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Record {
     pub source: String,
@@ -70,9 +73,9 @@ impl Record {
             }
         }
         for (name, v) in [("key", &self.key), ("before", &self.before), ("after", &self.after)] {
-            if !v.is_empty() && v.as_slice() != b"null" {
+            if !is_null(v) {
                 field(b, name);
-                b.extend_from_slice(v);
+                binary::append_value_json(b, v);
             }
         }
         if !self.commit_time.is_empty() {
@@ -96,8 +99,17 @@ impl Record {
     }
 }
 
-/// Reads a batch, a JSON array of records.
+/// Reads a batch in the form the plugin took: a JSON array of records, or
+/// the binary form.
 pub fn parse_batch(b: &[u8]) -> Result<Vec<Record>, SyntaxError> {
+    if binary::form() == FORM_BINARY {
+        return binary::parse_batch_binary(b);
+    }
+    parse_batch_json(b)
+}
+
+/// Reads a batch that is a JSON array of records.
+pub fn parse_batch_json(b: &[u8]) -> Result<Vec<Record>, SyntaxError> {
     let mut out = Vec::new();
     elements(b, |v| {
         out.push(Record::parse(v)?);
@@ -106,18 +118,22 @@ pub fn parse_batch(b: &[u8]) -> Result<Vec<Record>, SyntaxError> {
     Ok(out)
 }
 
-/// A map value's fields, in order, as `{"map": {...}}` holds them, each
-/// value its JSON.
+/// A map value's fields, in order, each value as it came, in either form.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Row(pub Vec<(String, Vec<u8>)>);
 
 impl Row {
     /// Reads `v`, a map value, or None for null or nothing.
     pub fn parse(v: &[u8]) -> Result<Option<Row>, SyntaxError> {
-        let v = trim(v);
-        if v.is_empty() || v == b"null" {
+        if is_null(v) {
             return Ok(None);
         }
+        let Some(v) = canonical(v) else {
+            if v[0] != binary::TAG_MAP {
+                return Err(SyntaxError);
+            }
+            return Ok(Some(Row(binary::map_fields(v)?)));
+        };
         let mut inner = None;
         members(v, |name, val| {
             if name == "map" {
@@ -151,8 +167,15 @@ impl Row {
         self.0.retain(|(n, _)| n != name);
     }
 
-    /// The row as a map value.
+    /// The row as a map value, in the form the plugin took.
     pub fn value(&self) -> Vec<u8> {
+        self.value_in(binary::form())
+    }
+
+    pub(crate) fn value_in(&self, form: u32) -> Vec<u8> {
+        if form == FORM_BINARY {
+            return binary::map_binary(self.0.iter().map(|(n, v)| (n.as_str(), v.as_slice())));
+        }
         let mut b = b"{\"map\":{".to_vec();
         for (i, (name, v)) in self.0.iter().enumerate() {
             if i > 0 {
@@ -160,37 +183,83 @@ impl Row {
             }
             append_quote(&mut b, name);
             b.push(b':');
-            b.extend_from_slice(v);
+            binary::append_value_json(&mut b, v);
         }
         b.extend_from_slice(b"}}");
         b
     }
 }
 
-/// `i` as a value.
+/// `i` as a value, in the form the plugin took.
 pub fn int(i: i64) -> Vec<u8> {
-    format!("{{\"int\":{i}}}").into_bytes()
+    int_in(binary::form(), i)
+}
+
+pub(crate) fn int_in(form: u32, i: i64) -> Vec<u8> {
+    binary::make(form, binary::TAG_INT, |b| binary::append_varint(b, i), || format!("{{\"int\":{i}}}").into_bytes())
 }
 
 /// `s` as a value.
 pub fn string(s: &str) -> Vec<u8> {
-    let mut b = Vec::with_capacity(s.len() + 2);
-    append_quote(&mut b, s);
-    b
+    string_in(binary::form(), s)
+}
+
+pub(crate) fn string_in(form: u32, s: &str) -> Vec<u8> {
+    binary::make(
+        form,
+        binary::TAG_STRING,
+        |b| binary::append_str(b, s.as_bytes()),
+        || {
+            let mut b = Vec::with_capacity(s.len() + 2);
+            append_quote(&mut b, s);
+            b
+        },
+    )
+}
+
+/// The decimal number written as `s`, as "-12.30", as a value.
+pub fn decimal(s: &str) -> Vec<u8> {
+    decimal_in(binary::form(), s)
+}
+
+pub(crate) fn decimal_in(form: u32, s: &str) -> Vec<u8> {
+    binary::make(
+        form,
+        binary::TAG_DECIMAL,
+        |b| binary::append_str(b, s.as_bytes()),
+        || {
+            let mut b = b"{\"decimal\":".to_vec();
+            append_quote(&mut b, s);
+            b.push(b'}');
+            b
+        },
+    )
 }
 
 /// `v` as a value.
 pub fn boolean(v: bool) -> Vec<u8> {
-    if v { b"true".to_vec() } else { b"false".to_vec() }
+    boolean_in(binary::form(), v)
+}
+
+pub(crate) fn boolean_in(form: u32, v: bool) -> Vec<u8> {
+    binary::make(form, binary::TAG_BOOL, |b| b.push(v as u8), || if v { b"true".to_vec() } else { b"false".to_vec() })
 }
 
 /// The null value.
 pub fn null() -> Vec<u8> {
-    b"null".to_vec()
+    binary::make(binary::form(), binary::TAG_NULL, |_| {}, || b"null".to_vec())
 }
 
 /// A value's integer, an int's or a uint's.
 pub fn as_int(v: &[u8]) -> Option<i64> {
+    let Some(v) = canonical(v) else {
+        let mut r = binary::Reader::new(v, 1);
+        return match v[0] {
+            binary::TAG_INT => r.varint().ok(),
+            binary::TAG_UINT => r.uvarint().ok().map(|u| u as i64),
+            _ => None,
+        };
+    };
     let mut n = None;
     members(v, |name, val| {
         let s = core::str::from_utf8(trim(val)).ok();
@@ -207,6 +276,9 @@ pub fn as_int(v: &[u8]) -> Option<i64> {
 
 /// A value's string.
 pub fn as_str(v: &[u8]) -> Option<String> {
+    let Some(v) = canonical(v) else {
+        return binary::text(v, binary::TAG_STRING);
+    };
     let v = trim(v);
     if v.first() != Some(&b'"') {
         return None;
@@ -214,8 +286,30 @@ pub fn as_str(v: &[u8]) -> Option<String> {
     unquote(v).ok()
 }
 
+/// The text of a value's decimal, as "12.30".
+pub fn as_decimal(v: &[u8]) -> Option<String> {
+    let Some(v) = canonical(v) else {
+        return binary::text(v, binary::TAG_DECIMAL);
+    };
+    let mut s = None;
+    members(v, |name, val| {
+        if name == "decimal" {
+            s = unquote(val).ok();
+        }
+        Ok(())
+    })
+    .ok()?;
+    s
+}
+
 /// A value's boolean.
 pub fn as_bool(v: &[u8]) -> Option<bool> {
+    let Some(v) = canonical(v) else {
+        return match v {
+            [binary::TAG_BOOL, c] => Some(*c == 1),
+            _ => None,
+        };
+    };
     match trim(v) {
         b"true" => Some(true),
         b"false" => Some(false),

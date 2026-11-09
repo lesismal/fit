@@ -67,6 +67,8 @@ pub extern "C" fn fit_sync_transform(n: u32) -> i32 {
         Ok(b) => b,
         Err(e) => return failed(&e.to_string()),
     };
+    // What the call emits, handed on in one go as it returns.
+    let mut out = fit::Emitter::new();
     for (i, r) in batch.iter_mut().enumerate() {
         if c.mode == "none" {
             continue;
@@ -76,7 +78,7 @@ pub extern "C" fn fit_sync_transform(n: u32) -> i32 {
             if r.namespace == "shop.orders" {
                 r.namespace = "orders".to_string();
             }
-            fit::emit_record(i, r);
+            out.emit(i, r);
             continue;
         }
         let n = id(r);
@@ -89,6 +91,7 @@ pub extern "C" fn fit_sync_transform(n: u32) -> i32 {
                 "trap" => panic!("on purpose"),
                 "http" => {
                     if let Err(e) = fit::request("", "http://127.0.0.1:1/", &[], "") {
+                        out.discard();
                         return failed(&e);
                     }
                 }
@@ -103,21 +106,24 @@ pub extern "C" fn fit_sync_transform(n: u32) -> i32 {
             0 => {} // dropped
             1 => {
                 // split
-                fit::emit_record(i, r);
+                out.emit(i, r);
                 r.namespace.push_str(".copy");
-                fit::emit_record(i, r);
+                out.emit(i, r);
             }
             _ => {
                 // changed
                 match Row::parse(&r.after) {
-                    Err(e) => return failed(&e.to_string()),
+                    Err(e) => {
+                        out.discard();
+                        return failed(&e.to_string());
+                    }
                     Ok(Some(mut row)) => {
                         row.set("seen", fit::boolean(true));
                         r.after = row.value();
                     }
                     Ok(None) => {}
                 }
-                fit::emit_record(i, r);
+                out.emit(i, r);
             }
         }
     }
@@ -138,6 +144,8 @@ pub extern "C" fn fit_sync_decode(n: u32) -> i32 {
         let Ok(n) = parts[0].parse::<i64>() else {
             return failed(&format!("{:?} is not a number", parts[0]));
         };
+        // The price written as canonical JSON by hand, which goes in either
+        // form.
         let price = format!("{{\"decimal\":\"{}\"}}", parts[2]).into_bytes();
         let r = Record {
             namespace: "lines".into(),
@@ -165,15 +173,7 @@ pub extern "C" fn fit_sync_encode(n: u32) -> i32 {
         };
         let id = row.get("id").and_then(fit::as_int).unwrap_or(0);
         let name = row.get("name").and_then(fit::as_str).unwrap_or_default();
-        let mut price = String::new();
-        if let Some(v) = row.get("price") {
-            let _ = fit::members(v, |k, v| {
-                if k == "decimal" {
-                    price = fit::unquote(v)?;
-                }
-                Ok(())
-            });
-        }
+        let price = row.get("price").and_then(fit::as_decimal).unwrap_or_default();
         out.push_str(&format!("{id}|{name}|{price}\n"));
     }
     if !out.is_empty() {

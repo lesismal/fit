@@ -6,6 +6,7 @@ import (
 	"fmt"
 	goruntime "runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fit/config"
@@ -17,7 +18,7 @@ import (
 // a sink, each named wasm in its namespace.
 func init() {
 	module.Register(module.Info{ID: fitsync.Transforms + ".wasm", New: func() any { return new(SyncTransform) },
-		Doc: "Runs a WebAssembly plugin that exports fit_sync_transform over the records, a batch at a time: it emits zero or more records for each, so it drops, changes, splits and routes them. The records cross as canonical JSON; a call that fails, traps, or runs past its time or memory fails its batch, which on_error then takes."})
+		Doc: "Runs a WebAssembly plugin that exports fit_sync_transform over the records, a batch at a time: it emits zero or more records for each, so it drops, changes, splits and routes them. The records cross in a binary form, or as canonical JSON for a plugin that does not take it; a call that fails, traps, or runs past its time or memory fails its batch, which on_error then takes."})
 	module.Register(module.Info{ID: fitsync.Codecs + ".wasm", New: func() any { return new(SyncCodec) },
 		Doc: "Runs a WebAssembly plugin that exports fit_sync_decode, turning bytes (a line, a message, a body) into records, and fit_sync_encode, turning records into bytes, for the sources and sinks that read and write bytes."})
 	module.Register(module.Info{ID: fitsync.Sources + ".wasm", New: func() any { return new(SyncSource) },
@@ -151,14 +152,20 @@ func (t *SyncTransform) Apply(r *fitsync.Record, emit func(*fitsync.Record)) err
 // fails fails each of its records.
 func (t *SyncTransform) ApplyBatch(in []*fitsync.Record, emit func(int, *fitsync.Record), fail func(int, error)) error {
 	size := t.BatchRecords
-	calls := make([]syncCall, (len(in)+size-1)/size)
+	calls := make([]*syncCall, (len(in)+size-1)/size)
+	for j := range calls {
+		calls[j] = t.pool.getCall()
+	}
+	defer func() {
+		for _, sc := range calls {
+			t.pool.putCall(sc)
+		}
+	}()
 	errs := make([]error, len(calls))
 	do := func(j int) {
 		part := in[j*size : min((j+1)*size, len(in))]
-		sc := &calls[j]
-		sc.n = len(part)
-		var err error
-		if sc.input, err = fitsync.AppendBatchJSON(nil, part); err != nil {
+		sc := calls[j]
+		if err := sc.setBatch(t.pool, part); err != nil {
 			errs[j] = err
 			return
 		}
@@ -175,23 +182,18 @@ func (t *SyncTransform) ApplyBatch(in []*fitsync.Record, emit func(int, *fitsync
 			do(j)
 		}
 	} else {
-		var next sync.Mutex
-		n := 0
-		var wg sync.WaitGroup
-		for range workers {
-			wg.Go(func() {
-				for {
-					next.Lock()
-					j := n
-					n++
-					next.Unlock()
-					if j >= len(calls) {
-						return
-					}
-					do(j)
-				}
-			})
+		var next atomic.Int64
+		work := func() {
+			for j := int(next.Add(1) - 1); j < len(calls); j = int(next.Add(1) - 1) {
+				do(j)
+			}
 		}
+		// The caller is one of the workers.
+		var wg sync.WaitGroup
+		for range workers - 1 {
+			wg.Go(work)
+		}
+		work()
 		wg.Wait()
 	}
 	for j := range calls {
@@ -265,11 +267,11 @@ func (c *SyncCodec) Encode(b []byte, recs []*fitsync.Record) ([]byte, error) {
 	if c.encode == nil {
 		return b, errors.New("wasm codec: the plugin does not export " + exportEncode)
 	}
-	input, err := fitsync.AppendBatchJSON(nil, recs)
-	if err != nil {
+	sc := c.encode.getCall()
+	defer c.encode.putCall(sc)
+	if err := sc.setBatch(c.encode, recs); err != nil {
 		return b, err
 	}
-	sc := &syncCall{input: input, n: len(recs)}
 	if err := c.run(c.encode, sc); err != nil {
 		return b, err
 	}
@@ -384,11 +386,11 @@ func (s *SyncSink) Cleanup() {
 // Write hands the plugin the batch. A record it names as failed fails the
 // write from there, those before it written.
 func (s *SyncSink) Write(ctx context.Context, batch []*fitsync.Record) error {
-	input, err := fitsync.AppendBatchJSON(nil, batch)
-	if err != nil {
+	sc := s.pool.getCall()
+	defer s.pool.putCall(sc)
+	if err := sc.setBatch(s.pool, batch); err != nil {
 		return err
 	}
-	sc := &syncCall{input: input, n: len(batch)}
 	status, err := s.pool.call(ctx, sc)
 	switch {
 	case err != nil:

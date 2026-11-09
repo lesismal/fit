@@ -9692,11 +9692,13 @@ Renames records' namespaces, by an exact map and then by glob rules with templat
 
 ### `wasm`
 
-Runs a WebAssembly plugin that exports fit_sync_transform over the records, a batch at a time: it emits zero or more records for each, so it drops, changes, splits and routes them. The records cross as canonical JSON; a call that fails, traps, or runs past its time or memory fails its batch, which on_error then takes.
+Runs a WebAssembly plugin that exports fit_sync_transform over the records, a batch at a time: it emits zero or more records for each, so it drops, changes, splits and routes them. The records cross in a binary form, or as canonical JSON for a plugin that does not take it; a call that fails, traps, or runs past its time or memory fails its batch, which on_error then takes.
 
 Runs a WebAssembly plugin, a WASI reactor, over the records: the plugin exports
-`fit_sync_transform`, reads the batch as its records' canonical JSON, and emits zero or more
-records for each through the host module `fit_sync`, so it drops, changes, splits and routes them.
+`fit_sync_transform`, reads the batch, and emits zero or more records for each through the host
+module `fit_sync`, so it drops, changes, splits and routes them. The records cross in a binary
+form of lengths and tags, which plugins built on the guest SDKs take (`fit_sync_form`), or as
+their canonical JSON for a plugin that does not, one built before it among them.
 The records the pipeline holds are split into calls of `batch_records`, run on up to `instances`
 instances at once, each with its own memory, and what they make goes on in order. A call that
 fails, traps, runs past `timeout`, or asks for more than `max_memory_bytes`, fails every record of
@@ -9704,7 +9706,8 @@ its call, which `on_error` then takes, and its instance is made again; a plugin 
 record too. A transform plugin makes no HTTP requests and does not sleep: only a source's and a
 sink's may. Package `plugin/wasm/guest` is the Go side of the calls (`OnTransform`, `Emit`,
 `Fail`, `Row`), `plugin/wasm/guest/rust` the Rust one; [decision 036](../decisions/036-sync.md)
-describes the ABI.
+describes the ABI. A TinyGo plugin is best built with `-scheduler=none`: TinyGo's default
+scheduler costs each call hundreds of microseconds.
 
 In a .conf file:
 

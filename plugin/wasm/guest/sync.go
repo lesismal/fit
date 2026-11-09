@@ -3,9 +3,9 @@
 package guest
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"time"
 	"unsafe"
 )
@@ -13,15 +13,20 @@ import (
 // The sync side of the ABI: a plugin registers, in an init function, what
 // runs for the calls it takes (OnTransform, OnDecode, OnEncode, OnPoll,
 // OnWrite), and reads its settings with Config and logs with Log, as a
-// request plugin does. Records cross as their canonical JSON (see
-// docs/decisions/036-sync.md): Record holds a record's parts, and Row and
-// the value helpers read and make its typed values.
+// request plugin does. Records cross in the binary form fit offers (see
+// docs/decisions/036-sync.md), or as their canonical JSON when fit offers
+// none or the plugin calls JSONForm: Record holds a record's parts, and
+// Row and the value helpers read and make its typed values, in either
+// form.
 
 //go:wasmimport fit_sync input
 func syncInput(buf, bufLen uint32) int32
 
 //go:wasmimport fit_sync record_emit
 func recordEmit(index int32, rec, recLen uint32)
+
+//go:wasmimport fit_sync records_emit
+func recordsEmit(buf, bufLen uint32)
 
 //go:wasmimport fit_sync fail
 func syncFail(index int32, msg, msgLen uint32)
@@ -51,6 +56,33 @@ const (
 	statusFailed   = 2
 )
 
+// The forms records cross in.
+const (
+	formJSON   = 0
+	formBinary = 1
+)
+
+var (
+	// form is the one fit_sync_form took: JSON until fit offers another.
+	form     uint32
+	jsonOnly bool
+)
+
+// JSONForm keeps the plugin's records in their canonical JSON, the form
+// of plugins built before the binary one, for a plugin that reads values'
+// JSON itself rather than with the value helpers. Call it in an init
+// function.
+func JSONForm() { jsonOnly = true }
+
+//go:wasmexport fit_sync_form
+func fitSyncForm(offered uint32) uint32 {
+	form = formJSON
+	if offered >= formBinary && !jsonOnly {
+		form = formBinary
+	}
+	return form
+}
+
 // Tx is a record's transaction.
 type Tx struct {
 	ID    string `json:"id,omitempty"`
@@ -58,15 +90,15 @@ type Tx struct {
 	Last  bool   `json:"last,omitempty"`
 }
 
-// Record is a record's canonical JSON, its values left as JSON for Row and
-// the value helpers to read.
+// Record is a record's parts, its values left as they came for Row and
+// the value helpers to read: empty for none.
 type Record struct {
 	Source     string          `json:"source,omitempty"`
 	Namespace  string          `json:"namespace,omitempty"`
 	Op         string          `json:"op,omitempty"`
-	Key        json.RawMessage `json:"key,omitempty"`
-	Before     json.RawMessage `json:"before,omitempty"`
-	After      json.RawMessage `json:"after,omitempty"`
+	Key        Value           `json:"key,omitempty"`
+	Before     Value           `json:"before,omitempty"`
+	After      Value           `json:"after,omitempty"`
 	CommitTime string          `json:"commit_time,omitempty"`
 	Tx         *Tx             `json:"tx,omitempty"`
 	Position   json.RawMessage `json:"position,omitempty"`
@@ -79,9 +111,23 @@ func bytesPtr(b []byte) (uint32, uint32) {
 	return uint32(uintptr(unsafe.Pointer(&b[0]))), uint32(len(b))
 }
 
-// input returns the call's input, n bytes long.
+// A call's input and its batch's records are held in memory the next
+// call reuses, rather than made anew for each call, which spares the
+// garbage collector, TinyGo's most: what a handler is given, the batch,
+// its records and the strings and values in them, or the bytes to decode
+// or the checkpoint, is the call's, and a plugin copies what it keeps past
+// it (strings.Clone, bytes.Clone).
+var (
+	inBuf  []byte
+	recBuf []Record
+)
+
+// input returns the call's input, n bytes long, in inBuf.
 func input(n uint32) []byte {
-	b := make([]byte, n)
+	if uint32(cap(inBuf)) < n {
+		inBuf = make([]byte, n)
+	}
+	b := inBuf[:n]
 	if n > 0 {
 		p, l := bytesPtr(b)
 		syncInput(p, l)
@@ -89,16 +135,36 @@ func input(n uint32) []byte {
 	return b
 }
 
-func batch(n uint32) ([]Record, error) { return parseBatch(input(n)) }
+// batch reads the call's batch, n bytes, in the form taken.
+func batch(n uint32) ([]Record, error) {
+	if form == formBinary {
+		return parseBatchBinary(input(n))
+	}
+	return parseBatch(input(n))
+}
 
 // MarshalJSON returns r's canonical JSON.
 func (r *Record) MarshalJSON() ([]byte, error) { return r.appendJSON(nil), nil }
 
-// emitBuf is where Emit writes a record, for the host to read.
+// emitBuf is where Emit writes a record, for the host to read; in the
+// binary form, the records emitted since the last flush.
 var emitBuf []byte
 
-// failed reports err as the call's failure.
+// flushAt is how much the binary form's emitBuf holds before it goes.
+const flushAt = 64 << 10
+
+// flush hands the host the records emitBuf holds, in the binary form.
+func flush() {
+	if len(emitBuf) > 0 && form == formBinary {
+		p, n := bytesPtr(emitBuf)
+		recordsEmit(p, n)
+	}
+	emitBuf = emitBuf[:0]
+}
+
+// failed reports err as the call's failure, dropping what it emitted.
 func failed(err error) int32 {
+	emitBuf = emitBuf[:0]
 	Fail(-1, err.Error())
 	return statusFailed
 }
@@ -107,6 +173,13 @@ func failed(err error) int32 {
 // as a record of the bytes, for a decode, or of the poll, for a source,
 // with i 0. A transform emits in order: i never goes back.
 func Emit(i int, r *Record) {
+	if form == formBinary {
+		emitBuf = r.appendBinary(binary.AppendUvarint(emitBuf, uint64(i)))
+		if len(emitBuf) >= flushAt {
+			flush()
+		}
+		return
+	}
 	emitBuf = r.appendJSON(emitBuf[:0])
 	p, n := bytesPtr(emitBuf)
 	recordEmit(int32(i), p, n)
@@ -132,7 +205,9 @@ var errNoHandler = errors.New("the plugin registered nothing for this call")
 
 // OnTransform sets fn to run over each batch of a transform: it calls Emit
 // with what each record becomes, nothing to drop it, several to split it,
-// and Fail for a record it refuses. An error fails the whole batch.
+// and Fail for a record it refuses. An error fails the whole batch. The
+// batch, and what its records hold, are the call's: the next call reuses
+// their memory.
 func OnTransform(fn func(batch []Record) error) { onTransform = fn }
 
 // OnDecode sets fn to turn bytes into records, which it hands to Emit with
@@ -172,6 +247,7 @@ func fitSyncTransform(n uint32) int32 {
 	if err != nil {
 		return failed(err)
 	}
+	flush()
 	return statusOK
 }
 
@@ -183,6 +259,7 @@ func fitSyncDecode(n uint32) int32 {
 	if err := onDecode(input(n)); err != nil {
 		return failed(err)
 	}
+	flush()
 	return statusOK
 }
 
@@ -215,6 +292,7 @@ func fitSyncPoll(n uint32) int32 {
 	if err != nil {
 		return failed(err)
 	}
+	flush()
 	if next != nil {
 		p, l := bytesPtr(next)
 		syncCheckpoint(p, l)
@@ -285,122 +363,3 @@ func HTTPHeader(name string) (string, bool) {
 
 // Sleep waits d, for a source or a sink, within its call's timeout.
 func Sleep(d time.Duration) { syncSleep(uint32(d.Milliseconds())) }
-
-// Field is a field of a Row.
-type Field struct {
-	Name  string
-	Value json.RawMessage
-}
-
-// Row is a map value's fields, in order, as {"map": {...}} holds them.
-type Row []Field
-
-// ParseRow reads v, a map value or null. The fields' values are slices of
-// v.
-func ParseRow(v json.RawMessage) (Row, error) {
-	if len(v) == 0 || string(v) == "null" {
-		return nil, nil
-	}
-	var inner []byte
-	if err := members(v, func(name string, val []byte) error {
-		if name == "map" {
-			inner = val
-		}
-		return nil
-	}); err != nil || inner == nil {
-		return nil, errors.New("not a map value")
-	}
-	var row Row
-	err := members(inner, func(name string, val []byte) error {
-		row = append(row, Field{Name: name, Value: val})
-		return nil
-	})
-	return row, err
-}
-
-// Get returns the field name.
-func (r Row) Get(name string) (json.RawMessage, bool) {
-	for _, f := range r {
-		if f.Name == name {
-			return f.Value, true
-		}
-	}
-	return nil, false
-}
-
-// Set sets the field name to v, adding it at the end when it is new.
-func (r *Row) Set(name string, v json.RawMessage) {
-	for i, f := range *r {
-		if f.Name == name {
-			(*r)[i].Value = v
-			return
-		}
-	}
-	*r = append(*r, Field{name, v})
-}
-
-// Delete removes the field name.
-func (r *Row) Delete(name string) {
-	for i, f := range *r {
-		if f.Name == name {
-			*r = append((*r)[:i], (*r)[i+1:]...)
-			return
-		}
-	}
-}
-
-// Value returns r as a map value.
-func (r Row) Value() json.RawMessage {
-	b := []byte(`{"map":{`)
-	for i, f := range r {
-		if i > 0 {
-			b = append(b, ',')
-		}
-		b = appendQuote(b, f.Name)
-		b = append(append(b, ':'), f.Value...)
-	}
-	return append(b, "}}"...)
-}
-
-// Int returns i as a value.
-func Int(i int64) json.RawMessage { return []byte(`{"int":` + strconv.FormatInt(i, 10) + `}`) }
-
-// String returns s as a value.
-func String(s string) json.RawMessage { return appendQuote(nil, s) }
-
-// Bool returns b as a value.
-func Bool(b bool) json.RawMessage { return []byte(strconv.FormatBool(b)) }
-
-// Null is the null value.
-func Null() json.RawMessage { return []byte("null") }
-
-// AsInt returns v's integer, an int or a uint's.
-func AsInt(v json.RawMessage) (int64, bool) {
-	var n int64
-	ok := false
-	_ = members(v, func(name string, val []byte) error {
-		var err error
-		switch name {
-		case "int":
-			n, err = strconv.ParseInt(string(val), 10, 64)
-		case "uint":
-			var u uint64
-			u, err = strconv.ParseUint(string(val), 10, 64)
-			n = int64(u)
-		default:
-			return nil
-		}
-		ok = err == nil
-		return nil
-	})
-	return n, ok
-}
-
-// AsString returns v's string.
-func AsString(v json.RawMessage) (string, bool) {
-	i := skipSpace(v, 0)
-	if i >= len(v) || v[i] != '"' {
-		return "", false
-	}
-	return unquote(v[i:]), true
-}

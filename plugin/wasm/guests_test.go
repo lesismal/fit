@@ -37,7 +37,7 @@ var syncGuests = []*syncGuest{
 	}},
 	{name: "tinygo", tools: []string{"tinygo"}, build: func(dir string) (string, []byte, error) {
 		path := filepath.Join(dir, "sync.wasm")
-		cmd := exec.Command("tinygo", "build", "-target=wasip1", "-buildmode=c-shared", "-o", path, "./testdata/sync")
+		cmd := exec.Command("tinygo", "build", "-target=wasip1", "-buildmode=c-shared", "-scheduler=none", "-o", path, "./testdata/sync")
 		out, err := cmd.CombinedOutput()
 		return path, out, err
 	}},
@@ -107,10 +107,31 @@ func (g *syncGuest) plugin(t testing.TB) string {
 	return g.path
 }
 
-// eachGuest runs f as a subtest for each guest, with its plugin's path.
+// syncForms are the forms the tests offer plugins: the binary form, which
+// each guest's plugin takes, and none, as fit offered before it, so that
+// records cross as canonical JSON, as they do for plugins built before.
+var syncForms = []struct {
+	name string
+	form uint32
+}{{"binary", formBinary}, {"json", formJSON}}
+
+// withForm runs f with offerForm set to form.
+func withForm(form uint32, f func()) {
+	defer func(old uint32) { offerForm = old }(offerForm)
+	offerForm = form
+	f()
+}
+
+// eachGuest runs f as a subtest for each guest and each form, with its
+// plugin's path: <guest>/<form>.
 func eachGuest(t *testing.T, f func(t *testing.T, plugin string)) {
 	for _, g := range syncGuests {
-		t.Run(g.name, func(t *testing.T) { f(t, g.plugin(t)) })
+		t.Run(g.name, func(t *testing.T) {
+			plugin := g.plugin(t)
+			for _, fm := range syncForms {
+				t.Run(fm.name, func(t *testing.T) { withForm(fm.form, func() { f(t, plugin) }) })
+			}
+		})
 	}
 }
 
