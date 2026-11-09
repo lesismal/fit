@@ -9,7 +9,8 @@
 // a Fix that plans a rollout, the alert rules, webhooks, alerts and silences, and the menu's badge while alerts fire.
 // Users and audit (I148, users.js): the users' roles and the audit log; every page is drawn once the user's roles are
 // read, and shows only what they allow (FitCluster.can*). Metrics, Logs and Certificates (I150, insight.js): the series
-// the manager keeps per member and group, the members' logs merged by time, and the certificate inventory.
+// the manager keeps per member and group, the members' logs merged by time, and the certificate inventory. BitTorrent
+// (I206, bittorrent.js): the members' BitTorrent roles, and distributions of a published file to members over BitTorrent.
 //
 // 集群菜单（I142）：工作台的一级入口，在控制台提供模块 cluster 时显示（设置了 admin.cluster 的 fit，即其他 fit 的管理端）：
 // 概览，各成员的状态；节点，添加、测试、信任、编辑与删除成员；以及成员页 #/cluster/node/<name>，两者都可打开。页面在
@@ -30,7 +31,9 @@
       { id: 'users', icon: 'users', label: 'n.users' },
       // Metrics, logs and certificates across the members (I150, insight.js). / 跨成员的指标、日志与证书（I150，insight.js）。
       { id: 'metrics', icon: 'activity', label: 'n.metrics' }, { id: 'logs', icon: 'log', label: 'n.logs' },
-      { id: 'certificates', icon: 'shield', label: 'n.certs' }],
+      { id: 'certificates', icon: 'shield', label: 'n.certs' },
+      // The members' BitTorrent roles and distributions (I206, bittorrent.js). / 成员的 BitTorrent 角色与分发（I206，bittorrent.js）。
+      { id: 'bittorrent', icon: 'download', label: 'n.bittorrent' }],
     // The count of alerts firing, on the menu's row (I147). / 菜单行上正在触发的告警数（I147）。
     badge: function () { return FC.alertBadge(); },
     boot: function (UI) { FC.alertsBoot(UI); },
@@ -74,7 +77,10 @@
         // Metrics, logs and certificates (I150, insight.js). / 指标、日志与证书（I150，insight.js）。
         metrics: function () { FC.pages.metrics(UI, sh); },
         logs: function () { FC.pages.logs(UI, sh); },
-        certificates: function () { FC.pages.certificates(UI, sh); }
+        certificates: function () { FC.pages.certificates(UI, sh); },
+        // BitTorrent (I206, bittorrent.js). / BitTorrent（I206，bittorrent.js）。
+        bittorrent: function () { FC.pages.bittorrent(UI, sh); },
+        'distribution/:id': function (p) { FC.pages.distribution(UI, sh, p); }
       };
       Object.keys(routes).forEach(function (k) { routes[k] = gated(routes[k]); });
       return { routes: routes, fallback: 'overview' };

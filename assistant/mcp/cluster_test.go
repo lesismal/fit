@@ -31,6 +31,9 @@ func (cluster) PlanRollout(ctx context.Context, user string, req []byte) ([]byte
 func (cluster) CheckOp(user string, req []byte) ([]byte, error) {
 	return []byte(`{"link":"#/cluster/ops?op=reload&members=m1"}`), nil
 }
+func (cluster) BitTorrent(ctx context.Context, user, group string, nodes []string) ([]byte, error) {
+	return []byte(`{"view":{"members":[]},"distributions":[]}`), nil
+}
 func (cluster) FixDrift(ctx context.Context, user string, nodes []string) ([]byte, error) {
 	return []byte(`{"nothing_to_fix":["m1"]}`), nil
 }

@@ -14,6 +14,7 @@
 - [发布：分阶段应用的修改](#发布分阶段应用的修改)
 - [漂移与告警](#漂移与告警)
 - [指标、日志与证书](#指标日志与证书)
+- [BitTorrent：成员的种子与分发](#bittorrent成员的种子与分发)
 - [如何访问成员](#如何访问成员)
 - [管理端读取什么，以及可能出现的问题](#管理端读取什么以及可能出现的问题)
 - [API](#api)
@@ -339,6 +340,7 @@ Webhook 的状态说明其发送情况。不应答的 Webhook 只阻塞它自己
 | `cluster_metrics` | `read` | 各成员按类别的请求、连接、重载与不可用后端（现读其 `GET /status`），并按分组汇总，附最近 12 次轮询的[序列](#指标日志与证书) |
 | `cluster_certs` | `read` | 各成员轮询读到的证书清单，最先到期的在前，可限定天数 |
 | `cluster_log_tail` | `read` | 最多 16 个成员自身日志的最新行，按时间合并，可按日志器、级别与文本筛选，默认每个成员 50 行；与 `log_tail` 一样在 `data.send_logs` 打开时提供 |
+| `cluster_bittorrent` | `read` | 即时读取的成员 BitTorrent 角色（I206）：客户端、按状态统计的种子、速率、字节数、对端、发布条目、tracker、合计，以及最近的分发及各目标的进度 |
 | `member` 参数 | `read` | `config_get`、`versions_diff`、`status_get`、`metrics_query`、`upstream_health`、`consistency_check`、`certs_list`、`cache_zones` 与媒体工具改为经管理端与该成员的会话读取该成员，而非管理端自身 |
 | `rollout_propose` | `propose` | 发布的规划：模板（现状或草稿）、同步、修改或复制，并建议策略 |
 | `cluster_op_propose` | `propose` | 检查一次操作（重载、回滚、检查、清除缓存、测试），但不启动 |
@@ -472,6 +474,38 @@ fit cluster rollout pause|resume|go|abort|rollback ID
 `-min-requests 20` 与 `-exclude a,b`，与发布页面的表单相同。发布失败、中止、回滚或过期时 `status` 的退出码为 1。每个命令都
 接受 `-json`，输出 Admin API 的应答。
 
+## BitTorrent：成员的种子与分发
+
+**集群 → BitTorrent**（I206）显示管理端即时读取的各成员 BitTorrent 角色：是否运行 `bittorrent.client` 及客户端是否在运行、
+接受对端的地址、按状态统计的种子、下载与上传速率、已下载与已上传的字节数、对端、出错的种子、发布条目及其种子，以及其 tracker 的
+种子与对端；上方是合计；**打开**经[节点切换器](#成员自己的页面节点切换器)打开该成员自己的 BitTorrent 页面。概览有一张合计与
+进行中分发的卡片。页面、助手或 Admin API 请求时，管理端读取各成员的 `GET /bittorrent/summary`（能力 `bittorrent.summary`），
+同时最多 `max_concurrency` 个成员，每次调用受 `timeout` 限制；一次读取在 2 秒内供所有请求共用，进行中的读取会被加入，不会重复
+发起。离线的成员或早于此视图的成员（能力中没有 `bittorrent.summary`）不会被请求，并单独说明。与成员状态一样，任何角色都可读取。
+
+**分发**把一个成员（**源**）发布的文件或目录经 BitTorrent 传给一组成员：例如 LLM 节点的模型或一个发行包。源用设置了 `private`
+的发布条目发布它（[发布](bittorrent.zh-CN.md#发布)），因此该种子不会公告到 DHT、不会与对端交换，也不会发给它未列出的 tracker。
+**新建分发**指定源、其条目与种子（其 ID，或 `per_file` 条目中文件的路径；条目只有一个种子时不填）、目标（分组的成员、所选成员，
+或两者）、目标客户端都有的分类（下载到其目录；留空为其 `download_dir`）、完成后是否继续做种、停滞超时与说明。然后管理端：
+
+1. 读取源的摘要（其客户端须在运行）、发布条目与该种子的 `.torrent` 文件：须为私有，最大 1 TiB，且不超过 `max_response_bytes`；
+2. 读取各目标的摘要：没有运行中客户端的目标单独失败（`no_client`）；
+3. 让每个目标把该种子添加到该分类（`POST /bittorrent/torrents`），以源和其他目标作为对端，地址为其客户端接受对端的地址：客户端
+   监听的地址；监听全部地址时为其成员 URL 的主机加客户端端口；或 `peer_hosts` 给出的地址（`{"edge-7": "10.0.0.7"}` 或
+   `"10.0.0.7:6881"`，客户端监听全部地址的连出成员需要它）；已有该种子的目标只跟进、从不删除（`adopted`）；
+4. 每 2 秒读取各目标的进度：下载完整即完成；客户端报告错误、种子被删除，或在停滞超时（默认 10 分钟，1 秒到 24 小时）内毫无增长
+   则失败（`stalled`）；
+5. 结束时从它添加过种子的目标上删除该种子：已下载完整的保留文件（设置 `keep_seeding` 时继续按其限制做种），失败或取消的删除已写入
+   的内容；并把分发及各目标的结果记入审计日志（`bt.distribute`）。
+
+**取消**在进行中的读取之后停止：仍在下载的目标被取消，种子连同已写入的内容从其上删除。分发页逐个目标跟进：状态、进度、字节数、
+速率、对端、提供给其他成员的地址与错误。上限：64 个目标，同时 2 个分发（`429`），一个成员同时只是一个分发的目标（`409`），内存
+中保留最近 16 个及其结果。分发不修改配置，因此不会占用成员而阻挡发布与操作；它需要在源和每个目标上有操作员角色，且管理端能写入
+其文档（用于审计日志）。管理端重启后会忘记进行中的分发；成员保留已有的内容。
+
+助手的 `cluster_bittorrent` 读取 `nodes` 或 `group` 的视图及最近的分发；BitTorrent 读取工具（`bt_torrents`、`bt_torrent`、
+`bt_tracker_stats`）与其他读取工具一样接受 `member`，且从不触及成员的 passkey、事件或修改。
+
 ## 如何访问成员
 
 成员是管理端能访问到的 fit，访问方式有三种：
@@ -582,6 +616,11 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 | `GET metrics` | 序列：`?node=a,b&group=g&points=90`（1 到 360；两者都未给出时为全部成员与分组）：`{"interval_ms", "points_max", "now", "nodes", "groups"}`，成员为 `{"name", "status", "groups", "counters", "series"}`，`counters` 为成员最近给出的 `{"at", "requests": {"total", "classes"}, "connections": {"open", "refused", "pending_bytes"}, "reloads": {"succeeded", "failed"}}`，分组为 `{"name", "nodes", "series"}`；序列按列给出 `{"t", "requests", "errors_4xx", "errors_5xx", "connections", "pending_bytes", "reloads", "reloads_failed", "members"}`，`t` 为 Unix 毫秒，速率为每秒，无值处为 `null`，分组的 `members` 为每点相加的成员数；任何角色 |
 | `GET certificates` | 证书清单：`{"now", "certificates", "nodes"}`，证书为 `{"node", "listener", "names", "issuer", "serial", "not_before", "not_after", "days_left", "status", "read"}`，最早到期的在前，成员为 `{"name", "status", "count", "read"}`；任何角色 |
 | `GET logs` | 追踪日志：`?node=a,b`（1 到 16 个，必填）、`level`、`logger`、`contains`、`limit`（每个成员最新的条数，默认 200，最多 1,000）与 `cursor`（上次应答的游标）：`{"records", "cursor", "nodes"}`，记录为 `{"node", "seq", "time", "level", "logger", "message"}`，按时间合并，成员为 `{"name", "count", "last", "error"}`；需要在所列每个成员上有角色；运行期间占用 8 个读取名额之一 |
+| `GET bittorrent` | 成员的 BitTorrent 角色（I206）：`{"read", "members", "totals", "distributions"}`，成员为 `{"name", "labels", "groups", "status", "summary", "error", "read"}`，`summary` 即其 `GET /bittorrent/summary`（`{"client", "tracker"}`），`totals` 为合计，`distributions` 为按状态统计的保留分发；任何角色 |
+| `POST distributions` | 开始分发：`{"source", "publish", "torrent", "group", "members", "category", "keep_seeding", "peer_hosts", "stall_timeout_ms", "description"}`；`202` 并返回准备中的分发；`400` 附 `{"field", "error"}`，成员或分组不存在为 `404`，目标在另一个分发中为 `409`，已有 2 个运行为 `429`；需要在源和每个目标上是操作员 |
+| `GET distributions` | `{"max_running", "max_targets", "read_only", "distributions"}`，最新的在前 |
+| `GET distributions/<id>` | 一个分发：`{"id", "user", "description", "source", "publish", "torrent", "source_peer", "group", "category", "keep_seeding", "stall_timeout_ms", "state", "reason", "error", "created", "ended", "finished", "counts", "targets"}`，`state` 为 `preparing`、`running`、`done`、`failed` 或 `cancelled`，目标为 `{"node", "status", "peer", "adopted", "state", "progress", "completed", "wanted", "download_rate", "peers", "error", "removed", "started", "ended", "took_ms"}`，`status` 为 `pending`、`adding`、`downloading`、`done`、`failed` 或 `cancelled` |
+| `POST distributions/<id>/cancel` | 取消它；已结束为 `409` |
 
 在模块之外、控制台的顶层，是节点切换器的转发：
 
@@ -598,7 +637,8 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 
 管理端的 Admin API 在 `/cluster/` 下以其令牌提供相同的读取与发布操作，供 `fit cluster` 使用：`GET nodes`、`state`、`groups`、
 `drift`、`metrics`、`certificates`、`logs`；`POST sync`（与模块的相同，但不通知成员）；`GET`/`POST rollouts`、
-`GET`/`DELETE rollouts/<id>`、`POST rollouts/<id>/start`、`pause`、`resume`、`go`、`abort`、`rollback`，应答与模块相同。
+`GET`/`DELETE rollouts/<id>`、`POST rollouts/<id>/start`、`pause`、`resume`、`go`、`abort`、`rollback`；`GET bittorrent`、`GET`/`POST distributions`、`GET distributions/<id>`、
+`POST distributions/<id>/cancel`（I206），应答与模块相同。
 不管理成员的 fit 上 `/cluster/` 返回 `404`。成员自己的 Admin API 新增 `GET /logs/recent?logger=&level=&contains=&limit=&after=`：
 `{"records", "last", "ring_size"}`，即序号 `after` 之后的消息（`after` 超过最后一条时从头开始），最多 `limit` 条（默认 100，
 最多 1,000），取最新的。
