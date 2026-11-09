@@ -1,0 +1,3 @@
+{"scenario":"seed","impl":"fit","mse":true,"peers":4,"bytes":1073741824,"seconds":4.391463725,"mib_per_sec":932.7186233332714,"cpu_seconds":9.469999999999999,"cpu_percent":215.64563874428902,"cpu_seconds_per_gib":2.3674999999999997,"peak_rss_mib":58.51953125}
+{"scenario":"seed","impl":"fit","mse":true,"peers":4,"bytes":1073741824,"seconds":4.401090747,"mib_per_sec":930.6783784887951,"cpu_seconds":9.29,"cpu_percent":211.08403652736587,"cpu_seconds_per_gib":2.3225,"peak_rss_mib":55.5390625}
+{"scenario":"seed","impl":"fit","mse":true,"peers":4,"bytes":1073741824,"seconds":4.374077181,"mib_per_sec":936.4260918376328,"cpu_seconds":9.399999999999999,"cpu_percent":214.90247224789425,"cpu_seconds_per_gib":2.3499999999999996,"peak_rss_mib":54.3359375}

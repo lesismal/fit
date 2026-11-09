@@ -311,6 +311,44 @@ jobs:
           go vet ./...
           go test -race -count=1 ./...
 
+  # The BitTorrent roles against anacrolix/torrent and libtorrent-rasterbar
+  # (I205), in a module of its own (test/btinterop) so that anacrolix stays
+  # out of fit's dependencies: it builds this checkout's fit and runs it.
+  # fit's client both ways (TCP and uTP, MSE off, preferred and required,
+  # v1, hybrid and v2, .torrent files and magnet links), the private tracker
+  # over HTTP and UDP, bt_stream while anacrolix seeds, and a publish
+  # entry's web seed. libtorrent through Ubuntu's python3-libtorrent; uTP
+  # against anacrolix needs cgo (go-libutp). The btbench command beside the
+  # tests is the benchmark host's (bench/bt.sh), only built here.
+  bittorrent-interop:
+    name: BitTorrent interop (anacrolix, libtorrent)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            test/btinterop/go.sum
+      - name: Install libtorrent
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-libtorrent
+          python3 -c 'import libtorrent; print("libtorrent", libtorrent.__version__)'
+      - name: go vet, go mod tidy -diff
+        working-directory: test/btinterop
+        run: |
+          go vet ./...
+          go mod tidy -diff
+      - name: Test against anacrolix and libtorrent
+        working-directory: test/btinterop
+        env:
+          CGO_ENABLED: '1'
+          FIT_LIBTORRENT: '1'
+        run: go test -race -count=1 -timeout 20m -v ./...
+
   # Sync's interop tests against real servers: test/sync/run.sh starts, in
   # Docker, Elasticsearch 8 and OpenSearch 2 with TLS, authentication and a
   # write pool small enough to answer 429s (I168, I169), ClickHouse 25.8
