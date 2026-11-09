@@ -70,6 +70,17 @@ func swapRuntime(engine *fib.Engine, next func(*Runtime) *Runtime) {
 	registry.Store(&m)
 }
 
+// envFor is the modules' environment of a pipeline loaded to be tested or
+// dry run on engine: the llm.proxy of the runtime registered for it, when
+// there is one.
+func envFor(engine *fib.Engine) *module.Env {
+	env := &module.Env{Engine: engine}
+	if rt := Lookup(engine); rt != nil {
+		env.LLMProxy = rt.llm.Load()
+	}
+	return env
+}
+
 // Lookup returns the runtime of the sync role whose modules dial through
 // engine, the engine the Admin API names, or nil.
 func Lookup(engine *fib.Engine) *Runtime {
@@ -542,7 +553,7 @@ func (rt *Runtime) Test(ctx context.Context, name string) ([]TestResult, error) 
 // TestPipeline tests the connections of cfg, a pipeline that need not run:
 // its modules are loaded, with engine to dial through, tested and let go.
 func TestPipeline(ctx context.Context, cfg *config.SyncPipeline, engine *fib.Engine) ([]TestResult, error) {
-	m, err := load(cfg, &module.Env{Engine: engine})
+	m, err := load(cfg, envFor(engine))
 	if err != nil {
 		return nil, err
 	}
@@ -697,7 +708,7 @@ func DryRunPipeline(ctx context.Context, cfg *config.SyncPipeline, from Position
 		timeout = DefaultDryRunTimeout
 	}
 	timeout = min(timeout, MaxDryRunTimeout)
-	env := &module.Env{Engine: engine}
+	env := envFor(engine)
 	v, err := module.Load(Sources, cfg.Source, env)
 	if err != nil {
 		return nil, err

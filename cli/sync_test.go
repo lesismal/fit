@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lesismal/fit/config"
 )
 
 // TestSyncRun checks fit sync run: a job runs to its end and exits 0, one
@@ -70,5 +72,15 @@ func TestValidateSync(t *testing.T) {
 	code, _, stderr := runFit("validate", "-c", bad)
 	if code != 1 || !strings.Contains(stderr, `record`) || !strings.Contains(stderr, `no module "nosuchsink" in sync.sinks`) {
 		t.Fatalf("%d %q", code, stderr)
+	}
+}
+
+// TestSyncLLMProxyAPI: fit sync run gives the modules the config's
+// llm.proxy, when it runs one.
+func TestSyncLLMProxyAPI(t *testing.T) {
+	api := &config.LLMProxyAPI{Address: "127.0.0.1:1"}
+	if llmProxyAPI(&config.Config{}) != nil || llmProxyAPI(&config.Config{LLM: &config.LLM{}}) != nil ||
+		llmProxyAPI(&config.Config{LLM: &config.LLM{Proxy: &config.LLMProxy{API: api}}}) != api {
+		t.Fatal("llmProxyAPI")
 	}
 }

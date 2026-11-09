@@ -163,6 +163,10 @@ type Env struct {
 	MediaAuth []config.MediaAuth
 	// MediaLibrary are the config's media libraries, as written.
 	MediaLibrary []config.MediaLibrary
+	// LLMProxy is the API of the config's llm.proxy, as written, or nil
+	// when it runs none: sync's embed transform calls it when given no
+	// URL of its own.
+	LLMProxy *config.LLMProxyAPI
 }
 
 // Graph returns the hold a module takes on its config for a request that
@@ -238,6 +242,15 @@ func (c *Context) MediaLibrary(name string) *config.MediaLibrary {
 		}
 	}
 	return nil
+}
+
+// LLMProxy returns the API of the llm.proxy of the module's config, as
+// written, or nil when it runs none.
+func (c *Context) LLMProxy() *config.LLMProxyAPI {
+	if c.env == nil {
+		return nil
+	}
+	return c.env.LLMProxy
 }
 
 // Load loads a module ref of the module's params names, in namespace ns,

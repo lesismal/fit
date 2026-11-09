@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fib"
@@ -27,7 +28,7 @@ func init() {
 			if c.Sync == nil {
 				return nil
 			}
-			return c.Sync
+			return &Member{Sync: c.Sync, LLMProxy: llmProxyAPI(c)}
 		},
 		New: func(h *app.Host) (app.Role, error) {
 			engine := h.Upstream
@@ -38,8 +39,28 @@ func init() {
 			Register(engine, r.rt)
 			return r, nil
 		},
-		Check: func(c *config.Config) error { return Check(c.Sync) },
+		Check: func(c *config.Config) error { return CheckWith(c.Sync, llmProxyAPI(c)) },
 	})
+}
+
+// Member is the sync role's member of a config: its sync, and what of the
+// rest of the config its modules use.
+type Member struct {
+	Sync *config.Sync
+	// LLMProxy is the API of the config's llm.proxy, nil when it runs
+	// none, which the embed transform calls when given no URL.
+	LLMProxy *config.LLMProxyAPI
+}
+
+// MarshalJSON writes the member as its sync, as the config has it.
+func (m *Member) MarshalJSON() ([]byte, error) { return json.Marshal(m.Sync) }
+
+// llmProxyAPI returns c's llm.proxy's API, nil when it runs none.
+func llmProxyAPI(c *config.Config) *config.LLMProxyAPI {
+	if c.LLM == nil || c.LLM.Proxy == nil {
+		return nil
+	}
+	return c.LLM.Proxy.API
 }
 
 // role runs the config's pipelines; the Admin API finds its runtime by
@@ -50,11 +71,14 @@ type role struct {
 }
 
 func (r *role) Apply(member any) error {
-	s, ok := member.(*config.Sync)
-	if !ok {
-		return fmt.Errorf("sync: a member of type %T", member)
+	switch m := member.(type) {
+	case *Member:
+		r.rt.SetLLMProxy(m.LLMProxy)
+		return r.rt.Apply(m.Sync)
+	case *config.Sync:
+		return r.rt.Apply(m)
 	}
-	return r.rt.Apply(s)
+	return fmt.Errorf("sync: a member of type %T", member)
 }
 
 func (r *role) Stop(ctx context.Context) {
@@ -64,13 +88,21 @@ func (r *role) Stop(ctx context.Context) {
 
 // Check loads every module s names, which checks their params, and lets
 // them go.
-func Check(s *config.Sync) error {
+func Check(s *config.Sync) error { return CheckWith(s, nil) }
+
+// CheckWith is Check for a config whose llm.proxy runs api (nil for none),
+// which the embed transform calls when given no URL.
+func CheckWith(s *config.Sync, api *config.LLMProxyAPI) error {
 	if s == nil {
 		return nil
 	}
+	var env *module.Env
+	if api != nil {
+		env = &module.Env{LLMProxy: api}
+	}
 	var errs config.Errors
 	for i := range s.Pipelines {
-		m, err := load(&s.Pipelines[i], nil)
+		m, err := load(&s.Pipelines[i], env)
 		if err != nil {
 			errs = append(errs, config.AsErrors(err)...)
 			continue
@@ -102,6 +134,9 @@ type Options struct {
 	// SourceAttempts, when above 0, is how many times in a row a source
 	// may fail before its pipeline stops, rather than restarting for ever.
 	SourceAttempts int
+	// LLMProxy is the API of the config's llm.proxy, which the embed
+	// transform calls when given no URL; nil when it runs none.
+	LLMProxy *config.LLMProxyAPI
 }
 
 // Runtime runs pipelines, and moves them to each config applied.
@@ -112,6 +147,9 @@ type Runtime struct {
 	// oneRun is RunPipeline's: a job runs now, anew when it had finished,
 	// and once, whatever its schedule.
 	oneRun bool
+	// llm is the llm.proxy's API the pipelines loaded from now on are
+	// given; Options.LLMProxy at first.
+	llm atomic.Pointer[config.LLMProxyAPI]
 }
 
 // NewRuntime returns a Runtime running no pipeline yet.
@@ -119,7 +157,19 @@ func NewRuntime(opts Options) *Runtime {
 	if opts.StopTimeout <= 0 {
 		opts.StopTimeout = 30 * time.Second
 	}
-	return &Runtime{opts: opts, pipes: map[string]*pipe{}}
+	rt := &Runtime{opts: opts, pipes: map[string]*pipe{}}
+	rt.llm.Store(opts.LLMProxy)
+	return rt
+}
+
+// SetLLMProxy sets the llm.proxy's API (nil for none) the pipelines loaded
+// from now on are given: those already running keep the one they were
+// loaded with until they are loaded again, by a change of their own.
+func (rt *Runtime) SetLLMProxy(api *config.LLMProxyAPI) { rt.llm.Store(api) }
+
+// env returns the modules' environment.
+func (rt *Runtime) env() *module.Env {
+	return &module.Env{Engine: rt.opts.Engine, LLMProxy: rt.llm.Load()}
 }
 
 // modules are a pipeline's modules, loaded.
@@ -235,7 +285,7 @@ func (rt *Runtime) Apply(s *config.Sync) error {
 		if p := rt.pipes[name]; p != nil && key(dir, w) == p.key {
 			continue
 		}
-		m, err := load(w, &module.Env{Engine: rt.opts.Engine})
+		m, err := load(w, rt.env())
 		if err != nil {
 			errs = append(errs, fmt.Errorf("pipeline %s: %w", name, err))
 			continue

@@ -119,7 +119,7 @@ func syncRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			attempts = p.Attempts()
 		}
 	}
-	st, err := fitsync.RunPipeline(ctx, &s, name, fitsync.Options{Log: root.Logger(config.LoggerSync), SourceAttempts: attempts})
+	st, err := fitsync.RunPipeline(ctx, &s, name, fitsync.Options{Log: root.Logger(config.LoggerSync), SourceAttempts: attempts, LLMProxy: llmProxyAPI(c)})
 	if err != nil {
 		printConfigError(stderr, "fit sync run", file, set.MapErrors(err))
 		return 1
@@ -146,4 +146,13 @@ func syncRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "fit sync run: the job was interrupted; run it again to go on from its checkpoint\n")
 	return 1
+}
+
+// llmProxyAPI returns c's llm.proxy's API, nil when it runs none: sync's
+// embed transform calls it when given no URL.
+func llmProxyAPI(c *config.Config) *config.LLMProxyAPI {
+	if c.LLM == nil || c.LLM.Proxy == nil {
+		return nil
+	}
+	return c.LLM.Proxy.API
 }
