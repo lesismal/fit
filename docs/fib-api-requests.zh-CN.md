@@ -84,15 +84,17 @@
 | A77 | BitTorrent 运行时可改的限制与单任务限制 | 已完成，fib `1f1d2e7` | 11 | I196、I199 |
 | A78 | `bittorrent.Config.Filter`：按地址拒绝 peer | 已完成，fib `1f1d2e7` | 11 | I196、I199 |
 | A79 | BitTorrent 客户端跑在调用者的引擎上 | 已完成，fib `1f1d2e7` | 11 | I196、I197 |
-| A80 | 事件队列有界 | 已提出 | 11 | I197 |
-| A81 | 以完整状态添加种子（seed 模式） | 已提出 | — | I202 |
-| A82 | Builder 只保留一个 piece 的叶子哈希，并可按 context 停止 | 已提出 | 11 | I202 |
-| A83 | Reader.Close 中断进行中的 Read | 已提出 | 1、10 | I200 |
-| A84 | 磁力链添加的 hybrid 种子的 piece layer | 已提出 | — | I196 |
-| A85 | tracker Store 可列出种子、可原地修改上限 | 已提出 | 11 | I201 |
-| A86 | 做种方不宣告“下载完成” | 已提出 | — | I201 |
+| A80 | 事件队列有界 | 已完成，fib `ecdcec0` | 11 | I197 |
+| A81 | 以完整状态添加种子（seed 模式） | 已完成，fib `ecdcec0` | — | I202 |
+| A82 | Builder 只保留一个 piece 的叶子哈希，并可按 context 停止 | 已完成，fib `ecdcec0` | 11 | I202 |
+| A83 | Reader.Close 中断进行中的 Read | 已完成，fib `ecdcec0` | 1、10 | I200 |
+| A84 | 磁力链添加的 hybrid 种子的 piece layer | 已完成，fib `ecdcec0` | — | I196 |
+| A85 | tracker Store 可列出种子、可原地修改上限 | 已完成，fib `ecdcec0` | 11 | I201 |
+| A86 | 做种方不宣告“下载完成” | 已完成，fib `ecdcec0` | — | I201 |
 | A87 | BitTorrent 任务的 tracker 及其 announce 状态 | 已提出 | — | I203 |
 | A88 | 重新校验运行中任务的数据 | 已提出 | — | I203 |
+| A89 | 单个种子的下载不受其锁和选块器限制 | 已提出 | 11 | I205 |
+| A90 | 客户端自建引擎的默认配置 | 已提出 | — | I205 |
 
 ## 证据
 
@@ -1949,7 +1951,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A80：事件队列有界
 
-**状态。** 2026-11-09 由 I197（BitTorrent 路线）提出；尚未实现。
+**状态。** 2026-11-09 由 I197（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
 
 **问题。** `bittorrent.Client` 把 `Config.OnEvent` 收到的事件放在一个无界切片里；处理慢一点或一阵 piece 事件就让它无限增长。
 
@@ -1959,7 +1961,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A81：以完整状态添加种子（seed 模式）
 
-**状态。** 2026-11-09 由 I202（BitTorrent 路线）提出；尚未实现。
+**状态。** 2026-11-09 由 I202（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
 
 **问题。** 刚由磁盘文件生成的种子被哈希两次：`metainfo.Builder` 一次，客户端初始校验又一次，因为无法告诉客户端存储里已有全部 piece。
 
@@ -1969,7 +1971,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A82：Builder 只保留一个 piece 的叶子哈希，并可按 context 停止
 
-**状态。** 2026-11-09 由 I202（BitTorrent 路线）提出；尚未实现。
+**状态。** 2026-11-09 由 I202（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
 
 **问题。** `metainfo.Builder` 在 v2 文件结束前保留每个 16 KiB 叶子哈希：size/512 字节，1 TiB 文件要 2 GiB；而且只能靠让读失败来取消。
 
@@ -1979,7 +1981,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A83：Reader.Close 中断进行中的 Read
 
-**状态。** 2026-11-09 由 I200（BitTorrent 路线）提出；尚未实现。
+**状态。** 2026-11-09 由 I200（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
 
 **问题。** `bittorrent.Reader.Close` 会等待正在进行的 `Read`（两者用同一把锁）；客户端已离开的流要等一个不再需要的 piece，除非先取消 context。
 
@@ -1989,7 +1991,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A84：磁力链添加的 hybrid 种子的 piece layer
 
-**状态。** 2026-11-09 由 I196（BitTorrent 路线）提出；尚未实现。
+**状态。** 2026-11-09 由 I196（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
 
 **问题。** fib 文档说客户端在 hybrid 磁力链下载完成后计算 v2 piece layer，但 `Torrent.computeLayers` 从未被调用：这样的种子做种时无法应答 v2 对端的哈希请求。
 
@@ -1999,7 +2001,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A85：tracker Store 可列出种子、可原地修改上限
 
-**状态。** 2026-11-09 由 I201（BitTorrent 路线）提出；尚未实现。
+**状态。** 2026-11-09 由 I201（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
 
 **问题。** `tracker.MemoryStore` 无法列出它保存的种子，上限和 peer TTL 在创建时固定，重载修改它们时 swarm 从空开始。
 
@@ -2009,7 +2011,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A86：做种方不宣告“下载完成”
 
-**状态。** 2026-11-09 由 I201（BitTorrent 路线）提出；尚未实现。
+**状态。** 2026-11-09 由 I201（BitTorrent 路线）提出；已在 fib 的 `ecdcec0` 完成（含 `cab3d6a`），由 fit 的会话实现；fit 已在 `ecdcec0` 上。
 
 **问题。** 客户端在做种方校验数据时宣告 `started`，校验结束时宣告 `completed`，于是 tracker 把每个做种方都算作一次完成的下载。
 
@@ -2037,3 +2039,22 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 **fit 如何使用。** `Role.Recheck` 调用它，Admin API 的 `{"action": "recheck"}` 和 `fit bt` 含义不变。
 
+## A89：单个种子的下载不受其锁和选块器限制
+
+**状态。** 2026-11-09 由 I205（BitTorrent 路线的基准）提出；尚未实现。
+
+**问题。** 在基准主机上，fib 客户端从 4 个做种方下载一个种子为 478 MiB/s（fit 的角色 705 MiB/s，anacrolix 1039 MiB/s），用不满 4 个 CPU 中的 2 个：每收到一个块都要取 `Torrent.mu` 并为该 peer 补请求；`nextRequest`/`pickPiece` 用 `math/rand` 扫描 piece（占 CPU 24%，`pickPiece` 21%）；每个 16 KiB 块单独一次 `pwrite`（30%）。
+
+**建议的 API。** 不改 API：peer 预定一个 piece 并请求其所有块，低于 reqq 一半时才补；最稀有优先用桶维护，在 have 与 bitfield 消息时更新；块按 piece 或按连续段写（`pwritev`），在磁盘池上进行。
+
+**fit 如何使用。** `bittorrent.client` 角色无需改动即可下载得更快。
+
+## A90：客户端自建引擎的默认配置
+
+**状态。** 2026-11-09 由 I205（BitTorrent 路线的基准）提出；尚未实现。
+
+**问题。** 在基准主机上，不设 `Config.SharedEngine` 的 fib 客户端下载速率只有同一客户端在 fit 共享引擎上的 0.68；其自建引擎的默认配置尚未分析。
+
+**建议的 API。** 对照共享引擎，检查 `NewClient` 给自建引擎的默认配置（poller、任务池、读缓冲），写入文档或修改。
+
+**fit 如何使用。** fit 不直接使用（fit 用 `SharedEngine`）；惠及 fib 客户端的其他使用者。
