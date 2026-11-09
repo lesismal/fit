@@ -119,8 +119,9 @@ func (p *rabbitPub) publish(ctx context.Context, bodies [][]byte) error {
 
 func (p *rabbitPub) close() { _ = p.c.Close() }
 
-// rabbitDeclare makes the queue bench, durable, the one every mover reads
-// (Kafka Connect's binds it to its exchange).
+// rabbitDeclare makes the queue bench, durable, the one every mover reads;
+// Kafka Connect's Camel connector declares nothing (autoDeclare false),
+// since it would declare the queue again, not durable, and be refused.
 func rabbitDeclare(ctx context.Context, addr, user, password string) error {
 	c, err := amqpwire.Dial(ctx, amqpwire.Config{Addrs: []string{addr}, Username: user, Password: password, Timeout: time.Minute})
 	if err != nil {

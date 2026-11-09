@@ -8041,10 +8041,11 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
    making them a family of their own.
 6. **The movers for RabbitMQ and MQTT are Apache Camel's Kafka connectors** (Apache 2.0) in Debezium's
    Kafka Connect image, the packages pinned by sha256; Confluent's RabbitMQ and MQTT connectors are
-   under a commercial licence, and Lenses's need a licence key for some. They are untried: the
-   benchmark host's first run may need their configs adjusted (`configs/connect/*.json`, the kamelets'
-   property names). Mosquitto keeps an unbounded queue (`max_queued_messages 0`), so that a paused
-   mover's messages wait for it.
+   under a commercial licence, and Lenses's need a licence key for some. The benchmark host's smoke
+   run (2026-11-10) found the kamelets' property names right; the RabbitMQ connector declares nothing
+   (`autoDeclare` false) and reads syncbench's durable queue `bench`, since its own declaration of the
+   queue is not durable and RabbitMQ refuses it. Mosquitto keeps an unbounded queue
+   (`max_queued_messages 0`), so that a paused mover's messages wait for it.
 7. **SQL Server's capture job is tuned for the benchmark** (every second, 5,000 transactions a scan,
    100 scans), so that CDC's capture does not bound either mover; both read the same change tables.
 8. **The plan's weights**: S1 20%, S2 15%, S3 15%, S4 10%, S5 15%, S6 5%, S7 7%, S8 6%, S9 7%: the

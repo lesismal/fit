@@ -5733,9 +5733,9 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    `pulsarServers` 现在至少需要一台，而不是两台都要。
 5. **`obs` 族为其两条流水线的测试启动 PostgreSQL 17 与 Mosquitto**，而不是让它们自成一族。
 6. **RabbitMQ 与 MQTT 的对手用 Apache Camel 的 Kafka 连接器**（Apache 2.0），装在 Debezium 的 Kafka Connect 镜像中，安装包以
-   sha256 固定；Confluent 的 RabbitMQ 与 MQTT 连接器是商业许可，Lenses 的部分需要许可证密钥。它们尚未试跑：基准主机的首次运行
-   可能需要调整其配置（`configs/connect/*.json`，kamelet 的属性名）。Mosquitto 的队列不设上限（`max_queued_messages 0`），
-   让暂停的对手的消息等着它。
+   sha256 固定；Confluent 的 RabbitMQ 与 MQTT 连接器是商业许可，Lenses 的部分需要许可证密钥。基准主机的冒烟运行（2026-11-10）
+   确认 kamelet 的属性名无误；RabbitMQ 连接器不声明任何东西（`autoDeclare` 为 false），读 syncbench 建的持久队列 `bench`，因为它自己
+   声明的队列不是持久的，RabbitMQ 会拒绝。Mosquitto 的队列不设上限（`max_queued_messages 0`），让暂停的对手的消息等着它。
 7. **为基准调整 SQL Server 的捕获作业**（每秒一次，每次扫描 5000 个事务，100 次扫描），使 CDC 的捕获不成为任何一方的瓶颈；
    两者读同样的变更表。
 8. **计划的权重**：S1 20%、S2 15%、S3 15%、S4 10%、S5 15%、S6 5%、S7 7%、S8 6%、S9 7%：第一批保留四分之三，大致维持原有比例。
