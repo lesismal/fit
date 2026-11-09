@@ -829,6 +829,10 @@
           },
           "type": "array"
         },
+        "rss": {
+          "$ref": "#/$defs/config.BitTorrentRSS",
+          "description": "RSS auto-download: feeds polled on their intervals, and rules adding the torrents of the items they pick (magnet links, .torrent enclosures or links) in a category, with size bounds and each episode once. What was seen is kept in data_dir/rss.json. A change applies in place. None when left out."
+        },
         "save_interval": {
           "default": "5s",
           "description": "How often, at most, the state is saved when something changed: a piece verified, a torrent added, removed, paused or its metadata received. It is saved when the role stops too, and changes to the list of torrents are saved at once. 5s when left out.",
@@ -1028,6 +1032,164 @@
       "required": [
         "name",
         "dir"
+      ],
+      "type": "object"
+    },
+    "config.BitTorrentRSS": {
+      "additionalProperties": false,
+      "properties": {
+        "feeds": {
+          "description": "The feeds polled, RSS 2.0 (or 1.0) and Atom, each on its own interval. Their URLs come from the config alone. At most 100.",
+          "items": {
+            "$ref": "#/$defs/config.BitTorrentRSSFeed"
+          },
+          "type": "array"
+        },
+        "history_size": {
+          "default": 1000,
+          "description": "How many items of each feed are remembered as seen, in data_dir/rss.json, so that an item is handled once, across restarts; the oldest are forgotten first. At least each feed's max_items. 1000 when left out or 0.",
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_feed_bytes": {
+          "default": 4194304,
+          "description": "The most bytes of a feed downloaded: a larger one fails its poll. 4 MiB when left out or 0, at most 32 MiB.",
+          "maximum": 33554432,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rules": {
+          "description": "The rules that pick the items whose torrents are added, tried in order: an item is added by the first rule whose feeds, patterns and size bounds it meets; an item no rule picks is only remembered as seen. At most 200.",
+          "items": {
+            "$ref": "#/$defs/config.BitTorrentRSSRule"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long a feed's download may take in all: connecting, redirects (at most 5) and the body. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.BitTorrentRSSFeed": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Poll the feed. On when left out. The Admin API may turn it off or on, which data_dir keeps until it is turned back.",
+          "type": "boolean"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Headers sent with the feed's requests, as a cookie a site wants. Not Host or the body's framing. A secret is better named by headers_env.",
+          "type": "object"
+        },
+        "headers_env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Headers sent with the feed's requests whose values are read from environment variables at each poll, by the header's name: {\"Authorization\": \"FEED_AUTH\"}. A variable not set sends no header.",
+          "type": "object"
+        },
+        "interval": {
+          "default": "15m",
+          "description": "How often the feed is polled, at least 1m; the server's ETag and Last-Modified are sent back, so that an unchanged feed answers 304 and costs nothing more. 15m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_items": {
+          "default": 200,
+          "description": "The most items of the feed read at a poll, the first in the document; the rest are left out. 200 when left out or 0.",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The feed's name, which the rules, the Admin API and data_dir/rss.json know it by. Letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The feed's http or https URL. Redirects are followed, at most 5. A private tracker's passkey may be in it: the Admin API and the pages show it without its user and query.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
+      ],
+      "type": "object"
+    },
+    "config.BitTorrentRSSRule": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "description": "The category the torrents are added in, one of categories. None, download_dir, when left out.",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Use the rule. On when left out. The Admin API may turn it off or on, which data_dir keeps until it is turned back.",
+          "type": "boolean"
+        },
+        "episodes": {
+          "description": "Add each episode once: an item whose title names an episode (S01E02, 1x02, or a date, as 2026-11-09) the rule has added already, of a show of the same name (the title before the episode), is left out, as another quality or a repack of it. Without an episode in the title, an item is told only by its own ID.",
+          "type": "boolean"
+        },
+        "exclude": {
+          "description": "Patterns, as patterns writes them, of titles the rule leaves out, as *720p* or re:(?:cam|ts)\\b. None when left out. At most 32.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "feeds": {
+          "description": "The feeds whose items the rule looks at, by name. Every feed when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_per_poll": {
+          "default": 5,
+          "description": "The most torrents the rule adds at one poll of a feed; the items past it are left for the next poll. 5 when left out or 0.",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_size": {
+          "description": "The most size of an item's content, in bytes, as min_size reads it. No bound when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_size": {
+          "description": "The least size of an item's content, in bytes, from its torrent:contentLength, or its enclosure's length. An item whose size the feed does not give passes. No bound when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The rule's name, which the Admin API and data_dir/rss.json know it by. Letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        },
+        "patterns": {
+          "description": "Patterns an item's title must match one of, in any case: a glob matching the whole title, where * matches any run of characters and ? one, as *Show Name*1080p*; or, after re:, a regular expression (Go's syntax) found anywhere in it, as re:S0[1-3]E\\d+. Every title when left out. At most 32.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "paused": {
+          "description": "Add the torrents paused.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },

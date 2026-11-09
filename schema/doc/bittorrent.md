@@ -39,6 +39,23 @@ of `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers` or `disk_q
 a new client, the torrents saved from the old one and added to the new one without a check. A new
 `data_dir` starts from that directory's state, as a restart would.
 
+`rss` downloads from RSS 2.0 (and 1.0) and Atom feeds: each of `feeds` is polled every `interval`
+(15m, at least 1m) on a goroutine of the role's, at most 4 at once, with fib's asynchronous HTTP
+client, sending back the `ETag` and `Last-Modified` it answered (304 costs nothing more), at most
+`max_feed_bytes` (4 MiB), within `timeout` (30s), at most 5 redirects; `headers` and `headers_env`
+(values read from environment variables) go with its requests, and its URL comes from the config
+alone. At most `max_items` items of a feed are read; each new one goes to the first of `rules` whose
+`feeds`, `patterns` and `exclude` (case-insensitive globs over the whole title, or `re:` and
+a regular expression) and `min_size` and `max_size` (from `torrent:contentLength` or the enclosure's
+length; unknown passes) it meets, which adds its torrent from its magnet link, else its .torrent
+enclosure or link (as a .torrent URL is added), in the rule's `category`, `paused` if it says, at
+most `max_per_poll` (5) a poll; with `episodes`, an episode (S01E02, 1x02 or a date) of a show the
+rule added already is left out. Every item is remembered as seen in `data_dir/rss.json`, at most
+`history_size` (1000) a feed, across restarts, with the episodes each rule added and the Admin
+API's toggles; items left for later (by `max_per_poll`, or an add that may pass, as `max_torrents`)
+are read again at the next poll, and an item whose .torrent file cannot be downloaded is tried at 3
+polls. A reload applies `rss` in place.
+
 `publish` entries publish directories: each file of `dir` (mode `per_file`), or the whole directory
 (mode `whole_dir`), is built into a hybrid torrent, with `web_seed` (the URL of a static route of `dir`)
 as its web seed, `announce` as its trackers and `private` if set, on `max_hashing` goroutines of the
@@ -58,15 +75,20 @@ at most 32 MiB), `/bittorrent/torrents/{id}` gives one with its files, pauses, r
 (`POST {"action"}`), changes its priorities, category, limits and queue position (`PATCH`) and
 removes it (`DELETE`, `?delete_data=1`); `.../files`, `.../peers` and `.../trackers`;
 `/bittorrent/alt_speed` reads and sets the alternative rates; `/bittorrent/publish` the publish
-entries, and `.../{name}/torrents/{id}` a published torrent's .torrent file; `/bittorrent/tracker/stats`, `.../torrents` and `.../passkey` the tracker's.
+entries, and `.../{name}/torrents/{id}` a published torrent's .torrent file; `/bittorrent/rss` the
+RSS feeds (their last poll and result) and rules, `.../items` the items seen, `POST
+.../feeds/{name}/poll` polls a feed now, `PUT .../feeds/{name}` and `.../rules/{name}` turn one on
+or off; `/bittorrent/tracker/stats`, `.../torrents` and `.../passkey` the tracker's.
 `GET /bittorrent/events` streams the client's events as server-sent events (torrents added, removed,
-completed, failing or changing state, peers banned, seed limits, the alternative rates), with
+completed, failing or changing state, peers banned, seed limits, the alternative rates, torrents
+an RSS rule added), with
 `Last-Event-ID` to catch up, 32 streams at most, a slow one disconnected after 256 events waiting;
 on the Admin API's address, and on a route of the console's own, `/api/m/admin/bittorrent/events`,
-which the workbench's BitTorrent pages read to show torrents as they change. `fit bt ls`, `add`, `info`, `pause`, `resume`, `rm`, `limit`
-and `alt` call these through the Admin API the bootstrap config names, as `fit sync` does. The
+which the workbench's BitTorrent pages read to show torrents as they change. `fit bt ls`, `add`, `info`, `pause`, `resume`, `rm`, `limit`,
+`alt` and `rss` call these through the Admin API the bootstrap config names, as `fit sync` does. The
 Admin API's `/metrics` carries the client's as `fit_bittorrent_*` (bytes, rates, peers and hash
-failures by category, torrents by category and state, bans, the alternative rates) and the
+failures by category, torrents by category and state, bans, the alternative rates, RSS polls and
+items added by feed) and the
 tracker's as `fit_bittorrent_tracker_*` (torrents, peers, announces, scrapes, refusals by reason).
 
 `bittorrent.tracker` is a BitTorrent tracker on fib's tracker, one a process: HTTP and HTTPS
@@ -103,6 +125,10 @@ interval, `min_interval`, `max_numwant` and `max_scrape` keep the swarms; the st
       },
       "categories": [{"name": "iso", "dir": "/srv/iso", "limits": {"seed_ratio": -1}}],
       "alt_speed": {"upload_rate": 131072, "schedules": [{"days": ["weekdays"], "from": "08:00", "to": "18:00"}]},
+      "rss": {
+        "feeds": [{"name": "shows", "url": "https://example.com/rss", "interval": "15m"}],
+        "rules": [{"name": "show", "patterns": ["*Show Name*1080p*"], "exclude": ["*hevc*"], "category": "iso", "episodes": true}]
+      },
       "access": {"deny": ["10.0.0.0/8"], "deny_files": ["/etc/fit/level1.p2p"]},
       "publish": [{
         "name": "releases",

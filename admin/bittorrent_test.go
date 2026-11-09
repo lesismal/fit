@@ -160,6 +160,8 @@ func TestBitTorrentWithoutRoles(t *testing.T) {
 		{"PUT", "/bittorrent/alt_speed", `{"mode": "on"}`}, {"GET", "/bittorrent/publish", ""}, {"GET", "/bittorrent/events", ""},
 		{"GET", "/bittorrent/tracker/stats", ""}, {"GET", "/bittorrent/tracker/torrents", ""},
 		{"GET", "/bittorrent/tracker/torrents/" + id, ""}, {"GET", "/bittorrent/tracker/passkey?user=a", ""},
+		{"GET", "/bittorrent/rss", ""}, {"GET", "/bittorrent/rss/items", ""}, {"POST", "/bittorrent/rss/feeds/a/poll", ""},
+		{"PUT", "/bittorrent/rss/feeds/a", `{"enabled": false}`}, {"PUT", "/bittorrent/rss/rules/a", `{"enabled": false}`},
 	} {
 		v := f.json(t, r.method, r.path, r.body, http.StatusNotFound)
 		if !strings.Contains(v["error"].(string), "does not run here") {

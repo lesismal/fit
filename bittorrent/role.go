@@ -127,6 +127,9 @@ type Role struct {
 
 	// pub is the publish entries (publish.go), guarded by mu.
 	pub *publisher
+	// rss is the RSS auto-download (rss.go), with a lock of its own,
+	// taken after mu.
+	rss *rssRunner
 
 	// mu orders Apply, Stop, the API and the saver, and guards what
 	// follows.
@@ -188,6 +191,7 @@ func New(h *app.Host) *Role {
 	}
 	r.console = roleconsole.New(h, ID, r.routes)
 	r.pub = newPublisher(r)
+	r.rss = newRSS(r)
 	return r
 }
 
@@ -255,6 +259,9 @@ func (r *Role) Apply(member any) error {
 	r.client.Refilter()
 	r.interval = cfg.Save()
 	r.pub.apply(cfg.Publish)
+	if err := r.rss.apply(cfg, r.dataDir); err != nil {
+		return fmt.Errorf("rss: %w", err)
+	}
 	if r.httpc != nil && cfg.URLFetchTimeout() != r.httpTimeout {
 		r.httpc.Close()
 		r.httpc = nil
@@ -565,6 +572,7 @@ func (r *Role) Stop(ctx context.Context) {
 		close(mstop)
 		<-mdone
 	}
+	r.rss.stop()
 	r.pub.stopAll()
 	r.mu.Lock()
 	defer r.mu.Unlock()
