@@ -1,0 +1,21 @@
+# The sync modules' test plugin in Rust, on the fit-guest crate: the same
+# behaviour as testdata/sync, the Go one, for the same tests.
+[package]
+name = "fit-sync-test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "lib.rs"
+
+[dependencies]
+fit-guest = { path = "../../guest/rust" }
+
+[profile.release]
+opt-level = 2
+panic = "abort"
+
+# A crate of its own, not a member of any workspace above it.
+[workspace]

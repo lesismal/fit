@@ -788,8 +788,11 @@ its own memory, bounded by `max_memory_bytes` and `timeout`; a call that traps o
 its records, which `on_error` takes.
 
 Package `plugin/wasm/guest` is the Go side of the calls (`OnTransform`, `OnDecode`, `OnEncode`,
-`OnPoll`, `OnWrite`, `Emit`, `Fail`, `Row`), `plugin/wasm/guest/rust` the Rust one. A transform that
-drops test accounts:
+`OnPoll`, `OnWrite`, `Emit`, `Fail`, `Row`), built by Go or by TinyGo
+(`tinygo build -target=wasip1 -buildmode=c-shared`), and the crate `plugin/wasm/guest/rust`
+(`fit-guest`) the Rust one; fit's tests run a plugin of each. fit-examples has a transform
+(`sync-wasm-transform`), a codec (`sync-wasm-codec`), a source (`sync-wasm-source`) and a sink
+(`sync-wasm-sink`). A transform that drops test accounts:
 
 ```go
 //go:build wasip1

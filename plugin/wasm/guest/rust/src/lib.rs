@@ -19,8 +19,14 @@
 //! The exports are `fit_sync_transform`, `fit_sync_decode`,
 //! `fit_sync_encode`, `fit_sync_poll` and `fit_sync_write`; each returns
 //! [`OK`], [`CAUGHT_UP`] (a poll with nothing more for now) or [`FAILED`].
-//! Records are their canonical JSON; parse them with the JSON library of
-//! your choice.
+//! Records are their canonical JSON: [`parse_batch`] reads a batch into
+//! [`Record`]s, [`Row`] and the value helpers ([`int`], [`string`],
+//! [`as_int`], ...) read and make their typed values, and [`emit_record`]
+//! hands one on, without a JSON library; [`records`] splits a batch into
+//! its records' JSON for a plugin that parses them with one of its own.
+
+mod record;
+pub use record::*;
 
 /// What an export returns when it went well.
 pub const OK: i32 = 0;
@@ -49,6 +55,7 @@ extern "C" {
     fn sync_checkpoint(buf: *const u8, buf_len: u32);
     fn http_request(req: *const u8, req_len: u32) -> i32;
     fn http_response(part: u32, buf: *mut u8, buf_len: u32) -> i32;
+    fn http_header(name: *const u8, name_len: u32, buf: *mut u8, buf_len: u32) -> i32;
     #[link_name = "sleep"]
     fn sync_sleep(ms: u32);
 }
@@ -85,6 +92,20 @@ pub fn input(n: u32) -> Vec<u8> {
 /// `i` becomes (0 for a decode or a poll). Indexes never go back.
 pub fn emit(i: usize, rec: &[u8]) {
     unsafe { record_emit(i as i32, rec.as_ptr(), rec.len() as u32) }
+}
+
+/// Hands on `r` as what the input's record `i` becomes, as [`emit`] does.
+pub fn emit_record(i: usize, r: &Record) {
+    EMIT_BUF.with(|b| {
+        let mut b = b.borrow_mut();
+        b.clear();
+        r.append_json(&mut b);
+        emit(i, &b);
+    })
+}
+
+std::thread_local! {
+    static EMIT_BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Fails the input's record `i`, or the whole call for `None`.
@@ -127,6 +148,43 @@ pub fn http(request_json: &str) -> Result<(u16, Vec<u8>), String> {
     }
     let body = get(|p, n| unsafe { http_response(0, p, n) }).unwrap_or_default();
     Ok((status as u16, body))
+}
+
+/// Sends a request, as [`http`] does, made of its parts: `method` (GET
+/// when empty), `url`, header fields and a text body.
+pub fn request(method: &str, url: &str, headers: &[(&str, &str)], body: &str) -> Result<(u16, Vec<u8>), String> {
+    let mut b = Vec::with_capacity(64 + url.len() + body.len());
+    b.extend_from_slice(b"{\"url\":");
+    append_quote(&mut b, url);
+    if !method.is_empty() {
+        b.extend_from_slice(b",\"method\":");
+        append_quote(&mut b, method);
+    }
+    if !headers.is_empty() {
+        b.extend_from_slice(b",\"headers\":{");
+        for (i, (k, v)) in headers.iter().enumerate() {
+            if i > 0 {
+                b.push(b',');
+            }
+            append_quote(&mut b, k);
+            b.push(b':');
+            append_quote(&mut b, v);
+        }
+        b.push(b'}');
+    }
+    if !body.is_empty() {
+        b.extend_from_slice(b",\"body\":");
+        append_quote(&mut b, body);
+    }
+    b.push(b'}');
+    // Every part was a str, quoted: the request is UTF-8.
+    http(&String::from_utf8_lossy(&b))
+}
+
+/// The header field `name` of the last response [`http`] had.
+pub fn response_header(name: &str) -> Option<String> {
+    let b = get(|p, n| unsafe { http_header(name.as_ptr(), name.len() as u32, p, n) })?;
+    Some(String::from_utf8_lossy(&b).into_owned())
 }
 
 /// Waits `ms` milliseconds, for a source or a sink, within its call's

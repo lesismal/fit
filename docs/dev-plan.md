@@ -4429,6 +4429,45 @@ track can place it); exactly-once into sinks with no transactions.
   explained and accepted; TinyGo and Rust plugins pass the same tests as the Go one.
 - **Touches**: `plugin/wasm`, `plugin/wasm/guest`, `sync`, fit-examples.
 
+**Decisions pending review** (made while building all but the benchmark host's run, 2026-11-09; each
+stands until the user rules on it; the item stays todo until that run):
+
+1. **The same tests, one subtest a guest.** `TestSyncTransform`, `TestSyncTransformFailures`,
+   `TestSyncCodec`, `TestSyncConnectors`, `TestSyncTransformInAPipeline` and
+   `TestSyncFailuresKeepTheCheckpoint` run as `/go`, `/tinygo` and `/rust`
+   (`plugin/wasm/guests_test.go`): TinyGo builds `testdata/sync`, the Go plugin's own source,
+   unchanged (`tinygo build -target=wasip1 -buildmode=c-shared`, default flags, as a user would);
+   Rust builds `testdata/rust`, a plugin of the same behaviour on the `fit-guest` crate. All pass,
+   locally in a container (TinyGo 0.44.0 with Go 1.27.3, Rust 1.99.0). Alternative: a smaller
+   TinyGo transform and Rust transform of their own, as the plan's wording allows.
+2. **Missing toolchains skip, unless required.** Without `tinygo`, or `cargo`/`rustc` with the
+   `wasm32-wasip1` target, a guest's subtests skip, so the Test and Coverage jobs (no toolchains) are
+   unaffected and no production code changed; `FIT_WASM_GUESTS=tinygo,rust` turns a missing one into a
+   failure. CI's new job **WASM guests (TinyGo, Rust)** installs TinyGo 0.44.0 (its .deb) and Rust
+   1.99.0 (`rustup`, `--target wasm32-wasip1`), runs the crate's `cargo test` and the `TestSync*`
+   tests with `-race` and that variable set. Alternative: a build tag; or prebuilt plugins in
+   testdata.
+3. **The Rust crate reads records by hand, as the Go guest does.** `fit-guest` gains `Record`,
+   `parse_batch`, `Row`, the value helpers (`int`, `string`, `boolean`, `as_int`, `as_str`, ...),
+   `members`/`elements`, `emit_record`, `request` (an HTTP request from its parts) and
+   `response_header`, still with no dependencies; `records` stays. Alternative: serde_json in the
+   test plugin and the examples, the crate left as I165 had it.
+4. **BenchmarkSyncTransform covers every guest**: `builtin`, then `wasm-<go|tinygo|rust>-<1|4>`, each
+   guest skipped where it cannot be built, so the benchmark host needs TinyGo and Rust installed for
+   all the numbers (the CI job's versions). Locally, in a container on an Apple M4 Pro (not the
+   benchmark host), per record: built-in 206 ns; Go 49.9 µs on one instance, 15.3 µs on four;
+   TinyGo 45.8 / 14.3 µs; Rust 30.2 / 11.3 µs. Every guest makes about 209 host allocations a
+   record (53.5k a batch of 256), so the host's JSON decoding of what plugins emit dominates, not
+   the guest's language: the binary form, with a host decoder that allocates less, is what the
+   host run will most likely ask for. Left to the main session with the host run.
+5. **Examples**: fit-examples branch `wasm-sync-examples` adds `sync-wasm-codec` (a line format of
+   its own read from a file and written back, its bad line dead-lettered), `sync-wasm-source` (a
+   paged API that fit itself serves, the checkpoint a page and how far into it) and
+   `sync-wasm-sink` (NDJSON posts to a webhook fit itself answers), beside I194's
+   `sync-wasm-transform`; each runs with fit alone and was run; their plugins are Go, and build by
+   TinyGo 0.44 too (checked), which the comments show. No Rust example there: its CI builds only Go.
+   Alternative: a Rust example, with a Rust toolchain in fit-examples' test.
+
 ### I166 Files as a source and a sink
 
 - **Do**: source `file`: paths and globs, scanned each `scan_interval`; each file known by its device,
