@@ -1,0 +1,16 @@
+{
+  "mover": "fit",
+  "scenario": "mysql-batch",
+  "variant": "s5-mysql-batch",
+  "records": 2000000,
+  "counted": 2000000,
+  "records_per_sec": 223484.5600661619,
+  "drain_seconds": 8.528557854,
+  "cpu_cores": 0.6788209799485286,
+  "startup_seconds": 0.508915813,
+  "rss_peak_bytes": 49356800,
+  "profiles": [
+    "fit-s5-mysql-batch-cpu.pprof",
+    "fit-s5-mysql-batch-heap.pprof"
+  ]
+}

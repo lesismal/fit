@@ -1,0 +1,18 @@
+start 2026-11-09T07:57:47Z rounds=3
+s1-files-128b-1f start 2026-11-09T07:57:47Z
+s1-files-128b-1f exit 0 2026-11-09T08:00:43Z
+s1-files-128b-16f start 2026-11-09T08:00:43Z
+s1-files-128b-16f exit 0 2026-11-09T08:03:28Z
+s1-files-1k-1f start 2026-11-09T08:03:28Z
+s1-files-1k-1f exit 0 2026-11-09T08:06:23Z
+s1-files-1k-16f start 2026-11-09T08:06:23Z
+s1-files-1k-16f exit 0 2026-11-09T08:09:09Z
+s2-mysql-es start 2026-11-09T08:09:09Z
+s2-mysql-es exit 0 2026-11-09T08:46:36Z
+s3-mysql-kafka start 2026-11-09T08:46:36Z
+s3-mysql-kafka exit 0 2026-11-09T08:54:13Z
+s4-pg-kafka start 2026-11-09T08:54:13Z
+s4-pg-kafka exit 0 2026-11-09T08:58:10Z
+s5-mysql-batch start 2026-11-09T08:58:10Z
+s5-mysql-batch exit 0 2026-11-09T09:01:44Z
+end 2026-11-09T09:01:44Z

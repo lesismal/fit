@@ -1,0 +1,21 @@
+{
+  "mover": "debezium",
+  "scenario": "mysql-kafka",
+  "variant": "s3-mysql-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 108258.47466883333,
+  "drain_seconds": 4.599658378,
+  "cpu_cores": 3.313990463489156,
+  "startup_seconds": 2.435934702,
+  "write_seconds": 10.75058351,
+  "rss_peak_bytes": 916779008,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 299.984515,
+    "p99": 578.829727,
+    "max": 599.557413,
+    "mean": 307.8659505729998
+  }
+}

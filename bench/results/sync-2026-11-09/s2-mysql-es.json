@@ -1,0 +1,313 @@
+{
+  "kind": "sync",
+  "name": "s2-mysql-es",
+  "finished": "2026-11-09T15:25:57.789637849Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-38-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "a0425fcd",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "500000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "canal": "canal/canal-server:v1.1.8",
+    "canal-adapter": "fit-syncbench/canal-adapter:1.1.8-2",
+    "debezium": "fit-syncbench/connect-es:3.0.8-14.1.2",
+    "es": "docker.elastic.co/elasticsearch/elasticsearch:7.17.28",
+    "kafka": "apache/kafka:3.9.1",
+    "mysql": "mysql:8.0.42"
+  },
+  "results": [
+    {
+      "mover": "canal",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 16553.10472297757,
+      "drain_seconds": 30.198987342,
+      "cpu_cores": 0.5565710468914968,
+      "startup_seconds": 3.691620738,
+      "write_seconds": 10.535202747,
+      "rss_peak_bytes": 2502324224,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 860.721931,
+        "p99": 1559.925225,
+        "max": 1639.860161,
+        "mean": 872.7971976219997
+      },
+      "rounds": 3,
+      "spread": 0.060868958865412194
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 26774.94652031302,
+      "drain_seconds": 18.392641779,
+      "cpu_cores": 1.6191741435426996,
+      "startup_seconds": 2.645179321,
+      "write_seconds": 10.818693168,
+      "rss_peak_bytes": 1325142016,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 899.404197,
+        "p99": 1559.860751,
+        "max": 1619.186297,
+        "mean": 895.7271795669998
+      },
+      "rounds": 3,
+      "spread": 0.013508477452574254
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 50365.012660570275,
+      "drain_seconds": 9.699193432,
+      "cpu_cores": 0.4360744045010608,
+      "startup_seconds": 2.735195937,
+      "write_seconds": 10.292480335,
+      "rss_peak_bytes": 46133248,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 680.826485,
+        "p99": 1259.876386,
+        "max": 1300.435732,
+        "mean": 687.8928146950008
+      },
+      "profiles": [
+        "fit-s2-mysql-es-cpu.pprof",
+        "fit-s2-mysql-es-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.034966876117194276
+    }
+  ],
+  "runs": [
+    {
+      "mover": "canal",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 16553.843823422416,
+      "drain_seconds": 30.196370422,
+      "cpu_cores": 0.5592862905038316,
+      "startup_seconds": 3.693236617,
+      "write_seconds": 10.431875783,
+      "rss_peak_bytes": 2516635648,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 860.259704,
+        "p99": 1520.134912,
+        "max": 1619.781744,
+        "mean": 867.3031774820006
+      }
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 26782.807050110976,
+      "drain_seconds": 18.59651974,
+      "cpu_cores": 1.7560148595846892,
+      "startup_seconds": 2.737101798,
+      "write_seconds": 10.328452003,
+      "rss_peak_bytes": 1444429824,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 859.879978,
+        "p99": 1523.611419,
+        "max": 1617.803211,
+        "mean": 851.4730241870005
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 50365.012660570275,
+      "drain_seconds": 9.699193432,
+      "cpu_cores": 0.4360744045010608,
+      "startup_seconds": 2.735195937,
+      "write_seconds": 10.292480335,
+      "rss_peak_bytes": 46133248,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 680.826485,
+        "p99": 1259.876386,
+        "max": 1300.435732,
+        "mean": 687.8928146950008
+      },
+      "profiles": [
+        "fit-s2-mysql-es-cpu.pprof",
+        "fit-s2-mysql-es-heap.pprof"
+      ]
+    },
+    {
+      "mover": "canal",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 15546.273572944634,
+      "drain_seconds": 32.000530395,
+      "cpu_cores": 0.49392134458088877,
+      "startup_seconds": 3.7042538990000002,
+      "write_seconds": 11.219896281,
+      "rss_peak_bytes": 2503122944,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 859.758145,
+        "p99": 1539.246368,
+        "max": 1619.588449,
+        "mean": 859.569406785
+      }
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 26421.118288747446,
+      "drain_seconds": 18.888261827,
+      "cpu_cores": 1.8344164390219726,
+      "startup_seconds": 2.6265334769999997,
+      "write_seconds": 10.507915312,
+      "rss_peak_bytes": 1473900544,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 872.338872,
+        "p99": 1521.252323,
+        "max": 1599.840556,
+        "mean": 869.6756350940009
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 51676.64938346632,
+      "drain_seconds": 9.499822567,
+      "cpu_cores": 0.44673381740225504,
+      "startup_seconds": 2.729472248,
+      "write_seconds": 10.372572497,
+      "rss_peak_bytes": 45305856,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 680.065432,
+        "p99": 1260.218213,
+        "max": 1360.102888,
+        "mean": 682.3215009099999
+      },
+      "profiles": [
+        "fit-s2-mysql-es-cpu.pprof",
+        "fit-s2-mysql-es-heap.pprof"
+      ]
+    },
+    {
+      "mover": "canal",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 16553.10472297757,
+      "drain_seconds": 30.198987342,
+      "cpu_cores": 0.5565710468914968,
+      "startup_seconds": 3.691620738,
+      "write_seconds": 10.535202747,
+      "rss_peak_bytes": 2502324224,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 860.721931,
+        "p99": 1559.925225,
+        "max": 1639.860161,
+        "mean": 872.7971976219997
+      }
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 26774.94652031302,
+      "drain_seconds": 18.392641779,
+      "cpu_cores": 1.6191741435426996,
+      "startup_seconds": 2.645179321,
+      "write_seconds": 10.818693168,
+      "rss_peak_bytes": 1325142016,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 899.404197,
+        "p99": 1559.860751,
+        "max": 1619.186297,
+        "mean": 895.7271795669998
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-es",
+      "variant": "s2-mysql-es",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 49915.54222512324,
+      "drain_seconds": 9.798771649,
+      "cpu_cores": 0.432234075016151,
+      "startup_seconds": 2.734628311,
+      "write_seconds": 10.321821452,
+      "rss_peak_bytes": 45424640,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 683.78055,
+        "p99": 1240.308546,
+        "max": 1265.406769,
+        "mean": 690.1710279580004
+      },
+      "profiles": [
+        "fit-s2-mysql-es-cpu.pprof",
+        "fit-s2-mysql-es-heap.pprof"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "mover": "fit",
+  "scenario": "mysql-es",
+  "variant": "s2-mysql-es",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 49915.54222512324,
+  "drain_seconds": 9.798771649,
+  "cpu_cores": 0.432234075016151,
+  "startup_seconds": 2.734628311,
+  "write_seconds": 10.321821452,
+  "rss_peak_bytes": 45424640,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 683.78055,
+    "p99": 1240.308546,
+    "max": 1265.406769,
+    "mean": 690.1710279580004
+  },
+  "profiles": [
+    "fit-s2-mysql-es-cpu.pprof",
+    "fit-s2-mysql-es-heap.pprof"
+  ]
+}

@@ -343,7 +343,8 @@ Every run keeps what it measured, and the report on it, in a folder of its own u
 fitbench run, named by its workload and level (`w1-api-500.json`), the plan derived for it
 (`plan.txt`, `plan-derived.json`), and the report, `report.md` and `report.zh-CN.md`, with the
 tables it cites in `tables.md`. fitbench run alone writes `results/run-<time>/results.json`, which
-git ignores. The latest report is
+git ignores. The sync benchmarks (I193) have reports of their own, under `results/sync-DATE`; the
+latest is [the 2026-11-09 sync plan](results/sync-2026-11-09/report.md). The latest report is
 [the 2026-11-06 plan, fit v1.0.0 on fib v1.7.2](results/plan-2026-11-06/report.md). To
 reproduce a run, run the harness with the `params` recorded in it, on the benchmark host:
 

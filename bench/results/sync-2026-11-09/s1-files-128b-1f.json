@@ -1,0 +1,214 @@
+{
+  "kind": "sync",
+  "name": "s1-files-128b-1f",
+  "finished": "2026-11-09T08:00:42.811901394Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-38-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "0b94708d",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "2000000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "filebeat": "docker.elastic.co/beats/filebeat:8.17.4"
+  },
+  "results": [
+    {
+      "mover": "filebeat",
+      "scenario": "files",
+      "variant": "s1-files-128b-1f",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 291773.6872342486,
+      "drain_seconds": 6.799790683,
+      "cpu_cores": 2.1470875620481213,
+      "startup_seconds": 0.101340887,
+      "rss_peak_bytes": 55750656,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 579.561808,
+        "p99": 1020.101216,
+        "max": 1219.748233,
+        "mean": 574.0850124930009
+      },
+      "rounds": 3,
+      "spread": 0.014960925193045862
+    },
+    {
+      "mover": "fit",
+      "scenario": "files",
+      "variant": "s1-files-128b-1f",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 913064.5637340862,
+      "drain_seconds": 2.099522943,
+      "cpu_cores": 1.0352251721023464,
+      "startup_seconds": 0.10188203,
+      "rss_peak_bytes": 39833600,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 319.647899,
+        "p99": 559.427669,
+        "max": 560.396857,
+        "mean": 313.16267345000034
+      },
+      "profiles": [
+        "fit-s1-files-128b-1f-cpu.pprof",
+        "fit-s1-files-128b-1f-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.002585102997669129
+    }
+  ],
+  "runs": [
+    {
+      "mover": "filebeat",
+      "scenario": "files",
+      "variant": "s1-files-128b-1f",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 291541.8607736561,
+      "drain_seconds": 6.799709636,
+      "cpu_cores": 2.1461066400159443,
+      "startup_seconds": 0.101138504,
+      "rss_peak_bytes": 55562240,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 559.797329,
+        "p99": 1040.0759,
+        "max": 1100.923074,
+        "mean": 557.9624989580003
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "files",
+      "variant": "s1-files-128b-1f",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 914299.3557015082,
+      "drain_seconds": 2.099421801,
+      "cpu_cores": 1.03809153499402,
+      "startup_seconds": 0.102104101,
+      "rss_peak_bytes": 38154240,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 319.907129,
+        "p99": 559.657251,
+        "max": 560.897615,
+        "mean": 317.2783075609996
+      },
+      "profiles": [
+        "fit-s1-files-128b-1f-cpu.pprof",
+        "fit-s1-files-128b-1f-heap.pprof"
+      ]
+    },
+    {
+      "mover": "filebeat",
+      "scenario": "files",
+      "variant": "s1-files-128b-1f",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 295907.06508166686,
+      "drain_seconds": 6.699934655,
+      "cpu_cores": 2.1524612914303116,
+      "startup_seconds": 0.101320775,
+      "rss_peak_bytes": 55336960,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 561.054673,
+        "p99": 1020.023644,
+        "max": 1219.56971,
+        "mean": 570.8419402249999
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "files",
+      "variant": "s1-files-128b-1f",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 913064.5637340862,
+      "drain_seconds": 2.099522943,
+      "cpu_cores": 1.0352251721023464,
+      "startup_seconds": 0.10188203,
+      "rss_peak_bytes": 39833600,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 319.647899,
+        "p99": 559.427669,
+        "max": 560.396857,
+        "mean": 313.16267345000034
+      },
+      "profiles": [
+        "fit-s1-files-128b-1f-cpu.pprof",
+        "fit-s1-files-128b-1f-heap.pprof"
+      ]
+    },
+    {
+      "mover": "filebeat",
+      "scenario": "files",
+      "variant": "s1-files-128b-1f",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 291773.6872342486,
+      "drain_seconds": 6.799790683,
+      "cpu_cores": 2.1470875620481213,
+      "startup_seconds": 0.101340887,
+      "rss_peak_bytes": 55750656,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 579.561808,
+        "p99": 1020.101216,
+        "max": 1219.748233,
+        "mean": 574.0850124930009
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "files",
+      "variant": "s1-files-128b-1f",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 911938.9897607338,
+      "drain_seconds": 2.098824616,
+      "cpu_cores": 1.0268404437276717,
+      "startup_seconds": 0.101876956,
+      "rss_peak_bytes": 39231488,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 319.668566,
+        "p99": 559.342377,
+        "max": 560.632959,
+        "mean": 317.0078588719999
+      },
+      "profiles": [
+        "fit-s1-files-128b-1f-cpu.pprof",
+        "fit-s1-files-128b-1f-heap.pprof"
+      ]
+    }
+  ]
+}

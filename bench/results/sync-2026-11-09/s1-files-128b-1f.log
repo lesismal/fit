@@ -1,0 +1,14 @@
+07:57:47 s1-files-128b-1f: movers fit,filebeat, 3 rounds, 2000000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+07:57:47 s1-files-128b-1f round 1: fit
+ "records_per_sec": 914299.3557015082, "cpu_cores": 1.03809153499402, "rss_peak_bytes": 38154240, 
+07:58:13 s1-files-128b-1f round 1: filebeat
+ "records_per_sec": 291541.8607736561, "cpu_cores": 2.1461066400159443, "rss_peak_bytes": 55562240, 
+07:58:45 s1-files-128b-1f round 2: filebeat
+ "records_per_sec": 295907.06508166686, "cpu_cores": 2.1524612914303116, "rss_peak_bytes": 55336960, 
+07:59:17 s1-files-128b-1f round 2: fit
+ "records_per_sec": 913064.5637340862, "cpu_cores": 1.0352251721023464, "rss_peak_bytes": 39833600, 
+07:59:43 s1-files-128b-1f round 3: fit
+ "records_per_sec": 911938.9897607338, "cpu_cores": 1.0268404437276717, "rss_peak_bytes": 39231488, 
+08:00:10 s1-files-128b-1f round 3: filebeat
+ "records_per_sec": 291773.6872342486, "cpu_cores": 2.1470875620481213, "rss_peak_bytes": 55750656, 
+08:00:42 s1-files-128b-1f: /root/fitbench/sync/bench/results/sync-2026-11-09/s1-files-128b-1f.json (0 runs failed)

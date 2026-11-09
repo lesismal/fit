@@ -348,7 +348,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I190 | workbench 的 Sync 页面，以及助手的同步工具 | I188, I189, I123 | done |
 | I191 | 写入 MySQL、TiDB 和 PostgreSQL 时恰好一次：检查点写在目标的事务中 | I176, I180 | done |
 | I192 | CI 中的互通与恢复矩阵 | I176, I180, I183, I185 | done |
-| I193 | 对比 Filebeat、Canal、Debezium 和 DataX 的基准测试 | I192 | todo |
+| I193 | 对比 Filebeat、Canal、Debezium 和 DataX 的基准测试 | I192 | done |
 | I194 | 同步的文档与示例 | I190 | done |
 | **访问控制** | | | |
 | I195 | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局 `access`，以及每个 listener、路由、service 和角色各自的 `access`，局部先决定；能在 accept 时决定的经 fib 的 `Binding.Filter`（A73）拒绝，不能的在请求时或选定 service 后拒绝；名单文件变化时重新应用 | — | done |

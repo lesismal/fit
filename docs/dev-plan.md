@@ -358,7 +358,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I211.
 | I190 | The workbench's Sync pages, and the assistant's tools for sync | I188, I189, I123 | done |
 | I191 | Exactly once into MySQL, TiDB and PostgreSQL: the checkpoint written in the sink's transaction | I176, I180 | done |
 | I192 | The interoperability and recovery matrix in CI | I176, I180, I183, I185 | done |
-| I193 | Benchmarks against Filebeat, Canal, Debezium and DataX | I192 | todo |
+| I193 | Benchmarks against Filebeat, Canal, Debezium and DataX | I192 | done |
 | I194 | Sync's documentation and examples | I190 | done |
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |

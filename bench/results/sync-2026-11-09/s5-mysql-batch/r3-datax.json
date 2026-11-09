@@ -1,0 +1,12 @@
+{
+  "mover": "datax",
+  "scenario": "mysql-batch",
+  "variant": "s5-mysql-batch",
+  "records": 2000000,
+  "counted": 2000000,
+  "records_per_sec": 211412.1013245525,
+  "drain_seconds": 9.020297268,
+  "cpu_cores": 0.5557184925360489,
+  "startup_seconds": 1.015054561,
+  "rss_peak_bytes": 450093056
+}
