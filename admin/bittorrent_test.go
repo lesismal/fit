@@ -878,9 +878,14 @@ func TestBitTorrentConsoleEvents(t *testing.T) {
 			}
 		}
 	}
-	for range bittorrent.MaxSubscribers - 1 {
+	// Every slot taken once the streams closed above have let theirs go,
+	// which they do on their own goroutines; then one given back for the
+	// console's stream.
+	for range bittorrent.MaxSubscribers {
 		waitSubscribe()
 	}
+	held[0].Close()
+	held = held[1:]
 	last := open(http.StatusOK)
 	if code, _, hd := b.do("GET", path, ""); code != http.StatusServiceUnavailable || hd.Get("Retry-After") == "" {
 		t.Fatalf("past the bound: %d %v", code, hd)

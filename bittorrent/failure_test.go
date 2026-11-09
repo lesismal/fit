@@ -175,17 +175,16 @@ func TestRestartMidDownloads(t *testing.T) {
 	rc := &readCounter{}
 	l2 := startRole(t, e, slow, rc)
 	for _, id := range ids {
+		// A torrent restored paused shows as paused while its first check
+		// takes the resume data; wait for the pieces themselves.
+		waitFor(t, "the restored torrent to have its pieces again", func() bool {
+			tor, err := l2.Torrent(id)
+			return err == nil && tor.Stats().PiecesHave >= had[id]
+		})
 		waitFor(t, "the restored torrent to run", func() bool {
 			st, err := l2.Get(id)
 			return err == nil && st.State != "checking" && st.State != "metadata" && st.Held == ""
 		})
-		tor, err := l2.Torrent(id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := tor.Stats().PiecesHave; got < had[id] {
-			t.Fatalf("%s: %d pieces after the restart, %d before", id, got, had[id])
-		}
 	}
 	if n := rc.total(); n != 0 {
 		t.Fatalf("%d reads of the data after a restart in the middle of downloads", n)
