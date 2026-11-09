@@ -8165,6 +8165,110 @@
               # # integer, 0 to 65535; default 64.
               # max_inflight: 64
 
+            # # Or mssql, with every one of its params:
+            # # Writes records to SQL Server (2016 and later): inserts, updates and messages as upserts by
+            # # the record's key, with MERGE (or UPDATE then INSERT), deletes as DELETE by the key, each run
+            # # of a batch's records for one table and one set of columns one statement; a run of a
+            # # snapshot's inserts is bulk loaded into a temporary table and merged from it. Each source
+            # # transaction is written as one of the server's (transactions: source), or several together
+            # # (transactions: batch), so that the table never holds half of one, and checkpoint sink writes
+            # # the checkpoint in the same transaction, for exactly once. Writing the same records again
+            # # leaves the same rows. DDL records are reported, or stop the pipeline (ddl: stop).
+            # module: "mssql"
+            # params:
+              # # The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out.
+              # # string; default "127.0.0.1:1433".
+              # address: "127.0.0.1:1433"
+
+              # # The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and
+              # # ALTER, with identity_insert).
+              # # string; required.
+              # username: "fit"
+
+              # # The environment variable holding username's password, read when the pipeline loads; none
+              # # when left out.
+              # # string.
+              # password_env: ""
+
+              # # The database the tables are in; the login's default when left out.
+              # # string.
+              # database: ""
+
+              # # How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server
+              # # that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows
+              # # in clear. The server's certificate is checked against the system's roots or ca_file's; the
+              # # check cannot be turned off. on when left out.
+              # # one of: on, strict, off; default "on".
+              # encrypt: "on"
+
+              # # A PEM file of the certificates the server's is checked against, in place of the system's
+              # # roots.
+              # # string.
+              # ca_file: "/etc/fit/ca.pem"
+
+              # # The name the server's certificate must have; address's host when left out.
+              # # string.
+              # server_name: ""
+
+              # # How long connecting, and each wait for the server, may take. 60s when left out or 0.
+              # # duration, as "1.5s" or "2m"; default "60s".
+              # timeout: "60s"
+
+              # # The table a record goes to: text with {namespace}, the record's namespace; its parts, split
+              # # at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema
+              # # shop's table orders). The table is not made: it is the user's, with a primary key or unique
+              # # index on the record's key columns. {namespace} when left out.
+              # # string; default "{namespace}".
+              # table: "{namespace}"
+
+              # # How a row is written: merge, a MERGE ... WITH (HOLDLOCK) of the run's rows; update_insert,
+              # # an UPDATE by the key and, when it found no row, an INSERT, for those who keep MERGE out of
+              # # their servers. merge when left out.
+              # # one of: merge, update_insert; default "merge".
+              # upsert: "merge"
+
+              # # Write the rows' values in the tables' IDENTITY columns (SET IDENTITY_INSERT ON around each
+              # # statement), as a copy of another database's keys needs; the login then needs ALTER on the
+              # # tables. false when left out.
+              # # boolean.
+              # identity_insert: true
+
+              # # How records are grouped in the server's transactions: source, each source transaction as
+              # # one, and the records without one (a snapshot's) of a batch together; batch, a batch's
+              # # records up to the last that ends a source transaction in one, and those after it, a part of
+              # # one source transaction, in one held open into the next batch. Either way a source
+              # # transaction is never committed in part. source when left out.
+              # # one of: source, batch; default "source".
+              # transactions: "source"
+
+              # # What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes
+              # # it, which with on_error stop stops the pipeline before it, for a person to change the table.
+              # # report when left out.
+              # # one of: report, stop; default "report".
+              # ddl: "report"
+
+              # # Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash
+              # # between a commit and the file's next checkpoint writes the records after it again (to the
+              # # same rows); sink, also in checkpoint_table, written in the same transaction as the records
+              # # it covers and read back when the pipeline starts, in preference to the file, so that no
+              # # record is written twice: exactly once, while every sink of the pipeline keeps it. file when
+              # # left out.
+              # # one of: file, sink; default "file".
+              # checkpoint: "file"
+
+              # # With checkpoint sink, the table the checkpoint is kept in, a row a pipeline, made when
+              # # missing (which needs CREATE TABLE); schema.table names its schema, the login's default
+              # # otherwise. _fit_sync_checkpoints when left out.
+              # # string; default "_fit_sync_checkpoints".
+              # checkpoint_table: "_fit_sync_checkpoints"
+
+              # # A run of at least this many inserts without a source transaction (a snapshot's, a job's) is
+              # # bulk loaded (INSERT BULK) into a temporary table and merged from it into the table, rather
+              # # than written as statements of parameters. A number larger than any batch turns it off. 1000
+              # # when left out or 0.
+              # # integer, 0 or more; default 1000.
+              # bulk_rows: 1000
+
             # # Or mysql, with every one of its params:
             # # Writes records to MySQL, MariaDB or TiDB: inserts, updates and messages as INSERT ... ON
             # # DUPLICATE KEY UPDATE of the row, deletes as DELETE by the key's columns, each run of a
@@ -11577,6 +11681,110 @@
             # # receive maximum in version 5. 64 when left out or 0.
             # # integer, 0 to 65535; default 64.
             # max_inflight: 64
+
+          # # Or mssql, with every one of its params:
+          # # Writes records to SQL Server (2016 and later): inserts, updates and messages as upserts by
+          # # the record's key, with MERGE (or UPDATE then INSERT), deletes as DELETE by the key, each run
+          # # of a batch's records for one table and one set of columns one statement; a run of a
+          # # snapshot's inserts is bulk loaded into a temporary table and merged from it. Each source
+          # # transaction is written as one of the server's (transactions: source), or several together
+          # # (transactions: batch), so that the table never holds half of one, and checkpoint sink writes
+          # # the checkpoint in the same transaction, for exactly once. Writing the same records again
+          # # leaves the same rows. DDL records are reported, or stop the pipeline (ddl: stop).
+          # module: "mssql"
+          # params:
+            # # The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out.
+            # # string; default "127.0.0.1:1433".
+            # address: "127.0.0.1:1433"
+
+            # # The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and
+            # # ALTER, with identity_insert).
+            # # string; required.
+            # username: "fit"
+
+            # # The environment variable holding username's password, read when the pipeline loads; none
+            # # when left out.
+            # # string.
+            # password_env: ""
+
+            # # The database the tables are in; the login's default when left out.
+            # # string.
+            # database: ""
+
+            # # How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server
+            # # that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows
+            # # in clear. The server's certificate is checked against the system's roots or ca_file's; the
+            # # check cannot be turned off. on when left out.
+            # # one of: on, strict, off; default "on".
+            # encrypt: "on"
+
+            # # A PEM file of the certificates the server's is checked against, in place of the system's
+            # # roots.
+            # # string.
+            # ca_file: "/etc/fit/ca.pem"
+
+            # # The name the server's certificate must have; address's host when left out.
+            # # string.
+            # server_name: ""
+
+            # # How long connecting, and each wait for the server, may take. 60s when left out or 0.
+            # # duration, as "1.5s" or "2m"; default "60s".
+            # timeout: "60s"
+
+            # # The table a record goes to: text with {namespace}, the record's namespace; its parts, split
+            # # at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema
+            # # shop's table orders). The table is not made: it is the user's, with a primary key or unique
+            # # index on the record's key columns. {namespace} when left out.
+            # # string; default "{namespace}".
+            # table: "{namespace}"
+
+            # # How a row is written: merge, a MERGE ... WITH (HOLDLOCK) of the run's rows; update_insert,
+            # # an UPDATE by the key and, when it found no row, an INSERT, for those who keep MERGE out of
+            # # their servers. merge when left out.
+            # # one of: merge, update_insert; default "merge".
+            # upsert: "merge"
+
+            # # Write the rows' values in the tables' IDENTITY columns (SET IDENTITY_INSERT ON around each
+            # # statement), as a copy of another database's keys needs; the login then needs ALTER on the
+            # # tables. false when left out.
+            # # boolean.
+            # identity_insert: true
+
+            # # How records are grouped in the server's transactions: source, each source transaction as
+            # # one, and the records without one (a snapshot's) of a batch together; batch, a batch's
+            # # records up to the last that ends a source transaction in one, and those after it, a part of
+            # # one source transaction, in one held open into the next batch. Either way a source
+            # # transaction is never committed in part. source when left out.
+            # # one of: source, batch; default "source".
+            # transactions: "source"
+
+            # # What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes
+            # # it, which with on_error stop stops the pipeline before it, for a person to change the table.
+            # # report when left out.
+            # # one of: report, stop; default "report".
+            # ddl: "report"
+
+            # # Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash
+            # # between a commit and the file's next checkpoint writes the records after it again (to the
+            # # same rows); sink, also in checkpoint_table, written in the same transaction as the records
+            # # it covers and read back when the pipeline starts, in preference to the file, so that no
+            # # record is written twice: exactly once, while every sink of the pipeline keeps it. file when
+            # # left out.
+            # # one of: file, sink; default "file".
+            # checkpoint: "file"
+
+            # # With checkpoint sink, the table the checkpoint is kept in, a row a pipeline, made when
+            # # missing (which needs CREATE TABLE); schema.table names its schema, the login's default
+            # # otherwise. _fit_sync_checkpoints when left out.
+            # # string; default "_fit_sync_checkpoints".
+            # checkpoint_table: "_fit_sync_checkpoints"
+
+            # # A run of at least this many inserts without a source transaction (a snapshot's, a job's) is
+            # # bulk loaded (INSERT BULK) into a temporary table and merged from it into the table, rather
+            # # than written as statements of parameters. A number larger than any batch turns it off. 1000
+            # # when left out or 0.
+            # # integer, 0 or more; default 1000.
+            # bulk_rows: 1000
 
           # # Or mysql, with every one of its params:
           # # Writes records to MySQL, MariaDB or TiDB: inserts, updates and messages as INSERT ... ON

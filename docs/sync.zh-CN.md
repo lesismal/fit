@@ -124,6 +124,7 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | `clickhouse` | 相同记录得到相同的去重令牌：服务器丢弃这次插入；否则由 `ReplacingMergeTree` 按版本合并 |
 | `doris` | 相同记录得到相同的 label：服务器以“已导入”拒绝这次导入；否则由 Unique Key 或主键表按键覆盖 |
 | `loki` | 相同的条目（流、时间、行）只保留一份；没有时间的行使用写入时间，会再存一次 |
+| `mssql` | 按键 upsert（`MERGE`）和删除：行相同 |
 | `redis` | 键相同；`entry_id key` 时已存在的流条目被拒绝 |
 | `s3` | 同一批次生成同一个对象，覆盖自身；重放若被切成不同的批次，会生成别的对象 |
 | `influxdb`、`tdengine` | 同一个数据点：序列（子表）加时间，覆盖自身；删除不写 |
@@ -138,7 +139,7 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 
 **按键保持顺序**，从源到每个目标：目标可以并行写不同的键（作业的多个写入者），但同一个键从不乱序。
 
-**恰好一次**，写入 MySQL、MariaDB、TiDB 和 PostgreSQL：`checkpoint sink` 时位置还会写入目标的一张表
+**恰好一次**，写入 MySQL、MariaDB、TiDB、PostgreSQL 和 SQL Server：`checkpoint sink` 时位置还会写入目标的一张表
 （`_fit_sync_checkpoints`），与它所覆盖的记录在同一个事务中，流水线启动时优先读回它而不是文件。这样目标提交与文件下一次
 检查点之间的崩溃不会让任何记录写两次。前提是流水线的每个目标都保存检查点，且位置相同：旁边有其他类型目标的流水线回退到
 文件，即至少一次。仍可能写两次的情况：大于 MySQL 目标 `max_transaction_bytes` 的源事务（分段提交），以及按块读取的作业
@@ -172,7 +173,7 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [MySQL、MariaDB、TiDB](#mysqlmariadb-与-tidb) | `mysql`：以副本身份读 binlog，无锁快照 | `mysql`：upsert 和 delete，保持源的事务 |
 | [经由 TiCDC 读取 TiDB](#经由-ticdc-读取-tidb) | `tidb`：在一个时间戳上读快照，再从 Kafka 读 changefeed | （用 `mysql` 目标） |
 | [PostgreSQL](#postgresql) | `postgres`：用 `pgoutput` 做逻辑复制，精确的快照 | `postgres`：`ON CONFLICT` upsert，`COPY` |
-| [SQL Server](#sql-server) | `mssql`：按 LSN 读 CDC 变更表，或 change tracking；无锁快照 | — |
+| [SQL Server](#sql-server) | `mssql`：按 LSN 读 CDC 变更表，或 change tracking；无锁快照 | `mssql`：`MERGE` upsert、删除、批量装载，恰好一次 |
 | [MongoDB](#mongodb) | `mongo`：按 `_id` 读快照，再读 change stream | `mongo`：按 `_id` 批量 upsert 和 delete |
 | [Kafka、Redpanda](#kafka-与-redpanda) | `kafka`：每个分区从检查点中的 offset 读 | `kafka`：带键消息，批量、压缩 |
 | [MQTT](#mqtt) | `mqtt`：持久会话，QoS 1 与 2 在目标拿到后确认 | `mqtt`：主题模板、QoS、可选保留 |
@@ -616,6 +617,40 @@ sync {
 
 连接默认使用 TLS（`encrypt on`，在 TDS 的 pre-login 中协商，服务器证书按 `ca_file` 或系统根证书校验），TDS 8 用 `strict`
 （SQL Server 2022），或 `off`；只支持 SQL 登录，不支持 Windows 或 Entra ID 认证。
+
+目标 `mssql` 用 `MERGE ... WITH (HOLDLOCK)` 按记录的键 upsert 一个批次中同一张表的每段连续行（`upsert update_insert`：先
+`UPDATE`，找不到行时再 `INSERT`），按键删除；不属于源事务的连续插入（快照的）达到 `bulk_rows`（1000）条时，先批量装载
+（`INSERT BULK`）到临时表再合并进来。每个源事务是服务器的一个事务（`transactions source`），或一个批次的合在一起
+（`batch`），从不只提交一部分；服务器永久拒绝的语句只让它的那条记录失败，之前的记录都已提交。`checkpoint sink` 时位置在同一
+事务中写入 `_fit_sync_checkpoints`，做到恰好一次。`identity_insert` 把源的值写入 `IDENTITY` 列。表名由命名空间得出，为
+`schema.table`（或 `db.schema.table`）：MySQL 源的 `shop.orders` 是 schema `shop` 中的 `orders`，所以要设 `table`，例如
+`dbo.{namespace}`，或直接写一张表的名字。表由你建好，在键列上要有主键或唯一索引。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-mssql {
+		source mysql {
+			address mysql:3306
+			username fit_repl
+			password_env MYSQL_PASSWORD
+			server_id 4102
+			tables shop.orders
+		}
+		sinks mssql {
+			sink mssql {
+				address mssql.internal:1433
+				username fit_writer
+				password_env MSSQL_PASSWORD
+				database dw
+				table dbo.orders
+				checkpoint sink
+				ca_file /etc/fit/mssql-ca.pem
+			}
+		}
+	}
+}
+```
 
 ### MongoDB
 

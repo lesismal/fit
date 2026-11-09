@@ -356,7 +356,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I214 | MQTT 3.1.1 与 5 作为源（持久会话，QoS 1/2 在目标拿到后确认）与目标 | I163 | done |
 | I215 | SQL Server 客户端：TDS 7.4、TLS、SQL 认证、带类型参数的 RPC、批量导入、取消 | I163 | done |
 | I216 | SQL Server 作为源：按 LSN 读 CDC 变更表，不加锁的快照在其 LSN 处衔接 | I215 | done |
-| I217 | SQL Server 作为目标：`MERGE` upsert、删除、批量导入，检查点写在目标中实现精确一次 | I215, I191 | todo |
+| I217 | SQL Server 作为目标：`MERGE` upsert、删除、批量导入，检查点写在目标中实现精确一次 | I215, I191 | done |
 | I218 | Doris 与 StarRocks 作为目标（带 label 的 Stream Load、删除标记）与源（按游标轮询） | I172 | done |
 | I219 | Loki 与 OpenTelemetry 日志作为目标（push API、OTLP/HTTP），文件到它们并对比 Promtail | I166 | done |
 | I220 | InfluxDB（line protocol）与 TDengine（schemaless）作为目标；MQTT 到 InfluxDB 端到端 | I214 | 目标已完成；MQTT 端到端待做 |
@@ -5464,6 +5464,38 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：互通：MySQL 到 SQL Server、SQL Server 到 SQL Server 的流水线在随机位置被 kill 后结果相同；
   `checkpoint: sink` 时精确一次成立。
 - **涉及**：`sync/mssql`、`test/sync`、`docs`。
+- **完成** 2026-11-10：`sync/mssql/sink.go`，目标 `mssql` 与源同在 `syncmssql` 包中，基于 I215 的 `mssqlwire`（与源共用
+  `ConnParams` 和 `WireConfig`）：一段行用 `MERGE ... WITH (HOLDLOCK)` upsert（`upsert update_insert`：先 `UPDATE`，没有行时
+  再 `INSERT`），按键删除，更新改了键时删除旧行，一段中每行只写一次（键再次出现时开始下一条语句），每条语句最多 1000 行、
+  2000 个参数；不属于源事务的连续插入达到 `bulk_rows`（1000）时批量装载到 `#fit_stage` 再合并；`transactions source` 或
+  `batch`，从不只提交源事务的一部分，打开的事务在新连接上重写；`SET XACT_ABORT ON`，语句被拒后由 `XACT_STATE()` 决定是否
+  重新开始事务并重写其中的语句；逐条语句找出被拒的记录；NULL 以其列的类型发送（每个连接用 `SELECT TOP 0` 读一次）；
+  `identity_insert`；`checkpoint sink`（I191 的 `CheckpointSink`）写入 `_fit_sync_checkpoints`。单元测试针对一个把语句
+  应用到表、支持事务（可被注定回滚或否）的假连接，`sync/mssql` 覆盖率 97.8%。互操作（`test/sync/mssql_sink_test.go`、
+  `TestMSSQLSink*`，基于 `test/sync/mssql.sh`，本地为 SQL Server 2022）：从中间和开头重放后，`MERGE`、先 `UPDATE` 后
+  `INSERT` 与批量装载都收敛；坏行单独失败；generate 的各类型记录（`IDENTITY` 键）经随机被杀的流水线；`checkpoint sink`
+  时两种 `transactions` 都恰好一次（多次被杀后 0 行重写，`checkpoint file` 时有重写）；SQL Server 到 SQL Server（CDC 源）
+  与 MySQL 8.4 到 SQL Server 在随机被杀后结果一致。两种语言的 `docs/sync.md`、schema、`schema-zh.js`。
+
+**待评审的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **一个写入者，不是 `ParallelSink`**：作业经一个连接写入。备选：MySQL 目标那样的备用写入者，各有连接和事务。
+2. **没有 `max_transaction_bytes`**：源事务无论多大都是 SQL Server 的一个事务（其日志随之增长）；MySQL 的上限是为 TiDB 设的。
+   备选：像 MySQL 目标那样把大事务分段提交。
+3. **`SET XACT_ABORT ON`，语句被拒后查 `XACT_STATE()`**：被拒语句的事务整体回滚（编译错误时保持原样），目标重新开始事务、
+   重写其中的语句，再查找那条记录。备选：`XACT_ABORT OFF`，依赖语句级回滚，但有些错误（转换）并不遵守。
+4. **批量装载经临时表再合并进目标表**（`SELECT TOP 0 ... INTO #fit_stage ... UNION ALL`，不带 `IDENTITY` 属性），这样重放的
+   快照也能收敛；直接装载到目标表会因已有的行而失败。只用于不属于源事务的插入，且达到 `bulk_rows` 条；因某个值失败的装载
+   改写成语句，由语句找出那条记录。
+5. **NULL 参数按其列的类型发送**，每张表每个连接用 `SELECT TOP 0 *` 读一次：客户端默认的 `nvarchar` NULL 不能转换为
+   `varbinary`（错误 257）。改变列类型的 DDL 在下一个连接时才会看到。
+6. **表名由命名空间按点拆成** `schema.table` 或 `db.schema.table`，所以 MySQL 源的 `shop.orders` 是 schema `shop` 中的表：
+   用 `dbo.{namespace}` 这样的 `table` 或直接写表名来改变映射。备选：一个默认 schema 参数。
+7. **永久拒绝的错误** 是一组错误号（转换 245、8114、8115，截断 8152 和 2628，NULL 写入 NOT NULL 515，约束 547、2601、2627，
+   对象和列 207、208，语法 102、156 等）；其余（死锁 1205、锁与快照冲突、超时）重试。
+8. **默认用 `MERGE`**，带 `WITH (HOLDLOCK)` 防止同一键的并发插入；不用 `MERGE` 的用户用 `update_insert`。
+9. **本地互操作只在 SQL Server 2022 上运行**（2019 在 `mssql.sh` 的默认集合中，由 CI 的 `mssql` 族运行），MySQL 流水线用
+   `mysql.sh` 的环境在 MySQL 8.4 上运行；没有它时跳过。
 
 ### I218 Doris 与 StarRocks 作为目标与源
 

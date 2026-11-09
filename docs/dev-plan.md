@@ -366,7 +366,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I214 | MQTT 3.1.1 and 5 as a source (persistent sessions, QoS 1/2 acknowledged after the sinks) and a sink | I163 | done |
 | I215 | A SQL Server client: TDS 7.4, TLS, SQL authentication, RPC with typed parameters, bulk load, cancellation | I163 | done |
 | I216 | SQL Server as a source: CDC change tables by LSN, a snapshot without locks handed over at its LSN | I215 | done |
-| I217 | SQL Server as a sink: `MERGE` upserts, deletes, bulk load, exactly once with the checkpoint in the sink | I215, I191 | todo |
+| I217 | SQL Server as a sink: `MERGE` upserts, deletes, bulk load, exactly once with the checkpoint in the sink | I215, I191 | done |
 | I218 | Doris and StarRocks as a sink (Stream Load with labels, the delete sign) and a source (a cursor polled) | I172 | done |
 | I219 | Loki and OpenTelemetry logs as sinks (push API, OTLP/HTTP), files to them against Promtail | I166 | done |
 | I220 | InfluxDB (line protocol) and TDengine (schemaless) as sinks; MQTT to InfluxDB end to end | I214 | sinks done; MQTT end to end todo |
@@ -7655,6 +7655,54 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 - **Done when**: interop: MySQL to SQL Server and SQL Server to SQL Server pipelines killed at random
   points end equal; exactly once holds with `checkpoint: sink`.
 - **Touches**: `sync/mssql`, `test/sync`, `docs`.
+- **Done** 2026-11-10: `sync/mssql/sink.go`, the sink `mssql` beside the source in `syncmssql`, on
+  I215's `mssqlwire` (its `ConnParams` and `WireConfig` shared with the source): upserts as `MERGE ...
+  WITH (HOLDLOCK)` of a run's rows (`upsert update_insert`: `UPDATE`, then `INSERT` when no row), deletes
+  by the key, a key changed by an update deleting the old row, a run's rows each written once (a key
+  again starts the next statement), at most 1,000 rows and 2,000 parameters a statement; a run of
+  `bulk_rows` (1000) inserts without a source transaction bulk loaded into `#fit_stage` and merged
+  from it; `transactions source` or `batch`, never a source transaction in part, the open one written
+  again on a new connection; `SET XACT_ABORT ON`, and after a refused statement `XACT_STATE()` decides
+  whether the transaction is begun again and its statements written again; the record refused found
+  one statement at a time; NULLs sent as their columns' types (read once a connection with `SELECT TOP
+  0`); `identity_insert`; `checkpoint sink` (I191's `CheckpointSink`) in `_fit_sync_checkpoints`.
+  Unit tests against a fake connection that applies the statements to tables in transactions (doomed
+  or not), 97.8% of `sync/mssql`. Interop (`test/sync/mssql_sink_test.go`, `TestMSSQLSink*`, on
+  `test/sync/mssql.sh`, SQL Server 2022 here): replays from the middle and the start converge with
+  `MERGE`, `UPDATE`-then-`INSERT` and bulk loads; a bad row fails alone; generate's every type (an
+  `IDENTITY` key) through a pipeline killed at random points; exactly once with `checkpoint sink` in
+  both `transactions` (0 rows written twice across kills, `checkpoint file` writing some twice); SQL
+  Server to SQL Server (CDC source) and MySQL 8.4 to SQL Server killed at random points end equal.
+  `docs/sync.md` in both languages, schema, `schema-zh.js`.
+
+**Decisions pending review** (made while building it, 2026-11-10; in force until the user rules):
+
+1. **One writer, not a `ParallelSink`**: a job writes through one connection. Alternative: the MySQL
+   sink's spare writers, each its own connection and transaction.
+2. **No `max_transaction_bytes`**: a source transaction is one of SQL Server's however large (its log
+   grows); MySQL's bound was for TiDB. Alternative: commit large ones in parts, as the MySQL sink can.
+3. **`SET XACT_ABORT ON`, then `XACT_STATE()` after a refused statement**: a refused statement's
+   transaction is rolled back whole (or left as it was, for a compile error), and the sink begins it
+   again and writes what it held again before looking for the record. Alternative: `XACT_ABORT OFF`,
+   trusting statement-level rollback, which some errors (conversions) do not keep to.
+4. **Bulk loads through a temporary table merged into the table** (`SELECT TOP 0 ... INTO #fit_stage
+   ... UNION ALL`, which leaves out the `IDENTITY` property), so that a snapshot replayed converges;
+   the bulk load straight into the table would fail on the rows already there. Only inserts without a
+   source transaction, in runs of `bulk_rows`; a load that fails for a value is written again as
+   statements, which find the record.
+5. **NULL parameters typed as their columns**, read with `SELECT TOP 0 *` once a table and
+   connection: a NULL of the client's default `nvarchar` does not convert to `varbinary` (error 257).
+   A DDL that changes a column's type is seen on the next connection.
+6. **Tables named by the namespace split at dots** into `schema.table` or `db.schema.table`, so a MySQL
+   source's `shop.orders` is the schema `shop`'s table: a `table` such as `dbo.{namespace}` or a name
+   maps it otherwise. Alternative: a default schema param.
+7. **Errors refused for good** are a list of numbers (conversions 245, 8114, 8115, truncation 8152 and
+   2628, NULL into NOT NULL 515, constraints 547, 2601, 2627, objects and columns 207, 208, syntax
+   102, 156, ...); the rest, deadlocks (1205), lock and snapshot conflicts, timeouts, are retried.
+8. **`MERGE` by default**, with `WITH (HOLDLOCK)` against concurrent inserts of a key; `update_insert`
+   for those who keep `MERGE` out.
+9. **Interop ran on SQL Server 2022 only here** (2019 is in `mssql.sh`'s default set, for CI's
+   `mssql` family), and the MySQL pipeline on MySQL 8.4 with `mysql.sh`'s env; it skips without it.
 
 ### I218 Doris and StarRocks as a sink and a source
 

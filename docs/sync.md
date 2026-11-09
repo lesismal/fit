@@ -145,6 +145,7 @@ sink had. Sinks therefore write idempotently, so that a replay converges on the 
 | `clickhouse` | the same deduplication token for the same records: the server drops the insert; rows of a `ReplacingMergeTree` by version otherwise |
 | `doris` | the same label for the same records: the server refuses the load as already loaded; rows of a unique or primary key table by key otherwise |
 | `loki` | the same entry (stream, time, line) is kept once; lines without a time get the time of the write, and are stored again |
+| `mssql` | upserts (`MERGE`) and deletes by key: the same rows |
 | `redis` | the same keys; stream entries with `entry_id key` are refused as already there |
 | `s3` | the same batch makes the same object, written over itself; a replay cut into other batches makes other objects |
 | `influxdb`, `tdengine` | the same point: a series (a subtable) and a time, written over itself; deletes are left out |
@@ -161,7 +162,7 @@ carry its ID, and the `mysql` and `postgres` sinks write each source transaction
 **Order is kept per key**, from the source to each sink: a sink may write keys in parallel (a job's
 writers), never one key out of order.
 
-**Exactly once** into MySQL, MariaDB, TiDB and PostgreSQL: with `checkpoint sink` the position is also
+**Exactly once** into MySQL, MariaDB, TiDB, PostgreSQL and SQL Server: with `checkpoint sink` the position is also
 written to a table of the sink's (`_fit_sync_checkpoints`), in the same transaction as the records it
 covers, and read back when the pipeline starts in preference to the file. A crash between the sink's
 commit and the file's next checkpoint then writes no record twice. It holds while every sink of the
@@ -203,7 +204,7 @@ after the same backoff, for as long as it fails: a source is expected to come ba
 | [MySQL, MariaDB, TiDB](#mysql-mariadb-and-tidb) | `mysql`: the binlog as a replica, a snapshot without locks | `mysql`: upserts and deletes, the source's transactions kept |
 | [TiDB through TiCDC](#tidb-through-ticdc) | `tidb`: a snapshot at a timestamp, then a changefeed from Kafka | (the `mysql` sink) |
 | [PostgreSQL](#postgresql) | `postgres`: logical replication with `pgoutput`, an exact snapshot | `postgres`: `ON CONFLICT` upserts, `COPY` |
-| [SQL Server](#sql-server) | `mssql`: CDC's change tables by LSN, or change tracking; a snapshot without locks | — |
+| [SQL Server](#sql-server) | `mssql`: CDC's change tables by LSN, or change tracking; a snapshot without locks | `mssql`: `MERGE` upserts, deletes, bulk loads, exactly once |
 | [MongoDB](#mongodb) | `mongo`: a snapshot by `_id`, then the change stream | `mongo`: bulk upserts and deletes by `_id` |
 | [Kafka, Redpanda](#kafka-and-redpanda) | `kafka`: every partition from offsets in the checkpoint | `kafka`: keyed messages, batched, compressed |
 | [MQTT](#mqtt) | `mqtt`: a persistent session, QoS 1 and 2 acknowledged after the sinks | `mqtt`: a topic template, a QoS, retained or not |
@@ -709,6 +710,45 @@ sync {
 The connection is TLS by default (`encrypt on`, negotiated in TDS's pre-login, the server's
 certificate checked against `ca_file` or the system's roots), `strict` for TDS 8 (SQL Server 2022),
 or `off`; SQL logins only, not Windows or Entra ID authentication.
+
+The `mssql` sink writes upserts by the record's key with `MERGE ... WITH (HOLDLOCK)` of each run of a
+batch's rows for one table (`upsert update_insert`: an `UPDATE`, then an `INSERT` when it found no
+row), and deletes by the key; a run of `bulk_rows` (1000) inserts or more without a source
+transaction, a snapshot's, is bulk loaded (`INSERT BULK`) into a temporary table and merged from it.
+Each source transaction is one of the server's (`transactions source`), or a batch's are together
+(`batch`), never committed in part; a statement the server refuses for good fails its record alone,
+the records before it committed. With `checkpoint sink` the position is written to
+`_fit_sync_checkpoints` in the same transaction, for exactly once. `identity_insert` writes the
+source's values into `IDENTITY` columns. Tables are named `schema.table` (or `db.schema.table`) from
+the namespace: a MySQL source's `shop.orders` is the schema `shop`'s `orders`, so give a `table` such
+as `dbo.{namespace}` or one table by name. The tables are yours, with a primary key or unique index
+on the key's columns.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-mssql {
+		source mysql {
+			address mysql:3306
+			username fit_repl
+			password_env MYSQL_PASSWORD
+			server_id 4102
+			tables shop.orders
+		}
+		sinks mssql {
+			sink mssql {
+				address mssql.internal:1433
+				username fit_writer
+				password_env MSSQL_PASSWORD
+				database dw
+				table dbo.orders
+				checkpoint sink
+				ca_file /etc/fit/mssql-ca.pem
+			}
+		}
+	}
+}
+```
 
 ### MongoDB
 
