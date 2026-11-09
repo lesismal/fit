@@ -122,9 +122,11 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | `mongo` | 按 `_id` upsert 和 delete：文档相同 |
 | `elasticsearch` | 按由键生成的 `_id` 索引和删除：文档相同（没有键的记录由集群生成 `_id`，重放会重复） |
 | `clickhouse` | 相同记录得到相同的去重令牌：服务器丢弃这次插入；否则由 `ReplacingMergeTree` 按版本合并 |
+| `doris` | 相同记录得到相同的 label：服务器以“已导入”拒绝这次导入；否则由 Unique Key 或主键表按键覆盖 |
+| `loki` | 相同的条目（流、时间、行）只保留一份；没有时间的行使用写入时间，会再存一次 |
 | `redis` | 键相同；`entry_id key` 时已存在的流条目被拒绝 |
 | `s3` | 同一批次生成同一个对象，覆盖自身；重放若被切成不同的批次，会生成别的对象 |
-| `kafka`、`http`、`file`、`stdout` | 再写一次：Kafka 的生产者不是幂等的；`http` 对相同记录发送相同的 `Idempotency-Key` |
+| `kafka`、`http`、`otlp_logs`、`file`、`stdout` | 再写一次：Kafka 的生产者不是幂等的，OTLP 也不是；`http` 对相同记录发送相同的 `Idempotency-Key` |
 
 **事务保持完整。** 检查点从不落在源事务内部；一个事务的记录带有其 ID，`mysql` 和 `postgres` 目标把每个源事务写成自己的
 一个事务（`transactions source`），所以目标的读者永远不会看到半个事务。
@@ -158,6 +160,9 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [文件](#文件) | `file`：跨轮转跟踪路径和通配符，多行合并 | `file`：按编解码器或模板写行，像日志一样轮转 |
 | [Elasticsearch、OpenSearch](#elasticsearch-与-opensearch) | `elasticsearch`：经时间点读快照，再轮询游标字段 | `elasticsearch`：按 `_id` 用 `_bulk` 写 |
 | [ClickHouse](#clickhouse) | `clickhouse`：按键读表或查询，再轮询游标列 | `clickhouse`：`JSONEachRow` 插入，去重，`ReplacingMergeTree` |
+| [Doris、StarRocks](#doris-与-starrocks) | `doris`：经 MySQL 协议按键读表或查询，再轮询游标列 | `doris`：Stream Load，按位置生成 label，删除标记 |
+| [Loki](#loki) | | `loki`：推送 API，protobuf 或 JSON，流取自配置的字段 |
+| [OpenTelemetry 日志](#opentelemetry-日志) | | `otlp_logs`：OTLP/HTTP 日志记录，protobuf 或 JSON |
 | [HTTP](#http) | `http`：POST 到 `sync_ingest` 路由的记录 | `http`：以 NDJSON 或 JSON 批量 POST |
 | [MySQL、MariaDB、TiDB](#mysqlmariadb-与-tidb) | `mysql`：以副本身份读 binlog，无锁快照 | `mysql`：upsert 和 delete，保持源的事务 |
 | [经由 TiCDC 读取 TiDB](#经由-ticdc-读取-tidb) | `tidb`：在一个时间戳上读快照，再从 Kafka 读 changefeed | （用 `mysql` 目标） |
@@ -170,7 +175,7 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [试用](#试用generatememory-和-stdout) | `generate` | `memory`、`stdout` |
 
 密钥从不写在配置里：每个连接器都给出保存其密码或令牌的环境变量名（`password_env`、`secret_access_key_env`、
-`bearer_token_env`），在流水线加载时读取，所以 `fit validate` 也需要设置它。TLS 按系统根证书或 `ca_file` 校验，且不能
+`bearer_token_env`、`headers_file`），在流水线加载时读取，所以 `fit validate` 也需要设置它。TLS 按系统根证书或 `ca_file` 校验，且不能
 关闭；客户端证书为 `cert_file` 和 `key_file`。除 `wasm` 连接器（其可达范围是插件自己的）外，每个连接器的连接都可以在不写
 任何记录的情况下测试（[测试连接](#admin-apifit-sync-与工作台)）。
 
@@ -279,6 +284,107 @@ sync {
 				table shop.orders
 			}
 			batch { max_records 10000; max_wait 1s }
+		}
+	}
+}
+```
+
+### Doris 与 StarRocks
+
+一个连接器 `doris` 同时服务 Apache Doris（2.1 及以上）和 StarRocks（3 及以上）；`flavor` 指明系统，两者在这里的区别只有
+删除列和部分列更新的请求头。目标用 HTTP 上的 Stream Load 导入一个批次中同一张表的每段连续记录，行为 JSON（或 CSV），
+`label` 由这段记录的第一个和最后一个位置生成：崩溃后再次导入的同一段会被以“已导入”拒绝，所以即使是 Duplicate Key 表，
+一个批次也只存一份。更新和删除需要 merge on write 的 Unique Key 表（Doris）或主键表（StarRocks）：删除写出行或其键，
+并把 `__DORIS_DELETE_SIGN__`（或 `__op`）设为 1。`partial_columns` 只更新记录带有的列。前端到后端的重定向会带着凭据跟随，
+所以后端地址必须是 fit 能访问到的；`urls` 也可以直接写后端的 HTTP 端口。因行而被拒绝的导入会被拆分，直到找出它不能
+接受的那条记录：该记录交给 `on_error`，它之前的记录都已导入。
+
+label 比表活得久：Doris 会保留 `label_keep_max_second`（默认三天），所以重置流水线或重建它的表之后，要改 `label_prefix`，
+否则之前导入过的记录会被以“已导入”拒绝。
+
+源经 MySQL 协议（前端的查询端口）读取表或查询，按 `cursor` 和 `key` 排序分页，再轮询上次读到的行之后的行，与 clickhouse
+源相同；从表中删除的行看不到，但 `deleted_column` 会读成删除。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-doris {
+		source mysql {
+			address mysql:3306
+			username fit_repl
+			password_env MYSQL_PASSWORD
+			server_id 4101
+			tables shop.orders
+		}
+		sinks doris {
+			sink doris {
+				urls http://fe1:8030 http://fe2:8030
+				username fit
+				password_env DORIS_PASSWORD
+				table dw.{namespace}
+			}
+			batch { max_records 20000; max_wait 2s }
+		}
+	}
+	pipelines starrocks-events {
+		source doris {
+			address sr-fe:9030
+			username fit
+			password_env SR_PASSWORD
+			table app.events
+			key id
+			cursor updated_at
+		}
+		sinks out { sink stdout }
+	}
+}
+```
+
+`orders-to-doris` 在 Doris 上的表：
+
+```sql
+CREATE TABLE dw.orders (id BIGINT NOT NULL, status VARCHAR(20), total DECIMAL(12, 2))
+UNIQUE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 8
+PROPERTIES ("enable_unique_key_merge_on_write" = "true");
+```
+
+### Loki
+
+目标 `loki` 把记录作为日志行推送到 Loki 的推送 API，格式为 snappy 压缩的 protobuf（与 Promtail 和 Alloy 相同）或 JSON。
+记录的行由其 `codec` 生成，默认是 line 编解码器，文件的行原样保留。流的 `labels` 是记录字段的模板，默认为
+`{"job": "fit", "namespace": "{$namespace}"}`：只有配置中写出的字段才成为标签，所以流的数量等于这些字段取值的数量，
+绝不会每条记录一个流；取值很多的值放进 `structured_metadata`（Loki 3）。行的时间取 `timestamp_field`，否则取记录的提交
+时间，再否则取写入时间。`tenant`（或 `tenant_field`）以 `X-Scope-OrgID` 发送。每个流的条目按时间排序；Loki 拒绝的请求
+（条目太旧、行太长）会被拆分，直到找出它拒绝的记录，交给 `on_error`。Loki 对流、时间和行都相同的条目只保留一份，所以
+记录带时间时，崩溃后再写一次的批次只存一份。
+
+### OpenTelemetry 日志
+
+目标 `otlp_logs` 把记录作为 OpenTelemetry 日志记录，经 OTLP/HTTP（`/v1/logs`）导出到 OpenTelemetry Collector 或任何
+OTLP 接收端，protobuf 或 JSON，gzip 压缩。资源与 fit 自身遥测发送的相同（`service.name`、`service.version`），再加上
+由记录字段模板生成的 `resource` 属性；日志记录的 body 是其 `codec` 生成的行，或带类型的行 map（`body row`），时间取
+`timestamp_field` 或提交时间，严重级别取 `severity_field`，属性取 `attributes` 的模板（默认 `fit.namespace` 和
+`fit.op`）。`headers_file` 让服务商的 key 不出现在配置中。OTLP 没有去重：崩溃后再写一次的批次会再导出一次。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines app-logs {
+		source file { paths /var/log/app/*.log }
+		sinks loki {
+			sink loki {
+				urls http://loki:3100
+				labels { job app; host web1 }
+			}
+			batch { max_wait 1s }
+		}
+		sinks otel {
+			sink otlp_logs {
+				urls http://collector:4318
+				service_name app
+				resource { host.name web1 }
+			}
+			batch { max_wait 1s }
 		}
 	}
 }
@@ -603,6 +709,7 @@ sync {
 | `redis` | 流的裁剪速度不快于流水线的读取 | 流的键上的 `+xread`（或 `+@stream`） |
 | `elasticsearch` | 每次写入都让其值比上次更晚的游标字段（更新时间），以及表示删除的软删除字段 | 索引的 `read` 和 `view_index_metadata` |
 | `clickhouse` | 随每次写入增长的游标列 | 表的 `SELECT` |
+| `doris` | 随每次写入增长的游标列 | 表的 `SELECT` |
 | `s3` | 随新增对象而增大的键 | `s3:ListBucket` 和 `s3:GetObject` |
 | `file` | 以改名或拷贝后截断的方式轮转 | 文件及其目录的读权限 |
 
@@ -634,7 +741,7 @@ CREATE PUBLICATION fit_orders FOR TABLE public.orders, public.order_items;  -- o
 ```
 
 目标只需要写权限：表的 `INSERT`、`UPDATE` 和 `DELETE`（MySQL、PostgreSQL），`checkpoint sink` 的表还需 `CREATE`；
-数据库的 `readWrite`（MongoDB）；`Write`，以及 `create_topics` 时的 `Create`（Kafka）。SQL 和 ClickHouse 目标中的表和
+数据库的 `readWrite`（MongoDB）；`Write`，以及 `create_topics` 时的 `Create`（Kafka）；表的 `LOAD`（Doris；StarRocks 为 `INSERT`）。SQL 和 ClickHouse 目标中的表和
 索引由你创建：DDL 只报告，从不重放。
 
 ## 系统之间的类型
@@ -925,3 +1032,12 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 ```
 
 `SYNC_PREFIX` 和脚本列出的 `*_PORT` 变量可以在第一套旁边再运行一套；`KEEP=1` 保留容器供下次运行。
+
+第二轮的连接器在 CI 的族接手之前（I222）有各自的脚本：`test/sync/olap.sh` 为 `TestDoris*` 启动 Doris 2.1（一个前端和一个
+后端）和 StarRocks 3.4，`test/sync/obs.sh` 为 `TestLoki*` 和 `TestOTLP*` 启动 Loki 3.5 和 OpenTelemetry Collector：
+
+```sh
+eval "$(test/sync/olap.sh up)"; eval "$(test/sync/obs.sh up)"
+go test ./test/sync -run 'TestDoris|TestLoki|TestOTLP' -v
+test/sync/olap.sh down; test/sync/obs.sh down
+```

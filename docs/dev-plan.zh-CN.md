@@ -357,8 +357,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I215 | SQL Server 客户端：TDS 7.4、TLS、SQL 认证、带类型参数的 RPC、批量导入、取消 | I163 | todo |
 | I216 | SQL Server 作为源：按 LSN 读 CDC 变更表，不加锁的快照在其 LSN 处衔接 | I215 | todo |
 | I217 | SQL Server 作为目标：`MERGE` upsert、删除、批量导入，检查点写在目标中实现精确一次 | I215, I191 | todo |
-| I218 | Doris 与 StarRocks 作为目标（带 label 的 Stream Load、删除标记）与源（按游标轮询） | I172 | todo |
-| I219 | Loki 与 OpenTelemetry 日志作为目标（push API、OTLP/HTTP），文件到它们并对比 Promtail | I166 | todo |
+| I218 | Doris 与 StarRocks 作为目标（带 label 的 Stream Load、删除标记）与源（按游标轮询） | I172 | done |
+| I219 | Loki 与 OpenTelemetry 日志作为目标（push API、OTLP/HTTP），文件到它们并对比 Promtail | I166 | done |
 | I220 | InfluxDB（line protocol）与 TDengine（schemaless）作为目标；MQTT 到 InfluxDB 端到端 | I214 | todo |
 | I221 | Milvus 与 Qdrant 作为目标，按键 upsert 与删除，配 `embed` 变换 | I163 | todo |
 | I222 | 第二批进入恢复矩阵、CI 互通分组、基准测试与文档 | I211–I221 | todo |
@@ -5223,6 +5223,41 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
   ClickHouse 的做法相同。
 - **完成标准**：在 Docker 中与 Doris 2.1 或 3.0 和 StarRocks 3.x 互通；重发的一批只导入一次；重放 upsert 与删除后行正确。
 - **涉及**：`sync/doris`、`test/sync`、`docs`。
+- **完成** 2026-11-10：`sync/doris` 包（`sink.go`、`source.go`、`values.go`），目标与源在 `modules/standard` 注册；与 I219
+  一起，第二轮基于 HTTP 的目标共用的连接 `sync/internal/httpconn`（fib 的客户端，依次尝试各 URL，基本或 bearer 认证，TLS，
+  跟随重定向，408、429 与 5xx 时退避重试）；为源导出 `syncmysql.WireValue`。单元测试针对会重定向到假后端的假前端（label、
+  请求头、请求体、已存在与仍在运行的 label、拆分找出坏行）和假 MySQL 连接（分页、续读、轮询、删除、`snapshot never`），
+  包覆盖率 98.6%。互操作（`test/sync/olap.sh`、`test/sync/olap_test.go`）：Doris 2.1.10（一个前端和一个后端，跟随前端的
+  重定向）与 StarRocks 3.4.8（allin1，直接导入其后端）：同一批两次导入 Duplicate Key 表只存一份；插入、更新与删除从中间
+  和开头以不同批大小重放后行正确，JSON 与 CSV 都是；部分列更新；坏行单独失败；源分页、续读、轮询；generate 的各类型记录
+  经随机被杀的流水线后结果一致。schema、参考文档、`schema-zh.js`、两种语言的 `docs/sync.md`、
+  `schema/doc/modules/sync_*_doris.md`。
+
+**待评审的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **一次导入的 label 是前缀加上数据库、表、这段记录首末位置和条数的哈希**，与 ClickHouse 的令牌相同。label 比删除重建的
+   表活得久（Doris 保留 `label_keep_max_second`，三天），所以重置或新建表之后用户要改 `label_prefix`，否则记录会以“已导入”
+   被拒绝。备选：label 中带上流水线的谱系（目前只有 `CheckpointSink` 能拿到）；用 Stream Load 的两阶段提交配合检查点做到
+   恰好一次。
+2. **每次导入都指明列**，即这段记录各行列的并集，因此缺少其中某列的行把它导入为 null（`partial_columns` 时保持不变）。备选：
+   整行时不发 `columns`（缺少的列取表的默认值）；按列集合切分。
+3. **只有含删除的一段才发送删除列**，删除写删除前的行或键；这样插入可导入任何模型，`deletes ignore` 适用于 Duplicate Key
+   表。备选：总是发送；删除用单独的 `merge_type: DELETE` 导入。
+4. **JSON 在 Doris 上每行一个（`read_json_by_line`），在 StarRocks 上为数组（`strip_outer_array`）**，各自的常用形式。
+   **CSV 用 `enclose` 与 `escape` 加引号**，Doris 上加 `trim_double_quotes`（否则保留引号），null 在 Doris 上写 `\N`，在先做
+   反转义的 StarRocks 上写 `\\N`：字符串 `\N` 无法以 CSV 写入 StarRocks（默认是 JSON）。
+5. **因行被拒的导入对半拆分**，各用自己的 label 导入，直到找出那一条，它永久失败；其余都导入。备选：整段交给 `on_error`；
+   每条记录一次导入。
+6. **`Label Already Exists` 在之前的导入为 `FINISHED`、`VISIBLE` 或 `COMMITTED` 时算已导入**，仍在运行时再问（不是交给
+   `on_error` 的错误）；`Publish Timeout` 算已导入（已提交，稍后可见）。
+7. **时间写成 `time_zone` 中的 `DATETIME` 文本，默认 UTC；字节为 base64**，与其他 JSON 目标相同。
+8. **目标的连接测试请求 `/api/health`**，不检查凭据；用一次空导入可以检查，但需要一张表。**源不支持作业的分块读取**
+   （clickhouse 源的 `chunk_rows`）：作业按游标读。位置中保存 SQL 字面量，读回时校验。
+9. **元组比较展开书写**（`(a > x) OR (a = x AND b > y)`），因为两个系统都不比较行值。
+10. **第二轮基于 HTTP 的目标共用一个连接包**（`sync/internal/httpconn`），而不是像 `clickhouse` 和 `elasticsearch` 那样各包
+    一份。
+11. **互操作用 Doris 2.1 与 StarRocks 3.4**：StarRocks 的前端重定向到其后端自己的地址 `127.0.0.1:8040`，在宿主机上与 Doris
+    的后端冲突，所以它的导入直接发往后端；Doris 的重定向经过测试。Doris 3.0 不在其中。
 
 ### I219 Loki 与 OpenTelemetry 日志作为目标
 
@@ -5232,6 +5267,34 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 Loki 3 和 OpenTelemetry Collector 互通；跨多次 kill 把文件送到 Loki 和 OTLP 不丢数据；在 I193
   的测试工具中与 Filebeat 并列做基准测试。
 - **涉及**：`sync/loki`、`sync/otlp`、`test/sync`、`bench/sync`、`docs`。
+- **完成** 2026-11-10：`sync/loki` 与 `sync/otlp`（目标 `otlp_logs`）包，在 `modules/standard` 注册，基于 I218 的
+  `sync/internal/httpconn`，以及 `sync/internal/pb`（手写 protobuf：logproto 的 `PushRequest`、OTLP 的
+  `ExportLogsServiceRequest`、部分成功的读取）和 `sync/internal/rectmpl`（标签与属性模板）。单元测试针对能解码两种编码的
+  假接收端：流、标签、元数据、租户、时间、拆分找出坏记录、部分成功、带类型的 body；`loki` 覆盖率 99.0%，`otlp` 99.3%。
+  互操作（`test/sync/obs.sh`、`test/sync/obs_test.go`）：Loki 3.5.5 与 OpenTelemetry Collector（contrib 0.137.0，读回其文件
+  导出器的输出）：两种编码，重放后 Loki 只存一份，文件经随机被杀的流水线送到 Loki 和 OTLP，每一行都送达。基准场景
+  `files-loki` 与 `files` 并列（fit 对比 Promtail 3.5.5，按 Loki 的 `loki_distributor_lines_received_total` 计数），此处未运行。
+  schema、参考文档、`schema-zh.js`，两种语言的 `docs/sync.md` 与 `bench/sync/README`。
+
+**待评审的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **流的标签只来自 `labels` 模板**，默认 `{"job": "fit", "namespace": "{$namespace}"}`，值为空的标签不写；此外不限制一批的
+   流数。备选：限制流数；每个字段都作标签，另加排除列表。
+2. **没有时间的记录使用写入时间，同一批中相差一纳秒**，这样 Loki 的去重不会合并不同的行，但它们重放后会再存一次（至少一次）。
+   备选：取源位置作时间（文件源目前没有可用作时间的位置）。
+3. **一次推送中每个流的条目按时间排序**；400 或 413 拆分直到找出那条记录，Loki 拒绝其余之前已接收的条目由它的去重吸收。
+4. **snappy 用 `klauspost/compress/s2`**，fit 为 Kafka 已依赖它，不是新依赖。
+5. **请求在目标内重试**：408、429 与 5xx，共六次，遵从 `Retry-After`（最多 10s），之后交给流水线自己的重试；不像
+   elasticsearch 目标那样在 429 持续期间一直等。
+6. **otlp_logs 复用 fit 追踪导出的部分**：资源（`service.name`、取自 `observe.Version` 的 `service.version`）、scope `fit`、
+   由 `config.ParseHeaders` 读取的 `headers_file`；不复用其 `net/http` 导出器（目标用 fib 的客户端），也不复用其只有 JSON 的
+   编码（protobuf 手写，JSON 作为选项）。
+7. **otlp_logs 的默认值**：body 为编解码器生成的行，属性 `fit.namespace` 与 `fit.op`，开启 gzip；`body row` 时超过 int64 的
+   uint 以及 decimal、时间和 JSON 为字符串。部分成功记为警告，因为接收端不说明丢弃了哪些记录。
+8. **连接测试**：loki 以该租户请求 `/loki/api/v1/labels`；otlp_logs 导出一个空请求。
+9. **基准对比 Promtail 而不是 Filebeat**（Filebeat 没有 Loki 输出），尽管 Promtail 已被 Alloy 取代；`files-loki` 还未加入
+   `plan.sh`，由 I222 连同权重加入。
+10. **互操作中的 Loki 不开认证**，所以租户只由单元测试检查。
 
 ### I220 InfluxDB 与 TDengine 作为目标
 

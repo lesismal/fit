@@ -143,9 +143,11 @@ sink had. Sinks therefore write idempotently, so that a replay converges on the 
 | `mongo` | upserts and deletes by `_id`: the same documents |
 | `elasticsearch` | index and delete by `_id` from the key: the same documents (a record without a key gets an `_id` the cluster makes, which a replay repeats) |
 | `clickhouse` | the same deduplication token for the same records: the server drops the insert; rows of a `ReplacingMergeTree` by version otherwise |
+| `doris` | the same label for the same records: the server refuses the load as already loaded; rows of a unique or primary key table by key otherwise |
+| `loki` | the same entry (stream, time, line) is kept once; lines without a time get the time of the write, and are stored again |
 | `redis` | the same keys; stream entries with `entry_id key` are refused as already there |
 | `s3` | the same batch makes the same object, written over itself; a replay cut into other batches makes other objects |
-| `kafka`, `http`, `file`, `stdout` | written again: Kafka's producer is not idempotent; `http` sends the same `Idempotency-Key` for the same records |
+| `kafka`, `http`, `otlp_logs`, `file`, `stdout` | written again: Kafka's producer is not idempotent, nor is OTLP; `http` sends the same `Idempotency-Key` for the same records |
 
 **Transactions stay whole.** A checkpoint never falls inside a source transaction; the records of one
 carry its ID, and the `mysql` and `postgres` sinks write each source transaction as one of their own
@@ -189,6 +191,9 @@ after the same backoff, for as long as it fails: a source is expected to come ba
 | [Files](#files) | `file`: paths and globs tailed across rotations, multiline | `file`: lines by a codec or a template, rotated as a log |
 | [Elasticsearch, OpenSearch](#elasticsearch-and-opensearch) | `elasticsearch`: a point-in-time snapshot, then a cursor field polled | `elasticsearch`: `_bulk` by `_id` |
 | [ClickHouse](#clickhouse) | `clickhouse`: a table or query by key, then a cursor column polled | `clickhouse`: `JSONEachRow` inserts, deduplicated, `ReplacingMergeTree` |
+| [Doris, StarRocks](#doris-and-starrocks) | `doris`: a table or query by key over MySQL's protocol, then a cursor column polled | `doris`: Stream Load, labelled by positions, delete signs |
+| [Loki](#loki) | | `loki`: the push API, protobuf or JSON, streams from configured fields |
+| [OpenTelemetry logs](#opentelemetry-logs) | | `otlp_logs`: OTLP/HTTP log records, protobuf or JSON |
 | [HTTP](#http) | `http`: records posted to a `sync_ingest` route | `http`: batches posted as NDJSON or JSON |
 | [MySQL, MariaDB, TiDB](#mysql-mariadb-and-tidb) | `mysql`: the binlog as a replica, a snapshot without locks | `mysql`: upserts and deletes, the source's transactions kept |
 | [TiDB through TiCDC](#tidb-through-ticdc) | `tidb`: a snapshot at a timestamp, then a changefeed from Kafka | (the `mysql` sink) |
@@ -201,7 +206,7 @@ after the same backoff, for as long as it fails: a source is expected to come ba
 | [Trials](#trials-generate-memory-and-stdout) | `generate` | `memory`, `stdout` |
 
 Secrets are never in the config: each connector names the environment variable holding its password
-or token (`password_env`, `secret_access_key_env`, `bearer_token_env`), read when the pipeline
+or token (`password_env`, `secret_access_key_env`, `bearer_token_env`, `headers_file`), read when the pipeline
 loads, so `fit validate` needs it set too. TLS is verified against the system's roots or `ca_file`,
 and cannot be turned off; a client certificate is `cert_file` and `key_file`. Every connector's
 connection can be tested without writing a record ([Test connection](#the-admin-api-fit-sync-and-the-workbench)),
@@ -321,6 +326,120 @@ sync {
 				table shop.orders
 			}
 			batch { max_records 10000; max_wait 1s }
+		}
+	}
+}
+```
+
+### Doris and StarRocks
+
+One connector, `doris`, serves Apache Doris (2.1 and later) and StarRocks (3 and later); `flavor`
+names the system, whose only differences here are the delete column and the partial update's header.
+The sink loads each run of a batch's records for one table with Stream Load over HTTP, JSON (or CSV)
+rows, and a `label` made from the run's first and last positions: a run loaded again after a crash
+is refused as already loaded, so a batch is stored once even in a duplicate key table. Updates and
+deletes need a table of the unique key model with merge on write (Doris) or the primary key model
+(StarRocks): a delete is the row, or its key, with `__DORIS_DELETE_SIGN__` (or `__op`) set to 1.
+`partial_columns` updates only the columns the records have. A frontend's redirect to a backend is
+followed with the credentials, so the backend's address must be one fit reaches; `urls` may name the
+backends' HTTP ports directly. A load refused for its rows is split until the record it cannot take
+is found: that one goes to `on_error`, the records before it are loaded.
+
+Labels outlive tables: Doris keeps them `label_keep_max_second` (three days by default), so after a
+pipeline is reset or its tables are made afresh, change `label_prefix`, or the records loaded before
+are refused as already loaded.
+
+The source reads a table or a query over MySQL's protocol (a frontend's query port), in pages
+ordered by `cursor` and `key`, then polls past the last row read, as the clickhouse source does; rows
+deleted from the table are not seen, but a `deleted_column` reads as deletes.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-to-doris {
+		source mysql {
+			address mysql:3306
+			username fit_repl
+			password_env MYSQL_PASSWORD
+			server_id 4101
+			tables shop.orders
+		}
+		sinks doris {
+			sink doris {
+				urls http://fe1:8030 http://fe2:8030
+				username fit
+				password_env DORIS_PASSWORD
+				table dw.{namespace}
+			}
+			batch { max_records 20000; max_wait 2s }
+		}
+	}
+	pipelines starrocks-events {
+		source doris {
+			address sr-fe:9030
+			username fit
+			password_env SR_PASSWORD
+			table app.events
+			key id
+			cursor updated_at
+		}
+		sinks out { sink stdout }
+	}
+}
+```
+
+The table for `orders-to-doris`, on Doris:
+
+```sql
+CREATE TABLE dw.orders (id BIGINT NOT NULL, status VARCHAR(20), total DECIMAL(12, 2))
+UNIQUE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 8
+PROPERTIES ("enable_unique_key_merge_on_write" = "true");
+```
+
+### Loki
+
+The sink `loki` pushes records to Loki's push API as log lines, snappy-compressed protobuf (as
+Promtail and Alloy send them) or JSON. A record's line is what its `codec` makes, the line codec by
+default, which keeps a file's lines as they are. Its stream's `labels` are templates of the record's
+fields, `{"job": "fit", "namespace": "{$namespace}"}` by default: only the fields you name become
+labels, so the streams are as many as their values, never one per record; put values of many kinds
+in `structured_metadata` (Loki 3) instead. A line's time is `timestamp_field`'s, else the record's
+commit time, else the time of the write. `tenant` (or `tenant_field`) is sent as `X-Scope-OrgID`.
+Each stream's entries go in time order; a request Loki refuses (an entry too old, a line too long)
+is split until the record it refuses is found, which goes to `on_error`. Loki keeps one copy of an
+entry with the same stream, time and line, so a batch written again after a crash is stored once
+when its records have times.
+
+### OpenTelemetry logs
+
+The sink `otlp_logs` exports records as OpenTelemetry log records over OTLP/HTTP (`/v1/logs`) to an
+OpenTelemetry Collector or any OTLP receiver, protobuf or JSON, gzipped. The resource is the one fit's
+own telemetry sends (`service.name`, `service.version`), with `resource` attributes from templates of
+the record's fields; a log record's body is the line its `codec` makes, or its row as a typed map
+(`body row`), its time `timestamp_field`'s or the commit time, its severity `severity_field`'s, and
+its `attributes` templates (`fit.namespace` and `fit.op` by default). `headers_file` keeps a vendor's
+key out of the config. OTLP has no deduplication: a batch written again after a crash is exported
+again.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines app-logs {
+		source file { paths /var/log/app/*.log }
+		sinks loki {
+			sink loki {
+				urls http://loki:3100
+				labels { job app; host web1 }
+			}
+			batch { max_wait 1s }
+		}
+		sinks otel {
+			sink otlp_logs {
+				urls http://collector:4318
+				service_name app
+				resource { host.name web1 }
+			}
+			batch { max_wait 1s }
 		}
 	}
 }
@@ -685,6 +804,7 @@ They are the [first pipeline](#a-first-pipeline)'s, and a quick way to try a tra
 | `redis` | streams trimmed no faster than the pipeline reads | `+xread` (or `+@stream`) on the streams' keys |
 | `elasticsearch` | a cursor field every write sets later than the last (an update time), and a soft-delete field for deletes | `read` and `view_index_metadata` on the indices |
 | `clickhouse` | a cursor column that grows with each write | `SELECT` on the table |
+| `doris` | a cursor column that grows with each write | `SELECT` on the table |
 | `s3` | keys that grow as objects are added | `s3:ListBucket` and `s3:GetObject` |
 | `file` | rotation by rename or copy and truncation | read on the files and their directories |
 
@@ -717,7 +837,7 @@ CREATE PUBLICATION fit_orders FOR TABLE public.orders, public.order_items;  -- o
 
 The sinks need write rights only: `INSERT`, `UPDATE` and `DELETE` on the tables (MySQL, PostgreSQL),
 `CREATE` too for `checkpoint sink`'s table; `readWrite` on the database (MongoDB); `Write` and, with
-`create_topics`, `Create` (Kafka). Tables and indexes in SQL and ClickHouse sinks are made by you: DDL
+`create_topics`, `Create` (Kafka); `LOAD` on the tables (Doris; `INSERT` on StarRocks). Tables and indexes in SQL and ClickHouse sinks are made by you: DDL
 is reported, never replayed.
 
 ## Types between systems
@@ -1048,3 +1168,13 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 
 `SYNC_PREFIX` and the `*_PORT` variables the script lists run a second set beside the first; `KEEP=1`
 keeps the containers for the next run.
+
+The second round's connectors have scripts of their own until CI's families take them (I222):
+`test/sync/olap.sh` starts Doris 2.1 (a frontend and a backend) and StarRocks 3.4 for `TestDoris*`,
+`test/sync/obs.sh` Loki 3.5 and the OpenTelemetry Collector for `TestLoki*` and `TestOTLP*`:
+
+```sh
+eval "$(test/sync/olap.sh up)"; eval "$(test/sync/obs.sh up)"
+go test ./test/sync -run 'TestDoris|TestLoki|TestOTLP' -v
+test/sync/olap.sh down; test/sync/obs.sh down
+```

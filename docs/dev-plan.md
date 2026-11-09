@@ -367,8 +367,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I215 | A SQL Server client: TDS 7.4, TLS, SQL authentication, RPC with typed parameters, bulk load, cancellation | I163 | todo |
 | I216 | SQL Server as a source: CDC change tables by LSN, a snapshot without locks handed over at its LSN | I215 | todo |
 | I217 | SQL Server as a sink: `MERGE` upserts, deletes, bulk load, exactly once with the checkpoint in the sink | I215, I191 | todo |
-| I218 | Doris and StarRocks as a sink (Stream Load with labels, the delete sign) and a source (a cursor polled) | I172 | todo |
-| I219 | Loki and OpenTelemetry logs as sinks (push API, OTLP/HTTP), files to them against Promtail | I166 | todo |
+| I218 | Doris and StarRocks as a sink (Stream Load with labels, the delete sign) and a source (a cursor polled) | I172 | done |
+| I219 | Loki and OpenTelemetry logs as sinks (push API, OTLP/HTTP), files to them against Promtail | I166 | done |
 | I220 | InfluxDB (line protocol) and TDengine (schemaless) as sinks; MQTT to InfluxDB end to end | I214 | todo |
 | I221 | Milvus and Qdrant as sinks, upserts and deletes by key, with an `embed` transform | I163 | todo |
 | I222 | The second round in the recovery matrix, CI's interop families, the benchmarks and the docs | I211–I221 | todo |
@@ -7276,6 +7276,58 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done when**: interop with Doris 2.1 or 3.0 and StarRocks 3.x in Docker; a batch sent twice is
   loaded once; upserts and deletes replayed end with the right rows.
 - **Touches**: `sync/doris`, `test/sync`, `docs`.
+- **Done** 2026-11-10: package `sync/doris` (`sink.go`, `source.go`, `values.go`), the sink and the
+  source registered in `modules/standard`; with I219, the HTTP connection the second round's HTTP
+  sinks share, `sync/internal/httpconn` (fib's client, URLs in turn, basic or bearer auth, TLS,
+  redirects, retries with a backoff on 408, 429 and 5xx); `syncmysql.WireValue` exported for the
+  source. Unit tests against a fake frontend that redirects to a fake backend (labels, headers,
+  bodies, refused and running labels, a bad row found by splitting) and a fake MySQL connection
+  (pages, resume, polling, deletes, `snapshot never`), 98.6% of the package. Interop
+  (`test/sync/olap.sh`, `test/sync/olap_test.go`) with Doris 2.1.10 (a frontend and a backend, the
+  frontend's redirect followed) and StarRocks 3.4.8 (allin1, loads to its backend): a batch loaded
+  twice into a duplicate key table is stored once; inserts, updates and deletes replayed from the
+  middle and the start in other batch sizes end with the right rows, in JSON and in CSV; partial
+  updates; a bad row fails alone; the source pages, resumes and polls; generate's records of every
+  type through a pipeline killed at random points end equal. Schema, reference, `schema-zh.js`,
+  `docs/sync.md` in both languages, `schema/doc/modules/sync_*_doris.md`.
+
+**Decisions pending review** (made while building it, 2026-11-10; in force until the user rules):
+
+1. **A load's label is the prefix and a hash of the database, the table, the run's first and last
+   positions and its count**, as ClickHouse's token is made. Labels outlive a table dropped and made
+   again (Doris keeps them `label_keep_max_second`, three days), so after a reset or new tables the
+   user changes `label_prefix`, or the records are refused as already loaded. Alternatives: the
+   pipeline's lineage in the label (only a `CheckpointSink` is told it today); Stream Load's
+   two-phase commit with the checkpoint, for exactly once.
+2. **Every load names its columns**, the union of the run's rows', so a row without one of them
+   loads it null (with `partial_columns`, keeps it). Alternatives: no `columns` header for whole rows
+   (missing columns take the table's defaults); runs cut by column set.
+3. **The delete column is sent only in a run that has a delete**, a delete being the row before, or
+   the key; so inserts load into any model, and `deletes ignore` serves a duplicate key table.
+   Alternatives: always send it; deletes as separate `merge_type: DELETE` loads.
+4. **JSON is a row a line on Doris (`read_json_by_line`) and an array on StarRocks
+   (`strip_outer_array`)**, each system's usual form. **CSV quotes with `enclose` and `escape`**,
+   with `trim_double_quotes` on Doris (which otherwise keeps the quotes), and null as `\N` on Doris
+   but `\\N` on StarRocks, which unescapes first: a string `\N` cannot go to StarRocks as CSV (JSON
+   is the default).
+5. **A load refused for its rows is split in halves**, each loaded with a label of its own, until
+   the one record is found, which fails for good; the rest are loaded. Alternatives: the whole run
+   to `on_error`; a record a load.
+6. **`Label Already Exists` counts as loaded when the earlier load is `FINISHED`, `VISIBLE` or
+   `COMMITTED`**, and is asked again (not an error for `on_error`) while it runs; `Publish Timeout`
+   counts as loaded (committed, visible later).
+7. **Times are written as `DATETIME` text in `time_zone`, UTC by default; bytes in base64**, as the
+   other JSON sinks write them.
+8. **The sink's connection test asks `/api/health`**, which checks no credentials; a dummy load
+   would, at the cost of a table. **The source has no chunked job reads** (the clickhouse source's
+   `chunk_rows`): a job reads by the cursor. Its position holds SQL literals, checked when read back.
+9. **The tuple comparison is spelled out** (`(a > x) OR (a = x AND b > y)`), since neither system
+   compares row values.
+10. **One HTTP connection package for the second round's HTTP sinks** (`sync/internal/httpconn`),
+    not a copy per package as `clickhouse` and `elasticsearch` have.
+11. **Interop on Doris 2.1 and StarRocks 3.4**: StarRocks's frontend redirects to `127.0.0.1:8040`,
+    its backend's own address, which a test on the host cannot reach beside Doris's, so its loads go
+    to the backend directly; Doris's redirect is tested. Doris 3.0 is not in the run.
 
 ### I219 Loki and OpenTelemetry logs as sinks
 
@@ -7287,6 +7339,45 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done when**: interop with Loki 3 and the OpenTelemetry Collector in Docker; files to Loki and to
   OTLP across kills lose nothing; a benchmark beside Filebeat's in I193's harness.
 - **Touches**: `sync/loki`, `sync/otlp`, `test/sync`, `bench/sync`, `docs`.
+- **Done** 2026-11-10: packages `sync/loki` and `sync/otlp` (the sink `otlp_logs`), registered in
+  `modules/standard`, on I218's `sync/internal/httpconn`, with `sync/internal/pb` (protobuf appended
+  by hand: logproto's `PushRequest`, OTLP's `ExportLogsServiceRequest`, a reader of the partial
+  success) and `sync/internal/rectmpl` (the label and attribute templates). Unit tests against fake
+  receivers that decode both encodings: streams, labels, metadata, tenants, times, the bad record
+  found by splitting, partial successes, typed bodies; 99.0% of `loki`, 99.3% of `otlp`. Interop
+  (`test/sync/obs.sh`, `test/sync/obs_test.go`) with Loki 3.5.5 and the OpenTelemetry Collector
+  (contrib 0.137.0, its file exporter read back): both encodings, a replay Loki stores once, files to
+  Loki and to OTLP through pipelines killed at random points with every line delivered. The
+  benchmark scenario `files-loki` beside `files` (fit against Promtail 3.5.5, counted from Loki's
+  `loki_distributor_lines_received_total`), not run here. Schema, reference, `schema-zh.js`,
+  `docs/sync.md` and `bench/sync/README` in both languages.
+
+**Decisions pending review** (made while building it, 2026-11-10; in force until the user rules):
+
+1. **A stream's labels come from `labels` templates only**, `{"job": "fit", "namespace":
+   "{$namespace}"}` by default, a label whose value comes out empty left out; no bound on streams a
+   batch beyond that. Alternatives: a cap on streams; every field a label, with a deny list.
+2. **A record without a time gets the time of the write, a nanosecond apart in a batch**, so lines
+   are never merged by Loki's deduplication, but a replay of them is stored again (at least once).
+   Alternative: a time from the source's position (none is a time for the file source today).
+3. **Each stream's entries are sorted by time in a push**; a 400 or 413 is split until the record is
+   found, Loki's deduplication absorbing the entries it took before refusing the rest.
+4. **Snappy through `klauspost/compress/s2`**, already fit's dependency for Kafka, not a new one.
+5. **Requests are retried in the sink** on 408, 429 and 5xx, six attempts, `Retry-After` honoured up
+   to 10s, then the pipeline's own retry; not for as long as a 429 lasts, as the elasticsearch sink
+   does.
+6. **What otlp_logs reuses of fit's tracing export**: the resource (`service.name`, `service.version`
+   from `observe.Version`), the scope `fit`, `headers_file` read by `config.ParseHeaders`; not its
+   `net/http` exporter (the sink is on fib's client) nor its JSON-only encoding (protobuf is encoded
+   by hand, JSON too, as an option).
+7. **otlp_logs's defaults**: the body is the codec's line, attributes `fit.namespace` and `fit.op`,
+   gzip on; with `body row`, a uint past int64 and decimals, times and JSON are strings. A partial
+   success is a warning, since the receiver does not say which records it dropped.
+8. **Connection tests**: loki asks `/loki/api/v1/labels` as the tenant; otlp_logs exports an empty
+   request.
+9. **The benchmark compares Promtail, not Filebeat** (Filebeat has no Loki output), though Promtail
+   is deprecated for Alloy; `files-loki` is not in `plan.sh` yet, which I222 adds with its weight.
+10. **Interop runs Loki without authentication**, so tenants are checked by the unit tests only.
 
 ### I220 InfluxDB and TDengine as sinks
 
