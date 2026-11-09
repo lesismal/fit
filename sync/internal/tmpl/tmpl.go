@@ -1,6 +1,8 @@
-// Package tmpl is the templates of sync's sinks' names (a measurement, a
-// collection, a subtable): text, {namespace} the record's namespace, and
-// {name} the row's field name, {{ being a brace.
+// Package tmpl is the templates of sync's sinks, of two kinds. Name
+// templates (Parse, Expand), of a measurement, a collection, a subtable:
+// text, {namespace} the record's namespace, and {name} the row's field
+// name, which a record must have, {{ being a brace. Record templates
+// (ParseRecord), of the log sinks' labels and attributes, in record.go.
 package tmpl
 
 import (

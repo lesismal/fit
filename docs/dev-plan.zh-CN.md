@@ -5344,7 +5344,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 Doris 2.1 或 3.0 和 StarRocks 3.x 互通；重发的一批只导入一次；重放 upsert 与删除后行正确。
 - **涉及**：`sync/doris`、`test/sync`、`docs`。
 - **完成** 2026-11-10：`sync/doris` 包（`sink.go`、`source.go`、`values.go`），目标与源在 `modules/standard` 注册；与 I219
-  一起，第二轮基于 HTTP 的目标共用的连接 `sync/internal/httpconn`（fib 的客户端，依次尝试各 URL，基本或 bearer 认证，TLS，
+  一起，第二轮基于 HTTP 的目标共用的连接 `sync/internal/httpconn`（之后已并入 `sync/internal/fibrest`，见 I219 的决定 11；fib 的客户端，依次尝试各 URL，基本或 bearer 认证，TLS，
   跟随重定向，408、429 与 5xx 时退避重试）；为源导出 `syncmysql.WireValue`。单元测试针对会重定向到假后端的假前端（label、
   请求头、请求体、已存在与仍在运行的 label、拆分找出坏行）和假 MySQL 连接（分页、续读、轮询、删除、`snapshot never`），
   包覆盖率 98.6%。互操作（`test/sync/olap.sh`、`test/sync/olap_test.go`）：Doris 2.1.10（一个前端和一个后端，跟随前端的
@@ -5374,7 +5374,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 8. **目标的连接测试请求 `/api/health`**，不检查凭据；用一次空导入可以检查，但需要一张表。**源不支持作业的分块读取**
    （clickhouse 源的 `chunk_rows`）：作业按游标读。位置中保存 SQL 字面量，读回时校验。
 9. **元组比较展开书写**（`(a > x) OR (a = x AND b > y)`），因为两个系统都不比较行值。
-10. **第二轮基于 HTTP 的目标共用一个连接包**（`sync/internal/httpconn`），而不是像 `clickhouse` 和 `elasticsearch` 那样各包
+10. **第二轮基于 HTTP 的目标共用一个客户端包**（`sync/internal/fibrest`，见 I219 的决定 11），而不是像 `clickhouse` 和 `elasticsearch` 那样各包
     一份。
 11. **互操作用 Doris 2.1 与 StarRocks 3.4**：StarRocks 的前端重定向到其后端自己的地址 `127.0.0.1:8040`，在宿主机上与 Doris
     的后端冲突，所以它的导入直接发往后端；Doris 的重定向经过测试。Doris 3.0 不在其中。
@@ -5388,8 +5388,8 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
   的测试工具中与 Filebeat 并列做基准测试。
 - **涉及**：`sync/loki`、`sync/otlp`、`test/sync`、`bench/sync`、`docs`。
 - **完成** 2026-11-10：`sync/loki` 与 `sync/otlp`（目标 `otlp_logs`）包，在 `modules/standard` 注册，基于 I218 的
-  `sync/internal/httpconn`，以及 `sync/internal/pb`（手写 protobuf：logproto 的 `PushRequest`、OTLP 的
-  `ExportLogsServiceRequest`、部分成功的读取）和 `sync/internal/rectmpl`（标签与属性模板）。单元测试针对能解码两种编码的
+  `sync/internal/fibrest`（决定 11），以及 `sync/internal/pb`（手写 protobuf：logproto 的 `PushRequest`、OTLP 的
+  `ExportLogsServiceRequest`、部分成功的读取）和 `sync/internal/tmpl` 的记录模板（标签与属性）。单元测试针对能解码两种编码的
   假接收端：流、标签、元数据、租户、时间、拆分找出坏记录、部分成功、带类型的 body；`loki` 与 `otlp` 覆盖率均为 99.0%。
   互操作（`test/sync/obs.sh`、`test/sync/obs_test.go`）：Loki 3.5.5 与 OpenTelemetry Collector（contrib 0.137.0，读回其文件
   导出器的输出）：两种编码，重放后 Loki 只存一份，文件经随机被杀的流水线送到 Loki 和 OTLP，每一行都送达。基准场景
@@ -5404,7 +5404,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    备选：取源位置作时间（文件源目前没有可用作时间的位置）。
 3. **一次推送中每个流的条目按时间排序**；400 或 413 拆分直到找出那条记录，Loki 拒绝其余之前已接收的条目由它的去重吸收。
 4. **snappy 用 `klauspost/compress/s2`**，fit 为 Kafka 已依赖它，不是新依赖。
-5. **请求在目标内重试**：408、429 与 5xx，共六次，遵从 `Retry-After`（最多 10s），之后交给流水线自己的重试；不像
+5. **请求在目标内重试**：408、429 与 5xx，共五次（fibrest 的默认），遵从 `Retry-After`（最多 30s），之后交给流水线自己的重试；不像
    elasticsearch 目标那样在 429 持续期间一直等。
 6. **otlp_logs 复用 fit 追踪导出的部分**：资源（`service.name`、取自 `observe.Version` 的 `service.version`）、scope `fit`、
    由 `config.ParseHeaders` 读取的 `headers_file`；不复用其 `net/http` 导出器（目标用 fib 的客户端），也不复用其只有 JSON 的
@@ -5415,6 +5415,18 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 9. **基准对比 Promtail 而不是 Filebeat**（Filebeat 没有 Loki 输出），尽管 Promtail 已被 Alloy 取代；`files-loki` 还未加入
    `plan.sh`，由 I222 连同权重加入。
 10. **互操作中的 Loki 不开认证**，所以租户只由单元测试检查。
+11. **七个 HTTP 目标共用一个客户端包和一个模板包**（与 I220、I221 合并时决定，2026-11-10）：I218/I219 的
+    `sync/internal/httpconn` 与 I220/I221 的 `sync/internal/fibrest` 做的是同一件事；保留 `fibrest`，因为已有五个连接器
+    （以及 `embed` 的固定证书）在用它，并补上 `httpconn` 有的部分：多个 `urls` 依次尝试（502、503、504 与连接错误换下一个）、
+    带凭据跟随重定向（`Request.Redirects`，用于 Doris 的前端）、`Authorization`（来自环境变量的 basic 或 bearer）、
+    `HeaderFields`（参数中的请求头，拒绝连接器自己的）、`Connect`（把模块参数变成客户端，错误为模块的）、带类型的
+    `ResponseError` 与 `IsStatus`。doris、loki 与 otlp_logs 改用它；`httpconn` 删除。默认值用 fibrest 的（五次尝试，退避最多
+    30s）；三个目标保留各自 60s 的超时。它们把被拒请求对半拆分的做法保留，与 fibrest 的 `WriteFinding`（逐条单独写）并存，
+    后者适合较少整体拒绝请求的服务器。**模板**：`sync/internal/tmpl` 同时包含两种：名称模板（`{namespace}` 与必须存在的
+    字段，用于 influxdb、tdengine 与 qdrant），以及来自 `rectmpl` 的记录模板（`{$namespace}`、`{$op}`，字段缺失时为空，
+    与 file 目标相同），即 `ParseRecord` 与 `TimeOf`；`rectmpl` 删除。两种语法保持原样，因为各自沿用其目标已写入文档的配置。
+    `vecutil`（向量目标的）与 `pb`（日志目标的 protobuf）没有重复。备选：保留 `httpconn`，把那四个目标改过去；所有目标用一种
+    模板语法，会破坏其中一方的配置。
 
 ### I220 InfluxDB 与 TDengine 作为目标
 

@@ -16,11 +16,11 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
-	"github.com/lesismal/fit/sync/internal/httpconn"
+	"github.com/lesismal/fit/sync/internal/fibrest"
 )
 
 func init() {
-	httpconn.BackoffFirst, httpconn.BackoffMost = time.Millisecond, 2*time.Millisecond
+	fibrest.BackoffFirst, fibrest.BackoffMost = time.Millisecond, 2*time.Millisecond
 }
 
 // load is a Stream Load a fake backend took.

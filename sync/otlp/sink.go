@@ -14,7 +14,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	stdhttp "net/http"
@@ -29,9 +28,9 @@ import (
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/observe"
 	fitsync "github.com/lesismal/fit/sync"
-	"github.com/lesismal/fit/sync/internal/httpconn"
+	"github.com/lesismal/fit/sync/internal/fibrest"
 	"github.com/lesismal/fit/sync/internal/pb"
-	"github.com/lesismal/fit/sync/internal/rectmpl"
+	"github.com/lesismal/fit/sync/internal/tmpl"
 )
 
 func init() {
@@ -74,7 +73,7 @@ type Sink struct {
 	SpanIDField     string            `json:"span_id_field,omitempty" doc:"A field of the row holding a span's ID as 16 hex digits. None when left out."`
 	MaxRequestBytes int64             `json:"max_request_bytes,omitempty" min:"0" default:"4194304" doc:"The most bytes of one export's log records, before compression; a batch larger is exported in several, in order, and a record larger fails. The Collector's own bound is its max_request_body_size, 20 MiB by default. 4 MiB when left out or 0."`
 
-	conn     *httpconn.Conn
+	client   *fibrest.Client
 	path     string
 	codec    fitsync.Codec
 	resource []attr
@@ -84,14 +83,14 @@ type Sink struct {
 // attr is an attribute's name and template.
 type attr struct {
 	name string
-	tmpl *rectmpl.Template
+	tmpl *tmpl.Record
 }
 
 // Provision checks the params, loads the codec and reads the secrets, the
 // headers and the TLS files; nothing is sent until the first write.
 func (s *Sink) Provision(ctx *module.Context) error {
 	var errs config.Errors
-	header := map[string]string{}
+	var header map[string]string
 	if s.HeadersFile != "" {
 		data, err := os.ReadFile(s.HeadersFile)
 		var h stdhttp.Header
@@ -102,12 +101,15 @@ func (s *Sink) Provision(ctx *module.Context) error {
 			errs = append(errs, ctx.Params.Field("headers_file").Errorf("%s: %v", s.HeadersFile, err))
 		}
 		for k := range h {
+			if header == nil {
+				header = map[string]string{}
+			}
 			header[k] = h.Get(k)
 		}
 	}
-	conn, cerrs := httpconn.New(ctx, httpconn.Params{URLs: s.URLs, Username: s.Username, PasswordEnv: s.PasswordEnv, BearerTokenEnv: s.BearerTokenEnv,
-		CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName, Timeout: s.Timeout, Header: header, AllowPath: true})
-	s.conn = conn
+	client, cerrs := fibrest.Connect(ctx, fibrest.Connection{URLs: s.URLs, Username: s.Username, PasswordEnv: s.PasswordEnv, BearerTokenEnv: s.BearerTokenEnv,
+		CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName, Timeout: s.Timeout, Headers: header, HeaderField: "headers_file"})
+	s.client = client
 	errs = append(errs, cerrs...)
 	// A URL's path may end in /v1/logs, which is then not added: all or
 	// none of them.
@@ -151,12 +153,12 @@ func (s *Sink) Provision(ctx *module.Context) error {
 				errs = append(errs, ctx.Params.Field(field).Errorf("%s is the sink's: service_name sets service.name", name))
 				continue
 			}
-			tmpl, err := rectmpl.Parse(t)
+			tp, err := tmpl.ParseRecord(t)
 			if err != nil {
 				errs = append(errs, ctx.Params.Field(field).Errorf("%s: %v", name, err))
 				continue
 			}
-			out = append(out, attr{name: name, tmpl: tmpl})
+			out = append(out, attr{name: name, tmpl: tp})
 		}
 		slices.SortFunc(out, func(a, b attr) int { return cmp.Compare(a.name, b.name) })
 		return out
@@ -198,8 +200,8 @@ func (s *Sink) Test(ctx context.Context) error {
 
 // Cleanup closes the client and lets the codec go.
 func (s *Sink) Cleanup() {
-	if s.conn != nil {
-		s.conn.Close()
+	if s.client != nil {
+		s.client.Close()
 	}
 	module.Cleanup(s.codec)
 }
@@ -227,7 +229,7 @@ var severities = map[string]int64{"trace": 1, "debug": 5, "info": 9, "informatio
 // build makes r's log record.
 func (s *Sink) build(r *fitsync.Record) logRecord {
 	var lr logRecord
-	row := rectmpl.Row(r)
+	row := tmpl.Row(r)
 	var key strings.Builder
 	for _, a := range s.resource {
 		if v := a.tmpl.Render(r); v != "" {
@@ -239,7 +241,7 @@ func (s *Sink) build(r *fitsync.Record) logRecord {
 	var ts time.Time
 	if s.TimestampField != "" {
 		if v, ok := row.Get(s.TimestampField); ok {
-			ts, _ = rectmpl.TimeOf(v)
+			ts, _ = tmpl.TimeOf(v)
 		}
 	}
 	if ts.IsZero() {
@@ -350,8 +352,7 @@ func (s *Sink) exportRun(ctx context.Context, recs []logRecord) (int, error) {
 	if err == nil {
 		return 0, nil
 	}
-	var se *httpconn.StatusError
-	if !errors.As(err, &se) || se.Status != stdhttp.StatusBadRequest && se.Status != stdhttp.StatusRequestEntityTooLarge {
+	if !fibrest.IsStatus(err, stdhttp.StatusBadRequest, stdhttp.StatusRequestEntityTooLarge) {
 		return 0, err
 	}
 	if len(recs) == 1 {
@@ -405,12 +406,12 @@ func (s *Sink) export(ctx context.Context, recs []logRecord) error {
 		body = buf.Bytes()
 		h.Set("Content-Encoding", "gzip")
 	}
-	resp, err := s.conn.DoRetry(ctx, &httpconn.Request{Method: stdhttp.MethodPost, Path: s.path, Header: h, Body: body}, 0)
+	resp, err := s.client.DoRetry(ctx, fibrest.Request{Method: stdhttp.MethodPost, Path: s.path, Header: h, Body: body}, 0)
 	if err != nil {
 		return err
 	}
 	if resp.Status/100 != 2 {
-		return &httpconn.StatusError{Status: resp.Status, Body: string(resp.Body)}
+		return fibrest.StatusError("the export", resp)
 	}
 	if n, msg := partialSuccess(resp.Header.Get("Content-Type"), resp.Body); n > 0 {
 		warnf("sync otlp_logs: the receiver rejected %d of %d log records: %s", n, len(recs), msg)

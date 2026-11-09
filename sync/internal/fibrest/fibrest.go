@@ -1,10 +1,12 @@
-// Package fibrest is what sync's connectors to HTTP APIs share (the
-// influxdb, tdengine, qdrant and milvus sinks, the embed transform): a
-// client on fib's asynchronous HTTP client, on the pipeline's engine or on
-// one of its own when the pipeline runs without one, waited on from the
-// pipeline's goroutine, never a fib worker's; TLS and secrets read as the
-// other connectors read them; tries again on 408, 429 and 5xx with a
-// backoff; and the search for the record of a batch a server refused.
+// Package fibrest is what sync's connectors to HTTP APIs share (the doris,
+// loki, otlp_logs, influxdb, tdengine, qdrant and milvus sinks, the embed
+// transform): a client on fib's asynchronous HTTP client, on the
+// pipeline's engine or on one of its own when the pipeline runs without
+// one, waited on from the pipeline's goroutine, never a fib worker's; one
+// URL or several tried in turn; redirects followed when asked; TLS, basic
+// and bearer credentials and secrets read as the other connectors read
+// them; tries again on 408, 429 and 5xx with a backoff; and the search for
+// the record of a batch a server refused.
 package fibrest
 
 import (
@@ -12,6 +14,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	stdhttp "net/http"
@@ -21,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fib"
@@ -48,6 +52,11 @@ type Params struct {
 	// URL is the server's base URL, http or https, a path prefix allowed,
 	// no query, fragment or user.
 	URL string
+	// URLs, when set, are used in place of URL: the one that answered
+	// last first, then each other in turn while one fails to answer (a
+	// connection's error, a timeout, a 502, 503 or 504). Their errors name
+	// the param urls.
+	URLs []string
 	// CAFile, CertFile, KeyFile and ServerName are TLS's, as the other
 	// connectors take them.
 	CAFile, CertFile, KeyFile, ServerName string
@@ -75,7 +84,8 @@ func (e FieldError) Error() string { return e.Field + ": " + e.Err.Error() }
 // Client sends requests to one server. It is safe for use by several
 // goroutines.
 type Client struct {
-	base    *url.URL
+	bases   []*url.URL
+	cur     atomic.Int64
 	tls     *tls.Config
 	timeout time.Duration
 	maxBody int
@@ -105,12 +115,18 @@ func New(engine *fib.Engine, p Params) (*Client, []FieldError) {
 	add := func(field, format string, args ...any) {
 		errs = append(errs, FieldError{field, fmt.Errorf(format, args...)})
 	}
-	u, err := url.Parse(p.URL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-		add("url", "%q is not an http or https URL of a host, with no query, fragment or user", p.URL)
-	} else {
+	urls, field := []string{p.URL}, "url"
+	if len(p.URLs) > 0 {
+		urls, field = p.URLs, "urls"
+	}
+	for _, s := range urls {
+		u, err := url.Parse(s)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			add(field, "%q is not an http or https URL of a host, with no query, fragment or user", s)
+			continue
+		}
 		u.Path = strings.TrimSuffix(u.Path, "/")
-		c.base = u
+		c.bases = append(c.bases, u)
 	}
 	tc := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: p.ServerName}
 	if p.CAFile != "" {
@@ -145,8 +161,66 @@ func New(engine *fib.Engine, p Params) (*Client, []FieldError) {
 	return c, errs
 }
 
-// Base returns the base URL.
-func (c *Client) Base() *url.URL { return c.base }
+// Base returns the (first) base URL.
+func (c *Client) Base() *url.URL {
+	if len(c.bases) == 0 {
+		return nil
+	}
+	return c.bases[0]
+}
+
+// Authorization returns the Authorization header of a connector's
+// credentials: basic, of username and the password in passwordEnv (none
+// when empty), or bearer, of the token in bearerTokenEnv; "" for none.
+// The errors name the params username, password_env and bearer_token_env.
+func Authorization(username, passwordEnv, bearerTokenEnv string) (string, []FieldError) {
+	var errs []FieldError
+	if strings.ContainsAny(username, ":\r\n") {
+		errs = append(errs, FieldError{"username", errors.New("a username has no ':' or line breaks")})
+	}
+	switch {
+	case bearerTokenEnv != "" && (username != "" || passwordEnv != ""):
+		return "", append(errs, FieldError{"bearer_token_env", errors.New("a bearer token or a username, not both")})
+	case bearerTokenEnv != "":
+		tok, fe := Secret("bearer_token_env", bearerTokenEnv)
+		if fe != nil {
+			return "", append(errs, *fe)
+		}
+		return "Bearer " + tok, errs
+	case passwordEnv != "" && username == "":
+		return "", append(errs, FieldError{"password_env", errors.New("password_env needs username")})
+	case username != "":
+		password := ""
+		if passwordEnv != "" {
+			pw, fe := Secret("password_env", passwordEnv)
+			if fe != nil {
+				return "", append(errs, *fe)
+			}
+			password = pw
+		}
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password)), errs
+	}
+	return "", errs
+}
+
+// HeaderFields checks a param of headers, field, and returns them: names
+// of a header's form, values without line breaks, and none of the
+// connector's own (Authorization, Content-Type, Content-Length, Host).
+func HeaderFields(field string, m map[string]string) (stdhttp.Header, []FieldError) {
+	h := stdhttp.Header{}
+	var errs []FieldError
+	for k, v := range m {
+		switch {
+		case k == "" || strings.ContainsAny(k, " \t\r\n:") || strings.ContainsAny(v, "\r\n"):
+			errs = append(errs, FieldError{field, fmt.Errorf("%q: %q is not a header field", k, v)})
+		case strings.EqualFold(k, "Authorization") || strings.EqualFold(k, "Content-Type") || strings.EqualFold(k, "Content-Length") || strings.EqualFold(k, "Host"):
+			errs = append(errs, FieldError{field, fmt.Errorf("%s is the connector's to set", k)})
+		default:
+			h.Set(k, v)
+		}
+	}
+	return h, errs
+}
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
@@ -179,7 +253,7 @@ func (c *Client) httpClient() (*fibhttp.Client, error) {
 	if e == nil {
 		cfg := fib.DefaultConfig()
 		cfg.LogSettings = false
-		own, err := fib.New(cfg)
+		own, err := newEngine(cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -195,6 +269,9 @@ func (c *Client) httpClient() (*fibhttp.Client, error) {
 	c.client = fibhttp.NewClient(e, cc)
 	return c.client, nil
 }
+
+// newEngine makes the engine of the package's own; the tests replace it.
+var newEngine = fib.New
 
 // Close closes the client, and stops the engine of its own.
 func (c *Client) Close() {
@@ -223,25 +300,99 @@ type Request struct {
 	// Retry, when not nil, says whether DoRetry sends the request again
 	// after an answer, in place of Transient's say on its status.
 	Retry func(*Response) bool
+	// Redirects is how many redirects (301, 302, 303, 307, 308) to follow,
+	// at most MaxRedirects, each sent again whole, with the client's
+	// headers and credentials, to wherever the Location names; 0 returns
+	// the redirect.
+	Redirects int
 }
+
+// MaxRedirects is the most redirects a request follows.
+const MaxRedirects = 3
 
 // Response is a request's answer.
 type Response struct {
 	Status int
 	Header stdhttp.Header
 	Body   []byte
+	// Host is the host that answered, after any redirect.
+	Host string
+}
+
+// unavailable is a status that sends the request to the next URL.
+func unavailable(status int) bool {
+	return status == stdhttp.StatusBadGateway || status == stdhttp.StatusServiceUnavailable || status == stdhttp.StatusGatewayTimeout
 }
 
 // Do sends r once and waits for its answer, on the caller's goroutine,
-// which must not be a fib worker's.
+// which must not be a fib worker's: to the URL that answered last, then to
+// each other in turn while one fails to answer (a connection's error, a
+// timeout, 502, 503 or 504). It returns the first answer, the last of
+// those statuses when every URL gave one, or the last error.
 func (c *Client) Do(ctx context.Context, r Request) (*Response, error) {
+	if len(c.bases) == 0 {
+		return nil, errors.New("no URL to send to")
+	}
 	cl, err := c.httpClient()
 	if err != nil {
 		return nil, err
 	}
-	u := *c.base
-	u.Path += r.Path
-	u.RawQuery = r.Query
+	var last *Response
+	var lastErr error
+	start := int(c.cur.Load())
+	for i := range c.bases {
+		n := (start + i) % len(c.bases)
+		u := *c.bases[n]
+		u.Path += r.Path
+		u.RawQuery = r.Query
+		resp, err := c.follow(ctx, cl, &u, &r)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err == nil && !unavailable(resp.Status) {
+			c.cur.Store(int64(n))
+			return resp, nil
+		}
+		if err != nil {
+			lastErr, last = fmt.Errorf("%s: %w", c.bases[n].Host, err), nil
+		} else {
+			last, lastErr = resp, nil
+		}
+	}
+	c.cur.Store(int64((start + 1) % len(c.bases)))
+	if last != nil {
+		return last, nil
+	}
+	return nil, lastErr
+}
+
+// follow sends r to u, and to each redirect's Location while r allows.
+func (c *Client) follow(ctx context.Context, cl *fibhttp.Client, u *url.URL, r *Request) (*Response, error) {
+	for hop := 0; ; hop++ {
+		resp, err := c.send(ctx, cl, u, r)
+		if err != nil {
+			return nil, err
+		}
+		resp.Host = u.Host
+		switch resp.Status {
+		case stdhttp.StatusMovedPermanently, stdhttp.StatusFound, stdhttp.StatusSeeOther, stdhttp.StatusTemporaryRedirect, stdhttp.StatusPermanentRedirect:
+		default:
+			return resp, nil
+		}
+		if hop >= min(r.Redirects, MaxRedirects) {
+			return resp, nil
+		}
+		loc := resp.Header.Get("Location")
+		next, err := u.Parse(loc)
+		if err != nil || (next.Scheme != "http" && next.Scheme != "https") || next.Host == "" {
+			return nil, fmt.Errorf("a redirect to %q, not an http or https URL", loc)
+		}
+		u = next
+	}
+}
+
+// send sends r to u once.
+func (c *Client) send(ctx context.Context, cl *fibhttp.Client, u *url.URL, r *Request) (*Response, error) {
 	req, err := stdhttp.NewRequestWithContext(ctx, r.Method, u.String(), bytes.NewReader(r.Body))
 	if err != nil {
 		return nil, err
@@ -270,10 +421,7 @@ func (c *Client) Do(ctx context.Context, r Request) (*Response, error) {
 	})
 	select {
 	case res := <-done:
-		if res.err != nil {
-			return nil, fmt.Errorf("%s: %w", c.base.Host, res.err)
-		}
-		return res.resp, nil
+		return res.resp, res.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -356,9 +504,35 @@ func Clip(b []byte) string {
 	return string(b)
 }
 
-// StatusError is an answer a request did not want.
+// ResponseError is an answer a request did not want: StatusError's.
+type ResponseError struct {
+	What   string
+	Status int
+	Body   []byte
+}
+
+func (e *ResponseError) Error() string {
+	return fmt.Sprintf("%s answered %d: %s", e.What, e.Status, Clip(e.Body))
+}
+
+// StatusError is an answer a request did not want, a *ResponseError.
 func StatusError(what string, resp *Response) error {
-	return fmt.Errorf("%s answered %d: %s", what, resp.Status, Clip(resp.Body))
+	return &ResponseError{What: what, Status: resp.Status, Body: resp.Body}
+}
+
+// IsStatus reports whether err is, or wraps, a ResponseError of one of
+// statuses.
+func IsStatus(err error, statuses ...int) bool {
+	var re *ResponseError
+	if !errors.As(err, &re) {
+		return false
+	}
+	for _, s := range statuses {
+		if re.Status == s {
+			return true
+		}
+	}
+	return false
 }
 
 // Refused marks err as the server's refusal of what a request carried, as

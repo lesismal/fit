@@ -7474,7 +7474,8 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done** 2026-11-10: package `sync/doris` (`sink.go`, `source.go`, `values.go`), the sink and the
   source registered in `modules/standard`; with I219, the HTTP connection the second round's HTTP
   sinks share, `sync/internal/httpconn` (fib's client, URLs in turn, basic or bearer auth, TLS,
-  redirects, retries with a backoff on 408, 429 and 5xx); `syncmysql.WireValue` exported for the
+  redirects, retries with a backoff on 408, 429 and 5xx; merged into `sync/internal/fibrest` since,
+  I219's decision 11); `syncmysql.WireValue` exported for the
   source. Unit tests against a fake frontend that redirects to a fake backend (labels, headers,
   bodies, refused and running labels, a bad row found by splitting) and a fake MySQL connection
   (pages, resume, polling, deletes, `snapshot never`), 98.6% of the package. Interop
@@ -7518,8 +7519,8 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
    `chunk_rows`): a job reads by the cursor. Its position holds SQL literals, checked when read back.
 9. **The tuple comparison is spelled out** (`(a > x) OR (a = x AND b > y)`), since neither system
    compares row values.
-10. **One HTTP connection package for the second round's HTTP sinks** (`sync/internal/httpconn`),
-    not a copy per package as `clickhouse` and `elasticsearch` have.
+10. **One HTTP client package for the second round's HTTP sinks** (`sync/internal/fibrest`, see
+    I219's decision 11), not a copy per package as `clickhouse` and `elasticsearch` have.
 11. **Interop on Doris 2.1 and StarRocks 3.4**: StarRocks's frontend redirects to `127.0.0.1:8040`,
     its backend's own address, which a test on the host cannot reach beside Doris's, so its loads go
     to the backend directly; Doris's redirect is tested. Doris 3.0 is not in the run.
@@ -7535,9 +7536,9 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
   OTLP across kills lose nothing; a benchmark beside Filebeat's in I193's harness.
 - **Touches**: `sync/loki`, `sync/otlp`, `test/sync`, `bench/sync`, `docs`.
 - **Done** 2026-11-10: packages `sync/loki` and `sync/otlp` (the sink `otlp_logs`), registered in
-  `modules/standard`, on I218's `sync/internal/httpconn`, with `sync/internal/pb` (protobuf appended
+  `modules/standard`, on `sync/internal/fibrest` (decision 11), with `sync/internal/pb` (protobuf appended
   by hand: logproto's `PushRequest`, OTLP's `ExportLogsServiceRequest`, a reader of the partial
-  success) and `sync/internal/rectmpl` (the label and attribute templates). Unit tests against fake
+  success) and `sync/internal/tmpl`'s record templates (labels and attributes). Unit tests against fake
   receivers that decode both encodings: streams, labels, metadata, tenants, times, the bad record
   found by splitting, partial successes, typed bodies; 99.0% of `loki` and of `otlp`. Interop
   (`test/sync/obs.sh`, `test/sync/obs_test.go`) with Loki 3.5.5 and the OpenTelemetry Collector
@@ -7558,9 +7559,9 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 3. **Each stream's entries are sorted by time in a push**; a 400 or 413 is split until the record is
    found, Loki's deduplication absorbing the entries it took before refusing the rest.
 4. **Snappy through `klauspost/compress/s2`**, already fit's dependency for Kafka, not a new one.
-5. **Requests are retried in the sink** on 408, 429 and 5xx, six attempts, `Retry-After` honoured up
-   to 10s, then the pipeline's own retry; not for as long as a 429 lasts, as the elasticsearch sink
-   does.
+5. **Requests are retried in the sink** on 408, 429 and 5xx, five attempts (fibrest's), `Retry-After`
+   honoured up to 30s, then the pipeline's own retry; not for as long as a 429 lasts, as the
+   elasticsearch sink does.
 6. **What otlp_logs reuses of fit's tracing export**: the resource (`service.name`, `service.version`
    from `observe.Version`), the scope `fit`, `headers_file` read by `config.ParseHeaders`; not its
    `net/http` exporter (the sink is on fib's client) nor its JSON-only encoding (protobuf is encoded
@@ -7573,6 +7574,24 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 9. **The benchmark compares Promtail, not Filebeat** (Filebeat has no Loki output), though Promtail
    is deprecated for Alloy; `files-loki` is not in `plan.sh` yet, which I222 adds with its weight.
 10. **Interop runs Loki without authentication**, so tenants are checked by the unit tests only.
+11. **One HTTP client package and one template package for the seven HTTP sinks** (made when merging
+    with I220 and I221, 2026-11-10): I218/I219's `sync/internal/httpconn` and I220/I221's
+    `sync/internal/fibrest` did the same; `fibrest` stays, since five connectors (and `embed`'s pinned
+    certificate) were on it, and gains what `httpconn` had: several `urls` tried in turn (502, 503, 504
+    and connection errors move on), redirects followed with the credentials (`Request.Redirects`, for
+    Doris's frontend), `Authorization` (basic or bearer from the environment), `HeaderFields` (a
+    param's headers, the connector's own refused), `Connect` (a module's params to a client, its
+    errors the module's), and a typed `ResponseError` with `IsStatus`. doris, loki and otlp_logs moved
+    to it; `httpconn` is gone. Its defaults are fibrest's (five attempts, a 30s backoff at most); the
+    three sinks keep their own 60s timeout. Their bisection of a refused request into halves stays,
+    beside fibrest's `WriteFinding` (each record alone), which suits servers that refuse a whole
+    request less often. **Templates**: `sync/internal/tmpl` holds both kinds, its name templates
+    (`{namespace}` and fields that must be there, for influxdb, tdengine and qdrant) and, from
+    `rectmpl`, the record templates (`{$namespace}`, `{$op}`, fields empty when missing, as the file
+    sink's) as `ParseRecord`, with `TimeOf`; `rectmpl` is gone. The two syntaxes stay as they are,
+    since each follows the config its sinks already documented. `vecutil` (the vector sinks') and
+    `pb` (the log sinks' protobuf) have no twin. Alternatives: keep `httpconn` and move the four
+    sinks to it; one template syntax for every sink, a break in one side's config.
 
 ### I220 InfluxDB and TDengine as sinks
 

@@ -19,12 +19,12 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
-	"github.com/lesismal/fit/sync/internal/httpconn"
+	"github.com/lesismal/fit/sync/internal/fibrest"
 	"github.com/lesismal/fit/sync/internal/pb"
 )
 
 func init() {
-	httpconn.BackoffFirst, httpconn.BackoffMost = time.Millisecond, 2*time.Millisecond
+	fibrest.BackoffFirst, fibrest.BackoffMost = time.Millisecond, 2*time.Millisecond
 }
 
 // pushed is an entry a fake Loki took.

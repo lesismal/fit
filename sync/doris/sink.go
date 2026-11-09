@@ -27,7 +27,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
-	"github.com/lesismal/fit/sync/internal/httpconn"
+	"github.com/lesismal/fit/sync/internal/fibrest"
 )
 
 func init() {
@@ -68,10 +68,10 @@ type Sink struct {
 	Properties      map[string]string `json:"properties,omitempty" doc:"Stream Load's other headers, sent with every load, as {\"max_filter_ratio\": \"0.1\", \"strict_mode\": \"true\", \"timeout\": \"600\"}; they cannot be the ones the sink sets: label, format, columns, the JSON and CSV ones, partial_columns, partial_update, hidden_columns, merge_type, delete, jsonpaths, Expect."`
 	MaxRequestBytes int64             `json:"max_request_bytes,omitempty" min:"0" default:"16777216" doc:"The most bytes of one load's rows; a batch larger is loaded in several, in order, each with a label of its own, and a row larger fails its record. 16 MiB when left out or 0."`
 
-	conn  *httpconn.Conn
-	table []tablePart
-	zone  *time.Location
-	sign  string
+	client *fibrest.Client
+	table  []tablePart
+	zone   *time.Location
+	sign   string
 }
 
 type tablePart struct {
@@ -98,10 +98,10 @@ func (s *Sink) Provision(ctx *module.Context) error {
 			errs = append(errs, ctx.Params.Field("properties").Errorf("%s is the sink's to set", k))
 		}
 	}
-	conn, cerrs := httpconn.New(ctx, httpconn.Params{URLs: s.URLs, Username: s.Username, PasswordEnv: s.PasswordEnv,
+	client, cerrs := fibrest.Connect(ctx, fibrest.Connection{URLs: s.URLs, Username: s.Username, PasswordEnv: s.PasswordEnv,
 		CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName, Timeout: s.Timeout,
-		Header: s.Properties})
-	s.conn = conn
+		Headers: s.Properties, HeaderField: "properties"})
+	s.client = client
 	errs = append(errs, cerrs...)
 	if s.Username == "" {
 		errs = append(errs, ctx.Params.Field("username").Errorf("no username"))
@@ -159,20 +159,20 @@ func (s *Sink) Provision(ctx *module.Context) error {
 // the server is there and speaks HTTP; whether the user may load into the
 // tables is not known before the first load.
 func (s *Sink) Test(ctx context.Context) error {
-	resp, err := s.conn.Do(ctx, &httpconn.Request{Method: stdhttp.MethodGet, Path: "/api/health"})
+	resp, err := s.client.Do(ctx, fibrest.Request{Method: stdhttp.MethodGet, Path: "/api/health"})
 	if err != nil {
 		return err
 	}
 	if resp.Status != stdhttp.StatusOK {
-		return &httpconn.StatusError{Status: resp.Status, Body: string(resp.Body)}
+		return fibrest.StatusError("the health check", resp)
 	}
 	return nil
 }
 
 // Cleanup closes the client.
 func (s *Sink) Cleanup() {
-	if s.conn != nil {
-		s.conn.Close()
+	if s.client != nil {
+		s.client.Close()
 	}
 }
 
@@ -444,7 +444,7 @@ func (e *LoadError) Error() string {
 	if e.Running {
 		return fmt.Sprintf("the load %s is still running (%s): it is asked again", e.Label, e.Result.ExistingJobStatus)
 	}
-	s := fmt.Sprintf("the load %s failed: %s: %s", e.Label, e.Result.Status, httpconn.Clip([]byte(msg)))
+	s := fmt.Sprintf("the load %s failed: %s: %s", e.Label, e.Result.Status, fibrest.Clip([]byte(msg)))
 	if e.Result.NumberFilteredRows > 0 {
 		s += fmt.Sprintf(" (%d of %d rows filtered)", e.Result.NumberFilteredRows, e.Result.NumberTotalRows)
 	}
@@ -542,16 +542,16 @@ func (s *Sink) load(ctx context.Context, recs []*fitsync.Record, items []item) e
 		}
 	}
 	path := "/api/" + url.PathEscape(db) + "/" + url.PathEscape(table) + "/_stream_load"
-	resp, err := s.conn.DoRetry(ctx, &httpconn.Request{Method: stdhttp.MethodPut, Path: path, Header: h, Body: body, Redirects: httpconn.MaxRedirects}, 0)
+	resp, err := s.client.DoRetry(ctx, fibrest.Request{Method: stdhttp.MethodPut, Path: path, Header: h, Body: body, Redirects: fibrest.MaxRedirects}, 0)
 	if err != nil {
 		return err
 	}
 	if resp.Status != stdhttp.StatusOK {
-		return &httpconn.StatusError{Status: resp.Status, Body: string(resp.Body)}
+		return fibrest.StatusError("the load "+label, resp)
 	}
 	var res LoadResult
 	if err := json.Unmarshal(resp.Body, &res); err != nil {
-		return fmt.Errorf("the answer to the load %s is not Stream Load's: %s", label, httpconn.Clip(resp.Body))
+		return fmt.Errorf("the answer to the load %s is not Stream Load's: %s", label, fibrest.Clip(resp.Body))
 	}
 	switch strings.ToLower(res.Status) {
 	case "success", "publish timeout":

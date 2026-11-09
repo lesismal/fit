@@ -24,9 +24,9 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
-	"github.com/lesismal/fit/sync/internal/httpconn"
+	"github.com/lesismal/fit/sync/internal/fibrest"
 	"github.com/lesismal/fit/sync/internal/pb"
-	"github.com/lesismal/fit/sync/internal/rectmpl"
+	"github.com/lesismal/fit/sync/internal/tmpl"
 )
 
 func init() {
@@ -60,7 +60,7 @@ type Sink struct {
 	TimestampField     string            `json:"timestamp_field,omitempty" doc:"A field of the row whose value is the line's time: a time, an integer of Unix seconds, milliseconds, microseconds or nanoseconds, or RFC 3339 text. The record's commit time when left out or when a record lacks it, and the time of the write when it has neither, a nanosecond apart for each record of a batch."`
 	MaxRequestBytes    int64             `json:"max_request_bytes,omitempty" min:"0" default:"1048576" doc:"The most bytes of the lines of one push, before compression; a batch larger is pushed in several, in order, and a line larger fails its record. Loki's own bound is its grpc_server_max_recv_msg_size, 4 MiB by default. 1 MiB when left out or 0."`
 
-	conn   *httpconn.Conn
+	client *fibrest.Client
 	codec  fitsync.Codec
 	labels []label
 	meta   []label
@@ -69,7 +69,7 @@ type Sink struct {
 // label is a label's or a metadata's name and template.
 type label struct {
 	name string
-	tmpl *rectmpl.Template
+	tmpl *tmpl.Record
 }
 
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -77,9 +77,9 @@ var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // Provision checks the params, loads the codec and reads the secrets and
 // TLS files; nothing is sent until the first write.
 func (s *Sink) Provision(ctx *module.Context) error {
-	conn, errs := httpconn.New(ctx, httpconn.Params{URLs: s.URLs, Username: s.Username, PasswordEnv: s.PasswordEnv, BearerTokenEnv: s.BearerTokenEnv,
-		CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName, Timeout: s.Timeout, AllowPath: true})
-	s.conn = conn
+	client, errs := fibrest.Connect(ctx, fibrest.Connection{URLs: s.URLs, Username: s.Username, PasswordEnv: s.PasswordEnv, BearerTokenEnv: s.BearerTokenEnv,
+		CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName, Timeout: s.Timeout})
+	s.client = client
 	if s.Encoding == "" {
 		s.Encoding = "protobuf"
 	}
@@ -94,12 +94,12 @@ func (s *Sink) Provision(ctx *module.Context) error {
 				errs = append(errs, ctx.Params.Field(field).Errorf("%q is not a label's name: letters, digits and _, not starting with a digit or __", name))
 				continue
 			}
-			tmpl, err := rectmpl.Parse(t)
+			tp, err := tmpl.ParseRecord(t)
 			if err != nil {
 				errs = append(errs, ctx.Params.Field(field).Errorf("%s: %v", name, err))
 				continue
 			}
-			out = append(out, label{name: name, tmpl: tmpl})
+			out = append(out, label{name: name, tmpl: tp})
 		}
 		slices.SortFunc(out, func(a, b label) int { return cmp.Compare(a.name, b.name) })
 		return out
@@ -140,20 +140,20 @@ func (s *Sink) Test(ctx context.Context) error {
 	if s.Tenant != "" {
 		h.Set("X-Scope-OrgID", s.Tenant)
 	}
-	resp, err := s.conn.Do(ctx, &httpconn.Request{Method: stdhttp.MethodGet, Path: "/loki/api/v1/labels", Header: h})
+	resp, err := s.client.Do(ctx, fibrest.Request{Method: stdhttp.MethodGet, Path: "/loki/api/v1/labels", Header: h})
 	if err != nil {
 		return err
 	}
 	if resp.Status != stdhttp.StatusOK {
-		return &httpconn.StatusError{Status: resp.Status, Body: string(resp.Body)}
+		return fibrest.StatusError("the labels", resp)
 	}
 	return nil
 }
 
 // Cleanup closes the client and lets the codec go.
 func (s *Sink) Cleanup() {
-	if s.conn != nil {
-		s.conn.Close()
+	if s.client != nil {
+		s.client.Close()
 	}
 	module.Cleanup(s.codec)
 }
@@ -186,7 +186,7 @@ func escape(s string) string {
 func (s *Sink) build(r *fitsync.Record, now time.Time) entry {
 	var e entry
 	e.tenant = s.Tenant
-	row := rectmpl.Row(r)
+	row := tmpl.Row(r)
 	if s.TenantField != "" {
 		if v, ok := row.Get(s.TenantField); ok && !v.IsNull() {
 			e.tenant = fitsync.TextOf(v)
@@ -226,7 +226,7 @@ func (s *Sink) build(r *fitsync.Record, now time.Time) entry {
 	e.ts = r.CommitTime
 	if s.TimestampField != "" {
 		if v, ok := row.Get(s.TimestampField); ok {
-			if t, ok := rectmpl.TimeOf(v); ok {
+			if t, ok := tmpl.TimeOf(v); ok {
 				e.ts = t
 			}
 		}
@@ -283,8 +283,7 @@ func (s *Sink) pushRun(ctx context.Context, es []entry) (int, error) {
 	if err == nil {
 		return 0, nil
 	}
-	var se *httpconn.StatusError
-	if !errors.As(err, &se) || se.Status != stdhttp.StatusBadRequest && se.Status != stdhttp.StatusRequestEntityTooLarge {
+	if !fibrest.IsStatus(err, stdhttp.StatusBadRequest, stdhttp.StatusRequestEntityTooLarge) {
 		return 0, err
 	}
 	if len(es) == 1 {
@@ -344,12 +343,12 @@ func (s *Sink) push(ctx context.Context, es []entry) error {
 		h.Set("Content-Type", "application/x-protobuf")
 		body = s2.EncodeSnappy(nil, appendProto(nil, streams(es)))
 	}
-	resp, err := s.conn.DoRetry(ctx, &httpconn.Request{Method: stdhttp.MethodPost, Path: pushPath, Header: h, Body: body}, 0)
+	resp, err := s.client.DoRetry(ctx, fibrest.Request{Method: stdhttp.MethodPost, Path: pushPath, Header: h, Body: body}, 0)
 	if err != nil {
 		return err
 	}
 	if resp.Status/100 != 2 {
-		return &httpconn.StatusError{Status: resp.Status, Body: string(resp.Body)}
+		return fibrest.StatusError("the push", resp)
 	}
 	return nil
 }

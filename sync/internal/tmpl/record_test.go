@@ -1,4 +1,4 @@
-package rectmpl
+package tmpl
 
 import (
 	"strconv"
@@ -8,7 +8,7 @@ import (
 	fitsync "github.com/lesismal/fit/sync"
 )
 
-func TestRender(t *testing.T) {
+func TestRecordRender(t *testing.T) {
 	r := &fitsync.Record{Source: "file", Namespace: "/var/log/a.log", Op: fitsync.OpMessage,
 		Key: fitsync.Int(7), CommitTime: time.Unix(1, 5).UTC(),
 		After: fitsync.Map(fitsync.Field{Name: "level", Value: fitsync.String("info")}, fitsync.Field{Name: "n", Value: fitsync.Int(3)})}
@@ -23,7 +23,7 @@ func TestRender(t *testing.T) {
 		"{missing}!":            "!",
 		"a{level}b{$namespace}": "ainfob/var/log/a.log",
 	} {
-		tp, err := Parse(tmpl)
+		tp, err := ParseRecord(tmpl)
 		if err != nil {
 			t.Fatalf("%s: %v", tmpl, err)
 		}
@@ -31,16 +31,16 @@ func TestRender(t *testing.T) {
 			t.Errorf("%s: %q, want %q", tmpl, got, want)
 		}
 	}
-	tp, _ := Parse("{$commit_time}")
+	tp, _ := ParseRecord("{$commit_time}")
 	if got := tp.Render(&fitsync.Record{}); got != "" {
 		t.Errorf("no commit time: %q", got)
 	}
 	del := &fitsync.Record{Op: fitsync.OpDelete, Before: fitsync.Map(fitsync.Field{Name: "level", Value: fitsync.String("old")})}
-	if tp, _ := Parse("{level}"); tp.Render(del) != "old" {
+	if tp, _ := ParseRecord("{level}"); tp.Render(del) != "old" {
 		t.Error("before")
 	}
 	for _, bad := range []string{"{", "{}", "{$nothing}"} {
-		if _, err := Parse(bad); err == nil {
+		if _, err := ParseRecord(bad); err == nil {
 			t.Errorf("%q parsed", bad)
 		}
 	}

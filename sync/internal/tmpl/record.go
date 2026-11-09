@@ -1,9 +1,11 @@
-// Package rectmpl is the text templates the log sinks (loki, otlp_logs)
-// make labels and attributes with, as the file sink's template: {name} is
-// a field of the record's row (after, or before when after is null) as
-// text, and {$namespace}, {$op}, {$source}, {$key} and {$commit_time} are
-// the record's; {{ is a brace. It also reads a time from a field.
-package rectmpl
+package tmpl
+
+// Record templates are the second kind: those the log sinks (loki,
+// otlp_logs) make labels and attributes with, as the file sink's template
+// is: {name} is a field of the record's row (after, or before when after
+// is null) as text, empty when it has none, and {$namespace}, {$op},
+// {$source}, {$key} and {$commit_time} are the record's; {{ is a brace.
+// TimeOf reads a time from a field.
 
 import (
 	"fmt"
@@ -14,12 +16,12 @@ import (
 	fitsync "github.com/lesismal/fit/sync"
 )
 
-// Template is a parsed template.
-type Template struct {
-	parts []part
+// Record is a parsed record template.
+type Record struct {
+	parts []recPart
 }
 
-type part struct {
+type recPart struct {
 	text  string
 	field string // a row's field, or $ and the record's part
 }
@@ -27,9 +29,9 @@ type part struct {
 // The record's parts a template may name.
 var recordParts = map[string]bool{"$namespace": true, "$op": true, "$source": true, "$key": true, "$commit_time": true}
 
-// Parse parses t.
-func Parse(t string) (*Template, error) {
-	var parts []part
+// ParseRecord parses a record template.
+func ParseRecord(t string) (*Record, error) {
+	var parts []recPart
 	var text strings.Builder
 	for i := 0; i < len(t); i++ {
 		switch {
@@ -46,19 +48,19 @@ func Parse(t string) (*Template, error) {
 				return nil, fmt.Errorf("{%s} names nothing: a field, or one of $namespace, $op, $source, $key and $commit_time", name)
 			}
 			if text.Len() > 0 {
-				parts = append(parts, part{text: text.String()})
+				parts = append(parts, recPart{text: text.String()})
 				text.Reset()
 			}
-			parts = append(parts, part{field: name})
+			parts = append(parts, recPart{field: name})
 			i += j
 		default:
 			text.WriteByte(t[i])
 		}
 	}
 	if text.Len() > 0 {
-		parts = append(parts, part{text: text.String()})
+		parts = append(parts, recPart{text: text.String()})
 	}
-	return &Template{parts: parts}, nil
+	return &Record{parts: parts}, nil
 }
 
 // Row returns the row a record's fields are read from: after, or before
@@ -71,7 +73,7 @@ func Row(r *fitsync.Record) fitsync.Value {
 }
 
 // Render returns the template made with r.
-func (t *Template) Render(r *fitsync.Record) string {
+func (t *Record) Render(r *fitsync.Record) string {
 	if len(t.parts) == 1 && t.parts[0].field == "" {
 		return t.parts[0].text
 	}
