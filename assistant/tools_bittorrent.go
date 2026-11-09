@@ -55,7 +55,68 @@ func btTools() []*Tool {
 			Description: "The BitTorrent tracker's totals (bittorrent.tracker): torrents and peers in its store against its bounds, announces and scrapes served, refusals by reason (unregistered, passkey, access), whether it is private, the allow-list's size and the UDP address; and the swarms (the allow-list's torrents, or a public tracker's by info hash; the first 50: seeders, leechers, completed). Never a passkey.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 			Run:         toolBTTrackerStats},
+		{Name: "bt_rss", Group: GroupBitTorrent, Level: config.AssistantRead,
+			Description: "The BitTorrent client's RSS auto-download (bittorrent.client.rss): each feed's name, title, whether it is polled (and whether the Admin API set that), interval, last poll, its result (ok, not_modified, error) and error, next poll, items seen, torrents added and items failed since fit started; each rule's feeds, category, episodes remembered and torrents added; and the latest items seen (title, feed, outcome: added, exists, duplicate episode, unmatched, no_source, failed; the rule, the torrent's ID, the error). A feed's URL as scheme, host and last path element only.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"feed":{"type":"string","description":"only this feed's items"},"outcome":{"type":"string","description":"only items of this outcome"},"items":{"type":"integer","description":"the most items, 20 when left out, at most 100; 0 for none"}}}`),
+			Run:         toolBTRSS},
 	}, btProposeTools()...)
+}
+
+func toolBTRSS(c *Call) (string, error) {
+	var args struct {
+		Feed    string `json:"feed"`
+		Outcome string `json:"outcome"`
+		Items   *int   `json:"items"`
+	}
+	if err := c.Decode(&args); err != nil {
+		return "", err
+	}
+	n := 20
+	if args.Items != nil {
+		n = *args.Items
+	}
+	if n < 0 || n > 100 {
+		return "", errors.New("items is 0 to 100")
+	}
+	var st struct {
+		Configured bool                         `json:"configured"`
+		Feeds      []map[string]json.RawMessage `json:"feeds"`
+		Rules      []json.RawMessage            `json:"rules"`
+		Error      string                       `json:"error,omitempty"`
+	}
+	if err := c.a.apiGet(c.Context, "/bittorrent/rss", &st); err != nil {
+		return "", err
+	}
+	for _, f := range st.Feeds {
+		var u string
+		_ = json.Unmarshal(f["url"], &u)
+		f["url"], _ = json.Marshal(trackerURL(u))
+	}
+	out := map[string]any{"configured": st.Configured, "feeds": st.Feeds, "rules": st.Rules}
+	if st.Error != "" {
+		out["save_error"] = st.Error
+	}
+	if n > 0 && st.Configured {
+		q := url.Values{"limit": {strconv.Itoa(n)}}
+		if args.Feed != "" {
+			q.Set("feed", args.Feed)
+		}
+		if args.Outcome != "" {
+			q.Set("outcome", args.Outcome)
+		}
+		var items struct {
+			Items []map[string]json.RawMessage `json:"items"`
+			Total int                          `json:"total"`
+		}
+		if err := c.a.apiGet(c.Context, "/bittorrent/rss/items?"+q.Encode(), &items); err != nil {
+			return "", err
+		}
+		for _, it := range items.Items {
+			delete(it, "key") // a link, which may hold a passkey
+		}
+		out["items"], out["items_total"] = items.Items, items.Total
+	}
+	return jsonText(out), nil
 }
 
 // btID returns the torrent's ID id names, checked, in lower case: 40 hex

@@ -1,6 +1,7 @@
 package bittorrent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	stdhttp "net/http"
@@ -58,6 +59,11 @@ func (r *Role) httpClientLocked() *fibhttp.Client {
 // url_timeout, as Add adds req's (whose Magnet and Torrent must be empty).
 // It waits for the download: it must not be called on a fib worker.
 func (r *Role) AddURL(rawURL string, req AddRequest) (Status, error) {
+	return r.addURL(context.Background(), rawURL, req)
+}
+
+// addURL is AddURL, given up when ctx is done.
+func (r *Role) addURL(ctx context.Context, rawURL string, req AddRequest) (Status, error) {
 	if req.Magnet != "" || len(req.Torrent) > 0 {
 		return Status{}, fmt.Errorf("%w: a URL with a magnet link or a .torrent file", ErrBadRequest)
 	}
@@ -84,18 +90,23 @@ func (r *Role) AddURL(rawURL string, req AddRequest) (Status, error) {
 	r.mu.Unlock()
 
 	deadline := time.Now().Add(timeout)
+	hdr := stdhttp.Header{"Accept": {"application/x-bittorrent, */*"}}
 	for range maxRedirects + 1 {
-		body, loc, err := fetch(c, u, time.Until(deadline))
+		a, err := httpGet(ctx, c, u, time.Until(deadline), hdr)
 		if err != nil {
 			return Status{}, err
 		}
-		if loc == nil {
-			req.Torrent = body
+		if a.status == stdhttp.StatusOK {
+			req.Torrent = a.body
 			s, err := r.Add(req)
 			if errors.Is(err, ErrBadRequest) {
 				err = fmt.Errorf("%w (from %s)", err, u.Redacted())
 			}
 			return s, err
+		}
+		loc, err := redirectOf(u, a)
+		if err != nil {
+			return Status{}, err
 		}
 		if loc.Scheme == "magnet" {
 			req.Magnet = loc.String()
@@ -109,21 +120,33 @@ func (r *Role) AddURL(rawURL string, req AddRequest) (Status, error) {
 	return Status{}, fmt.Errorf("%w: more than %d redirects", ErrFetch, maxRedirects)
 }
 
-// fetch downloads u: its body, or where it redirects to.
-func fetch(c *fibhttp.Client, u *url.URL, timeout time.Duration) ([]byte, *url.URL, error) {
+// getAnswer is the answer to a GET: its status, the headers that matter,
+// and its body when the status is 200.
+type getAnswer struct {
+	status       int
+	location     string
+	etag         string
+	lastModified string
+	body         []byte
+}
+
+// httpGet sends a GET of u with hdr through c, and waits for the answer,
+// at most timeout, or until ctx is done. A body arrives only with 200; one
+// past c's MaxResponseBodyBytes fails.
+func httpGet(ctx context.Context, c *fibhttp.Client, u *url.URL, timeout time.Duration, hdr stdhttp.Header) (getAnswer, error) {
 	if timeout <= 0 {
-		return nil, nil, fmt.Errorf("%w: url_timeout passed", ErrFetch)
+		return getAnswer{}, fmt.Errorf("%w: %s: the timeout passed", ErrFetch, u.Redacted())
 	}
 	req, err := stdhttp.NewRequest(stdhttp.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", ErrBadRequest, err)
+		return getAnswer{}, fmt.Errorf("%w: %w", ErrBadRequest, err)
 	}
-	req.Header.Set("Accept", "application/x-bittorrent, */*")
+	for k, v := range hdr {
+		req.Header[k] = v
+	}
 	type answer struct {
-		status int
-		loc    string
-		body   []byte
-		err    error
+		getAnswer
+		err error
 	}
 	ch := make(chan answer, 1)
 	// The callback runs on a fib worker: it only copies the answer out.
@@ -133,7 +156,8 @@ func fetch(c *fibhttp.Client, u *url.URL, timeout time.Duration) ([]byte, *url.U
 			return
 		}
 		defer resp.Close()
-		a := answer{status: resp.StatusCode, loc: resp.Header.Get("Location")}
+		a := answer{getAnswer: getAnswer{status: resp.StatusCode, location: resp.Header.Get("Location"),
+			etag: resp.Header.Get("ETag"), lastModified: resp.Header.Get("Last-Modified")}}
 		if a.status == stdhttp.StatusOK {
 			body, ok := resp.BodyBytes()
 			if !ok {
@@ -152,20 +176,27 @@ func fetch(c *fibhttp.Client, u *url.URL, timeout time.Duration) ([]byte, *url.U
 	select {
 	case a = <-ch:
 	case <-t.C:
-		call.Cancel(errors.New("url_timeout passed"))
-		return nil, nil, fmt.Errorf("%w: %s: url_timeout passed", ErrFetch, u.Redacted())
+		call.Cancel(errors.New("the timeout passed"))
+		return getAnswer{}, fmt.Errorf("%w: %s: the timeout passed", ErrFetch, u.Redacted())
+	case <-ctx.Done():
+		call.Cancel(ctx.Err())
+		return getAnswer{}, fmt.Errorf("%w: %s: %v", ErrFetch, u.Redacted(), context.Cause(ctx))
 	}
-	switch {
-	case a.err != nil:
-		return nil, nil, fmt.Errorf("%w: %s: %v", ErrFetch, u.Redacted(), a.err)
-	case a.status == stdhttp.StatusOK:
-		return a.body, nil, nil
-	case a.status >= 300 && a.status < 400 && a.loc != "":
-		loc, err := u.Parse(a.loc)
+	if a.err != nil {
+		return getAnswer{}, fmt.Errorf("%w: %s: %v", ErrFetch, u.Redacted(), a.err)
+	}
+	return a.getAnswer, nil
+}
+
+// redirectOf returns where a, an answer that is not 200, redirects u to,
+// or the error the status is.
+func redirectOf(u *url.URL, a getAnswer) (*url.URL, error) {
+	if a.status >= 300 && a.status < 400 && a.location != "" {
+		loc, err := u.Parse(a.location)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %s redirects to a bad location: %v", ErrFetch, u.Redacted(), err)
+			return nil, fmt.Errorf("%w: %s redirects to a bad location: %v", ErrFetch, u.Redacted(), err)
 		}
-		return nil, loc, nil
+		return loc, nil
 	}
-	return nil, nil, fmt.Errorf("%w: %s answered %d", ErrFetch, u.Redacted(), a.status)
+	return nil, fmt.Errorf("%w: %s answered %d", ErrFetch, u.Redacted(), a.status)
 }

@@ -192,6 +192,7 @@ func (r *Role) WriteMetrics(w observe.MetricWriter) {
 	w.Sample("fit_bittorrent_events_dropped_total", float64(r.clientDropped.Load()))
 	w.Family("fit_bittorrent_event_subscribers_dropped_total", "counter", "Subscribers to the role's events dropped for not taking them fast enough.")
 	w.Sample("fit_bittorrent_event_subscribers_dropped_total", float64(r.events.dropped.Load()))
+	r.rss.writeMetrics(w)
 	pubs := r.Publishing(nil)
 	if len(pubs) > 0 {
 		w.Family("fit_bittorrent_published_torrents", "gauge", "Torrents a publish entry seeds, or has built and cannot seed.")

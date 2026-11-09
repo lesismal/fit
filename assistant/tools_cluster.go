@@ -74,7 +74,7 @@ var (
 // manager: those that read the Admin API.
 var memberTools = []string{"config_get", "versions_diff", "status_get", "metrics_query", "upstream_health", "consistency_check",
 	"certs_list", "cache_zones", "media_library_search", "media_item_get", "channels_status", "playback_sessions",
-	"sync_pipelines", "sync_dead_letters", "bt_torrents", "bt_torrent", "bt_tracker_stats"}
+	"sync_pipelines", "sync_dead_letters", "bt_torrents", "bt_torrent", "bt_tracker_stats", "bt_rss"}
 
 // clusterSkills are the built-in skills offered on a manager only.
 var clusterSkills = []string{"fleet-health", "rollout-planner", "cluster-drift"}

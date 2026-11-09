@@ -231,6 +231,99 @@ PeerGuardian `.p2p` lines (`name:first-last`) beside addresses, prefixes and ran
 by line ([access](reference/config.md#access)). A change of the policy, or of a list file, applies
 at once: the role refilters (`Client.Refilter`), closing the connected peers it now refuses.
 
+## RSS auto-download
+
+`rss` adds torrents from RSS 2.0 (and 1.0) and Atom feeds (I208), as qBittorrent's RSS downloader
+does, without search plugins or indexers (decision 037):
+
+```json
+"rss": {
+  "feeds": [
+    {"name": "shows", "url": "https://example.com/rss?passkey=...", "interval": "15m"},
+    {"name": "linux", "url": "https://example.org/torrents.atom", "headers_env": {"Authorization": "LINUX_FEED_AUTH"}}
+  ],
+  "rules": [
+    {"name": "show", "feeds": ["shows"], "patterns": ["*Show Name*1080p*"], "exclude": ["*hevc*"],
+     "category": "tv", "episodes": true, "max_size": 4294967296},
+    {"name": "isos", "feeds": ["linux"], "patterns": ["re:\\b(?:debian|ubuntu)\\b.*\\.iso"], "paused": true}
+  ]
+}
+```
+
+**Polling.** Each feed of `feeds` is polled every `interval` (15m, at least 1m) by a goroutine of the
+role's own, at most 4 feeds at once, each poll on a goroutine of its own, never a fib worker. The
+feed is downloaded with fib's asynchronous HTTP client (its callback only hands the answer over),
+sending back the `ETag` and `Last-Modified` it answered last, so that an unchanged feed answers
+`304` and costs nothing more; the body is bounded by `max_feed_bytes` (4 MiB, at most 32 MiB), the
+whole download by `timeout` (30s), and at most 5 redirects are followed, to http and https only.
+`headers` are sent with its requests, and `headers_env` sends headers whose values are read from
+environment variables at each poll (a variable not set sends none), for a secret kept out of the
+config. A feed's URL comes from the config alone; like a .torrent URL (I198's decision 3), it is
+fetched wherever it points, loopback and private addresses included. The first poll comes right
+after the role starts, then each `interval` after the last poll, kept across restarts. A feed with
+`enabled: false` is polled only when asked (the Admin API's poll).
+
+**Reading.** RSS 2.0, RSS 1.0 (RDF) and Atom are read with Go's `encoding/xml`, leniently (HTML
+entities, unknown elements), in UTF-8 or ISO-8859-1; at most `max_items` items (200, at most 1000),
+the first in the document. Each item gives:
+
+- an ID: its `guid` (Atom: `id`), else its link, else its enclosure's URL, else its title; one past
+  1 KiB is hashed;
+- a title, cut at 1 KiB;
+- a source, the first there is of: a magnet link (the torrent namespace's `magnetURI`, an enclosure
+  or a link that is one), a .torrent enclosure's http or https URL, an info hash alone (`infoHash`,
+  made a magnet link), the item's link; a URL past 8 KiB or a magnet link past 64 KiB is left out;
+- a size: the torrent namespace's `contentLength`, a site's own `size` (as `1.5 GiB`), else the
+  enclosure's `length`; unknown when none.
+
+**Rules.** An item not seen before goes to the rules in their order; the first whose `feeds` (every
+feed when left out), `patterns`, `exclude` and size bounds it meets picks it:
+
+- `patterns` (a title must match one) and `exclude` (none may match) are case-insensitive. A pattern
+  is a glob over the whole title, `*` any run of characters and `?` one (`*Show Name*1080p*`), or,
+  after `re:`, a regular expression in Go's syntax found anywhere in the title. They are compiled
+  when the config is applied; a bad one fails the config's check. At most 32 of each, 512 bytes each.
+- `min_size` and `max_size` bound the item's size; an item whose size the feed does not give passes.
+- `episodes` adds each episode once: the title's episode, `S01E02` (`S01E02E03` and `S01E02-03` as a
+  range), `1x02`, or a date (`2026-11-09`, `2026.11.09`), and the show, the title before it in lower
+  case with punctuation made spaces and a release group's leading `[tags]` left out, make a key; an
+  item of a key the rule added already (or held already) is a `duplicate`: another quality, a repack
+  or a proper of an episode had. The first item of an episode in the document wins. Without an
+  episode in the title (a season pack, a film), an item is told by its ID alone.
+- `max_per_poll` (5, at most 100) bounds the torrents a rule adds at one poll of a feed.
+
+The rule adds the item's torrent as the Admin API would, in its `category`, `paused` if it says: a
+magnet link at once, a URL as a .torrent URL is added (I198: fib's HTTP client, 32 MiB, 5 redirects
+of which one may be to a magnet link, `url_timeout`, 4 at once). An `rss_added` event follows the
+`added` one, with the feed, the rule and the item's title.
+
+**What is remembered.** Every item read is remembered as seen, with its outcome, in
+`data_dir/rss.json`, so that it is handled once, across restarts:
+
+| Outcome | What it means |
+| --- | --- |
+| `added` | a rule picked it and its torrent was added (`torrent` its ID) |
+| `exists` | a rule picked it and its torrent is held already |
+| `duplicate` | a rule with `episodes` picked an episode it had already |
+| `unmatched` | no rule picked it (a rule added later does not look at it again) |
+| `no_source` | a rule picked it, but it has no magnet link, URL or info hash |
+| `failed` | its torrent could not be added: not a torrent, a bad link (given up at once), or a .torrent file that could not be downloaded, tried again at the next polls, 3 in all |
+
+Two kinds of items are not remembered, and come again at the next poll: those past a rule's
+`max_per_poll`, and those whose add may pass later (`max_torrents` reached, 4 URL downloads already
+running, the client down). The feed's new `ETag` and `Last-Modified` are not kept after such a poll,
+so that the next one reads the whole feed again rather than a `304`. A feed remembers at most
+`history_size` items (1000, at least every feed's `max_items`), the oldest forgotten first; a rule
+remembers its last 10000 episodes. `rss.json` is written as the torrents' state is, to a temporary
+file renamed into place, after every poll that changed something and when the role stops. One that
+does not read is moved aside, as `rss.json.bad`, and the role starts with nothing seen: a torrent
+added again is then refused as held already. The feeds and rules the config no longer names are
+forgotten, with what they saw, at the next save.
+
+**Turning feeds and rules off.** The Admin API (`fit bt rss enable|disable`, the pages) turns a feed's
+polling or a rule off or on whatever the config's `enabled` says; `rss.json` keeps the choice until
+it is turned back (`reset`, `{"enabled": null}`).
+
 ## Reloads
 
 | Change | What happens |
@@ -240,6 +333,7 @@ at once: the role refilters (`Client.Refilter`), closing the connected peers it 
 | `save_interval`, `console`, `download_dir`, `watch_dir`, `watch_interval`, `watch_max_files`, `url_timeout` | Applied in place |
 | `categories` | Applied in place: limits to the category's torrents at once, a new `dir` to the torrents added from then on; a torrent whose category is gone keeps its directory and loses its limits |
 | `max_active_downloads`, `max_active_seeds`, `min_free_bytes`, `alt_speed` | Applied in place, the torrents started and paused by them at once |
+| `rss` | Applied in place: the rules compiled again, new feeds polled at once, a changed `interval` counted from the last poll, the feeds and rules gone forgotten with what they saw; a poll under way finishes |
 | `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers`, `disk_queue_bytes` | A new client: the old one is closed, every torrent's resume data saved, and the torrents added to the new one without a check. When the new one cannot be made (its port taken), the old one is made again and the reload reports the error |
 | `data_dir` | A new client on the new directory's state, as a restart would; the old directory keeps what was saved there |
 
@@ -362,6 +456,12 @@ file and a torrent added by hand) share is seeded once; the second is listed wit
 | A .torrent file | 128 MiB (fib's metainfo bound) |
 | A magnet link | 64 KiB |
 | `torrents.json`, a resume file | 64 MiB each |
+| `rss.feeds`, `rss.rules` | at most 100, 200 |
+| A feed's body; its download; redirects; feeds polled at once | `max_feed_bytes` 4 MiB (at most 32 MiB); `timeout` 30s; 5; 4 |
+| Items read a poll; items remembered a feed; episodes a rule | `max_items` 200 (at most 1000); `history_size` 1000 (at most 10000); 10000 |
+| Torrents a rule adds a poll; patterns of a rule | `max_per_poll` 5 (at most 100); 32 each, 512 bytes |
+| An item's title; ID; URL | 1 KiB (cut); 1 KiB (hashed past it); 8 KiB |
+| `rss.json` read back | 64 MiB |
 
 ## The role's API
 
@@ -404,6 +504,10 @@ console), never on a fib worker.
 | `GET /bittorrent/publish` | the publish entries and their torrents; `/bittorrent/publish/<name>` one |
 | `GET /bittorrent/publish/<name>/torrents/<id>` | a published torrent's .torrent file (`application/x-bittorrent`, as an attachment), which the pages offer |
 | `GET /bittorrent/events` | the events, as server-sent events (below) |
+| `GET /bittorrent/rss` | the RSS auto-download: `{"configured", "feeds", "rules", "error"}`, each feed's name, URL (without its user and query), title, `enabled` and `toggled` (set through the API), interval, `polling`, `last_poll`, `next_poll`, `last_result` and `last_error`, `last` (the last poll since fit started), `seen`, and `polls`, `errors`, `added`, `failed` since fit started; each rule's feeds, category, `episodes`, `episodes_seen`, `added` and `last_added` |
+| `GET /bittorrent/rss/items` | the items seen, the newest first: `{"items", "total"}`, each with `feed`, `key`, `title`, `seen`, `outcome`, `rule`, `torrent`, `size`, `source`, `error`, `attempts`; `feed`, `outcome`, `limit` (100, at most 1000) |
+| `POST /bittorrent/rss/feeds/<name>/poll` | poll a feed now, enabled or not, and answer what the poll did: `result` (`ok`, `not_modified`, `error`), `status`, `error`, `items`, `new`, `added`, `failed`, `deferred`, `truncated`; `409` while it is being polled |
+| `PUT /bittorrent/rss/feeds/<name>`, `PUT /bittorrent/rss/rules/<name>` | `{"enabled": true}`, `false`, or `null` back to the config; answers the feed's or rule's status |
 | `GET /bittorrent/tracker/stats` | the tracker's totals |
 | `GET /bittorrent/tracker/torrents` | `{"torrents", "total", "offset", "source", "next"}`: the allow-list's swarms, or a public tracker's by info hash (`offset`, `limit` at most 1000, `after`); `/bittorrent/tracker/torrents/<info hash>` one torrent's |
 | `GET /bittorrent/tracker/passkey?user=` | a user of the private tracker's policy, and its passkey |
@@ -430,13 +534,15 @@ a URL is downloaded by the role, within `url_timeout`.
 | four .torrent files being downloaded already; 32 event streams | 503 with `Retry-After` |
 | the client does not run, as after a port it could not take | 503 with `Retry-After` |
 | a .torrent file that could not be downloaded | 502 |
+| no such feed or rule | 404 |
+| a poll of a feed being polled | 409 with `Retry-After` |
 
 ## Events
 
 `GET /bittorrent/events` streams the client's events as server-sent events (`text/event-stream`),
 each with its `id`, its type as `event`, and as `data` the event in JSON: `id`, `time`, `type`, and
 as they apply `torrent`, `name`, `category`, `state`, `previous`, `error`, `peer`, `data_deleted`,
-`dropped`.
+`dropped`, `feed`, `rule`, `title`.
 
 | Type | When |
 | --- | --- |
@@ -448,6 +554,7 @@ as they apply `torrent`, `name`, `category`, `state`, `previous`, `error`, `peer
 | `peer_banned` | a peer, or every peer of an address, was banned, `error` why |
 | `seed_limit` | a torrent reached its seed ratio or time and paused |
 | `alt_speed` | the alternative rates started (`state` `on`) or stopped (`off`) holding |
+| `rss_added` | an RSS rule (`rule`) added a torrent from an item (`title`) of a feed (`feed`), after its `added` |
 | `events_dropped` | fib's client dropped `dropped` of its piece and peer events since the manager's last look, its queue for the role being full; at most one a second |
 
 State changes are noticed by the role's manager every second, and at once after the API's
@@ -492,6 +599,11 @@ fit bt rm -delete-data 3f2a91
 fit bt limit -down 2M -ratio 2 -seed-time 72h 3f2a91
 fit bt limit -clear 3f2a91
 fit bt alt on                           # auto, on, off; alone it shows them
+fit bt rss                              # the feeds (last poll, result, counts) and the rules
+fit bt rss items -feed shows -outcome added -limit 20
+fit bt rss poll shows                   # exits 1 when the poll fails
+fit bt rss disable shows                # enable, disable, reset (back to the config)
+fit bt rss enable -rule show
 ```
 
 `add` takes magnet links, http and https URLs and .torrent files, `-paused`, `-sequential`, and
@@ -520,6 +632,8 @@ so the counters keep what removed torrents counted and never go back while fit r
 | `fit_bittorrent_event_subscribers`, `fit_bittorrent_event_subscribers_dropped_total` | gauge, counter | |
 | `fit_bittorrent_events_dropped_total` (the client's piece and peer events fib dropped) | counter | |
 | `fit_bittorrent_published_torrents` | gauge | `entry` |
+| `fit_bittorrent_rss_polls_total` | counter | `feed`, `result`: `ok`, `not_modified`, `error` |
+| `fit_bittorrent_rss_items_added_total`, `fit_bittorrent_rss_items_failed_total` | counter | `feed` |
 | `fit_bittorrent_tracker_torrents`, `fit_bittorrent_tracker_peers`, `fit_bittorrent_tracker_max_torrents`, `fit_bittorrent_tracker_max_peers`, `fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`, `fit_bittorrent_tracker_scrapes_total` | counter | |
 | `fit_bittorrent_tracker_refused_total` | counter | `reason`: `unregistered`, `passkey`, `access` |
@@ -557,6 +671,7 @@ Admin API's `/bittorrent/` endpoints through the console, and edits the shared d
 - **Publishing**: each publish entry, its directory, mode, web seed, last walk, files pending and
   problems, and its torrents with their size, files, state and age, a **.torrent** download (the
   Admin API's `/bittorrent/publish/<name>/torrents/<id>`) and the magnet link, opened or copied.
+- **RSS** (I208): each feed with its title, URL, a switch turning it on or off (marked when set here, with a link back to the config), interval, last poll with its result and error, next poll, items seen, torrents added and items failed, and **Poll now**, which says what the poll did; each rule with its switch, feeds, category, episodes remembered, torrents added and when last; the recent items (200), filtered by feed and outcome, each with its rule and a link to the torrent it added. The client's events list `rss_added` too.
 - **BitTorrent config**: the whole `bittorrent` member, the client with its categories, limits,
   `alt_speed` and `publish`, and the tracker, made from the schema; a save's problems under
   `bittorrent` link here.
@@ -579,6 +694,7 @@ levels as every tool ([the console](console.md#bittorrent)):
 | `bt_torrents` | `read` | the torrents in short (state, held, error, progress, size, rates, peers, ratio, time left), filtered by state, category and name (50, at most 200), with the alternative rates |
 | `bt_torrent` | `read` | a torrent's status, its first 100 files with their priorities, its first 50 peers and its trackers and web seeds |
 | `bt_tracker_stats` | `read` | the tracker's totals and refusals, and the allow-list's first 50 swarms |
+| `bt_rss` | `read` | the RSS feeds (last poll, result, counts) and rules, and the latest items seen (20, at most 100), by feed and outcome; a feed's URL as scheme, host and last path element, an item's ID (often a link) left out |
 | `bt_add_propose` | `propose` | a torrent added by magnet link or .torrent URL, in a category, paused or sequential |
 | `bt_pause_propose` | `propose` | torrents paused, by ID (at most 100) |
 | `bt_resume_propose` | `propose` | torrents resumed, by ID (at most 100) |
@@ -915,5 +1031,6 @@ plaintext download (7%).
   never holds a passkey.
 - **Streams.** `bt_stream` without `auth` serves every torrent the client holds to whoever reaches the
   route; with `auth`, a token's `play` grant names the torrents (`bt/*` for all).
+- **RSS.** A feed's URL and headers come from the config alone, and are fetched wherever they point, as a .torrent URL is; a secret header is better read from the environment (`headers_env`) than written in the config, which the Admin API's `GET /config` shows. The Admin API, `fit bt` and the pages show a feed's URL without its user and query, the assistant only its scheme, host and last path element. A rule adds torrents from the internet as `fit bt add` would, bounded by `max_per_poll`, `max_torrents` and `min_free_bytes`; write its `patterns` narrowly.
 - **Event queues.** fib's client queues at most 4096 events for the role (piece and peer events
   dropped past it, counted); each event stream has its 256, the role keeps 1024.
