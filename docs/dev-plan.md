@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I209.
+Status: `todo`, `doing` or `done`. The next free iteration number is I210.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -376,6 +376,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
 | I207 | (second phase) A tracker store the cluster shares | I201 | todo |
 | I208 | (second phase) RSS auto-download | I198 | todo |
+| I209 | The roles use fib A80–A86: publishing hashes once and builds stop on a context, a public tracker's torrents listed and its bounds changed in place, the client's event queue bounded | I201, I202, I203 | done |
 
 ## M0, foundations
 
@@ -7386,6 +7387,9 @@ Not run: the Linux race run, and the full suite (left to the main session).
    made; the interval, `min_interval`, `max_numwant` and `max_scrape` make a new fib `Server` on the
    same store, with the role's one UDP secret, so swarms and UDP connection IDs survive.
    Alternatives: refuse such a change until a restart; wait for fib to set bounds at run time.
+   **Changed by I209**: the bounds and `peer_ttl` now change in place (fib's `MemoryStore.SetConfig`,
+   A85), keeping the swarms; a change of both them and the interval sets them, then makes a new
+   `Server` on the same store.
 5. **An allow-list file with a bad line, or one that does not read, refuses the reload**, the list
    before staying in force. Why: a typo would otherwise silently refuse a torrent, or with a missing
    file, every torrent. Alternative: skip bad lines with a warning.
@@ -7401,6 +7405,8 @@ Not run: the Linux race run, and the full suite (left to the main session).
    its torrents. Keeping our own index beside the store would work around fib (rule 15), so it is a
    fib request instead (below). Counters: announces and scrapes served, refusals by reason
    (`unregistered`, counted per refused hash, scrapes included; `passkey`; `access`).
+   **Changed by I209**: a public tracker lists the torrents its store has peers of, by info hash,
+   through fib's `MemoryStore.Range` (A85).
 9. **A user's passkey is read on the role's console**, `GET /api/passkey?user=`, behind its login,
    until I203's Admin API and I204's pages; the console's other routes are `GET /api/stats`,
    `/api/torrents` (`offset`, `limit` ≤ 1000) and `/api/torrents/<hash>`.
@@ -7833,3 +7839,92 @@ Open from it:
 - **Do**: feeds polled on a schedule, rules (patterns, categories, size bounds, episode
   deduplication) adding torrents; bounded feeds, items and history.
 - **Touches**: `bittorrent`.
+
+### I209 The roles use what fib A80–A86 added
+
+- **Why**: I197, I200, I201 and I202 left fib requests (A80–A86, done at fib `ecdcec0`, fit on
+  `e633fc2`): a published file hashed twice, builds stopped only by failing their reads, a public
+  tracker unable to list its torrents, reloads of the tracker's bounds starting the swarms empty,
+  the client's event queue unbounded, `Reader.Close` waiting for a read.
+- **Do**: publishing adds a newly built torrent with `AddOptions.Seed` (resume data afterwards,
+  never both: `ErrSeedResume`) and builds with `BuildContext`; the tracker lists a public tracker's
+  torrents through `MemoryStore.Range` (Admin API, console, pages; paged, bounded) and applies new
+  bounds and `peer_ttl` with `SetConfig`; the client sets `Config.EventQueue` and surfaces
+  `EventDropped` (event stream, `fit_bittorrent_events_dropped_total`); `bt_stream` drops what A83
+  makes unnecessary, where safe.
+- **Done when**: a new publish reads no data at add; a build stops promptly on a stop; a public
+  tracker's torrents are listed and paged; a reload of bounds keeps the swarms; dropped events are
+  counted and published; docs in both languages.
+- **Touches**: `bittorrent`, `bittorrent/tracker`, `handler/btstream`, `admin`, `assistant`,
+  `config`, `app/workbench`, `docs`.
+- **Done** 2026-11-09 (branch `bt-i209`): **Publishing** (`bittorrent/publish.go`,
+  `publish_walk.go`): an item built here and without resume data is added with `AddOptions.Seed`,
+  later with its resume data alone (saved once it has every piece, which with seed mode is at once,
+  its unchecked pieces kept as such); an entry has a context, cancelled when it halts, which ends
+  its walks and its builds (`Builder.BuildContext`), replacing the atomic flag and the `fs.File`
+  wrapper that failed reads (a test hook on reads remains). **Tracker** (`bittorrent/tracker`):
+  `ListTorrents(offset, limit, after)` with `Source` (`allow_list` or `store`), `Total` and `Next`;
+  a public tracker's list ordered by info hash through `Range`, keeping the `offset`+`limit`
+  smallest past `after` in a heap; `Torrents` keeps its signature; the console's `/api/torrents`
+  and the Admin API's `/bittorrent/tracker/torrents` take `after` (400 for a bad one, and with an
+  allow-list) and answer `source` and `next`; a reload of the bounds or `peer_ttl` calls
+  `SetConfig` on the store it has, and a change of the interval too makes a new `Server` on it; the
+  four fields' descriptions (schema, reference, templates, `schema-zh.js`) say so; the Tracker page
+  words the list by its source; the assistant's `bt_tracker_stats` description. **Client**
+  (`bittorrent/role.go`, `events.go`, `metrics.go`): `Config.EventQueue` set to `EventQueue`
+  (fib's default 4096); `EventDropped` counted (`fit_bittorrent_events_dropped_total`) and
+  published by the manager's next look as one `events_dropped` event with `dropped`; the pages word
+  it. **`bt_stream`**: nothing removed (below); its comment says why. Docs:
+  [BitTorrent](bittorrent.md) (publishing hashing once and builds stopping, the event type, the
+  client's queue, the metric, the tracker's reloads and listing, the Admin API row, limits) in both
+  languages; A80–A86 marked used in [fib-api-requests](fib-api-requests.md#a80-the-bittorrent-clients-event-queue-bounded).
+  Tests: a new publish reading no storage at add with every piece trusted, then served (reads, and
+  the trusted count reaching 0); a build of a 24 MiB file at 100ms a megabyte read cut short by a
+  stop within 3 reads; a public tracker's 25 torrents listed by offset and by `after` (every one
+  once, in order), the console's route, `after` refused with an allow-list; a reload of the bounds
+  and `peer_ttl` keeping the store and its swarm, lowered bounds refusing a new torrent and peer,
+  bounds with the interval (same store, new server), a shorter `peer_ttl` expiring the peers; the
+  Admin API's `source`, `after` and a bad `after`; dropped events counted and published once for two
+  drops; the pages' words. Run: `go test -race` of `bittorrent/...`, `handler/btstream`, `admin`,
+  `assistant`, `config`; `go test ./schema/ ./app/workbench/ ./docs/ ./test/workers/`; vet, gofmt.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **No `event_queue` config field**: the role sets fib's default (4096) as a constant. Why: the
+   role's handler takes a short lock and returns, and the events fib drops (pieces verified, hash
+   failures, peers connected and disconnected) are ones the role never publishes, so no operator
+   gains by tuning it. Alternative: `event_queue` in `bittorrent.client` (reload makes a new client,
+   as fib reads it at `NewClient`).
+2. **Dropped events are one `events_dropped` event a second at most**, published by the manager's
+   look with the count since the last, not one per fib `EventDropped`, so that a burst cannot push
+   the stream's real events out of the 1024 kept for replay nor lag its subscribers; logged at
+   debug. A dropped piece event may leave a storage error shown until the next piece passes or the
+   state changes (as before, those clear it too). Alternatives: forward each `EventDropped`; only
+   the metric.
+3. **A public tracker's list is ordered by info hash and paged by `offset` or `after`**: `Range`
+   gives no order, so a page keeps the `offset`+`limit` smallest hashes past `after` in a heap, time
+   in the torrents tracked (at most `max_torrents`) and memory in the page; `total` counts the
+   torrents with peers (past `after`, when given). The allow-list keeps its own order and refuses
+   `after` (400). Off the worker: the console's route runs it on its pool, the Admin API on the
+   request's goroutine. Alternatives: a snapshot of the store kept by the role and refreshed
+   periodically; `Range`'s order with a cursor of shard and position (unstable as torrents come and
+   go); ordering by swarm size.
+4. **Seed mode only for a torrent built in this process with no resume data yet**: a torrent
+   restored from `index.json` without its resume data (a crash before it was saved) is still
+   checked in full, as its files were not just hashed. Alternative: seed mode for those too, since
+   the walk compares their stamps (but only after they are added).
+5. **The build's cancellation is the entry's context alone**: the `fs.File` wrapper that failed
+   reads once the entry stopped is gone, so a build stops within a megabyte read
+   (`BuildContext`'s look), and a read that blocks is not interrupted (as before).
+6. **`bt_stream` is unchanged in behaviour**: it never closed a reader while a `Read` ran; the
+   stream's context, which the client leaving and `Drain` cancel, also ends the waits for the
+   torrent's hold and info and is the parent of each read's `read_timeout`, so A83 removes nothing
+   there. Alternative: close the reader from `OnCancel` (it would need the reader shared across
+   goroutines, for no gain).
+7. **Lowered tracker bounds drop nothing** (fib's `SetConfig`): what is past them leaves as peers
+   stop or expire, within `peer_ttl`. Alternative: trim at once (fib offers no way).
+
+Open from it: A84 (piece layers of a hybrid added by magnet link) and A86 (no `completed` for seeds)
+work through the client with no change in fit and are not tested in fit itself; an interop case of
+a v2-only peer fetching hashes from a fit seed of a magnet-added hybrid would cover A84. Not run: the
+Linux race run and the full suite (left to the main session).

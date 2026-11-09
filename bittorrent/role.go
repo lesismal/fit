@@ -168,8 +168,13 @@ type Role struct {
 	// mu, and snap the metrics a scrape writes (metrics.go).
 	events *hub
 	banned atomic.Uint64
-	acct   map[string]*catTotals
-	snap   atomic.Pointer[metricsSnap]
+	// clientDropped counts the client events fib dropped, its queue for
+	// onEvent being full (EventQueue), since fit started; dropPending
+	// those not yet published as an EventDropped.
+	clientDropped atomic.Uint64
+	dropPending   atomic.Int64
+	acct          map[string]*catTotals
+	snap          atomic.Pointer[metricsSnap]
 }
 
 // New returns the role, which its first Apply starts.
@@ -352,6 +357,7 @@ func (r *Role) newClient(cfg *config.BitTorrentClient) (*fibbt.Client, error) {
 		SharedEngine:   r.engine,
 		Filter:         r.gate.Allows,
 		OnEvent:        r.onEvent,
+		EventQueue:     EventQueue,
 	}
 	switch cfg.EncryptionMode() {
 	case config.BTEncryptionAllow:
@@ -374,6 +380,13 @@ func (r *Role) newClient(cfg *config.BitTorrentClient) (*fibbt.Client, error) {
 // until a piece passes its check again. It must not take r.mu, which is
 // held while a client is closed.
 func (r *Role) onEvent(e fibbt.Event) {
+	if e.Type == fibbt.EventDropped {
+		// Piece and peer events, which the role does not publish; the
+		// manager's next look says so once (EventDropped).
+		r.clientDropped.Add(uint64(e.Dropped))
+		r.dropPending.Add(int64(e.Dropped))
+		return
+	}
 	if e.Type == fibbt.EventPeerBanned {
 		r.banned.Add(1)
 		peer := e.Peer.String()

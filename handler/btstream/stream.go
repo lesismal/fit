@@ -20,7 +20,10 @@ import (
 // one at a time: open, then pump, which ends when the client has enough
 // queued and is started again by OnWritable. Only that chain touches the
 // response and the reader; the client leaving and Drain only cancel ctx,
-// which ends a read waiting for its piece.
+// which ends a read waiting for its piece and the waits before it (the
+// torrent's hold and info). fib's Reader.Close interrupts a Read too (A83),
+// but ctx is what every wait selects on, and the per-read timeout derives
+// from it, so the stream closes its reader only as it finishes.
 type stream struct {
 	h    *BTStream
 	c    *fibhttp.Context

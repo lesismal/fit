@@ -369,8 +369,8 @@ func scrape(r *Role) string {
 }
 
 // TestMetrics checks the role's metrics: bytes by category that outlive the
-// torrent, states, bans, the alternative rates, and the event
-// subscribers.
+// torrent, states, bans, the alternative rates, the event subscribers and
+// the client events dropped.
 func TestMetrics(t *testing.T) {
 	e := startEngine(t)
 	src := t.TempDir()
@@ -396,7 +396,7 @@ func TestMetrics(t *testing.T) {
 	text := scrape(l)
 	for _, want := range []string{"fit_bittorrent_client_running 1", `fit_bittorrent_torrents{category="films",state="downloading"} 0`,
 		`fit_bittorrent_hash_failures_total{category="films"} 0`, "fit_bittorrent_peers_banned_total 0",
-		"fit_bittorrent_alt_speed_active 0", "fit_bittorrent_event_subscribers 0", "# TYPE fit_bittorrent_downloaded_bytes_total counter",
+		"fit_bittorrent_alt_speed_active 0", "fit_bittorrent_event_subscribers 0", "fit_bittorrent_events_dropped_total 0", "# TYPE fit_bittorrent_downloaded_bytes_total counter",
 		`fit_bittorrent_download_rate_bytes{category="films"}`, `fit_bittorrent_peers{category="films"}`, `fit_bittorrent_seeders{category="films"}`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
@@ -412,6 +412,25 @@ func TestMetrics(t *testing.T) {
 		return metric(text, "fit_bittorrent_alt_speed_active", "") == 1 && metric(text, "fit_bittorrent_peers_banned_total", "") == 1 &&
 			metric(text, "fit_bittorrent_event_subscribers", "") == 1
 	})
+	// Client events fib dropped: counted, and published once by the next
+	// look, whatever the number of drops before it.
+	l.onEvent(fibbt.Event{Type: fibbt.EventDropped, Dropped: 3})
+	l.onEvent(fibbt.Event{Type: fibbt.EventDropped, Dropped: 4})
+	if v := metric(scrape(l), "fit_bittorrent_events_dropped_total", ""); v != 7 {
+		t.Fatalf("events dropped %v", v)
+	}
+	var drop Event
+	timeout := time.After(hang)
+	for drop.Type != EventDropped {
+		select {
+		case drop = <-sub.Events():
+		case <-timeout:
+			t.Fatal("no events_dropped event")
+		}
+	}
+	if drop.Dropped != 7 || drop.Torrent != "" {
+		t.Fatalf("event %+v", drop)
+	}
 	sub.Close()
 	// Removed, its bytes stay counted.
 	if err := l.Remove(st.ID, false); err != nil {

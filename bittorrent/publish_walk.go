@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -66,7 +65,7 @@ func (e *pubEntry) walkLoop() {
 		case <-timer.C:
 		}
 		res := e.walk()
-		if e.cancel.Load() {
+		if e.ctx.Err() != nil {
 			return
 		}
 		r := e.p.r
@@ -107,8 +106,8 @@ func (e *pubEntry) walk() walkResult {
 		}
 	}
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if e.cancel.Load() {
-			return errPublishStopped
+		if err := e.ctx.Err(); err != nil {
+			return err
 		}
 		if p == root {
 			return err
@@ -177,7 +176,7 @@ func (e *pubEntry) walk() walkResult {
 		res.files = append(res.files, walkFile{rel: rel, stamp: filewatch.StampOf(info)})
 		return nil
 	})
-	if errors.Is(err, errPublishStopped) {
+	if e.ctx.Err() != nil {
 		return res
 	}
 	if err != nil {
@@ -376,7 +375,7 @@ func (e *pubEntry) build(j *pubJob) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(e.building, j.key)
-	if e.stopped || errors.Is(err, errPublishStopped) || changed {
+	if e.stopped || e.ctx.Err() != nil || changed {
 		// A file changed while it was hashed: the next walks see it, and
 		// build it once it settles.
 		return
@@ -397,7 +396,7 @@ func (e *pubEntry) build(j *pubJob) {
 		}
 		if err == nil {
 			it := &pubItem{key: j.key, id: id, files: j.files, built: time.Now().UTC().Truncate(time.Second), mi: mi, raw: raw,
-				magnet: mi.Magnet().String()}
+				magnet: mi.Magnet().String(), seed: true}
 			for _, f := range j.files {
 				it.size += f.Stamp.Size
 			}
@@ -438,9 +437,9 @@ func (e *pubEntry) buildTorrent(root string, j *pubJob) (*metainfo.MetaInfo, err
 	if ws := e.itemWebSeed(j.key); ws != "" {
 		b.WebSeeds = []string{ws}
 	}
-	fsys := &pubFS{root: root, cancel: &e.cancel}
+	fsys := &pubFS{root: root, hook: e.p.readHook}
 	if e.cfg.PublishMode() == config.BTPublishFiles {
-		return b.Build(fsys, j.key)
+		return b.BuildContext(e.ctx, fsys, j.key)
 	}
 	b.Name = filepath.Base(e.dir)
 	fsys.allow = map[string]bool{".": true}
@@ -449,14 +448,15 @@ func (e *pubEntry) buildTorrent(root string, j *pubJob) (*metainfo.MetaInfo, err
 			fsys.allow[p] = true
 		}
 	}
-	return b.Build(fsys, ".")
+	return b.BuildContext(e.ctx, fsys, ".")
 }
 
-// pubFS is the file system a torrent is built from: dir, its reads ending
-// once the entry stops, and in mode whole_dir only the files the walk found.
+// pubFS is the file system a torrent is built from: dir, and in mode
+// whole_dir only the files the walk found. The build itself stops once the
+// entry does (BuildContext looks at its context every megabyte).
 type pubFS struct {
-	root   string
-	cancel *atomic.Bool
+	root string
+	hook func()
 	// allow, when set, are the paths shown: the files and the directories
 	// on their way.
 	allow map[string]bool
@@ -470,7 +470,10 @@ func (f *pubFS) Open(name string) (fs.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &hashingFile{File: file, cancel: f.cancel}, nil
+	if f.hook == nil {
+		return file, nil
+	}
+	return &hookedFile{File: file, hook: f.hook}, nil
 }
 
 // ReadDir lists a directory's entries that are shown.
@@ -485,16 +488,14 @@ func (f *pubFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	return slices.DeleteFunc(list, func(d fs.DirEntry) bool { return !f.allow[path.Join(name, d.Name())] }), nil
 }
 
-// hashingFile is a file being hashed, whose reads fail once the entry stops.
-type hashingFile struct {
+// hookedFile is a file being hashed whose reads run a test's hook first.
+type hookedFile struct {
 	*os.File
-	cancel *atomic.Bool
+	hook func()
 }
 
-func (f *hashingFile) Read(p []byte) (int, error) {
-	if f.cancel.Load() {
-		return 0, errPublishStopped
-	}
+func (f *hookedFile) Read(p []byte) (int, error) {
+	f.hook()
 	return f.File.Read(p)
 }
 
@@ -719,4 +720,4 @@ func anyMatch(list []pattern, rel string) bool {
 	return false
 }
 
-var _ io.Reader = (*hashingFile)(nil)
+var _ io.Reader = (*hookedFile)(nil)

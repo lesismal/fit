@@ -245,7 +245,8 @@ route { match { path /torrents/* }; handler bt_publish }
 **跟随磁盘。** 每个条目在自己的 goroutine 上每隔 `check_interval`（10s）遍历一次 `dir`。文件以大小、修改时间、状态改变时间
 和 inode 识别，与静态文件相同，因此被另一个大小和时间都相同的文件替换也能发现。新增或改变的文件在一个 `check_interval`
 内不再变化后才生成种子（其状态改变时间已经这么久，或上一次遍历看到的相同），以免对仍在复制的文件做哈希；哈希在条目的
-`max_hashing`（1）个 goroutine 之一上进行，从不在 fib worker 上，且只有在哈希之后文件的标记仍未改变时才保留结果。改变或
+`max_hashing`（1）个 goroutine 之一上进行，从不在 fib worker 上，且只有在哈希之后文件的标记仍未改变时才保留结果。条目停止或
+改变时，生成在读完一兆字节之内停止（fib 的 `Builder.BuildContext`），且每次只保留一个分片的 v2 叶子哈希，而不是整个文件的。改变或
 删除的文件立即停止其种子，改变的文件在稳定后得到 info hash 不同的新种子；`whole_dir` 模式下任何变化都会取代种子。生成
 失败的文件（无法读取）会被报告，在文件改变前不再重试。无法读取的目录会被报告，其种子保持原样；目录中无法读取的部分下的
 种子也一样。
@@ -253,8 +254,9 @@ route { match { path /torrents/* }; handler bt_publish }
 **状态。** 种子保存在 `data_dir/publish/<name>/` 中：`index.json`（每个种子的文件及其标记）、`<id>.torrent`，以及做种后保存
 一次的续传数据 `<id>.resume`。重启时从这里取回文件标记未变的种子及其续传数据，既不重新生成也不重新校验；只改变条目的上限
 或 `check_interval` 的 reload 也一样。改变 `dir`、`mode`、`web_seed`、`announce`、`private` 或 `piece_length` 会重新生成种子
-（种子的字节变了）；从配置中移除的条目会停止其种子并删除其状态，从不删除其文件。第一次生成的种子在加入客户端时仍会被校验
-一次，因为 fib 还不能以"已完整"的方式添加种子（见开发计划中 I202 的遗留项）。
+（种子的字节变了）；从配置中移除的条目会停止其种子并删除其状态，从不删除其文件。**文件只哈希一次**：刚生成的种子以"已完整"
+方式加入客户端（fib 的 seed 模式，`AddOptions.Seed`），不读取任何数据，每个分片在 peer 第一次请求时才校验；校验失败的分片
+报告为哈希失败，并不再提供。之后保存的续传数据把尚未校验的分片标为未校验，因此重启后同样在第一次提供时校验。
 
 **`bt_publish` 处理器** 在以 `/` 或 `index.json` 结尾的路径上返回 JSON 索引：每个条目（`publish` 指定提供哪些，不设置时为
 全部）的种子，各带路径、名称、大小、info hash、磁力链接、状态（`seeding`、`checking`，没有客户端运行时为 `stopped`）以及
@@ -332,7 +334,7 @@ goroutine 上（Admin API 上是 net/http 的，控制台后面是控制台的�
 | `GET /bittorrent/publish/<name>/torrents/<id>` | 已发布种子的 .torrent 文件（`application/x-bittorrent`，作为附件），页面提供下载 |
 | `GET /bittorrent/events` | 事件，以 server-sent events 推送（见下） |
 | `GET /bittorrent/tracker/stats` | tracker 的总计 |
-| `GET /bittorrent/tracker/torrents` | 允许列表中种子的 swarm（`offset`，`limit` 最多 1000）；`/bittorrent/tracker/torrents/<info hash>` 一个种子的 |
+| `GET /bittorrent/tracker/torrents` | `{"torrents", "total", "offset", "source", "next"}`：允许列表中种子的 swarm，或公开 tracker 按 info hash 排序的种子（`offset`，`limit` 最多 1000，`after`）；`/bittorrent/tracker/torrents/<info hash>` 一个种子的 |
 | `GET /bittorrent/tracker/passkey?user=` | 私有 tracker 策略中的一个用户及其 passkey |
 
 种子的 `<id>` 是它的 ID，即十六进制的 v1 info hash，大小写均可，或其 v2 hash（64 位），取前 20 字节为 ID。`limits` 接受
@@ -358,7 +360,7 @@ URL 下载的相同，边到达边读取，超出时以 `413` 拒绝（表单的
 
 `GET /bittorrent/events` 以 server-sent events（`text/event-stream`）推送客户端的事件，每个事件带 `id`、作为 `event` 的类型，
 以及作为 `data` 的 JSON：`id`、`time`、`type`，视情况还有 `torrent`、`name`、`category`、`state`、`previous`、`error`、
-`peer`、`data_deleted`。
+`peer`、`data_deleted`、`dropped`。
 
 | 类型 | 何时 |
 | --- | --- |
@@ -370,6 +372,7 @@ URL 下载的相同，边到达边读取，超出时以 `413` 拒绝（表单的
 | `peer_banned` | 某个 peer 或某地址的所有 peer 被封禁，`error` 说明原因 |
 | `seed_limit` | 种子达到做种比率或时间而暂停 |
 | `alt_speed` | 备用速率开始（`state` 为 `on`）或停止（`off`）生效 |
+| `events_dropped` | 自管理器上次查看以来，fib 的客户端因交给角色的队列已满丢弃了 `dropped` 个分块和 peer 事件；每秒最多一个 |
 
 状态变化由角色的管理器每秒察觉一次，API 修改之后则立即察觉。没有事件可发时，事件流每 15s 写一行注释。带
 `Last-Event-ID`（或 `?after=<id>`）重连的客户端会先收到它错过的事件，取自角色保留的最近 1024 个；其中有些已不再保留，或
@@ -380,6 +383,11 @@ fit 此后重启过（ID 每次启动从 1 开始）时，事件流以事件 `re
 控制台在 fib 的连接上写出事件流：worker 订阅并写出流的开头，之后由该流自己的一个 goroutine 不等待地写出每个事件，超过连接
 的水位时等待其排空，最多 30s，超时即断开；两者共用 32 个事件流的上限。管理端到成员的转发（节点切换器）同样只回答完整的
 应答，因此页面在那里只轮询。
+
+**客户端自己的队列。** fib 在自己的 goroutine 上把客户端的事件交给角色，经过一个 4096 的队列（fib 的
+`Config.EventQueue`，取其默认值，不可配置）：超出时 fib 丢弃分块和 peer 事件，从不丢弃其他事件。角色不发布这两类事件，因此
+丢弃不会让事件流缺少什么；丢弃会被计数（`fit_bittorrent_events_dropped_total`），并每秒一次以 `events_dropped` 告知，页面
+收到后重新读取列表。角色的处理器只取一个短锁就返回，所以只有突发时队列才会满。
 
 事件也写入 fit 的日志，logger 为 `bittorrent`：添加、移除种子，封禁和做种限制为 info，完成和备用速率照旧为 info，存储错误
 为 error，状态变化为 debug。
@@ -422,6 +430,7 @@ fit bt alt on                           # auto、on、off；不带参数时显�
 | `fit_bittorrent_peers_banned_total` | counter | |
 | `fit_bittorrent_alt_speed_active` | gauge | |
 | `fit_bittorrent_event_subscribers`、`fit_bittorrent_event_subscribers_dropped_total` | gauge、counter | |
+| `fit_bittorrent_events_dropped_total`（fib 丢弃的客户端分块和 peer 事件） | counter | |
 | `fit_bittorrent_published_torrents` | gauge | `entry` |
 | `fit_bittorrent_tracker_torrents`、`fit_bittorrent_tracker_peers`、`fit_bittorrent_tracker_max_torrents`、`fit_bittorrent_tracker_max_peers`、`fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`、`fit_bittorrent_tracker_scrapes_total` | counter | |
@@ -444,7 +453,7 @@ fit bt alt on                           # auto、on、off；不带参数时显�
   连接（方向、uTP、加密、做种、阻塞）与速率。**Tracker**按层级列出其 tracker 及其 Web 种子，即其 .torrent 文件或磁力链接所列。
 - **备用速率**位于客户端各页面的顶栏：自动（按计划）、开或关，以及当前是否生效及其速率。
 - **Tracker**：tracker 的种子与 peer 数及其上限、announce 与 scrape 数、按原因统计的拒绝、私有或公开及其白名单与 UDP 地址；
-  白名单中种子的 swarm，每页 100 个；私有 tracker 还可按用户查询其 passkey，用于该用户的 announce URL，只显示给登录者，
+  种子的 swarm，每页 100 个（白名单中的，或公开 tracker 按 info hash 排序的）；私有 tracker 还可按用户查询其 passkey，用于该用户的 announce URL，只显示给登录者，
   从不保存。
 - **发布**：各发布条目的目录、模式、Web 种子、上次遍历时间、待处理文件与问题，以及其种子的大小、文件数、状态与构建时间，
   提供 **.torrent** 下载（Admin API 的 `/bittorrent/publish/<name>/torrents/<id>`）与磁力链接（打开或复制）。
@@ -587,16 +596,20 @@ passkey 被替换为 `REDACTED`。`public` 含 `play` 的策略让所有人进�
 **Access。** 角色的 `access`，然后是全局的，在 fib 为被拒地址的 UDP 数据报建立连接之前将其丢弃，并以失败原因 "refused"
 应答来自被拒地址的 HTTP announce 和 scrape（路由的监听器也有全局 access）。
 
-**重载。** 允许列表、`auth`、`access` 和控制台原地改变。`interval`、`min_interval`、`max_numwant` 和 `max_scrape` 在同一
-存储上新建 fib tracker，swarm 保留，UDP 连接 ID 仍然有效（角色保持同一个密钥）。`max_torrents`、`max_peers_per_torrent`、
-`max_peers` 和 `peer_ttl` 会新建存储，因为 fib 的 `MemoryStore` 只在创建时接受它们：swarm 从空开始，随客户端再次 announce
-而填充。`listen` 的更改会移动 UDP 端口；无法绑定时重载失败，tracker 保持原样。
+**重载。** 允许列表、`auth`、`access` 和控制台原地改变，`max_torrents`、`max_peers_per_torrent`、`max_peers` 和
+`peer_ttl` 也一样（fib 的 `MemoryStore.SetConfig`），swarm 保留：调低的上限不丢弃任何东西，在存储回到上限以下之前拒绝新的
+种子或 peer；改短的 `peer_ttl` 使已保留超过新时长的 peer 过期。`interval`、`min_interval`、`max_numwant` 和 `max_scrape`
+在同一存储上新建 fib tracker，swarm 保留，UDP 连接 ID 仍然有效（角色保持同一个密钥）。`listen` 的更改会移动 UDP 端口；无法
+绑定时重载失败，tracker 保持原样。
 
 **统计。** 角色的 Go API 有 `Stats`（保存的种子和 peer、已服务的 announce 和 scrape、按原因的拒绝次数、上限）、
-`Torrent(hash)`（做种者、下载者、完成次数）以及 `Torrents`（允许列表中种子的 swarm）；其控制台只读地提供
-`GET /api/stats`、`/api/torrents`（`offset`、`limit`，最多 1000）和 `/api/torrents/<hash>`，作为模块时为
-`/api/m/bittorrent.tracker/...`。公开的 tracker 无法列出它跟踪的种子：fib 的 `MemoryStore` 只对指名的种子作答。
-Admin API 以 `/bittorrent/tracker/stats`、`/bittorrent/tracker/torrents[/<hash>]` 和 `/bittorrent/tracker/passkey?user=`
+`Torrent(hash)`（做种者、下载者、完成次数）以及 `Torrents`/`ListTorrents`：有允许列表时，按列表顺序给出其中种子的
+swarm，无论是否正在跟踪（`source` 为 `allow_list`）；公开 tracker 给出存储中有 peer 的种子，按 info hash 排序（`source` 为
+`store`），经 fib 的 `MemoryStore.Range` 逐个分片读取。每页最多 1000 个种子，按 `offset` 翻页，公开 tracker 还可按
+`after=<info hash>` 翻页（应答的 `next` 是下一页的起点，最后一页为 `""`）；一次调用在内存中只保留 `offset`+`limit` 个种子，
+耗时与跟踪的种子数成正比，因此要翻到大存储的深处应使用 `after`；每个种子的数字取自同一时刻。其控制台只读地提供
+`GET /api/stats`、`/api/torrents`（`offset`、`limit`、`after`）和 `/api/torrents/<hash>`，作为模块时为
+`/api/m/bittorrent.tracker/...`。Admin API 以 `/bittorrent/tracker/stats`、`/bittorrent/tracker/torrents[/<hash>]` 和 `/bittorrent/tracker/passkey?user=`
 提供它们，另有[指标](#指标)。
 
 ## 互通
@@ -672,5 +685,5 @@ profile 中占 CPU 的五分之一），而且每个 16 KiB 块各是一次 `pwr
   `auth`，用 `allow` 或 `allow_files` 限制它跟踪什么）或不用 tracker（web seed 和 DHT）。访问日志中从不出现 passkey。
 - **流。** 不设 `auth` 的 `bt_stream` 把客户端持有的每个种子提供给能到达该路由的任何人；设了 `auth` 时，令牌的 `play` 授权
   指定哪些种子（`bt/*` 表示全部）。
-- **此处未限制的。** fib 的客户端无上限地排队其事件（fit 的处理器立即取走它们）；fib 的 tracker 存储不新建存储就无法改变其
-  上限（swarm 重新开始）。两者都是开发计划遗留项中的 fib 请求。
+- **事件队列。** fib 的客户端为角色最多排队 4096 个事件（超出时丢弃分块和 peer 事件并计数）；每个事件流 256 个，角色保留
+  1024 个。

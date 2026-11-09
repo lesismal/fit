@@ -1135,14 +1135,14 @@
         },
         "max_peers": {
           "default": 500000,
-          "description": "The most peers kept of all torrents together, each about 150 bytes; a peer past it still gets peers but is not handed out. 500000 when left out or 0. A change makes a new store.",
+          "description": "The most peers kept of all torrents together, each about 150 bytes; a peer past it still gets peers but is not handed out. 500000 when left out or 0. A change applies in place, keeping the swarms; lowered, it drops no peer.",
           "maximum": 4194304,
           "minimum": 0,
           "type": "integer"
         },
         "max_peers_per_torrent": {
           "default": 10000,
-          "description": "The most peers kept of one torrent; a peer past it still gets peers but is not handed out. 10000 when left out or 0. A change makes a new store.",
+          "description": "The most peers kept of one torrent; a peer past it still gets peers but is not handed out. 10000 when left out or 0. A change applies in place, keeping the swarms; lowered, it drops no peer.",
           "maximum": 65536,
           "minimum": 0,
           "type": "integer"
@@ -1156,7 +1156,7 @@
         },
         "max_torrents": {
           "default": 100000,
-          "description": "The most torrents tracked at once; an announce of one more is refused with \"tracker is full\". 100000 when left out or 0. A change makes a new store: the swarms start empty and fill again as clients announce.",
+          "description": "The most torrents tracked at once; an announce of one more is refused with \"tracker is full\". 100000 when left out or 0. A change applies in place, keeping the swarms; lowered, it drops none and refuses new torrents until the store is back under it.",
           "maximum": 1048576,
           "minimum": 0,
           "type": "integer"
@@ -1168,7 +1168,7 @@
         },
         "peer_ttl": {
           "default": "1h",
-          "description": "How long a peer is kept after its last announce, longer than interval so that a peer announcing a little late is not forgotten; a torrent left without peers is forgotten, its completed count with it. 1h when left out. A change makes a new store: the swarms start empty and fill again as clients announce.",
+          "description": "How long a peer is kept after its last announce, longer than interval so that a peer announcing a little late is not forgotten; a torrent left without peers is forgotten, its completed count with it. 1h when left out. A change applies in place, keeping the swarms; a shorter one expires the peers kept past it.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         }

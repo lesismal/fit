@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I209。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I210。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -366,6 +366,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
 | I207 | （第二阶段）集群共享的 tracker Store | I201 | todo |
 | I208 | （第二阶段）RSS 自动下载 | I198 | todo |
+| I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
 
 ## M0 基础
 
@@ -5274,6 +5275,8 @@ I198/I203 的添加路径。fib 的 `Reader.Close` 会等待进行中的 `Read`�
 4. **存储上限或 `peer_ttl` 的更改会新建存储**，swarm 从空开始（客户端在其间隔内重新 announce），因为 fib 的 `MemoryStore` 只在创建时
    接受它们；interval、`min_interval`、`max_numwant` 和 `max_scrape` 在同一存储上新建 fib `Server`，用角色唯一的 UDP 密钥，swarm 和
    UDP 连接 ID 都保留。备选：拒绝此类更改直到重启；等 fib 支持运行时设置上限。
+   **I209 已改**：上限和 `peer_ttl` 现在原地修改（fib 的 `MemoryStore.SetConfig`，A85），保留 swarm；它们与 interval 同时改变时，
+   先设置上限，再在同一存储上新建 `Server`。
 5. **允许列表文件有坏行或无法读取时重载失败**，之前的列表继续生效。原因：否则一个笔误会悄悄拒绝某个种子，缺失文件则拒绝所有种子。
    备选：跳过坏行并警告。
 6. **HTTP 的角色 `access` 在 `bt_tracker` 处理器中检查**（BEP 3 风格的失败原因 "refused"），UDP 由绑定的 `Filter` 在建立连接前检查；
@@ -5283,6 +5286,7 @@ I198/I203 的添加路径。fib 的 `Reader.Close` 会等待进行中的 `Read`�
 8. **单个种子的统计按指名的种子给出，列表只列允许列表中的种子**；公开 tracker 无法列出它跟踪的内容，因为 fib 的 `MemoryStore` 无法
    枚举其种子。在存储旁另建索引就是绕过 fib（规则 15），所以改为向 fib 提需求（见下）。计数：已服务的 announce 和 scrape，按原因的
    拒绝（`unregistered` 按每个被拒哈希计，含 scrape；`passkey`；`access`）。
+   **I209 已改**：公开 tracker 经 fib 的 `MemoryStore.Range`（A85）按 info hash 列出存储中有 peer 的种子。
 9. **用户的 passkey 在角色控制台上读取**，`GET /api/passkey?user=`，在其登录之后，直到 I203 的 Admin API 和 I204 的页面；控制台的
    其他路由是 `GET /api/stats`、`/api/torrents`（`offset`、`limit` ≤ 1000）和 `/api/torrents/<hash>`。
 10. **私有 scrape 需要授权覆盖其所有种子的 passkey**；不指名任何种子的 scrape 得不到任何内容，正如 fib 的处理，无论谁来问。
@@ -5574,3 +5578,61 @@ race 测试与完整测试套件（留给主会话）。
 
 - **做什么**：按计划轮询订阅源，用规则（模式、分类、大小上限、剧集去重）添加任务；订阅源、条目和历史都有上限。
 - **涉及**：`bittorrent`。
+
+### I209 各角色用上 fib A80–A86 新增的能力
+
+- **为什么**：I197、I200、I201 和 I202 留下了 fib 需求（A80–A86，已在 fib `ecdcec0` 完成，fit 在 `e633fc2` 上）：发布的文件被
+  哈希两次，生成只能靠让读失败来停止，公开 tracker 无法列出其种子，重载 tracker 的上限会让 swarm 从空开始，客户端的事件队列
+  无界，`Reader.Close` 要等待进行中的读。
+- **做什么**：发布以 `AddOptions.Seed` 添加新生成的种子（之后用续传数据，两者从不同时：`ErrSeedResume`），并以 `BuildContext`
+  生成；tracker 经 `MemoryStore.Range` 列出公开 tracker 的种子（Admin API、控制台、页面；分页、有界），并以 `SetConfig` 应用新的
+  上限和 `peer_ttl`；客户端设置 `Config.EventQueue` 并呈现 `EventDropped`（事件流、`fit_bittorrent_events_dropped_total`）；
+  `bt_stream` 在安全时去掉 A83 使之多余的部分。
+- **完成标准**：新发布加入时不读取数据；停止时生成及时结束；公开 tracker 的种子可列出并分页；重载上限保留 swarm；被丢弃的事件
+  被计数并发布；两种语言的文档。
+- **涉及**：`bittorrent`、`bittorrent/tracker`、`handler/btstream`、`admin`、`assistant`、`config`、`app/workbench`、`docs`。
+- **完成** 2026-11-09（分支 `bt-i209`）：**发布**（`bittorrent/publish.go`、`publish_walk.go`）：本进程生成且尚无续传数据的条目
+  以 `AddOptions.Seed` 加入，之后只用其续传数据（拥有全部分片后保存，seed 模式下立即如此，未校验的分片仍标为未校验）；每个条目有
+  一个 context，停止时取消，结束其遍历和生成（`Builder.BuildContext`），取代了原来的原子标志和让读失败的 `fs.File` 包装（保留了
+  一个测试用的读钩子）。**Tracker**（`bittorrent/tracker`）：`ListTorrents(offset, limit, after)`，带 `Source`（`allow_list` 或
+  `store`）、`Total` 和 `Next`；公开 tracker 的列表经 `Range` 按 info hash 排序，用堆保留 `after` 之后最小的 `offset`+`limit` 个；
+  `Torrents` 签名不变；控制台的 `/api/torrents` 和 Admin API 的 `/bittorrent/tracker/torrents` 接受 `after`（错误的 `after` 以及有
+  允许列表时为 400），并应答 `source` 和 `next`；重载上限或 `peer_ttl` 时对现有存储调用 `SetConfig`，interval 也变时在其上新建
+  `Server`；四个字段的说明（schema、参考、模板、`schema-zh.js`）随之更新；Tracker 页面按来源说明列表；助手 `bt_tracker_stats` 的
+  说明。**客户端**（`bittorrent/role.go`、`events.go`、`metrics.go`）：`Config.EventQueue` 设为 `EventQueue`（fib 的默认值
+  4096）；`EventDropped` 被计数（`fit_bittorrent_events_dropped_total`），由管理器下一次查看发布为一个带 `dropped` 的
+  `events_dropped` 事件；页面给出其文字。**`bt_stream`**：未删除任何东西（见下）；注释说明了原因。文档：
+  [BitTorrent](bittorrent.zh-CN.md)（发布只哈希一次、生成可停止、新事件类型、客户端的队列、指标、tracker 的重载与列表、Admin API
+  一行、限制）两种语言；[fib-api-requests](fib-api-requests.zh-CN.md#a80事件队列有界) 中 A80–A86 标为已使用。测试：新发布加入时
+  不读存储且全部分片为信任状态，随后被提供（有读取，信任计数降到 0）；以每兆字节读取 100ms 生成 24 MiB 文件，停止后 3 次读取内
+  中断；公开 tracker 的 25 个种子按 offset 和按 `after` 列出（每个恰好一次、有序）、控制台路由、有允许列表时拒绝 `after`；重载上限
+  和 `peer_ttl` 保留存储及其 swarm，调低的上限拒绝新种子和新 peer，上限与 interval 同时改变（同一存储、新 server），改短的
+  `peer_ttl` 使 peer 过期；Admin API 的 `source`、`after` 及错误的 `after`；两次丢弃被计数并只发布一次；页面文字。已运行：
+  `bittorrent/...`、`handler/btstream`、`admin`、`assistant`、`config` 的 `go test -race`；`go test ./schema/ ./app/workbench/
+  ./docs/ ./test/workers/`；vet、gofmt。
+
+**待评审的决定**（实现时做出，2026-11-09；在用户裁定前有效）：
+
+1. **不加 `event_queue` 配置项**：角色把 fib 的默认值（4096）设为常量。原因：角色的处理器只取一个短锁就返回，而 fib 丢弃的事件
+   （分片校验通过、哈希失败、peer 连接与断开）角色从不发布，调整它对运维没有好处。备选：`bittorrent.client` 中的 `event_queue`
+   （重载时新建客户端，因为 fib 在 `NewClient` 时读取）。
+2. **被丢弃的事件每秒至多一个 `events_dropped` 事件**，由管理器的查看带上自上次以来的计数发布，而不是每个 fib `EventDropped` 一个，
+   以免一阵突发把事件流的真实事件挤出保留供重放的 1024 个，或使订阅者落后；日志为 debug。被丢弃的分片事件可能让存储错误多显示
+   一会儿，直到下一个分片通过或状态变化（与以前一样，它们也会清除）。备选：逐个转发 `EventDropped`；只要指标。
+3. **公开 tracker 的列表按 info hash 排序，按 `offset` 或 `after` 分页**：`Range` 不给顺序，所以每页用堆保留 `after` 之后最小的
+   `offset`+`limit` 个哈希，耗时与跟踪的种子数（至多 `max_torrents`）成正比，内存与页大小成正比；`total` 是有 peer 的种子数（给了
+   `after` 时为其后的）。允许列表保持自己的顺序并拒绝 `after`（400）。不在 worker 上：控制台路由在其池中运行，Admin API 在请求的
+   goroutine 上。备选：角色定期刷新的存储快照；以分片和位置为游标、按 `Range` 的顺序（种子增减时不稳定）；按 swarm 大小排序。
+4. **只有本进程生成且尚无续传数据的种子用 seed 模式**：从 `index.json` 恢复但没有续传数据的种子（保存前崩溃）仍完整校验，因为其
+   文件不是刚哈希过的。备选：它们也用 seed 模式，因为遍历会比较其标记（但只在加入之后）。
+5. **生成只由条目的 context 取消**：条目停止后让读失败的 `fs.File` 包装已删除，因此生成在读完一兆字节之内停止（`BuildContext`
+   的检查），阻塞的读不会被打断（与以前一样）。
+6. **`bt_stream` 行为不变**：它从不在 `Read` 进行时关闭 reader；流的 context 由客户端离开和 `Drain` 取消，也结束对种子占用和 info
+   的等待，并是每次读取 `read_timeout` 的父 context，因此 A83 在这里没有可删的东西。备选：在 `OnCancel` 中关闭 reader（需要跨
+   goroutine 共享 reader，没有好处）。
+7. **调低的 tracker 上限不丢弃任何东西**（fib 的 `SetConfig`）：超出的部分随 peer 停止或在 `peer_ttl` 内过期而离开。备选：立即
+   裁剪（fib 不提供）。
+
+由此遗留：A84（磁力链添加的 hybrid 种子的 piece layer）和 A86（做种方不宣告 `completed`）经由客户端生效，fit 无需改动，但 fit
+本身未测试；一个纯 v2 对端从 fit 做种的磁力链 hybrid 种子获取哈希的互通用例可覆盖 A84。未运行：Linux 上的 race 测试和完整测试
+（留给主会话）。

@@ -52,7 +52,7 @@ func btTools() []*Tool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"torrent":{"type":"string","description":"the torrent's ID: 40 hex digits, or its v2 hash"}},"required":["torrent"]}`),
 			Run:         toolBTTorrent},
 		{Name: "bt_tracker_stats", Group: GroupBitTorrent, Level: config.AssistantRead,
-			Description: "The BitTorrent tracker's totals (bittorrent.tracker): torrents and peers in its store against its bounds, announces and scrapes served, refusals by reason (unregistered, passkey, access), whether it is private, the allow-list's size and the UDP address; and the swarms of the allow-list's torrents (the first 50: seeders, leechers, completed). Never a passkey.",
+			Description: "The BitTorrent tracker's totals (bittorrent.tracker): torrents and peers in its store against its bounds, announces and scrapes served, refusals by reason (unregistered, passkey, access), whether it is private, the allow-list's size and the UDP address; and the swarms (the allow-list's torrents, or a public tracker's by info hash; the first 50: seeders, leechers, completed). Never a passkey.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 			Run:         toolBTTrackerStats},
 	}, btProposeTools()...)

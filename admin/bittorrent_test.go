@@ -478,11 +478,16 @@ func TestBitTorrentAltSpeedPublishTracker(t *testing.T) {
 	if st["private"] != false || st["udp"] == "" || st["refused"] == nil {
 		t.Fatalf("stats %v", st)
 	}
-	if v := f.json(t, "GET", "/bittorrent/tracker/torrents", "", http.StatusOK); v["total"] != 0.0 || len(v["torrents"].([]any)) != 0 {
+	if v := f.json(t, "GET", "/bittorrent/tracker/torrents", "", http.StatusOK); v["total"] != 0.0 || len(v["torrents"].([]any)) != 0 ||
+		v["source"] != "store" {
 		t.Fatalf("tracker torrents %v", v)
 	}
 	f.json(t, "GET", "/bittorrent/tracker/torrents?limit=5000", "", http.StatusBadRequest)
+	f.json(t, "GET", "/bittorrent/tracker/torrents?after=zz", "", http.StatusBadRequest)
 	h := strings.Repeat("ab", 20)
+	if v := f.json(t, "GET", "/bittorrent/tracker/torrents?after="+h, "", http.StatusOK); v["total"] != 0.0 || v["next"] != "" {
+		t.Fatalf("tracker torrents after %v", v)
+	}
 	if v := f.json(t, "GET", "/bittorrent/tracker/torrents/"+h, "", http.StatusOK); v["info_hash"] != h || v["tracked"] != false {
 		t.Fatalf("tracker torrent %v", v)
 	}
@@ -878,9 +883,14 @@ func TestBitTorrentConsoleEvents(t *testing.T) {
 			}
 		}
 	}
-	for range bittorrent.MaxSubscribers - 1 {
+	// Every slot taken once the streams closed above have let theirs go,
+	// which they do on their own goroutines; then one given back for the
+	// console's stream.
+	for range bittorrent.MaxSubscribers {
 		waitSubscribe()
 	}
+	held[0].Close()
+	held = held[1:]
 	last := open(http.StatusOK)
 	if code, _, hd := b.do("GET", path, ""); code != http.StatusServiceUnavailable || hd.Get("Retry-After") == "" {
 		t.Fatalf("past the bound: %d %v", code, hd)

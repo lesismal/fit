@@ -300,7 +300,8 @@ are, so a file replaced by another of the same size and time is seen too. A file
 built once it has not changed for a `check_interval` (its status change time is that old, or the
 walk before saw it the same), so that a file still being copied is not hashed; it is hashed on one
 of the entry's `max_hashing` goroutines (1), never on a fib worker, and kept only if its stamp is
-still the same afterwards. A file changed or removed stops its torrent at once, and a changed one
+still the same afterwards. A build stops within a megabyte read when its entry stops or changes
+(fib's `Builder.BuildContext`), and holds one piece's v2 leaf hashes at a time, not a file's. A file changed or removed stops its torrent at once, and a changed one
 gets a new torrent, of a new info hash, once it settles; in mode `whole_dir` any change replaces
 the torrent. A build that fails (a file that cannot be read) is reported and not tried again until
 the file changes. A directory that cannot be read is reported and its torrents are left as they
@@ -312,9 +313,11 @@ takes from there the torrents whose files kept their stamps, with their resume d
 checking none of them; a reload that changes only an entry's bounds or `check_interval` does the
 same. A change of `dir`, `mode`, `web_seed`, `announce`, `private` or `piece_length` builds the
 torrents again (their bytes change), and an entry taken out of the config has its torrents stopped
-and its state removed, never its files. A torrent built for the first time is still checked once by
-the client when added, as fib has no way yet to add a torrent as complete (see the open items of
-I202 in the development plan).
+and its state removed, never its files. **A file is hashed once**: a torrent just built is added
+as complete (fib's seed mode, `AddOptions.Seed`), reading nothing, and each piece is checked the
+first time a peer asks for it; one that fails is reported as a hash failure and is no longer
+offered. The resume data saved then keeps the pieces not checked yet as such, so a restart checks
+them on first serve as well.
 
 **The `bt_publish` handler** answers at a path ending in `/` or `index.json` with an index in JSON:
 for each entry (`publish` names those served; all when left out) its torrents, each with its path,
@@ -402,7 +405,7 @@ console), never on a fib worker.
 | `GET /bittorrent/publish/<name>/torrents/<id>` | a published torrent's .torrent file (`application/x-bittorrent`, as an attachment), which the pages offer |
 | `GET /bittorrent/events` | the events, as server-sent events (below) |
 | `GET /bittorrent/tracker/stats` | the tracker's totals |
-| `GET /bittorrent/tracker/torrents` | the allow-list's swarms (`offset`, `limit` at most 1000); `/bittorrent/tracker/torrents/<info hash>` one torrent's |
+| `GET /bittorrent/tracker/torrents` | `{"torrents", "total", "offset", "source", "next"}`: the allow-list's swarms, or a public tracker's by info hash (`offset`, `limit` at most 1000, `after`); `/bittorrent/tracker/torrents/<info hash>` one torrent's |
 | `GET /bittorrent/tracker/passkey?user=` | a user of the private tracker's policy, and its passkey |
 
 A torrent's `<id>` is its ID, the v1 info hash in hex, in either case, or its v2 hash (64 digits),
@@ -431,7 +434,8 @@ a URL is downloaded by the role, within `url_timeout`.
 
 `GET /bittorrent/events` streams the client's events as server-sent events (`text/event-stream`),
 each with its `id`, its type as `event`, and as `data` the event in JSON: `id`, `time`, `type`, and
-as they apply `torrent`, `name`, `category`, `state`, `previous`, `error`, `peer`, `data_deleted`.
+as they apply `torrent`, `name`, `category`, `state`, `previous`, `error`, `peer`, `data_deleted`,
+`dropped`.
 
 | Type | When |
 | --- | --- |
@@ -443,6 +447,7 @@ as they apply `torrent`, `name`, `category`, `state`, `previous`, `error`, `peer
 | `peer_banned` | a peer, or every peer of an address, was banned, `error` why |
 | `seed_limit` | a torrent reached its seed ratio or time and paused |
 | `alt_speed` | the alternative rates started (`state` `on`) or stopped (`off`) holding |
+| `events_dropped` | fib's client dropped `dropped` of its piece and peer events since the manager's last look, its queue for the role being full; at most one a second |
 
 State changes are noticed by the role's manager every second, and at once after the API's
 changes. With no event to send, the stream writes a comment every 15s. A client that reconnects with
@@ -459,6 +464,13 @@ worker subscribes and writes the stream's start, then one goroutine of the strea
 event without waiting and, past the connection's watermark, waits for it to drain, at most 30s, after
 which the stream is cut; the same 32 streams bound both. A manager's pass-through to its members
 (the node switcher) answers whole responses too, so the pages poll there.
+
+**The client's own queue.** fib hands the client's events to the role on a goroutine of its own,
+through a queue of 4096 (fib's `Config.EventQueue`, its default, not configurable): past it fib
+drops piece and peer events, never the others. The role publishes none of those, so a drop costs
+the stream nothing; it is counted (`fit_bittorrent_events_dropped_total`) and said once a second
+as `events_dropped`, on which the pages read the list again. The role's handler takes a short lock
+and returns, so the queue fills only in a burst.
 
 The events go to fit's log too, under the logger `bittorrent`: torrents added and removed, bans and
 seed limits at info, completions and the alternative rates at info as before, storage errors at
@@ -505,6 +517,7 @@ so the counters keep what removed torrents counted and never go back while fit r
 | `fit_bittorrent_peers_banned_total` | counter | |
 | `fit_bittorrent_alt_speed_active` | gauge | |
 | `fit_bittorrent_event_subscribers`, `fit_bittorrent_event_subscribers_dropped_total` | gauge, counter | |
+| `fit_bittorrent_events_dropped_total` (the client's piece and peer events fib dropped) | counter | |
 | `fit_bittorrent_published_torrents` | gauge | `entry` |
 | `fit_bittorrent_tracker_torrents`, `fit_bittorrent_tracker_peers`, `fit_bittorrent_tracker_max_torrents`, `fit_bittorrent_tracker_max_peers`, `fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`, `fit_bittorrent_tracker_scrapes_total` | counter | |
@@ -535,8 +548,8 @@ Admin API's `/bittorrent/` endpoints through the console, and edits the shared d
 - The **alternative rates** are in the top bar of the client's pages: auto (the schedules), on or
   off, and whether they hold now, with the rates.
 - **Tracker**: the tracker's torrents and peers against its bounds, announces and scrapes, refusals
-  by reason, private or public with its allow-list and UDP address; the allow-list's swarms, 100 a
-  page; and, for a private tracker, a user's passkey looked up for their announce URL, shown to
+  by reason, private or public with its allow-list and UDP address; the swarms, 100 a page (the
+  allow-list's, or a public tracker's by info hash); and, for a private tracker, a user's passkey looked up for their announce URL, shown to
   the person signed in and never kept.
 - **Publishing**: each publish entry, its directory, mode, web seed, last walk, files pending and
   problems, and its torrents with their size, files, state and age, a **.torrent** download (the
@@ -722,20 +735,25 @@ reload, and the list before stays in force.
 before fib makes a connection for them, and answers HTTP announces and scrapes from them with the
 failure reason "refused" (the route's listener has the global access too).
 
-**Reloads.** The allow-list, `auth`, `access` and the console change in place. `interval`,
-`min_interval`, `max_numwant` and `max_scrape` make a new fib tracker on the same store, so the
-swarms stay, and UDP connection IDs stay good (the role keeps one secret). `max_torrents`,
-`max_peers_per_torrent`, `max_peers` and `peer_ttl` make a new store, since fib's `MemoryStore`
-takes them only when it is made: the swarms start empty and fill as clients announce again. A
-`listen` change moves the UDP port; one that cannot be bound fails the reload and leaves the
-tracker as it was.
+**Reloads.** The allow-list, `auth`, `access` and the console change in place, and so do
+`max_torrents`, `max_peers_per_torrent`, `max_peers` and `peer_ttl` (fib's
+`MemoryStore.SetConfig`), keeping the swarms: a lowered bound drops nothing, refusing new torrents
+or peers until the store is back under it, and a shorter `peer_ttl` expires the peers kept past it.
+`interval`, `min_interval`, `max_numwant` and `max_scrape` make a new fib tracker on the same store,
+so the swarms stay, and UDP connection IDs stay good (the role keeps one secret). A `listen` change
+moves the UDP port; one that cannot be bound fails the reload and leaves the tracker as it was.
 
 **Statistics.** The role's Go API has `Stats` (torrents and peers kept, announces and scrapes
 served, refusals by reason, the bounds), `Torrent(hash)` (seeders, leechers, completed) and
-`Torrents`, the swarms of the allow-list's torrents; its console serves them read-only as
-`GET /api/stats`, `/api/torrents` (`offset`, `limit`, at most 1000) and `/api/torrents/<hash>`,
-and as `/api/m/bittorrent.tracker/...` as a module. A public tracker cannot list the torrents it
-tracks: fib's `MemoryStore` answers only for a torrent named. The Admin API serves them as
+`Torrents`/`ListTorrents`: with an allow-list, the swarms of its torrents in its order, tracked or
+not (`source` `allow_list`); a public tracker, the torrents its store has peers of, ordered by
+info hash (`source` `store`), read through fib's `MemoryStore.Range` one shard at a time. A page is
+at most 1000 torrents, by `offset` or, for a public tracker, by `after=<info hash>` (the answer's
+`next` is where the next page starts, `""` on the last); a call keeps only `offset`+`limit`
+torrents in memory and takes time in the torrents tracked, so `after` is the way to page far into
+a large store, and each torrent's numbers are as of one moment. Its console serves them read-only as
+`GET /api/stats`, `/api/torrents` (`offset`, `limit`, `after`) and `/api/torrents/<hash>`, and as
+`/api/m/bittorrent.tracker/...` as a module. The Admin API serves them as
 `/bittorrent/tracker/stats`, `/bittorrent/tracker/torrents[/<hash>]` and
 `/bittorrent/tracker/passkey?user=`, with [metrics](#metrics).
 
@@ -831,6 +849,5 @@ plaintext download (7%).
   never holds a passkey.
 - **Streams.** `bt_stream` without `auth` serves every torrent the client holds to whoever reaches the
   route; with `auth`, a token's `play` grant names the torrents (`bt/*` for all).
-- **Not bounded here.** fib's client queues its events without a bound (fit's handler drains them
-  at once); fib's tracker store cannot change its bounds without a new store (swarms start again).
-  Both are fib requests in the development plan's open items.
+- **Event queues.** fib's client queues at most 4096 events for the role (piece and peer events
+  dropped past it, counted); each event stream has its 256, the role keeps 1024.
