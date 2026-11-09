@@ -163,6 +163,7 @@ type Client struct {
 
 	mu        sync.Mutex
 	err       error
+	closing   bool // Close began: the connection ends as ErrClosed
 	nextID    uint16
 	pending   map[uint16]*Delivery
 	subs      map[uint16]chan subResult
@@ -408,7 +409,13 @@ func (c *Client) Err() error {
 // keeps the session, as CleanStart and SessionExpiry said, with the
 // messages not acknowledged in it.
 func (c *Client) Close() error {
-	if c.Err() == nil {
+	// Marked first: the server closes its side on DISCONNECT, and the
+	// reader's EOF may come before the fail below.
+	c.mu.Lock()
+	up := c.err == nil
+	c.closing = true
+	c.mu.Unlock()
+	if up {
 		c.write(disconnectPacket(c.version, 0))
 	}
 	c.fail(ErrClosed)
@@ -438,6 +445,9 @@ func (c *Client) fail(err error) {
 	if c.err != nil {
 		c.mu.Unlock()
 		return
+	}
+	if c.closing {
+		err = ErrClosed
 	}
 	c.err = err
 	pending, subs := c.pending, c.subs

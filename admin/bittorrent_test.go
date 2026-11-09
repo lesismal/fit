@@ -709,10 +709,13 @@ func TestBitTorrentEvents(t *testing.T) {
 		}
 	}
 	// The streams closed above free their slots once their handlers see
-	// it.
-	for range bittorrent.MaxSubscribers - 1 {
+	// it: every slot is taken here, which waits for them, then one is
+	// given back for the stream.
+	for range bittorrent.MaxSubscribers {
 		waitSubscribe()
 	}
+	held[len(held)-1].Close()
+	held = held[:len(held)-1]
 	last := f.openEvents(t, http.StatusOK)
 	f.openEvents(t, http.StatusServiceUnavailable)
 	last.close()

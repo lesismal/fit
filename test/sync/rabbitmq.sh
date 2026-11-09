@@ -63,10 +63,15 @@ for v in $RABBITMQ_IMAGES; do
 	ADDRS="$ADDRS${ADDRS:+,}$version=localhost:$p"
 	TLS_ADDRS="$TLS_ADDRS${TLS_ADDRS:+,}$version=localhost:$((p + 1))"
 	if ! docker inspect "$name" >/dev/null 2>&1; then
-		docker run -d --name "$name" --hostname "$name" \
+		# Copied in, not mounted: the image's entrypoint takes /etc/rabbitmq
+		# for its user, and a read-only mount there left the node unable to
+		# read its own .erlang.cookie (eacces).
+		docker create --name "$name" --hostname "$name" \
 			-p "127.0.0.1:$p:5672" -p "127.0.0.1:$((p + 1)):5671" \
-			-v "$STATE:/etc/rabbitmq/fit:ro" -v "$STATE/10-fit.conf:/etc/rabbitmq/conf.d/10-fit.conf:ro" \
 			"$image" >/dev/null
+		docker cp "$STATE/." "$name:/etc/rabbitmq/fit" >/dev/null
+		docker cp "$STATE/10-fit.conf" "$name:/etc/rabbitmq/conf.d/10-fit.conf" >/dev/null
+		docker start "$name" >/dev/null
 	fi
 	p=$((p + 2))
 done
