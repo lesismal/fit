@@ -93,6 +93,15 @@ type MediaAction struct {
 	// Usage is what uses a file step's item now, and Warning says it.
 	Usage   *ItemUsage `json:"usage,omitempty"`
 	Warning string     `json:"warning,omitempty"`
+	// The BitTorrent steps' (proposals_bt.go): the torrents a pause or a
+	// resume names, or that an add adds when its magnet link names it, and
+	// what an add adds.
+	Torrents   []btRef `json:"torrents,omitempty"`
+	Magnet     string  `json:"magnet,omitempty"`
+	URL        string  `json:"url,omitempty"`
+	Category   string  `json:"category,omitempty"`
+	Paused     bool    `json:"paused,omitempty"`
+	Sequential bool    `json:"sequential,omitempty"`
 
 	// modified is the sidecar's time the change is made from, "" when the
 	// item has none.

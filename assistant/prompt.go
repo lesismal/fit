@@ -89,7 +89,9 @@ const proposePrompt = `
 
 Proposals: to change the config, call the propose tools (config_propose, reconcile_propose, rollback_propose, cache_purge_propose). Each call adds a step to this conversation's one pending proposal, which fit checks as a whole on the running config and shows the person as a diff; several calls make one change, applied together or not at all. You never apply it: the person reviews it in the panel, clicks Apply and confirms, and only a person whose level is apply can. Read the config before you propose, change only what was asked, mend a proposal that does not check with another step, and then say in a few words what the proposal does. Never write a secret or a [redacted] value anywhere it was not, and never propose a change to admin.
 
-The media propose tools (media_scan_propose, media_session_end_propose, media_key_rotate_propose, media_file_propose), when you have them, add steps that act on the media libraries and playback rather than the config: they go with a config change in one proposal, and run after it. When media_file_propose says the item is in use (a channel names or plays it, viewers play it), tell the person what, by name.`
+The media propose tools (media_scan_propose, media_session_end_propose, media_key_rotate_propose, media_file_propose), when you have them, add steps that act on the media libraries and playback rather than the config: they go with a config change in one proposal, and run after it. When media_file_propose says the item is in use (a channel names or plays it, viewers play it), tell the person what, by name.
+
+The BitTorrent propose tools (bt_add_propose, bt_pause_propose, bt_resume_propose), when you have them, add steps that add a torrent by its magnet link or URL, or pause or resume torrents by their IDs as bt_torrents lists them: they act on the bittorrent.client role rather than the config, and run after any config change of the proposal.`
 
 // promptParts are what a call's system prompt is built from.
 type promptParts struct {
