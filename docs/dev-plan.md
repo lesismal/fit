@@ -363,9 +363,9 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I211 | RabbitMQ as a source (queues and stream queues, acknowledged after the sinks) and a sink (publisher confirms) | I163 | todo |
 | I212 | NATS JetStream as a source (a durable pull consumer, the sequence in the checkpoint) and a sink (`Nats-Msg-Id` deduplication) | I163 | todo |
 | I213 | Apache Pulsar as a source (readers from message IDs, or a subscription) and a sink (sequence IDs, broker deduplication) | I163 | todo |
-| I214 | MQTT 3.1.1 and 5 as a source (persistent sessions, QoS 1/2 acknowledged after the sinks) and a sink | I163 | todo |
+| I214 | MQTT 3.1.1 and 5 as a source (persistent sessions, QoS 1/2 acknowledged after the sinks) and a sink | I163 | done |
 | I215 | A SQL Server client: TDS 7.4, TLS, SQL authentication, RPC with typed parameters, bulk load, cancellation | I163 | done |
-| I216 | SQL Server as a source: CDC change tables by LSN, a snapshot without locks handed over at its LSN | I215 | todo |
+| I216 | SQL Server as a source: CDC change tables by LSN, a snapshot without locks handed over at its LSN | I215 | done |
 | I217 | SQL Server as a sink: `MERGE` upserts, deletes, bulk load, exactly once with the checkpoint in the sink | I215, I191 | todo |
 | I218 | Doris and StarRocks as a sink (Stream Load with labels, the delete sign) and a source (a cursor polled) | I172 | todo |
 | I219 | Loki and OpenTelemetry logs as sinks (push API, OTLP/HTTP), files to them against Promtail | I166 | todo |
@@ -7231,6 +7231,66 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done when**: interop with EMQX 5 and Mosquitto 2 in Docker; QoS 1 messages published while fit
   is killed are all delivered after its restart; QoS 2 delivers each once.
 - **Touches**: `sync/mqtt`, `test/sync`, `docs`.
+- **Done** 2026-11-10: package `sync/mqtt/wire` (`mqttwire`): `Dial` with `Config` (servers, TLS,
+  version 3.1.1 or 5, user and password, keep-alive, clean start or a session with its expiry,
+  receive maximum, topic alias maximum, packet size and in-flight bounds), `Subscribe`, `Messages`
+  (a channel bounded by the receive maximum) and `Ack` (PUBACK, or PUBREC then PUBCOMP on PUBREL),
+  `Send`/`Publish` with a `Delivery` to wait on, topic name and filter checks and matching (`$share`
+  too), MQTT 5 properties both ways (user properties, message expiry, content type, response topic,
+  correlation data, topic aliases both ways), a reader and a keep-alive goroutine per connection.
+  Package `sync/mqtt` (`syncmqtt`): the source and the sink `mqtt`, registered in
+  `modules/standard`; schema, reference, templates, `schema-zh.js`; [MQTT](sync.md#mqtt) in the guide
+  in both languages. Unit tests on an in-process fake broker: 100 % of statements in both packages,
+  race-clean. Interop (`test/sync/mqtt_test.go`, `test/sync/mqtt.sh`) passed on Mosquitto 2.0.22 and
+  EMQX 5.8.6, in 3.1.1 and 5: QoS 1 messages published while the pipeline was killed at a random
+  point and while it was down all arrive after its restart (duplicates after kills at `written`);
+  QoS 2 messages arrive once each, across a graceful stop too; the sink's messages read back by a
+  subscriber, the source in a job; user and password over TLS, a wrong password refused. Interop found
+  a 3.1.1 broker sending a session's queued messages before the SUBACK, more than the client's channel
+  held (fixed: the source subscribes on a goroutine of its own while it takes messages).
+
+**Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **No codec is the source's own form**, not Kafka's `raw`: after holds `topic`, `payload` (bytes),
+   `qos`, `retain` and the version 5 properties the message has; the sink without a codec publishes
+   after's `payload`, so a topic copied through both stays byte for byte. Why: importing sync/kafka
+   for `Raw` drags its client in, and MQTT's metadata has no other place in a record. Alternative:
+   move `Raw` into `sync` and default to it.
+2. **A record's key is its topic** unless the codec sets one: a retained topic is like a compacted
+   key, and a key's records keep their order in the sinks' lanes. Alternative: no key.
+3. **User properties** are a map; a name sent more than once holds an array of its values.
+   Alternative: an array of pairs.
+4. **QoS 2 is handed on at PUBLISH and its PUBREC held until the sinks have it**, PUBCOMP sent when
+   PUBREL comes, a PUBLISH again of an ID held dropped: once per connection, and redelivered after a
+   crash before PUBREC. Alternative: PUBREC at once, which loses a message on a crash.
+5. **The connection outlives `Run`'s context** until `Cleanup` or the next `Run`, and acks of
+   records the sinks write while the pipeline drains are flushed before DISCONNECT, to spare
+   redeliveries.
+6. **`Acknowledged` only queues**; a goroutine per connection writes the acks, in order; a message
+   whose codec made no record is released with its neighbours.
+7. **In a job** the source reads until no message comes for `idle` (5s) after it subscribed, waits
+   for every message's acknowledgement, and ends; later messages stay for the next run. Alternative:
+   refuse mode once.
+8. **Every `Run` subscribes again** (topics may have changed), with retain handling 1 in version 5 so
+   that retained messages are not sent again at each restart; 3.1.1 brokers do send them again, which
+   idempotent sinks absorb. Filters dropped from the config are not unsubscribed.
+9. **The sink's session is clean, its client ID random** (`fit-sync-<random>`) unless set: delivery
+   is at least once anyway. Alternative: a persistent session resending QoS 2 with DUP.
+10. **A delete with `retain` is an empty retained message**, which clears the topic; otherwise the
+    codec's encoding. Alternative: a `deletes` param.
+11. **Refusals that retrying cannot cure go to `on_error` at once**: version 5 reason codes 0x87,
+    0x90, 0x95, 0x99, 0x9A and 0x9B, a packet past the broker's maximum, a feature it lacks, an invalid
+    topic, a codec's error; quota exceeded (0x97) and the rest are retried.
+12. **`Test` connects with a client ID of its own** (`<client_id>-test-<hex>`, clean session), so it
+    never takes a running pipeline's session over; the source's also subscribes and checks the grant.
+    Brokers whose ACLs bind client IDs may refuse the test's.
+13. **Bounds**: packets 1 MiB both ways, the source's `receive_maximum` 128 (at most about 128
+    packets held), the sink's `max_inflight` 64, keep-alive 60s.
+14. **`servers` is a list tried in turn**, the nodes of a cluster sharing the session.
+15. **Version 3.1.1 refuses a password without a username** at provision, as its protocol does.
+
+Open from it: enhanced authentication (an AUTH packet ends the connection), will messages and
+UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds the family.
 
 ### I215 A SQL Server client: TDS, authentication and queries
 
@@ -7328,6 +7388,69 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 - **Done when**: interop with SQL Server 2019 and 2022: a snapshot under writes and the stream after
   it end equal to the source across kills; a table added to CDC is picked up.
 - **Touches**: `sync/mssql`, `test/sync`, `docs`.
+- **Done** 2026-11-10: package `sync/mssql` (`syncmssql`), the source `mssql` (`source.go`,
+  `snapshot.go`, `cdc.go`, `ct.go`), registered in `modules/standard`; schema, reference, templates,
+  `schema-zh.js`; [SQL Server](sync.md#sql-server) in the guide in both languages, with the server's
+  settings and grants. Unit tests on a fake server of the source's queries (snapshot in batches and
+  resumed, windows halved, a lone transaction in pages, two capture instances, a table added while
+  following, DDL, cleanup past the position, change tracking, every query's and emit's failure):
+  98.6 % of statements, race-clean. Interop (`test/sync/mssql_source_test.go`) passed twice on SQL
+  Server 2019 and 2022: a table of 500 rows written to by 300 transactions of inserts, updates,
+  deletes and key changes while its snapshot and changes are read, killed at random points, ends
+  equal by key, with CDC and with change tracking; a second table captured while the pipeline runs,
+  rows already in it, is read whole and followed; a column added is a DDL record; a table named and
+  not captured fails the connection test with the `sp_cdc_enable_table` call.
+
+**Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
+
+1. **Namespace `schema.table`**, the database a param, as PostgreSQL's source writes it; the key the
+   primary key, else the unique index CDC was enabled with, else `keys`. Alternative:
+   `database.schema.table`.
+2. **Windows of transactions from `cdc.lsn_time_mapping`**: up to `window_transactions` (1000)
+   transactions, every table's changes in them read and ordered by LSN, then `__$seqval`, then
+   operation, held in memory up to `window_rows` (10000); a window with more is halved, and a single
+   transaction with more is read a table at a time in pages of `window_rows` (`TOP ... WITH TIES` on
+   the sequence value, so an update's two rows never split): such a transaction's records come table
+   by table, not in the server's order across tables. Alternative: a connection per capture instance
+   and a streaming merge (no MARS on one connection).
+3. **The snapshot reads each batch in a snapshot isolation transaction where the database allows
+   it, read committed otherwise** (short shared locks, never `NOLOCK`, which reads uncommitted
+   rows); it is handed over at CDC's highest LSN read before the tables are found, saved as the
+   start before the first record (I175). Alternative: refuse to snapshot without snapshot isolation.
+4. **Tables CDC begins to capture are found when the source is caught up and the list of capture
+   instances changed**, and are those whose instances were all created after the position's
+   `Since` (the server's clock when the tables were last found, kept in the checkpoint): each is read
+   whole, then followed from its instance's start. Changes of such a table between its capture's
+   start and its discovery are covered by its snapshot. Alternative: a fixed rediscovery interval.
+5. **A table's capture instances are read in turn**, each from its start to the next one's, so a
+   schema change's new instance is followed without a snapshot; an older instance dropped before its
+   changes were read loses them unnoticed (open).
+6. **Cleanup is detected by `cdc.lsn_time_mapping`'s oldest LSN** being past the checkpoint's: the
+   pipeline fails asking for a new snapshot, conservatively (it may fail when nothing of the read
+   tables was removed). Alternative: compare each capture instance's minimum LSN, which a new instance
+   also moves.
+7. **A table named whole in `tables` must be captured** (the error gives the `sp_cdc_enable_table`
+   call); a glob matches the captured tables only, so that tables added later are picked up; no table
+   at all is an error. Alternative: every glob match must be captured.
+8. **Commit times** are `lsn_time_mapping`'s `tran_end_time`, in the server's clock, turned into UTC
+   with the server's UTC offset read at connect (`SYSDATETIMEOFFSET`): a daylight saving change while
+   a pipeline runs shifts them by the change until it reconnects.
+9. **DDL records** come from `cdc.ddl_history`, of the table's namespace, with the statement in
+   after's `statement`, without a position; CDC itself captures new columns only in a new capture
+   instance (decision 5).
+10. **Change tracking** (`mode change_tracking`): every poll reads every table's keys changed after
+    the checkpoint's version up to the current one, by key in pages, all in one snapshot isolation
+    transaction where allowed, the rows joined back; a poll's records are one transaction
+    (`ct-<version>`), a row gone a delete, updates without a row before; a primary key is required;
+    tables are found at each start only (no pick-up while running).
+11. **Values**: `time` as text (`hh:mm:ss.fffffff` to its scale), `uniqueidentifier` as its text,
+    `datetimeoffset` as the instant, `datetime2` and `datetime` as times in UTC (their clock),
+    `date` as a date, `money` as a decimal, `xml` as a string, `sql_variant` as its base value.
+12. **Left out**: jobs read the snapshot table by table, not in chunks (no `Chunker`); no lag is
+    reported; the checkpoint moves only on records of the tables read, so transactions of other
+    captured tables are read again after a restart.
+13. **`ConnParams` and `WireConfig` are exported** from `sync/mssql`, for I217's sink to share the
+    connection's params and their checks.
 
 ### I217 SQL Server as a sink
 

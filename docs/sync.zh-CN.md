@@ -162,8 +162,10 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 | [MySQL、MariaDB、TiDB](#mysqlmariadb-与-tidb) | `mysql`：以副本身份读 binlog，无锁快照 | `mysql`：upsert 和 delete，保持源的事务 |
 | [经由 TiCDC 读取 TiDB](#经由-ticdc-读取-tidb) | `tidb`：在一个时间戳上读快照，再从 Kafka 读 changefeed | （用 `mysql` 目标） |
 | [PostgreSQL](#postgresql) | `postgres`：用 `pgoutput` 做逻辑复制，精确的快照 | `postgres`：`ON CONFLICT` upsert，`COPY` |
+| [SQL Server](#sql-server) | `mssql`：按 LSN 读 CDC 变更表，或 change tracking；无锁快照 | — |
 | [MongoDB](#mongodb) | `mongo`：按 `_id` 读快照，再读 change stream | `mongo`：按 `_id` 批量 upsert 和 delete |
 | [Kafka、Redpanda](#kafka-与-redpanda) | `kafka`：每个分区从检查点中的 offset 读 | `kafka`：带键消息，批量、压缩 |
+| [MQTT](#mqtt) | `mqtt`：持久会话，QoS 1 与 2 在目标拿到后确认 | `mqtt`：主题模板、QoS、可选保留 |
 | [Redis、Valkey](#redis-与-valkey) | `redis`：用 `XREAD` 读流 | `redis`：`XADD`，或每条记录一个键 |
 | [S3 及兼容存储](#s3-及兼容存储) | `s3`：前缀下的对象，按键的顺序，逐行 | `s3`：由行组成的对象，按大小和时间滚动 |
 | [插件](#插件) | `wasm`：经 fit 的 HTTP 客户端轮询的插件 | `wasm`：经它写出的插件 |
@@ -459,6 +461,45 @@ sync {
 两者默认都用 `sslmode verify-full` 的 TLS（还有 `verify-ca`、`require`、`disable`）和 SCRAM-SHA-256，服务器提供通道绑定时
 使用它；MD5 和明文密码被拒绝。流水线永久移除时，请删除复制槽（`SELECT pg_drop_replication_slot('fit_orders')`）。
 
+### SQL Server
+
+`mssql` 源经 SQL Server 的 CDC 变更表跟随 SQL Server 2016 及以后的版本（测试过 2019 与 2022），变更表由 SQL Server Agent
+的捕获作业从事务日志填充。`snapshot initial`（默认）时，没有检查点的流水线先读取 CDC 的最高 LSN，再按键读取各表的所有行，
+每次 `batch_size`（1000）行，数据库允许时每批在快照隔离的事务中读取（`ALLOW_SNAPSHOT_ISOLATION ON`），否则用读已提交；
+之后变更从那个 LSN 开始，因此快照期间的变更会再来一次，与 MySQL 源一样。追上之后每隔 `poll_interval`（1s）轮询变更表，
+每次最多 `window_transactions`（1000）个事务，每个事务的变更跨表按服务器产生的顺序一起交出：更新带有变更前后的行（键
+也可能改变），删除带有被删的行，CDC 记在 `cdc.ddl_history` 中的 DDL 作为 `ddl` 记录。检查点是所有目标都拿到的最后一个
+事务的 LSN。变更行超过 `window_rows`（10000）的窗口会缩小后重读，超过它的单个事务分页读取。记录的命名空间为
+`schema.table`，键为主键（或启用 CDC 时指定的唯一索引，或 `keys`）。
+
+`tables` 中完整写出名称的表必须被捕获，否则流水线失败，并给出捕获它的 `sys.sp_cdc_enable_table` 调用；`dbo.*` 这样的
+通配模式匹配已被捕获的表，流水线运行期间 CDC 开始捕获的表会先整表读取，再跟随。表的第二个捕获实例（模式变化后建立，
+含新列）从其起点开始跟随，旧实例读到那里为止。比 CDC 清理所保留的（默认三天）更旧的检查点会让流水线停止：需要新的快照。
+`mode change_tracking` 改读 SQL Server 的 change tracking，对服务器更轻：读取检查点中的版本之后变更过的键，每行按当时的
+状态读回（行已不存在则为删除），一次轮询中所有表的变更是一个事务；两次轮询之间的变更合并为最后一个，更新没有变更前的行。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-from-mssql {
+		source mssql {
+			address mssql.internal:1433
+			username fit_cdc
+			password_env MSSQL_PASSWORD
+			database shop
+			tables dbo.orders sales.*
+			ca_file /etc/fit/mssql-ca.pem
+		}
+		sinks search {
+			sink elasticsearch { urls https://es:9200; username fit; password_env ES_PASSWORD }
+		}
+	}
+}
+```
+
+连接默认使用 TLS（`encrypt on`，在 TDS 的 pre-login 中协商，服务器证书按 `ca_file` 或系统根证书校验），TDS 8 用 `strict`
+（SQL Server 2022），或 `off`；只支持 SQL 登录，不支持 Windows 或 Entra ID 认证。
+
 ### MongoDB
 
 `mongo` 源读取 MongoDB 6.0 及以后的副本集，或经 `mongos` 读取分片集群：先按 `_id` 读集合的快照（`snapshot initial`），
@@ -521,6 +562,51 @@ sync {
 	}
 }
 ```
+
+### MQTT
+
+`mqtt` 源以持久会话订阅 MQTT broker（3.1.1 或 5：EMQX、Mosquitto、HiveMQ、VerneMQ）上的主题过滤器，会话由 `client_id`
+命名，fit 不在时 broker 保留该会话以及发给它的 QoS 1 与 2 消息（版本 5 中为 `session_expiry`，24h）。QoS 1 或 2 的消息只在
+所有目标都拿到其记录后才按到达顺序确认（`PUBACK`，或 `PUBREC` 后 `PUBCOMP`），因此在目标写入之前停止或被 kill 的流水线会
+从 broker 再次收到它：对幂等目标至少一次，QoS 2 的消息在一个连接内只取一次。检查点不保存可续读的位置：会话就是位置。
+一条消息是一条记录，命名空间为主题（或 `namespace`），键为主题，除非编解码器设了键；没有 `codec` 时其 after 含 `topic`、
+`payload`（字节）、`qos`、`retain`，在版本 5 中还有消息带有的属性（`content_type`、`response_topic`、`correlation_data`、
+`user_properties`）。作业中，源一直读到 `idle`（5s）内没有消息到来。
+
+`mqtt` 目标把每条记录以 `qos`（1）发布到 `topic`（`{namespace}`，也可用 `{key}`），`retain` 时保留；一批消息按顺序发出，
+未确认的最多 `max_inflight`（64）条，broker 确认了每一条后这批才算写入。负载为编解码器的编码，没有编解码器时为 after 的
+`payload`，因此经源与目标复制的主题逐字节不变，版本 5 的属性也保留。`retain` 时的删除是一条空的保留消息，它清除该主题。
+版本 5 的 broker 永久拒绝的发布（主题名无效、未授权、包过大）立即交给 `on_error`。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines sensors {
+		source mqtt {
+			servers emqx1:1883 emqx2:1883
+			client_id fit-sensors
+			topics sensors/+/temperature devices/#
+			qos 1
+			codec json
+		}
+		sinks archive {
+			sink mqtt {
+				servers mosquitto:8883
+				tls true
+				username fit
+				password_env MQTT_PASSWORD
+				topic archive/{namespace}
+				qos 2
+				retain true
+			}
+		}
+	}
+}
+```
+
+消息只在目标拿到后才确认，因此 broker 发出而未确认的消息数限制了一批的大小：EMQX 的 `mqtt.max_inflight` 默认 32，
+Mosquitto 的 `max_inflight_messages` 默认 20；请把它们以及版本 5 中源的 `receive_maximum`（128）调到高于目标的
+`batch.max_records`，或把 `batch.max_wait` 设短。每条流水线需要自己的 `client_id`：同一 ID 的第二个客户端会接管会话。
 
 ### Redis 与 Valkey
 
@@ -599,6 +685,8 @@ sync {
 | `postgres` | `wal_level = logical`；每条流水线有空余的 `max_replication_slots` 和 `max_wal_senders`；发布了更新或删除的每张表有主键或 `REPLICA IDENTITY` | `REPLICATION`、表的 `SELECT`，`create` 时还需创建 publication 的权限（表的所有者；`FOR ALL TABLES` 需超级用户） |
 | `mongo` | 副本集或分片集群（change stream 需要）；`full_document whenAvailable` 或 `full_document_before_change` 需在集合上开启 `changeStreamPreAndPostImages`；oplog 窗口长于流水线可能停止的时间 | 数据库的 `read`（所有数据库则为 `readAnyDatabase`） |
 | `tidb` | 在快照之前已启动的、写到 Kafka 的 TiCDC changefeed（`canal-json` 带 `enable-tidb-extension=true`，或 `simple`）；`tidb_gc_life_time` 长于快照所需时间 | 表的 `SELECT`；Kafka 源在该主题上的权限 |
+| `mssql` | 数据库与表开启 CDC（`sys.sp_cdc_enable_db`、`sys.sp_cdc_enable_table`），SQL Server Agent 在运行（其捕获作业填充变更表），清理保留时间长于流水线可能停止的时间（默认三天）；无锁快照需要 `ALLOW_SNAPSHOT_ISOLATION ON`；`mode change_tracking` 时数据库与表开启 change tracking | 表与 `cdc` 架构的 `SELECT`（`db_owner`，或给 `sp_cdc_enable_table` 的门控角色）；用 change tracking 时表的 `VIEW CHANGE TRACKING` |
+| `mqtt` | 持久会话保留足够久（EMQX 的 `session_expiry_interval`，Mosquitto 的 `persistence true` 与 `persistent_client_expiration`），fit 不在时排队的消息有足够空间（`max_mqueue_len`、`max_queued_messages`）；不要用 Mosquitto 的 `per_listener_settings true`，它会丢弃这些消息 | 主题的订阅权限 |
 | `kafka` | 保留时间长于流水线可能停止的时间 | 主题的 `Describe` 和 `Read`（不需要消费者组的权限：不加入组） |
 | `redis` | 流的裁剪速度不快于流水线的读取 | 流的键上的 `+xread`（或 `+@stream`） |
 | `elasticsearch` | 每次写入都让其值比上次更晚的游标字段（更新时间），以及表示删除的软删除字段 | 索引的 `read` 和 `view_index_metadata` |
@@ -631,6 +719,20 @@ PostgreSQL 在 `postgresql.conf` 中设置 `wal_level = logical`（需重启）�
 CREATE ROLE repl WITH LOGIN REPLICATION PASSWORD '...';
 GRANT SELECT ON public.orders, public.order_items TO repl;
 CREATE PUBLICATION fit_orders FOR TABLE public.orders, public.order_items;  -- or create true
+```
+
+SQL Server 在数据库中执行，且 SQL Server Agent 在运行：
+
+```sql
+ALTER DATABASE shop SET ALLOW_SNAPSHOT_ISOLATION ON;
+USE shop;
+EXEC sys.sp_cdc_enable_db;
+EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'orders', @role_name = N'fit_cdc_reader';
+CREATE LOGIN fit_cdc WITH PASSWORD = '...';
+CREATE USER fit_cdc FOR LOGIN fit_cdc;
+ALTER ROLE fit_cdc_reader ADD MEMBER fit_cdc;
+GRANT SELECT ON SCHEMA::dbo TO fit_cdc;
+GRANT SELECT ON SCHEMA::cdc TO fit_cdc;
 ```
 
 目标只需要写权限：表的 `INSERT`、`UPDATE` 和 `DELETE`（MySQL、PostgreSQL），`checkpoint sink` 的表还需 `CREATE`；
@@ -925,3 +1027,12 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 ```
 
 `SYNC_PREFIX` 和脚本列出的 `*_PORT` 变量可以在第一套旁边再运行一套；`KEEP=1` 保留容器供下次运行。
+
+第二批的服务器在加入这些家族（I222）之前有各自的脚本：`test/sync/mssql.sh` 启动 SQL Server 2022 与 2019（带 SQL Server
+Agent，在数据库 `fit_sync` 上开启 CDC 与 change tracking；amd64 镜像，在 arm64 上模拟运行），`test/sync/mqtt.sh` 启动
+Mosquitto 2 与 EMQX 5：
+
+```sh
+eval "$(test/sync/mssql.sh up)" && go test ./test/sync -run 'TestMSSQL' -v
+eval "$(test/sync/mqtt.sh up)" && go test ./test/sync -run 'TestMQTT' -v
+```

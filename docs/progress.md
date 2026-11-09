@@ -6776,6 +6776,40 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   varchar outside UTF-8 and code page 1252 comes as bytes; no Windows or Entra ID authentication;
   the decisions in the plan's I215 section, pending review.
 
+### I216 SQL Server as a source — done
+
+- **Source `mssql`** (`sync/mssql`, package `syncmssql`): a snapshot by key, each batch in snapshot
+  isolation where allowed, handed over at CDC's highest LSN read before it; then the CDC change tables
+  in windows of transactions from `cdc.lsn_time_mapping`, each transaction's changes together in the
+  server's order (updates with their row before, key changes, deletes), DDL from `cdc.ddl_history`,
+  the commit LSN in the checkpoint; a window too large halved, a lone transaction too large read in
+  pages; tables CDC begins to capture read whole then followed; a table's newer capture instance
+  followed from its start; cleanup past the checkpoint an error asking for a snapshot; checks with
+  the SQL that turns CDC (or change tracking) on. `mode change_tracking`: keys changed since the
+  version, rows read back.
+- **Tests**: unit tests on a fake of the source's queries, 98.6 % of statements, race-clean. Interop
+  (`test/sync/mssql_source_test.go`): SQL Server 2019 and 2022, a snapshot under writes and the
+  changes after it equal to the table across kills (CDC and change tracking), a table added to CDC
+  picked up, a DDL record, the check's error.
+- **Docs**: [SQL Server](sync.md#sql-server) and its server settings in the guide, both languages.
+- **Gaps**: no chunked jobs, no lag; an older capture instance dropped before its changes are read
+  loses them unnoticed; the sink is I217's; the decisions in the plan's I216 section, pending review.
+
+### I214 MQTT as a source and a sink — done
+
+- **Client** (`sync/mqtt/wire`, package `mqttwire`): MQTT 3.1.1 and 5, TLS, user and password,
+  keep-alive, persistent sessions, QoS 0, 1 and 2 both ways with acks the caller sends, topic filters
+  and `$share`, version 5 properties and topic aliases both ways, packet and in-flight bounds.
+- **Source and sink `mqtt`** (`sync/mqtt`, package `syncmqtt`): a persistent session whose QoS 1 and
+  2 messages are acknowledged only once every sink has their records; publishing to a topic template
+  at a QoS, retained or not, in-flight bounded, a batch written once the broker acknowledged each.
+- **Tests**: unit tests on a fake broker, 100 % of statements in both packages, race-clean. Interop
+  (`test/sync/mqtt_test.go`, `test/sync/mqtt.sh`): Mosquitto 2 and EMQX 5 in 3.1.1 and 5, QoS 1
+  across kills and while down, QoS 2 once, the sink read back, a job, TLS with a password.
+- **Docs**: [MQTT](sync.md#mqtt) in the guide, both languages.
+- **Gaps**: no enhanced authentication, will messages or UNSUBSCRIBE; the decisions in the plan's
+  I214 section, pending review.
+
 ### I186 Redis as a source and a sink — done
 
 - **Client** (`sync/redis/wire`, package `wire`): RESP2 and RESP3 over TCP or TLS; `HELLO 3` with

@@ -353,9 +353,9 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I211 | RabbitMQ 作为源（队列与 stream 队列，目标拿到后确认）与目标（publisher confirms） | I163 | todo |
 | I212 | NATS JetStream 作为源（持久 pull consumer，序号存入检查点）与目标（`Nats-Msg-Id` 去重） | I163 | todo |
 | I213 | Apache Pulsar 作为源（按消息 ID 的 reader，或订阅）与目标（序列号与代理去重） | I163 | todo |
-| I214 | MQTT 3.1.1 与 5 作为源（持久会话，QoS 1/2 在目标拿到后确认）与目标 | I163 | todo |
+| I214 | MQTT 3.1.1 与 5 作为源（持久会话，QoS 1/2 在目标拿到后确认）与目标 | I163 | done |
 | I215 | SQL Server 客户端：TDS 7.4、TLS、SQL 认证、带类型参数的 RPC、批量导入、取消 | I163 | done |
-| I216 | SQL Server 作为源：按 LSN 读 CDC 变更表，不加锁的快照在其 LSN 处衔接 | I215 | todo |
+| I216 | SQL Server 作为源：按 LSN 读 CDC 变更表，不加锁的快照在其 LSN 处衔接 | I215 | done |
 | I217 | SQL Server 作为目标：`MERGE` upsert、删除、批量导入，检查点写在目标中实现精确一次 | I215, I191 | todo |
 | I218 | Doris 与 StarRocks 作为目标（带 label 的 Stream Load、删除标记）与源（按游标轮询） | I172 | todo |
 | I219 | Loki 与 OpenTelemetry 日志作为目标（push API、OTLP/HTTP），文件到它们并对比 Promtail | I166 | todo |
@@ -5186,6 +5186,46 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：在 Docker 中与 EMQX 5 和 Mosquitto 2 互通；fit 被 kill 期间发布的 QoS 1 消息在其重启后全部投递；QoS 2 每条
   只投递一次。
 - **涉及**：`sync/mqtt`、`test/sync`、`docs`。
+- **已完成** 2026-11-10：包 `sync/mqtt/wire`（`mqttwire`）：`Dial` 与 `Config`（服务器、TLS、版本 3.1.1 或 5、用户名与密码、
+  keep-alive、clean start 或带过期时间的会话、receive maximum、topic alias maximum、包大小与在途数上限）、`Subscribe`、
+  `Messages`（以 receive maximum 为界的 channel）与 `Ack`（PUBACK，或 PUBREC 并在收到 PUBREL 后 PUBCOMP）、`Send`/`Publish`
+  及可等待的 `Delivery`、主题名与过滤器的检查和匹配（含 `$share`）、双向的 MQTT 5 属性（用户属性、消息过期、content type、
+  response topic、correlation data、双向主题别名），每个连接一个读 goroutine 和一个 keep-alive goroutine。包 `sync/mqtt`
+  （`syncmqtt`）：源与目标 `mqtt`，注册于 `modules/standard`；schema、参考、模板、`schema-zh.js`；指南中两种语言的
+  [MQTT](sync.zh-CN.md#mqtt)。针对进程内假 broker 的单元测试：两个包的语句覆盖率均为 100%，race 检查无误。互通
+  （`test/sync/mqtt_test.go`、`test/sync/mqtt.sh`）在 Mosquitto 2.0.22 与 EMQX 5.8.6 上、3.1.1 与 5 下通过：流水线在随机点被
+  kill 时以及停止期间发布的 QoS 1 消息在重启后全部到达（在 `written` 处 kill 后有重复）；QoS 2 消息每条只到一次，优雅停止时
+  也是；目标的消息由订阅者读回，源以作业运行；经 TLS 的用户名与密码，错误密码被拒绝。互通发现 3.1.1 的 broker 会在 SUBACK
+  之前发送会话中排队的消息，多于客户端 channel 的容量（已修复：源在自己的 goroutine 上订阅，同时接收消息）。
+
+**待审查的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **不设编解码器时用源自己的形式**，而非 Kafka 的 `raw`：after 含 `topic`、`payload`（字节）、`qos`、`retain` 以及消息带有的
+   版本 5 属性；目标不设编解码器时发布 after 的 `payload`，因此经两者复制的主题逐字节不变。原因：为 `Raw` 引入 sync/kafka
+   会带入其客户端，而 MQTT 的元数据在记录中没有别的位置。备选：把 `Raw` 移入 `sync` 并作为默认。
+2. **记录的键是其主题**，除非编解码器设了键：保留的主题类似压缩主题的键，同键的记录在目标的通道中保持顺序。备选：无键。
+3. **用户属性**为 map；同名多次出现时值为数组。备选：键值对数组。
+4. **QoS 2 在 PUBLISH 时交出，PUBREC 留到目标拿到后**，收到 PUBREL 时发送 PUBCOMP，已持有 ID 的重复 PUBLISH 被丢弃：每个
+   连接一次，PUBREC 前崩溃则重投。备选：立即 PUBREC，崩溃时会丢消息。
+5. **连接比 `Run` 的 context 活得久**，直到 `Cleanup` 或下一次 `Run`，流水线排空时目标写入的记录的确认在 DISCONNECT 前发出，
+   以免多余的重投。
+6. **`Acknowledged` 只入队**；每个连接一个 goroutine 按顺序写确认；编解码器没有产生记录的消息随相邻消息一起释放。
+7. **作业中**源在订阅后读到 `idle`（5s）内没有消息，等每条消息都确认后结束；之后的消息留给下一次运行。备选：拒绝 once 模式。
+8. **每次 `Run` 都重新订阅**（主题可能已变），版本 5 中 retain handling 为 1，使保留消息不在每次重启时重发；3.1.1 的 broker
+   会重发，由幂等目标吸收。配置中去掉的过滤器不会被取消订阅。
+9. **目标的会话是 clean 的，client ID 随机**（`fit-sync-<random>`），除非另行设置：投递反正是至少一次。备选：持久会话，以
+   DUP 重发 QoS 2。
+10. **`retain` 时的删除是一条空的保留消息**，它清除该主题；否则为编解码器的编码。备选：`deletes` 参数。
+11. **重试无法解决的拒绝立即交给 `on_error`**：版本 5 的原因码 0x87、0x90、0x95、0x99、0x9A 与 0x9B，超过 broker 上限的包，
+    它不具备的功能，无效主题，编解码器的错误；超出配额（0x97）及其余的都会重试。
+12. **`Test` 用自己的 client ID 连接**（`<client_id>-test-<hex>`，clean 会话），因此不会接管运行中流水线的会话；源的还会订阅
+    并检查授予的 QoS。按 client ID 绑定 ACL 的 broker 可能拒绝测试的 ID。
+13. **上限**：双向包大小 1 MiB，源的 `receive_maximum` 128（最多约持有 128 个包），目标的 `max_inflight` 64，keep-alive 60s。
+14. **`servers` 是依次尝试的列表**，集群的各节点共享会话。
+15. **版本 3.1.1 在 provision 时拒绝没有用户名的密码**，与其协议一致。
+
+由此留下的问题：增强认证（AUTH 包会结束连接）、遗嘱消息与 UNSUBSCRIBE 尚未实现；I222 加入家族之后 `test/sync/run.sh` 才会运行
+`mqtt.sh`。
 
 ### I215 SQL Server 客户端：TDS、认证与查询
 
@@ -5256,6 +5296,46 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 - **完成标准**：与 SQL Server 2019 和 2022 互通：在写入下读取快照并继续读取变更，跨多次 kill 后与源相同；新加入 CDC 的表
   会被读取。
 - **涉及**：`sync/mssql`、`test/sync`、`docs`。
+- **已完成** 2026-11-10：包 `sync/mssql`（`syncmssql`），源 `mssql`（`source.go`、`snapshot.go`、`cdc.go`、`ct.go`），注册于
+  `modules/standard`；schema、参考、模板、`schema-zh.js`；指南中两种语言的 [SQL Server](sync.zh-CN.md#sql-server)，含服务器的
+  设置与授权。针对模拟源所用查询的假服务器的单元测试（分批读取并续读的快照、减半的窗口、分页读取的单个大事务、两个捕获
+  实例、跟随期间新加入的表、DDL、清理越过位置、change tracking、每个查询与每次 emit 的失败）：语句覆盖率 98.6%，race 检查
+  无误。互通（`test/sync/mssql_source_test.go`）在 SQL Server 2019 与 2022 上两次通过：一张 500 行的表在读取快照与变更期间
+  被 300 个含插入、更新、删除与改键的事务写入，在随机点被 kill，结束时按键相等，CDC 与 change tracking 皆然；流水线运行中
+  才被捕获、已有行的第二张表先整表读取再跟随；新增的列成为 DDL 记录；被点名却未捕获的表让连接测试失败，并给出
+  `sp_cdc_enable_table` 调用。
+
+**待审查的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
+
+1. **命名空间为 `schema.table`**，数据库是参数，与 PostgreSQL 源的写法一致；键为主键，否则为启用 CDC 时指定的唯一索引，否则
+   为 `keys`。备选：`database.schema.table`。
+2. **按 `cdc.lsn_time_mapping` 的事务分窗口**：最多 `window_transactions`（1000）个事务，读取其中所有表的变更并按 LSN、
+   `__$seqval`、操作排序，内存中最多持有 `window_rows`（10000）行；超过时窗口减半，超过它的单个事务按表依次以 `window_rows`
+   分页读取（对序列值用 `TOP ... WITH TIES`，更新的两行不会被拆开）：这样的事务的记录按表依次到来，而不是服务器跨表的
+   顺序。备选：每个捕获实例一个连接并流式归并（一个连接上没有 MARS）。
+3. **快照的每一批在数据库允许时于快照隔离事务中读取，否则用读已提交**（短暂的共享锁，从不用读取未提交行的 `NOLOCK`）；
+   它在发现表之前读到的 CDC 最高 LSN 处衔接，并在第一条记录前保存为起点（I175）。备选：没有快照隔离时拒绝做快照。
+4. **CDC 新开始捕获的表在源追上且捕获实例列表变化时被发现**，即所有实例都创建于位置的 `Since`（上次发现表时服务器的
+   时钟，保存在检查点中）之后的表：每张先整表读取，再从其实例的起点跟随。这类表在捕获开始与被发现之间的变更由其快照
+   覆盖。备选：固定的重新发现间隔。
+5. **表的多个捕获实例依次读取**，每个从其起点读到下一个的起点，因此模式变化产生的新实例无需快照即可跟随；在其变更被读取
+   之前删掉的旧实例会无声地丢失这些变更（未解决）。
+6. **以 `cdc.lsn_time_mapping` 最旧的 LSN 越过检查点的 LSN 判定清理**：流水线失败并要求新的快照，偏保守（所读的表即使没有
+   被删除的内容也可能失败）。备选：比较每个捕获实例的最小 LSN，但新实例也会移动它。
+7. **`tables` 中完整写出名称的表必须被捕获**（错误中给出 `sp_cdc_enable_table` 调用）；通配模式只匹配已捕获的表，以便之后
+   加入的表被接上；一张表也没有则报错。备选：通配匹配到的每张表都必须被捕获。
+8. **提交时间**取 `lsn_time_mapping` 的 `tran_end_time`，为服务器时钟，用连接时读到的服务器 UTC 偏移（`SYSDATETIMEOFFSET`）
+   转为 UTC：流水线运行期间的夏令时切换会让它们偏移，直到重新连接。
+9. **DDL 记录**来自 `cdc.ddl_history`，命名空间为该表的，语句放在 after 的 `statement` 中，不带位置；CDC 本身只在新的捕获
+   实例中捕获新列（决定 5）。
+10. **Change tracking**（`mode change_tracking`）：每次轮询读取所有表在检查点版本之后、当前版本及以前变更的键，按键分页，
+    允许时全部在一个快照隔离事务中，并连接回行；一次轮询的记录是一个事务（`ct-<version>`），不存在的行为删除，更新没有
+    变更前的行；需要主键；表只在每次启动时发现（运行中不会接上新表）。
+11. **值**：`time` 为文本（按其精度的 `hh:mm:ss.fffffff`），`uniqueidentifier` 为其文本，`datetimeoffset` 为时刻，`datetime2`
+    与 `datetime` 为 UTC 时间（其钟面），`date` 为日期，`money` 为十进制数，`xml` 为字符串，`sql_variant` 为其基础值。
+12. **未包括**：作业逐表读取快照，不分块（没有 `Chunker`）；不报告延迟；检查点只随所读表的记录前进，因此其他被捕获表的事务
+    在重启后会被再次读取。
+13. **`ConnParams` 与 `WireConfig` 从 `sync/mssql` 导出**，供 I217 的目标共用连接参数及其检查。
 
 ### I217 SQL Server 作为目标
 

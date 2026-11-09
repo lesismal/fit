@@ -193,8 +193,10 @@ after the same backoff, for as long as it fails: a source is expected to come ba
 | [MySQL, MariaDB, TiDB](#mysql-mariadb-and-tidb) | `mysql`: the binlog as a replica, a snapshot without locks | `mysql`: upserts and deletes, the source's transactions kept |
 | [TiDB through TiCDC](#tidb-through-ticdc) | `tidb`: a snapshot at a timestamp, then a changefeed from Kafka | (the `mysql` sink) |
 | [PostgreSQL](#postgresql) | `postgres`: logical replication with `pgoutput`, an exact snapshot | `postgres`: `ON CONFLICT` upserts, `COPY` |
+| [SQL Server](#sql-server) | `mssql`: CDC's change tables by LSN, or change tracking; a snapshot without locks | — |
 | [MongoDB](#mongodb) | `mongo`: a snapshot by `_id`, then the change stream | `mongo`: bulk upserts and deletes by `_id` |
 | [Kafka, Redpanda](#kafka-and-redpanda) | `kafka`: every partition from offsets in the checkpoint | `kafka`: keyed messages, batched, compressed |
+| [MQTT](#mqtt) | `mqtt`: a persistent session, QoS 1 and 2 acknowledged after the sinks | `mqtt`: a topic template, a QoS, retained or not |
 | [Redis, Valkey](#redis-and-valkey) | `redis`: streams with `XREAD` | `redis`: `XADD`, or a key per record |
 | [S3 and compatibles](#s3-and-compatibles) | `s3`: objects under a prefix, in key order, as lines | `s3`: objects of lines, rolled by size and time |
 | [Plugins](#plugins) | `wasm`: a plugin polling through fit's HTTP client | `wasm`: a plugin writing through it |
@@ -528,6 +530,56 @@ SCRAM-SHA-256, with channel binding when the server offers it; MD5 and cleartext
 refused. Drop the slot (`SELECT pg_drop_replication_slot('fit_orders')`) when a pipeline goes for
 good.
 
+### SQL Server
+
+The `mssql` source follows SQL Server 2016 and later (2019 and 2022 tested) through its CDC change
+tables, which SQL Server Agent's capture job fills from the transaction log. With `snapshot initial`
+(the default) a pipeline without a checkpoint first reads CDC's highest LSN, then every row of the
+tables by key, `batch_size` (1000) at a time, each batch in a transaction of snapshot isolation when
+the database allows it (`ALLOW_SNAPSHOT_ISOLATION ON`), read committed otherwise; the changes then
+start at that LSN, so what changed during the snapshot comes again, as the MySQL source's does. The
+change tables are polled every `poll_interval` (1s) once caught up, up to `window_transactions`
+(1000) transactions at a time, and the changes of each transaction are handed on together, in the
+order the server made them, across the tables: an update with its row before and after (a key
+changed too), a delete with the row it removed, a DDL that CDC recorded in `cdc.ddl_history` as a
+`ddl` record. The checkpoint is the LSN of the last transaction every sink has. A window of more than
+`window_rows` (10000) changed rows is read again smaller, and a single transaction of more is read in
+pages. Records are of namespace `schema.table`, keyed by the primary key (or the unique index CDC was
+enabled with, or `keys`).
+
+A table named whole in `tables` must be captured, or the pipeline fails with the
+`sys.sp_cdc_enable_table` call that captures it; a glob such as `dbo.*` matches the captured tables,
+and a table CDC begins to capture while the pipeline runs is read whole, then followed. A second
+capture instance of a table (made after a schema change, with the new columns) is followed from its
+start, the older one up to there. A checkpoint older than what CDC's cleanup keeps (three days by
+default) stops the pipeline: a new snapshot is needed. `mode change_tracking` reads SQL Server's change
+tracking instead, lighter on the server: the keys changed since the version in the checkpoint, each
+row read back as it is then (a row gone a delete), every table's changes of one poll a transaction;
+changes between two polls are merged into the last, and updates have no row before.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-from-mssql {
+		source mssql {
+			address mssql.internal:1433
+			username fit_cdc
+			password_env MSSQL_PASSWORD
+			database shop
+			tables dbo.orders sales.*
+			ca_file /etc/fit/mssql-ca.pem
+		}
+		sinks search {
+			sink elasticsearch { urls https://es:9200; username fit; password_env ES_PASSWORD }
+		}
+	}
+}
+```
+
+The connection is TLS by default (`encrypt on`, negotiated in TDS's pre-login, the server's
+certificate checked against `ca_file` or the system's roots), `strict` for TDS 8 (SQL Server 2022),
+or `off`; SQL logins only, not Windows or Entra ID authentication.
+
 ### MongoDB
 
 The `mongo` source reads MongoDB 6.0 and later, a replica set or a sharded cluster through `mongos`:
@@ -596,6 +648,60 @@ sync {
 	}
 }
 ```
+
+### MQTT
+
+The `mqtt` source subscribes to topic filters on an MQTT broker (3.1.1 or 5: EMQX, Mosquitto, HiveMQ,
+VerneMQ) in a persistent session named by its `client_id`, which the broker keeps, with the QoS 1 and
+2 messages for it, while fit is away (`session_expiry`, 24h, in version 5). A QoS 1 or 2 message is
+acknowledged (`PUBACK`, or `PUBREC` then `PUBCOMP`) only once every sink has its records, in the order
+the messages came, so a pipeline stopped or killed before its sinks wrote a message gets it again from
+the broker: at least once into idempotent sinks, a QoS 2 message taken once within a connection. The
+checkpoint holds nothing to resume from: the session is the position. A message is a record of the
+topic's namespace (or `namespace`), keyed by the topic unless the codec sets a key; without a `codec`
+its after holds `topic`, `payload` (bytes), `qos`, `retain` and, in version 5, the properties it has
+(`content_type`, `response_topic`, `correlation_data`, `user_properties`). In a job the source reads
+until no message comes for `idle` (5s).
+
+The `mqtt` sink publishes each record to `topic` (`{namespace}`, with `{key}` too) at `qos` (1),
+retained with `retain`; a batch's messages go out in order, at most `max_inflight` (64)
+unacknowledged, and the batch is written once the broker acknowledged each. The payload is the codec's
+encoding, or, without one, after's `payload`, so a topic copied through the source and the sink stays
+byte for byte, with its version 5 properties. A delete with `retain` is an empty retained message,
+which clears the topic. A publish a version 5 broker refuses for good (topic name invalid, not
+authorized, packet too large) goes to `on_error` at once.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines sensors {
+		source mqtt {
+			servers emqx1:1883 emqx2:1883
+			client_id fit-sensors
+			topics sensors/+/temperature devices/#
+			qos 1
+			codec json
+		}
+		sinks archive {
+			sink mqtt {
+				servers mosquitto:8883
+				tls true
+				username fit
+				password_env MQTT_PASSWORD
+				topic archive/{namespace}
+				qos 2
+				retain true
+			}
+		}
+	}
+}
+```
+
+A message is acknowledged only once the sinks have it, so what a broker sends unacknowledged bounds a
+batch: EMQX's `mqtt.max_inflight` is 32 and Mosquitto's `max_inflight_messages` 20 by default; raise
+them, and the source's `receive_maximum` (128) in version 5, above the sinks' `batch.max_records`, or
+keep `batch.max_wait` short. Each pipeline needs a `client_id` of its own: a second client with the
+same ID takes the session over.
 
 ### Redis and Valkey
 
@@ -681,6 +787,8 @@ They are the [first pipeline](#a-first-pipeline)'s, and a quick way to try a tra
 | `postgres` | `wal_level = logical`; a free `max_replication_slots` and `max_wal_senders` per pipeline; a primary key or `REPLICA IDENTITY` on each table whose updates or deletes are published | `REPLICATION`, `SELECT` on the tables, and with `create` the right to create the publication (the tables' owner, or superuser for `FOR ALL TABLES`) |
 | `mongo` | a replica set or a sharded cluster (change streams need one); `changeStreamPreAndPostImages` on the collections for `full_document whenAvailable` or `full_document_before_change`; an oplog window longer than a pipeline may stop | `read` on the database (`readAnyDatabase` for every database) |
 | `tidb` | a TiCDC changefeed to Kafka (`canal-json` with `enable-tidb-extension=true`, or `simple`) started before the snapshot; `tidb_gc_life_time` longer than the snapshot | `SELECT` on the tables; the Kafka source's rights on the topic |
+| `mssql` | CDC on for the database and the tables (`sys.sp_cdc_enable_db`, `sys.sp_cdc_enable_table`), SQL Server Agent running (its capture job fills the change tables), a cleanup retention longer than a pipeline may stop (three days by default); `ALLOW_SNAPSHOT_ISOLATION ON` for snapshots without locks; with `mode change_tracking`, change tracking on for the database and the tables | `SELECT` on the tables and on the `cdc` schema (`db_owner`, or the gating role given to `sp_cdc_enable_table`); `VIEW CHANGE TRACKING` on the tables with change tracking |
+| `mqtt` | persistent sessions kept long enough (EMQX's `session_expiry_interval`, Mosquitto's `persistence true` and `persistent_client_expiration`) and room for the messages queued while fit is away (`max_mqueue_len`, `max_queued_messages`); not Mosquitto's `per_listener_settings true`, which drops them | subscribe on the topics |
 | `kafka` | retention longer than a pipeline may stop | `Describe` and `Read` on the topics (no group rights: no group is joined) |
 | `redis` | streams trimmed no faster than the pipeline reads | `+xread` (or `+@stream`) on the streams' keys |
 | `elasticsearch` | a cursor field every write sets later than the last (an update time), and a soft-delete field for deletes | `read` and `view_index_metadata` on the indices |
@@ -713,6 +821,20 @@ For PostgreSQL, `wal_level = logical` in `postgresql.conf` (a restart), then:
 CREATE ROLE repl WITH LOGIN REPLICATION PASSWORD '...';
 GRANT SELECT ON public.orders, public.order_items TO repl;
 CREATE PUBLICATION fit_orders FOR TABLE public.orders, public.order_items;  -- or create true
+```
+
+For SQL Server, in the database, with SQL Server Agent running:
+
+```sql
+ALTER DATABASE shop SET ALLOW_SNAPSHOT_ISOLATION ON;
+USE shop;
+EXEC sys.sp_cdc_enable_db;
+EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'orders', @role_name = N'fit_cdc_reader';
+CREATE LOGIN fit_cdc WITH PASSWORD = '...';
+CREATE USER fit_cdc FOR LOGIN fit_cdc;
+ALTER ROLE fit_cdc_reader ADD MEMBER fit_cdc;
+GRANT SELECT ON SCHEMA::dbo TO fit_cdc;
+GRANT SELECT ON SCHEMA::cdc TO fit_cdc;
 ```
 
 The sinks need write rights only: `INSERT`, `UPDATE` and `DELETE` on the tables (MySQL, PostgreSQL),
@@ -1048,3 +1170,12 @@ SYNC_FAMILIES=matrix MATRIX_SERVERS="search mysql postgres mongo" PG_VERSIONS="1
 
 `SYNC_PREFIX` and the `*_PORT` variables the script lists run a second set beside the first; `KEEP=1`
 keeps the containers for the next run.
+
+The second round's servers have scripts of their own until they join the families (I222):
+`test/sync/mssql.sh` starts SQL Server 2022 and 2019 (with SQL Server Agent, CDC and change tracking on
+a database `fit_sync`; amd64 images, emulated on arm64), and `test/sync/mqtt.sh` Mosquitto 2 and EMQX 5:
+
+```sh
+eval "$(test/sync/mssql.sh up)" && go test ./test/sync -run 'TestMSSQL' -v
+eval "$(test/sync/mqtt.sh up)" && go test ./test/sync -run 'TestMQTT' -v
+```

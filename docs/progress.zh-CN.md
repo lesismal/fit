@@ -4781,6 +4781,32 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **缺口**：`strict` 尚未对真实服务器验证（镜像需要按 TDS 8 配置证书）；UTF-8 与代码页 1252 以外的 varchar 以字节返回；
   不支持 Windows 与 Entra ID 认证；计划 I215 一节中的决定，待审查。
 
+### I216 SQL Server 作为源 — 已完成
+
+- **源 `mssql`**（`sync/mssql`，包 `syncmssql`）：按键读取快照，允许时每批在快照隔离中读取，在快照前读到的 CDC 最高 LSN
+  处衔接；之后按 `cdc.lsn_time_mapping` 的事务分窗口读取 CDC 变更表，每个事务的变更按服务器的顺序一起交出（更新带变更前
+  的行、改键、删除），DDL 来自 `cdc.ddl_history`，提交 LSN 存入检查点；过大的窗口减半，过大的单个事务分页读取；CDC 新开始
+  捕获的表先整表读取再跟随；表的新捕获实例从其起点跟随；清理越过检查点时报错并要求快照；检查时给出开启 CDC（或 change
+  tracking）的 SQL。`mode change_tracking`：读取自该版本以来变更的键，并读回行。
+- **测试**：针对模拟源所用查询的假服务器的单元测试，语句覆盖率 98.6%，race 检查无误。互通
+  （`test/sync/mssql_source_test.go`）：SQL Server 2019 与 2022，写入下的快照与其后的变更跨多次 kill 后与表相同（CDC 与
+  change tracking），新加入 CDC 的表被接上，DDL 记录，检查的错误。
+- **文档**：指南中的 [SQL Server](sync.zh-CN.md#sql-server) 及其服务器设置，两种语言。
+- **缺口**：没有分块作业，不报告延迟；在其变更被读取前删掉的旧捕获实例会无声地丢失这些变更；目标属于 I217；计划 I216
+  一节中的决定，待审查。
+
+### I214 MQTT 作为源与目标 — 已完成
+
+- **客户端**（`sync/mqtt/wire`，包 `mqttwire`）：MQTT 3.1.1 与 5，TLS，用户名与密码，keep-alive，持久会话，双向的 QoS 0、1、2
+  且由调用方发送确认，主题过滤器与 `$share`，双向的版本 5 属性与主题别名，包大小与在途数上限。
+- **源与目标 `mqtt`**（`sync/mqtt`，包 `syncmqtt`）：持久会话，其 QoS 1 与 2 的消息只在所有目标拿到其记录后才确认；按 QoS
+  发布到主题模板，可选保留，在途数有界，broker 确认每一条后一批才算写入。
+- **测试**：针对假 broker 的单元测试，两个包的语句覆盖率均为 100%，race 检查无误。互通（`test/sync/mqtt_test.go`、
+  `test/sync/mqtt.sh`）：Mosquitto 2 与 EMQX 5，3.1.1 与 5，跨 kill 与停止期间的 QoS 1、只到一次的 QoS 2、读回目标的消息、
+  作业、带密码的 TLS。
+- **文档**：指南中的 [MQTT](sync.zh-CN.md#mqtt)，两种语言。
+- **缺口**：没有增强认证、遗嘱消息与 UNSUBSCRIBE；计划 I214 一节中的决定，待审查。
+
 ### I186 Redis 作为源与目标 — 已完成
 
 - **客户端**（`sync/redis/wire`，包 `wire`）：经 TCP 或 TLS 的 RESP2 与 RESP3；带 `AUTH` 与 `SETNAME` 的 `HELLO 3`，服务器
