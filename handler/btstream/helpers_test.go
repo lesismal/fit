@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -272,14 +273,24 @@ func (f *fit) must(t *testing.T, method, path string, want int, hdr ...string) r
 // the response's header read.
 func (f *fit) rawGet(t *testing.T, path string, rcvbuf int, hdr ...string) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	conn, err := net.Dial("tcp", strings.TrimPrefix(f.base, "http://"))
+	// The receive buffer is set before the connection is made: shrinking
+	// it on an established Linux connection leaves the window the peer was
+	// told, and TCP stalls for seconds at a time (zero-window probes).
+	d := net.Dialer{}
+	if rcvbuf > 0 {
+		d.Control = func(_, _ string, rc syscall.RawConn) error {
+			var serr error
+			if err := rc.Control(func(fd uintptr) { serr = setRcvbuf(fd, rcvbuf) }); err != nil {
+				return err
+			}
+			return serr
+		}
+	}
+	conn, err := d.Dial("tcp", strings.TrimPrefix(f.base, "http://"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	if rcvbuf > 0 {
-		_ = conn.(*net.TCPConn).SetReadBuffer(rcvbuf)
-	}
 	req := "GET " + path + " HTTP/1.1\r\nHost: fit\r\n"
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req += hdr[i] + ": " + hdr[i+1] + "\r\n"
