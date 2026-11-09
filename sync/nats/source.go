@@ -197,7 +197,7 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	s.pending, s.acked = nil, from.Seq
 	s.ackMu.Unlock()
 	s.ackStart.Do(s.startAcker)
-	if err := rd.consumer(ctx, true); err != nil {
+	if err := rd.consumer(ctx, true, false); err != nil {
 		return err
 	}
 	if r.From == nil {
@@ -237,7 +237,17 @@ type reader struct {
 	// the checkpoint says; emitted, the last sequence emitted; end, a
 	// job's last sequence, 0 in a stream.
 	done, emitted, end uint64
+	// dseq is the consumer sequence of the last delivery taken from a
+	// consumer fit made; check, whether the next must follow it.
+	dseq  uint64
+	check bool
 }
+
+// errLost is take's when a delivery of a consumer fit made is not the one
+// after the last taken: the consumer delivered messages this run never
+// read, a pull's answer lost to a reconnect, or a run killed before it,
+// which a consumer's info read while its leader moves can hide.
+var errLost = errors.New("nats: deliveries this run did not read")
 
 // consumer finds the consumer, or makes it, when the run starts (start) and
 // when a pull says it is gone. A consumer fit makes (create_consumer)
@@ -251,7 +261,16 @@ type reader struct {
 // it is, from its acknowledgement floor, its ack policy explicit (or none,
 // at most once): under all, acknowledging a message would acknowledge one
 // delivered again before it and not read yet.
-func (rd *reader) consumer(ctx context.Context, start bool) error {
+//
+// A consumer fit makes is made again too, from the floor, when it delivered
+// messages this run never read, which a later message acknowledged under
+// ack all would acknowledge unread: when take finds a gap in its consumer
+// sequence, which every delivery raises, redeliveries too (fresh), and
+// when, found again after a pull failed (409), it delivered past the last
+// delivery taken (to that pull). A consumer's info read while its leader
+// moves can say nothing is pending when a killed run left messages
+// delivered; the gap shows it at the first delivery.
+func (rd *reader) consumer(ctx context.Context, start, fresh bool) error {
 	s := rd.s
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
@@ -275,7 +294,8 @@ func (rd *reader) consumer(ctx context.Context, start bool) error {
 		if ci != nil {
 			floor = max(floor, ci.AckFloor.Stream)
 		}
-		if ci != nil && start && (ci.NumAckPending > 0 || ci.Delivered.Stream > floor) {
+		lost := fresh || !start && ci != nil && ci.Delivered.Consumer != rd.dseq
+		if ci != nil && (lost || start && (ci.NumAckPending > 0 || ci.Delivered.Stream > floor)) {
 			if err := rd.c.DeleteConsumer(ctx, s.Stream, s.Consumer); err != nil && !natswire.IsAPIError(err, natswire.ErrCodeConsumerNotFound) {
 				return fmt.Errorf("nats: consumer %s of %s: %w", s.Consumer, s.Stream, err)
 			}
@@ -289,6 +309,7 @@ func (rd *reader) consumer(ctx context.Context, start bool) error {
 		if start {
 			rd.done = max(floor, ci.AckFloor.Stream)
 		}
+		rd.dseq, rd.check = ci.Delivered.Consumer, true
 	}
 	if start {
 		rd.emitted = rd.done
@@ -357,20 +378,32 @@ func (rd *reader) loop(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		lost := false
 		for _, m := range msgs {
-			if err := rd.take(m); err != nil {
+			if err := rd.take(m); errors.Is(err, errLost) {
+				// Those after it come again from the consumer made again.
+				lost = true
+				break
+			} else if err != nil {
 				return err
 			}
 			if rd.end > 0 && rd.emitted >= rd.end {
 				return nil
 			}
 		}
+		if lost {
+			if err := rd.consumer(ctx, false, true); err != nil {
+				return err
+			}
+			idle = false
+			continue
+		}
 		var se *natswire.StatusError
 		switch {
 		case errors.As(err, &se) && se.Status == 409:
 			// The consumer was deleted, or its leader moved: found again,
 			// or made again after what the sinks have.
-			if err := rd.consumer(ctx, false); err != nil {
+			if err := rd.consumer(ctx, false, false); err != nil {
 				return err
 			}
 		case err != nil && !errors.Is(err, context.DeadlineExceeded):
@@ -408,6 +441,12 @@ func (rd *reader) take(m *natswire.Msg) error {
 		return err
 	}
 	s := rd.s
+	if rd.check {
+		if meta.ConsumerSeq != rd.dseq+1 {
+			return errLost
+		}
+		rd.dseq = meta.ConsumerSeq
+	}
 	if meta.StreamSeq <= rd.done {
 		return rd.c.Ack(m.Reply)
 	}

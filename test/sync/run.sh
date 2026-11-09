@@ -410,22 +410,28 @@ if has tidb; then
 fi
 
 # The second round's servers (I222), each family's script printing the
-# environment its tests read; a script that fails ends the run.
+# environment its tests read; a script that fails ends the run. up runs it
+# in an assignment of its own, which set -e ends the run on: an eval of a
+# command substitution would go on, with nothing in the environment.
+up() {
+	env_=$("$@")
+	eval "$env_"
+}
 if has mq; then
-	if mq_has rabbitmq; then eval "$(test/sync/rabbitmq.sh up)"; fi
-	if mq_has nats; then eval "$(test/sync/nats.sh up)"; fi
-	if mq_has pulsar; then eval "$(test/sync/pulsar.sh up)"; fi
+	if mq_has rabbitmq; then up test/sync/rabbitmq.sh up; fi
+	if mq_has nats; then up test/sync/nats.sh up; fi
+	if mq_has pulsar; then up test/sync/pulsar.sh up; fi
 fi
 if { has mq && mq_has mqtt; } || has obs; then
 	# obs's MQTT to InfluxDB test needs Mosquitto alone.
 	if ! has mq; then EMQX=0; fi
-	eval "$(EMQX=${EMQX:-1} test/sync/mqtt.sh up)"
+	up env EMQX="${EMQX:-1}" test/sync/mqtt.sh up
 fi
-if has mssql; then eval "$(test/sync/mssql.sh up)"; fi
-if has olap; then eval "$(test/sync/olap.sh up)"; fi
+if has mssql; then up test/sync/mssql.sh up; fi
+if has olap; then up test/sync/olap.sh up; fi
 if has obs; then
 	export OBS_PREFIX=${OBS_PREFIX:-$SYNC_PREFIX-obs}
-	eval "$(test/sync/obs.sh up)"
+	up test/sync/obs.sh up
 	export FIT_SYNC_OBS=1
 fi
 
