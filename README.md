@@ -48,6 +48,9 @@ iterations are done, 1.0's included, and 1.0's external security review is still
   the viewers a site's API signs [playback URLs that expire](docs/media-library.md#playback-urls-that-expire) for.
 - [Channels](docs/channels.md): a media library's items played as live streams, in order, shuffled
   or on a schedule, over every egress of the streaming role, and pushed on to RTMP and SRT servers.
+- [Sync](docs/sync.md): pipelines that move records from files, databases' changes, topics, indices
+  and buckets to other systems, as Filebeat, Canal, Debezium and DataX do, with checkpoints that lose
+  nothing, exactly once into transactional sinks, batch jobs and WASM plugins.
 - [Writing modules](docs/modules.md): extending fit with Go, built in with `fit build`.
 - [nginx, Caddy and Traefik compared](docs/comparison.md): what fit takes from each.
 - [Roadmap](docs/roadmap.md): goals, design principles and milestones.

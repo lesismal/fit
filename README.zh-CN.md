@@ -39,6 +39,8 @@ TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或�
   [会过期的播放地址](docs/media-library.zh-CN.md#会过期的播放地址)的观众。
 - [频道](docs/channels.zh-CN.md)：把媒体库的条目作为直播流播放，按顺序、随机或按排期，经流媒体角色的每种出口播放，并可
   转推到 RTMP 和 SRT 服务器。
+- [同步](docs/sync.zh-CN.md)：把文件、数据库的变更、主题、索引和存储桶中的记录搬到其他系统的流水线，就像 Filebeat、
+  Canal、Debezium 和 DataX 那样，检查点不丢数据，对有事务的目标恰好一次，并有批处理作业和 WASM 插件。
 - [编写模块](docs/modules.zh-CN.md)：用 Go 扩展 fit，通过 `fit build` 编入。
 - [nginx、Caddy、Traefik 对比](docs/comparison.zh-CN.md)：fit 从三者各借鉴什么。
 - [路线图](docs/roadmap.zh-CN.md)：目标、设计原则和里程碑。

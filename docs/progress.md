@@ -6563,6 +6563,24 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   sink keeps the checkpoint; jobs read in chunks keep to their file; a source transaction committed in
   parts can still be written twice.
 
+### I194 Sync's documentation and examples — done
+
+- **Guide**: `docs/sync.md` and `docs/sync.zh-CN.md`: records, pipelines, checkpoints, at least once
+  and I191's exactly once, errors; every connector with a .conf config (each checked with `fit
+  validate`, the MySQL source's once I174 lands); what each source needs on its server (MySQL's binlog
+  settings and grants, PostgreSQL's `wal_level` and publication, MongoDB's replica set, Kafka's ACLs,
+  ...); the type mapping between systems; transforms, codecs and WASM plugins; jobs; the Admin API,
+  `fit sync` and the workbench; metrics and dead letters; snapshots, resets, moves, failures, limits.
+  Linked from the README and the configuration pages' `sync` row. The MySQL source (I174, I175) and
+  I192's matrix are marked `MERGE CHECK` for the merge.
+- **Examples** in fit-examples, branch `sync-examples` (not pushed): files to Elasticsearch, MySQL to
+  PostgreSQL (exactly once), PostgreSQL to Kafka, a WASM transform in Go; its test sets the password
+  variables to stand-ins and builds the plugin; go.mod at fit `7a793de`.
+- **Tests**: `go test ./docs` (TestLinks, TestConfigExamples); fit-examples' `go test` against this
+  fit through a local `replace`; the WASM example run with `fit sync run --once`.
+- **Gaps**: the decisions in the plan's I194 section, pending review; fit-examples' go.mod to move to a
+  pushed fit with I179, I185 and I174, and `sync-mysql-to-postgres` out of `noValidate` then.
+
 ### I186 Redis as a source and a sink — done
 
 - **Client** (`sync/redis/wire`, package `wire`): RESP2 and RESP3 over TCP or TLS; `HELLO 3` with

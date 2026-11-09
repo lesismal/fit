@@ -359,7 +359,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I209.
 | I191 | Exactly once into MySQL, TiDB and PostgreSQL: the checkpoint written in the sink's transaction | I176, I180 | done |
 | I192 | The interoperability and recovery matrix in CI | I176, I180, I183, I185 | todo |
 | I193 | Benchmarks against Filebeat, Canal, Debezium and DataX | I192 | todo |
-| I194 | Sync's documentation and examples | I190 | todo |
+| I194 | Sync's documentation and examples | I190 | done |
 | **Access** | | | |
 | I195 | Allow and deny lists of client addresses (whitelists and blacklists): a global `access`, and one on each listener, route, service and role that decides first; refused at accept through fib's `Binding.Filter` (A73) where it can be, per request or once a service is picked where it cannot; list files watched | — | done |
 | **BitTorrent** | | | |
@@ -6560,6 +6560,40 @@ review:
   fit-examples: files to Elasticsearch, MySQL to PostgreSQL, PostgreSQL to Kafka, a WASM transform.
 - **Done when**: links checked; each example runs in fit-examples' CI.
 - **Touches**: `docs`, fit-examples.
+
+**Decisions pending review** (made while building it, 2026-11-09; each stands until the user rules on it):
+
+1. **One guide, `docs/sync.md` and its Chinese twin**, linked from the README and the configuration
+   page's `sync` row: concepts, every connector with a .conf config that loads, what each source needs
+   on its server, the type mapping, transforms and codecs, plugins, jobs, the Admin API, `fit sync`
+   and the workbench, metrics, dead letters, operations and interop. Each field's description stays in
+   the generated reference, which the guide links to rather than repeats. Alternative: a page per
+   connector.
+2. **Four examples in fit-examples** (`sync-files-to-elasticsearch`, `sync-mysql-to-postgres` with
+   `checkpoint: "sink"`, `sync-postgres-to-kafka`, `sync-wasm-transform`), on a branch
+   `sync-examples` there, not pushed. "Runs in fit-examples' CI" is taken as `fit validate` in its
+   test, as every example there; only the WASM one runs without servers (file to stdout, checked by
+   hand with `fit sync run --once`). Running the others against servers is I192's matrix's, or a
+   Compose example later. Alternative: a Compose file per example, run in fit-examples' CI.
+3. **fit-examples' test sets the examples' password variables** (`ES_PASSWORD`, `KAFKA_PASSWORD`,
+   `MYSQL_PASSWORD`, `PG_PASSWORD`) to stand-ins, since `fit validate` reads `password_env` as `fit
+   run` does, and **builds the WASM plugin from its Go source** (`GOOS=wasip1`) before validating; the
+   4.5 MB `.wasm` is not committed (`.gitignore`). Alternative: a committed `.wasm`, or TinyGo's
+   smaller one (I165b).
+4. **`sync-mysql-to-postgres` is only adapted** (fit-examples' `noValidate`) until the fit its go.mod
+   requires has the `mysql` source (I174); its go.mod is moved to fit `7a793de` (origin's main),
+   which lacks I179 and I185, so the pinned job validates only once go.mod moves to a pushed fit
+   with I179, I185 and I174. The sync-examples branch is to be pushed with that bump.
+5. **The MySQL source's parts were written from I174's and I175's specs** before they merged, and
+   I192's matrix is not described yet: both are marked in the guide with `MERGE CHECK` comments
+   (hidden on GitHub) for the merge to check against the merged code. Alternative: leave them out
+   until merged.
+6. **The guide's configs were checked with `fit validate` while writing**, not by a permanent test:
+   `TestConfigExamples` covers the configuration pages, and the guide's MySQL source block cannot
+   load until I174. Once it can, `sync*.md` can join that test. Alternative: a test skipping blocks of
+   modules not registered.
+7. **Size**: about 1,000 lines of guide in English and 890 in Chinese; four examples and 30 lines of test in
+   fit-examples. Nothing of the plan is left out, but decision 2's runs against servers.
 
 ### Decisions pending review (2026-11-08)
 
