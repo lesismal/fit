@@ -180,6 +180,9 @@ func cases(e *env) []tc {
 		// it, an announce is served inline too, the store's lock held
 		// briefly, which bittorrent/tracker's tests drive.
 		{module: "bt_tracker", handler: `{"module": "bt_tracker"}`, status: 503, inline: true},
+		// Without a client role; with one, its index and files come from a
+		// snapshot in memory (handler/btpublish's tests).
+		{module: "bt_publish", handler: `{"module": "bt_publish"}`, status: 503, inline: true},
 		{module: "test_late", handler: lateHandler, status: 200},
 	}
 }
