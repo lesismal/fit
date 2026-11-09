@@ -12746,6 +12746,91 @@
           // "deny_files": [],
         // },
       // },
+
+      // // A store of the swarms that the trackers of several fit instances share, so that they answer
+      // // as one tracker: each keeps its own peers in memory, as without it, and shares them through
+      // // the store, answering an announce with peers of every instance and a scrape with the counts
+      // // of all. Each instance's swarms alone, in its memory, when left out. A change of it, or
+      // // adding or removing it, makes a new store: this instance's swarms start anew in memory
+      // // (clients announce again within their interval), the shared ones staying in the store. The
+      // // bounds max_torrents, max_peers_per_torrent and max_peers apply to the shared store too, to
+      // // all instances' peers together.
+      // // object.
+      // "store": {
+        // // Share the swarms through Redis 6.2 or later (or Valkey), a standalone server or a primary
+        // // (not Redis Cluster), with Lua scripts, each announce one script run, on Redis's clock. Its
+        // // maxmemory-policy must not evict keys (noeviction): the store bounds them instead.
+        // // object.
+        // "redis": {
+          // // The server's host and port. 127.0.0.1:6379 when left out.
+          // // string; default "127.0.0.1:6379".
+          // "address": "127.0.0.1:6379",
+
+          // // The ACL user to authenticate as, with password_file; the default user when left out.
+          // // string.
+          // "username": "fit",
+
+          // // A file holding the password to authenticate with, read at each connection; none when left
+          // // out.
+          // // string.
+          // "password_file": "/etc/fit/password",
+
+          // // The database selected. 0 when left out.
+          // // integer, 0 or more.
+          // "db": 0,
+
+          // // Connect over TLS.
+          // // boolean.
+          // "tls": true,
+
+          // // A PEM file with the CAs the server's certificate is verified with, over TLS; the system's
+          // // when left out.
+          // // string.
+          // "ca_file": "/etc/fit/ca.pem",
+
+          // // A PEM file with the client certificate sent over TLS; with key_file.
+          // // string.
+          // "cert_file": "/etc/fit/example.com.pem",
+
+          // // A PEM file with cert_file's private key.
+          // // string.
+          // "key_file": "/etc/fit/example.com.key",
+        // },
+
+        // // What the store's keys start with, as fit/bittorrent/tracker/t/<info hash>/s; the trackers
+        // // that answer as one share it. fit/bittorrent/tracker/ when left out.
+        // // string; default "fit/bittorrent/tracker/".
+        // "prefix": "fit/bittorrent/tracker/",
+
+        // // How long each round trip to the store may take, connecting included; past it the store
+        // // counts as unreachable, and is tried again after a back-off. 2s when left out.
+        // // duration, as "1.5s" or "2m"; default "2s".
+        // "request_timeout": "2s",
+
+        // // How often the peers of the torrents this instance serves are read from the store again, and
+        // // so how late an instance learns of another's peers. Read peers are used for three times this,
+        // // then only the instance's own. 5s when left out; at least 100ms, and shorter than interval.
+        // // duration, as "1.5s" or "2m"; default "5s".
+        // "refresh": "5s",
+
+        // // The most announces waiting to be written to the store, one per peer and torrent, a later
+        // // announce of a peer taking its earlier one's place; past it announces are still answered but
+        // // not shared, and counted as dropped. 65536 when left out or 0.
+        // // integer, 0 to 1048576; default 65536.
+        // "queue": 65536,
+
+        // // The most torrents whose shared peers this instance keeps a sample of; a torrent past it is
+        // // answered with this instance's own peers. A torrent leaves when nobody has announced or
+        // // scraped it here for peer_ttl; scrapes alone may fill three quarters. 4096 when left out or
+        // // 0.
+        // // integer, 0 to 1048576; default 4096.
+        // "cache_torrents": 4096,
+
+        // // How many seeders and how many leechers of a torrent's shared peers, picked at random, each
+        // // sample keeps, about 60 bytes each; announces get peers from it. 100 when left out or 0.
+        // // integer, 0 to 1000; default 100.
+        // "cache_peers": 100,
+      // },
     // },
   // },
 

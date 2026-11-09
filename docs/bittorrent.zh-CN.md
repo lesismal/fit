@@ -435,6 +435,8 @@ fit bt alt on                           # auto、on、off；不带参数时显�
 | `fit_bittorrent_tracker_torrents`、`fit_bittorrent_tracker_peers`、`fit_bittorrent_tracker_max_torrents`、`fit_bittorrent_tracker_max_peers`、`fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`、`fit_bittorrent_tracker_scrapes_total` | counter | |
 | `fit_bittorrent_tracker_refused_total` | counter | `reason`：`unregistered`、`passkey`、`access` |
+| `fit_bittorrent_tracker_store_reachable`、`fit_bittorrent_tracker_store_queued`、`fit_bittorrent_tracker_store_cached`（有共享存储时） | gauge | |
+| `fit_bittorrent_tracker_store_written_total`、`_dropped_total`、`_refused_total`、`_failed_total`（有共享存储时） | counter | |
 
 ## 页面
 
@@ -571,6 +573,37 @@ routes {
 **Swarm** 保存在内存中，即 fib 的 `MemoryStore`，重启后不保留：客户端会在其间隔内再次 announce。peer 在最后一次 announce
 之后 `peer_ttl`（1h）被遗忘，它必须长于 `interval`（30m）；没有 peer 的种子连同其完成次数一起被遗忘。
 
+**多个实例共享的存储**（I207）。设置 `store` 块后，多个 fit 实例的 tracker（在同一个名字之后，或列为同一层）经由 Redis 6.2
+或更高版本（或 Valkey）作为一个 tracker 应答：单机服务器或主节点，其 `maxmemory-policy` 为 `noeviction`。fib 的 tracker
+在读到请求的 worker 上询问存储并等待应答，所以共享存储在请求上从不等待 Redis：每个实例仍像没有它时一样在 fib 的
+`MemoryStore` 中保留自己的 peer，由存储自己的一个 goroutine 完成每次往返，每次不超过 `request_timeout`（2s）。announce
+进入队列（每个 peer 与种子一条，同一 peer 后来的 announce 取代之前的，最多 `queue` 条，65536），以 Lua 脚本流水线批量写入，
+每个 peer 一次脚本，以 Redis 的时钟为准（各实例的时钟不必一致）：每个种子的做种者和下载者分别存于按过期时间排序的有序集合，
+地址存于哈希，另有完成次数、种子索引和 peer 总数，每个脚本都使它们保持准确。对一个实例上 announce 或 scrape 过的每个种子，
+存储每 `refresh`（5s）读取一次共享 swarm 的随机样本：`cache_peers`（100）个做种者和同样多的下载者及其计数，最多
+`cache_torrents`（4096）个种子。announce 的应答先取样本中的 peer，再补上样本没有的本实例 peer，做种者只得到下载者，
+从不包括自己；announce 和 scrape 的计数取本实例与共享计数中较大者。因此一个实例在一个 refresh 内得知另一个实例的 peer，
+而**一个实例尚未服务过的种子，其第一次 announce 只得到本实例的 peer**（下一次才得到整个集群的）：fib 的 `Store` 同步应答，
+异步的 Store 是对 fib 的请求。
+
+```fit
+bittorrent {
+	tracker {
+		listen :6969
+		store {
+			redis { address redis.internal:6379; password_file /etc/fit/redis.pass }
+		}
+	}
+}
+```
+
+上限对共享存储同样适用，即所有实例的 peer 合计：索引中最多 `max_torrents` 个种子，一个 swarm 最多 `max_peers_per_torrent`
+个，总共最多 `max_peers` 个；超出上限的 announce 仍由实例内存应答，但不共享（计为被拒）。键从不自行过期：种子中过期的 peer
+由该种子的 announce 移除，每个实例每分钟移除至多 4096 个 peer 已全部过期的种子，所以每个种子四个键，另加两个。**Redis
+无法访问时**，tracker 继续依靠内存：announce 以本实例的 peer 和不超过三个 refresh 的样本应答，进入队列，Redis 恢复后写入
+（超出队列或早于 `peer_ttl` 的丢弃并计数）；退避 100ms 起、加倍到 `refresh`（最多 10s）后重试。请求从不因此被拒。它增加的
+内存是队列（每条约 100 字节）和样本（每个 peer 约 60 字节）。
+
 | 上限 | 默认 | 最多 |
 | --- | --- | --- |
 | `max_torrents`，同时跟踪的种子；再多一个以 "tracker is full" 拒绝 | 100000 | 1048576 |
@@ -600,14 +633,20 @@ passkey 被替换为 `REDACTED`。`public` 含 `play` 的策略让所有人进�
 `peer_ttl` 也一样（fib 的 `MemoryStore.SetConfig`），swarm 保留：调低的上限不丢弃任何东西，在存储回到上限以下之前拒绝新的
 种子或 peer；改短的 `peer_ttl` 使已保留超过新时长的 peer 过期。`interval`、`min_interval`、`max_numwant` 和 `max_scrape`
 在同一存储上新建 fib tracker，swarm 保留，UDP 连接 ID 仍然有效（角色保持同一个密钥）。`listen` 的更改会移动 UDP 端口；无法
-绑定时重载失败，tracker 保持原样。
+绑定时重载失败，tracker 保持原样。有共享存储时，上限和 `peer_ttl` 从此作用于它之后的写入（已共享的 peer 保留原过期时间）；
+更改、添加或移除 `store` 块会新建存储，本实例的 swarm 在内存中重新开始，共享的仍留在 Redis 中；无法建立（TLS 文件读不出）
+时重载失败。
 
 **统计。** 角色的 Go API 有 `Stats`（保存的种子和 peer、已服务的 announce 和 scrape、按原因的拒绝次数、上限）、
 `Torrent(hash)`（做种者、下载者、完成次数）以及 `Torrents`/`ListTorrents`：有允许列表时，按列表顺序给出其中种子的
 swarm，无论是否正在跟踪（`source` 为 `allow_list`）；公开 tracker 给出存储中有 peer 的种子，按 info hash 排序（`source` 为
 `store`），经 fib 的 `MemoryStore.Range` 逐个分片读取。每页最多 1000 个种子，按 `offset` 翻页，公开 tracker 还可按
 `after=<info hash>` 翻页（应答的 `next` 是下一页的起点，最后一页为 `""`）；一次调用在内存中只保留 `offset`+`limit` 个种子，
-耗时与跟踪的种子数成正比，因此要翻到大存储的深处应使用 `after`；每个种子的数字取自同一时刻。其控制台只读地提供
+耗时与跟踪的种子数成正比，因此要翻到大存储的深处应使用 `after`；每个种子的数字取自同一时刻。有共享存储时，`Stats`
+的种子和 peer 是共享存储中所有实例的，每个 refresh 读取一次（无法读取时为本实例的），其 `store` 说明存储的状况：`kind`、
+`reachable`、`error`、共享的与 `local_` 开头的本实例种子和 peer、`queued`、`cached`，以及 announce 的 `written`、
+`dropped`、`refused` 和 `failed`；列表是所有实例的种子，从 Redis 读取（`ZSCAN` 加计数，每次往返 512 个），无法读取时为
+本实例的；单个种子的数字取本实例与其样本中较大者。其控制台只读地提供
 `GET /api/stats`、`/api/torrents`（`offset`、`limit`、`after`）和 `/api/torrents/<hash>`，作为模块时为
 `/api/m/bittorrent.tracker/...`。Admin API 以 `/bittorrent/tracker/stats`、`/bittorrent/tracker/torrents[/<hash>]` 和 `/bittorrent/tracker/passkey?user=`
 提供它们，另有[指标](#指标)。

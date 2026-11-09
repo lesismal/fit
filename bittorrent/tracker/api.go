@@ -13,6 +13,7 @@ import (
 	fibtracker "github.com/lesismal/fib/bittorrent/tracker"
 
 	"github.com/lesismal/fit/app/console"
+	"github.com/lesismal/fit/bittorrent/tracker/sharedstore"
 	"github.com/lesismal/fit/config"
 )
 
@@ -44,6 +45,11 @@ type Stats struct {
 	// MaxTorrents and MaxPeers are the store's bounds.
 	MaxTorrents int `json:"max_torrents"`
 	MaxPeers    int `json:"max_peers"`
+	// Store is how the store the trackers of several instances share is
+	// doing, with a store block; Torrents and Peers are then the shared
+	// storage's, of every instance, as last read (its own while it cannot
+	// be read), and Store's local_torrents and local_peers this instance's.
+	Store *sharedstore.Status `json:"store,omitempty"`
 }
 
 // TorrentStats is one torrent's swarm.
@@ -73,6 +79,10 @@ func (r *Role) Stats() (Stats, error) {
 	}
 	if a := r.allow.Load(); a != nil {
 		out.Allowed = len(a.list)
+	}
+	if ss, ok := s.store.(*sharedstore.Store); ok {
+		st := ss.Status()
+		out.Store = &st
 	}
 	// Not r.mu, which an Apply holds while it binds: a console's request
 	// on a fib worker never waits for one.
@@ -140,6 +150,9 @@ func (r *Role) Torrents(offset, limit int) ([]TorrentStats, int, error) {
 // past after: a call takes time in the torrents tracked (at most
 // max_torrents) and memory in offset+limit only, so after is the way to
 // page far into a large store. Each torrent's numbers are as of one moment.
+// With a shared store, the list is of every instance's torrents, read from
+// the shared storage (its own torrents while that cannot be read), waiting
+// for it: call it off fib's workers.
 func (r *Role) ListTorrents(offset, limit int, after *metainfo.InfoHash) (TorrentList, error) {
 	s := r.cur.Load()
 	if s == nil {

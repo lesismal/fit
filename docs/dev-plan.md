@@ -374,7 +374,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I210.
 | I204 | The workbench's BitTorrent pages, `schema-zh.js`, the AI assistant's functions | I203 | done |
 | I205 | Interop with libtorrent and anacrolix, failure tests, benchmarks on the benchmark host, docs and an example | I198–I204 | done |
 | I206 | (second phase) The cluster's view of its members' torrents; spreading large files to members over BitTorrent | I203 | todo |
-| I207 | (second phase) A tracker store the cluster shares | I201 | todo |
+| I207 | (second phase) A tracker store the cluster shares | I201 | done |
 | I208 | (second phase) RSS auto-download | I198 | todo |
 | I209 | The roles use fib A80–A86: publishing hashes once and builds stop on a context, a public tracker's torrents listed and its bounds changed in place, the client's event queue bounded | I201, I202, I203 | done |
 
@@ -7750,6 +7750,87 @@ Open from it:
 - **Do**: a `tracker.Store` on fit's shared storage (redis, etcd), so trackers on several members
   answer as one.
 - **Touches**: `bittorrent`, fit's shared storage.
+- **Done** 2026-11-09 (branch `bt-i207`): package `bittorrent/tracker/sharedstore` (`store.go`,
+  `redis.go`), a fib `tracker.Store` with `MemoryStore`'s `Range`, `SetConfig`, `Config`, `Torrents`
+  and `Peers`. Each instance answers from its own fib `MemoryStore` at once; one goroutine of the
+  store's own does every Redis round trip (`request_timeout`): announces queued (bounded, coalesced by
+  peer and torrent, a completion kept through later announces) and written as pipelined Lua scripts
+  on Redis's clock (seeders and leechers in sorted sets by expiry, addresses in a hash, the completed
+  count, an index of torrents scored by their latest expiry, a peers counter, every change by a
+  script); a random sample (`ZRANDMEMBER`) of each served torrent's shared swarm and its counts read
+  every `refresh`; an announce answered with the sample's peers then the instance's own (a seeder
+  gets leechers only, never itself, expired ones skipped), counts the larger of each; the bounds
+  enforced in Redis for all instances together; a sweep every minute of torrents whose peers all
+  expired; `Range` through `ZSCAN` on a second connection (the instance's own torrents while Redis
+  cannot be read). Config `bittorrent.tracker.store` (`redis` with acme's `RedisStorage` shape,
+  `prefix`, `request_timeout`, `refresh`, `queue`, `cache_torrents`, `cache_peers`) with checks
+  (Redis's checks shared with `acme.shared_storage` as `checkRedisStorage`); the role keeps its store
+  behind an interface, makes a new store when the block changes (before anything else, so a bad TLS
+  file leaves the role as it was), closes it on change and stop; `Stats.Store` and
+  `fit_bittorrent_tracker_store_*` metrics. Schema, reference, templates, `schema-zh.js`;
+  [BitTorrent](bittorrent.md)'s tracker section, metrics and reloads in both languages. Tests: the
+  store's cases (two instances seeing each other's peers, seeders getting leechers, scrapes and
+  completed counts across, stops; the shared bounds and SetConfig raising them; expiry and sweeping;
+  Range across instances and stopping; address families and numwant; Redis unreachable: answered
+  from memory, queued, written once back) against a real Redis in Docker (`redis:8.2.2`, skipped
+  without Docker, as `tlsmgr/sharedstore`'s) and against a fake; the queue, requeue, cache bounds and
+  eviction, the merge, stale samples, failed writes, more writes than a cycle takes; the TLS files;
+  the address codec and sample parsing; two tracker roles on two engines sharing one Redis through
+  fib's clients over HTTP and UDP (peers, scrape, statistics, list, metrics, reloads to a new prefix
+  and to memory); an unreachable store answering from memory, a bad TLS file refusing the reload;
+  the config's checks. Run: `go test -race` of `bittorrent/tracker/...`, `config`;
+  `go test ./schema/ ./app/workbench/ ./docs/ ./test/workers/`; vet, gofmt.
+
+**Decisions pending review** (made while building it, 2026-11-09; in force until the user rules):
+
+1. **Answer from memory, share in the background** rather than ask Redis on each request: fib's
+   `Server` calls `Store.Announce` on the worker and needs the answer before it returns, so a Redis
+   round trip there would block a worker (rule 1). Cost: an instance learns of others' peers within
+   `refresh`, and the first announce of a torrent it has not served yet gets only its own peers.
+   Alternatives: an asynchronous `Store` in fib (filed below), then ask Redis per announce.
+2. **Redis only**: etcd and Consul are consensus stores, each announce would be a Raft write, unfit
+   for a peer table written by every client every interval; the store's `backend` interface leaves
+   room for another kind. `store` takes `redis { ... }` in the shape of `acme.shared_storage.redis`
+   (one `RedisStorage` type), not a reference to acme's block. Alternative: etcd with leases.
+3. **Unreachable Redis: fall back to memory, never refuse**: announces are answered from the
+   instance's own peers and samples younger than three refreshes, queued (bounded) and written when
+   Redis is back; back-off 100ms doubling to `refresh`, at most 10s. Alternative: refuse announces,
+   which would take a whole tracker cluster down with Redis.
+4. **The bounds are the tracker's own, applied twice**: to each instance's memory, and to Redis for
+   all instances together (`max_torrents` the index, `max_peers_per_torrent` a swarm, `max_peers` a
+   counter); past them an announce is answered but not shared (counted as refused). No separate
+   bounds for the shared store. Alternative: their own fields in `store`.
+5. **Lua scripts on Redis's clock (`TIME`)**, each write carrying its age in fit's queue, so
+   instances' clocks need not agree; keys never expire of themselves (so the peers counter stays
+   true), removed by announces and a sweep each instance runs every minute (up to 4096 torrents),
+   which means keys linger while no tracker runs; Redis's `maxmemory-policy` must be `noeviction`.
+   Needs Redis 6.2 (`ZRANDMEMBER`); no Redis Cluster (keys of a torrent are not hash-tagged).
+   Alternative: keys with `PEXPIRE` and an approximate counter.
+6. **Samples only for torrents announced or scraped on the instance** (`cache_torrents`, 4096;
+   scrapes alone fill at most three quarters; an entry leaves after `peer_ttl` unused), each of
+   `cache_peers` (100) seeders and as many leechers. Alternative: samples of every torrent in the
+   cluster, at memory and Redis cost in the cluster's size.
+7. **Peers from the sample first, then the instance's own**, so an answer is a sample of the whole
+   cluster; counts are the larger of the instance's and the sample's, per field. Alternative: mix in
+   proportion to the instance's share of the swarm.
+8. **A change of the `store` block makes a new store**, the instance's swarms starting anew in memory
+   (clients announce again within their interval) and the queued writes let go; a shorter `peer_ttl`
+   applies to new writes only in Redis (the peers already shared keep their expiry), unlike fib's
+   `SetConfig` in memory. Alternative: carry the memory store over.
+9. **`Stats`' torrents and peers are the shared storage's** with a store (the instance's in
+   `store.local_*`), and `ListTorrents` lists every instance's torrents from Redis; the workbench's
+   Tracker page and the assistant's `bt_tracker_stats` are not changed (they show the totals as
+   before; `store` is in the JSON).
+10. **sync's RESP client (`sync/redis/wire`) is reused** rather than tlsmgr/sharedstore's private one,
+    for its pipelining and reply limits; RESP2.
+
+Open from it: fib requests to file — **an asynchronous `Store` API** (say
+`AnnounceAsync(a StoreAnnounce, done func(StoreResult, error))` and `ScrapeAsync`, the Server
+retaining the HTTP context, or answering the UDP datagram later, and replying from `done`), which
+would let a shared store ask Redis per announce, ending the first-announce gap; and, short of that,
+**`StoreResult.Interval`** (a store asking a client to come back sooner when its answer was
+partial). The workbench pages could show `store` (reachable, queued, dropped). No benchmark: the
+tracker is off the gateway's hot path (rule 21's control plane / data plane off the hot path).
 
 ### I208 (second phase) RSS auto-download
 

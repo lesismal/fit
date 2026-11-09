@@ -2,8 +2,9 @@
 // fit's config: fib's tracker (github.com/lesismal/fib/bittorrent/tracker)
 // over HTTP, through the routes whose handler is bt_tracker, and over UDP,
 // on the role's own listen, both on one bounded store in memory, on the
-// listeners' fib engine. See docs/decisions/037-bittorrent.md and
-// docs/bittorrent.md.
+// listeners' fib engine; with a store block, on a store the trackers of
+// several instances share (package sharedstore), which answers from memory
+// too. See docs/decisions/037-bittorrent.md and docs/bittorrent.md.
 //
 // Nothing here blocks a fib worker: an announce or a scrape is served on
 // the worker that read it, by fib's tracker, whose store takes a short lock
@@ -17,11 +18,13 @@
 // MemoryStore.SetConfig), keeping the swarms. The interval, min_interval,
 // max_numwant and max_scrape make a new fib tracker on the same store. A
 // listen change moves the UDP binding, and a port that cannot be bound
-// leaves the one before.
+// leaves the one before. A change of the store block makes a new store,
+// this instance's swarms starting anew.
 package tracker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -31,12 +34,14 @@ import (
 	"sync/atomic"
 
 	"github.com/lesismal/fib"
+	"github.com/lesismal/fib/bittorrent/metainfo"
 	fibtracker "github.com/lesismal/fib/bittorrent/tracker"
 
 	"github.com/lesismal/fit/access"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/app/roleconsole"
+	"github.com/lesismal/fit/bittorrent/tracker/sharedstore"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/mediaauth"
@@ -109,10 +114,61 @@ type view struct {
 	maxTorrents, maxPeers int
 }
 
+// swarms is the role's store: fib's MemoryStore, or a *sharedstore.Store.
+// Announce, Scrape, Config, Torrents and Peers never wait; Range may, and
+// is called off fib's workers.
+type swarms interface {
+	fibtracker.Store
+	Range(func(metainfo.InfoHash, fibtracker.Stats) bool)
+	SetConfig(fibtracker.MemoryStoreConfig)
+	Config() fibtracker.MemoryStoreConfig
+	Torrents() int
+	Peers() int
+}
+
+var (
+	_ swarms = (*fibtracker.MemoryStore)(nil)
+	_ swarms = (*sharedstore.Store)(nil)
+)
+
 // server is a fib tracker and its store.
 type server struct {
 	srv   *fibtracker.Server
-	store *fibtracker.MemoryStore
+	store swarms
+}
+
+// newSwarms makes the store cfg asks for, bounded by scfg: a shared one
+// with a store block, which reads its TLS files now and connects on its
+// own goroutine, or one in memory.
+func newSwarms(cfg *config.BitTorrentTracker, scfg fibtracker.MemoryStoreConfig, log *logs.Logger) (swarms, error) {
+	st := cfg.Store
+	if st == nil {
+		return fibtracker.NewMemoryStore(scfg), nil
+	}
+	s, err := sharedstore.NewRedis(st.Redis, st.KeyPrefix(), sharedstore.Config{
+		Bounds: scfg, Refresh: st.RefreshOr(), Timeout: st.Timeout(),
+		Queue: st.QueueOr(), CacheTorrents: st.Torrents(), CachePeers: st.Peers(),
+	}, log)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	return s, nil
+}
+
+// closeSwarms stops a shared store's goroutine; a store in memory has none.
+func closeSwarms(s swarms) {
+	if ss, ok := s.(*sharedstore.Store); ok {
+		ss.Close()
+	}
+}
+
+// sharedKey is the store block, a change of which makes a new store.
+func sharedKey(cfg *config.BitTorrentTracker) string {
+	if cfg.Store == nil {
+		return ""
+	}
+	b, _ := json.Marshal(cfg.Store)
+	return string(b)
 }
 
 // The reasons a request is refused, counted in Stats.
@@ -160,6 +216,7 @@ type Role struct {
 	cfg       *config.BitTorrentTracker
 	storeKey  string
 	serverKey string
+	sharedKey string
 	bind      int // the UDP binding's index, or -1
 	listen    string
 	udpAddr   netip.AddrPort
@@ -211,10 +268,26 @@ func (r *Role) Apply(member any) error {
 	}
 	// The access before a new binding takes anyone; the UDP port first of
 	// the rest, so that a port that cannot be bound leaves all as it was.
+	sk, vk, shk := storeKey(cfg), serverKey(cfg), sharedKey(cfg)
+	scfg := fibtracker.MemoryStoreConfig{MaxTorrents: cfg.Torrents(), MaxPeersPerTorrent: cfg.PeersPerTorrent(),
+		MaxPeers: cfg.Peers(), PeerTTL: cfg.TTL()}
+	cur := r.cur.Load()
+	// A new store, when the role starts or its store block changed, made
+	// before anything changes, so that one that cannot be made (a TLS file
+	// that does not read) leaves all as it was.
+	var fresh swarms
+	if cur == nil || shk != r.sharedKey {
+		if fresh, err = newSwarms(cfg, scfg, r.log); err != nil {
+			return err
+		}
+	}
 	oldPolicy := r.gate.Policy()
 	r.gate.Set(policy)
 	if err := r.applyListen(cfg.Listen); err != nil {
 		r.gate.Set(oldPolicy)
+		if fresh != nil {
+			closeSwarms(fresh)
+		}
 		return err
 	}
 	r.allow.Store(allow)
@@ -226,14 +299,17 @@ func (r *Role) Apply(member any) error {
 		// anew at every Apply, for a policy removed and made again.
 		r.auth.Store(&guard{key: r.key, name: cfg.Auth, p: mediaauth.Lookup(r.key, cfg.Auth)})
 	}
-	sk, vk := storeKey(cfg), serverKey(cfg)
-	scfg := fibtracker.MemoryStoreConfig{MaxTorrents: cfg.Torrents(), MaxPeersPerTorrent: cfg.PeersPerTorrent(),
-		MaxPeers: cfg.Peers(), PeerTTL: cfg.TTL()}
-	cur := r.cur.Load()
 	switch {
-	case cur == nil:
-		store := fibtracker.NewMemoryStore(scfg)
-		r.cur.Store(&server{srv: r.newServer(cfg, store), store: store})
+	case fresh != nil:
+		r.cur.Store(&server{srv: r.newServer(cfg, fresh), store: fresh})
+		if cur != nil {
+			// Requests already in the old store's hands finish there;
+			// what it had queued for the shared storage is let go.
+			closeSwarms(cur.store)
+			if r.log != nil {
+				r.log.Infof("the store changed: this instance's swarms start anew")
+			}
+		}
 	case vk != r.serverKey:
 		if sk != r.storeKey {
 			cur.store.SetConfig(scfg)
@@ -244,10 +320,10 @@ func (r *Role) Apply(member any) error {
 		// bounds drop nothing; new torrents and peers wait for room.
 		cur.store.SetConfig(scfg)
 	}
-	if cur != nil && sk != r.storeKey && r.log != nil {
+	if cur != nil && fresh == nil && sk != r.storeKey && r.log != nil {
 		r.log.Infof("the store's bounds changed in place, the swarms kept")
 	}
-	r.storeKey, r.serverKey = sk, vk
+	r.storeKey, r.serverKey, r.sharedKey = sk, vk, shk
 	r.cfg = cfg
 	v := &view{maxTorrents: cfg.Torrents(), maxPeers: cfg.Peers()}
 	if r.udpAddr.IsValid() {
@@ -350,7 +426,9 @@ func (r *Role) Stop(ctx context.Context) {
 	}
 	r.stopped = true
 	r.closeUDP()
-	r.cur.Store(nil)
+	if cur := r.cur.Swap(nil); cur != nil {
+		closeSwarms(cur.store)
+	}
 	r.console.Stop(ctx)
 	unregister(r.key, r)
 }

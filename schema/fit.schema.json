@@ -1171,6 +1171,58 @@
           "description": "How long a peer is kept after its last announce, longer than interval so that a peer announcing a little late is not forgotten; a torrent left without peers is forgotten, its completed count with it. 1h when left out. A change applies in place, keeping the swarms; a shorter one expires the peers kept past it.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "store": {
+          "$ref": "#/$defs/config.BitTorrentTrackerStore",
+          "description": "A store of the swarms that the trackers of several fit instances share, so that they answer as one tracker: each keeps its own peers in memory, as without it, and shares them through the store, answering an announce with peers of every instance and a scrape with the counts of all. Each instance's swarms alone, in its memory, when left out. A change of it, or adding or removing it, makes a new store: this instance's swarms start anew in memory (clients announce again within their interval), the shared ones staying in the store. The bounds max_torrents, max_peers_per_torrent and max_peers apply to the shared store too, to all instances' peers together."
+        }
+      },
+      "type": "object"
+    },
+    "config.BitTorrentTrackerStore": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_peers": {
+          "default": 100,
+          "description": "How many seeders and how many leechers of a torrent's shared peers, picked at random, each sample keeps, about 60 bytes each; announces get peers from it. 100 when left out or 0.",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cache_torrents": {
+          "default": 4096,
+          "description": "The most torrents whose shared peers this instance keeps a sample of; a torrent past it is answered with this instance's own peers. A torrent leaves when nobody has announced or scraped it here for peer_ttl; scrapes alone may fill three quarters. 4096 when left out or 0.",
+          "maximum": 1048576,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefix": {
+          "default": "fit/bittorrent/tracker/",
+          "description": "What the store's keys start with, as fit/bittorrent/tracker/t/<info hash>/s; the trackers that answer as one share it. fit/bittorrent/tracker/ when left out.",
+          "type": "string"
+        },
+        "queue": {
+          "default": 65536,
+          "description": "The most announces waiting to be written to the store, one per peer and torrent, a later announce of a peer taking its earlier one's place; past it announces are still answered but not shared, and counted as dropped. 65536 when left out or 0.",
+          "maximum": 1048576,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "redis": {
+          "$ref": "#/$defs/config.RedisStorage",
+          "description": "Share the swarms through Redis 6.2 or later (or Valkey), a standalone server or a primary (not Redis Cluster), with Lua scripts, each announce one script run, on Redis's clock. Its maxmemory-policy must not evict keys (noeviction): the store bounds them instead."
+        },
+        "refresh": {
+          "default": "5s",
+          "description": "How often the peers of the torrents this instance serves are read from the store again, and so how late an instance learns of another's peers. Read peers are used for three times this, then only the instance's own. 5s when left out; at least 100ms, and shorter than interval.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "request_timeout": {
+          "default": "2s",
+          "description": "How long each round trip to the store may take, connecting included; past it the store counts as unreachable, and is tried again after a back-off. 2s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
         }
       },
       "type": "object"

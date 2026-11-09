@@ -364,7 +364,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I204 | 工作台的 BitTorrent 页面、`schema-zh.js`、AI 助手函数 | I203 | done |
 | I205 | 与 libtorrent、anacrolix 互通，故障测试，基准主机上的基准，文档与示例 | I198–I204 | done |
 | I206 | （第二阶段）集群汇总各成员的任务；经 BitTorrent 把大文件分发给成员 | I203 | todo |
-| I207 | （第二阶段）集群共享的 tracker Store | I201 | todo |
+| I207 | （第二阶段）集群共享的 tracker Store | I201 | done |
 | I208 | （第二阶段）RSS 自动下载 | I198 | todo |
 | I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
 
@@ -5524,6 +5524,57 @@ race 测试与完整测试套件（留给主会话）。
 
 - **做什么**：基于 fit 共享存储（redis、etcd）的 `tracker.Store`，让多个成员上的 tracker 如同一个。
 - **涉及**：`bittorrent`、fit 的共享存储。
+- **已完成** 2026-11-09（分支 `bt-i207`）：包 `bittorrent/tracker/sharedstore`（`store.go`、`redis.go`），一个 fib
+  `tracker.Store`，并有 `MemoryStore` 的 `Range`、`SetConfig`、`Config`、`Torrents` 和 `Peers`。每个实例立即从自己的 fib
+  `MemoryStore` 应答；存储自己的一个 goroutine 完成每次 Redis 往返（`request_timeout`）：announce 进入有界队列（按 peer
+  与种子合并，完成标记在后来的 announce 中保留），以 Lua 脚本流水线写入，以 Redis 的时钟为准（做种者和下载者存于按过期时间
+  排序的有序集合，地址存于哈希，另有完成次数、按最晚过期时间计分的种子索引和 peer 计数，每次改动都由脚本完成）；每个被服务
+  种子的共享 swarm 随机样本（`ZRANDMEMBER`）及计数每 `refresh` 读取一次；announce 先以样本中的 peer、再以本实例的 peer
+  应答（做种者只得到下载者，不含自己，跳过过期的），计数各取较大者；上限在 Redis 中对所有实例合计执行；每分钟清扫 peer 已
+  全部过期的种子；`Range` 经第二个连接用 `ZSCAN`（Redis 无法读取时为本实例的种子）。配置 `bittorrent.tracker.store`
+  （`redis` 与 acme 的 `RedisStorage` 同形，`prefix`、`request_timeout`、`refresh`、`queue`、`cache_torrents`、
+  `cache_peers`）及其检查（Redis 的检查与 `acme.shared_storage` 共用为 `checkRedisStorage`）；角色经接口持有存储，块变化
+  时新建存储（在其他改动之前，坏的 TLS 文件使角色保持原样），变化和停止时关闭；`Stats.Store` 与
+  `fit_bittorrent_tracker_store_*` 指标。schema、参考、模板、`schema-zh.js`；两种语言的 [BitTorrent](bittorrent.zh-CN.md)
+  tracker 一节、指标和重载。测试：存储的各情形（两个实例互见 peer、做种者得到下载者、跨实例的 scrape 与完成次数、停止；共享
+  上限与 SetConfig 调高；过期与清扫；跨实例 Range 与提前停止；地址族与 numwant；Redis 不可达时从内存应答、排队、恢复后写入）
+  分别对 Docker 中的真实 Redis（`redis:8.2.2`，无 Docker 时跳过，同 `tlsmgr/sharedstore`）和假实现运行；队列、重新入队、
+  缓存上限与淘汰、合并、过时样本、失败的写入、超过一轮的写入量；TLS 文件；地址编码与样本解析；两个引擎上的两个 tracker 角色
+  共享一个 Redis，经 fib 的客户端走 HTTP 和 UDP（peer、scrape、统计、列表、指标、重载到新前缀和内存）；不可达的存储从内存
+  应答，坏的 TLS 文件使重载失败；配置检查。运行：`bittorrent/tracker/...`、`config` 的 `go test -race`；
+  `go test ./schema/ ./app/workbench/ ./docs/ ./test/workers/`；vet、gofmt。
+
+**待评审的决定**（构建时作出，2026-11-09；在用户裁定前有效）：
+
+1. **从内存应答，在后台共享**，而不是每个请求询问 Redis：fib 的 `Server` 在 worker 上调用 `Store.Announce` 并须在返回前
+   得到应答，在那里往返 Redis 会阻塞 worker（规则 1）。代价：实例在 `refresh` 内得知其他实例的 peer，尚未服务过的种子第一次
+   announce 只得到本实例的 peer。备选：fib 提供异步 `Store`（见下），再每个 announce 询问 Redis。
+2. **只支持 Redis**：etcd 和 Consul 是共识存储，每次 announce 都是一次 Raft 写入，不适合每个客户端每个间隔都写的 peer 表；
+   存储的 `backend` 接口为其他种类留有余地。`store` 采用与 `acme.shared_storage.redis` 同形的 `redis { ... }`（同一个
+   `RedisStorage` 类型），而不是引用 acme 的块。备选：带租约的 etcd。
+3. **Redis 不可达：退回内存，从不拒绝**：以本实例的 peer 和不超过三个 refresh 的样本应答，有界排队，Redis 恢复后写入；
+   退避 100ms 起加倍到 `refresh`，最多 10s。备选：拒绝 announce，那样 Redis 一停整个 tracker 集群都停。
+4. **上限沿用 tracker 自己的，作用两次**：作用于每个实例的内存，也作用于 Redis 中所有实例的合计（`max_torrents` 对索引、
+   `max_peers_per_torrent` 对 swarm、`max_peers` 对计数）；超出的 announce 应答但不共享（计为被拒）。共享存储没有单独的上限。
+   备选：`store` 中设单独字段。
+5. **Lua 脚本以 Redis 的时钟（`TIME`）为准**，每次写入带上它在 fit 队列中的时长，各实例时钟不必一致；键从不自行过期（使
+   peer 计数保持准确），由 announce 和每个实例每分钟一次的清扫（至多 4096 个种子）移除，因此没有 tracker 运行时键会滞留；
+   Redis 的 `maxmemory-policy` 须为 `noeviction`。需要 Redis 6.2（`ZRANDMEMBER`）；不支持 Redis Cluster（一个种子的键没有
+   hash tag）。备选：`PEXPIRE` 的键加近似计数。
+6. **只为在本实例 announce 或 scrape 过的种子取样本**（`cache_torrents` 4096；仅凭 scrape 最多占四分之三；`peer_ttl` 内未用
+   即移出），每个样本 `cache_peers`（100）个做种者和同样多的下载者。备选：集群所有种子的样本，内存和 Redis 开销随集群规模增长。
+7. **先给样本中的 peer，再给本实例的**，使应答是整个集群的样本；计数按字段取本实例与样本中较大者。备选：按本实例在 swarm
+   中的占比混合。
+8. **`store` 块变化时新建存储**，本实例的 swarm 在内存中重新开始（客户端在其间隔内再次 announce），排队的写入放弃；更短的
+   `peer_ttl` 在 Redis 中只作用于新写入（已共享的 peer 保留原过期时间），不同于 fib 在内存中的 `SetConfig`。备选：沿用内存存储。
+9. **有存储时 `Stats` 的种子和 peer 是共享存储的**（本实例的在 `store.local_*`），`ListTorrents` 从 Redis 列出所有实例的种子；
+   工作台的 Tracker 页面和助手的 `bt_tracker_stats` 未改动（照旧显示总数；JSON 中有 `store`）。
+10. **复用 sync 的 RESP 客户端（`sync/redis/wire`）**，而非 tlsmgr/sharedstore 私有的那个，因其有流水线和应答上限；用 RESP2。
+
+由此留下：要提交给 fib 的请求——**异步 `Store` API**（如 `AnnounceAsync(a StoreAnnounce, done func(StoreResult, error))` 与
+`ScrapeAsync`，Server 保留 HTTP context，或稍后应答 UDP 数据报，在 `done` 中回复），使共享存储能每个 announce 询问 Redis，
+消除首次 announce 的缺口；退一步，**`StoreResult.Interval`**（存储在应答不完整时请客户端早些再来）。工作台页面可以显示
+`store`（可达、排队、丢弃）。无基准测试：tracker 不在网关热路径上（规则 21）。
 
 ### I208 （第二阶段）RSS 自动下载
 

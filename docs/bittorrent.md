@@ -522,6 +522,8 @@ so the counters keep what removed torrents counted and never go back while fit r
 | `fit_bittorrent_tracker_torrents`, `fit_bittorrent_tracker_peers`, `fit_bittorrent_tracker_max_torrents`, `fit_bittorrent_tracker_max_peers`, `fit_bittorrent_tracker_allowed` | gauge | |
 | `fit_bittorrent_tracker_announces_total`, `fit_bittorrent_tracker_scrapes_total` | counter | |
 | `fit_bittorrent_tracker_refused_total` | counter | `reason`: `unregistered`, `passkey`, `access` |
+| `fit_bittorrent_tracker_store_reachable`, `fit_bittorrent_tracker_store_queued`, `fit_bittorrent_tracker_store_cached` (with a shared store) | gauge | |
+| `fit_bittorrent_tracker_store_written_total`, `_dropped_total`, `_refused_total`, `_failed_total` (with a shared store) | counter | |
 
 ## The pages
 
@@ -701,6 +703,49 @@ again within their interval. A peer is forgotten `peer_ttl` (1h) after its last 
 must be longer than `interval` (30m), and a torrent with no peers left is forgotten with its
 completed count.
 
+**A store the instances share** (I207). With a `store` block, the trackers of several fit instances
+(behind one name, or listed as one tier) answer as one tracker through Redis 6.2 or later, or
+Valkey: a standalone server or a primary, its `maxmemory-policy` `noeviction`. fib's tracker asks its
+store on the worker that read the request and waits for the answer, so the shared store never waits
+for Redis on a request: each instance keeps its own peers in fib's `MemoryStore`, as without a
+store, and one goroutine of the store's own does every round trip, each within `request_timeout`
+(2s). An announce is queued (one entry a peer and torrent, a later announce taking an earlier one's
+place, at most `queue`, 65536) and written in pipelined batches of Lua scripts, one a peer, on
+Redis's clock (so the instances' clocks need not agree): seeders and leechers of each torrent in
+sorted sets by expiry, their addresses in a hash, the completed count, an index of the torrents and
+the count of peers, which every script keeps true. For each torrent announced or scraped on an
+instance, the store reads a random sample of the shared swarm, `cache_peers` (100) seeders and as
+many leechers, and its counts, every `refresh` (5s), for at most `cache_torrents` (4096) torrents.
+An announce is answered with peers of that sample first, then the instance's own that it lacks, a
+seeder getting leechers only, never itself; the counts of announces and scrapes are the larger of
+the instance's own and the shared one. So an instance learns of another's peers within a refresh,
+and **the first announce of a torrent an instance has not served yet gets only its own peers**
+(the next, the cluster's): fib's `Store` answers synchronously, and an asynchronous one is a fib
+request.
+
+```fit
+bittorrent {
+	tracker {
+		listen :6969
+		store {
+			redis { address redis.internal:6379; password_file /etc/fit/redis.pass }
+		}
+	}
+}
+```
+
+The bounds hold for the shared storage too, for all instances' peers together: `max_torrents`
+torrents in its index, `max_peers_per_torrent` in a swarm, `max_peers` in all; an announce past them
+is still answered from the instance's memory, but not shared (counted as refused). Keys never expire
+of themselves: a torrent's expired peers are removed by its announces, and every minute each
+instance removes up to 4096 torrents whose peers have all expired, so the keys stay at four a torrent
+and two more. **While Redis cannot be reached**, the tracker goes on from memory: announces are
+answered with the instance's own peers and the samples younger than three refreshes, queued, and
+written once Redis is back (past the queue, or older than `peer_ttl`, dropped and counted); the
+store is tried again after a back-off of 100ms doubling to `refresh` (at most 10s). Requests are
+never refused for it. The memory it adds is the queue (about 100 bytes an entry) and the samples
+(about 60 bytes a peer).
+
 | Bound | Default | At most |
 | --- | --- | --- |
 | `max_torrents`, torrents tracked at once; one more is refused "tracker is full" | 100000 | 1048576 |
@@ -741,7 +786,11 @@ failure reason "refused" (the route's listener has the global access too).
 or peers until the store is back under it, and a shorter `peer_ttl` expires the peers kept past it.
 `interval`, `min_interval`, `max_numwant` and `max_scrape` make a new fib tracker on the same store,
 so the swarms stay, and UDP connection IDs stay good (the role keeps one secret). A `listen` change
-moves the UDP port; one that cannot be bound fails the reload and leaves the tracker as it was.
+moves the UDP port; one that cannot be bound fails the reload and leaves the tracker as it was. With
+a shared store, the bounds and `peer_ttl` apply to its writes from then on (the peers already shared
+keep their expiry); a change of the `store` block, or adding or removing it, makes a new store,
+this instance's swarms starting anew in memory and the shared ones staying in Redis; one that cannot
+be made (a TLS file that does not read) fails the reload.
 
 **Statistics.** The role's Go API has `Stats` (torrents and peers kept, announces and scrapes
 served, refusals by reason, the bounds), `Torrent(hash)` (seeders, leechers, completed) and
@@ -751,7 +800,13 @@ info hash (`source` `store`), read through fib's `MemoryStore.Range` one shard a
 at most 1000 torrents, by `offset` or, for a public tracker, by `after=<info hash>` (the answer's
 `next` is where the next page starts, `""` on the last); a call keeps only `offset`+`limit`
 torrents in memory and takes time in the torrents tracked, so `after` is the way to page far into
-a large store, and each torrent's numbers are as of one moment. Its console serves them read-only as
+a large store, and each torrent's numbers are as of one moment. With a shared store, `Stats`'
+torrents and peers are the shared storage's, of every instance, as read every refresh (the
+instance's own while it cannot be read), and its `store` says how the store is doing: `kind`,
+`reachable`, `error`, the shared and `local_` torrents and peers, `queued`, `cached`, and the
+announces `written`, `dropped`, `refused` and `failed`; the list is every instance's torrents, read
+from Redis (`ZSCAN` and the counts, 512 a round trip), and the instance's own while it cannot be
+read; one torrent's numbers are the larger of the instance's and its sample's. Its console serves them read-only as
 `GET /api/stats`, `/api/torrents` (`offset`, `limit`, `after`) and `/api/torrents/<hash>`, and as
 `/api/m/bittorrent.tracker/...` as a module. The Admin API serves them as
 `/bittorrent/tracker/stats`, `/bittorrent/tracker/torrents[/<hash>]` and
