@@ -19,6 +19,7 @@ import (
 
 func init() {
 	warmWait, warmSettle = 50*time.Millisecond, 50*time.Millisecond
+	captureRestart = 0
 }
 
 // fakePprof serves fit's profiles, or fails them with code.
