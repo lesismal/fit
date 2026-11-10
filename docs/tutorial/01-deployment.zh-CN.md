@@ -4,10 +4,10 @@
 
 ## 功能
 
-fit 是一个静态二进制加一个配置文件：装好它，写一份配置，`fit run` 就跑起来。要带控制台，配置分在
+fit 是一个静态二进制加一个配置文件：装好它，写一份配置，`fit run` 就跑起来。有 store 时配置分在
 两个文件里：一个明文的**引导文件**，只写 `admin`；一个用密码封存的 **store**，写其余的配置。控制台是
-登录后看到的那个网页（[功能导航栏](03-navigation.zh-CN.md)），从它做出的每次修改都会写入 store，重启后
-fit 仍从 store 运行。
+登录后看到的那个网页（[功能导航栏](03-navigation.zh-CN.md)）；有 store 时，从它做出的每次修改都会写入
+store，重启后 fit 仍从 store 运行；没有 store 时，它像 Admin API 一样在内存中修改运行中的配置。
 
 本章按顺序走一遍：安装；两个文件各装什么；`fit run -admin` 的首次启动；创建用户；从哪里访问控制台；
 最后是 Docker、Helm 与 systemd 的打包要点。字段表不重复罗列，以链接指向
@@ -23,13 +23,14 @@ fit 仍从 store 运行。
 go install github.com/lesismal/fit/cmd/fit@latest
 ```
 
-在源码目录中 `make build` 把产物放在 `bin/fit`；`fit version` 打印 fit、fib 与 Go 的版本。
+在源码目录中 `make build` 把产物放在 `bin/fit`；`fit version` 打印 fit、fib 与 Go 的版本，以及操作系统
+与架构。
 
 没有 Go 时，从 [GitHub Releases](https://github.com/lesismal/fit/releases) 下载预编译的二进制：
 Linux（amd64、arm64、armv7、386）、macOS（amd64、arm64）、Windows（amd64、arm64）和 FreeBSD
 （amd64、arm64），每个是一个 `.tar.gz`（Windows 为 `.zip`），SHA-256 校验和在 `checksums.txt` 里。
-另外发布容器镜像 `ghcr.io/lesismal/fit`（打 `v<semver>` 标签时），以及 Helm chart 和 systemd unit。
-三种打包方式的细节（端口、volume、sysctl、values）都在[部署](../../deploy/README.zh-CN.md)里；本章只
+另外发布容器镜像 `ghcr.io/lesismal/fit`（打 `v<semver>` 标签时）；Helm chart 与 systemd unit 也在仓库
+里。三种打包方式的细节（端口、volume、sysctl、values）都在[部署](../../deploy/README.zh-CN.md)里；本章只
 记下与控制台有关的部分。
 
 ### 两个文件
@@ -46,9 +47,9 @@ Linux（amd64、arm64、armv7、386）、macOS（amd64、arm64）、Windows（am
 整体替换文件中的。只有文件设置的成员会保留，合并后的配置写回 store。要重新从文件开始，删除 store。写入先
 写到 store 旁的临时文件（权限 0600），同步后重命名覆盖，所以崩溃只会留下旧的或新的 store，不会留下半个。
 
-`admin` 从不进入 store，也从不显示：它在每个配置加载时放入，但不放入基础配置，所以 Admin API 的
-`GET /config` 和 JSON 页面里没有密码、哈希或密钥路径。有 store 时，带 `admin` 的配置被拒绝：`admin` 只
-来自引导文件。`admin` 的设置（包括 store 和控制台的）在 fit 启动时读取，改它要重启。
+有 store 时，`admin` 从不进入 store，也从不显示：它在每个配置加载时放入，但不放入基础配置，所以 Admin
+API 的 `GET /config` 和 JSON 页面里没有密码、哈希或密钥路径。带 `admin` 的配置被拒绝：`admin` 只来自
+引导文件。`admin` 的设置（包括 store 和控制台的）在 fit 启动时读取，改它要重启。
 
 store 打不开（密码错或某个字节被改）时 fit 不会启动，且不会被覆盖。所以做一份副本：`fit store export -c
 <引导文件>` 以 JSON 输出 store 中的配置，`fit store import -c <引导文件> <文件>` 检查一份配置并重新封存
@@ -74,7 +75,8 @@ fit run -admin -c site.yaml -timeout 30m
   store 一起保存：复制到别处的 store 用它打开。
 - 只有 `admin.console`、没有监听和路由的配置是合法的，fit 可以在尚无服务内容时启动。
 - `-c` 也接受一个 `.store` 文件（最多一个），单独给出或与配置文件一起：`fit run -c site.store` 运行 store
-  中的配置。配置文件旁的 `.store` 只要存在就会使用，不论是否给出 `-admin`。
+  中的配置，`fit run -c base.yaml -c site.store` 则按上面的规则把它合并到 `base.yaml` 上。配置文件旁的
+  `.store` 只要存在就会使用，不论是否给出 `-admin`。
 
 ### 创建用户
 
@@ -89,7 +91,8 @@ echo 'correct horse battery staple' | fit hash-password
 
 把输出的哈希写进引导文件的 `admin.console.users`。`fit validate` 拒绝不是 bcrypt 哈希的
 `password_hash`、空用户名和重复列出的用户名。登录后也可以在“账户”页改密码（见[账户](13-account.zh-CN.md)），
-但改过的密码保存在 store 里，而 `admin` 只来自引导文件：用户本身及其初始哈希仍在文件中。
+但改过的密码保存在 store 里，而 `admin` 只来自引导文件：用户本身及其初始哈希仍在文件中。没有 store 时
+没有地方保存改动：页面会说明，接口答 `409`。
 
 ### 访问控制台
 
@@ -101,21 +104,26 @@ ssh -L 2020:127.0.0.1:2020 host
 
 在环回地址上 TLS 可选。**非环回地址需要 `cert_file` 和 `key_file`**，使密码从不以明文穿过网络；
 `fit validate` 拒绝没有它们的配置。`access` 决定哪些客户端地址能连上控制台，它随每次应用的配置生效，
-无需重启；在其中写 `allow 127.0.0.1`（和 `::1`）可无论全局 `access` 如何都保留本机访问。
+无需重启；被拒绝的连接一被接受就关闭。在其中写 `allow 127.0.0.1`（和 `::1`）可无论全局 `access` 如何
+都保留本机访问。
 
 ### Docker、Helm 与 systemd
 
 - **Docker**：镜像是 distroless 的 static 镜像，以 `nonroot`（65532）运行，只有 `/usr/local/bin/fit`
-  和 `/etc/fit/fit.json` 处的占位配置。store 所在目录要放在 volume 里（写入方式是写一个新文件再改名
-  覆盖），密码放在环境变量（`password_env`）或挂载的文件（`password_file`）中，而不是写在配置里。要从
-  容器外访问控制台，给它非环回的地址加 `cert_file` 和 `key_file`。1024 以下的端口由 sysctl
-  `net.ipv4.ip_unprivileged_port_start=0` 放开，Helm chart 就是这样做的。
-- **Helm**：chart 把 fit 作为 Gateway API 和 Ingress 的控制器运行，配置放在 ConfigMap 里；控制台与
-  store 的设置写在 `config` 值中，store 要放在持久卷里，密码用 Secret 挂成文件或环境变量。
+  和 `/etc/fit/fit.json` 处的占位配置（它在 8080 端口应答所有请求）。store 所在目录要放在 volume 里
+  （写入方式是写一个新文件再改名覆盖），密码放在环境变量（`password_env`）或挂载的文件
+  （`password_file`）中，而不是写在配置里。要从容器外访问控制台，给它非环回的地址加 `cert_file` 和
+  `key_file`。1024 以下的端口由 sysctl `net.ipv4.ip_unprivileged_port_start=0` 放开，Helm chart 就是
+  这样做的。
+- **Helm**：chart 把 fit 作为 Gateway API 和 Ingress 的控制器运行，配置放在 ConfigMap 里；它的 values
+  只管服务部分，不管控制台与 store。要一并运行它们，在 `config` 值中给出整份配置（保留 chart 的健康检查
+  监听、路由与 Kubernetes provider），并自己为 store 提供 volume 与密码——chart 的文件系统是只读的，也没
+  挂载其他 volume。
 - **systemd**：`fit.service` 用于配置在 `/etc/fit/fit.json` 的 fit，`fit@<name>` 用于
-  `/etc/fit/<name>.json`。fit 以系统用户 `fit` 运行，只有 `/var/lib/fit`（`StateDirectory`，store 的
-  `path` 放这里）和 `/run/fit` 可写。启动前先用 `fit validate` 检查配置；`systemctl reload fit` 检查新
-  配置后发 SIGHUP，而 SIGHUP 会重新读取 store，例如在 `fit store import` 之后。`systemctl stop fit` 发
+  `/etc/fit/<name>.json`。fit 以系统用户 `fit` 运行，只带 `CAP_NET_BIND_SERVICE`，文件系统只读，例外是
+  `/var/lib/fit`（`StateDirectory`，store 的 `path` 放这里）和 `/run/fit`（`RuntimeDirectory`）。启动前
+  先用 `fit validate` 检查配置；`systemctl reload fit` 检查新配置后发 SIGHUP，校验不过的重载会失败、运行
+  中的配置保持不变；SIGHUP 会重新读取 store，例如在 `fit store import` 之后。`systemctl stop fit` 发
   SIGTERM，fit 最多等 30s（`-shutdown-timeout`）让进行中的请求完成。
 
 ## 参数
@@ -132,8 +140,9 @@ ssh -L 2020:127.0.0.1:2020 host
 
 三者恰好设置一个；文件为空、环境变量未设置或为空时 fit 不会启动。store 的格式是 fit 自己的
 `fitstore`：59 字节的头部加用 XChaCha20-Poly1305 封存的 JSON 载荷，密钥由密码经 Argon2id 派生，只在
-启动时派生一次。打不开的 store 不会被覆盖；丢失密码就丢失了 store，所以用 `fit store export` 做一份
-副本。
+启动时派生一次。载荷包含基础配置和从页面改过密码的控制台用户；若 store 还保存具名 section（如助手的设置与
+模型密钥），它写成更新的版本，而导出从不包含 section。打不开的 store 不会被覆盖；丢失密码就丢失了 store，
+所以用 `fit store export` 做一份副本。
 
 `admin.console` 的字段在[登录](02-login.zh-CN.md)中列出。
 

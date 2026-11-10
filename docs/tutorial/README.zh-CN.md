@@ -12,13 +12,13 @@
 
 ## 教程结构
 
-前 3 章是准备：部署、登录、导航栏总览。其后 22 章与导航栏的模块一一对应，顺序与菜单相同。
+前 3 章是准备：部署、登录、导航栏总览。其后 24 章与导航栏的模块一一对应，顺序与菜单相同。
 
 | 章 | 文件 | 菜单模块 | 讲什么 |
 | --- | --- | --- | --- |
 | 01 | [部署](01-deployment.zh-CN.md) | — | 安装 fit；引导文件、store 与 `admin.console`；`fit run -admin` 首次启动；创建用户；访问控制台；Docker、Helm 与 systemd。 |
 | 02 | [登录](02-login.zh-CN.md) | — | 登录页；用户与 bcrypt 密码哈希；默认密码与强制修改；会话；锁定与减速；CSRF 与 CSP；修改密码。 |
-| 03 | [功能导航栏](03-navigation.zh-CN.md) | — | 工作台布局与 URL 规则；全部模块与页面清单；筛选、收起、主题与语言；角色的动态模块。 |
+| 03 | [功能导航栏](03-navigation.zh-CN.md) | — | 工作台布局与 URL 规则；全部模块与页面清单；筛选、收起、主题与语言；角色的动态模块，以及始终显示的数据同步与 BitTorrent。 |
 | 04 | [概览](04-overview.zh-CN.md) | 概览 | 运行中配置的概览：版本、连接、路由、上游健康、证书、突增。 |
 | 05 | [监听](05-listeners.zh-CN.md) | 监听 | `listener` 的参数：地址、协议、TLS、客户端证书、SOCKS、PROXY 协议、mptcp。 |
 | 06 | [引擎](06-engine.zh-CN.md) | 引擎 | 按端口查看运行中的功能：处理器、路由、缓存、流媒体、WebRTC、四层、SOCKS、TLS；实际绑定地址与标签。 |
@@ -27,7 +27,7 @@
 | 09 | [版本](09-versions.zh-CN.md) | 版本 | 已应用的配置版本：查看与回滚。 |
 | 10 | [一致性检查](10-consistency-check.zh-CN.md) | 一致性检查 | 运行中配置与生效配置的差异：drift 与 info、逐项修正、`fit check`。 |
 | 11 | [日志](11-logs.zh-CN.md) | 日志 | fit 自身日志与访问日志的文件、切割、保留、立即切割与清理。 |
-| 12 | [集群](12-cluster.zh-CN.md) | 集群 | `admin.cluster` 管理端：成员、分组、模板、发布、告警、用户、跨成员指标/日志/证书、NAT 后面的成员。 |
+| 12 | [集群](12-cluster.zh-CN.md) | 集群 | `admin.cluster` 管理端：成员、分组、模板、发布、告警、用户、跨成员指标/日志/证书、成员的 BitTorrent 角色与分发、NAT 后面的成员。 |
 | 13 | [账户](13-account.zh-CN.md) | 账户 | 修改自己的密码、设置其他用户的密码、本节点信息。 |
 | 14 | [助手](14-assistant.zh-CN.md) | 助手 | `admin.assistant`：提供方与密钥、级别、对话面板、提案、技能、MCP 服务器、审计日志。 |
 | 15 | [反向代理](15-reverse-proxy.zh-CN.md) | 反向代理 | 路由：匹配、处理器、中间件；上游：负载均衡与健康检查；各处理器与中间件模块。 |
@@ -41,6 +41,8 @@
 | 23 | [WebRTC](23-webrtc.zh-CN.md) | WebRTC | `webrtc`：TURN 服务器、WHIP/WHEP 媒体服务器、媒体代理。 |
 | 24 | [隧道角色](24-tunnel.zh-CN.md) | 隧道角色、tunnel.hub、tunnel.node、tunnel.proxy | `tunnel` 配置；hub、node、proxy 三种角色的页面。 |
 | 25 | [LLM 角色](25-llm.zh-CN.md) | LLM 角色、llm.hub、llm.node、llm.proxy | `llm` 配置；hub、node、proxy 三种角色的页面。 |
+| 26 | [数据同步](26-sync.zh-CN.md) | 数据同步 | `sync`：从源到 sink 的管道、记录、检查点、死信、批处理作业；管道的各页面与模块配置。 |
+| 27 | [BitTorrent](27-bittorrent.zh-CN.md) | BitTorrent | `bittorrent`：客户端（种子、分类、队列、速率、RSS、发布）与 tracker；两种角色的页面与模块配置。 |
 
 ## 各章细目
 
@@ -68,9 +70,9 @@
 
 - 布局：左侧菜单（一级为模块、二级为页面、三级为端口的功能），右侧页面；顶栏（标题、面包屑、工具、主题与语言）。
 - URL 规则：`#/<模块>/<页面>`；模块只显示在控制台提供其服务端模块时。
-- 全部模块与页面的清单（与菜单顺序一致），含各模块的小标签（HTTP、HTTP CONNECT、TCP/UDP、TLS、RTMP / RTSP / SRT、媒体令牌、WebRTC、隧道、LLM、点播 / 频道）。
+- 全部模块与页面的清单（与菜单顺序一致），含各模块的小标签（HTTP、HTTP CONNECT、TCP/UDP、TLS、RTMP / RTSP / SRT、媒体令牌、WebRTC、隧道、LLM、管道、客户端 / tracker、点播 / 频道）。
 - 筛选菜单、收起为图标、展开与折叠；主题（浅色、深色等）与语言（英文、中文）。
-- 角色的动态模块：`tunnel.*` 与 `llm.*` 在角色运行后出现。
+- 角色的动态模块：`tunnel.*` 与 `llm.*` 在角色运行后出现；数据同步与 BitTorrent 属于控制台本身，始终显示。
 - 资料来源：`app/workbench/web/core/workbench.js`（菜单顺序 RANK 与各模块注册）、[控制台与 store](../console.zh-CN.md#页面)。
 
 ### 04 概览
@@ -88,14 +90,14 @@
 
 ### 06 引擎
 
-- 按端口查看运行中的监听：每个端口展开为它提供的功能——各处理器、反向与正向代理路由、缓存、流媒体与 WebRTC 处理器、四层服务、SOCKS、TLS/ACME/默认 HTTPS——每项链接到编辑它的页面。
+- 按端口查看运行中的监听：每个端口展开为它提供的功能——各处理器（静态文件、直接应答、FastCGI、媒体令牌与媒体页面，以及其路由上按模块 id 列出的其他处理器，如 `vod`、`sync_ingest`、`bt_stream`、`bt_publish`、`bt_tracker`）、反向与正向代理路由、缓存、流媒体与 WebRTC 处理器、四层服务、SOCKS、TLS/ACME/默认 HTTPS——每项链接到编辑它的页面。
 - 写入的地址旁给出内核实际绑定的地址；端口行的标签（PROXY 协议、HTTP/3、按需证书、客户端证书、点播）。
 - 资料来源：`app/workbench/web/gateway/engine.js`、[控制台与 store](../console.zh-CN.md#页面)。
 
 ### 07 全局设置
 
 - 各页编辑一个顶层成员：`log`（按 logger 的级别、输出、格式、`time_zone`、`rotate`）、`access_log`、`telemetry`（OTLP）、`metrics`、`pprof`（即时开关，Admin API 的 `/debug/pprof/`）、`limits`（连接、头部、请求体、写队列）、`engine`（event loop、worker、队列、缓冲、backlog）、`providers`（Docker、Consul、etcd、Kubernetes）。
-- “其他”页：schema 中尚无专门页面的成员。
+- “其他”页：schema 中尚无专门页面的成员——`access`（全局允许与拒绝名单）、`media_library` 与 `schema_version`；`sync` 与 `bittorrent` 在各自模块的页面编辑。
 - “导入 / 导出”页：整个配置的导入与导出（`.conf`、`.yaml`、`.json`、`.store`）。
 - 资料来源：`templates/conf/conf.d/00-runtime.conf`、`30-observability.conf`、`50-providers.conf`、[配置参考](../reference/config.zh-CN.md)各章、[控制台与 store](../console.zh-CN.md#配置的导入与导出)。
 
@@ -124,7 +126,7 @@
 
 ### 12 集群
 
-- `admin.cluster` 使本 fit 成为管理端：成员的地址与凭据保存在 store；概览、节点、分组、模板、发布、告警、用户、跨成员的指标/日志/证书。
+- `admin.cluster` 使本 fit 成为管理端：成员的地址与凭据保存在 store；概览、节点、分组、模板、发布、告警、用户、跨成员的指标/日志/证书，以及成员的 BitTorrent 角色、私有种子的分发与概览页上的卡片。
 - 添加、测试与信任成员；NAT 后面的成员以 `admin.cluster_member` 主动连接管理端。
 - 资料来源：[集群管理](../cluster.zh-CN.md)、`app/workbench/web/cluster/`、[配置参考：Admin API](../reference/config.md#admin-api)。
 
@@ -137,14 +139,14 @@
 ### 14 助手
 
 - `admin.assistant`：提供方（Anthropic、OpenAI、Gemini、Azure OpenAI、Ollama、OpenAI 兼容、`llm.proxy`）、密钥（只写不读）、默认模型、上限。
-- 用户级别：`off`、`read`、`edit`、`propose`、`apply`；对话面板（以当前页面为上下文）；提案（审阅并应用）；技能（18 个内置 + 自定义）；MCP 服务器（`/mcp` 与令牌）；审计日志。
+- 用户级别：`off`、`read`、`edit`、`propose`、`apply`；对话面板（以当前页面为上下文）；提案（审阅并应用）；技能（22 个内置 + 自定义）；MCP 服务器（`/mcp` 与令牌）；审计日志；数据同步与 BitTorrent 两组工具，以及把它们的记录原样发送的设置。
 - 资料来源：[控制台与 store](../console.zh-CN.md#助手)、`app/workbench/web/ai/`。
 
 ### 15 反向代理
 
 - 路由页：按处理器类型分标签（全部、`proxy`、`static`、`respond`、`fastcgi` 等）；每条路由的 `match`（host、path、method、header、query、remote_ip、expr）、`handler` 与 `middleware`。
 - 上游页：`addresses`、`load_balancing`（九种策略）、`sticky_cookie`、连接与排队上限、超时、主动与被动健康检查、`deny_internal`；每行显示后端可用数。
-- 处理器与中间件模块清单（`proxy`、`static`、`respond`、`fastcgi`、`media_pages`、`media_tokens`、流媒体与 WebRTC 处理器；`basic_auth`、`body_limit`、`cache`、`circuit_breaker`、`client_cert`、`compress`、`concurrency_limit`、`forward_auth`、`headers`、`jwt`、`rate_limit`、`redirect`、`rewrite`、`wasm`），各章链接到参考。
+- 处理器与中间件模块清单（`proxy`、`static`、`respond`、`fastcgi`、`media_pages`、`media_tokens`、`vod`、`sync_ingest`、`bt_stream`、`bt_publish`、`bt_tracker`、流媒体与 WebRTC 处理器；`basic_auth`、`body_limit`、`cache`、`circuit_breaker`、`client_cert`、`compress`、`concurrency_limit`、`forward_auth`、`headers`、`jwt`、`rate_limit`、`redirect`、`rewrite`、`wasm`），各章链接到参考。
 - 资料来源：`templates/conf/conf.d/60-apps.conf`、[配置参考：Routes](../reference/config.md#routes)、[配置参考：Upstreams](../reference/config.md#upstreams)、[配置参考：Handlers](../reference/config.md#handlers)、[配置参考：Middleware](../reference/config.md#middleware)、[schema/doc](../../schema/doc/) 各模块文档。
 
 ### 16 正向代理
@@ -186,8 +188,8 @@
 
 ### 22 媒体库
 
-- 页面：**媒体库**（条目、搜索、过滤、分页、扫描状态、重新扫描）、**频道**（播放列表、日程、循环与随机、推流目标）、**播放 URL**（`url_signing` 的测试 URL、密钥轮换、会话）、**指标**、**媒体库配置**（`media_library`）、**点播路由**（`vod` 路由）、**频道配置**（`streaming.channels` 与 `streaming.push`）、**URL 签名**（各策略的 `url_signing`）。
-- `media_library` 的参数：`roots`、`files`、`exclude`、`follow_symlinks`、sidecar、各上限。
+- 页面（按菜单顺序）：**媒体库**（条目、搜索、过滤、分页、扫描状态、重新扫描）、**频道**（播放列表、日程、循环与随机、推流目标）、**播放 URL**（`url_signing` 的测试 URL、密钥轮换、会话）、**指标**、**媒体库配置**（`media_library`）、**点播路由**（`vod` 路由）、**频道配置**（`streaming.channels` 与 `streaming.push`）、**URL 签名**（各策略的 `url_signing`）。
+- `media_library` 的参数：`roots`、`files`、`exclude`、`follow_symlinks`、sidecar、各上限；`media_pages` 处理器提供的观众页面（媒体库页、房间的通话与聊天、发布与播放、播放器）及其字段。
 - 资料来源：[媒体库](../media-library.zh-CN.md)、[频道](../channels.zh-CN.md)、[配置参考：Media library](../reference/config.md#media-library)、`app/workbench/web/gateway/media.js`。
 
 ### 23 WebRTC
@@ -209,6 +211,20 @@
 - 角色的页面：llm.hub（概览、节点、模型、代理、流量、对端、设置）、llm.node（概览、模型、GPU、操作、任务、流量、对端、设置）、llm.proxy（概览、模型、节点、流量、密钥、对端、设置）。
 - 资料来源：[llm](../llm.zh-CN.md)、[配置参考：LLM](../reference/config.md#llm)、`app/workbench/web/llm/`。
 
+### 26 数据同步
+
+- `sync` 成员与角色：源、转换与编解码、一个或多个 sink 组成的管道；记录及其带类型的值、只在每个 sink 都确认后才保存的检查点、位置与投递语义、重试、`on_error` 与死信、批处理作业（`mode: "once"`、`job`、日程）、事务型 sink 的恰好一次、WASM 插件；连接器（文件、数据库及其变更、主题、索引、桶、对象存储、可观测性与向量存储）及较新的 MQTT、RabbitMQ、NATS JetStream、Pulsar、SQL Server、Doris 与 StarRocks、Loki、OpenTelemetry 日志、InfluxDB、TDengine、Qdrant 与 Milvus。
+- 页面：**管道**（状态、吞吐与延迟、已读取与已确认、错误、队列、死信；新建管道）、管道的**概览**（暂停、恢复、重新快照、测试连接、试运行、计数、sink、作业）、**编辑**、**检查点**（设置或重置）、**死信**（重放或丢弃），以及**同步配置**。
+- `fit sync` 与 Admin API；助手的 `sync_*` 工具与 `sync-pipeline` 技能。
+- 资料来源：[数据同步](../sync.zh-CN.md)、[配置参考：Sync](../reference/config.md#sync)、[控制台与 store](../console.zh-CN.md#数据同步)、[决策 036](../decisions/036-sync.zh-CN.md)、`app/workbench/web/sync/`。
+
+### 27 BitTorrent
+
+- `bittorrent` 成员：客户端角色（种子及其在 `data_dir` 中的状态、`listen`、上限与速率、队列、磁盘检查、分类、`alt_speed`、`watch_dir`、单种子上限、屏蔽名单、把目录发布为 hybrid 种子并以 fit 的静态文件作为 web 种子的 `publish` 条目、RSS 自动下载）与 tracker 角色（经 `bt_tracker` 路由的 HTTP announce 与其自行 `listen` 的 UDP、公开或使用 `media_auth` 策略 passkey 的私有、info hash 允许列表、有上限的 swarm）。
+- 页面：**种子**（筛选、批量暂停/恢复/删除、添加种子、备用速率、最近事件）、种子的**概览 / 文件 / Peer / Tracker**、**Tracker**、**RSS**、**发布**、**BitTorrent 配置**。
+- 路由上的处理器 `bt_stream`、`bt_publish` 与 `bt_tracker`；Admin API、控制台的事件流、`fit bt`、助手的 `bt_*` 工具；集群的 BitTorrent 页面与分发。
+- 资料来源：[BitTorrent](../bittorrent.zh-CN.md)、[配置参考：BitTorrent](../reference/config.md#bittorrent)、[控制台与 store](../console.zh-CN.md#bittorrent)、[决策 037](../decisions/037-bittorrent.zh-CN.md)、`app/workbench/web/bittorrent/`。
+
 ## 编写约定（维护者与分章任务）
 
 1. **文件**：每章两个文件，`NN-<slug>.zh-CN.md`（中文）与 `NN-<slug>.md`（英文），`NN` 为两位章号。
@@ -223,14 +239,15 @@
    不编辑配置的页面（概览、引擎、版本、一致性检查、集群等）省略“参数”与“.conf 配置”或只写所涉及的成员。
 3. **.conf 示例必须能通过校验**：把示例（含必要的注释行）存成临时文件，运行
    `./bin/fit validate -c <临时文件>`，通过才可写入。示例应是自包含的完整配置：
-   只写 `upstream` 而没有监听器会报错，需要时补一个最小 `listener`。示例中的 `admin` 只允许出现在
-   01 章（引导文件）与 02 章（用户）中；控制台页面从不编辑 `admin`。
+   只写 `upstream` 而没有监听器会报错，需要时补一个最小 `listener`。示例中的 `admin` 只出现在以
+   `admin` 本身为主题的章节：01（引导文件）、02（用户）、12（`admin.cluster`）与 14
+   （`admin.assistant`）；控制台页面从不编辑 `admin`，其他章的配置都没有它。
 4. **链接**：只用相对路径。章间互链用本目录下的文件名；链到其他文档用 `../<文件>`。
    标题锚点按 GitHub 规则（小写、空格转 `-`、去掉标点，中文保留）。所有相对链接会被
    `go test ./docs` 检查，目标文件与标题必须存在。
 5. **术语**：菜单与页面名称以 `app/workbench/web` 中各模块的 i18n 词条为准（中文文件用中文词条，
    英文文件用英文词条）；配置字段名一律用代码中的英文原名。
-6. **篇幅**：每章中文 150–400 行为宜（反向代理、媒体库、助手、集群、隧道、LLM 可更长）；
+6. **篇幅**：每章中文 150–400 行为宜（反向代理、媒体库、助手、集群、隧道、LLM、数据同步与 BitTorrent 可更长）；
    英文与中文等长。
 7. **不要**运行负载测试或基准（本仓库规则）；`./bin/fit validate` 与 `go test ./docs` 可以运行。
 8. 资料来源中列出的文件是**权威**的：页面行为以 `app/workbench/web` 的代码为准，参数以
@@ -254,5 +271,7 @@
 | WebRTC | [../webrtc.zh-CN.md](../webrtc.zh-CN.md) |
 | tunnel | [../tunnel.zh-CN.md](../tunnel.zh-CN.md) |
 | llm | [../llm.zh-CN.md](../llm.zh-CN.md) |
+| 数据同步 | [../sync.zh-CN.md](../sync.zh-CN.md) |
+| BitTorrent | [../bittorrent.zh-CN.md](../bittorrent.zh-CN.md) |
 | 模块文档（处理器、中间件、ACME 等） | [../../schema/doc/](../../schema/doc/) |
 | 工作台前端（菜单与页面） | [../../app/workbench/web/](../../app/workbench/web/) |

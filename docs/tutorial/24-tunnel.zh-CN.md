@@ -25,7 +25,8 @@ fib 引擎上，可以和网关的路由并存，也可以单独运行：
 
 角色的页面在角色运行后出现在菜单中：在**隧道角色**页设置成员，配置应用后角色启动，其模块出现在菜单的隧道组下。这些页面的修改
 写回角色在配置中的成员并立即生效，无需重启；fit 把配置保存在 `admin.store` 时以加密方式保存，没有 store 时修改只在重启或重新读取
-配置文件之前有效，页面会提示这一点。每个角色页面每 3 秒刷新一次，都有隧道全景图（**详情**）。
+配置文件之前有效，页面会提示这一点。展示状态的页面每 3 秒刷新一次；设置表单只在打开时与修改后加载。**概览**与**隧道**页带有
+**隧道全景**工具，某条隧道的**详情**会在其中打开它的完整链路。
 
 ### 隧道角色（Tunnel roles）
 
@@ -219,6 +220,8 @@ tunnel {
 - [隧道](../tunnel.zh-CN.md)：运行角色、链路（TLS、WSS、QUIC 与明文）、[令牌](../tunnel.zh-CN.md#令牌)、[链路靠什么保护](../tunnel.zh-CN.md#链路靠什么保护)、[控制台](../tunnel.zh-CN.md#控制台)、流控与上限。
 - [配置参考：Tunnel](../reference/config.md#tunnel)与[控制台与 store](../console.zh-CN.md#页面)。
 - [功能导航栏](03-navigation.zh-CN.md)：角色的动态模块。
+- [WebRTC](23-webrtc.zh-CN.md)：TURN 服务器，中继 ICE agent 的 UDP 数据报；隧道转发的是 TCP 服务。
+- [LLM 角色](25-llm.zh-CN.md)：菜单里同样的三个角色，以及同类链路与令牌。
 - 页面代码：[app/workbench/web/tunnel/hub.js](../../app/workbench/web/tunnel/hub.js)、
   [node.js](../../app/workbench/web/tunnel/node.js)、[proxy.js](../../app/workbench/web/tunnel/proxy.js)与
   [shared.js](../../app/workbench/web/tunnel/shared.js)。

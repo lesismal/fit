@@ -2,10 +2,6 @@
 
 [English](25-llm.md) | [简体中文](25-llm.zh-CN.md)
 
-本章是教程的第 25 章，讲配置成员 `llm` 的三个角色在工作台中的页面：`llm.hub`、`llm.node` 与
-`llm.proxy`。字段的完整表在[配置参考](../reference/config.md#llm)，功能的深入说明在
-[LLM 功能](../llm.zh-CN.md)。
-
 ## 功能
 
 `llm` 开启 fit 的三个 LLM 角色，每个角色由它自己的成员开启，任意组合，可以与网关的监听和路由并存：
@@ -15,8 +11,9 @@
   托管接口；node 还上报本机硬件，并执行一组固定的操作。
 - **`llm.hub`** 是 node 与 proxy 汇合之处：它维护节点表与模型目录，把每次调用转给提供该模型、负载最小的节点。
 - **`llm.proxy`** 为 agent 提供这些接口（`/v1/chat/completions`、`/v1/messages`、
-  `/v1beta/models/{model}:generateContent`、`/api/chat`、`/v2/chat`），打通本机或局域网——公网 hub——其他
-  机器上的 node 这条链路。
+  `/v1beta/models/{model}:generateContent`、`/api/chat`、`/v2/chat`，以及这些接口的其他无状态调用），打通
+  本机或局域网——公网 hub——其他机器上的 node 这条链路。把状态留在厂商侧的调用——文件、批处理、存储的
+  响应、assistant、微调、Gemini 的缓存内容——不提供，应答 `404`。
 
 角色之间通过 WebSocket 连接组成的互联（mesh）通信：每个角色 `listen` 接受连接、`peers` 拨号连接对端；回环
 之外的连接走 TLS，拨号方按 `pin` 或 `ca_file` 校验对端的证书。连接凭据是监听方签发的**令牌**：角色的
@@ -180,8 +177,28 @@ curl、Gemini SDK、Ollama）；**各模型调用**列出每个模型的调用�
 | --- | --- | --- |
 | `description` | 无 | 对端显示的节点说明 |
 | `models` | 无 | 节点提供的模型，最多 256 个；每个 `name`、`api`、`base_url` 必填 |
-| `settings` | 默认值 | `allow_hub_manage`（默认关闭）、`gpu_sudo`、`refresh_interval`（`30s`）、`job_timeout`（`1h`）、`gpu_data_dir` |
+| `settings` | 默认值 | `allow_hub_manage`（默认关闭）、`gpu_sudo`（`true`）、`refresh_interval`（`30s`）、`job_timeout`（`1h`）、`gpu_data_dir` |
 | `proxy` | 默认值 | 转发给上游的调用的上限，见下表 |
+
+### 模型接口（`api`）
+
+模型的 `api` 是它上游所用的接口：它决定 agent 经哪些端点到达该模型、node 调用的 URL 与 Key 头，以及
+`upstream` 替换名称的位置。代码支持的六种如下：
+
+| `api` | 上游 | agent 调用 | node 调用 |
+| --- | --- | --- | --- |
+| `openai` | OpenAI 及所有 OpenAI 兼容服务（vLLM、llama.cpp、LM Studio、Ollama 的 `/v1`；DeepSeek、Qwen、Mistral、Groq、xAI 等） | `/v1/{call}`，如 `chat/completions` | `base_url/{call}` |
+| `anthropic` | Anthropic 及说其 Messages API 的服务 | `/v1/messages`、`/v1/messages/count_tokens` | `base_url/{call}` |
+| `gemini` | Google 的 Gemini API | `/v1beta/models/{model}:{method}`，或 `/v1/models/…` | `base_url/models/{upstream}:{method}` |
+| `azure_openai` | Azure OpenAI 的 deployment，agent 以 `openai` 调用 | 同 `openai` | `base_url/openai/deployments/{upstream}/{call}?api-version={api_version}` |
+| `ollama` | Ollama 自己的接口 | `/api/chat`、`/api/generate`、`/api/embed` | `base_url/api/…` |
+| `cohere` | Cohere 的 v2 接口 | `/v2/chat`、`/v2/embed`、`/v2/rerank` | `base_url/{call}` |
+
+Key 头：`openai`、`ollama` 与 `cohere` 用 `Authorization: Bearer`，`anthropic` 用 `x-api-key`，`gemini`
+用 `x-goog-api-key`，`azure_openai` 用 `api-key` 且需要 `api_version`。模型的 `upstream` 是替换 `name`
+发往上游的 ID 或 deployment；页面的**模型**表把两者都列出，完整字段见
+[配置参考](../reference/config.md#config-llmmodel)，各接口的收发细节见
+[模型与接口](../llm.zh-CN.md#模型与接口)。
 
 ### llm.proxy
 
@@ -297,7 +314,8 @@ llm {
 ```
 
 只有角色、没有路由的配置不需要监听。页面对这些成员的修改经 `admin.Configs` 作为一次配置编辑生效，有
-store 时加密写入 store。
+store 时加密写入 store。proxy 的成员见[配置参考：LLM](../reference/config.md#config-llmproxy)：
+`api { address 127.0.0.1:9301 }` 在本机提供 agent 接口，它的 `peers` 像 node 的一样拨号连接 hub。
 
 ## 相关文档
 
@@ -306,5 +324,7 @@ store 时加密写入 store。
 - [控制台与 store](../console.zh-CN.md#页面)：登录、会话与页面的通用规则。
 - [隧道角色](24-tunnel.zh-CN.md)：同样的三个角色，流量页的链路图与之相同。
 - [助手](14-assistant.zh-CN.md)：`llm.proxy` 作为助手的 `llm_proxy` 提供方。
+- [数据同步](26-sync.zh-CN.md)：菜单里的下一个模块及其页面。
+- [BitTorrent](27-bittorrent.zh-CN.md)：再下一个模块，也是菜单的最后一个。
 - 前端代码：[app/workbench/web/llm/](../../app/workbench/web/llm/)。
 - [决定 028](../decisions/028-llm-and-tunnel.zh-CN.md) 与[决定 035](../decisions/035-link-tokens.zh-CN.md)。

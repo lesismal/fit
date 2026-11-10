@@ -10,8 +10,8 @@ keeps, which files are on disk now with their sizes and times, and two actions a
 
 The settings themselves are edited in the forms at the bottom of the page: the forms of `log` and
 `access_log` (with `time_zone` and `rotate`), over the config's shared draft, with the same save bar and raw
-text tabs as any other page. `rotate` and `time_zone` take effect on reload; `log`'s `output` and `format`
-take a restart.
+text tabs as any other page. `rotate`, `time_zone` and the levels take effect on reload; `output` and `format`
+take a restart, of `log` and of `access_log` alike.
 
 A file is written by its own writer goroutine: when the disk cannot keep up, the lines past the buffer are
 dropped and counted, so a slow disk never holds up the work that logged them. Rotation, compression and the
@@ -29,16 +29,17 @@ startup. When no log writes to a file, the page says so and points at the forms 
 
 Then one card per file output (what `GET /logs` reads):
 
-- The card is titled **fit's own log** or **Access log**; its first line is the path, a badge for each logger
-  that writes there, the format badge and the time zone badge. The format shows as mixed when the loggers
-  writing one file do not share it.
+- The card is titled **Access log** when the access log is the only logger writing there, and **fit's own log**
+  otherwise; its first line is the path, a badge for each logger that writes there, the format badge and the time
+  zone badge. The format shows as mixed when the loggers writing one file do not share it.
 - One line says what this output's rotation does: rotates at `max_bytes`, every `interval`, keeps `max_age`,
   at most `max_files` files, at most `max_total_bytes`, gzip. With no `rotate` it is a warning that this file
   grows without bound.
 - Dropped lines and the last write failure, when there are any, are shown beside it.
 - A table of the files: **File**, **Size**, **Modified**, with a **current** badge on the one being written. A
-  rotated file is named after the time of the rotation in UTC, as in `fit.log.2026-11-05T04-00-00.000`, and
-  gets `.gz` when `compress` is on. Under the table is the line "N files, size".
+  rotated file is named after the time of the rotation in UTC, as in `fit.log.2026-11-05T04-00-00.000` (`-1`,
+  `-2` and so on when that name is taken), and gets `.gz` when `compress` is on. Under the table is the line
+  "N files, size".
 - Two buttons: **Rotate now** and **Clean up now**.
 
 **Rotate now** turns that file into a new one at once (`POST /logs/rotate`, body `{"path"}`): the queue is

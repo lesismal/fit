@@ -26,10 +26,11 @@ A listener can also serve SOCKS5 (and SOCKS4) with the `socks` protocol: `listen
 clients may use it and where it connects them. It serves CONNECT only, without authentication, and
 refuses BIND and UDP ASSOCIATE. The `forward_proxy` route and `listeners.socks` are the same object, so
 `clients`, `allow`, `deny`, `ports` and the two timeouts are written exactly the same way; the only
-difference is how a refused client is refused: the route answers 403, SOCKS closes the connection after
-the handshake. A port that serves both HTTP and socks is told apart by what the client sends first: a
-SOCKS greeting goes to socks, an HTTP request in the clear to HTTP. Of SOCKS5's commands only CONNECT is
-served, and SOCKS4 has connect only. Neither authenticates, so `clients` is the only gate.
+difference is how a refused client is refused: the route answers 403, while SOCKS answers with a
+SOCKS failure reply (code 2, "connection not allowed by ruleset"). A port that serves both HTTP and
+socks is told apart by what the client sends first: a SOCKS greeting goes to socks, an HTTP request
+in the clear to HTTP. Of SOCKS5's commands only CONNECT is served, and SOCKS4 has connect only.
+Neither authenticates, so `clients` is the only gate.
 
 ## Pages
 
@@ -39,19 +40,20 @@ The Forward proxy module has one page in the menu. It edits the `routes` member 
 only the routes whose `handler` is `forward_proxy`; the callout at the top says so, and reminds that
 listeners can serve SOCKS5 with the `socks` protocol too.
 
-- When the draft has a listener that sets `socks`, the page lists "Listeners serving SOCKS": each badge
-  holds the listener's name and address and opens the [Listeners](05-listeners.md) page. This row is
-  read only; `socks` itself is edited on the Listeners page.
-- Each route is a row: its name and its `match`, with the small tags `clients`, `:ports` and
-  `@listeners` (which listeners the route serves; a route that names none serves every listener).
-- "Add forward proxy route" makes a route with `match { method CONNECT }`, `clients` and `ports` as
-  placeholders, named `forward-1`, `forward-2`, …
+- When the draft has a listener that sets `socks` (or names it in `protocols`), the page lists
+  "Listeners serving SOCKS": each badge holds the listener's name and address and opens the
+  [Listeners](05-listeners.md) page. This row is read only; `socks` itself is edited on the Listeners
+  page.
+- Each route is a row: its name, with the small tags `clients`, `:ports` and `@listeners` (which
+  listeners the route serves; a route that names none serves every listener).
+- "Add forward proxy route" makes a route with `match { method CONNECT }`, `clients` `127.0.0.1/32`
+  and `ports` `443`, named `forward-1`, `forward-2`, …
 - A route row opens its form: `match` and the handler's params are edited field by field, `clients`,
   `allow`, `deny`, `ports` and the two timeouts among them.
-- The page edits the shared draft: the form and the `.conf`, `.yaml` and `.json` tabs are the same
-  draft, and Save and apply checks and applies it. The page shows the whole `routes` member, not only
-  the routes this page filters, so the problems the consistency check and the JSON page report come from
-  here too.
+- The page lists only the forward proxy routes, but its `.conf`, `.yaml` and `.json` tabs are the
+  whole `routes` member, the other routes included; the form and the tabs are the same draft, and
+  Save and apply checks and applies it. The problems the consistency check and the JSON page report
+  for any route come from this draft too.
 
 ### On the Engine page
 
@@ -68,7 +70,7 @@ same object, so the fields are the same.
 
 | field | default | description |
 | --- | --- | --- |
-| `clients` | required | The addresses and CIDR ranges of the clients that may use the proxy, as `10.0.0.0/8`; others are refused (the route answers 403, SOCKS closes the connection). |
+| `clients` | required | The addresses and CIDR ranges of the clients that may use the proxy, as `10.0.0.0/8`; others are refused (the route answers 403, SOCKS answers a failure reply). |
 | `allow` | everything, but for the addresses refused by default | The destinations the proxy connects to: host names, `*.example.com`, IP addresses and CIDR ranges; a range also holds the address a host name resolves to. |
 | `deny` | none | Destinations refused, written as in `allow`, whatever `allow` holds. |
 | `ports` | any | The destination ports allowed, as `443`. |
@@ -80,19 +82,22 @@ same object, so the fields are the same.
 These are refused whatever `allow` holds; to allow them `allow` must name them:
 
 - loopback: `127.0.0.0/8` and `::1`;
-- link-local: `169.254.0.0/16`, of which `169.254.169.254` is the metadata service of most clouds;
-- unspecified: `0.0.0.0/0` and `::/0`;
-- multicast;
+- "this network" and unspecified: `0.0.0.0/8` (a connection to `0.0.0.0` reaches the host itself) and `::`;
+- link-local: `169.254.0.0/16` — of which `169.254.169.254` is the metadata service of most clouds —
+  and `fe80::/10`;
+- multicast and broadcast: `224.0.0.0/4`, `ff00::/8` and `255.255.255.255`;
+- the cloud metadata services outside those: `100.100.100.200` (Alibaba Cloud) and `fd00:ec2::254`
+  (AWS's, over IPv6);
 - the addresses of the host fit runs on: only writing that address alone names it, a wider range does not.
 
 ### What gets refused, and how
 
-- a client not in `clients`: the route answers 403, SOCKS closes the connection after the handshake;
+- a client not in `clients`: the route answers 403, SOCKS answers a failure reply (code 2);
 - a destination `allow` does not hold, or one of the addresses refused by default above: the route
-  answers 403;
-- a host name that resolves to a refused address: refused once it is connected, before anything is sent,
-  and the route answers 502;
-- a resolve or connect past `connect_timeout`: 504.
+  answers 403, SOCKS code 2;
+- a host name that resolves to a refused address: refused once it is connected, before anything is
+  sent, and the route answers 502 (SOCKS code 2);
+- a resolve or connect past `connect_timeout`: the route answers 504, SOCKS a failure reply.
 
 ### Points that are easy to misread
 
@@ -140,8 +145,8 @@ the `socks` block, not in the listener block. `allow` holds no `127.0.0.0/8`, so
 the host itself; to allow that, write it in `allow`. `ports 443` allows only destination port 443 — the
 port the proxy goes to, not the port it listens on; leave `ports` out and any port is allowed.
 
-The page edits the `routes` member: in JSON and YAML the same thing is `routes[0].handler.params`, so
-this listener and route are the same config as the JSON example in
+The page edits the `routes` member: in JSON and YAML the same route is `routes[].handler.params`,
+and this route is the one in the JSON example of
 [the forward_proxy module doc](../../schema/doc/modules/forward_proxy.md).
 
 ## See also

@@ -35,8 +35,8 @@ says so.
 
 This page edits no config: it reads the running state (the Admin API's `GET /status`). The
 certificates come from a listener's `tls.certificates`, `tls.acme` and `tls.on_demand`, or from HTTPS
-by default. The same table is on the [Overview](04-overview.md) page, which lists only those expiring
-within 14 days.
+by default. The same table is on the [Overview](04-overview.md) page, whose certificate tile counts
+those expiring within 14 days.
 
 What can be done on this page is only looking: no form, no Save and apply. To change what a listener
 serves, edit its `tls` on the Listeners page; to have the certificates come from ACME, edit `acme` here,
@@ -47,8 +47,10 @@ or write a listener's `tls` empty.
 Edits the `auto_https` member: the form plus the `.conf`, `.yaml` and `.json` tabs, and Save and apply
 checks and applies it. Its four fields — `disable`, `disable_redirects`, `http_port` and `https_port` —
 are in the [key parameters](#key-parameters) below. The page creates no listeners: it changes the rule,
-and fit makes the listeners from the rule; the Engine page lists the generated ones under "Automatic
-HTTPS", linking back here.
+and fit makes the listeners from the rule. The [Engine](06-engine.md) page links each port's TLS
+settings: "TLS certificates" and "ACME certificates" for a listener's own `tls`, "Automatic HTTPS"
+where HTTPS by default applies, and "Redirects to HTTPS" on the generated port 80, each opening the
+page that sets it.
 
 ### ACME (`#/gw.tls/acme`)
 
@@ -63,7 +65,7 @@ running issuance and renewal go on by the rules read at start.
 
 | field | default | description |
 | --- | --- | --- |
-| `disable` | on | Turn HTTPS by default off: no listeners are made for a config that writes none, and an empty `tls` gets no certificates. |
+| `disable` | off | Turn HTTPS by default off: no listeners are made for a config that writes none, and an empty `tls` gets no certificates. |
 | `disable_redirects` | off | Make no listener in the clear to redirect to HTTPS; HTTP-01 is then answered by none, and certificates come through TLS-ALPN-01. |
 | `http_port` | `80` | The port of the listener in the clear that redirects to HTTPS. |
 | `https_port` | `443` | The port of the HTTPS listener, and the one redirects name when it is not 443. |
@@ -75,7 +77,7 @@ running issuance and renewal go on by the rules read at start.
 | `directory` | Let's Encrypt | The URL of the CA's ACME directory; `acme-staging-v02` is its staging CA, for tests. |
 | `email` | none | The address the CA may write to about the account's certificates. |
 | `ca_file` | the system's roots | A PEM file of the certificates the directory's is checked against, in place of the system's roots, for a CA of one's own. |
-| `storage` | `~/.local/share/fit` | The directory accounts, keys and certificates are kept in, which instances of fit may share. |
+| `storage` | `$XDG_DATA_HOME/fit`, or `~/.local/share/fit` | The directory accounts, keys and certificates are kept in, which instances of fit may share. |
 | `shared_storage` | none | Keep them in Redis, etcd or Consul instead (not with `storage`): one instance obtains a certificate, holding a lock there, and the others take it from there; each challenge's answer is kept there too, so that whichever instance the CA reaches answers it. |
 | `challenges` | `http-01`, `tls-alpn-01` | The challenges answered, in the order tried: HTTP-01 answered by any listener of fit's in the clear on port 80, TLS-ALPN-01 by the TLS listener that lists the name on port 443. |
 | `on_demand` | none | For listeners whose `tls` sets `on_demand`: whom to ask whether a name may have a certificate, the URL `ask`, answered 2xx means yes. |
@@ -92,12 +94,12 @@ The full field tables are in
 The challenges are tried in the order written: `http-01` is answered by any listener of fit's in the
 clear on port 80 — so with `disable_redirects` on, HTTP-01 is answered by none and certificates can only
 come through TLS-ALPN-01 — and `tls-alpn-01` by the TLS listener that lists the name, on port 443. A
-listener that requires client certificates (`client_auth` with `mode: require`) cannot answer
-TLS-ALPN-01, because the CA sends none.
+failed attempt is tried again with the next. A listener that requires client certificates (`client_auth`
+with `mode: require`) cannot answer TLS-ALPN-01, because the CA sends none.
 
 ### Storage and sharing
 
-`storage` is a directory, which several instances of fit on one host may share. Across hosts, use
+`storage` is a directory, which instances of fit may share. Across hosts, use
 `shared_storage` — one of `redis`, `etcd` or `consul`, and not with `storage`: one instance obtains a
 certificate while holding a lock there and the others take it from there; each challenge's answer is kept
 there too, so whichever instance the CA reaches can answer it. `prefix` (default `fit/`), `lock_ttl`

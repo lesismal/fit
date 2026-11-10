@@ -21,8 +21,8 @@ takes the names one label below `example.com`. A `tcp` listener may be listed by
 connection goes to the one whose names hold the name it asks for, or else to the service without
 `server_names` (which also takes a connection that is not TLS or asks for no name), and if there is
 none, the connection is closed. The ClientHello must come within 10s. These TLS connections are
-proxied as they are: fit does not decrypt them, so the listener's `tls` and its certificates play no
-part — the certificates are the upstream's side's business.
+proxied as they are: fit does not decrypt them, so the certificates that answer them are the
+upstream's side's business.
 
 `proxy_protocol` tells the upstream who the client was: each connection to the upstream first sends a
 PROXY protocol header of version v1 (text) or v2 (binary), naming the client's address and the one it
@@ -69,8 +69,9 @@ the `proxy_protocol`; when a port is used by HTTP, tcp and socks at once, the pa
 - The page listens on nothing and picks no address: `listeners` is only names pointing at listeners
   edited elsewhere, and writing a listener's `protocols` as `tcp` or `udp` is done on the
   [Listeners](05-listeners.md) page.
-- The page shows no running connections: the counts of connections and sessions are on the
-  [Overview](04-overview.md) and [Engine](06-engine.md) pages.
+- The page shows no running counts: the connections fit holds are on the [Overview](04-overview.md)
+  page, and the services themselves on the [Overview](04-overview.md) and [Engine](06-engine.md)
+  pages.
 
 ## Key parameters
 
@@ -86,14 +87,14 @@ Only the key parameters; the full field table is in
 | `proxy_protocol` | none | Send each upstream connection a PROXY protocol header of this version (`v1`, text, or `v2`, binary) first, naming the client's address and the one it connected to. For `tcp` listeners. |
 | `idle_timeout` | `10m` for a connection, `1m` for a `udp` session | How long a connection or a session may carry nothing either way before both sides are closed. |
 | `max_conns` | `10000` | The most connections and `udp` sessions the service proxies at once; a connection past it is closed as soon as it is accepted, and the datagrams of a session past it are dropped. |
-| `access` | inherited | The client addresses the service takes, deciding before its listener's `access` and the global one. |
+| `access` | inherited | The client addresses the service takes, deciding before its listener's `access` and the global one: a connection it refuses is closed once its PROXY header and ClientHello are read when the listener needs them, and the datagrams of a `udp` session it refuses are dropped. |
 
 ### Counts and limits
 
 `max_conns` counts the connections and sessions one service proxies at once: a connection past it is
 closed as soon as it is accepted, and the datagrams of a session past it are dropped. `idle_timeout`
 means nothing on either side — a side that is still talking is not idle. The page shows none of these
-numbers: the running connections are on the [Overview](04-overview.md) and [Engine](06-engine.md) pages.
+numbers: the connections fit holds are counted on the [Overview](04-overview.md) page.
 
 ### What is not used
 
@@ -127,8 +128,9 @@ of its own.
 
 ## In .conf
 
-Two listeners, three upstreams and three services: one TLS pass-through split by SNI, one `udp`, and one
-that sends a PROXY header. This is a self-contained complete config, and it passes `fit validate`:
+Three listeners, three upstreams and three services: one TLS pass-through split by SNI, one `udp`,
+and one that sends a PROXY header. This is a self-contained complete config, and it passes
+`fit validate`:
 
 ```fit
 listener pg :5432 tcp
@@ -144,8 +146,9 @@ service dns { listeners dns; upstream resolvers }
 service mail { listeners mail; upstream mail; server_names mail.example.com }
 ```
 
-An `upstream` with no listener and no service fails validation: an upstream does not listen by itself,
-so it has to be used by a service or a route on some listener.
+A config that writes no listener — and no route matching a host name, for which HTTPS by default
+would make listeners — fails validation: an upstream does not listen by itself. The three upstreams
+here are used by the three services.
 
 The `mail` service is the SNI pass-through: a connection on `:8443` that asks for `mail.example.com` is
 proxied as it is to `10.0.0.25:8443`; a connection that asks for another name or for none has nowhere

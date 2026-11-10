@@ -2,11 +2,6 @@
 
 [English](25-llm.md) | [简体中文](25-llm.zh-CN.md)
 
-This is chapter 25 of the tutorial: the pages of the three roles of the `llm` config member in the
-workbench — `llm.hub`, `llm.node` and `llm.proxy`. The full field tables are in
-[the config reference](../reference/config.md#llm), and the feature itself is described in
-[the LLM feature](../llm.md).
-
 ## What it does
 
 `llm` runs fit's three LLM roles, each started by its own member, in any combination, beside the
@@ -19,8 +14,10 @@ gateway's listeners and routes or without them:
 - **`llm.hub`** is where nodes and proxies meet: it keeps the node table and the model catalog, and
   passes each call to the least loaded node that serves that model.
 - **`llm.proxy`** serves those APIs to agents (`/v1/chat/completions`, `/v1/messages`,
-  `/v1beta/models/{model}:generateContent`, `/api/chat`, `/v2/chat`), across the path from the
-  machine or the LAN to the public hub to the nodes on other machines.
+  `/v1beta/models/{model}:generateContent`, `/api/chat`, `/v2/chat`, and the other stateless calls of
+  those APIs), across the path from the machine or the LAN to the public hub to the nodes on other
+  machines. Calls that keep state at the vendor — files, batches, stored responses, assistants,
+  fine-tuning, Gemini's cached contents — are not served and answer `404`.
 
 The roles talk over a mesh of WebSocket links: each role takes links at `listen` and dials its
 `peers`; off loopback the links go over TLS, and the dialer checks the peer's certificate by its
@@ -220,8 +217,30 @@ Only the key parameters; the full tables are in [the config reference: LLM](../r
 | --- | --- | --- |
 | `description` | none | the note about the node its peers show |
 | `models` | none | the models it serves, at most 256; each needs `name`, `api` and `base_url` |
-| `settings` | the defaults | `allow_hub_manage` (off by default), `gpu_sudo`, `refresh_interval` (`30s`), `job_timeout` (`1h`), `gpu_data_dir` |
+| `settings` | the defaults | `allow_hub_manage` (off by default), `gpu_sudo` (`true`), `refresh_interval` (`30s`), `job_timeout` (`1h`), `gpu_data_dir` |
 | `proxy` | the defaults | the bounds on the calls it forwards to its upstreams, in the table below |
+
+### The model APIs (`api`)
+
+A model's `api` is the API its upstream speaks; it sets the agent endpoints that reach the model, the URL
+and key header the node calls, and where `upstream` replaces the name. The six kinds are all the code
+supports:
+
+| `api` | Upstreams | Agents call | The node calls |
+| --- | --- | --- | --- |
+| `openai` | OpenAI and every OpenAI-compatible server (vLLM, llama.cpp, LM Studio, Ollama's `/v1`; DeepSeek, Qwen, Mistral, Groq, xAI and the like) | `/v1/{call}`, `chat/completions` and the rest | `base_url/{call}` |
+| `anthropic` | Anthropic and servers that speak its Messages API | `/v1/messages`, `/v1/messages/count_tokens` | `base_url/{call}` |
+| `gemini` | Google's Gemini API | `/v1beta/models/{model}:{method}`, or `/v1/models/…` | `base_url/models/{upstream}:{method}` |
+| `azure_openai` | Azure OpenAI deployments, which agents call as `openai` | as `openai` | `base_url/openai/deployments/{upstream}/{call}?api-version={api_version}` |
+| `ollama` | Ollama's own API | `/api/chat`, `/api/generate`, `/api/embed` | `base_url/api/…` |
+| `cohere` | Cohere's v2 API | `/v2/chat`, `/v2/embed`, `/v2/rerank` | `base_url/{call}` |
+
+The key header is `Authorization: Bearer` for `openai`, `ollama` and `cohere`, `x-api-key` for
+`anthropic`, `x-goog-api-key` for `gemini` and `api-key` for `azure_openai`, and `azure_openai` needs
+`api_version`. A model's `upstream` is the ID or deployment sent in place of `name`; the page's `Models`
+table shows both, and the full fields are in
+[the config reference](../reference/config.md#config-llmmodel). What each API takes and returns is in
+[Models and APIs](../llm.md#models-and-apis).
 
 ### `llm.proxy`
 
@@ -338,7 +357,9 @@ llm {
 
 A config with only roles and no routes needs no listener. What the pages change in these members is
 applied as one config edit through `admin.Configs`, and goes into the store, encrypted, when there is
-one.
+one. The proxy's member is in [the config reference: LLM](../reference/config.md#config-llmproxy):
+`api { address 127.0.0.1:9301 }` serves the agent API on this machine, and its `peers` dial the hub as
+the node's do.
 
 ## See also
 
@@ -348,5 +369,7 @@ one.
 - [The console and the store](../console.md#the-pages): logins, sessions and the rules the pages share.
 - [Tunnel roles](24-tunnel.md): the same three roles, and the same kind of traffic page.
 - [The assistant](14-assistant.md): `llm.proxy` as the assistant's `llm_proxy` provider.
+- [Sync](26-sync.md): the next module of the menu, with its own pages.
+- [BitTorrent](27-bittorrent.md): the module after it, and the last of the menu.
 - The front end: [app/workbench/web/llm/](../../app/workbench/web/llm/).
 - [Decision 028](../decisions/028-llm-and-tunnel.md) and [decision 035](../decisions/035-link-tokens.md).

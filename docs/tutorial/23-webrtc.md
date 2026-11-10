@@ -45,7 +45,7 @@ What can be done on the page:
 - Write `turn`'s quotas and bandwidth: `max_allocations`, `max_allocations_per_user`, `max_permissions`,
   `max_channels`, `user_bandwidth`, the lifetimes, and `allowed_peers` with `denied_peers`.
 - Write `media`'s port, `public_ips`, `ice_servers` and `turn_urls` (which the answers' `Link` headers tell to
-  the peers), and the limits and timeouts for PeerConnections, streams, viewers and bitrate.
+  the peers), its `access`, and the limits and timeouts for PeerConnections, streams, viewers and bitrate.
 - Write `proxy`'s port, `public_ips`, the session and relay limits, the idle timeout, and the source address
   `relay_ip` and the port range of the sockets toward the media servers.
 
@@ -70,6 +70,7 @@ Only the key parameters are listed here; the full field tables are in
 | --- | --- | --- |
 | `listen` | — | Required. The UDP addresses clients reach the server at, as `:3478`, the port `turn:` URIs default to; the same address also answers STUN Binding requests without credentials, so it works as a `stun:` server |
 | `listen_tcp`, `listen_tls` | none | TURN over TCP and TLS (`turn:host:port?transport=tcp`, `turns:`); TLS's certificates come from `tls.certificates` and are watched as a listener's are. A TLS address may not equal a TCP address; a UDP and a TCP address may, as `:3478` |
+| `mptcp` | off | Carries `listen_tcp` and `listen_tls` over Multipath TCP where the kernel offers it (Linux 5.6+); `listen`'s UDP sockets have none |
 | `realm` | — | Required. The realm of the credentials, sent in every challenge |
 | `users` | none | The static users, each with a `password` or the `key` it derives; with `secret` set too, a name is looked up in `users` first |
 | `secret` | none | coturn's `use-auth-secret`: a username `<expiry in Unix seconds>:<anything>` whose password is `base64(HMAC-SHA1(secret, username))`, accepted until the expiry |
@@ -82,6 +83,7 @@ Only the key parameters are listed here; the full field tables are in
 | `max_channels` | 64 | The channels one allocation binds; one more is refused with `508` |
 | `user_bandwidth` | 2 MiB | The bytes relayed for one username each way per second, with a second's worth of burst; datagrams past it are dropped |
 | `default_lifetime`, `max_lifetime` | 10m, 1h | An allocation's lifetime, refreshed by its client |
+| `nonce_lifetime`, `nonce_secret` | 10m, a random one | How long a nonce is good for (438 past it), and the key nonces are made with — shared by the servers of one load balancer, since any of them may see a client's requests |
 | `max_stream_message` | 8 KiB | The largest message a TCP or TLS client may send; a connection whose next message claims more is closed |
 | `stream_idle_timeout` | 30s | How long a TCP or TLS connection without an allocation stays open |
 | `allowed_peers`, `denied_peers` | none | Loopback, private, link-local, multicast and other internal ranges are refused by default; `allowed_peers` lets some of them in. Both take addresses with a port, as `10.0.0.5:8189`, which names that port alone |
@@ -96,6 +98,7 @@ server's own goroutines, never on a worker serving requests.
 | --- | --- | --- |
 | `listen` | — | Required. The UDP port every PeerConnection shares, as `:8189`; a wildcard host advertises the address of every interface that is up, unless `public_ips` is set |
 | `public_ips` | none | The addresses peers are told to reach the port at (behind a 1:1 NAT, or a load balancer that forwards the port unchanged) |
+| `access` | by the global `access` | The peer addresses the port serves, deciding before the global `access`; a refused address's datagrams are dropped, so its ICE checks go unanswered |
 | `ice_servers` | none | The STUN and TURN servers peers are told of in `Link` headers; fit needs none itself, as it is an ICE lite agent on its own address |
 | `turn_urls` | none | fit's own `webrtc.turn`, told to peers as `turn_urls`; then its `secret` must be set |
 | `turn_credential_ttl` | 1h | How long the TURN credentials an answer carries are good for |

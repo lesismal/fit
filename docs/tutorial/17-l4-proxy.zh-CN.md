@@ -15,8 +15,8 @@
 `server_names` 让同一个端口分出几条服务：只有 TLS 连接、且 ClientHello 里问的名字（SNI）落在某条服务的
 `server_names` 里，才归那条服务；`*.example.com` 含 `example.com` 下面一层的那个名字。一个 `tcp` 监听可以
 被几条服务列出，连接归名字对得上的那条；对不上归没有 `server_names` 的那条（不是 TLS 或没问名字的连接也
-归它），都没有就合上连接。ClientHello 必须在 10s 内到。这些 TLS 连接原样转发，fit 不解密，所以监听上的
-`tls` 与证书不参与——证书是上游那端的事。
+归它），都没有就合上连接。ClientHello 必须在 10s 内到。这些 TLS 连接原样转发：fit 不解密，所以应答它们的证书是
+上游那端的事。
 
 `proxy_protocol` 让上游知道客户端是谁：每条到上游的连接先送一个 v1（文本）或 v2（二进制）头，写着客户端
 的地址与它连上的地址。只用于 `tcp` 监听。监听端的 `proxy_protocol` 是收头，服务端的是发头，两者可以叠加：
@@ -54,8 +54,8 @@
 
 - 这一页不监听，也不选地址：`listeners` 只是名字，指向别处编辑的监听；把监听的 `protocols` 写成 `tcp`
   或 `udp` 在[监听](05-listeners.zh-CN.md)页做。
-- 页上不显示运行中的连接数：四层的连接与会话数在[概览](04-overview.zh-CN.md)与[引擎](06-engine.zh-CN.md)
-  页看。
+- 页上不显示运行中的计数：fit 持有的连接数在[概览](04-overview.zh-CN.md)页，服务本身在
+  [概览](04-overview.zh-CN.md)与[引擎](06-engine.zh-CN.md)页看。
 
 ## 参数
 
@@ -70,13 +70,13 @@
 | `proxy_protocol` | 无 | 发给上游的 PROXY 协议头的版本：`v1`（文本）或 `v2`（二进制）。只用于 `tcp` 监听。 |
 | `idle_timeout` | 连接 `10m`，`udp` 会话 `1m` | 一条连接或会话两边都没有字节多久后合上。 |
 | `max_conns` | `10000` | 同时最多代理多少条连接与会话；超出的连接一被接受就合上，超出的会话的数据报被丢掉。 |
-| `access` | 继承 | 这条服务接的客户端地址，先于监听的 `access` 与全局的 `access` 决定。 |
+| `access` | 继承 | 这条服务接的客户端地址，先于监听的 `access` 与全局的 `access` 决定：被它拒绝的连接在监听需要时读完 PROXY 头与 ClientHello 后合上，被它拒绝的 `udp` 会话的数据报被丢掉。 |
 
 ### 计数与上限
 
 `max_conns` 数的是一条服务同时代理的连接与会话：超出的连接一被接受就合上，超出的会话的数据报被丢掉。
-`idle_timeout` 说的是两边都没有字节——一侧还在说话就不算空闲。页上不显示这些数，运行中的连接数在
-[概览](04-overview.zh-CN.md)与[引擎](06-engine.zh-CN.md)页看。
+`idle_timeout` 说的是两边都没有字节——一侧还在说话就不算空闲。页上不显示这些数，fit 持有的连接数在
+[概览](04-overview.zh-CN.md)页看。
 
 ### 用不上的那些
 
@@ -104,7 +104,7 @@ HTTP 请求给 HTTP；其他字节给没有 `server_names` 的服务，没有就
 
 ## .conf 配置
 
-两个监听、三个上游、三条服务：一条按 SNI 分出的 TLS 透传，一条 `udp`，一条发 PROXY 头。这是自包含的完整
+三个监听、三个上游、三条服务：一条按 SNI 分出的 TLS 透传，一条 `udp`，一条发 PROXY 头。这是自包含的完整
 配置，能通过 `fit validate`：
 
 ```fit
@@ -121,7 +121,8 @@ service dns { listeners dns; upstream resolvers }
 service mail { listeners mail; upstream mail; server_names mail.example.com }
 ```
 
-只有 `upstream` 而没有监听和服务，校验会报错：上游自己不听，它要靠一条服务或一条路由被某个监听用到。
+不写任何监听——也没有匹配主机名的路由、HTTPS by default 因此会生成监听——的配置通不过校验：上游自己不听。
+这里的三个上游由三条服务使用。
 
 `mail` 那条是 SNI 透传：`:8443` 上问 `mail.example.com` 的连接原样送到 `10.0.0.25:8443`；问别的名字或没问
 名字的连接没有归属，会被合上——要兜底，再加一条没有 `server_names` 的服务。

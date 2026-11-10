@@ -15,7 +15,9 @@ every field of `match` must hold, and within a field one of the values listed is
 the one with the highest `priority`; among equal priorities, the most specific host (exact, then
 `*.`, then `**.`, then none), then the most specific path (exact, then the longest prefix), then the
 one with the most other matchers set, then the one written first. A request no route takes is
-answered 404. The path is made canonical before any route sees it.
+answered 404. The path is made canonical before any route sees it: dot-segments are removed
+(`/a/./b/../c` is `/a/c`), repeated slashes are one (`//a` is `/a`), and a path whose `..` climbs
+above `/` is answered 400.
 
 The module has two pages: **Routes** and **Upstreams**. Middleware and handlers are modules, named by
 `module`, with their `params`; every one is listed below, each linked to its chapter of the
@@ -29,16 +31,19 @@ reference.
 match requests and hand them to a handler — proxy passes them to an upstream, static serves files,
 respond answers itself; forward proxy routes are on their own page.
 
-- **Tabs by handler module**: **All** · the count, then every module that appears · its count. Coming
-  in from a handler in the [Engine](06-engine.md) menu (`?handler=<module>`) lands on that tab; a tab
-  clicked afterwards keeps its own choice.
+- **Tabs by handler module**: **All** · the count, then every module that appears · its count, in
+  alphabetical order. Coming in from a handler in the [Engine](06-engine.md) menu
+  (`?handler=<module>`) lands on that tab; a tab clicked afterwards keeps its own choice. The Engine
+  menu links the port's handlers to their tabs on this page — the newer `bt_stream`, `bt_publish`,
+  `bt_tracker` and `sync_ingest` appear by module id — while a `proxy` route is listed there as the
+  port's reverse proxy routes, and `forward_proxy` and `vod` on their own pages.
 - **Each row** shows the route's name and its match: the handler's module as a badge, the first two
   hosts, the first two paths, the methods, `→ <upstream>`, `@<listeners>`; at the end of the row is
   the **Ask AI** button, which asks the `diagnose` skill about the route — does it answer, and does it
   fail or run slow (no button while the assistant is off for the user).
-- **Add route** makes a new row: `name` `route-N` and `handler` `proxy` by default, with the first
-  upstream's name when the draft already has one. Every row can be **removed**, **moved up** or
-  **moved down**.
+- **Add route** makes a new row: `name` `route-N`; on the **All** tab its `handler` is `proxy`, with
+  the first upstream's name when the draft already has one, and on a handler's tab that module. Every
+  row can be **removed**, **moved up** or **moved down**.
 - A route's form fields are `name`, `listeners`, `priority`, `match` (`host`, `path`, `path_regexp`,
   `method`, `header`, `query`, `remote_ip`, `expr`), `access`, `middleware` (a list of modules, in
   order) and `handler`.
@@ -80,9 +85,9 @@ Only the key parameters are listed; the full field tables are in
 | --- | --- | --- |
 | `name` | none | A name unique among the routes, for logs and metrics. |
 | `listeners` | every listener | The names of the listeners the route serves. |
-| `priority` | none (0) | Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the number of other matchers set, then the order written. |
-| `match` | every request | What a request must match: `host` (exact, or with a leading `*.` or `**.` wildcard), `path` (exact or ending in `*` for a prefix), `path_regexp`, `method`, `header`, `query`, `remote_ip` (the connection's address, not X-Forwarded-For's), `expr` (matchers combined with `&&`, `\|\|`, `!` and parentheses). |
-| `access` | none | The client addresses the route serves, deciding before its listener's access and the global one; a request it refuses is answered 403. |
+| `priority` | none (0) | Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one with the most other matchers set (method, header, query, remote_ip, path_regexp, expr), then the one written first. |
+| `match` | every request | What a request must match: `host` (exact, or with a leading `*.` or `**.` wildcard), `path` (exact or ending in `*` for a prefix), `path_regexp`, `method`, `header`, `query`, `remote_ip` (the connection's address, not X-Forwarded-For's), `expr` (the matchers `Host`, `Path`, `PathPrefix`, `PathRegexp`, `Method`, `Header`, `Query` and `RemoteIP` combined with `&&`, `\|\|`, `!` and parentheses). |
+| `access` | none | The client addresses the route serves, deciding before its listener's access and the global one; the address is the connection's, or the one its PROXY header names, and a request it refuses is answered 403. |
 | `middleware` | none | The middleware a request passes through, in order, before the handler; a middleware may answer itself. |
 | `handler` | required | The module that answers the request. |
 
@@ -92,10 +97,10 @@ Only the key parameters are listed; the full field tables are in
 | --- | --- | --- |
 | `name` | required | A name unique among the upstreams, by which handlers refer to this one. |
 | `addresses` | required | The upstream's servers, each a host and a port, as `10.0.0.1:8080` or `backend:80`. |
-| `weights` | 1 each | Each address's weight, in the order of `addresses`: its share under `weighted_round_robin`, and the requests it takes to be as busy as an address of weight 1 under `least_conn`. |
+| `weights` | 1 each | Each address's weight (1 to 1000), in the order of `addresses`: its share under `weighted_round_robin`, and the requests it takes to be as busy as an address of weight 1 under `least_conn`. |
 | `load_balancing` | `round_robin`, or `weighted_round_robin` when `weights` are given | How requests are spread over the addresses; see the nine strategies below. |
 | `hash_key` | none | The header `header_hash` and the cookie `cookie_hash` hash by. |
-| `sticky_cookie` | none | Keeps each client on one address with a cookie: `name` `fit_sticky` by default, `path` `/`, `max_age`, `secure`. |
+| `sticky_cookie` | none | Keeps each client on one address with a cookie: `name` `fit_sticky`, `path` `/`, `max_age` until the browser closes, `secure` off; it is always HttpOnly and SameSite=Lax. |
 | `max_conns` | `256` | The most connections open, or being opened, to one address; a request past it waits for one to be free. |
 | `max_pending` | `1024` | How many requests may wait for a connection once `max_conns` are busy; one past it is answered 503 at once. |
 | `max_idle_conns` | `32` | The idle connections kept to one address; 0 keeps none. |
@@ -106,8 +111,8 @@ Only the key parameters are listed; the full field tables are in
 | `response_timeout` | `1h` | How long a whole response may take; past it before the response began a request gets 504, and past it later it is cut short. |
 | `max_fails` | `1` | The failed requests to an address within `fail_timeout` that take it out of rotation for `fail_timeout` (passive health); 0 keeps every address in. |
 | `fail_timeout` | `10s` | The window `max_fails` are counted in, and how long an address that reached them stays out. |
-| `health_check` | none | Active health checks: probe each address every `interval` (`http` sends a GET, `tcp` passes once a connection opens), out after `fails` in a row, back after `passes`; `timeout` `2s`, `jitter` a tenth of `interval`. |
-| `deny_internal` | off | Refuse to connect where an address, or the address its host name resolves to, is loopback, link-local (`169.254.169.254`, the metadata service of most clouds), unspecified, multicast or the host's own; a request refused so gets 502. |
+| `health_check` | none | Active health checks: probe each address every `interval` (`5s`); `http` (the default) sends a GET of `path` `/` and passes on 200–399, `tcp` passes once a connection opens. An address is out after `fails` (`2`) in a row, back after `passes` (`2`); `timeout` `2s`, `jitter` a tenth of `interval`. |
+| `deny_internal` | off | Refuse a connection whose address, or the address its host name resolved to, is loopback, link-local (`169.254.169.254`, the metadata service of most clouds), unspecified, multicast or the host's own, decided once the connection is open and before anything is sent; a request refused so gets 502. |
 | `protocol` | `http/1.1` | How requests reach the upstream: `http/1.1`, `h2c`, or `h2` (TLS, with `tls_server_name`, `tls_ca_file`, `tls_cert_file`, `tls_key_file`). |
 
 ### The nine load balancing strategies
@@ -131,12 +136,13 @@ moves only the keys that went to it or will. A request without the header or coo
 
 | Module | What it does |
 | --- | --- |
-| [`proxy`](../reference/config.md#http-handlers-proxy) | A reverse proxy to an upstream: splitting by weight, failover, mirroring, retries |
-| [`static`](../reference/config.md#http-handlers-static) | Files from a directory: listings, precompressed variants, `try_files` |
+| [`proxy`](../reference/config.md#http-handlers-proxy) | A reverse proxy to an upstream, or several by weight, with retries, mirroring and failover; WebSockets and gRPC calls too |
+| [`static`](../reference/config.md#http-handlers-static) | Files from a directory: listings, precompressed variants, `try_files`, small files kept in memory |
 | [`respond`](../reference/config.md#http-handlers-respond) | A fixed status, header fields and body |
 | [`fastcgi`](../reference/config.md#http-handlers-fastcgi) | A FastCGI application, as PHP-FPM |
 | [`media_pages`](../reference/config.md#http-handlers-media_pages) | fit's own media pages: the index, a room call, the publish and play pages |
-| [`media_tokens`](../reference/config.md#http-handlers-media_tokens) | Issues time-limited media_auth tokens in batches for a business backend |
+| [`media_tokens`](../reference/config.md#http-handlers-media_tokens) | Issues time-limited media_auth tokens in batches for a business backend, and rotates a key's tokens |
+| [`vod`](../reference/config.md#http-handlers-vod) | A media library's items as video on demand over HLS, fMP4 or MPEG-TS, and the files with Range; set up in the [media library](22-media-library.md) chapter |
 | [`hls`](../reference/config.md#http-handlers-hls) | Plays the streaming role's streams over HLS |
 | [`httpflv`](../reference/config.md#http-handlers-httpflv) | Plays them as HTTP-FLV and WebSocket-FLV |
 | [`whip`](../reference/config.md#http-handlers-whip) | Takes WebRTC streams published with WHIP into fit's media server |
@@ -144,6 +150,10 @@ moves only the keys that went to it or will. A request without the header or coo
 | [`stream_whip`](../reference/config.md#http-handlers-stream_whip) | Publishes with WHIP into the streaming role's hub |
 | [`stream_whep`](../reference/config.md#http-handlers-stream_whep) | Plays the streaming role's streams with WHEP |
 | [`webrtc_proxy`](../reference/config.md#http-handlers-webrtc_proxy) | Proxies WHIP and WHEP to other media servers, relaying peers by ICE ufrag |
+| [`bt_stream`](../reference/config.md#http-handlers-bt_stream) | Plays a torrent's file over HTTP ranges while it downloads, for the `bittorrent.client` role, and adds a torrent by magnet on the fly; see [playing a file while it downloads](../bittorrent.md#playing-a-file-while-it-downloads) and the [BitTorrent chapter](27-bittorrent.md) |
+| [`bt_publish`](../reference/config.md#http-handlers-bt_publish) | Serves a `bittorrent.client` `publish` entry's `.torrent` files and magnet links, and an index of its entries; see [publishing](../bittorrent.md#publishing) and the [BitTorrent chapter](27-bittorrent.md) |
+| [`bt_tracker`](../reference/config.md#http-handlers-bt_tracker) | Serves a `bittorrent.tracker` role's HTTP announces and scrapes behind a route; see [the tracker](../bittorrent.md#the-tracker) and the [BitTorrent chapter](27-bittorrent.md) |
+| [`sync_ingest`](../reference/config.md#http-handlers-sync_ingest) | Hands the bodies POSTed to the route to the `http` source of a sync pipeline, and answers each 200 once every sink has them; see [the HTTP connector](../sync.md#http) and the [Sync chapter](26-sync.md) |
 | [`forward_proxy`](../reference/config.md#http-handlers-forward_proxy) | A forward proxy for HTTP CONNECT, edited on the [Forward proxy](16-forward-proxy.md) page |
 
 The per-module docs are in `schema/doc/modules/`, as
@@ -152,14 +162,17 @@ The per-module docs are in `schema/doc/modules/`, as
 [respond.md](../../schema/doc/modules/respond.md),
 [fastcgi.md](../../schema/doc/modules/fastcgi.md),
 [media_pages.md](../../schema/doc/modules/media_pages.md),
-[media_tokens.md](../../schema/doc/modules/media_tokens.md),
+[media_tokens.md](../../schema/doc/modules/media_tokens.md), [vod.md](../../schema/doc/modules/vod.md),
 [hls.md](../../schema/doc/modules/hls.md), [httpflv.md](../../schema/doc/modules/httpflv.md),
 [whip.md](../../schema/doc/modules/whip.md), [whep.md](../../schema/doc/modules/whep.md),
 [stream_whip.md](../../schema/doc/modules/stream_whip.md),
 [stream_whep.md](../../schema/doc/modules/stream_whep.md),
 [webrtc_proxy.md](../../schema/doc/modules/webrtc_proxy.md),
-[forward_proxy.md](../../schema/doc/modules/forward_proxy.md). `vod` is in the
-[media library](22-media-library.md) chapter.
+[bt_stream.md](../../schema/doc/modules/bt_stream.md),
+[bt_publish.md](../../schema/doc/modules/bt_publish.md),
+[bt_tracker.md](../../schema/doc/modules/bt_tracker.md),
+[sync_ingest.md](../../schema/doc/modules/sync_ingest.md),
+[forward_proxy.md](../../schema/doc/modules/forward_proxy.md).
 
 ### Middleware
 
@@ -268,11 +281,42 @@ route {
 		body "ok\n"
 	}
 }
+
+route {
+	name torrents
+	match { path /bt/* }
+	handler bt_stream {
+		max_streams 16
+	}
+}
+
+route {
+	name releases
+	match { path /releases/* }
+	handler bt_publish
+}
+
+route {
+	name tracker
+	match { path /tracker/announce /tracker/scrape }
+	handler bt_tracker
+}
+
+route {
+	name events
+	match { path /ingest/* }
+	handler sync_ingest {
+		pipeline events
+	}
+}
 ```
 
 This config passes `./bin/fit validate -c`. An `upstream` without a listener is refused, so the
 example adds a minimal `listener`; a `static` handler's `root` must exist on disk for `fit validate`
-to read it, so the example has no static route.
+to read it, so the example has no static route. The last four routes are the handlers the BitTorrent
+and Sync roles add: the roles' own config members, and the pages that edit them, are in the
+[BitTorrent chapter](27-bittorrent.md) and the [Sync chapter](26-sync.md); where no role (or, for
+`sync_ingest`, no running pipeline) is configured, these routes answer 503.
 
 ## See also
 
@@ -282,7 +326,11 @@ to read it, so the example has no static route.
   [chapter guide in Chinese](../reference/config.zh-CN.md#各章内容)
 - [Forward proxy](16-forward-proxy.md), [L4 proxy](17-l4-proxy.md), [Cache](19-cache.md),
   [Streaming](20-streaming.md), [Media auth](21-media-auth.md), [Media library](22-media-library.md),
-  [WebRTC](23-webrtc.md)
+  [WebRTC](23-webrtc.md), [Sync](26-sync.md), [BitTorrent](27-bittorrent.md)
+- The BitTorrent and Sync handlers' guides:
+  [playing a file while it downloads](../bittorrent.md#playing-a-file-while-it-downloads),
+  [publishing](../bittorrent.md#publishing), [the tracker](../bittorrent.md#the-tracker),
+  [the HTTP source](../sync.md#http)
 - The commented templates with every field:
   [templates/conf/conf.d/60-apps.conf](../../templates/conf/conf.d/60-apps.conf) and
   [sites/](../../templates/conf/conf.d/sites/)

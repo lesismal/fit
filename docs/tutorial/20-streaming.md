@@ -26,6 +26,13 @@ shuffled, looped or on a schedule, each under its name as the stream name; `push
 stream, to outside RTMP or SRT servers, reconnecting with backoff when it drops. A streaming role with
 channels needs no listener that takes publishes.
 
+What the role does not do yet: an RTSP SETUP asking for UDP is answered `461` — RTP goes interleaved on
+the connection, and RTP over UDP waits on fib (request A61); WebRTC carries H.264, H.265, AV1, Opus and
+G.711 only, so an RTMP stream of H.264 and AAC plays over WHEP as video alone, and Opus is not turned into
+AAC for RTMP; `push` relays RTMP, RTMPS and SRT only, not HLS or DASH; and the role's WebRTC side is the
+`stream_whip` and `stream_whep` handlers on `streaming.webrtc`'s port, not [WebRTC](23-webrtc.md)'s
+`webrtc.media` SFU.
+
 | Protocol | Publish | Play | Where it is configured |
 | --- | --- | --- | --- |
 | RTMP | `rtmp://host:1935/live/cam` | same | `streaming.rtmp` |
@@ -103,6 +110,7 @@ is closed.
 | Field | Default | Description |
 | --- | --- | --- |
 | `listen` | — | Required. The TCP address RTSP clients connect to, as `:8554`; RTP goes interleaved on the same connection (RTP/AVP/TCP) |
+| `mptcp` | off | Carries the RTSP connections over Multipath TCP where the kernel offers it (Linux 5.6+) |
 | `auth` | none | The policy the requests must satisfy; credentials are a user with a plaintext password by Digest, Basic when `auth_methods` offers it, or a token in the URL's query (`?token=T`) |
 | `auth_methods` | `digest` | The schemes a 401 offers; a `password_hash` user can only use `basic` |
 | `realm` | `fit` | The realm of the challenges, which Digest's response is computed with |
@@ -155,12 +163,29 @@ The UDP port the `stream_whip` and `stream_whep` handlers share, where fit is an
 | `channels.loop` | on | Plays the items again from the first once the last has played |
 | `channels.schedule` | none | The slots: an item started at a set time, cutting what plays; at most 1000 |
 | `channels.time_zone` | `UTC` | The IANA time zone the schedule's times are in |
+| `channels.rendition` | none | The rendition played of each item, by name (`720p`); one an item lacks plays its best |
 | `channels.read_ahead` | 3s | How much of the items is read ahead on the library's file pool |
+| `channels.max_buffer_bytes` | 16 MiB | The bytes read ahead and not yet sent, whatever `read_ahead` says; a sample larger than it ends its item |
 | `channels.push` | none | The channel's own push targets |
+| `channels.encrypt` | off | Encrypts the channel's HLS segments with AES-128 under a key derived from the library's `secret` |
+| `channels.key_rotation` | 10 | With `encrypt`, the segments one key encrypts before the next takes over |
 | `push.stream` | — | The stream relayed: a stream of the hub or a channel's name (required in `streaming.push`) |
 | `push.url` | — | Required. `rtmp://`, `rtmps://` or `srt://`; it holds a stream key, so the API and the logs show its scheme, host and app alone |
 | `push.retry_min`, `push.retry_max` | 1s, 30s | The backoff between reconnects |
 | `push.connect_timeout` | 10s | The handshake and publish time |
+
+### The handlers on routes
+
+The HTTP side is handlers on routes, not on this page: the full field tables are in
+[the config reference: Handlers](../reference/config.md#handlers), and the fields that matter here:
+
+| Handler | Key fields | What it does |
+| --- | --- | --- |
+| `hls` | `prefix` (`/`), `auth`, `format` (`fmp4` or `ts`), `target_duration` (2s), `part_duration` (Low-Latency HLS), `playlist_size` (6), `max_bytes` (32 MiB), `play_wait`, `idle_timeout` (30s), `cors` | `/hls/live/cam/index.m3u8` plays `live/cam` |
+| `httpflv` | `prefix` (`/`), `auth`, `wait`, `cors` | `/live/cam.flv` plays `live/cam`, as HTTP-FLV or WebSocket-FLV |
+| `stream_whip`, `stream_whep` | `stream`, `prefix` (`/whip/`, `/whep/`), `auth` | WHIP publish and WHEP play on `streaming.webrtc`'s port; the answer's `Location` is the session URL, which needs no credentials |
+| `vod` | `library`, `prefix` (`/vod/<library>/`), `auth`, the segment parameters | Plays a media library's items as HLS, not the hub's streams ([Media library](22-media-library.md)) |
+| `whip`, `whep` | `auth`, `stream` | [WebRTC](23-webrtc.md)'s own media server, `webrtc.media`, apart from the hub |
 
 ## In .conf
 

@@ -11,7 +11,8 @@
 一条请求只走一条路由：先是它所在的监听中匹配它的路由——`match` 的每个字段都要成立，字段内则
 列出的值中有一个成立即可；其中 `priority` 最高的先选；同优先级时按 host 的具体程度（精确、`*.`、
 `**.`、无），再按 path 的具体程度（精确、最长的前缀），再按设了多少其他匹配器，最后按书写顺序。
-没有路由接住的请求答 404。路径在任何路由看到它之前先规范化。
+没有路由接住的请求答 404。路径在任何路由看到它之前先规范化：点段被去掉（`/a/./b/../c` 即 `/a/c`），
+重复的斜杠合成一个（`//a` 即 `/a`），`..` 越过 `/` 往上爬的路径答 400。
 
 反向代理模块有两页：**路由**和**上游**。处理器与中间件是模块，按 `module` 命名，带各自的 `params`；
 下面列出全部模块，各链接到参考的一章。
@@ -23,13 +24,15 @@
 `#/gw.reverse/routes`。本页编辑配置的 `routes` 成员，页面上方的提示写着：路由匹配请求并交给处理器：
 proxy 转发到上游，static 提供静态文件，respond 直接应答。正向代理路由在其单独的页面中。
 
-- **按处理器的模块分标签**：**全部** · 条数，然后是每个出现过的模块 · 条数。从[引擎](06-engine.zh-CN.md)菜单
-  的某个处理器进来时（`?handler=<module>`）会直接落到那个标签；之后点别的标签以点击的为准。
+- **按处理器的模块分标签**：**全部** · 条数，然后是每个出现过的模块 · 条数，按字母顺序。从[引擎](06-engine.zh-CN.md)
+  菜单的某个处理器进来时（`?handler=<module>`）会直接落到那个标签；之后点别的标签以点击的为准。引擎菜单把端口的
+  处理器链到本页各自的标签——较新的 `bt_stream`、`bt_publish`、`bt_tracker` 与 `sync_ingest` 以模块 ID 出现——
+  而 `proxy` 的路由在那里列为端口的反向代理路由，`forward_proxy` 与 `vod` 各在自己的页面上。
 - **每一行**显示路由的名字与它的匹配：处理器的模块作为一个标记，前两个 host、前两个 path、方法、
   `→ <upstream>`、`@<listeners>`；行末是**问 AI**按钮，以技能 `diagnose` 诊断这条路由——它是否正常应答，
   是否失败或变慢（没有助手时不显示）。
-- **添加路由**新建一行：默认 `name` 为 `route-N`、`handler` 为 `proxy`（草稿里已有上游时带上第一个的
-  名字）。每行可**删除**、**上移**、**下移**。
+- **添加路由**新建一行：`name` 为 `route-N`；在**全部**标签下 `handler` 是 `proxy`（草稿里已有上游时带上第一个的
+  名字），在某个处理器的标签下则是那个模块。每行可**删除**、**上移**、**下移**。
 - 一条路由的表单字段是 `name`、`listeners`、`priority`、`match`（`host`、`path`、`path_regexp`、`method`、
   `header`、`query`、`remote_ip`、`expr`）、`access`、`middleware`（按顺序的一组模块）与 `handler`。
 - **`.conf`、`.yaml`、`.json` 三个标签**编辑的是整个 `routes` 成员——包括[正向代理](16-forward-proxy.zh-CN.md)
@@ -65,9 +68,9 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | --- | --- | --- |
 | `name` | 无 | 路由之间唯一的名字，供日志与指标。 |
 | `listeners` | 所有监听 | 这条路由服务的监听的名字。 |
-| `priority` | 无（0） | 优先级高的先选；同优先级时按 host、path 的具体程度，再按其他匹配器的数量，再按书写顺序。 |
-| `match` | 所有请求 | 请求必须匹配什么：`host`（精确或 `*.`、`**.` 通配）、`path`（精确或以 `*` 结尾的前缀）、`path_regexp`、`method`、`header`、`query`、`remote_ip`（连接的地址，不是 X-Forwarded-For）、`expr`（用 `&&`、`\|\|`、`!` 与括号组合匹配器）。 |
-| `access` | 无 | 这条路由服务的客户端地址，先于其监听与全局的 `access` 决定；被拒绝的请求答 403。 |
+| `priority` | 无（0） | 优先级高的先选；同优先级时按 host、path 的具体程度，再按其他匹配器（method、header、query、remote_ip、path_regexp、expr）的数量多者，再按书写顺序。 |
+| `match` | 所有请求 | 请求必须匹配什么：`host`（精确或 `*.`、`**.` 通配）、`path`（精确或以 `*` 结尾的前缀）、`path_regexp`、`method`、`header`、`query`、`remote_ip`（连接的地址，不是 X-Forwarded-For）、`expr`（用 `&&`、`\|\|`、`!` 与括号组合 `Host`、`Path`、`PathPrefix`、`PathRegexp`、`Method`、`Header`、`Query`、`RemoteIP` 这些匹配器）。 |
+| `access` | 无 | 这条路由服务的客户端地址，先于其监听与全局的 `access` 决定；地址取连接的，或它的 PROXY 头所指的，被拒绝的请求答 403。 |
 | `middleware` | 无 | 请求在处理器之前按顺序穿过的中间件；中间件也可以自己应答。 |
 | `handler` | 必填 | 应答请求的模块。 |
 
@@ -77,10 +80,10 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | --- | --- | --- |
 | `name` | 必填 | 上游之间唯一的名字，处理器用它引用。 |
 | `addresses` | 必填 | 上游的服务器地址，如 `10.0.0.1:8080` 或 `backend:80`。 |
-| `weights` | 每个 1 | 按 `addresses` 顺序的权重：`weighted_round_robin` 下的份额，以及 `least_conn` 下与权重 1 一样忙所需的请求数。 |
+| `weights` | 每个 1 | 按 `addresses` 顺序的权重（1 到 1000）：`weighted_round_robin` 下的份额，以及 `least_conn` 下与权重 1 一样忙所需的请求数。 |
 | `load_balancing` | `round_robin`（写了 `weights` 时 `weighted_round_robin`） | 请求如何分给各地址，见下面九种策略。 |
 | `hash_key` | 无 | `header_hash` 的头部与 `cookie_hash` 的 cookie 的名字。 |
-| `sticky_cookie` | 无 | 用 cookie 把每个客户端固定在一个地址上：`name` 默认 `fit_sticky`，`path` 默认 `/`，`max_age`、`secure`。 |
+| `sticky_cookie` | 无 | 用 cookie 把每个客户端固定在一个地址上：`name` 默认 `fit_sticky`，`path` 默认 `/`，`max_age` 默认到浏览器关闭，`secure` 默认关；它总是 HttpOnly、SameSite=Lax。 |
 | `max_conns` | `256` | 到一个地址最多打开（或正在打开）的连接数；超过的请求等一个空出来。 |
 | `max_pending` | `1024` | `max_conns` 占满后还能等待的请求数；超过的立刻答 503。 |
 | `max_idle_conns` | `32` | 为一个地址保留的空闲连接数；0 不保留。 |
@@ -91,8 +94,8 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | `response_timeout` | `1h` | 整个响应最多多久；开始前超过答 504，之后超过被截断。 |
 | `max_fails` | `1` | `fail_timeout` 内多少次失败请求把一个地址取出轮转（被动健康检查）；0 不取出。 |
 | `fail_timeout` | `10s` | 计数的窗口，也是地址被取出的时长。 |
-| `health_check` | 无 | 主动健康检查：按 `interval` 探测每个地址（`http` 发 GET，`tcp` 只需连上），`fails` 次连续失败取出、`passes` 次连续通过放回；`timeout` 默认 `2s`，`jitter` 默认 `interval` 的十分之一。 |
-| `deny_internal` | 关闭 | 拒绝连接环回、链路本地（`169.254.169.254`，多数云的元数据服务）、未指定、组播和本机自己的地址；被拒绝的请求答 502。 |
+| `health_check` | 无 | 主动健康检查：按 `interval`（默认 `5s`）探测每个地址；`http`（默认）发一个 `path` 默认 `/` 的 GET，200–399 算通过，`tcp` 连上就算通过。连续 `fails`（默认 2）次失败取出，连续 `passes`（默认 2）次通过放回；`timeout` 默认 `2s`，`jitter` 默认 `interval` 的十分之一。 |
+| `deny_internal` | 关闭 | 拒绝地址、或主机名解析到的地址，是环回、链路本地（`169.254.169.254`，多数云的元数据服务）、未指定、组播或本机自己的连接；连接打开后、送出任何东西之前判定，被拒绝的请求答 502。 |
 | `protocol` | `http/1.1` | 请求如何到达上游：`http/1.1`、`h2c`，或 `h2`（TLS，配 `tls_server_name`、`tls_ca_file`、`tls_cert_file`、`tls_key_file`）。 |
 
 ### 九种负载均衡策略
@@ -116,12 +119,13 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 
 | 模块 | 做什么 |
 | --- | --- |
-| [`proxy`](../reference/config.md#http-handlers-proxy) | 反向代理到上游：按权重分流、故障转移、镜像、重试 |
-| [`static`](../reference/config.md#http-handlers-static) | 提供目录中的文件：目录列表、预压缩文件、`try_files` |
+| [`proxy`](../reference/config.md#http-handlers-proxy) | 反向代理到上游，或按权重分到几个上游：重试、镜像与故障转移；WebSocket 与 gRPC 调用也一样 |
+| [`static`](../reference/config.md#http-handlers-static) | 提供目录中的文件：目录列表、预压缩文件、`try_files`，小文件留在内存中 |
 | [`respond`](../reference/config.md#http-handlers-respond) | 固定的状态码、头部和响应体 |
 | [`fastcgi`](../reference/config.md#http-handlers-fastcgi) | FastCGI 应用，如 PHP-FPM |
 | [`media_pages`](../reference/config.md#http-handlers-media_pages) | 提供 fit 自己的媒体页面：索引、通话、发布与播放页 |
-| [`media_tokens`](../reference/config.md#http-handlers-media_tokens) | 为业务后端批量签发限时的 media_auth 令牌 |
+| [`media_tokens`](../reference/config.md#http-handlers-media_tokens) | 为业务后端批量签发限时的 media_auth 令牌，并轮换某个键的令牌 |
+| [`vod`](../reference/config.md#http-handlers-vod) | 把媒体库的条目以 HLS、fMP4 或 MPEG-TS 点播，文件也可按 Range 取；在[媒体库](22-media-library.zh-CN.md)一章设置 |
 | [`hls`](../reference/config.md#http-handlers-hls) | 播放流媒体角色的流，HLS 切片 |
 | [`httpflv`](../reference/config.md#http-handlers-httpflv) | 以 HTTP-FLV 与 WebSocket-FLV 播放 |
 | [`whip`](../reference/config.md#http-handlers-whip) | 以 WHIP 把 WebRTC 流发布到 fit 的媒体服务器 |
@@ -129,6 +133,10 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | [`stream_whip`](../reference/config.md#http-handlers-stream_whip) | 以 WHIP 发布到流媒体角色的 hub |
 | [`stream_whep`](../reference/config.md#http-handlers-stream_whep) | 以 WHEP 播放流媒体角色的流 |
 | [`webrtc_proxy`](../reference/config.md#http-handlers-webrtc_proxy) | 把 WHIP 与 WHEP 代理到别的媒体服务器，按 ICE ufrag 中继 |
+| [`bt_stream`](../reference/config.md#http-handlers-bt_stream) | 种子下载的同时经 HTTP range 播放其中某个文件（`bittorrent.client` 角色），并可按磁力链接就地加入种子；见[下载时播放文件](../bittorrent.md#playing-a-file-while-it-downloads)与 [BitTorrent 一章](27-bittorrent.zh-CN.md) |
+| [`bt_publish`](../reference/config.md#http-handlers-bt_publish) | 提供 `bittorrent.client` 的 `publish` 条目的 `.torrent` 文件与磁力链接，以及这些条目的索引；见[发布](../bittorrent.md#publishing)与 [BitTorrent 一章](27-bittorrent.zh-CN.md) |
+| [`bt_tracker`](../reference/config.md#http-handlers-bt_tracker) | 在路由后面提供 `bittorrent.tracker` 角色的 HTTP announce 与 scrape；见[tracker](../bittorrent.md#the-tracker)与 [BitTorrent 一章](27-bittorrent.zh-CN.md) |
+| [`sync_ingest`](../reference/config.md#http-handlers-sync_ingest) | 把 POST 到路由的请求体交给同步管道的 `http` 源，所有 sink 拿到后答 200；见[HTTP 连接器](../sync.md#http)与[数据同步一章](26-sync.zh-CN.md) |
 | [`forward_proxy`](../reference/config.md#http-handlers-forward_proxy) | HTTP CONNECT 正向代理，在[正向代理](16-forward-proxy.zh-CN.md)页编辑 |
 
 各模块的详细文档在 `schema/doc/modules/`，如 [proxy.md](../../schema/doc/modules/proxy.md)、
@@ -136,12 +144,17 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 [fastcgi.md](../../schema/doc/modules/fastcgi.md)、
 [media_pages.md](../../schema/doc/modules/media_pages.md)、
 [media_tokens.md](../../schema/doc/modules/media_tokens.md)、
+[vod.md](../../schema/doc/modules/vod.md)、
 [hls.md](../../schema/doc/modules/hls.md)、[httpflv.md](../../schema/doc/modules/httpflv.md)、
 [whip.md](../../schema/doc/modules/whip.md)、[whep.md](../../schema/doc/modules/whep.md)、
 [stream_whip.md](../../schema/doc/modules/stream_whip.md)、
 [stream_whep.md](../../schema/doc/modules/stream_whep.md)、
 [webrtc_proxy.md](../../schema/doc/modules/webrtc_proxy.md)、
-[forward_proxy.md](../../schema/doc/modules/forward_proxy.md)。`vod` 在[媒体库](22-media-library.zh-CN.md)一章。
+[bt_stream.md](../../schema/doc/modules/bt_stream.md)、
+[bt_publish.md](../../schema/doc/modules/bt_publish.md)、
+[bt_tracker.md](../../schema/doc/modules/bt_tracker.md)、
+[sync_ingest.md](../../schema/doc/modules/sync_ingest.md)、
+[forward_proxy.md](../../schema/doc/modules/forward_proxy.md)。
 
 ### 中间件
 
@@ -250,10 +263,40 @@ route {
 		body "ok\n"
 	}
 }
+
+route {
+	name torrents
+	match { path /bt/* }
+	handler bt_stream {
+		max_streams 16
+	}
+}
+
+route {
+	name releases
+	match { path /releases/* }
+	handler bt_publish
+}
+
+route {
+	name tracker
+	match { path /tracker/announce /tracker/scrape }
+	handler bt_tracker
+}
+
+route {
+	name events
+	match { path /ingest/* }
+	handler sync_ingest {
+		pipeline events
+	}
+}
 ```
 
 这份配置用 `./bin/fit validate -c` 校验通过。只写 `upstream` 而没有监听器会被拒绝，所以示例补了一个最小的
-`listener`；`static` 的 `root` 要磁盘上真实存在，`fit validate` 才会通过，所以示例里没有它。
+`listener`；`static` 的 `root` 要磁盘上真实存在，`fit validate` 才会通过，所以示例里没有它。最后四条路由是
+BitTorrent 与数据同步角色新增的处理器：两个角色自己的配置成员、以及编辑它们的页面，在 [BitTorrent 一章](27-bittorrent.zh-CN.md)
+与[数据同步一章](26-sync.zh-CN.md)里；没有运行角色（对 `sync_ingest` 则是没有运行中的管道）时，这些路由答 503。
 
 ## 相关文档
 
@@ -262,6 +305,9 @@ route {
   [中文的章节说明](../reference/config.zh-CN.md#各章内容)
 - [正向代理](16-forward-proxy.zh-CN.md)、[四层代理](17-l4-proxy.zh-CN.md)、[缓存](19-cache.zh-CN.md)、
   [流媒体](20-streaming.zh-CN.md)、[媒体认证](21-media-auth.zh-CN.md)、[媒体库](22-media-library.zh-CN.md)、
-  [WebRTC](23-webrtc.zh-CN.md)
+  [WebRTC](23-webrtc.zh-CN.md)、[数据同步](26-sync.zh-CN.md)、[BitTorrent](27-bittorrent.zh-CN.md)
+- BitTorrent 与数据同步处理器的指南：
+  [下载时播放文件](../bittorrent.md#playing-a-file-while-it-downloads)、[发布](../bittorrent.md#publishing)、
+  [tracker](../bittorrent.md#the-tracker)、[HTTP 源](../sync.md#http)
 - 带全部字段的注释模板：[templates/conf/conf.d/60-apps.conf](../../templates/conf/conf.d/60-apps.conf)与
   [sites/](../../templates/conf/conf.d/sites/)

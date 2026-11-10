@@ -33,7 +33,9 @@ A role's pages appear in the menu once the role runs: set its member on the **Tu
 module shows under the Tunnel group when the config is applied. What these pages change is written back
 into the role's member and applies at once, without a restart, and is kept encrypted when fit keeps its
 config in `admin.store`; without a store a change holds only until fit restarts or reads the config file
-again, and the pages say so. Every role page refreshes every 3 s and has the tunnel map (**Details**).
+again, and the pages say so. The pages that show status refresh every 3 s; the settings forms load once and
+after a change. The **Overview** and **Tunnels** pages carry a **Tunnel map** tool, and a tunnel's
+**Details** opens its whole path there.
 
 ### Tunnel roles
 
@@ -261,6 +263,9 @@ config with only the roles and no routes needs no listener. The proxy's form is 
 - [The config reference: Tunnel](../reference/config.md#tunnel) and
   [the console and the store](../console.md#the-pages).
 - [The function navigation bar](03-navigation.md): the roles' dynamic modules.
+- [WebRTC](23-webrtc.md): the TURN server, which relays the UDP datagrams of ICE agents; a tunnel forwards
+  TCP services instead.
+- [LLM roles](25-llm.md): the same three roles of the menu, over the same kind of links and tokens.
 - The page code: [app/workbench/web/tunnel/hub.js](../../app/workbench/web/tunnel/hub.js),
   [node.js](../../app/workbench/web/tunnel/node.js), [proxy.js](../../app/workbench/web/tunnel/proxy.js)
   and [shared.js](../../app/workbench/web/tunnel/shared.js).

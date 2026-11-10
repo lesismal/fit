@@ -536,10 +536,11 @@ Read the status and each upstream's health, and say what is down and why.
 最多 32 KiB。不符合上述格式的 front matter（未列出的键、类型不对的值、已被占用的名称、无法解析的 YAML）会被拒绝，并给出出错
 的行号。
 
-fit 内置 18 个技能，嵌入在二进制中：`explain`、`route-builder`、`reverse-proxy`、`tls-acme`、`rate-limit-auth`、
+fit 内置 22 个技能，嵌入在二进制中：`explain`、`route-builder`、`reverse-proxy`、`tls-acme`、`rate-limit-auth`、
 `cache-tuning`、`diagnose`、`drift-explain`、`log-analysis`、`security-review`、`migrate`、`media-setup`、
-`llm-mesh-setup`、`tunnel-setup`，以及媒体库的 `vod-setup`、`channel-scheduler`、`library-health` 与
-`playback-troubleshoot`（见[下文](#媒体库)）。**技能** 页把它们与用户添加的技能一起列出：每个技能的标题与用途、所列的工具（本用户不可
+`llm-mesh-setup`、`tunnel-setup`，媒体库的 `vod-setup`、`channel-scheduler`、`library-health` 与
+`playback-troubleshoot`（见[下文](#媒体库)），集群的 `fleet-health`、`rollout-planner` 与 `cluster-drift`，以及
+数据同步的 `sync-pipeline`。**技能** 页把它们与用户添加的技能一起列出：每个技能的标题与用途、所列的工具（本用户不可
 调用的以删除线显示）以及是否启用；可查看全文、导出为 `.md`，并用 **试用** 以其示例运行。级别为 `apply` 的用户可以添加技能
 （从模板或导入 `.md` 文件）、编辑与删除已添加的技能，并启用或停用任意技能；内置技能不能修改或删除，但可以导出、改名后作为自己的
 技能添加，再停用内置的那个。添加的技能由所有控制台用户共享，最多 64 个，与停用了哪些内置技能一起保存在 store 的
@@ -653,7 +654,7 @@ fit 内置 18 个技能，嵌入在二进制中：`explain`、`route-builder`、
 
 ### BitTorrent
 
-[BitTorrent 页面](bittorrent.zh-CN.md#页面)（I204）配有三个只读工具和三个提议工具：它们经 Admin API 读取
+[BitTorrent 页面](bittorrent.zh-CN.md#页面)（I204）配有四个只读工具和三个提议工具：它们经 Admin API 读取
 `bittorrent.client` 与 `bittorrent.tracker` 角色，并像媒体工具一样向对话的提案加入步骤：
 
 | 工具 | 级别 | 作用 |
@@ -677,7 +678,8 @@ passkey（由 Tracker 页面为人读取）。**BitTorrent 步骤**与提案的�
 ### 跨集群
 
 在管理其他 fit 的管理端（`admin.cluster`）上，助手还会读取集群并提议跨成员的修改（I153）：工具 `cluster_members`、`cluster_templates`、
-`cluster_rollouts`、`cluster_metrics`、`cluster_certs` 与 `cluster_log_tail`，读取 Admin API 的读取工具上的 `member` 参数，以及 `rollout_propose`、
+`cluster_rollouts`、`cluster_metrics`、`cluster_certs`、`cluster_log_tail` 与 `cluster_bittorrent`（成员的
+BitTorrent 角色与分发），读取 Admin API 的读取工具上的 `member` 参数，以及 `rollout_propose`、
 `cluster_op_propose` 与 `drift_fix_propose`：它们生成发布规划或经检查的操作，由人在集群页面上以其自身的确认启动，从不是对话提案的步骤。
 用户在管理端上的角色与助手的级别都会检查，取更窄的；成员的凭据不会到达模型。技能 `fleet-health`、`rollout-planner` 与 `cluster-drift`
 只在管理端上提供。见[管理端上的助手](cluster.zh-CN.md#管理端上的助手)。

@@ -21,6 +21,12 @@ hub 里每路流缓存它最新的 GOP（从最后一个关键帧开始），最
 名称为流名；`push` 把频道或任意流转推到外部 RTMP 或 SRT 服务器，断开后以退避方式重连。有频道的流媒体角色无需接收
 推流的监听器。
 
+本角色目前还不做的事：请求 UDP 的 RTSP SETUP 应答 `461`——RTP 只走连接上的交织传输，基于 UDP 的 RTP 还在等 fib
+（请求 A61）；WebRTC 只能承载 H.264、H.265、AV1、Opus 与 G.711，因此 H.264 加 AAC 的 RTMP 流经 WHEP 播放时只有
+视频，Opus 也不会被转成 AAC 供 RTMP 用；`push` 只转推 RTMP、RTMPS 与 SRT，不转推 HLS 或 DASH；本角色的 WebRTC
+一侧是 `streaming.webrtc` 端口上的 `stream_whip`、`stream_whep` 处理器，而不是 [WebRTC](23-webrtc.zh-CN.md) 的
+`webrtc.media` SFU。
+
 | 协议 | 推流 | 播放 | 配置位置 |
 | --- | --- | --- | --- |
 | RTMP | `rtmp://host:1935/live/cam` | 同左 | `streaming.rtmp` |
@@ -87,6 +93,7 @@ hub 里每路流缓存它最新的 GOP（从最后一个关键帧开始），最
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `listen` | — | 必填。RTSP 客户端连的 TCP 地址，如 `:8554`；RTP 交织在同一条连接上（RTP/AVP/TCP） |
+| `mptcp` | 关闭 | 内核支持时（Linux 5.6+）以多路径 TCP 承载 RTSP 连接 |
 | `auth` | 无 | 请求要满足的策略；凭据是明文密码用户的 Digest、`auth_methods` 列出 `basic` 时的 Basic，或 URL 查询中的 `?token=T` |
 | `auth_methods` | `digest` | 401 提供的方案；`password_hash` 的用户只能用 `basic` |
 | `realm` | `fit` | 质询的 realm，Digest 的应答由它计算 |
@@ -138,12 +145,29 @@ hub 里每路流缓存它最新的 GOP（从最后一个关键帧开始），最
 | `channels.loop` | 打开 | 列表播完后从第一个重新播放 |
 | `channels.schedule` | 无 | 排期：在某个时间开始某个条目，打断正在播放的内容；最多 1000 |
 | `channels.time_zone` | `UTC` | 排期所用的 IANA 时区 |
+| `channels.rendition` | 无 | 每个条目播放的码流，按名称（如 `720p`）；条目没有它时播放最佳码流 |
 | `channels.read_ahead` | 3s | 在媒体库的文件池上提前读取的量 |
+| `channels.max_buffer_bytes` | 16 MiB | 已读入但尚未发送的字节上限，优先于 `read_ahead`；更大的采样会结束该条目 |
 | `channels.push` | 无 | 该频道自己的转推目标 |
+| `channels.encrypt` | 关闭 | 以媒体库 `secret` 派生的密钥，用 AES-128 加密频道的 HLS 分段 |
+| `channels.key_rotation` | 10 | 与 `encrypt` 一起用：一个密钥加密多少个分段后轮换 |
 | `push.stream` | — | 转推的流：hub 中的流名或频道名（`streaming.push` 中必填） |
 | `push.url` | — | 必填。`rtmp://`、`rtmps://` 或 `srt://`；含流密钥，接口与日志只显示其 scheme、host 和 app |
 | `push.retry_min`、`push.retry_max` | 1s、30s | 断线重连的退避 |
 | `push.connect_timeout` | 10s | 握手与 publish 的时间 |
+
+### 路由上的处理器
+
+HTTP 一侧是路由上的处理器，不在这一页：完整字段表见[配置参考：Handlers](../reference/config.md#handlers)，这里列出
+关键的几个：
+
+| 处理器 | 关键字段 | 作用 |
+| --- | --- | --- |
+| `hls` | `prefix`（`/`）、`auth`、`format`（`fmp4` 或 `ts`）、`target_duration`（2s）、`part_duration`（低延迟 HLS）、`playlist_size`（6）、`max_bytes`（32 MiB）、`play_wait`、`idle_timeout`（30s）、`cors` | `/hls/live/cam/index.m3u8` 播放 `live/cam` |
+| `httpflv` | `prefix`（`/`）、`auth`、`wait`、`cors` | `/live/cam.flv` 播放 `live/cam`，可走 HTTP-FLV 或 WebSocket-FLV |
+| `stream_whip`、`stream_whep` | `stream`、`prefix`（`/whip/`、`/whep/`）、`auth` | 在 `streaming.webrtc` 的端口上做 WHIP 推流与 WHEP 播放；应答的 `Location` 是会话 URL，不需要凭据 |
+| `vod` | `library`、`prefix`（`/vod/<library>/`）、`auth`、各分段参数 | 把媒体库的条目以 HLS 提供，而不是 hub 的流（[媒体库](22-media-library.zh-CN.md)） |
+| `whip`、`whep` | `auth`、`stream` | [WebRTC](23-webrtc.zh-CN.md) 自己的媒体服务器 `webrtc.media`，与 hub 无关 |
 
 ## .conf 配置
 
