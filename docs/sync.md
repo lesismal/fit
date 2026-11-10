@@ -140,6 +140,25 @@ checkpoint too: fit joins no consumer group and commits nothing to the brokers.
 A pipeline runs on one fit: its checkpoint is a local file. Moving a pipeline to another fit means
 moving its file (with the pipeline stopped).
 
+**Lineage.** The checkpoint also holds a lineage, a random ID made when a pipeline first starts and
+again by a reset of its checkpoint, a position set by hand and a new job (a job run again from its
+start); restarts keep it. Sinks whose servers drop what they already had by a name made from
+positions put it in the name: `doris`'s labels and `http`'s `Idempotency-Key`, so that the records a
+reset reads again are written again rather than dropped as repeats (see [Delivery
+guarantees](#delivery-guarantees)). A checkpoint saved by a fit older than lineages keeps none, and
+its sinks' names stay as they were, until it is reset.
+
+**Quiet tables.** A source's position moves with its own tables' records. One reading a quiet table
+from a busy log (a binlog, a WAL, SQL Server's change tables) would keep an old checkpoint while the
+server moves on, and a restart after the server dropped that part of its log (binlogs purged, CDC's
+cleanup retention passed) would fail asking for a snapshot, though nothing of the table was lost. So
+the `mysql`, `postgres` and `mssql` sources hand on position-only records after a stretch of other
+tables' changes: each moves the checkpoint once the records before it are written, and no transform
+or sink sees one, nor do they count as records read or written. One is taken at most once per
+`checkpoint_interval`, and only when no record came in that time, so a busy table's records move the
+checkpoint themselves. The `postgres` source's slot is also told the position between transactions,
+so that the server keeps no WAL for the other tables.
+
 ### Delivery guarantees
 
 **At least once.** After a crash, a restart or `kill -9`, the records after the last checkpoint are
@@ -152,7 +171,7 @@ sink had. Sinks therefore write idempotently, so that a replay converges on the 
 | `mongo` | upserts and deletes by `_id`: the same documents |
 | `elasticsearch` | index and delete by `_id` from the key: the same documents (a record without a key gets an `_id` the cluster makes, which a replay repeats) |
 | `clickhouse` | the same deduplication token for the same records: the server drops the insert; rows of a `ReplacingMergeTree` by version otherwise |
-| `doris` | the same label for the same records: the server refuses the load as already loaded; rows of a unique or primary key table by key otherwise |
+| `doris` | the same label for the same records (of the same lineage): the server refuses the load as already loaded; rows of a unique or primary key table by key otherwise |
 | `loki` | the same entry (stream, time, line) is kept once; lines without a time get the time of the write, and are stored again |
 | `mssql` | upserts (`MERGE`) and deletes by key: the same rows |
 | `redis` | the same keys; stream entries with `entry_id key` are refused as already there |
@@ -162,7 +181,7 @@ sink had. Sinks therefore write idempotently, so that a replay converges on the 
 | `nats` | the same `Nats-Msg-Id` for the same records: the stream's duplicate window drops it (2 minutes by default) |
 | `pulsar` | the same `fit-id` property for the same records: with `dedup read_back`, a record the producer stored lately is dropped |
 | `rabbitmq` | published again, with the same `message_id`, by which a consumer can drop it |
-| `kafka`, `http`, `otlp_logs`, `file`, `stdout` | written again: Kafka's producer is not idempotent, nor is OTLP; `http` sends the same `Idempotency-Key` for the same records |
+| `kafka`, `http`, `otlp_logs`, `file`, `stdout` | written again: Kafka's producer is not idempotent, nor is OTLP; `http` sends the same `Idempotency-Key` for the same records (of the same lineage) |
 
 **Record IDs.** The `nats`, `pulsar` and `rabbitmq` sinks give each record an ID (`Nats-Msg-Id`,
 `fit-id`, `message_id`), and `http`'s `Idempotency-Key`, `doris`'s labels and `s3`'s object names
@@ -180,7 +199,11 @@ sources give equal origins (a topic of one name on two Kafka clusters, one binlo
 two MySQL servers) feeding one stream do not take each other's records for repeats. A record without an origin (a queue's message, MQTT, files, snapshots,
 change tracking) is named by the position at or after it and its distance from it, which repeats
 when the source reads the record again at the same position: a database's log, files, a single
-partition.
+partition. `doris`'s labels and `http`'s keys also hold the checkpoint's lineage, so that the records
+a reset reads again are taken again (a Doris label lives `label_keep_max_second`, three days, past a
+table dropped and made again); the record IDs and `s3`'s object names do not: a message is the same
+message after a reset, which its consumers may drop, and an object written again is written over
+itself.
 
 **Transactions stay whole.** A checkpoint never falls inside a source transaction; the records of one
 carry its ID, and the `mysql` and `postgres` sinks write each source transaction as one of their own
@@ -198,7 +221,9 @@ them falls back to the file, at least once. What can still be written twice: a s
 larger than the MySQL sink's `max_transaction_bytes` (committed in parts), and a job read in chunks,
 which keeps to its file. A reset, a position set by hand and a new job start a new lineage, so an
 older position in the sink does not undo them; deleting the pipeline's row and its file starts it
-over.
+over. Position-only records (see [Checkpoints](#checkpoints)) move the file past the position the
+sink holds, which they do not write: the file keeps that position too (`wrote`), and the sink holding
+it starts the pipeline from the file's.
 
 ### Errors and retries
 
@@ -388,9 +413,12 @@ to http, which would send them and the rows in the clear; `urls` may name the ba
 directly. A load refused for its rows is split until the record it cannot take
 is found: that one goes to `on_error`, the records before it are loaded.
 
-Labels outlive tables: Doris keeps them `label_keep_max_second` (three days by default), so after a
-pipeline is reset or its tables are made afresh, change `label_prefix`, or the records loaded before
-are refused as already loaded.
+Labels outlive tables: Doris keeps them `label_keep_max_second` (three days by default). A label
+holds the lineage of the pipeline's checkpoint (see [Checkpoints](#checkpoints)), which a reset
+changes, so a pipeline reset to load tables made afresh loads its records again with no change to
+`label_prefix`. Tables made afresh without a reset need one, or a new `label_prefix`, or the records
+loaded before are refused as already loaded; so does a checkpoint saved by a fit older than lineages,
+whose labels stay as they were until it is reset.
 
 The source reads a table or a query over MySQL's protocol (a frontend's query port), in pages
 ordered by `cursor` and `key`, then polls past the last row read, as the clickhouse source does; rows
@@ -500,7 +528,7 @@ The handler never waits on a fib worker. Anyone who reaches the route writes int
 put an authenticating middleware before it.
 
 The `http` sink posts each batch as NDJSON or a JSON array, with an `Idempotency-Key` that is the same
-when the same records are sent again; `2xx` acknowledges, `5xx`, `408`, `429` and timeouts are tried
+when the same records are sent again, and new after a reset of the checkpoint (its lineage); `2xx` acknowledges, `5xx`, `408`, `429` and timeouts are tried
 again, any other answer fails the records for good.
 
 ```fit

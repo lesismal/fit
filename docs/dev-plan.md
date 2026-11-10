@@ -7771,11 +7771,37 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 11. **[kept]** (2026-11-10: the same forms the other sources give these types) **Values**: `time` as text (`hh:mm:ss.fffffff` to its scale), `uniqueidentifier` as its text,
     `datetimeoffset` as the instant, `datetime2` and `datetime` as times in UTC (their clock),
     `date` as a date, `money` as a decimal, `xml` as a string, `sql_variant` as its base value.
-12. **[changed]** (2026-11-10: the lag is reported now: the transactions of `cdc.lsn_time_mapping` after the position (a window's count, or `COUNT_BIG` at most once a second when a window is full), with change tracking the versions, as `fit_sync_source_lag` (commit `ae364b6a`). No `Chunker` for jobs: kept, as the other CDC sources'. The checkpoint moving only on the read tables' records: a quiet table among busy captured ones keeps an old checkpoint, and a restart after the cleanup's retention passed it fails asking for a new snapshot though nothing of it was lost; the cure is in `sync`, see the list at the top of the section) **Left out**: jobs read the snapshot table by table, not in chunks (no `Chunker`); no lag is
+12. **[ruled 2026-11-10: done as recommended]** (2026-11-10: the lag is reported now: the transactions of `cdc.lsn_time_mapping` after the position (a window's count, or `COUNT_BIG` at most once a second when a window is full), with change tracking the versions, as `fit_sync_source_lag` (commit `ae364b6a`). No `Chunker` for jobs: kept, as the other CDC sources'. The checkpoint moving only on the read tables' records: a quiet table among busy captured ones kept an old checkpoint, and a restart after the cleanup's retention passed it failed asking for a new snapshot though nothing of it was lost. Built: a position-only record in `sync` (`Run.EmitPosition`), which flows through the queue in order, skips the transforms and sinks, counts as no record, and moves the checkpoint once the records before it are acknowledged; `mssql` hands one on after each CDC window and change tracking version range, `mysql` at the end of a binlog transaction of other tables, `postgres` at an empty transaction's end and a keepalive between transactions. See decisions 14 to 16.) **Left out**: jobs read the snapshot table by table, not in chunks (no `Chunker`); no lag is
     reported; the checkpoint moves only on records of the tables read, so transactions of other
     captured tables are read again after a restart.
 13. **[kept]** (2026-11-10: the sink shares the params and their checks without a third package) **`ConnParams` and `WireConfig` are exported** from `sync/mssql`, for I217's sink to share the
     connection's params and their checks.
+14. **[pending review]** (2026-11-10, with decision 12's ruling) **A position-only record is gated by
+    the pipeline, not the source**: a source calls `Run.EmitPosition(func() Position)` after every
+    stretch of none of its records, and the pipeline calls the function, and queues the record, only
+    when no record of either kind was emitted for `checkpoint_interval` (5s), so a busy table's
+    records move the checkpoint themselves and a quiet one's moves once per checkpoint at most; the
+    function spares a binlog source marshalling a GTID set per skipped transaction. A dry run and a
+    chunk's read take none. The record kind is unexported (`Record.posOnly`): no transform, sink or
+    dead letter sees one, the status's read, acknowledged and sink counts leave it out, and record IDs
+    and a transform's numbering are untouched. Alternatives: a new `Op` (every transform and sink
+    would have to skip it); a rate in each source.
+15. **[pending review]** (2026-11-10) **Sinks keeping the checkpoint and position-only records**: such
+    a sink holds the last position it wrote, which position-only records pass without a write. Rather
+    than write the sink's table for each, the checkpoint file keeps that position (`wrote`) while its
+    `position` is a position-only record's, and a run whose sinks agree on `wrote` starts from the
+    file's later position (no replay); sinks agreeing on any other position are taken as before.
+    Alternative: tell `CheckpointSink`s each position-only record, a transaction on their servers per
+    checkpoint interval of a quiet table.
+16. **[pending review]** (2026-11-10) **Where each source hands one on**: `mssql` after every CDC
+    window read (its end LSN, transactions of tables not read or not captured) and every change
+    tracking version range with none of the read tables' changes; `mysql` at every transaction's end
+    with none of the read tables' records (DDL of other databases too), not on heartbeats (an idle
+    server's binlog does not move); `postgres` at the end of a transaction of no records (other
+    tables', on servers before 15, which send them) and at a keepalive between transactions while no
+    streamed transaction is spooled (15 and later skip empty transactions), only past the run's
+    start. The `postgres` slot was already told the position between transactions (`idle`), so the
+    server keeps no WAL for other tables; the position-only record makes the checkpoint follow.
 
 ### I217 SQL Server as a sink
 
@@ -7887,9 +7913,12 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; in force until the user rules):
 
-1. **[needs the user]** (2026-11-10: a reset or a table made again within `label_keep_max_second`
-   has its records refused as already loaded, silently, unless the user changes `label_prefix`: see
-   the list at the top of this section.)
+1. **[ruled 2026-11-10: done as recommended]** (2026-11-10: a reset or a table made again within
+   `label_keep_max_second` had its records refused as already loaded, silently, unless the user
+   changed `label_prefix`. Built: the checkpoint file always holds a lineage, made at a pipeline's
+   first start, a reset, a position set by hand and a new job, kept by restarts; every record that
+   reaches a sink carries it (`Record.Lineage`), and the label hashes it, so a reset changes the
+   labels by itself; `label_prefix` stays. See decisions 12 and 13.)
    **A load's label is the prefix and a hash of the database, the table, the run's first and last
    positions and its count**, as ClickHouse's token is made. Labels outlive a table dropped and made
    again (Doris keeps them `label_keep_max_second`, three days), so after a reset or new tables the
@@ -7945,6 +7974,25 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
     **Interop on Doris 2.1 and StarRocks 3.4**: StarRocks's frontend redirects to `127.0.0.1:8040`,
     its backend's own address, which a test on the host cannot reach beside Doris's, so its loads go
     to the backend directly; Doris's redirect is tested. Doris 3.0 is not in the run.
+12. **[pending review]** (2026-11-10, with decision 1's ruling) **The lineage, every pipeline's**: a
+    random ID in the checkpoint file (`lineage`, which only `CheckpointSink` pipelines had), made when
+    a stream starts with none and no position, saved at once before the source runs (a stream's start
+    now writes a checkpoint of no position, so a crash before the first checkpoint keeps the
+    labels), by a reset, a position set by hand and a new job (one of chunks run again from its start;
+    an unchunked job run again from its position keeps it); kept by restarts and by a job resumed.
+    Sinks read it as `Record.Lineage()`, set with the pipeline's name before a record reaches a sink;
+    dead letters carry it too. A checkpoint of a position saved by a fit before lineages keeps none
+    until it is reset, and the names its sinks made stay byte for byte, so an upgrade replays nothing
+    under new labels; a pipeline whose sink keeps the checkpoint already had one. Alternatives: a
+    generation number (an ID needs no compare); a lineage for old checkpoints too (labels changed by
+    the upgrade, the records after the checkpoint loaded twice into duplicate key tables).
+13. **[pending review]** (2026-11-10) **Which names take the lineage**: `doris`'s labels and `http`'s
+    `Idempotency-Key`, whose servers keep what they took past a target made afresh, so a reset's
+    records are written again. Not the record IDs (`nats`'s `Nats-Msg-Id`, `pulsar`'s `fit-id`,
+    `rabbitmq`'s `message_id`): a message read again after a reset is the same message, which its
+    consumers may rightly drop, and a JetStream window is minutes. Not `s3`'s object names: an object
+    written again is written over itself, which a reset wants. Not `clickhouse`'s deduplication
+    token: ClickHouse keeps it with the table, gone with a table made afresh.
 
 ### I219 Loki and OpenTelemetry logs as sinks
 

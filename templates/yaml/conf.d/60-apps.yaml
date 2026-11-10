@@ -6581,12 +6581,13 @@
             # # Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says,
             # # with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON
             # # (or CSV) rows whose label is made from the run's first and last records' origins (Kafka
-            # # offsets, Pulsar message IDs, a CDC transaction and place) or positions, so a run loaded
-            # # again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a
-            # # table of the unique or primary key model; a delete is the row (or its key) with Doris's
-            # # __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is
-            # # followed. A load refused for its data is split until the record it cannot take is found,
-            # # which fails, on_error taking it, those before it loaded.
+            # # offsets, Pulsar message IDs, a CDC transaction and place) or positions, and the lineage of
+            # # the pipeline's checkpoint, so a run loaded again after a crash is refused as already loaded,
+            # # and one a reset of the checkpoint reads again is loaded again. Inserts and updates are rows,
+            # # upserts on a table of the unique or primary key model; a delete is the row (or its key) with
+            # # Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a
+            # # backend is followed. A load refused for its data is split until the record it cannot take is
+            # # found, which fails, on_error taking it, those before it loaded.
             # module: "doris"
             # params:
               # # The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends'
@@ -6668,9 +6669,10 @@
               # # boolean.
               # partial_columns: true
 
-              # # The start of each load's label, letters, digits, _ and -, before a hash of the table and the
-              # # run's positions; pipelines loading the same database need prefixes of their own only when
-              # # their sources' positions could match. fit when left out.
+              # # The start of each load's label, letters, digits, _ and -, before a hash of the table, the
+              # # run's positions and the lineage of the pipeline's checkpoint, which a reset changes, so that
+              # # records a reset reads again are loaded again; pipelines loading the same database need
+              # # prefixes of their own only when their sources' positions could match. fit when left out.
               # # string; default "fit".
               # label_prefix: "fit"
 
@@ -7131,9 +7133,10 @@
               # bearer_token_env: ""
 
               # # The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's
-              # # records' origins (or positions, for a source without them) and its body, the same each time
-              # # the request is sent again, so a receiver can drop a request it already took. Idempotency-Key
-              # # when left out.
+              # # records' origins (or positions, for a source without them), its body and the lineage of the
+              # # pipeline's checkpoint, the same each time the request is sent again, so a receiver can drop
+              # # a request it already took, and new for the records a reset of the checkpoint reads again.
+              # # Idempotency-Key when left out.
               # # string; default "Idempotency-Key".
               # idempotency_header: "Idempotency-Key"
 
@@ -10103,12 +10106,13 @@
           # # Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says,
           # # with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON
           # # (or CSV) rows whose label is made from the run's first and last records' origins (Kafka
-          # # offsets, Pulsar message IDs, a CDC transaction and place) or positions, so a run loaded
-          # # again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a
-          # # table of the unique or primary key model; a delete is the row (or its key) with Doris's
-          # # __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is
-          # # followed. A load refused for its data is split until the record it cannot take is found,
-          # # which fails, on_error taking it, those before it loaded.
+          # # offsets, Pulsar message IDs, a CDC transaction and place) or positions, and the lineage of
+          # # the pipeline's checkpoint, so a run loaded again after a crash is refused as already loaded,
+          # # and one a reset of the checkpoint reads again is loaded again. Inserts and updates are rows,
+          # # upserts on a table of the unique or primary key model; a delete is the row (or its key) with
+          # # Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a
+          # # backend is followed. A load refused for its data is split until the record it cannot take is
+          # # found, which fails, on_error taking it, those before it loaded.
           # module: "doris"
           # params:
             # # The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends'
@@ -10190,9 +10194,10 @@
             # # boolean.
             # partial_columns: true
 
-            # # The start of each load's label, letters, digits, _ and -, before a hash of the table and the
-            # # run's positions; pipelines loading the same database need prefixes of their own only when
-            # # their sources' positions could match. fit when left out.
+            # # The start of each load's label, letters, digits, _ and -, before a hash of the table, the
+            # # run's positions and the lineage of the pipeline's checkpoint, which a reset changes, so that
+            # # records a reset reads again are loaded again; pipelines loading the same database need
+            # # prefixes of their own only when their sources' positions could match. fit when left out.
             # # string; default "fit".
             # label_prefix: "fit"
 
@@ -10653,9 +10658,10 @@
             # bearer_token_env: ""
 
             # # The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's
-            # # records' origins (or positions, for a source without them) and its body, the same each time
-            # # the request is sent again, so a receiver can drop a request it already took. Idempotency-Key
-            # # when left out.
+            # # records' origins (or positions, for a source without them), its body and the lineage of the
+            # # pipeline's checkpoint, the same each time the request is sent again, so a receiver can drop
+            # # a request it already took, and new for the records a reset of the checkpoint reads again.
+            # # Idempotency-Key when left out.
             # # string; default "Idempotency-Key".
             # idempotency_header: "Idempotency-Key"
 

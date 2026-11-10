@@ -8623,7 +8623,7 @@ Keeps a pipeline's dead letters in a file of its state_dir, bounded by max_recor
 
 ### `doris`
 
-Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says, with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON (or CSV) rows whose label is made from the run's first and last records' origins (Kafka offsets, Pulsar message IDs, a CDC transaction and place) or positions, so a run loaded again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a table of the unique or primary key model; a delete is the row (or its key) with Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is followed. A load refused for its data is split until the record it cannot take is found, which fails, on_error taking it, those before it loaded.
+Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says, with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON (or CSV) rows whose label is made from the run's first and last records' origins (Kafka offsets, Pulsar message IDs, a CDC transaction and place) or positions, and the lineage of the pipeline's checkpoint, so a run loaded again after a crash is refused as already loaded, and one a reset of the checkpoint reads again is loaded again. Inserts and updates are rows, upserts on a table of the unique or primary key model; a delete is the row (or its key) with Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is followed. A load refused for its data is split until the record it cannot take is found, which fails, on_error taking it, those before it loaded.
 
 Loads records into Apache Doris or StarRocks with Stream Load (`PUT /api/<db>/<table>/_stream_load`),
 through fib's asynchronous HTTP client, with `Expect: 100-continue`; a frontend's redirect to a
@@ -8632,7 +8632,8 @@ the rows in the clear. Each run of a batch's records for one table is one load,
 its rows JSON (a row a line on Doris, an array on StarRocks) or CSV, and its `columns` header the union
 of the run's columns. The load's `label` is `label_prefix`, `_` and a hash of the database, the table,
 the run's first and last records' origins (a Kafka partition and offset, a Pulsar message ID, a CDC
-transaction and the record's place in it), or positions for a source without them, and its count: written again after a crash, the same records make
+transaction and the record's place in it), or positions for a source without them, its count and
+the lineage of the pipeline's checkpoint: written again after a crash, the same records make
 the same label and the server answers `Label Already Exists`, which counts as loaded once the earlier
 load has finished (and is asked again while it runs).
 
@@ -8648,9 +8649,12 @@ A load refused for its rows (`too many filtered rows`, a JSON it cannot parse) i
 half loaded, until the record it cannot take is found: that record fails for good (`on_error` takes
 it), the records before it are loaded, and the error names the load's `ErrorURL`. Any other failure
 is retried by the pipeline; a 429 or a 5xx is sent again with a backoff first. Labels outlive a
-table dropped and made again (Doris keeps them `label_keep_max_second`, three days by default): after
-a pipeline is reset, or its tables made afresh, change `label_prefix`, or the records loaded before
-are refused as already loaded.
+table dropped and made again (Doris keeps them `label_keep_max_second`, three days by default), which
+is why the lineage is in them: a reset of the pipeline's checkpoint (or a position set by hand, or a
+new job) starts another lineage, so the records it reads again into tables made afresh are loaded,
+not refused as already loaded, with no change to `label_prefix`. Tables made afresh without a reset
+are not the pipeline's to know: reset it, or change `label_prefix`. A checkpoint saved by a fit
+before lineages keeps the labels it had until it is reset.
 
 ```sql
 CREATE TABLE shop.orders (id BIGINT NOT NULL, status VARCHAR(20), total DECIMAL(12, 2))
@@ -8674,7 +8678,7 @@ PROPERTIES ("enable_unique_key_merge_on_write" = "true");
 | `format` | string: `json`, `csv` | `"json"` | How rows are sent: json, a JSON object of each row's columns; csv, comma-separated values, quoted with escapes, null as \N (Doris 2.0 and StarRocks 3.0 or later). Either way the load names its columns, the union of the run's rows', so a row without a column of the union loads it null. json when left out. |
 | `deletes` | string: `sign`, `ignore` | `"sign"` | How deletes are written: sign, as the row before (or the key, when the source has no row before) with the flavor's delete column set to 1, which a table of the unique or primary key model takes as deleting the key; ignore, not at all, for a table of another model. A run without deletes sends no delete column. sign when left out. |
 | `partial_columns` | boolean |  | Update only the columns a run's rows have, keeping the others as they are, rather than replacing the row: Doris's partial_columns, StarRocks's partial_update. Needs a unique key table with merge on write, or a primary key table. false when left out. |
-| `label_prefix` | string | `"fit"` | The start of each load's label, letters, digits, _ and -, before a hash of the table and the run's positions; pipelines loading the same database need prefixes of their own only when their sources' positions could match. fit when left out. |
+| `label_prefix` | string | `"fit"` | The start of each load's label, letters, digits, _ and -, before a hash of the table, the run's positions and the lineage of the pipeline's checkpoint, which a reset changes, so that records a reset reads again are loaded again; pipelines loading the same database need prefixes of their own only when their sources' positions could match. fit when left out. |
 | `time_zone` | string |  | The zone times are written in, as DATETIME text: UTC when left out, local, or an IANA name such as Asia/Shanghai. |
 | `properties` | object of string |  | Stream Load's other headers, sent with every load, as {"max_filter_ratio": "0.1", "strict_mode": "true", "timeout": "600"}; they cannot be the ones the sink sets: label, format, columns, the JSON and CSV ones, partial_columns, partial_update, hidden_columns, merge_type, delete, jsonpaths, Expect. |
 | `max_request_bytes` | integer, 0 or more | `16777216` | The most bytes of one load's rows; a batch larger is loaded in several, in order, each with a label of its own, and a row larger fails its record. 16 MiB when left out or 0. |
@@ -8832,11 +8836,14 @@ Every request carries `headers`, the authentication the config gives (`username`
 `password_env` for basic authentication, or `bearer_token_env`, read from the environment when the
 pipeline loads) and an idempotency key in `idempotency_header` (`Idempotency-Key`): 32 hex digits of
 a SHA-256 of the request's records' origins (a Kafka partition and offset, a Pulsar message ID, a
-CDC transaction and the record's place in it), or positions for a source without them, and its body.
-A request sent again carries the same key, so a receiver that keeps the keys it has taken can drop a
-request it already has; the same records at other positions, or other records, get another. An
-origin keeps the key after a restart where a Kafka or Pulsar source's position, which holds every
-partition's progress in the order the run read them, does not.
+CDC transaction and the record's place in it), or positions for a source without them, its body,
+and the lineage of the pipeline's checkpoint. A request sent again carries the same key, so a
+receiver that keeps the keys it has taken can drop a request it already has; the same records at
+other positions, or other records, get another. An origin keeps the key after a restart where a
+Kafka or Pulsar source's position, which holds every partition's progress in the order the run read
+them, does not. A reset of the checkpoint (or a position set by hand, or a new job) starts another
+lineage, so the records it reads again are sent with new keys and the receiver takes them again; a
+checkpoint saved by a fit before lineages keeps the keys it had until it is reset.
 
 Any `2xx` acknowledges the request's records. A `5xx`, `408` or `429`, a timeout (`timeout`, 30s)
 or a connection's error fails the write, and the pipeline's `retry` sends it again with its backoff,
@@ -8933,7 +8940,7 @@ In JSON:
 | `username` | string |  | The user for basic authentication, with password_env. |
 | `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads. |
 | `bearer_token_env` | string |  | The environment variable holding a token sent as Authorization: Bearer, read when the pipeline loads. Not with username. |
-| `idempotency_header` | string | `"Idempotency-Key"` | The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' origins (or positions, for a source without them) and its body, the same each time the request is sent again, so a receiver can drop a request it already took. Idempotency-Key when left out. |
+| `idempotency_header` | string | `"Idempotency-Key"` | The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' origins (or positions, for a source without them), its body and the lineage of the pipeline's checkpoint, the same each time the request is sent again, so a receiver can drop a request it already took, and new for the records a reset of the checkpoint reads again. Idempotency-Key when left out. |
 | `ca_file` | string |  | A PEM file of the certificates the endpoint's is checked against, in place of the system's roots. The check cannot be turned off. |
 | `cert_file` | string |  | A PEM file of a client certificate, and the chain after it, presented to an endpoint that asks for one; needs key_file. |
 | `key_file` | string |  | The PEM file of cert_file's private key. |

@@ -8733,7 +8733,7 @@
         },
         "label_prefix": {
           "default": "fit",
-          "description": "The start of each load's label, letters, digits, _ and -, before a hash of the table and the run's positions; pipelines loading the same database need prefixes of their own only when their sources' positions could match. fit when left out.",
+          "description": "The start of each load's label, letters, digits, _ and -, before a hash of the table, the run's positions and the lineage of the pipeline's checkpoint, which a reset changes, so that records a reset reads again are loaded again; pipelines loading the same database need prefixes of their own only when their sources' positions could match. fit when left out.",
           "type": "string"
         },
         "max_request_bytes": {
@@ -8955,7 +8955,7 @@
         },
         "idempotency_header": {
           "default": "Idempotency-Key",
-          "description": "The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' origins (or positions, for a source without them) and its body, the same each time the request is sent again, so a receiver can drop a request it already took. Idempotency-Key when left out.",
+          "description": "The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' origins (or positions, for a source without them), its body and the lineage of the pipeline's checkpoint, the same each time the request is sent again, so a receiver can drop a request it already took, and new for the records a reset of the checkpoint reads again. Idempotency-Key when left out.",
           "type": "string"
         },
         "key_file": {
