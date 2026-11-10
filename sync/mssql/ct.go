@@ -100,7 +100,7 @@ func (rd *reader) trackTable(ctx context.Context, t *table, v, cur int64, each f
 	var from *fitsync.Value
 	for {
 		q := fmt.Sprintf("SELECT TOP (%d) ct.SYS_CHANGE_OPERATION, %s, %s FROM CHANGETABLE(CHANGES %s, @p1) AS ct LEFT JOIN %s AS t ON %s WHERE ct.SYS_CHANGE_VERSION <= @p2",
-			n, list("ct.", t.key), list("t.", t.cols), t.from(), t.from(), strings.Join(join, " AND "))
+			n, selectList("ct.", t.key, t.casts), selectList("t.", t.cols, t.casts), t.from(), t.from(), strings.Join(join, " AND "))
 		args := []any{v, cur}
 		if from != nil {
 			cond, a, err := after("ct.", t.key, *from)

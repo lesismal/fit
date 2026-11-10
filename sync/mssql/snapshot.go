@@ -51,6 +51,32 @@ func list(prefix string, cols []string) string {
 	return strings.Join(q, ", ")
 }
 
+// selectList is cols quoted, each with prefix, those in casts selected as
+// CAST(col AS nvarchar(n)) under their own names: varchar, char and text of
+// a code page the client does not decode, which the server converts to
+// UTF-16 (I215 decision 5).
+func selectList(prefix string, cols []string, casts map[string]string) string {
+	q := make([]string, len(cols))
+	for i, c := range cols {
+		q[i] = prefix + quoteName(c)
+		if n := casts[c]; n != "" {
+			q[i] = "CAST(" + q[i] + " AS nvarchar(" + n + ")) AS " + quoteName(c)
+		}
+	}
+	return strings.Join(q, ", ")
+}
+
+// castLength is the SELECT expression, over sys.columns' columns each with
+// prefix, of the length a column is cast to as nvarchar: n or max for a
+// varchar, char or text column whose collation's code page is neither 1252
+// nor UTF-8's, NULL for any other. A varchar(n) holds at most n characters,
+// so nvarchar(n) keeps them all; past nvarchar's 4000, max.
+func castLength(prefix string) string {
+	return fmt.Sprintf(`CASE WHEN %[1]ssystem_type_id IN (35, 167, 175) AND %[1]scollation_name IS NOT NULL
+AND COLLATIONPROPERTY(%[1]scollation_name, 'CodePage') NOT IN (1252, 65001)
+THEN CASE WHEN %[1]smax_length = -1 OR %[1]smax_length > 4000 OR %[1]ssystem_type_id = 35 THEN 'max' ELSE CAST(%[1]smax_length AS varchar(4)) END END`, prefix)
+}
+
 // after is the condition that a row's key, of columns cols each with
 // prefix, comes after key, and its parameters, named @k1 and on.
 func after(prefix string, cols []string, key fitsync.Value) (string, []any, error) {
@@ -163,19 +189,21 @@ func (rd *reader) newTables(since time.Time) []*table {
 func (rd *reader) readTable(ctx context.Context, t *table, from *fitsync.Value, each func(*fitsync.Record) error) error {
 	n := rd.s.batchSize()
 	for {
-		q := "SELECT " + list("", t.cols) + " FROM " + t.from()
+		// The table is t, so that the key's order is its columns', not
+		// the casts' of the select list.
+		q := "SELECT " + selectList("t.", t.cols, t.casts) + " FROM " + t.from() + " AS t"
 		var args []any
 		if len(t.key) > 0 {
-			q = fmt.Sprintf("SELECT TOP (%d) %s FROM %s", n, list("", t.cols), t.from())
+			q = fmt.Sprintf("SELECT TOP (%d) %s FROM %s AS t", n, selectList("t.", t.cols, t.casts), t.from())
 			if from != nil {
-				cond, a, err := after("", t.key, *from)
+				cond, a, err := after("t.", t.key, *from)
 				if err != nil {
 					return err
 				}
 				q += " WHERE " + cond
 				args = a
 			}
-			q += " ORDER BY " + list("", t.key)
+			q += " ORDER BY " + list("t.", t.key)
 		}
 		got := 0
 		var last fitsync.Value

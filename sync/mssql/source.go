@@ -175,6 +175,9 @@ type instance struct {
 	start   lsn
 	created time.Time
 	cols    []string
+	// casts are the columns read as nvarchar, and their lengths
+	// (selectList).
+	casts map[string]string
 }
 
 // table is a table the source reads.
@@ -183,7 +186,10 @@ type table struct {
 	// cols are the columns read: the newest capture instance's, or every
 	// column with change tracking.
 	cols []string
-	key  []string
+	// casts are the columns read as nvarchar, and their lengths
+	// (selectList).
+	casts map[string]string
+	key   []string
 	// instances are its capture instances, the oldest first.
 	instances []*instance
 }
@@ -290,15 +296,17 @@ ORDER BY s.name, t.name, ct.create_date`)
 		}
 		in := &instance{name: str(r[2]), start: lsnOf(r[3])}
 		in.created, _ = r[4].(time.Time)
-		_, cols, err := c.QueryAll(ctx, "SELECT column_name FROM cdc.captured_columns WHERE object_id = OBJECT_ID(@p1) ORDER BY column_ordinal", "cdc."+quoteName(in.name+"_CT"))
+		// The change table's columns have the table's types and
+		// collations.
+		_, cols, err := c.QueryAll(ctx, "SELECT cc.column_name, "+castLength("c.")+` FROM cdc.captured_columns cc
+LEFT JOIN sys.columns c ON c.object_id = cc.object_id AND c.name = cc.column_name
+WHERE cc.object_id = OBJECT_ID(@p1) ORDER BY cc.column_ordinal`, "cdc."+quoteName(in.name+"_CT"))
 		if err != nil {
 			return nil, err
 		}
-		for _, col := range cols {
-			in.cols = append(in.cols, str(col[0]))
-		}
+		in.cols, in.casts = columnsOf(cols)
 		t.instances = append(t.instances, in)
-		t.cols = in.cols
+		t.cols, t.casts = in.cols, in.casts
 		if idx := str(r[5]); idx != "" && t.key == nil {
 			t.key, err = indexColumns(ctx, c, t, "i.name = @p2", idx)
 			if err != nil {
@@ -323,16 +331,31 @@ JOIN sys.schemas s ON s.schema_id = t.schema_id ORDER BY s.name, t.name`)
 		if !s.included(t.ns()) {
 			continue
 		}
-		_, cols, err := c.QueryAll(ctx, "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(@p1) AND is_computed = 0 ORDER BY column_id", t.from())
+		_, cols, err := c.QueryAll(ctx, "SELECT name, "+castLength("")+" FROM sys.columns WHERE object_id = OBJECT_ID(@p1) AND is_computed = 0 ORDER BY column_id", t.from())
 		if err != nil {
 			return nil, err
 		}
-		for _, col := range cols {
-			t.cols = append(t.cols, str(col[0]))
-		}
+		t.cols, t.casts = columnsOf(cols)
 		out[t.ns()] = t
 	}
 	return out, nil
+}
+
+// columnsOf reads rows of a column's name and, when it is cast, the
+// length it is cast to (castLength).
+func columnsOf(rows [][]any) ([]string, map[string]string) {
+	var cols []string
+	var casts map[string]string
+	for _, r := range rows {
+		cols = append(cols, str(r[0]))
+		if len(r) > 1 && str(r[1]) != "" {
+			if casts == nil {
+				casts = map[string]string{}
+			}
+			casts[str(r[0])] = str(r[1])
+		}
+	}
+	return cols, casts
 }
 
 // keyColumns reads a table's primary key's columns, or keeps those of the
