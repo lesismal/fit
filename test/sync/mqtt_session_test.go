@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -180,17 +181,159 @@ func TestMQTTUnsubscribe(t *testing.T) {
 		quiet(name+"/a/#", name+"/c/#")
 		quiet(name + "/a/#")
 		rt = run(name + "/a/#")
-		defer rt.Close(context.Background())
 		send("c/1", "c-last")
 		send("a/4", "a-last")
 		wait("a-last")
+		rt.Close(context.Background())
+
+		// A message queued for a filter since dropped, under a topic a
+		// filter added in its place matches: in version 5 it carries the
+		// dropped filter's subscription identifier alone, and is not
+		// written; in 3.1.1, told by its topic, it is.
+		rt = run(name+"/a/#", name+"/d/#")
+		for deadline := time.Now().Add(time.Minute); payloads(store)["d-first"] == 0; time.Sleep(50 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("d/# never subscribed")
+			}
+			send("d/0", "d-first")
+		}
+		rt.Close(context.Background())
+		send("d/1", "d-away")
+		rt = run(name+"/a/#", name+"/+/1")
+		defer rt.Close(context.Background())
+		send("a/5", "a-fifth")
+		wait("a-fifth")
 		time.Sleep(500 * time.Millisecond)
-		for _, p := range []string{"b-away", "b-after", "b-third", "c-last"} {
-			if n := payloads(store)[p]; n != 0 {
-				t.Fatalf("%s written %d times", p, n)
+		want := map[string]int{"b-away": 0, "b-after": 0, "b-third": 0, "c-last": 0, "d-away": 0}
+		if version == "3.1.1" {
+			want["d-away"] = 1
+		}
+		for p, n := range want {
+			if got := payloads(store)[p]; got != n {
+				t.Fatalf("%s written %d times, not %d", p, got, n)
 			}
 		}
 	})
+}
+
+// TestMQTTSubscriptionIDs: both brokers put the identifiers of the
+// subscriptions a message matches on it, on those the session kept while
+// its client was away too, as the source's version 5 needs. Both send a
+// message that two subscriptions match twice, each copy with one
+// subscription's identifier, as MQTT 5 lets them (3.3.4): the copy of a
+// filter dropped is not emitted.
+func TestMQTTSubscriptionIDs(t *testing.T) {
+	eachMQTT(t, func(t *testing.T, b mqttBroker, version string) {
+		if version != "5" {
+			t.Skip("version 5's")
+		}
+		ctx := hangGuard(t)
+		name := mqttName(t)
+		cfg := mqttwire.Config{Address: b.addr, ClientID: name + "-sub", SessionExpiry: time.Minute}
+		sub := mqttDial(t, cfg)
+		if !sub.SubscriptionIDsAvailable() {
+			t.Fatal("no subscription identifiers")
+		}
+		for _, s := range []mqttwire.Subscription{{Filter: name + "/a/#", QoS: 1, ID: 7}, {Filter: name + "/a/+", QoS: 1, ID: 9},
+			{Filter: name + "/b", QoS: 1}} {
+			if _, err := sub.Subscribe(ctx, s); err != nil {
+				t.Fatal(err)
+			}
+		}
+		pub := mqttDial(t, mqttwire.Config{Address: b.addr, ClientID: name + "-pub", CleanStart: true})
+		// next takes the copies of a message, one per identifier.
+		next := func(c *mqttwire.Client, topic string, ids ...int) {
+			t.Helper()
+			var got []int
+			for len(got) < max(len(ids), 1) {
+				select {
+				case m := <-c.Messages():
+					c.Ack(m)
+					if m.Topic != name+"/"+topic || len(m.SubscriptionIDs) > 1 {
+						t.Fatalf("%s %v, not %s %v", m.Topic, m.SubscriptionIDs, topic, ids)
+					}
+					got = append(got, m.SubscriptionIDs...)
+					if len(ids) == 0 {
+						got = append(got, 0)
+					}
+				case <-time.After(30 * time.Second):
+					t.Fatalf("no %s", topic)
+				}
+			}
+			if slices.Sort(got); len(ids) > 0 && !slices.Equal(got, ids) {
+				t.Fatalf("%s %v, not %v", topic, got, ids)
+			}
+		}
+		for _, topic := range []string{"a/1", "b"} {
+			if err := pub.Publish(ctx, &mqttwire.Message{Topic: name + "/" + topic, QoS: 1}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		next(sub, "a/1", 7, 9)
+		next(sub, "b")
+		sub.Close()
+		if err := pub.Publish(ctx, &mqttwire.Message{Topic: name + "/a/2", QoS: 1}); err != nil {
+			t.Fatal(err)
+		}
+		next(mqttDial(t, cfg), "a/2", 7, 9)
+	})
+}
+
+// TestMQTTRewrite: EMQX's rewrite rule (test/sync/mqtt.sh) moves the
+// filters subscribed and the topics published under fit-rewrite/ to
+// fit-rewritten/, so the source's messages come under topics its filter
+// does not match, and match a filter dropped from topics: in version 5,
+// their subscription identifiers say they are the filter's of topics, and
+// they are written, both those queued before the UNSUBACK and those after.
+func TestMQTTRewrite(t *testing.T) {
+	addr := mqttEnv(t, "FIT_SYNC_MQTT_EMQX")
+	ctx := hangGuard(t)
+	name := mqttName(t)
+	from, to := "fit-rewrite/"+name, "fit-rewritten/"+name
+	pub := mqttDial(t, mqttwire.Config{Address: addr, ClientID: name + "-pub", CleanStart: true})
+	sub := mqttDial(t, mqttwire.Config{Address: addr, ClientID: name + "-sub", CleanStart: true})
+	if _, err := sub.Subscribe(ctx, mqttwire.Subscription{Filter: from + "/#", QoS: 1, ID: 42}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pub.Publish(ctx, &mqttwire.Message{Topic: from + "/x", QoS: 1}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case m := <-sub.Messages():
+		if m.Topic != to+"/x" || !slices.Equal(m.SubscriptionIDs, []int{42}) {
+			t.Fatalf("%s %v: not rewritten", m.Topic, m.SubscriptionIDs)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("no message")
+	}
+
+	store := name
+	fitsync.MemoryStore(store).Reset()
+	dir := t.TempDir()
+	run := func(topics ...string) *fitsync.Runtime {
+		params := map[string]any{"servers": []string{addr}, "client_id": name, "topics": topics}
+		return startSync(t, mqttSourceConfig(t, dir, store, params, nil), nil)
+	}
+	send := func(topic, payload string) {
+		t.Helper()
+		if err := pub.Publish(ctx, &mqttwire.Message{Topic: topic, QoS: 1, Payload: []byte(payload)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rt := run(from+"/#", to+"/+")
+	mqttWarm(t, pub, from, store)
+	rt.Close(context.Background())
+	send(from+"/1", "away")
+	rt = run(from + "/#")
+	defer rt.Close(context.Background())
+	send(from+"/2", "after")
+	deadline := time.Now().Add(time.Minute)
+	for got := payloads(store); got["away"] != 1 || got["after"] != 1; got = payloads(store) {
+		if time.Now().After(deadline) {
+			t.Fatalf("written: %v", got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // TestMQTTSCRAM: MQTT 5's enhanced authentication by SCRAM-SHA-256 with

@@ -15,6 +15,7 @@ import (
 	"hash"
 	"math/big"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -68,6 +69,7 @@ type fakeBroker struct {
 type fakeSession struct {
 	id       string
 	subs     map[string]byte
+	ids      map[string]int // the subscriptions' identifiers
 	inflight []*fakeOut
 	nextID   uint16
 	conn     *fakeConn
@@ -80,6 +82,7 @@ type fakeOut struct {
 	id    uint16
 	stage int  // QoS 2: 1 once the client's PUBREC came
 	sent  bool // sent once
+	ids   []int
 }
 
 type fakeConn struct {
@@ -296,7 +299,7 @@ func (c *fakeConn) connect(br *bufio.Reader, body []byte) bool {
 	s := b.sessions[id]
 	present := s != nil && !c.clean
 	if s == nil || c.clean {
-		s = &fakeSession{id: id, subs: map[string]byte{}, rec: map[uint16]*Message{}}
+		s = &fakeSession{id: id, subs: map[string]byte{}, ids: map[string]int{}, rec: map[uint16]*Message{}}
 		b.sessions[id] = s
 	}
 	if old := s.conn; old != nil {
@@ -379,6 +382,9 @@ func (c *fakeConn) sendPublish(o *fakeOut, dup bool) {
 		if subIDs {
 			w.b = appendVarint(append(w.b, propSubscriptionID), 300)
 		}
+		for _, id := range o.ids {
+			w.b = appendVarint(append(w.b, propSubscriptionID), id)
+		}
 		body = w.appendTo(body)
 	}
 	c.write(packet(first, append(body, m.Payload...)))
@@ -390,17 +396,22 @@ func (b *fakeBroker) route(m *Message) {
 	var sends []func()
 	for _, s := range b.sessions {
 		q, ok := byte(0), false
+		var ids []int
 		for f, fq := range s.subs {
 			if MatchTopic(f, m.Topic) {
 				q, ok = max(q, fq), true
+				if id := s.ids[f]; id > 0 {
+					ids = append(ids, id)
+				}
 			}
 		}
 		if !ok {
 			continue
 		}
+		slices.Sort(ids)
 		cp := *m
 		cp.QoS = min(q, m.QoS)
-		o := &fakeOut{m: &cp}
+		o := &fakeOut{m: &cp, ids: ids}
 		if cp.QoS > 0 {
 			s.nextID++
 			o.id = s.nextID
@@ -507,8 +518,13 @@ func (c *fakeConn) handle(first byte, body []byte) bool {
 		}
 	case typeSubscribe:
 		id := r.u16()
+		var p props
 		if c.version == Version5 {
-			r.props()
+			p = r.props()
+		}
+		subID := 0
+		if len(p.subIDs) > 0 {
+			subID = p.subIDs[0]
 		}
 		var codes []byte
 		b.mu.Lock()
@@ -520,6 +536,7 @@ func (c *fakeConn) handle(first byte, body []byte) bool {
 				continue
 			}
 			c.sess.subs[f] = o & 3
+			c.sess.ids[f] = subID
 			codes = append(codes, o&3)
 		}
 		no := b.noSuback
@@ -556,6 +573,7 @@ func (c *fakeConn) handle(first byte, body []byte) bool {
 				codes = append(codes, 0x87)
 			case had:
 				delete(c.sess.subs, f)
+				delete(c.sess.ids, f)
 				codes = append(codes, 0)
 			default:
 				codes = append(codes, 0x11)

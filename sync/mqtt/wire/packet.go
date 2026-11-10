@@ -64,6 +64,10 @@ const (
 // of variable byte integer.
 const maxRemaining = 268435455
 
+// MaxSubscriptionID is the largest subscription identifier: a variable
+// byte integer's most.
+const MaxSubscriptionID = 268435455
+
 // errMalformed says a packet is not what MQTT says it must be.
 var errMalformed = errors.New("mqtt: a malformed packet")
 
@@ -94,6 +98,8 @@ type props struct {
 	hasMaxQoS       bool
 	retainAvailable byte
 	hasRetain       bool
+	subIDsAvailable byte
+	hasSubIDs       bool
 	maxPacket       uint32
 	user            []UserProperty
 	authMethod      string
@@ -308,7 +314,9 @@ func (r *reader) props() props {
 			r.string()
 		case propWillDelay:
 			p.willDelay = r.u32()
-		case propRequestProblemInfo, propRequestRespInfo, propWildcardAvailable, propSubIDAvailable, propSharedAvailable:
+		case propSubIDAvailable:
+			p.subIDsAvailable, p.hasSubIDs = r.byte(), true
+		case propRequestProblemInfo, propRequestRespInfo, propWildcardAvailable, propSharedAvailable:
 			r.byte()
 		default:
 			r.fail()

@@ -951,9 +951,16 @@ acknowledged (`PUBACK`, or `PUBREC` then `PUBCOMP`) only once every sink has its
 the messages came, so a pipeline stopped or killed before its sinks wrote a message gets it again from
 the broker: at least once into idempotent sinks, a QoS 2 message taken once within a connection. The
 checkpoint holds nothing to resume from, the session being the position, but the topic filters
-subscribed: a filter dropped from `topics` is unsubscribed (`UNSUBSCRIBE`) when the session resumes
-at the next run, and the messages the broker had queued for it before, which may still come, are
-acknowledged and not written, unless a filter still named matches their topic too. A run whose
+subscribed and, in version 5, their subscription identifiers: each filter is subscribed with an
+identifier of its own, kept from run to run (the messages the session kept carry it) and never given
+to another filter, and the broker puts on each message the identifiers of the subscriptions it
+matched. A filter dropped from `topics` is unsubscribed (`UNSUBSCRIBE`) when the session resumes at
+the next run, and the messages the broker had queued for it before, which may still come, are
+acknowledged and not written: in version 5, those whose identifiers are all of filters dropped,
+whatever their topic, so a broker that rewrites topics (EMQX's rewrite rules) loses none of the
+filters still named; in 3.1.1, with a broker that takes no identifiers (`CONNACK`'s Subscription
+Identifier Available 0), and for a message that carries none (one queued before an upgrade from a
+fit that gave none), those whose topic matches a filter dropped and none still named. A run whose
 filters differ from the checkpoint's hands them on in a position-only record once it has subscribed,
 so they are saved within about `checkpoint_interval` though no message comes (a pipeline's first run
 saves them at once), and a filter added in one run and dropped in the next is unsubscribed too. A

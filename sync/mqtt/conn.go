@@ -192,6 +192,7 @@ type client interface {
 	Subscribe(ctx context.Context, subs ...mqttwire.Subscription) ([]byte, error)
 	Unsubscribe(ctx context.Context, filters ...string) ([]byte, error)
 	SessionPresent() bool
+	SubscriptionIDsAvailable() bool
 	Messages() <-chan *mqttwire.Message
 	Ack(m *mqttwire.Message) error
 	Send(ctx context.Context, m *mqttwire.Message) (waiter, error)

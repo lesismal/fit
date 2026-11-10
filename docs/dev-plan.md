@@ -7635,12 +7635,36 @@ Made after the rulings (2026-11-10), pending review:
     records; before, such a filter never reached a checkpoint and stayed in the session.) The
     position's run and seq are the last message's, so acknowledging it releases nothing new.
     Alternative: a file of the source's own in `state_dir`, outside the checkpoint.
-17. **Messages of a filter dropped**, which the broker may send before the UNSUBACK and, as MQTT lets
-    it, after (messages it had queued), are acknowledged and not emitted throughout that run when their
-    topic matches a dropped filter and no filter of `topics`; a topic that matches one of `topics` too
-    is emitted. Topics are never checked otherwise: EMQX's rewrite rules may deliver what a filter asks
-    under a topic it does not match. Alternative: version 5's subscription identifiers, which would
-    say which subscription a message is for, at the cost of an identifier per filter.
+17. **[ruled 2026-11-10: subscription identifiers]** **Messages of a filter dropped**, which the
+    broker may send before the UNSUBACK and, as MQTT lets it, after (messages it had queued), are told
+    by version 5's subscription identifiers. Each filter of `topics` is subscribed with an identifier
+    (SUBSCRIBE property 0x0B), in a SUBSCRIBE of its own since one SUBSCRIBE carries one identifier;
+    the broker puts the identifiers of the subscriptions a message matched on its PUBLISH (property
+    0x0B, which may repeat, `Message.SubscriptionIDs` in sync/mqtt/wire). The position keeps the
+    filter→identifier map (`ids`) beside `filters`, so a filter keeps its identifier from run to run
+    (the messages a resumed session kept carry the one given when subscribing), and the next
+    identifier to give (`next_id`): a new filter takes a new one, and none is ever given twice. A
+    dropped filter's identifier stays in `ids` with it until its UNSUBACK; after that it need not be
+    remembered, since an identifier fit gave before (below the run's first `next_id`) that no filter of
+    `topics` holds can only be a dropped filter's. A message is acknowledged and not emitted when every
+    identifier it carries is such a one, whatever its topic, so EMQX's rewrite rules, which deliver a
+    filter's messages under topics it does not match, lose nothing (checked on EMQX 5 with a rewrite
+    rule, `TestMQTTRewrite`); a message that carries one of `topics`' is emitted. A message queued for
+    a filter since dropped is not emitted even when a filter added in its place matches its topic
+    (`TestMQTTUnsubscribe`). The topic rule of before stays for the messages identifiers do not
+    settle: those with none (subscriptions made before identifiers were used, an upgrade from the
+    release before this; a broker that does not send them), those with one fit did not give (a
+    checkpoint lost), every message in version 3.1.1, and every message of a broker whose CONNACK
+    says Subscription Identifier Available 0 (property 0x29; such a run subscribes without
+    identifiers, in one SUBSCRIBE, and its positions carry no `ids`, only `next_id`). Under it, a
+    message is acknowledged and not emitted, throughout the run, when its topic matches a filter
+    dropped and none of `topics`. The wire client takes `Subscription.ID` (1 to 268435455, one per
+    Subscribe call, refused in 3.1.1 or when the server takes none: `SubscriptionIDsAvailable`), and
+    takes a PUBLISH of identifier 0 as a protocol error. Mosquitto 2 and EMQX 5 send the identifiers,
+    on the messages a session kept too (`TestMQTTSubscriptionIDs`), and send a message two
+    subscriptions match as two copies, each with one identifier (MQTT 5 lets a server do either): the
+    copy of a dropped filter is not emitted, where the topic rule emitted it, a duplicate, when a
+    filter of `topics` matched too.
 18. **[ruled 2026-11-10: kept]** **A refused UNSUBSCRIBE fails the run**, as a refused SUBSCRIBE does (version 5 codes 0x80 and
     up); 0x11, no subscription existed, is success. A session not resumed (`SessionPresent` false)
     unsubscribes from nothing.
