@@ -232,9 +232,19 @@ func mssqlPrepare(ctx context.Context, o *options) error {
 		if err := c.exec(ctx, q); err != nil && !strings.Contains(q, "_job @job_type = N'capture'") {
 			return fmt.Errorf("%s: %w", q, err)
 		}
+		// The job stops a moment after it is told to: a start before
+		// then is refused, and the job stays stopped, CDC capturing
+		// nothing (as test/sync's mssqlCapture waits too).
+		if strings.Contains(q, "sp_cdc_stop_job") {
+			time.Sleep(captureRestart)
+		}
 	}
 	return nil
 }
+
+// captureRestart is how long mssqlPrepare waits between stopping the
+// capture job and starting it again.
+var captureRestart = time.Second
 
 // Dialers of the second round's sources, replaced by the tests.
 var (

@@ -355,6 +355,72 @@ func TestMSSQLSourceChecks(t *testing.T) {
 	})
 }
 
+// TestMSSQLSourceDroppedInstance: an older capture instance dropped, while
+// the source runs, before it read that instance's changes up to the newer
+// one's start, fails the source asking for a new snapshot, rather than
+// losing them unnoticed.
+func TestMSSQLSourceDroppedInstance(t *testing.T) {
+	eachMSSQL(t, func(t *testing.T, s mssqlServer) {
+		c := s.dial(t, mssqlwire.EncryptOn)
+		table := fmt.Sprintf("dropped_%d", time.Now().UnixNano())
+		mssqlExec(t, c, "CREATE TABLE dbo."+table+" "+mssqlLoadColumns)
+		t.Cleanup(func() { c.Exec(context.Background(), "DROP TABLE dbo."+table) })
+		mssqlCapture(t, s, c, table)
+		older, newer := "dbo_"+table, table+"_2"
+		src := mssqlSourceAt(t, s, map[string]any{"tables": []string{"dbo." + table}, "snapshot": "never"})
+		// The source holds its first record until the older instance is
+		// dropped: the changes after it are then unread.
+		held, gate := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		defer cancel()
+		started := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- src.Run(ctx, &fitsync.Run{Emit: func(*fitsync.Record) error {
+				once.Do(func() { close(held); <-gate })
+				return nil
+			}, Start: func(fitsync.Position) error { close(started); return nil }})
+		}()
+		<-started
+		mssqlExec(t, c, "INSERT INTO dbo."+table+" (id, v) VALUES (1, N'a')")
+		select {
+		case <-held:
+		case err := <-done:
+			t.Fatal(err)
+		case <-ctx.Done():
+			t.Fatal("no record")
+		}
+		mssqlExec(t, c, "INSERT INTO dbo."+table+" (id, v) VALUES (2, N'b')")
+		mssqlExec(t, c, "EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = @p1, @role_name = NULL, @capture_instance = @p2", table, newer)
+		mssqlExec(t, c, "INSERT INTO dbo."+table+" (id, v) VALUES (3, N'c')")
+		// Both instances have row 3 once the capture job read it.
+		for {
+			_, rows, err := c.QueryAll(ctx, "SELECT COUNT(*) FROM cdc."+newer+"_CT")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rows[0][0] == int64(1) {
+				break
+			}
+			if ctx.Err() != nil {
+				t.Fatal("the capture job did not read row 3")
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		mssqlExec(t, c, "EXEC sys.sp_cdc_disable_table @source_schema = N'dbo', @source_name = @p1, @capture_instance = @p2", table, older)
+		close(gate)
+		select {
+		case err := <-done:
+			if err == nil || !strings.Contains(err.Error(), "capture instance "+older+" of dbo."+table+" was dropped") {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("the source did not fail")
+		}
+	})
+}
+
 func mssqlSourceAt(t *testing.T, s mssqlServer, extra map[string]any) fitsync.Source {
 	t.Helper()
 	b, _ := json.Marshal(mssqlSourceParams(t, s, extra))

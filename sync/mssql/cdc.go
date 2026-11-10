@@ -73,9 +73,14 @@ func (rd *reader) follow(ctx context.Context, from position) error {
 		if err != nil {
 			return err
 		}
+		if err := rd.lag(ctx, at, head, len(txs)); err != nil {
+			return err
+		}
 		if len(txs) > 0 {
 			if at, err = rd.read(ctx, at, txs, since); err != nil {
-				return err
+				// A capture instance dropped under the read fails its
+				// query: say so when its changes are lost.
+				return rd.whyFailed(ctx, err, at, known)
 			}
 			continue
 		}
@@ -93,6 +98,9 @@ func (rd *reader) follow(ctx context.Context, from position) error {
 			if err != nil {
 				return err
 			}
+			if err := rd.dropped(tables, at); err != nil {
+				return err
+			}
 			rd.tables, known = tables, now
 			if len(rd.newTables(since)) > 0 {
 				p, err := rd.snapshot(ctx, position{LSN: at, Since: since}, &snapPos{Added: true})
@@ -107,6 +115,89 @@ func (rd *reader) follow(ctx context.Context, from position) error {
 			return err
 		}
 	}
+}
+
+// whyFailed is err, a read's failure after at, or the loss of a capture
+// instance's changes when the capture instances changed since known and
+// one was dropped before its changes were read.
+func (rd *reader) whyFailed(ctx context.Context, err error, at lsn, known string) error {
+	now, cerr := rd.captured(ctx)
+	if cerr != nil || now == known {
+		return err
+	}
+	_, tables, derr := rd.s.discover(ctx, rd.c)
+	if derr != nil {
+		return err
+	}
+	if lerr := rd.dropped(tables, at); lerr != nil {
+		return lerr
+	}
+	return err
+}
+
+// dropped fails, asking for a new snapshot, when a capture instance of a
+// table read is no longer in tables, CDC's capture instances now, and the
+// table's remaining ones start after at: the dropped instance held the
+// changes from at to their start, unread. A table no longer captured at
+// all is logged: the source stops reading it. A dropped instance whose
+// changes are all read, or which a remaining one covers, is no loss.
+// Only a drop the source sees is caught: one while it is stopped leaves no
+// trace in CDC's tables.
+func (rd *reader) dropped(tables []*table, at lsn) error {
+	now := make(map[string]*table, len(tables))
+	for _, t := range tables {
+		now[t.ns()] = t
+	}
+	for _, t := range rd.tables {
+		nt := now[t.ns()]
+		if nt == nil {
+			rd.s.log.Warnf("sync mssql: CDC no longer captures %s; its changes after %s that were not read are not", t.ns(), at)
+			continue
+		}
+		left := map[string]bool{}
+		first := nt.instances[0].start
+		for _, in := range nt.instances {
+			left[in.name] = true
+			first = min(first, in.start)
+		}
+		if first <= at.next() {
+			continue
+		}
+		for _, in := range t.instances {
+			if !left[in.name] && in.start < first {
+				return fmt.Errorf("mssql: the capture instance %s of %s was dropped before its changes from %s to %s were read: %w",
+					in.name, t.ns(), at.next(), first, errNeedSnapshot)
+			}
+		}
+	}
+	return nil
+}
+
+// The units of the source's lag: CDC's transactions in
+// cdc.lsn_time_mapping, change tracking's versions.
+const (
+	lagTransactions = "transactions"
+	lagVersions     = "versions"
+)
+
+// lag reports the transactions after at to head, of which a window read n:
+// n when the window held them all, or counted, at most once a second.
+func (rd *reader) lag(ctx context.Context, at, head lsn, n int) error {
+	if n < rd.s.windowTransactions() {
+		rd.r.ReportLag(int64(n), lagTransactions)
+		return nil
+	}
+	if time.Since(rd.lagAt) < time.Second {
+		return nil
+	}
+	_, rows, err := rd.c.QueryAll(ctx, "SELECT COUNT_BIG(*) FROM cdc.lsn_time_mapping WHERE start_lsn > @p1 AND start_lsn <= @p2", at.param(), head.param())
+	if err != nil {
+		return err
+	}
+	behind, _ := rows[0][0].(int64)
+	rd.r.ReportLag(behind, lagTransactions)
+	rd.lagAt = time.Now()
+	return nil
 }
 
 // maxLSN is CDC's highest LSN.

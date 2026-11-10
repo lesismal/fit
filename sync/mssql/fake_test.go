@@ -351,6 +351,9 @@ func (c *fakeConn) QueryAll(_ context.Context, sql string, args ...any) ([]mssql
 				rows = append(rows, []any{lsnBytes(tx.lsn), tx.at})
 			}
 		}
+		if strings.HasPrefix(sql, "SELECT COUNT_BIG(*)") {
+			return nil, [][]any{{int64(len(rows))}}, nil
+		}
 		return nil, rows, nil
 	case strings.Contains(sql, "fn_cdc_get_all_changes_"):
 		return f.changes(sql, top, args)
@@ -425,6 +428,9 @@ func (f *fake) changes(sql string, top int, args []any) ([]mssqlwire.Column, [][
 		if i.name == name {
 			in = i
 		}
+	}
+	if in == nil {
+		return nil, nil, errors.New("fake: error 208, invalid object name")
 	}
 	lo, hi := lsnNum(argOf(args[0])), lsnNum(argOf(args[1]))
 	if lo < in.start {
