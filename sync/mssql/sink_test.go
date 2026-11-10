@@ -301,7 +301,7 @@ func TestSinkErrors(t *testing.T) {
 		})
 	}
 	f := newSinkFake()
-	s := newSink(t, f, map[string]any{"ddl": "stop", "table": "x.{namespace}"})
+	s := newSink(t, f, map[string]any{"ddl": "stop", "table": "x.{$namespace}"})
 	var be *fitsync.BatchError
 	for _, r := range []*fitsync.Record{
 		{Op: fitsync.OpDDL, Namespace: "dbo.t", After: fitsync.String(strings.Repeat("x", 300))},

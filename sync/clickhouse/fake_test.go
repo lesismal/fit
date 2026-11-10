@@ -183,7 +183,7 @@ func TestSinkWrites(t *testing.T) {
 
 func TestSinkDeletesAndPlain(t *testing.T) {
 	f := newFakeCH(t, nil)
-	s := fakeSink(t, f, map[string]any{"deletes": "delete", "plain": true, "table": "x_{namespace}"})
+	s := fakeSink(t, f, map[string]any{"deletes": "delete", "plain": true, "table": "x_{$namespace}"})
 	batch := []*fitsync.Record{rec(1, fitsync.OpInsert, 1, "a"), rec(2, fitsync.OpDelete, 1, "a"), rec(3, fitsync.OpDelete, 2, "a"), rec(4, fitsync.OpInsert, 3, "c")}
 	if err := s.Write(context.Background(), batch); err != nil {
 		t.Fatal(err)

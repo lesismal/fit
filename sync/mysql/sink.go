@@ -15,6 +15,7 @@ import (
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
+	nametmpl "github.com/lesismal/fit/sync/internal/tmpl"
 	mysqlwire "github.com/lesismal/fit/sync/mysql/wire"
 )
 
@@ -49,7 +50,7 @@ type Sink struct {
 	TLSRSA              bool            `json:"tls_rsa,omitempty" doc:"Offer TLS's RSA key exchange besides the default suites, for MySQL 5.7's image, which offers no other that Go has; needs tls. false when left out."`
 	ServerPublicKeyFile string          `json:"server_public_key_file,omitempty" doc:"A PEM file of the server's RSA public key, with which caching_sha2_password and sha256_password send the password without TLS. Without it and without TLS, a user of those plugins logs in only through the server's cache."`
 	Timeout             config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long connecting, and each wait for the server in a statement, may take. 60s when left out or 0."`
-	Table               string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, with a primary or unique key on the record's key columns, which the upserts rely on. {namespace} when left out."`
+	Table               string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; db.table names the database too. The table is not made: it is the user's, with a primary or unique key on the record's key columns, which the upserts rely on. {namespace} when left out."`
 	Transactions        string          `json:"transactions,omitempty" enum:"source,batch" default:"\"source\"" doc:"How records are grouped in the server's transactions: source, each source transaction as one, and the records without one (a snapshot's) of a batch together; batch, a batch's records up to the last that ends a source transaction in one, several source transactions together, and those after it, a part of one source transaction, in one held open into the next batch. Either way a source transaction is never committed in part, unless it is larger than max_transaction_bytes. source when left out."`
 	DDL                 string          `json:"ddl,omitempty" enum:"report,stop" default:"\"report\"" doc:"What a ddl record does: report, logged and not applied; stop, fails, so that on_error takes it, which with on_error stop stops the pipeline before it, for a person to change the table. report when left out."`
 	Checkpoint          string          `json:"checkpoint,omitempty" enum:"file,sink" default:"\"file\"" doc:"Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash between a commit and the file's next checkpoint writes the records after it again (to the same rows); sink, also in checkpoint_table, written in the same transaction as the records it covers and read back when the pipeline starts, in preference to the file, so that no record is written twice: exactly once, while every sink of the pipeline keeps it. file when left out."`
@@ -150,7 +151,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 	if s.dial == nil {
 		s.dial = dialWire
 	}
-	tmpl := s.Table
+	tmpl := nametmpl.Canonical(s.Table)
 	if tmpl == "" {
 		tmpl = "{namespace}"
 	}
@@ -165,7 +166,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 		rest = rest[i+len("{namespace}"):]
 	}
 	if strings.ContainsAny(strings.ReplaceAll(tmpl, "{namespace}", ""), "{}") {
-		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s", tmpl))
+		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s (or {$namespace}'s)", s.Table))
 	}
 	s.batch = s.Transactions == "batch"
 	s.stop = s.DDL == "stop"

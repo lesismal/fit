@@ -31,6 +31,15 @@ import (
 // DefaultTimeout bounds connecting and each request's answer.
 const DefaultTimeout = 10 * time.Second
 
+// The headers the sink writes a record's key, op and namespace in, as the
+// RabbitMQ sink's fit-key, fit-op and fit-namespace; the source reads the
+// key back from keyHeader.
+const (
+	keyHeader       = "Fit-Key"
+	opHeader        = "Fit-Op"
+	namespaceHeader = "Fit-Namespace"
+)
+
 // connParams are the params the source and the sink share, declared by
 // each as its own, with the same names and docs.
 type connParams struct {

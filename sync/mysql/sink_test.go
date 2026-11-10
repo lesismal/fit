@@ -530,7 +530,7 @@ func TestFailuresOpen(t *testing.T) {
 // of many keys goes in several statements.
 func TestKeys(t *testing.T) {
 	d := newFakeDB(map[string][]string{"db.k": {"a", "b"}, "db.m": {"id"}})
-	s := fakeSink(t, d, map[string]any{"table": "db.{namespace}"})
+	s := fakeSink(t, d, map[string]any{"table": "db.{$namespace}"})
 	key := func(a, b int64) fitsync.Value {
 		return fitsync.Map(fitsync.Field{Name: "a", Value: fitsync.Int(a)}, fitsync.Field{Name: "b", Value: fitsync.Int(b)})
 	}

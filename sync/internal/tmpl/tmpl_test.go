@@ -9,7 +9,7 @@ import (
 func TestTemplates(t *testing.T) {
 	r := &fitsync.Record{Namespace: "db.t"}
 	row := fitsync.Map(fitsync.Field{Name: "dev", Value: fitsync.Int(7)}, fitsync.Field{Name: "none", Value: fitsync.Null()})
-	for tmpl, want := range map[string]string{"{namespace}": "db.t", "m_{dev}_x": "m_7_x", "{{a}": "{a}", "plain": "plain", "": ""} {
+	for tmpl, want := range map[string]string{"{namespace}": "db.t", "{$namespace}_{dev}": "db.t_7", "m_{dev}_x": "m_7_x", "{{a}": "{a}", "plain": "plain", "": ""} {
 		parts, err := Parse(tmpl)
 		if err != nil {
 			t.Fatal(tmpl, err)
@@ -23,7 +23,7 @@ func TestTemplates(t *testing.T) {
 			t.Errorf("%s: static %q %v", tmpl, s, static)
 		}
 	}
-	for _, bad := range []string{"{", "a{}b"} {
+	for _, bad := range []string{"{", "a{}b", "{$op}", "{$}"} {
 		if _, err := Parse(bad); err == nil {
 			t.Errorf("%q parsed", bad)
 		}

@@ -17,6 +17,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
+	nametmpl "github.com/lesismal/fit/sync/internal/tmpl"
 )
 
 func init() {
@@ -46,7 +47,7 @@ type Sink struct {
 	ServerName      string            `json:"server_name,omitempty" doc:"The name the server's certificate must have, and the TLS server name sent; each URL's host when left out."`
 	Timeout         config.Duration   `json:"timeout,omitempty" default:"\"60s\"" doc:"How long one request may take, from connecting to the end of its answer. 60s when left out or 0."`
 	Settings        map[string]string `json:"settings,omitempty" doc:"ClickHouse settings sent with every query, the name to the value, as {\"async_insert\": \"1\"}; they cannot be query, database, insert_deduplication_token, insert_deduplicate or a param_."`
-	Table           string            `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, a ReplacingMergeTree(_version, _deleted) ordered by the key for updates and deletes, with non_replicated_deduplication_window set unless it is replicated, so that the deduplication token works. {namespace} when left out."`
+	Table           string            `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; db.table names the database too. The table is not made: it is the user's, a ReplacingMergeTree(_version, _deleted) ordered by the key for updates and deletes, with non_replicated_deduplication_window set unless it is replicated, so that the deduplication token works. {namespace} when left out."`
 	Plain           bool              `json:"plain,omitempty" doc:"Write rows as they are, without the version and deleted columns, as for a log's MergeTree; deletes must then be delete or ignore. false when left out."`
 	VersionColumn   string            `json:"version_column,omitempty" default:"\"_version\"" doc:"The UInt64 column each row's version goes in, which a ReplacingMergeTree keeps the greatest of: the record's commit time in Unix nanoseconds, 0 when it has none (a snapshot's rows, which any change then outranks), or version_field's value. _version when left out."`
 	VersionField    string            `json:"version_field,omitempty" doc:"A field of the row (an int, a uint, or a time, in Unix nanoseconds) whose value is the version, for a source whose commit times can tie for one key, as a binlog's seconds; a record without it fails. The commit time when left out, or, when the source gives none, 0: a snapshot's rows never outrank a change, and rows of one version are kept as the last written."`
@@ -86,7 +87,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 		CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName, Timeout: s.Timeout})
 	s.conn = conn
 	errs = append(errs, checkSettings(ctx, s.Settings)...)
-	tmpl := s.Table
+	tmpl := nametmpl.Canonical(s.Table)
 	if tmpl == "" {
 		tmpl = "{namespace}"
 	}
@@ -101,7 +102,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 		rest = rest[i+len("{namespace}"):]
 	}
 	if strings.ContainsAny(strings.ReplaceAll(tmpl, "{namespace}", ""), "{}") {
-		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s", tmpl))
+		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s (or {$namespace}'s)", s.Table))
 	}
 	if s.VersionColumn == "" {
 		s.VersionColumn = DefaultVersionColumn

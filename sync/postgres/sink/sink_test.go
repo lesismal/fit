@@ -227,7 +227,7 @@ func TestWrite(t *testing.T) {
 
 func TestKeys(t *testing.T) {
 	f := newFake(t)
-	s := sinkOf(t, f, map[string]any{"key_columns": []string{"a", "b"}, "table": "t_{namespace}"})
+	s := sinkOf(t, f, map[string]any{"key_columns": []string{"a", "b"}, "table": "t_{$namespace}"})
 	r := &fitsync.Record{Namespace: "x", Op: fitsync.OpInsert, Key: fitsync.Map(col("a", fitsync.Int(1))),
 		After: fitsync.Map(col("b", fitsync.String("k")), col("v", fitsync.Int(5)))}
 	d := &fitsync.Record{Namespace: "x", Op: fitsync.OpDelete, Key: fitsync.Map(col("a", fitsync.Int(1))),

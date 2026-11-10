@@ -1,7 +1,9 @@
 // Package tmpl is the templates of sync's sinks, of two kinds. Name
 // templates (Parse, Expand), of a measurement, a collection, a subtable:
-// text, {namespace} the record's namespace, and {name} the row's field
-// name, which a record must have, {{ being a brace. Record templates
+// text, {namespace} (or {$namespace}, as record templates write it) the
+// record's namespace, and {name} the row's field name, which a record must
+// have, {{ being a brace. The SQL sinks' table templates, text and the
+// namespace only, take {$namespace} through Canonical. Record templates
 // (ParseRecord), of the log sinks' labels and attributes, in record.go.
 package tmpl
 
@@ -19,8 +21,18 @@ type Part struct {
 	namespace   bool
 }
 
-// Parse reads a template of text, {namespace} and {field}s, {{
-// being a brace.
+// NamespaceAlias is {namespace} as record templates write it, which name
+// templates take as well.
+const NamespaceAlias = "{$namespace}"
+
+// Canonical returns a template with NamespaceAlias written {namespace},
+// for the templates that know only {namespace}.
+func Canonical(t string) string {
+	return strings.ReplaceAll(t, NamespaceAlias, "{namespace}")
+}
+
+// Parse reads a template of text, {namespace} (or {$namespace}) and
+// {field}s, {{ being a brace; no other name starts with $.
 func Parse(t string) ([]Part, error) {
 	var parts []Part
 	var text strings.Builder
@@ -37,6 +49,11 @@ func Parse(t string) ([]Part, error) {
 			name := t[i+1 : i+j]
 			if name == "" {
 				return nil, errors.New("{} names nothing")
+			}
+			if name == "$namespace" {
+				name = "namespace"
+			} else if strings.HasPrefix(name, "$") {
+				return nil, fmt.Errorf("{%s} names nothing: a field, {namespace} or {$namespace}", name)
 			}
 			if text.Len() > 0 {
 				parts = append(parts, Part{text: text.String()})

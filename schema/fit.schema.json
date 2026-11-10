@@ -8619,7 +8619,7 @@
         },
         "table": {
           "default": "{namespace}",
-          "description": "The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, a ReplacingMergeTree(_version, _deleted) ordered by the key for updates and deletes, with non_replicated_deduplication_window set unless it is replicated, so that the deduplication token works. {namespace} when left out.",
+          "description": "The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; db.table names the database too. The table is not made: it is the user's, a ReplacingMergeTree(_version, _deleted) ordered by the key for updates and deletes, with non_replicated_deduplication_window set unless it is replicated, so that the deduplication token works. {namespace} when left out.",
           "type": "string"
         },
         "timeout": {
@@ -8763,7 +8763,7 @@
         },
         "table": {
           "default": "{namespace}",
-          "description": "The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, of the unique key model (merge on write) on Doris or the primary key model on StarRocks for updates and deletes. {namespace} when left out.",
+          "description": "The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; db.table names the database too. The table is not made: it is the user's, of the unique key model (merge on write) on Doris or the primary key model on StarRocks for updates and deletes. {namespace} when left out.",
           "type": "string"
         },
         "time_zone": {
@@ -9067,7 +9067,7 @@
         },
         "measurement": {
           "default": "{namespace}",
-          "description": "The measurement a record's point goes to: text with placeholders, {namespace} the record's namespace and {name} the row's field name (which the point still has as a field or tag); {{ is a brace. {namespace} when left out.",
+          "description": "The measurement a record's point goes to: text with placeholders, {namespace} (or {$namespace}, as record templates write it) the record's namespace and {name} the row's field name (which the point still has as a field or tag); {{ is a brace. {namespace} when left out.",
           "type": "string"
         },
         "org": {
@@ -9376,7 +9376,7 @@
           "type": "string"
         },
         "collection": {
-          "description": "The collection a record's entity goes to, which must exist with a primary key that is not auto_id: text with placeholders, {namespace} the record's namespace and {name} the row's field name; {{ is a brace.",
+          "description": "The collection a record's entity goes to, which must exist with a primary key that is not auto_id: text with placeholders, {namespace} (or {$namespace}, as record templates write it) the record's namespace and {name} the row's field name; {{ is a brace.",
           "type": "string"
         },
         "database": {
@@ -9726,7 +9726,7 @@
         },
         "table": {
           "default": "{namespace}",
-          "description": "The table a record goes to: text with {namespace}, the record's namespace; its parts, split at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema shop's table orders). The table is not made: it is the user's, with a primary key or unique index on the record's key columns. {namespace} when left out.",
+          "description": "The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; its parts, split at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema shop's table orders). The table is not made: it is the user's, with a primary key or unique index on the record's key columns. {namespace} when left out.",
           "type": "string"
         },
         "timeout": {
@@ -9829,7 +9829,7 @@
         },
         "table": {
           "default": "{namespace}",
-          "description": "The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, with a primary or unique key on the record's key columns, which the upserts rely on. {namespace} when left out.",
+          "description": "The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; db.table names the database too. The table is not made: it is the user's, with a primary or unique key on the record's key columns, which the upserts rely on. {namespace} when left out.",
           "type": "string"
         },
         "timeout": {
@@ -10182,7 +10182,7 @@
         },
         "table": {
           "default": "{namespace}",
-          "description": "The table a record goes to: text with {namespace}, the record's namespace; split at its first dot into the schema and the table (shop.orders is the table orders of the schema shop), a name without a dot found by the search_path. The table is not made: it must have a primary key or unique index on the key's columns. {namespace} when left out.",
+          "description": "The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; split at its first dot into the schema and the table (shop.orders is the table orders of the schema shop), a name without a dot found by the search_path. The table is not made: it must have a primary key or unique index on the key's columns. {namespace} when left out.",
           "type": "string"
         },
         "timeout": {
@@ -10321,7 +10321,7 @@
           "type": "string"
         },
         "collection": {
-          "description": "The collection a record's point goes to, which must exist: text with placeholders, {namespace} the record's namespace and {name} the row's field name; {{ is a brace.",
+          "description": "The collection a record's point goes to, which must exist: text with placeholders, {namespace} (or {$namespace}, as record templates write it) the record's namespace and {name} the row's field name; {{ is a brace.",
           "type": "string"
         },
         "key_file": {
@@ -10731,7 +10731,7 @@
         },
         "measurement": {
           "default": "{namespace}",
-          "description": "The super table a record's row goes to: text with placeholders, {namespace} the record's namespace and {name} the row's field name; {{ is a brace. {namespace} when left out.",
+          "description": "The super table a record's row goes to: text with placeholders, {namespace} (or {$namespace}, as record templates write it) the record's namespace and {name} the row's field name; {{ is a brace. {namespace} when left out.",
           "type": "string"
         },
         "mode": {

@@ -13,6 +13,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
+	nametmpl "github.com/lesismal/fit/sync/internal/tmpl"
 	pgwire "github.com/lesismal/fit/sync/postgres/wire"
 )
 
@@ -44,7 +45,7 @@ type Sink struct {
 	ServerName       string          `json:"server_name,omitempty" doc:"The name the server's certificate must have, and the TLS server name sent; address's host when left out."`
 	ChannelBinding   string          `json:"channel_binding,omitempty" enum:"prefer,require,disable" default:"\"prefer\"" doc:"SCRAM's channel binding to the TLS connection: prefer, when the server offers it; require, refusing a server that does not authenticate with it; disable. prefer when left out."`
 	Timeout          config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long connecting and writing one batch may take; a write that takes longer breaks its connection and is tried again. 60s when left out or 0."`
-	Table            string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace}, the record's namespace; split at its first dot into the schema and the table (shop.orders is the table orders of the schema shop), a name without a dot found by the search_path. The table is not made: it must have a primary key or unique index on the key's columns. {namespace} when left out."`
+	Table            string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; split at its first dot into the schema and the table (shop.orders is the table orders of the schema shop), a name without a dot found by the search_path. The table is not made: it must have a primary key or unique index on the key's columns. {namespace} when left out."`
 	KeyColumns       []string        `json:"key_columns,omitempty" doc:"The columns of the key the upserts conflict on and the deletes delete by, their values taken from the record's key, or from its row. The record's key's fields when left out, so that the key must then be a map of columns."`
 	Transactions     string          `json:"transactions,omitempty" enum:"batch,source" default:"\"batch\"" doc:"What a transaction of the sink's holds: batch, each batch written; source, each of the source's transactions, its records held across batches until its last arrives, so that a reader never sees part of one. A transaction with a record the server refuses for good is then not written at all; on_error takes the record refused, or the first of the batch for one held. batch when left out, source with checkpoint sink, which batch cannot go with."`
 	Checkpoint       string          `json:"checkpoint,omitempty" enum:"file,sink" default:"\"file\"" doc:"Where the pipeline's checkpoint is kept: file, in the pipeline's file alone, so that a crash between a commit and the file's next checkpoint writes the records after it again (to the same rows); sink, also in checkpoint_table, written in the same transaction as the records it covers and read back when the pipeline starts, in preference to the file, so that no record is written twice: exactly once, while every sink of the pipeline keeps it. Needs transactions source. file when left out."`
@@ -85,12 +86,12 @@ type tablePart struct {
 func (s *Sink) Provision(ctx *module.Context) error {
 	cfg, errs := s.connConfig(ctx)
 	s.pool.cfg = cfg
-	tmpl := s.Table
+	tmpl := nametmpl.Canonical(s.Table)
 	if tmpl == "" {
 		tmpl = "{namespace}"
 	}
 	if strings.ContainsAny(strings.ReplaceAll(tmpl, "{namespace}", ""), "{}") {
-		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s", tmpl))
+		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s (or {$namespace}'s)", s.Table))
 	}
 	for rest := tmpl; rest != ""; {
 		i := strings.Index(rest, "{namespace}")

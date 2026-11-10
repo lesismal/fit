@@ -16,7 +16,7 @@ import (
 
 func init() {
 	module.Register(module.Info{ID: fitsync.Sinks + ".nats", New: func() any { return new(Sink) },
-		Doc: "Publishes records to NATS JetStream: each a message to the subject its namespace names (or subject's template), its data what the codec makes of it (raw when none is named), with a Nats-Msg-Id made from the record's origin (a Kafka offset, a Pulsar message ID, a stream sequence, a CDC transaction and place) or, without one, its position, so that a batch written again within the stream's duplicate window (2 minutes by default) is stored once; a batch's messages are published together, max_in_flight at a time, and acknowledged by the stream before the batch is. With mode core, published to core NATS, confirmed only as far as the server reading them: at most once."})
+		Doc: "Publishes records to NATS JetStream: each a message to the subject its namespace names (or subject's template), its data what the codec makes of it (raw when none is named), with a Nats-Msg-Id made from the record's origin (a Kafka offset, a Pulsar message ID, a stream sequence, a CDC transaction and place) or, without one, its position, and the record's op, namespace and key in the Fit-Op, Fit-Namespace and Fit-Key headers (as RabbitMQ's fit-op, fit-namespace and fit-key; the key's strings and bytes as they are, anything else as plain JSON), so that a batch written again within the stream's duplicate window (2 minutes by default) is stored once; a batch's messages are published together, max_in_flight at a time, and acknowledged by the stream before the batch is. With mode core, published to core NATS, confirmed only as far as the server reading them: at most once."})
 }
 
 // The defaults of the sink's params.
@@ -96,17 +96,47 @@ func (s *Sink) subjectOf(r *fitsync.Record) string {
 	return strings.ReplaceAll(s.Subject, defaultSubject, r.Namespace)
 }
 
-// message makes r a message: its subject and data.
-func (s *Sink) message(r *fitsync.Record) (string, []byte, error) {
+// message makes r a message: its subject, headers and data. The headers
+// are Fit-Op, Fit-Namespace and, when r has a key, Fit-Key, as the
+// RabbitMQ sink writes them; a value a header line cannot hold as it is
+// (a CR or LF, or space at either end) is left out.
+func (s *Sink) message(r *fitsync.Record) (string, natswire.Header, []byte, error) {
 	subj := s.subjectOf(r)
 	if !validSubject(subj) {
-		return "", nil, fitsync.Permanent(fmt.Errorf("nats: %q is not a subject to publish to", subj))
+		return "", nil, nil, fitsync.Permanent(fmt.Errorf("nats: %q is not a subject to publish to", subj))
 	}
 	data, err := s.codec.Encode(nil, []*fitsync.Record{r})
 	if err != nil {
-		return "", nil, fitsync.Permanent(fmt.Errorf("nats: the codec: %w", err))
+		return "", nil, nil, fitsync.Permanent(fmt.Errorf("nats: the codec: %w", err))
 	}
-	return subj, bytes.TrimSuffix(data, []byte{'\n'}), nil
+	h := natswire.Header{opHeader: {r.Op.String()}}
+	if headerSafe(r.Namespace) {
+		h[namespaceHeader] = []string{r.Namespace}
+	}
+	if k, ok := keyText(r.Key); ok && headerSafe(k) {
+		h[keyHeader] = []string{k}
+	}
+	return subj, h, bytes.TrimSuffix(data, []byte{'\n'}), nil
+}
+
+// keyText is a key as the Fit-Key header has it, the same as RabbitMQ's
+// fit-key: strings and bytes as they are, anything else as plain JSON.
+func keyText(k fitsync.Value) (string, bool) {
+	switch k.Kind() {
+	case fitsync.KindNull:
+		return "", false
+	case fitsync.KindString, fitsync.KindBytes:
+		return k.Text(), true
+	}
+	var plain fitsync.JSONCodec
+	b, _ := plain.Encode(nil, []*fitsync.Record{{After: k}}) // a key's values all encode
+	return string(bytes.TrimSuffix(b, []byte{'\n'})), true
+}
+
+// headerSafe reports whether v is read back the same from a header line:
+// no line breaks, and nothing the reader trims.
+func headerSafe(v string) bool {
+	return !strings.ContainsAny(v, "\r\n") && strings.TrimSpace(v) == v
 }
 
 // Write publishes the batch, and returns once the stream has acknowledged
@@ -146,10 +176,11 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 		return nil
 	}
 	for i, r := range batch {
-		subj, data, err := s.message(r)
+		subj, h, data, err := s.message(r)
 		if err == nil {
+			h["Nats-Msg-Id"] = []string{ids[i]}
 			var pa *natswire.PendingAck
-			if pa, err = c.PublishJS(subj, natswire.Header{"Nats-Msg-Id": {ids[i]}}, data); err == nil {
+			if pa, err = c.PublishJS(subj, h, data); err == nil {
 				flight = append(flight, inFlight{i, pa})
 			} else if errors.Is(err, natswire.ErrMaxPayload) {
 				err = fitsync.Permanent(err)
@@ -182,9 +213,9 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 // PONG after it.
 func (s *Sink) writeCore(ctx context.Context, c *natswire.Client, batch []*fitsync.Record) error {
 	for i, r := range batch {
-		subj, data, err := s.message(r)
+		subj, h, data, err := s.message(r)
 		if err == nil {
-			if err = c.Publish(subj, "", nil, data); errors.Is(err, natswire.ErrMaxPayload) {
+			if err = c.Publish(subj, "", h, data); errors.Is(err, natswire.ErrMaxPayload) {
 				err = fitsync.Permanent(err)
 			}
 		}
