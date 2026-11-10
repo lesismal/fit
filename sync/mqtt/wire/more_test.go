@@ -481,3 +481,75 @@ func TestAuthFlow(t *testing.T) {
 		t.Fatal(c311.Err())
 	}
 }
+
+// TestSubscriptionIDs: a subscription's identifier rides in its SUBSCRIBE,
+// and the server puts those of the subscriptions a message matches on it;
+// a subscription subscribed to again takes its new one, or none.
+func TestSubscriptionIDs(t *testing.T) {
+	ctx := context.Background()
+	b := newFakeBroker(t, nil)
+	sub := dial(t, Config{Address: b.addr(), ClientID: "sub"})
+	if !sub.SubscriptionIDsAvailable() {
+		t.Fatal("not available")
+	}
+	for _, s := range []Subscription{{Filter: "a/+", QoS: 1, ID: 7}, {Filter: "a/#", QoS: 1, ID: MaxSubscriptionID}, {Filter: "b", QoS: 1}} {
+		if _, err := sub.Subscribe(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pub := dial(t, Config{Address: b.addr(), CleanStart: true})
+	publish := func(topic string) *Message {
+		t.Helper()
+		if err := pub.Publish(ctx, &Message{Topic: topic, QoS: 1}); err != nil {
+			t.Fatal(err)
+		}
+		m := next(t, sub)
+		sub.Ack(m)
+		return m
+	}
+	if m := publish("a/1"); !reflect.DeepEqual(m.SubscriptionIDs, []int{7, MaxSubscriptionID}) {
+		t.Fatal(m.SubscriptionIDs)
+	}
+	if m := publish("b"); m.SubscriptionIDs != nil {
+		t.Fatal(m.SubscriptionIDs)
+	}
+	// Two filters of one identifier, in one SUBSCRIBE; a/# again, without.
+	if _, err := sub.Subscribe(ctx, Subscription{Filter: "a/+", QoS: 1, ID: 8}, Subscription{Filter: "b", QoS: 1, ID: 8}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sub.Subscribe(ctx, Subscription{Filter: "a/#", QoS: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if m := publish("a/1"); !reflect.DeepEqual(m.SubscriptionIDs, []int{8}) {
+		t.Fatal(m.SubscriptionIDs)
+	}
+	if m := publish("b"); !reflect.DeepEqual(m.SubscriptionIDs, []int{8}) {
+		t.Fatal(m.SubscriptionIDs)
+	}
+	for _, subs := range [][]Subscription{{{Filter: "x", ID: 1}, {Filter: "y", ID: 2}}, {{Filter: "x", ID: -1}},
+		{{Filter: "x", ID: MaxSubscriptionID + 1}}, {{Filter: "x"}, {Filter: "y", ID: 1}}} {
+		if _, err := sub.Subscribe(ctx, subs...); err == nil || !strings.Contains(err.Error(), "identifier") {
+			t.Fatalf("%v: %v", subs, err)
+		}
+	}
+
+	// Neither 3.1.1 nor a server whose CONNACK says no takes them.
+	sub3 := dial(t, Config{Address: b.addr(), ClientID: "sub3", Version: Version311})
+	b.set(func(b *fakeBroker) { b.connack = func(w *propsWriter) { w.byte(propSubIDAvailable, 0) } })
+	no := dial(t, Config{Address: b.addr(), ClientID: "no"})
+	for _, c := range []*Client{sub3, no} {
+		if c.SubscriptionIDsAvailable() {
+			t.Fatal("available")
+		}
+		if _, err := c.Subscribe(ctx, Subscription{Filter: "x", ID: 1}); !errors.Is(err, ErrNotSupported) {
+			t.Fatal(err)
+		}
+		if _, err := c.Subscribe(ctx, Subscription{Filter: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.set(func(b *fakeBroker) { b.connack = func(w *propsWriter) { w.byte(propSubIDAvailable, 1) } })
+	if c := dial(t, Config{Address: b.addr(), ClientID: "yes"}); !c.SubscriptionIDsAvailable() {
+		t.Fatal("not available")
+	}
+}

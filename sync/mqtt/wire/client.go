@@ -2,14 +2,15 @@
 // fit's sync connectors: TLS, a user and password, keep-alive, persistent
 // sessions, QoS 0, 1 and 2 in both directions, topic filters, and MQTT 5's
 // properties (user properties, message expiry, topic aliases both ways,
-// content types, reason codes and strings), UNSUBSCRIBE, will messages,
-// and MQTT 5's enhanced authentication (AUTH, re-authentication too), with
-// SCRAM (SHA-1, SHA-256, SHA-512) as its methods. A Client is one connection,
-// on goroutines of its own: one reads the server's packets, one keeps the
-// connection alive. Messages the server sends are handed out on a bounded
-// channel, and acknowledged only when the caller says so, with Ack, in the
-// order they came. Publishes are bounded in flight. Packets are bounded in
-// size both ways. A connection lost is an error, never retried here.
+// content types, reason codes and strings, subscription identifiers),
+// UNSUBSCRIBE, will messages, and MQTT 5's enhanced authentication (AUTH,
+// re-authentication too), with SCRAM (SHA-1, SHA-256, SHA-512) as its
+// methods. A Client is one connection, on goroutines of its own: one reads
+// the server's packets, one keeps the connection alive. Messages the
+// server sends are handed out on a bounded channel, and acknowledged only
+// when the caller says so, with Ack, in the order they came. Publishes are
+// bounded in flight. Packets are bounded in size both ways. A connection
+// lost is an error, never retried here.
 package mqttwire
 
 import (
@@ -21,6 +22,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"slices"
 	"sync"
 	"time"
 )
@@ -141,7 +143,9 @@ type Message struct {
 	ResponseTopic   string
 	CorrelationData []byte
 	UserProperties  []UserProperty
-	// SubscriptionIDs are those of the subscriptions it matched.
+	// SubscriptionIDs are the identifiers of the subscriptions it matched
+	// that have one (Subscription.ID), in version 5; a subscription
+	// subscribed to again keeps its new one.
 	SubscriptionIDs []int
 
 	id uint16
@@ -159,6 +163,13 @@ type Subscription struct {
 	// RetainHandling says when the server sends the retained messages: 0
 	// at each subscribe, 1 only when the subscription is new, 2 never.
 	RetainHandling byte
+	// ID is MQTT 5's subscription identifier, 1 to MaxSubscriptionID,
+	// which the server puts on each message the subscription matches
+	// (Message.SubscriptionIDs), those it kept for the session too; none
+	// when 0. A SUBSCRIBE carries one identifier, so the subscriptions of
+	// one Subscribe share it. Version 5 only, and only when the server
+	// takes identifiers (SubscriptionIDsAvailable).
+	ID int
 }
 
 // Client is a connection to an MQTT server.
@@ -174,6 +185,7 @@ type Client struct {
 	sessionPresent bool
 	maxQoS         byte
 	retainOK       bool
+	subIDsOK       bool
 	maxOut         int // the server's most packet bytes; 0: no bound
 	aliasMax       uint16
 
@@ -510,6 +522,7 @@ func (c *Client) connack(body []byte) error {
 		if p.hasRetain {
 			c.retainOK = p.retainAvailable == 1
 		}
+		c.subIDsOK = !p.hasSubIDs || p.subIDsAvailable == 1
 		c.maxOut = int(p.maxPacket)
 		c.aliasMax = p.aliasMax
 		if p.hasKeepAlive {
@@ -522,6 +535,11 @@ func (c *Client) connack(body []byte) error {
 // SessionPresent reports whether the server resumed a session of the
 // client ID.
 func (c *Client) SessionPresent() bool { return c.sessionPresent }
+
+// SubscriptionIDsAvailable reports whether the server takes subscription
+// identifiers (Subscription.ID): in version 5, unless its CONNACK said
+// it does not (Subscription Identifier Available, 0).
+func (c *Client) SubscriptionIDsAvailable() bool { return c.subIDsOK }
 
 // Messages are what the server sends the subscriptions, in the order it
 // sent them. A message of QoS 1 or 2 is acknowledged once Ack is called;
@@ -768,6 +786,9 @@ func (c *Client) publish(flags byte, r *reader) (byte, error) {
 		p := r.props()
 		m.PayloadUTF8, m.ContentType, m.ResponseTopic = p.payloadUTF8, p.contentType, p.responseTopic
 		m.CorrelationData, m.UserProperties, m.SubscriptionIDs = p.correlation, p.user, p.subIDs
+		if slices.Contains(p.subIDs, 0) {
+			return 0x82, errors.New("mqtt: PUBLISH of subscription identifier 0")
+		}
 		if p.hasExpiry {
 			m.MessageExpiry = time.Duration(p.expiry) * time.Second
 		}
@@ -921,6 +942,7 @@ func (c *Client) Subscribe(ctx context.Context, subs ...Subscription) ([]byte, e
 	if len(subs) == 0 {
 		return nil, errors.New("mqtt: no subscriptions")
 	}
+	id := subs[0].ID
 	for _, s := range subs {
 		if err := ValidTopicFilter(s.Filter); err != nil {
 			return nil, err
@@ -928,8 +950,18 @@ func (c *Client) Subscribe(ctx context.Context, subs ...Subscription) ([]byte, e
 		if s.QoS > 2 || s.RetainHandling > 2 {
 			return nil, fmt.Errorf("mqtt: subscription %s: QoS %d or retain handling %d past 2", s.Filter, s.QoS, s.RetainHandling)
 		}
+		if s.ID != id || s.ID < 0 || s.ID > MaxSubscriptionID {
+			return nil, fmt.Errorf("mqtt: subscription %s: identifier %d is not the others' or out of 1 to %d", s.Filter, s.ID, MaxSubscriptionID)
+		}
 	}
-	res, err := c.request(ctx, typeSubscribe, len(subs), func(b []byte) []byte {
+	var props []byte
+	if id > 0 {
+		if !c.subIDsOK {
+			return nil, fmt.Errorf("mqtt: subscription identifiers: %w", ErrNotSupported)
+		}
+		props = appendVarint([]byte{propSubscriptionID}, id)
+	}
+	res, err := c.request(ctx, typeSubscribe, len(subs), props, func(b []byte) []byte {
 		for _, s := range subs {
 			o := s.QoS
 			if c.version == Version5 {
@@ -969,7 +1001,7 @@ func (c *Client) Unsubscribe(ctx context.Context, filters ...string) ([]byte, er
 			return nil, err
 		}
 	}
-	res, err := c.request(ctx, typeUnsub, len(filters), func(b []byte) []byte {
+	res, err := c.request(ctx, typeUnsub, len(filters), nil, func(b []byte) []byte {
 		for _, f := range filters {
 			b = appendString(b, f)
 		}
@@ -987,9 +1019,10 @@ func (c *Client) Unsubscribe(ctx context.Context, filters ...string) ([]byte, er
 }
 
 // request sends a SUBSCRIBE or UNSUBSCRIBE of n entries, which add
-// appends, and waits for its acknowledgement, of n codes (zeros for an
-// UNSUBACK of 3.1.1, which has none).
-func (c *Client) request(ctx context.Context, typ byte, n int, add func([]byte) []byte) (subResult, error) {
+// appends, and in version 5 the properties props, and waits for its
+// acknowledgement, of n codes (zeros for an UNSUBACK of 3.1.1, which has
+// none).
+func (c *Client) request(ctx context.Context, typ byte, n int, props []byte, add func([]byte) []byte) (subResult, error) {
 	ch := make(chan subResult, 1)
 	c.mu.Lock()
 	if c.err != nil {
@@ -1006,7 +1039,7 @@ func (c *Client) request(ctx context.Context, typ byte, n int, add func([]byte) 
 	c.mu.Unlock()
 	b := appendUint16(nil, id)
 	if c.version == Version5 {
-		b = append(b, 0)
+		b = append(appendVarint(b, len(props)), props...)
 	}
 	if err := c.write(packet(typ<<4|2, add(b))); err != nil {
 		return subResult{}, err
