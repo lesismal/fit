@@ -18,25 +18,39 @@ CSRF 令牌；页面只允许自身的文件。检查密码要花 bcrypt 的几�
 
 ### 登录页
 
-打开控制台的地址，未登录时看到的就是登录页：**用户名**、**密码**与**登录**。未登录时它是唯一绘制的
-页面：除登录外的每个 `/api/` 请求都得到 `401`（`log in first`）。它把 JSON 请求体发到
-`POST /api/login`（`{"username", "password"}`，最多 4 KiB，必须是 `application/json`，否则得到 `415`
-或 `400`），成功时得到 `{"user", "csrf"}`——需要修改临时密码时还带
-`{"must_change_password": true, "password_expires": ...}`——以及会话 cookie；页面保存用户名与令牌，此后
-除 GET 与 HEAD 外的每个请求都在 `X-Fit-Csrf` 中带上令牌。登录之后，`GET /api/workbench` 列出这台 fit
-提供的模块，菜单才画得出页面。
+打开控制台的地址，未登录时看到的就是登录页：**用户名**（预填 `admin`）、**密码**与**登录**，右上角是
+主题与语言选择。未登录时它是唯一绘制的页面：除登录与登出外的每个 `/api/` 请求都得到 `401`
+（`log in first`）。它把 JSON 请求体 `{"username", "password"}` 发到 `POST /api/login`；不是
+`application/json` 的得到 `415`，超过 4 KiB 的得到 `413`，不是该对象的得到 `400`。成功时得到
+`{"user", "csrf"}`——需要修改临时密码时还带 `{"must_change_password": true, "password_expires": ...}`——
+以及会话 cookie。页面只在内存中保存令牌，此后除 GET 与 HEAD 外的每个请求都在 `X-Fit-Csrf` 中带上它。登录
+之后，`GET /api/workbench` 应答 `{"user", "modules"}`，即此控制台提供的服务端模块，菜单才画得出页面。
 
-失败的登录显示“登录失败”：`401` 说明用户名或密码不对，`429` 说明该地址或该用户还在等待，应答带
-`{"error", "retry_after"}`，即需等待的秒数，`Retry-After` 里也是同一个值。给脚本用的也是同一个端点：
-程序自己保存 cookie，并在每个非读取的请求的 `X-Fit-Csrf` 中发送 `csrf`；`GET /api/session` 以同一个会话
-应答 `{"user", "csrf"}`，未登录时 `401`；`POST /api/logout` 结束会话（应答 `204`，并清除 cookie）。
+登录失败时，表单下方显示服务端给出的原因（没有原因时显示“登录失败”）：`401` 为
+`the user name or password is wrong`；`429` 表示该地址被锁定、该用户被减速，或该地址的另一次登录正在
+检查，应答带 `{"error", "retry_after"}`，即需等待的秒数，`Retry-After` 里也是同一个值；`503` 表示登录池
+已满。刷新页面不会丢失登录：页面请求 `GET /api/session`，它以同一个会话应答 `{"user", "csrf"}`，未登录时
+`401`。菜单底部的**退出登录**调用 `POST /api/logout`，结束会话（应答 `204`，并清除 cookie）。
+
+脚本使用同样的端点：程序自己保存 cookie，并在每个非读取的请求的 `X-Fit-Csrf` 中发送 `csrf`。Admin API 的
+端点位于 `/api/m/admin/` 下：
+
+```bash
+C=http://127.0.0.1:2020
+# 登录：cookie 存入文件 jar，应答 {"user", "csrf"} 给出令牌。
+CSRF=$(curl -s -c jar -H 'Content-Type: application/json' \
+  -d '{"username": "admin", "password": "..."}' $C/api/login | sed 's/.*"csrf":"\([^"]*\)".*/\1/')
+curl -s -b jar $C/api/m/admin/status                            # 读取只需 cookie
+curl -s -b jar -X POST -H "X-Fit-Csrf: $CSRF" $C/api/logout    # 204
+```
 
 ### 修改默认密码页
 
 以 `fit run -admin` 的默认密码登录时，会话是临时的：它只能打开**修改默认密码**这一页，其他接口一律 `403`
-及 `"must_change_password": true`，Admin API 对所有请求 `403`。这一页外观同登录页，有当前（默认）密码、
-**新密码**与**确认新密码**三个输入框（最多 72 字节，即 bcrypt 的限制），以及默认密码失效前的剩余时间倒
-计时；**修改密码并继续**提交。新密码不能与当前密码相同。改过之后工作台才开始可用。超过 `-timeout` 后该
+及 `"must_change_password": true`，Admin API 对所有请求 `403`。这一页外观同登录页：一条说明密码是临时的提示、默认密码失效前的剩余时间倒计时及失效时刻；
+**当前（默认）密码**、**新密码**（最多 72 字节，即 bcrypt 的限制）与**确认新密码**三个输入框；调用
+`POST /api/m/admin/account/password` 的**修改密码并继续**；以及**退出登录**。新密码不能为空，也不能与当前
+密码相同。改过之后，同一个会话直接进入工作台，Admin API 也恢复服务。超过 `-timeout` 后该
 密码无法再登录（`401`，`"password_expired": true`），页面用只有以 `-admin` 重启才有用的提示替换表单，这时
 只能以 `-admin` 重启 fit 再及时修改。
 
@@ -67,11 +81,12 @@ SHA-256，并在下列情况下结束它：`session_timeout` 内没有请求；�
 
 ### CSRF、Origin 与响应头
 
-除读取外的每个请求都要在 `X-Fit-Csrf` 中携带会话的 CSRF 令牌，否则 `403`；`Origin` 不是控制台自身的请求
-也返回 `403`。页面带有只允许自身文件的 Content-Security-Policy（`script-src`、`style-src` 与
-`connect-src` 为 `'self'`，`frame-ancestors 'none'`），以及 `X-Frame-Options: DENY`、
-`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`，TLS 下还有
-`Strict-Transport-Security`；API 的响应带 `Cache-Control: no-store`。策略会把提供 `vod` 与 `hls` 路由的
+除读取（GET 或 HEAD）、登录与登出外，每个请求都要在 `X-Fit-Csrf` 中携带会话的 CSRF 令牌，否则 `403`；
+`Origin` 不是控制台自身的请求也返回 `403`。页面带有只允许自身文件的 Content-Security-Policy
+（`default-src 'none'`；`script-src`、`style-src` 与 `connect-src` 为 `'self'`，`img-src` 另加 `data:`，
+`frame-ancestors 'none'`），以及 `X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、
+`X-Content-Type-Options: nosniff`，TLS 下还有 `Strict-Transport-Security`；页面文件带
+`Cache-Control: no-cache`，API 的响应带 `Cache-Control: no-store`。策略会把提供 `vod` 与 `hls` 路由的
 监听的来源加进 `img-src` 与 `connect-src`，并加上 `media-src`，使媒体预览可以从它们播放。
 
 ### admin 日志
@@ -87,7 +102,8 @@ SHA-256，并在下列情况下结束它：`session_timeout` 内没有请求；�
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `address` | `127.0.0.1:2020` | 控制台监听的主机和端口。非环回地址需要 `cert_file` 与 `key_file`。 |
-| `cert_file`、`key_file` | | 控制台的证书与私钥的 PEM 文件；设置后以 TLS 1.2 或更高版本提供服务，两者同时设置或都不设置。 |
+| `cert_file`、`key_file` | | 控制台的证书（及中间证书）与私钥的 PEM 文件；设置后以 TLS 1.2 或更高版本提供服务，两者同时设置或都不设置。 |
+| `mptcp` | `false` | 内核支持时（Linux 5.6+、`net.mptcp.enabled`）以多路径 TCP 监听，不支持时用普通 TCP。 |
 | `users` | | 必填。可以登录的用户：至少一个，每个有 `username` 和 `password_hash`。 |
 | `session_timeout` | `30m` | 没有请求时登录保持多久。 |
 | `session_lifetime` | `12h` | 无论多活跃，登录最长保持多久。 |
@@ -96,13 +112,14 @@ SHA-256，并在下列情况下结束它：`session_timeout` 内没有请求；�
 | `access` | | 控制台服务的客户端地址，先于全局 `access` 决定，随每次应用的配置生效，无需重启。 |
 
 登录之外，控制台还有几项固定的上限：请求头 16 KiB、10s 内读完；请求体 `admin.max_config_bytes` 加
-64 KiB、30s 内读完；写响应 30s；连接打开 5s 后就关闭，不论它发了什么，直到它发出带有效会话的请求（登录
-成功也算），之后空闲保持 2m；同时进行的密码检查 2 次；Admin API 调用与角色方法 4 个运行、64 个等待，
-每个最多等待 30s，超出时 `503`。见[上限与超时](../console.zh-CN.md#上限与超时)。
+64 KiB（默认 4 MiB 加 64 KiB）、30s 内读完；写响应 30s；连接的超时见[会话](#会话)；同时进行的密码检查
+2 次；Admin API 调用与角色方法 4 个运行、64 个等待：超出时得到 `503`（`the console is busy; try again`），
+等待 30s 仍未开始的得到 `504`。见[上限与超时](../console.zh-CN.md#上限与超时)。
 
 ## .conf 配置
 
-引导文件中的登录部分，加一个最小的监听和路由：
+引导文件中的登录部分，加一个最小的监听和路由。哈希只是示例：请写入 `fit hash-password` 输出的哈希。
+`access` 使本机访问不受全局 `access` 影响。
 
 ```fit
 # 引导文件：admin 只在 fit 启动时读取，改它要重启。
@@ -121,13 +138,17 @@ admin {
 		}
 		users {
 			username ops
-			password_hash "$2a$10$R3sQ0a3nB0eS0dC1kZmV2uLqXlN5pT7yH8gD6fC.bA1iJ2kL3mN4o"
+			password_hash "$2a$10$uc5watArbG960eK0AjkCXeRYYMiIjKNf9bGmnov2O6JbDgF15Azqm"
 		}
 
 		session_timeout 30m
 		session_lifetime 12h
 		max_sessions 64
 		max_conns 32
+
+		access {
+			allow 127.0.0.1 ::1
+		}
 	}
 }
 

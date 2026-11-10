@@ -1,4 +1,4 @@
-# fit Web Console Tutorial (Outline)
+# fit Web Console Tutorial
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -10,7 +10,20 @@ parameters**, and how to write the corresponding **.conf configuration**.
 Readers should already know [what fit is](../../README.md), the
 [.conf format](../reference/fit.md), and [how the config loads](../configuration.md). The
 tutorial does not repeat full field tables; it links to the
-[config reference](../reference/config.zh-CN.md) (generated from code, in sync with the binary).
+[config reference](../reference/config.md) (generated from code, in sync with the binary).
+
+## Where to start
+
+- **First time**: read 01 → 02 → 03 in order; they take you from an installed binary to a
+  logged-in console and explain the menu every other chapter refers to.
+- **Serve a site or an API**: 05 Listeners → 15 Reverse proxy → 18 TLS, then 19 Cache if needed.
+- **Run it day to day**: 04 Overview, 09 Versions, 10 Consistency check, 11 Logs.
+- **Many fit nodes**: 12 Cluster; 24 and 25 for the tunnel and LLM roles.
+- **Media**: 20 Streaming → 21 Media auth → 22 Media library, and 23 WebRTC.
+- **Data and files**: 26 Sync, 27 BitTorrent.
+
+Every chapter after 03 stands on its own: it names the page in the menu, what you can do there,
+the key parameters, and a complete `.conf` you can load with `fit validate -c <file>`.
 
 ## Structure
 
@@ -101,7 +114,7 @@ The pages, the config members each chapter edits, and the main sources:
 - Each page edits one top-level member: `log` (per-logger level, output, format, `time_zone`, `rotate`), `access_log`, `telemetry` (OTLP), `metrics`, `pprof` (toggled at once, served by the Admin API at `/debug/pprof/`), `limits` (connections, headers, request bodies, the write queue), `engine` (event loops, workers, queues, buffers, backlog), `providers` (Docker, Consul, etcd, Kubernetes).
 - The "Other" page: the members that have no page of their own yet — `access` (the global allow and deny lists), `media_library` and `schema_version`; `sync` and `bittorrent` are edited on their own modules' pages.
 - The "Import / Export" page: the whole config, in `.conf`, `.yaml`, `.json` and `.store`.
-- Sources: `templates/conf/conf.d/00-runtime.conf`, `30-observability.conf`, `50-providers.conf`, the chapters of [the config reference](../reference/config.zh-CN.md), [the console and the store](../console.md#importing-and-exporting-the-config).
+- Sources: `templates/conf/conf.d/00-runtime.conf`, `30-observability.conf`, `50-providers.conf`, the chapters of [the config reference](../reference/config.md), [the console and the store](../console.md#importing-and-exporting-the-config).
 
 ### 08 JSON
 
@@ -141,7 +154,7 @@ The pages, the config members each chapter edits, and the main sources:
 ### 14 Assistant
 
 - `admin.assistant`: the providers (Anthropic, OpenAI, Gemini, Azure OpenAI, Ollama, OpenAI-compatible, `llm.proxy`), the keys (write-only), the default model, the limits.
-- The user levels: `off`, `read`, `edit`, `propose`, `apply`; the chat panel (the current page as context); the proposals (review and apply); the skills (22 built-in plus custom); the MCP server (`/mcp` and its tokens); the audit log; the Sync and BitTorrent tool groups, and the setting that sends their records as they are.
+- The user levels: `off`, `read`, `edit`, `propose`, `apply`; the chat panel (the current page as context); the proposals (review and apply); the skills (22 built-in, 19 on a fit that manages no cluster, plus custom); the MCP server (`/mcp` and its tokens); the audit log; the Sync and BitTorrent tool groups, and the setting that sends their records as they are.
 - Sources: [the console and the store](../console.md#the-assistant), `app/workbench/web/ai/`.
 
 ### 15 Reverse proxy
@@ -153,7 +166,7 @@ The pages, the config members each chapter edits, and the main sources:
 
 ### 16 Forward proxy
 
-- The `forward_proxy` routes: HTTP CONNECT and plain HTTP proxying for the listed `clients`, optionally limited to `ports`; loopback, link-local, unspecified, multicast and the machine's own addresses are refused by default.
+- The `forward_proxy` routes: HTTP CONNECT proxying (other methods are answered 405) for the listed `clients`, optionally limited to `ports`; loopback, link-local, unspecified, multicast and the machine's own addresses are refused by default.
 - The `socks` protocol of a listener serves SOCKS5.
 - Sources: [the config reference: Handlers](../reference/config.md#http-handlers-forward_proxy), [the config reference: Listeners](../reference/config.md#listeners).
 

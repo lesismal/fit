@@ -21,7 +21,8 @@
 ### 配置版本
 
 页面顶部的一行说明：已应用的配置，最新的在前，保留数量由 fit 决定；回滚即把旧版本重新应用为新版本。接口按最老
-的在前返回，页面把它倒过来显示。下面是一张表，每行一个版本：
+的在前返回，页面把它倒过来显示。下面是一张表，每行一个版本，行末有**查看**与**回滚**（运行中的那一行没有
+**回滚**）：
 
 | 列 | 显示什么 |
 | --- | --- |
@@ -30,6 +31,7 @@
 | 来源 | 这份配置从哪来：`file`、`store`、`admin`、`console`、`rollback`、`certificates`、`cluster`，或某个 provider 的名字（下面逐个说明） |
 | 大小 | 配置写出的字节数 |
 | ETag | 它的强实体标签：配置内容的哈希，`If-Match` 比较的就是它 |
+| | **查看**；除运行中的那一行外还有**回滚** |
 
 例如：
 
@@ -40,15 +42,16 @@
 | 10 | 2026-11-08 11:20:44（2 小时前） | `rollback` | 1.0 KiB | `"7a1d4e8b2c3059f6a4d8e1b7"` |
 
 **刷新** 重新读取这张表；表在打开这一页时读一次。这一页不编辑任何成员，所以没有格式标签页，但仍有共用的保存
-栏：回滚带 `If-Match` 发送，比较的是运行中配置的 ETag。失败的应用不留下版本：只有走通的应用才被记下，失败的
-次数在[概览](04-overview.zh-CN.md)页的突增里能看到。Admin API 的仪表盘也显示这些版本（`admin.disable_dashboard`
+栏：回滚带 `If-Match` 发送，比较的是运行中配置的 ETag。失败的应用不留下版本：只有走通的应用才被记下；失败的
+次数记在[概览](04-overview.zh-CN.md)页的**重载**卡片上（"N 次失败"），每次新的失败也会作为突增提示出来。Admin API 的仪表盘也显示这些版本（`admin.disable_dashboard`
 关掉仪表盘时就不显示了）。
 
 **查看** 打开一个窗口，标题是"版本 N"，显示那个版本的文本：能解析成 JSON 就格式化后显示，否则按写出的样子
 显示。窗口里有**复制**、**回滚**（只有不是运行中的版本才有）和**关闭**。文本是那份配置本身——基础配置，不含
 provider 提供的内容；要看合并后的，去 [JSON](08-json.zh-CN.md) 页的生效配置标签。
 
-这一页与[概览](04-overview.zh-CN.md)页的关系是：概览只显示运行中的版本与它的来源，这一页列出全部保留的版本。
+这一页与[概览](04-overview.zh-CN.md)页的关系是：概览的**最近版本**卡片显示最新的五个（版本、应用时间、来源），
+并有**全部版本**链接到这一页；这一页列出全部保留的版本。
 
 **回滚** 要确认两次：草稿里有未保存的修改时先问"回滚会放弃尚未保存的修改。继续？"，再问"将版本 N 重新应用为
 一个新版本？"。确认后走与保存相同的路径：先校验，再应用为一个新版本并写入 store，成功后提示"版本 N 已重新应用
@@ -64,7 +67,7 @@ provider 提供的内容；要看合并后的，去 [JSON](08-json.zh-CN.md) 页
 | --- | --- |
 | `GET /versions` | 保留的版本，最老的在前，加运行中的版本号 |
 | `GET /versions/{n}` | 版本 n 的文本 |
-| `POST /rollback/{n}` | 把版本 n 再应用一次，带 `If-Match` |
+| `POST /rollback/{n}` | 把版本 n 再应用一次；页面带 `If-Match` 发送，已不再保留的版本答 404 |
 
 ## 参数
 
@@ -86,19 +89,19 @@ provider 提供的内容；要看合并后的，去 [JSON](08-json.zh-CN.md) 页
 | `applied` | 应用的时刻 |
 | `source` | 从哪来：`file`、`store`、`admin`、`console`、`rollback`、`certificates`、`cluster` 或某个 provider 的名字 |
 | `bytes` | 配置写出的字节数 |
-| `etag` | 内容的哈希（前 12 字节，十六进制，带引号），作为强实体标签 |
+| `etag` | 内容的哈希（SHA-256 的前 12 字节，即 24 位十六进制，带引号），作为强实体标签 |
 
 来源的名字就是配置进入系统的那些路径：
 
 | 来源 | 谁应用的 |
 | --- | --- |
-| `file` | 配置文件：启动时、它被重新加载时（`SIGHUP`），或使用 `-watch` 时 |
+| `file` | 配置文件：启动时、它被重新加载时（`SIGHUP`），或使用 `fit run -watch` 时 |
 | `store` | 配置所在的 store：启动时，或 `SIGHUP` 时重新读取 |
-| `admin` | 经 Admin API 的修改 |
-| `console` | 控制台页面上的保存 |
+| `admin` | 经 Admin API 的修改（`PUT /config`、`POST /reload` 等） |
+| `console` | 控制台页面上的保存、重新加载或一致性修复，以及管理端经成员控制台做的修改 |
 | `rollback` | 这一页上的回滚 |
-| `certificates` | 它加载的某个证书文件变了，于是运行中的配置被重新应用 |
-| `cluster` | 管理端经连接应用到本成员的一份配置 |
+| `certificates` | 它加载的某个证书文件变了，于是运行中的配置被重新应用（`fit run -watch-certs`，默认开启） |
+| `cluster` | 管理端经连接（`admin.cluster_member`）应用到本成员的一份配置；管理端经 HTTP 访问成员时，来源是 `console` 或 `admin` |
 | provider 的名字 | 该 provider 提供的内容变了 |
 
 ## 版本与 store
@@ -116,8 +119,12 @@ store 里只有一份配置：当前那份。每次应用都会把它写进 stor
 `If-Match` 比较的是运行中配置的 ETag，不匹配（`412`）时什么都不应用。
 
 成功后：一个新的版本、写入 store、`admin` 日志记下这次应用。回滚只把那份基础配置再应用一次，不改 provider
-提供的部分；它也不会重启只在启动时读取的设置——`engine`、`telemetry`、`providers` 与 `admin` 要到下次重启才
-按新的值跑，这类差异在[一致性检查](10-consistency-check.zh-CN.md)页上能看到。
+提供的部分；它也不会重启只在启动时读取的设置——`engine`、`telemetry`、`acme`、`providers`、`log` 与 `access_log` 的
+输出和格式，以及 `admin`，要到下次重启才按新的值跑，这类差异在[一致性检查](10-consistency-check.zh-CN.md)页上
+能看到。
+
+在集群设置了角色的管理端上（[集群](12-cluster.zh-CN.md#用户与审计)），只有集群范围的管理员才能回滚管理端自己的
+配置；其他用户会被告知页面只读。
 
 ## 常见情形
 
@@ -136,11 +143,19 @@ store 里只有一份配置：当前那份。每次应用都会把它写进 stor
 - **对比两个版本**：这一页没有并排比较；用**查看**复制一份文本，再与另一份比。
 - **回滚不改 `admin`**：`admin` 来自引导文件，每次加载时被放进配置；用户、密码与 store 的设置不在版本里，所以
   回滚不会动它们。
-- **脚本里读版本**：终端里没有读版本的命令，要读它用 Admin API：
-  `curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2019/versions`；回滚是
-  `POST /rollback/{n}`，带 `If-Match`。
-- **管理端**：`admin.cluster` 的回滚是对每个成员调用它的 `POST /rollback/{n}`，所以管理端上看到的版本是那个
-  成员自己的版本。
+- **脚本里读版本**：终端里没有读版本的命令，要读它用 Admin API（地址默认 `127.0.0.1:2019`，以
+  `admin.address` 为准；设置了 `admin.token_file` 才需要令牌）：
+
+  ```sh
+  curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2019/versions      # 版本清单与 "current"
+  curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2019/versions/11   # 版本 11 的文本
+  curl -X POST -H "Authorization: Bearer $TOKEN" -H 'If-Match: "9f2c1a7b3e0d4c65a1b8e2f0"' \
+    http://127.0.0.1:2019/rollback/11                                         # 回滚到它
+  ```
+
+  在 API 上 `If-Match` 是可选的：不带它，无论期间改过什么，回滚都会被应用。
+- **管理端**：`admin.cluster` 的回滚（分组的**回滚**操作，或发布的回滚）是对每个成员调用它的
+  `POST /rollback/{n}`，所以管理端用的版本是那个成员自己的版本；经节点切换器打开成员自己的版本页即可看到。
 
 ## .conf 配置
 

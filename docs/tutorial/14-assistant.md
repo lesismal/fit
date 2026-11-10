@@ -19,7 +19,7 @@ The assistant is made of its **providers** (`anthropic`, `openai`, `openai_respo
 [LLM roles](25-llm.md)), with a default model, each provider with its own timeouts and retries. Its
 **keys** are write only: a page shows only whether a provider has a key, where it comes from (the store or
 an environment variable) and its last four characters; an `api_key_env` variable is read at every call, and
-a key kept in the store comes first.
+a key kept in the store comes first. A key is sent only over https, or to a loopback host.
 
 The assistant only reads: its tools read what this fit runs, on the console's pool, through the Admin API
 in process, and every result is redacted and cut. It never changes anything itself — the propose tools only
@@ -27,7 +27,18 @@ add steps to a proposal, which a user whose level is `apply` applies on the **Pr
 
 Every console user has a **level**: `off` (no panel), `read` (the read tools), `edit` (also drafts on the
 open page, never submitted), `propose` (also proposals) and `apply` (also applies them), each level
-including the ones before it.
+including the ones before it. A level bounds what the assistant does for a user, not the user: every console
+user is an administrator, who can change the config on the pages and save the Settings page, levels included.
+
+## First steps
+
+1. Add `admin.assistant` with at least one provider to the bootstrap file (see [In .conf](#in-conf)) and
+   restart fit; with `admin.store`, the settings can be edited on the console from then on.
+2. On **Assistant → Settings**, edit the provider, type its key (or name an `api_key_env` variable), press
+   **Test**, and **Read the provider's list** to add its models.
+3. Pick the default model, set each user's level (or `default_level`), and press **Save settings**.
+4. Open the panel from the top bar of any page and ask; with `propose`, review what it proposes on
+   **Proposals**.
 
 ## Pages
 
@@ -45,9 +56,12 @@ added are in [Tools by group](#tools-by-group) below.
 
 ### Skills
 
-Every skill: the 22 built-in ones (the last of them `fleet-health`, `rollout-planner`, `cluster-drift` and
-`sync-pipeline`) and those users added. Each shows its title and what it is for in the workbench's language,
-the tools it names (those this user may not call muted) and whether it is enabled. Only a user whose level is
+Every skill: the 22 built-in ones and those users added. The cluster's three (`fleet-health`,
+`rollout-planner` and `cluster-drift`) are offered only on a manager, so a fit that manages no other lists 19;
+the last of them is the sync role's `sync-pipeline`. Each shows its title and what it is for in the workbench's language,
+the tools it names (those this user may not call marked, with why) and whether it is enabled. **View** shows a
+skill whole, **Export** saves its `.md`, **Try** runs one of its examples, and **Use in chat** picks it in the
+panel. Only a user whose level is
 `apply` adds (from the template or by importing `.md` files), edits and deletes the skills users added, and
 enables or disables any skill; the built-in ones cannot be changed or deleted, but can be exported, added under
 a new name as your own, and then the built-in one disabled. Every user reads them and runs one in the panel with
@@ -71,24 +85,28 @@ and confirmed again. **Discard** drops the proposal; the config does not change.
 
 What the assistant did for each user, the latest first: the tools an answer called (arguments redacted and
 cut), each proposal applied, refused, offered again or discarded, and the media library files each user
-changed on the workbench's pages, with the conversation, the skill and how it ended. Filter by user, kind
+changed on the workbench's pages, and every call an MCP token made, with the conversation, the skill and how it ended. Filter by user, kind
 and conversation, a page at a time; kept in the store within `limits.max_audit_entries` (1000), or until fit
 restarts without one.
 
 ### MCP
 
 The MCP server at `/mcp` on the console's address: whether it is on, its settings
-(`admin.assistant.mcp`, saved with the assistant's settings), how to connect a client (the Claude Code
-command and the JSON config), and the user's **tokens**: name, level (`propose` at most), days and the
-optional source addresses. A token is shown once — fit keeps only its hash — and is revoked on the same
-page. A user whose level is `apply` sees and revokes everyone's tokens. Outside agents call the tools the
+(`admin.assistant.mcp`: **Serve MCP at /mcp**, the allowed addresses — loopback only when empty — and the
+bounds per token, saved with **Save settings** together with the assistant's settings, so a store is needed),
+how to connect a client (the Claude Code command and the JSON config, with the console's own address), and the
+user's **tokens**. **Make a token** takes a name, a level (`read`, or `propose` for a user whose level is
+`propose` or `apply`), the days it lasts (at most `max_token_days`, 90) and, optionally, the addresses it may be
+used from. A token is shown once — fit keeps only its hash — and is revoked on the same page; without a store
+tokens last until fit restarts. A user whose level is `apply` sees and revokes everyone's tokens. Outside agents call the tools the
 panel calls, read the config, the schema, the versions and the reference as resources, and use the enabled
 skills as prompts; `ask_user` and the page tools are not served. A token's proposals wait on the
 **Proposals** page and are applied only there.
 
 ### Settings
 
-**Providers**: name, kind, base URL, API version (`azure_openai`), key (write only) and models; every provider
+**Providers**: name, kind, base URL (the vendor's when empty), API version (`azure_openai`), key (write
+only, or **Key from an environment variable**), headers (one `Name: value` a line) and models; every provider
 has its own **Timeouts and retries** (`connect_timeout`, `first_byte_timeout`, `idle_timeout`, `timeout` and
 `retries`). **Test** calls a provider as the editor has it, saved or not: first its model list, then a short
 call to one model, each with its time; **Read the provider's list** adds the models it lists. Below are
@@ -102,7 +120,8 @@ subjects, the records of sync dry runs and dead letters, and more to redact) and
 
 Every page's top bar has the assistant button (none for a user whose level is `off`), and the panel opens
 beside the page. A message goes with **the current page as context** (its module, page and title, the
-selection the page declares, and the text selected on it) to the default model; the answer streams back, the
+selection the page declares, and the text selected on it; untick **Send this page as context** to leave it
+out) to the default model; the answer streams back, the
 Markdown drawn as it comes, each tool call a folded row with its arguments and its result, and an `ask_user`
 question a row of buttons whose choice is the call's result. **Stop** ends the answer and keeps what was
 made; **Retry** answers the last message again; the panel's head picks, starts or deletes conversations. A
@@ -170,13 +189,13 @@ Only the key parameters; the full table is in [the config reference: Admin API](
 | field | default | description |
 | --- | --- | --- |
 | `providers` | none | the model APIs the assistant may call, each by name; their keys are not written here |
-| `default_model` | the first model of the first provider | the provider and model the chat uses |
+| `default_model` | the first model of the first provider that lists one | the provider and model the chat uses |
 | `params` | the defaults | `max_output_tokens` (4096), `temperature` and `thinking` (`off`) |
 | `limits` | the defaults | see the table below |
 | `data` | the defaults | `send_logs`, `send_access_log`, `send_subjects` and `send_records` (all off by default), and `redact` |
 | `users` | none | what each console user may have the assistant do |
 | `default_level` | `read` | the level of the users not listed |
-| `mcp` | off | the MCP server at `/mcp` on the console's address |
+| `mcp` | off | the MCP server at `/mcp` on the console's address, on once set (even empty): `allow` (loopback), `max_tokens_per_user` (10), `max_token_days` (90), `max_calls_per_minute` (120), `max_concurrent_calls` (4), `max_request_bytes` (1 MiB), `max_sessions` (4), `session_idle_timeout` (`1h`) |
 
 ### `limits`
 
@@ -200,6 +219,7 @@ Only the key parameters; the full table is in [the config reference: Admin API](
 | `base_url` | the vendor's | required for `openai_compatible` and `azure_openai`; not for `llm_proxy` |
 | `api_version` | none | the api-version of an `azure_openai` provider's calls, as `2024-10-21`; needed for it, and for no other kind |
 | `api_key_env` | none | an environment variable holding the key, read at every call; a key in the store comes first |
+| `headers` | none | headers sent with every call (at most 16), as an organization's; not the key's headers, `Host` or the body's framing |
 | `connect_timeout` | `10s` | how long a connect, TLS included, may take |
 | `first_byte_timeout` | `2m` | how long a call may wait for its answer to begin |
 | `idle_timeout` | `1m` | how long a streamed answer may go silent |
@@ -226,6 +246,7 @@ admin {
 		providers {
 			name claude
 			kind anthropic
+			api_key_env ANTHROPIC_API_KEY
 			models claude-sonnet-5-5 {
 				context 200000
 			}

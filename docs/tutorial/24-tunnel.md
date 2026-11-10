@@ -30,7 +30,9 @@ and the pages warn while a peer still uses it.
 ## Pages
 
 A role's pages appear in the menu once the role runs: set its member on the **Tunnel roles** page, and the
-module shows under the Tunnel group when the config is applied. What these pages change is written back
+module shows under the Tunnel group when the config is applied. They show in the `admin.console` workbench
+with no more setting; a role's own `console` serves the same pages alone, at an address and with users of its
+own, for a machine without `admin.console`. What these pages change is written back
 into the role's member and applies at once, without a restart, and is kept encrypted when fit keeps its
 config in `admin.store`; without a store a change holds only until fit restarts or reads the config file
 again, and the pages say so. The pages that show status refresh every 3 s; the settings forms load once and
@@ -83,16 +85,19 @@ TCP and WS carry the links in the clear: off a loopback address they need the bo
 
 #### Tokens
 
-The tokens this hub issued: create one (shown once, to copy, for a node's or proxy's `token`), list them
-with their expiry, the last use since fit started and its address, their members and the links using them
-now, change a token's expiry, and revoke one (which closes its links at once). A warning shows while a
-member still registers with the shared password.
+The tokens this hub issued. **Issue token** takes a name, a note and a lifetime (`720h`, `30d`) or an expiry
+time, none for never; the token is shown once, to copy into a node's or proxy's `token`. The table lists each
+token's name, ID, expiry, the last use since fit started and its address, its bound members and the links using
+it now; **Expiry** changes the expiry, and **Revoke** closes its links at once and frees its members. A member is
+bound to the first token it links with, and no other token may link as it. A warning shows while a member still
+registers with the shared password.
 
 #### Settings
 
 **Passwords and console socket**: the shared registration password (deprecated, with **Remove the shared
-password**: only tokens register), the body AES password (removable), and the console socket's password and
-address (which defaults to the registration password). A password already set never comes back: leaving it
+password**: only tokens register), the body AES password (removable), the console socket's password (the
+registration password when left out) and its address (empty for none, as `:7002`); **Save settings** applies
+them. A password already set never comes back: leaving it
 blank keeps it. Registered peers stay linked; a new body password applies to the links opened from now on.
 **Hub certificate**: the fingerprint (SHA-256), with copy — nodes and proxies pin this fingerprint as their
 hub's certificate pin; it is made, and written into the config, when a TLS, WSS or QUIC listener is added.
@@ -139,15 +144,16 @@ version, tunnels and the info it tells the hubs; the **Forwards** table lists ea
 
 A card per hub: its endpoints, its state and the protocols its links took, its latency, the hub's name, its
 Peer ID, its pool, its nodes, its tunnels and its body encryption, and its **Console** — the local address
-its web proxy serves, the URL it goes through, its connections and **Open**. A web proxy that is no hub's
-gets a card of its own.
+its web proxy serves, the URL it goes through, its connections and **Open**. A card's buttons are **Query
+nodes** (ask the hub for its nodes again), **Edit** and **Remove**; **Add hub** in the top bar opens the same
+editor as the node's. A web proxy that is no hub's gets a card of its own.
 
 #### Nodes and services
 
 One row per node on each hub: the hub, the node, the latency to it through that hub, the share of that
 node's tunnels this hub takes, and its services (name → address, description and connect time), each with a
-**Forward…** button that fills in the form, and **Edit services** — only when both the hub's
-`allow_proxy_services` and the node's `allow_hub_services` allow it.
+**Forward…** button that fills in the form, and **Edit services**, which the hub and the node take only when
+both the hub's `allow_proxy_services` and the node's `allow_hub_services` allow it.
 
 #### Forwards
 
@@ -185,7 +191,7 @@ The key parameters; the full tables are in [the config reference](../reference/c
 | `max_links`, `max_links_per_peer`, `max_peers`, `max_tunnels` | 1024, 128, 1024, 16384 | The resources the hub bounds |
 | `max_unregistered`, `max_unregistered_per_ip` | 256, 32 | The links open that have not registered yet, in total and from one IP address |
 | `allow_proxy_services` | false | Lets registered proxies set nodes' services through the hub; the node still needs its own `allow_hub_services` |
-| `console` | none | The hub's pages |
+| `console` | none | A console of the hub's own: its pages alone, at their own `address` with their own `users`; not needed where `admin.console` runs |
 
 ### tunnel.node
 
@@ -197,7 +203,7 @@ The key parameters; the full tables are in [the config reference](../reference/c
 | `services` | none | `{name, address, description}`: the services the node reaches, and the only addresses it opens tunnels to |
 | `allow_hub_services` | false | Lets its hubs set `services` and write them into this member |
 | `dial_timeout`, `idle_timeout`, `max_tunnels` | 5s, 2h, 4096 | The time a connect to a service may take, the idle time past which a tunnel is closed, and the tunnels open at once |
-| `console` | none | The node's pages |
+| `console` | none | A console of the node's own, as the hub's |
 
 ### tunnel.proxy
 
@@ -208,7 +214,7 @@ The key parameters; the full tables are in [the config reference](../reference/c
 | `web_proxies` | none | `{name, listen, url, password, max_conns}`: serves a hub's console pages locally through its `console_socket` |
 | `access` | by the global `access` | The client addresses the proxy's forwards and web proxies take |
 | `open_timeout`, `idle_timeout`, `max_tunnels` | 20s, 2h, 4096 | The time opening a tunnel may take, the idle time past which a tunnel is closed, and the tunnels open at once |
-| `console` | none | The proxy's pages |
+| `console` | none | A console of the proxy's own, as the hub's |
 
 ### A hub a node or proxy links to (`hubs[]`)
 
@@ -250,10 +256,27 @@ tunnel {
 
 Do not write `tokens` or `pin` by hand: the hub's **Tokens** page issues each token (shown once) and the
 hub's **Settings** page shows its certificate fingerprint; put both into the node's `token` and `pin`. A
-config with only the roles and no routes needs no listener. The proxy's form is in
-[the config reference](../reference/config.md#config-tunnelproxy): its
-`forwards { listen 127.0.0.1:2222; node lab; service ssh }` makes `ssh -p 2222 127.0.0.1` reach
-10.0.0.5:22.
+config with only the roles and no routes needs no listener.
+
+A proxy on a laptop, with a token of its own from the same hub, and one forward:
+
+```fit
+tunnel {
+	proxy {
+		name laptop
+		hubs hub {
+			endpoints { address wss://hub.example.com:7443/tunnel }
+			token fitt1.3b7a0c9e1d2f4a56.q8Xc2Lr0VwN5bTz7Ka1MdYp4Hs9GfJu3EoWi6RnBtQk
+			pin 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
+		}
+		forwards { listen 127.0.0.1:2222; node lab; service ssh }
+	}
+}
+```
+
+`ssh -p 2222 127.0.0.1` then reaches 10.0.0.5:22 through the hub. A forward on a host that is not a loopback one
+serves the LAN too; the proxy's `access` limits who may use it. The full fields are in
+[the config reference](../reference/config.md#config-tunnelproxy).
 
 ## See also
 

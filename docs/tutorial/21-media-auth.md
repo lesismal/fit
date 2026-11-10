@@ -6,9 +6,11 @@
 
 `media_auth` is a set of named policies in the config that say who may publish and play which streams. The
 handlers and roles that take media refer to one by name with their `auth`: `whip`, `whep`, `webrtc_proxy`,
-`hls`, `httpflv`, `vod`, `media_pages`, `media_tokens`, and every listener of
-[Streaming](20-streaming.md). A policy is checked by the stream's path: publishing needs `publish`, playing
-needs `play`. A handler without `auth` lets everyone in, as the route's own middleware allow.
+`stream_whip`, `stream_whep`, `hls`, `httpflv`, `vod`, `media_pages`, `media_tokens`, `bt_stream`, the `rtmp`,
+`rtsp` and `srt` listeners of [Streaming](20-streaming.md), and the [BitTorrent](27-bittorrent.md) tracker,
+which takes the policy's tokens and its users' passkeys. A policy is checked by the stream's path: publishing
+needs `publish`, playing needs `play`. A handler without `auth` lets everyone in, as the route's own
+middleware allow.
 
 A policy has three kinds of credentials: static `tokens` (written as plaintext `token`, or as its
 `token_sha256`, so that the config does not hold the token itself); `users`, each with a plaintext `password`
@@ -32,14 +34,15 @@ mediaauth's own small pool and remembered once found right.
 
 ## Pages
 
-### Media auth
+### Media auth (`#/gw.mediaauth/media_auth`)
 
 The Media auth module in the menu has one page, which edits the `media_auth` member of the config: the
 policies with their `tokens`, `users`, `keys`, `public`, `token_ttl` and `url_signing`. The page has the UI,
 `.conf`, `.yaml` and `.json` tabs, and edits the part of the shared draft that belongs to it; **Save and
 apply** in the top bar saves the whole draft, **Check** takes the changes through the whole apply path without
 applying them, and **Discard** drops the draft. A problem of a save links back to this page, whichever page
-the save came from — for instance a route whose `auth` names a policy the config does not hold.
+the save came from — for instance a route whose `auth` names a policy the config does not hold — except one
+in a policy's `url_signing`, which links to the Media library's **URL signing** page.
 
 What can be done on the page:
 
@@ -47,17 +50,19 @@ What can be done on the page:
   by), its signing key (`secret`, `secret_file` or `keys`), and its `public` actions.
 - Write `tokens`: a static token or its SHA-256, with the streams it may publish and play. Logs show only
   `token:<name>`, never the token itself.
-- Write `users`: a plaintext password or a bcrypt hash, with their streams. Passwords are secrets: a
-  `[redacted]` value in the draft is not read out, and what the assistant copies back is put back as the
-  draft holds it.
+- Write `users`: a plaintext password or a bcrypt hash, with their streams. Secrets are typed by a person:
+  the [assistant](14-assistant.md) sees them as `[redacted]`, a `[redacted]` value it copies back is put
+  back as the draft holds it, and any other change it makes to a secret field is refused.
 - Write the `keys` ring: each key a name with its own `secret` or `secret_file`, for issuing and revoking
   per shard — rotating one key refuses only the tokens that key signed, while the other shards keep running.
-  A `secret_file` must hold at least 16 bytes at start, and the process must be able to write to its
-  directory.
+  A `secret_file` must exist and hold at least 16 bytes, or the config fails; a rotation (by `media_tokens`,
+  or **Rotate** on the Media library's **Playback URLs** page) writes the new secret to a file beside it and
+  renames it into place, so the process must be able to write to its directory.
 
 `url_signing` is also edited on the **URL signing** page of the Media library module, and its test URLs are
-issued and played on the **Playback URLs** page ([Media library](22-media-library.md)); both edit the same
-draft. A reload changes a policy in place, for the requests and sessions that follow: the sessions already
+issued and played, its keys rotated and its playback sessions ended on the **Playback URLs** page
+([Media library](22-media-library.md)); the two config pages edit the same draft. A secret written in the
+config (`secret`, or a key's `secret`) cannot be rotated from a page: edit it and apply the config. A reload changes a policy in place, for the requests and sessions that follow: the sessions already
 established are kept.
 
 ## Key parameters
@@ -100,7 +105,7 @@ Basic. A token and a signature in a query are written as `REDACTED` in the acces
 | --- | --- | --- |
 | `name` | — | Required. The user's name; it may not hold a colon or a control character |
 | `password` | — | The plaintext password, which RTSP's Digest needs; or `password_hash`, one of the two |
-| `password_hash` | — | The bcrypt hash (as `fit hash-password` makes it), usable only with Basic and the query's user and pass, checked off fib's workers |
+| `password_hash` | — | The bcrypt hash (as `fit hash-password` makes it), usable only with Basic and the query's user and pass, checked off fib's workers; RTMP, RTSP and SRT refuse such a user once, as a try again, until the password is found right |
 | `publish` | none | The patterns of the streams the user may publish |
 | `play` | none | The patterns of the streams the user may play |
 
@@ -134,7 +139,8 @@ the same, rotating one would leave the other still good. The ring holds at most 
 
 The handler `media_tokens` is how a business backend issues tokens, and playback URLs, in batches over a
 route of its own: it checks no caller credential itself — the route's `jwt`, `basic_auth`, `forward_auth`
-or `client_cert` without `optional` does — and it needs a policy with a `secret_file`, or a keyring whose
+or `client_cert` without `optional` does, and a route with none of them fails the config (a `rate_limit`
+authenticates no one) — and it needs a policy with a `secret_file`, or a keyring whose
 every key has one, so that a revoke can rewrite a file and outlive a restart. Its full fields are in
 [the config reference: Handlers](../reference/config.md#http-handlers-media_tokens).
 
@@ -168,7 +174,7 @@ media_auth site {
 	token_ttl 12h
 
 	tokens studio {
-		token_sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+		token_sha256 751213bf907c13a8ffdc4f2bb17f74e8e4567c724395bc4eb3cb5fc661b58ae5
 		publish live/*
 	}
 
@@ -194,10 +200,13 @@ route flv { match { path /live/* }; handler httpflv { auth site } }
 route hls { match { path /hls/* }; handler hls { prefix /hls/; auth site } }
 ```
 
-So `fit media-token -policy site -publish 'live/*' -ttl 1h` prints a time-limited token that OBS publishes
-with, and the site's API signs the expiring playback URLs for its viewers, which `hls` and `httpflv` check on
-every request. The CLI takes `-policy`, one or more `-publish` and `-play` patterns (repeated, or separated
-by commas), `-ttl`, `-subject` and, for a keyring, `-key`; it needs the policy's `secret`, `secret_file` or
+The static token `studio-publish-token` publishes `live/*` (the config holds its SHA-256), `alice` publishes
+`live/*` and plays everything with her password, and anyone plays without credentials. So
+`fit media-token -c fit.conf -policy site -publish 'live/*' -ttl 1h` prints a time-limited token that OBS
+publishes with, and the site's API signs the expiring playback URLs for its viewers, which `hls` and
+`httpflv` check on every request. The CLI takes `-c` (the config to read the policy from), `-policy`, one or
+more `-publish` and `-play` patterns (repeated, or separated by commas), `-ttl` (the policy's `token_ttl`
+when left out), `-subject` (`media-token` by default) and, for a keyring, `-key`; it needs the policy's `secret`, `secret_file` or
 `keys`, because a token signed with a random key of the process could not be checked by a running fit. To
 issue tokens in batches for many subjects — one key per meeting, group or region — use the `media_tokens`
 handler: it needs the policy's `secret_file` or a keyring of `secret_file`s, and must sit behind `jwt`,

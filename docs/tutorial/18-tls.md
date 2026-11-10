@@ -48,16 +48,20 @@ Edits the `auto_https` member: the form plus the `.conf`, `.yaml` and `.json` ta
 checks and applies it. Its four fields — `disable`, `disable_redirects`, `http_port` and `https_port` —
 are in the [key parameters](#key-parameters) below. The page creates no listeners: it changes the rule,
 and fit makes the listeners from the rule. The [Engine](06-engine.md) page links each port's TLS
-settings: "TLS certificates" and "ACME certificates" for a listener's own `tls`, "Automatic HTTPS"
-where HTTPS by default applies, and "Redirects to HTTPS" on the generated port 80, each opening the
-page that sets it.
+settings: a port whose listener sets `tls` lists "TLS certificates", opening the Certificates page, and,
+when its `tls.acme` names hosts, "ACME certificates", opening the ACME page; a port that serves HTTP
+with an empty `tls` (as `tls {}`), or the generated port 443, lists "Automatic HTTPS" while HTTPS by
+default is on; and the generated port 80 lists
+"Redirects to HTTPS"; both open this page.
 
 ### ACME (`#/gw.tls/acme`)
 
 Edits the `acme` member: the CA's directory, the email, `ca_file`, `storage` or `shared_storage`
 (`redis`, `etcd` or `consul`, one of them), `challenges`, `on_demand`, `max_concurrent` and the two
 timeouts. What is changed here takes effect at the next restart; the page edits the config, while the
-running issuance and renewal go on by the rules read at start.
+running issuance and renewal go on by the rules read at start. Until then the
+[consistency check](10-consistency-check.md) lists `acme` among the settings whose running value is the
+one fit started with.
 
 ## Key parameters
 
@@ -95,7 +99,19 @@ The challenges are tried in the order written: `http-01` is answered by any list
 clear on port 80 — so with `disable_redirects` on, HTTP-01 is answered by none and certificates can only
 come through TLS-ALPN-01 — and `tls-alpn-01` by the TLS listener that lists the name, on port 443. A
 failed attempt is tried again with the next. A listener that requires client certificates (`client_auth`
-with `mode: require`) cannot answer TLS-ALPN-01, because the CA sends none.
+with `mode: require`) cannot answer TLS-ALPN-01, because the CA sends none: with `challenges` set to
+`tls-alpn-01` alone, such a listener whose certificates come from ACME (`tls.acme`, `on_demand` or an
+empty `tls`) fails validation; set `mode: verify_if_given` or allow `http-01`.
+
+### Renewal
+
+A certificate is renewed once a third of its lifetime is left (a little earlier for some, by its serial
+number, so that certificates obtained together are not all renewed together), or earlier when the CA's
+renewal information (ARI, RFC 9773) suggests a window. A failed attempt is tried again after a minute,
+then twice as long each time, up to an hour. A certificate in the storage is used as it is until it is
+due, so a restart obtains nothing again. OCSP responses are fetched and stapled to every certificate ACME
+obtained, and to a certificate from files whose chain verifies against the system's roots; this has no
+setting.
 
 ### Storage and sharing
 
@@ -143,15 +159,36 @@ route { handler respond { body hello } }
 
 Two things to note: `tls.on_demand` needs the top-level `acme.on_demand` with its `ask`, and without it
 validation fails; and the `cert_file` and `key_file` of `tls.certificates` are read during validation, so
-a file that does not exist is an error — which is why the example names only ACME names. For instances on
-several hosts, use `shared_storage` (not with `storage`) and keep `email` and `ask`.
+a file that does not exist is an error — which is why the example names only ACME names.
+
+For instances on several hosts, use `shared_storage` in place of `storage`: here Redis, its password read
+from a file at each connection. This is a complete config too:
+
+```fit
+acme {
+	email ops@example.com
+	shared_storage {
+		redis { address 10.0.0.5:6379; password_file /etc/fit/redis-password }
+		prefix fit/
+		lock_ttl 30s
+	}
+}
+
+listener https :443 { tls { acme example.com www.example.com } }
+
+route { handler respond { body hello } }
+```
+
+Every instance names the same store and `prefix`; `etcd { endpoints http://10.0.0.6:2379 }` or
+`consul { endpoint http://127.0.0.1:8500 }` take Redis's place the same way.
 
 ## See also
 
 - [Listeners](05-listeners.md): a listener's `tls`, `client_auth` and on-demand certificates.
 - [Engine](06-engine.md): where a port lists the certificates, ACME and automatic HTTPS.
 - [Overview](04-overview.md): the certificates expiring within 14 days.
-- [Consistency check](10-consistency-check.md): a name in `acme` with no certificate covering it is drift.
+- [Consistency check](10-consistency-check.md): a name a listener's `tls.acme` lists that no certificate
+  covers is drift, and an `acme` changed since fit started is listed until it restarts.
 - [the config reference: HTTPS by default](../reference/config.md#https-by-default): every field of `auto_https`.
 - [the config reference: ACME](../reference/config.md#acme): every field of `acme`.
 - [the auto_https module doc](../../schema/doc/auto_https.md) and [the acme module doc](../../schema/doc/acme.md).

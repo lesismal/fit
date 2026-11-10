@@ -32,10 +32,10 @@
 
 | 更改 | 发生什么 |
 | --- | --- |
-| `limits`、`access`、`categories`、`alt_speed`、`watch_dir`、`save_interval`、队列与磁盘的上限、`rss` | 就地应用，已连接的 peer 保留（降低的连接上限所超出者、新 `access` 拒绝者除外） |
-| `listen`、`encryption`、`dht`、`pex`、`utp`、`lsd`、`disk_workers`、`disk_queue_bytes` | 新建客户端：保存每个种子的续传数据，把它们加入新客户端且不重新校验 |
+| `limits`、`access`、`categories`、`alt_speed`、`watch_dir`、`save_interval`、`url_timeout`、队列与磁盘的上限、`rss`、`publish` | 就地应用，已连接的 peer 保留（降低的连接上限所超出者、新 `access` 拒绝者除外） |
+| `listen`、`encryption`、`dht`、`pex`、`utp`、`lsd`、`disk_workers`、`disk_queue_bytes` | 新建客户端：保存每个种子的续传数据，把它们加入新客户端且不重新校验；新客户端建不起来时（端口被占用），重新建回原来的客户端，本次应用失败 |
 | `data_dir` | 在新目录的状态上新建客户端，如同重启；旧目录保留已保存的内容 |
-| tracker 的 `allow`、`auth`、`access`、`console`、各上限、`peer_ttl` | 就地应用，swarm 保留 |
+| tracker 的 `allow`、`auth`、`access`、`console`、`interval`、`min_interval`、各上限、`peer_ttl` | 就地应用，swarm 保留 |
 | tracker 的 `listen` | UDP 端口移动，swarm 保留 |
 | tracker 的 `store` | 新建 store；本实例的 swarm 在内存中重新开始，共享的留在 Redis |
 
@@ -44,7 +44,8 @@
 ### 种子、元数据与分片
 
 种子的数据由**元数据**（文件树与分片哈希）描述，并由它的 **info hash** 标识。fit 处理 v1、v2 与 hybrid 种子：
-种子的 **ID** 是它的 v1 info hash（十六进制），或它的 v2 哈希（64 位数字）的前 20 字节。元数据随 .torrent 文件到达；
+种子的 **ID** 总是 40 位十六进制数字——它的 v1 info hash，或纯 v2 种子的 v2 哈希的前 20 字节；API 也接受完整的
+64 位 v2 哈希。元数据随 .torrent 文件到达；
 以**磁力链接**（`magnet:?xt=urn:btih:…`）添加的种子则要从 peer 处取得元数据，在那之前它没有可显示的文件。文件被切成
 **分片**，其哈希会被校验，因此一个分片要么已有、要么没有；fit 报告一个种子共有多少分片、已有多少。
 
@@ -58,7 +59,7 @@
 ### 做种、分享率与限制
 
 做种就是上传种子已有的数据；种子拥有它需要的全部分片后即在做种。`limits.seed_ratio`（已上传字节除以种子大小）与
-`limits.seed_time` 达到时暂停种子——不设置时永久做种——状态与事件（`seed_limit`）会说明。`limits` 保存客户端的速率、
+`limits.seed_time`（都从种子添加或 fit 启动时算起）达到时暂停种子——不设置时永久做种——状态与事件（`seed_limit`）会说明。`limits` 保存客户端的速率、
 连接数、上传槽位与做种界限；分类的 `limits` 是其中每个种子的，种子自己的限制取代它们所设置的那些（0 取客户端的；
 负数连接数、分享率或时长为该种子不设限）。**屏蔽列表**是角色的 `access` 与全局 `access`：`deny`/`allow` 地址与
 `deny_files`/`allow_files`，后者除地址、前缀与范围外还读取 eMule `ipfilter.dat` 与 PeerGuardian `.p2p` 行；
@@ -85,9 +86,11 @@
 
 ### 备用速率
 
-`alt_speed` 设置一个上传和一个下载速率（0 为不限），在它的某个每周 `schedules`（`days`、`from`、`to`；`to` 早于
-`from` 的时段跨过午夜延续到第二天）生效期间取代 `limits.upload_rate` 与 `limits.download_rate`。客户端各页面的
-顶栏可把它们设为 `on` 或 `off`（不论时间表如何），或恢复为 `auto`；这个选择跨重启保存在状态中。
+`alt_speed` 设置一个上传和一个下载速率（0 为不限），在它的某个每周 `schedules`（`days`、`from`、`to`，均为
+`HH:MM`，不含 `to`；`to` 早于 `from` 的时段跨过午夜延续到第二天）生效期间取代 `limits.upload_rate` 与
+`limits.download_rate`，时间按 `alt_speed.time_zone`（不设置时为本地时区）计算。没有 `schedules` 时，只有手动开启
+才生效。种子列表页与单个种子页的顶栏可把它们设为 `on` 或 `off`（不论时间表如何），或恢复为 `auto`；这个选择跨重启
+保存在状态中。
 
 ### 从 watch_dir 添加
 
@@ -103,7 +106,8 @@
 已发布的种子永久做种，不论 `seed_ratio` 与 `seed_time` 如何；它不在客户端的种子列表中，也不计入 `max_torrents`。
 `web_seed` 是目录对外提供服务的 URL（如同 `static` 路由），写进每个种子作为其 Web 种子，客户端因此可以从 fit 的
 做种、Web 种子或两者同时下载。`announce` 列出 tracker URL，`private` 把种子标为私有（BEP 27：peer 只经所声明的
-tracker 获得），`files`/`exclude` 挑选发布哪些文件。条目每 `check_interval` 遍历目录，在文件停止变化后构建它；
+tracker 获得），`files`/`exclude` 挑选发布哪些文件（以 `.` 开头的名称与符号链接总是被排除）。`whole_dir` 模式下，Web 种子的 URL
+必须以 `dir` 的最后一段结尾。条目每 `check_interval` 遍历目录，在文件停止变化后构建它；
 文件改变或被删除会停止其种子，改变的文件会得到一个新 info hash 的新种子。`bt_publish` 提供 JSON 索引、各种子的
 `.torrent` 文件与磁力链接。
 
@@ -113,8 +117,18 @@ tracker 获得），`files`/`exclude` 挑选发布哪些文件。条目每 `chec
 未变化的订阅源答 `304`，不再有额外开销。每个新条目交给第一条满足其 `feeds`、`patterns`、`exclude`（对整条标题
 大小写不敏感的通配符，或 `re:` 加正则）以及 `min_size`、`max_size` 的规则；规则把该条目的磁力链接或 .torrent URL
 按其 `category`、`paused` 添加，每次轮询至多 `max_per_poll` 个。设置 `episodes` 后，一部剧的每一集（`S01E02`、
-`1x02` 或日期）只添加一次。读过的每个条目连同结果记在 `data_dir/rss.json`。订阅源或规则可以在 RSS 页启用或停用，
-不论配置中的 `enabled` 如何。
+`1x02` 或日期）只添加一次。读过的每个条目连同结果记在 `data_dir/rss.json`。订阅源或规则可以在 RSS 页（或用
+`fit bt rss enable|disable`）启用或停用，不论配置中的 `enabled` 如何；这个选择保存在 `data_dir` 中，直到用“恢复为配置”
+（`fit bt rss reset`）交还给配置。规则的 `category` 必须是 `categories` 之一。
+
+### 边下边播
+
+以 `bt_stream` 为处理器的路由按 `Range` 提供种子中的文件，优先获取所请求的分片（以及其后 `readahead_bytes`）：
+`/bt/<id>/<文件路径>`、`/bt/<id>/<n>`（索引为 `n` 的文件）或 `/bt/<id>/`（最大的文件），前缀为 `prefix`（`/bt/`）。
+设置 `auth` 后，请求须在该 `media_auth` 策略下能 `play` `bt/<id>`（bearer 令牌、Basic、`?token=` 或
+`fit_media_token` cookie）。设置 `magnet true`（需要 `auth`）后，带 `?magnet=<该种子的磁力链接>` 的请求可以添加
+客户端尚未持有的种子，前提是它还能 `publish` `bt/<id>`：这样的种子是“临时”的——只下载被播放的文件，在最后一次播放
+结束 `temporary_ttl` 后连同数据一起删除。添加种子时勾选**按顺序下载分片**是另一种边下边播的方式。
 
 ### 私有 tracker 与 passkey
 
@@ -133,6 +147,10 @@ tracker 限制在列出的 info hash 上；其他以未注册被拒绝。访问�
 [集群管理](../cluster.zh-CN.md#bittorrent成员的种子与分发)与[集群一章](12-cluster.zh-CN.md)。
 
 ## 页面与操作
+
+菜单项下有五个页面——**种子**（`#/bittorrent/torrents`）、**Tracker**（`#/bittorrent/tracker`）、**RSS**
+（`#/bittorrent/rss`）、**发布**（`#/bittorrent/publish`）与 **BitTorrent 配置**（`#/bittorrent/config`）——单个种子
+另有自己的页面 `#/bittorrent/torrent/<id>`。角色未在此运行的页面会说明这一点，并给出到配置页的链接。
 
 ### 种子
 
@@ -158,7 +176,8 @@ tracker 限制在列出的 info hash 上；其他以未注册被拒绝。访问�
 ### 单个种子：概览、文件、Peer 与 Tracker
 
 `#/bittorrent/torrent/<id>` 显示一个种子，分四个标签页（概览、文件、Peer、Tracker；后三个的地址是 `.../files`、
-`.../peers`、`.../trackers`），页头是名称、状态、保持原因与分类，工具栏是**暂停**或**恢复**、**重新校验**与**删除**。
+`.../peers`、`.../trackers`），页头是名称、状态、保持原因与分类，工具栏是**暂停**或**恢复**、**重新校验**（需确认：逐个分片校验文件，peer 保持
+连接，校验失败的分片重新下载）与**删除**（同样带“同时删除已下载的文件”复选框）。
 
 - **概览**：进度、速率、已下载与已上传字节、peer 与做种数、分享率与剩余时间、已有分片数；一张卡片列出 ID、v1 与 v2
   info hash、大小（不同时还有需要的大小）、目录、添加时间、保持原因，以及可复制的磁力链接。设置就地编辑：分类、
@@ -173,7 +192,9 @@ tracker 限制在列出的 info hash 上；其他以未注册被拒绝。访问�
   被拒绝、无应答或尚未联系，连同错误或警告与连续失败次数）、上次与下次 announce、间隔、peer，以及上次应答或 scrape 的
   做种数、下载数与完成数；hybrid 种子的 v2 哈希另有一张表。下面还有 **Peer 来源**——Tracker、DHT、Peer 交换、
   本地发现、手动添加、其他来源——各自启用或未启用，并给出找到与已连接的 peer；以及 **Web 种子**的状态、失败次数、
-  下次重试与正在获取的分片。这个标签页每四秒读取一次。
+  下次重试与正在获取的分片。
+
+文件与 Tracker 标签页每四秒读取一次，其余每两秒一次。
 
 ### Tracker
 
@@ -181,8 +202,9 @@ tracker 页：总计——种子数与 peer 数相对其上限、announce 与 sc
 无效、被访问控制拒绝）——以及**谁可以 announce**（**私有**或**公开**、白名单数量或“无：接受所有种子”，以及 UDP
 地址）。**Swarm** 每页 100 个：有白名单时，是白名单中的种子（按白名单顺序，无论是否正在跟踪）；公开 tracker 则是其
 当前有 peer 的种子（按 info hash 排序）；每个显示做种者、下载者、完成数与是否已跟踪；可用**上一页**与**下一页**
-翻页。私有 tracker 还有**用户的 passkey**：按用户查询 `media_auth` 用户的 passkey，用于该用户的 announce URL——
-只在此显示给登录的人，从不保存；公开 tracker 没有 passkey，页面会说明。
+翻页。私有 tracker 还有**用户的 passkey**：按用户查询 `media_auth` 用户的 passkey，用于该用户的 announce URL（按示例的路由为
+`https://<host>/tracker/<passkey>/announce`）——只在此显示给登录的人，从不保存；公开 tracker 没有 passkey，页面会
+说明。总计每四秒读取一次。
 
 ### RSS
 
@@ -191,7 +213,8 @@ RSS 自动下载的可视页面。**订阅源**列出每个订阅源的名称与
 已添加与失败数，以及**立即轮询**（说明本次轮询做了什么：条目、新条目、添加、失败、留到下次）。**规则**列出每条规则
 的开关、订阅源（或“所有订阅源”）、分类、记住的剧集数、已添加数与上次添加时间。**最近条目**列出已见条目（200 个），
 可按订阅源与结果筛选——已添加、已存在、剧集重复、无规则匹配、无种子链接、失败——每条带其规则与到所添加种子的链接。
-配置中没有 `rss` 时，页面说明到哪里添加。
+页面每十秒读取一次。配置中没有 `rss`（或没有订阅源）时，页面说明到哪里添加；`rss.json` 无法保存时，错误显示在订阅源
+上方。
 
 ### 发布
 
@@ -202,9 +225,9 @@ RSS 自动下载的可视页面。**订阅源**列出每个订阅源的名称与
 ### BitTorrent 配置
 
 整个 `bittorrent` 成员在一个表单里：`bittorrent.client`（`listen`、`data_dir`、`download_dir`、加密与 peer 发现、
-磁盘池、`save_interval`、`limits`、`categories`、`watch_dir`、`url_timeout`、`alt_speed`、`access`、`rss` 与
-`publish`）与 `bittorrent.tracker`（`listen`、`interval`、`peer_ttl`、各上限、`auth`、`allow` 与 `allow_files`、
-`access` 与 `store`），带 UI、`.conf`、`.yaml`、`.json` 标签页。`bittorrent` 因此有自己的配置页，而不在“全局设置”
+磁盘池、`save_interval`、`limits`、`categories`、`watch_dir` 及 `watch_interval`、`watch_max_files`、`url_timeout`、
+`alt_speed`、`access`、`console`、`rss` 与 `publish`）与 `bittorrent.tracker`（`listen`、`interval`、`min_interval`、
+`peer_ttl`、各上限、`auth`、`allow` 与 `allow_files`、`access`、`console` 与 `store`），带 UI、`.conf`、`.yaml`、`.json` 标签页。`bittorrent` 因此有自己的配置页，而不在“全局设置”
 的“其他”页上；该成员下的保存问题链接到这里。
 
 ## API、fit bt 与事件
@@ -220,14 +243,16 @@ Admin API 在 `/bittorrent/` 下服务两个角色，位于其令牌与 `admin.a
 
 `fit bt` 经该 API 操作运行中 fit 的客户端（及其 RSS 自动下载），它像 `fit check` 与 `fit sync` 一样找到并
 认证（`-c` 引导配置、`-timeout`、`-json`，以及 TLS 相关参数）：`fit bt ls`、`add`、`info`、`pause`、`resume`、`rm`、`limit`、
-`alt` 与 `rss`（其 `items`、`poll`、`enable`、`disable` 与 `reset` 子命令）；`add` 接受磁力链接、http 与 https
-URL 和 .torrent 文件，可带 `-paused`、`-sequential`、`-up` 与 `-down`，速率为字节/秒，可带 `K`、`M` 或 `G`。
-Admin API 拒绝某一个时它继续尝试其余，最后以 1 退出。
+`alt` 与 `rss`（其 `items`、`poll`、`enable`、`disable` 与 `reset` 子命令，规则用 `-rule`）。种子可用 ID、ID 的
+唯一前缀或名称指定。`add` 接受磁力链接、http 与 https URL 和 .torrent 文件，可带 `-category`、`-paused`、
+`-sequential`、`-up` 与 `-down`，速率为字节/秒，可带 `K`、`M` 或 `G`；`rm -delete-data` 同时删除文件；`limit`
+设置种子自身的 `-up`、`-down`、`-conns`、`-slots`、`-ratio` 与 `-seed-time`，或用 `-clear` 清除。Admin API 拒绝
+某一个时它继续尝试其余，最后以 1 退出。
 
 `GET /bittorrent/events` 以 server-sent events 推送客户端事件；控制台用自己的一条路由
 `GET /api/m/admin/bittorrent/events` 在会话之后提供它们，这正是各页面读取的流。事件包括种子已添加与已删除、状态变化
 （`previous` 到 `state`）、备用速率开始或停止生效、已完成、存储错误、peer 被封禁、做种上限与 RSS 添加；流带
-`Last-Event-ID` 重连（`reset` 事件表示错过的事件已不存在，页面会重新读取列表）；慢客户端等待超过 256 个事件后收到
+`Last-Event-ID` 重连，从保留的最近 1024 个事件中接着推送（`reset` 事件表示错过的事件已不存在，页面会重新读取列表）；慢客户端等待超过 256 个事件后收到
 `lagged` 并被断开；同时最多 32 个流。事件也写入日志，logger 为 `bittorrent`。
 
 指标在 Admin API 的 `/metrics` 与 OpenTelemetry 导出中：客户端的字节、速率、peer、按状态与分类的种子、哈希失败、
@@ -324,8 +349,8 @@ Admin API 拒绝某一个时它继续尝试其余，最后以 1 退出。
 ## .conf 配置
 
 一份最小但完整的配置：一个下载并做种的客户端，一个 passkey 来自 `media_auth` 策略的私有 tracker，一个分类与一条 RSS
-规则，一个发布的目录，以及 tracker 的 HTTP announce 与已发布 .torrent 文件的路由。它能通过
-`./bin/fit validate -c` 校验。
+规则，一个发布的目录，以及 tracker 的 HTTP announce、已发布 .torrent 文件与播放种子文件的路由。它能通过
+`fit validate -c` 校验。
 
 ```fit
 listener web :8080 http/1.1 h2c
@@ -340,7 +365,7 @@ media_auth members {
 	}
 	users alice {
 		password replace-with-a-password
-		play bittorrent/*
+		play bittorrent/* bt/*
 	}
 }
 
@@ -391,13 +416,16 @@ bittorrent {
 
 route tracker { match { path /tracker/* }; handler bt_tracker }
 route torrents { match { path /torrents/* }; handler bt_publish }
+route stream { match { path /bt/* }; handler bt_stream { auth members } }
 ```
 
 分类 `iso` 的种子下载到 `/srv/downloads/iso`；任何下载在磁盘将只剩不足 10 GiB 时暂停；备用速率在工作日 08:00 到
 18:00 生效；放进 `/srv/torrents/watch` 的 `.torrent` 或 `.magnet` 文件会被添加；剧集规则把它挑中的内容添加到 `iso`；
 `/srv/releases` 以 `https://example.com/releases/` 为 Web 种子发布；tracker 是私有的，其 HTTP announce 与 scrape
-在 `/tracker/announce`（以及 `/tracker/<passkey>/announce`）提供，UDP 的在 `:6969`；`/torrents/` 提供已发布种子的
-.torrent 文件与磁力链接。`media_auth` 的用户与令牌须能播放 `bittorrent/<info hash>` 才能 announce；`allow_files`
+在 `/tracker/announce`（以及 `/tracker/<passkey>/announce`，scrape 在 `.../scrape`）提供，UDP 的在 `:6969`；
+`/torrents/` 以 JSON 提供已发布内容的索引，`/torrents/<id>.torrent` 为 .torrent 文件，`/torrents/<id>.magnet` 为其
+磁力链接；`/bt/<id>/` 向带有 `members` 凭据且能播放 `bt/*` 的请求播放种子中最大的文件，例如 alice 经 Basic 提供的
+用户名与密码。`media_auth` 的用户与令牌须能播放 `bittorrent/<info hash>` 才能 announce；`allow_files`
 限制跟踪哪些种子。
 
 示例的两点细节：Web 种子的 URL 所需的 `static` 路由

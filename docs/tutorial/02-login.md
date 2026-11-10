@@ -21,32 +21,48 @@ slowdowns, CSRF and the response headers, and the `admin` log. Changing password
 
 ### The login page
 
-Opening the console's address while not logged in shows the login page: a **Username**, a **Password**
-and **Log in**. It is the only page drawn: every `/api/` request but the login gets `401`
-(`log in first`). It sends a JSON body to `POST /api/login` (`{"username", "password"}`, 4 KiB at
-most, and it must be `application/json`; anything else gets `415` or `400`), and on success gets
-`{"user", "csrf"}` — and, while a temporary password must be changed,
+Opening the console's address while not logged in shows the login page: **Username** (filled in with
+`admin`), **Password** and **Log in**, with the theme and language pickers at the top right. It is the
+only page drawn: every `/api/` request but the login and the logout gets `401` (`log in first`). It
+sends a JSON body to `POST /api/login` (`{"username", "password"}`); a body that is not
+`application/json` gets `415`, one over 4 KiB `413`, and one that is not that object `400`. On success
+it gets `{"user", "csrf"}` — and, while a temporary password must be changed,
 `{"must_change_password": true, "password_expires": ...}` — and the session cookie. The page keeps
-the user and the token, and from then every request but a GET or a HEAD carries the token in
-`X-Fit-Csrf`. After logging in, `GET /api/workbench` lists the modules this fit serves, and only
-then can the menu draw a page.
+the token in memory only, and from then every request but a GET or a HEAD carries it in
+`X-Fit-Csrf`. After logging in, `GET /api/workbench` answers `{"user", "modules"}`, the server modules
+this console serves, and only then can the menu draw a page.
 
-A failed login shows "Login failed": a `401` says the name or password is wrong, and a `429` says
-the address or the user is still waiting, with `{"error", "retry_after"}`, the seconds to wait, and
-the same in `Retry-After`. Scripts use the same endpoint: a program keeps the cookie itself and
-sends `csrf` in `X-Fit-Csrf` with every request but a read; `GET /api/session` answers
-`{"user", "csrf"}` for the same session, or `401` when not logged in; and `POST /api/logout` ends
-the session (with `204`, and the cookie cleared).
+A failed login shows the server's reason under the form ("Login failed" when it gives none): a `401`
+says `the user name or password is wrong`; a `429` says the address is locked out, the user is slowed
+down, or another login from the address is being checked, with `{"error", "retry_after"}`, the seconds
+to wait, and the same in `Retry-After`; a `503` says the login pool is full. A reload of the page keeps
+the login: it asks `GET /api/session`, which answers `{"user", "csrf"}` for the same session, or `401`.
+**Log out**, at the foot of the menu, calls `POST /api/logout`, which ends the session (with `204`, and
+the cookie cleared).
+
+Scripts use the same endpoints: a program keeps the cookie itself and sends `csrf` in `X-Fit-Csrf` with
+every request but a read. The Admin API's endpoints are under `/api/m/admin/`:
+
+```bash
+C=http://127.0.0.1:2020
+# Log in: the cookie goes to the file jar, and the answer {"user", "csrf"} gives the token.
+CSRF=$(curl -s -c jar -H 'Content-Type: application/json' \
+  -d '{"username": "admin", "password": "..."}' $C/api/login | sed 's/.*"csrf":"\([^"]*\)".*/\1/')
+curl -s -b jar $C/api/m/admin/status                            # a read needs only the cookie
+curl -s -b jar -X POST -H "X-Fit-Csrf: $CSRF" $C/api/logout    # 204
+```
 
 ### Change the default password
 
 A session that logged in with the default password of `fit run -admin` is temporary: it can open only the
 **Change the default password** page, and every other endpoint answers `403` with
 `"must_change_password": true`, while the Admin API answers every request `403`. That page is the login
-page's layout with fields for the current (default) password, **New password** and **Confirm the new
-password** — at most 72 bytes, bcrypt's limit — and the time left before the default password stops
-working, counted down; **Change password and continue** submits it. The new password must differ from the
-current one. Only after it is changed does the workbench become usable. After `-timeout` the password no
+page's layout: a note that the password is temporary, the time left before it stops working, counted
+down, and the time it stops; fields for **Current (default) password**, **New password** (at most 72
+bytes, bcrypt's limit) and **Confirm the new password**; **Change password and continue**, which calls
+`POST /api/m/admin/account/password`; and **Log out**. The new password must not be empty and must
+differ from the current one. Once it is changed the same session goes on into the workbench, and the
+Admin API serves requests again. After `-timeout` the password no
 longer logs in (`401`, `"password_expired": true`), the page replaces the form with the note that only a
 restart with `-admin` helps, and fit must be restarted with `-admin` to get a new one and change it in time.
 
@@ -84,11 +100,13 @@ Changing a password ends that user's other sessions, the caller's own kept (see
 
 ### CSRF, the Origin and the headers
 
-Every request but a read must carry the session's CSRF token in `X-Fit-Csrf`, or gets `403`; a request whose
-`Origin` is not the console's own also gets `403`. Pages are sent with a Content-Security-Policy that allows
-their own files only (`script-src`, `style-src` and `connect-src` are `'self'`, `frame-ancestors 'none'`),
-with `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, and over
-TLS `Strict-Transport-Security`; API answers carry `Cache-Control: no-store`. The policy adds the origins
+Every request but a read (GET or HEAD), the login and the logout must carry the session's CSRF token in
+`X-Fit-Csrf`, or gets `403`; a request whose `Origin` is not the console's own also gets `403`. Pages are
+sent with a Content-Security-Policy that allows their own files only (`default-src 'none'`; `script-src`,
+`style-src` and `connect-src` are `'self'`, `img-src` adds `data:`, `frame-ancestors 'none'`), with
+`X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, and over TLS
+`Strict-Transport-Security`; the pages' files carry `Cache-Control: no-cache` and API answers
+`Cache-Control: no-store`. The policy adds the origins
 of the listeners that serve the `vod` and `hls` routes to `img-src` and `connect-src`, and adds `media-src`,
 so that a media preview can play from them.
 
@@ -105,7 +123,8 @@ chapter of [the config reference](../reference/config.md)):
 | field | default | description |
 | --- | --- | --- |
 | `address` | `127.0.0.1:2020` | The host and port the console listens on. A host that is not a loopback address needs `cert_file` and `key_file`. |
-| `cert_file`, `key_file` | | PEM files with the console's certificate and its private key; with them the console is served over TLS, 1.2 or later. Both are set together or neither. |
+| `cert_file`, `key_file` | | PEM files with the console's certificate (and intermediates) and its private key; with them the console is served over TLS, 1.2 or later. Both are set together or neither. |
+| `mptcp` | `false` | Listen with Multipath TCP where the kernel offers it (Linux 5.6+, `net.mptcp.enabled`), plain TCP where it does not. |
 | `users` | | Required. Who may log in: at least one user, each with a `username` and a `password_hash`. |
 | `session_timeout` | `30m` | How long a login lasts without a request. |
 | `session_lifetime` | `12h` | How long a login lasts at most, however busy. |
@@ -114,14 +133,15 @@ chapter of [the config reference](../reference/config.md)):
 | `access` | | The client addresses the console serves, deciding before the global `access`, and following every config applied, without a restart. |
 
 Beside these, the console has a few fixed limits: request headers 16 KiB, read within 10s; a request body of
-`admin.max_config_bytes` plus 64 KiB, read within 30s; writing an answer 30s; a connection closed 5s after it
-opens, whatever it sends, until it sends a request with a valid session (a login that succeeds counts), then
-kept 2m idle; at most 2 password checks at once; and 4 running and 64 waiting Admin API calls and role
-methods, each waiting at most 30s, with `503` past that. See [limits and timeouts](../console.md#limits-and-timeouts).
+`admin.max_config_bytes` plus 64 KiB (4 MiB and 64 KiB by default), read within 30s; writing an answer 30s;
+the connection timeouts of [Sessions](#sessions); at most 2 password checks at once; and 4 running and 64
+waiting Admin API calls and role methods: a call past them gets `503` (`the console is busy; try again`), and
+one that has waited 30s without starting gets `504`. See [limits and timeouts](../console.md#limits-and-timeouts).
 
 ## In .conf
 
-The login part of the bootstrap file, with a minimal listener and route:
+The login part of the bootstrap file, with a minimal listener and route. The hashes are examples: write the
+ones `fit hash-password` prints. `access` keeps local access whatever the global `access` says.
 
 ```fit
 # The bootstrap file: admin is read when fit starts, and changing it takes a restart.
@@ -140,13 +160,17 @@ admin {
 		}
 		users {
 			username ops
-			password_hash "$2a$10$R3sQ0a3nB0eS0dC1kZmV2uLqXlN5pT7yH8gD6fC.bA1iJ2kL3mN4o"
+			password_hash "$2a$10$uc5watArbG960eK0AjkCXeRYYMiIjKNf9bGmnov2O6JbDgF15Azqm"
 		}
 
 		session_timeout 30m
 		session_lifetime 12h
 		max_sessions 64
 		max_conns 32
+
+		access {
+			allow 127.0.0.1 ::1
+		}
 	}
 }
 

@@ -23,7 +23,8 @@ fib 引擎上，可以和网关的路由并存，也可以单独运行：
 
 ## 页面与操作
 
-角色的页面在角色运行后出现在菜单中：在**隧道角色**页设置成员，配置应用后角色启动，其模块出现在菜单的隧道组下。这些页面的修改
+角色的页面在角色运行后出现在菜单中：在**隧道角色**页设置成员，配置应用后角色启动，其模块出现在菜单的隧道组下。这些页面无需另外设置就显示在 `admin.console` 的工作台中；角色自己的
+`console` 则在自己的地址、用自己的用户单独提供同样的页面，供没有 `admin.console` 的机器使用。这些页面的修改
 写回角色在配置中的成员并立即生效，无需重启；fit 把配置保存在 `admin.store` 时以加密方式保存，没有 store 时修改只在重启或重新读取
 配置文件之前有效，页面会提示这一点。展示状态的页面每 3 秒刷新一次；设置表单只在打开时与修改后加载。**概览**与**隧道**页带有
 **隧道全景**工具，某条隧道的**详情**会在其中打开它的完整链路。
@@ -65,13 +66,15 @@ fib 引擎上，可以和网关的路由并存，也可以单独运行：
 
 #### 令牌
 
-本 hub 签发的令牌：签发（只显示一次，供复制，填到节点或 proxy 的 `token`）、列出每个令牌的过期时间、自启动以来的最近使用及其来源
-地址、它的成员和当前使用它的链路，修改过期时间，吊销（立即关闭它的链路）。只要还有对端用共享密码注册，这里给出警告。
+本 hub 签发的令牌。**签发令牌**填写名称、备注与有效期（`720h`、`30d`）或过期时间，都不填则永不过期；令牌只显示一次，供复制
+到节点或 proxy 的 `token`。表格列出每个令牌的名称、ID、过期时间、fit 启动以来的最近使用及其来源地址、绑定成员和当前使用它的
+链路；**过期时间**修改过期时间，**吊销**立即关闭它的链路并释放其成员。成员绑定到它第一次连接所用的令牌，其他令牌不能以它的身份
+连接。只要还有对端用共享密码注册，这里给出警告。
 
 #### 设置
 
 **密码与控制台 WebSocket**：共享注册密码（已弃用，可**移除共享密码**，从此只接受令牌注册）、消息体 AES 密码（可移除）、控制台
-WebSocket 的密码与地址（默认用注册密码）。已设置的密码不会返回：留空则保持不变。已注册的对端保持连接；新的消息体密码只用于此后
+WebSocket 的密码（不设时用注册密码）与地址（留空则不启用，如 `:7002`）；**保存设置**使其生效。已设置的密码不会返回：留空则保持不变。已注册的对端保持连接；新的消息体密码只用于此后
 新建的链路。**Hub 证书**：指纹（SHA-256）与复制，节点和 proxy 把此指纹填作 hub 的证书指纹；添加 TLS、WSS 或 QUIC 监听时生成，
 并写入配置。
 
@@ -108,12 +111,13 @@ Peer ID 与连接池（当前 / 上限）、隧道数；操作是**编辑**与**
 #### hub
 
 每个 hub 一张卡片：各端点、状态与所用协议、延迟、hub 的名字、Peer ID、连接池、节点数、隧道数与消息体加密，以及它的 **控制台**——
-该 hub 的 `web_proxies` 在本地提供的地址、经由的 URL、连接数与**打开**。不属于任何 hub 的 Web 代理单独一张卡片。
+该 hub 的 `web_proxies` 在本地提供的地址、经由的 URL、连接数与**打开**。卡片上的按钮是**查询节点**（让 hub 重新报回它的节点）、
+**编辑**与**移除**；顶栏的**添加 hub** 打开与节点相同的编辑器。不属于任何 hub 的 Web 代理单独一张卡片。
 
 #### 节点与服务
 
 每个 hub 上的每个节点一行：hub、节点、经该 hub 到它的延迟、该节点隧道的分担比例、它的服务（名称 → 地址、描述与建连时间），每个服务
-旁是**转发…**（预填表单），以及**编辑服务**——仅在 hub 的 `allow_proxy_services` 与节点的 `allow_hub_services` 都允许时可用。
+旁是**转发…**（预填表单），以及**编辑服务**——只有 hub 的 `allow_proxy_services` 与节点的 `allow_hub_services` 都允许时，hub 与节点才接受。
 
 #### 转发
 
@@ -148,7 +152,7 @@ Peer ID 与连接池（当前 / 上限）、隧道数；操作是**编辑**与**
 | `max_links`、`max_links_per_peer`、`max_peers`、`max_tunnels` | 1024、128、1024、16384 | hub 保有资源的上限 |
 | `max_unregistered`、`max_unregistered_per_ip` | 256、32 | 尚未注册的已打开链路，总数与每个 IP 地址的数量 |
 | `allow_proxy_services` | false | 允许已注册的 proxy 经 hub 设置节点的服务；节点仍须开启自己的 `allow_hub_services` |
-| `console` | 无 | hub 的页面 |
+| `console` | 无 | hub 自己的控制台：只有它的页面，在自己的 `address`、用自己的 `users`；运行 `admin.console` 时不需要 |
 
 ### tunnel.node
 
@@ -160,7 +164,7 @@ Peer ID 与连接池（当前 / 上限）、隧道数；操作是**编辑**与**
 | `services` | 无 | `{name, address, description}`：节点能访问的服务，也是它唯一会连接的地址 |
 | `allow_hub_services` | false | 允许它的 hub 设置 `services` 并写入本成员 |
 | `dial_timeout`、`idle_timeout`、`max_tunnels` | 5s、2h、4096 | 连接一个服务的时限、空闲隧道关闭前的时长、同时打开的隧道数 |
-| `console` | 无 | 节点的页面 |
+| `console` | 无 | 节点自己的控制台，同 hub |
 
 ### tunnel.proxy
 
@@ -171,7 +175,7 @@ Peer ID 与连接池（当前 / 上限）、隧道数；操作是**编辑**与**
 | `web_proxies` | 无 | `{name, listen, url, password, max_conns}`：经 hub 的 `console_socket` 在本地提供它的控制台 |
 | `access` | 由全局 `access` 决定 | 作用于 `forwards` 与 `web_proxies` 接受的连接 |
 | `open_timeout`、`idle_timeout`、`max_tunnels` | 20s、2h、4096 | 打开一条隧道的时限、空闲隧道关闭前的时长、同时打开的隧道数 |
-| `console` | 无 | proxy 的页面 |
+| `console` | 无 | proxy 自己的控制台，同 hub |
 
 ### 节点或 proxy 连接的 hub（`hubs[]`）
 
@@ -212,8 +216,26 @@ tunnel {
 ```
 
 `tokens` 与 `pin` 不手写：hub 的**令牌**页签发每个令牌（只显示一次），hub 的**设置**页显示它的证书指纹；把两者填到节点的 `token`
-与 `pin`。只有角色、没有路由的配置不需要监听器。proxy 的写法见[配置参考](../reference/config.md#config-tunnelproxy)：它的
-`forwards { listen 127.0.0.1:2222; node lab; service ssh }` 让 `ssh -p 2222 127.0.0.1` 连到 10.0.0.5:22。
+与 `pin`。只有角色、没有路由的配置不需要监听器。
+
+笔记本上的一个 proxy，持有同一 hub 为它单独签发的令牌，带一个转发：
+
+```fit
+tunnel {
+	proxy {
+		name laptop
+		hubs hub {
+			endpoints { address wss://hub.example.com:7443/tunnel }
+			token fitt1.3b7a0c9e1d2f4a56.q8Xc2Lr0VwN5bTz7Ka1MdYp4Hs9GfJu3EoWi6RnBtQk
+			pin 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
+		}
+		forwards { listen 127.0.0.1:2222; node lab; service ssh }
+	}
+}
+```
+
+之后 `ssh -p 2222 127.0.0.1` 经 hub 连到 10.0.0.5:22。转发监听在非回环地址上时也服务局域网，用 proxy 的 `access` 限制谁能使用。
+完整字段见[配置参考](../reference/config.md#config-tunnelproxy)。
 
 ## 相关文档
 

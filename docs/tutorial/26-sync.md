@@ -66,22 +66,25 @@ leaves the rest running untouched. A pipeline paused by hand stays paused across
 and runs again when fit restarts. A save's problems link to the pipeline's **Edit** page, or to **Sync
 config** for the member itself.
 
-The connectors cover every kind of system fit speaks, so any pair can be joined. Files (`file`); the
-databases (`mysql` for MySQL, MariaDB and TiDB, `tidb` through TiCDC, `postgres`, `mssql` through CDC
-or change tracking, `mongo`); the search and analytics stores (`elasticsearch` for Elasticsearch and
-OpenSearch, `clickhouse`, `doris` for Doris and StarRocks); the queues and logs (`kafka` for Kafka and
-Redpanda, `mqtt`, `rabbitmq`, `nats` JetStream, `pulsar`, `redis` for Redis and Valkey, `s3` for S3 and
-compatibles); the observability stores (`loki`, `otlp_logs`, `influxdb`, `tdengine`); the vector
-databases (`qdrant`, `milvus`, fed by the `embed` transform); `http`, as a source behind a route's
-`sync_ingest` handler; and the trials `generate`, `memory` and `stdout`. Sources and sinks are modules
+The connectors are both sources and sinks unless said otherwise, so most pairs can be joined. Files
+(`file`); the databases (`mysql` for MySQL, MariaDB and TiDB, `tidb` through TiCDC — a source only, TiDB
+as a sink being the `mysql` sink — `postgres`, `mssql` through CDC or change tracking, `mongo`); the
+search and analytics stores (`elasticsearch` for Elasticsearch and OpenSearch, `clickhouse`, `doris` for
+Doris and StarRocks); the queues and logs (`kafka` for Kafka and Redpanda, `mqtt`, `rabbitmq`, `nats`
+JetStream, `pulsar`, `redis` for Redis and Valkey, `s3` for S3 and compatibles); `http`, as a source
+behind a route's `sync_ingest` handler and as a sink posting batches; and these sinks only: the
+observability stores (`loki`, `otlp_logs`, `influxdb`, `tdengine`), the vector databases (`qdrant`,
+`milvus`, fed by the `embed` transform) and `dead_letters`. For trials, the source `generate` and the
+sinks `memory` and `stdout`. Sources and sinks are modules
 of the namespaces `sync.sources` and `sync.sinks`, transforms of `sync.transforms` (`filter`, `route`,
 `fields`, `key`, `cast`, `mask`, `envelope`, `embed`, `wasm`) and codecs of `sync.codecs`; what the
 built-ins do not cover is a WebAssembly plugin in any of those four places.
 
 `fit validate` checks every pipeline as it checks the rest of the config: the modules named exist in
-their namespaces, `state_dir` is set, each pipeline and sink has a valid and unique name, at least one
-sink is there, `on_error dead_letter` has its `dead_letter` sink and no other policy has one, and a
-`job` appears only with `mode once`.
+their namespaces, `state_dir` is set, each pipeline and sink (the `dead_letter` sink included) has a
+valid and unique name, at least one sink is there, `on_error dead_letter` has its `dead_letter` sink and
+no other policy has one, a `job` appears only with `mode once`, its `schedule` and `time_zone` parse, and
+`retry.max_backoff` is not shorter than `backoff`.
 
 The same pipelines can be watched and steered from outside the pages: the Admin API's `/sync/…`
 endpoints (state, pause and resume, snapshot, checkpoint, test, dry run, dead letters), `fit sync` on
@@ -102,10 +105,10 @@ the lag and behind the source — labelled by `pipeline`, and by `sink` for each
 Sync is in the menu after LLM roles and before BitTorrent, tagged *pipelines*, with two pages:
 **Pipelines** and **Sync config**. A pipeline has four tabs of its own: **Overview**, **Edit**,
 **Checkpoint** and **Dead letters**. Each page has its own address — `#/sync/pipelines`,
-`#/sync/config`, `#/sync/pipeline/<name>`, `#/sync/edit/<name>` and the tab's suffix — so a pipeline
-can be linked to directly. The module belongs to the console, so it is listed as soon as the console
-runs, before its role is configured; the pages then say what to set and start the pipelines when the
-config is applied.
+`#/sync/config`, `#/sync/pipeline/<name>`, `#/sync/edit/<name>`, `#/sync/pipeline/<name>/checkpoint` and
+`#/sync/pipeline/<name>/dead_letters` — so a pipeline can be linked to directly. The module belongs to
+the console, so it is listed as soon as the console runs, before its role is configured; the pages then
+say what to set and start the pipelines when the config is applied.
 
 ### Pipelines
 
@@ -131,9 +134,11 @@ that **Save and apply** starts them. With nothing in the draft either, the page 
 **New pipeline** in the top bar asks for a name (letters, digits, `_`, `.` and `-`, unique; suggested
 `pipeline-1`), a **source** (every `sync.sources` module, `generate` preselected), a **sink** (every
 `sync.sinks` module except `dead_letters`, `memory` preselected) and, when the draft has no `sync`
-member yet, the **state directory** (`sync.state_dir`, `/var/lib/fit/sync` suggested). **Make it** adds
-the pipeline to the draft and opens its **Edit** page: it is a real pipeline only after **Save and
-apply** starts it.
+member yet, the **state directory** (`sync.state_dir`; `/var/lib/fit/sync` when left empty). **Make it**
+adds the pipeline to the draft — the source and one sink named after its module, with no params yet —
+and opens its **Edit** page: it is a real pipeline only after **Save and apply** starts it. The dialog
+checks the name by the same rule as `fit validate`: letters, digits, `_`, `.` and `-`, starting with a
+letter or digit, and not taken.
 
 ### Sync config
 
@@ -158,19 +163,20 @@ written, replayed, and the ones kept against their bounds, linking to that tab).
 
 The buttons steer the running pipeline:
 
-- **Pause** holds the source while what it read is still written and the checkpoint saved; **Resume**
-  lets it go on, and starts again a pipeline stopped on an error.
+- **Pause** holds the source while what it read is still written and the checkpoint saved. The button
+  reads **Resume** while the pipeline is paused, `stopped` or `killed`: it lets it go on, and starts
+  again a pipeline stopped on an error.
 - **New snapshot** asks first: it reads the source again from its start, removing the checkpoint and
   restarting the pipeline, so the sinks get every record again over what they hold.
 - **Test connection** tests the connections of the source, the sinks and the `dead_letter` sink, writing
   no record. The card lists each part, its module, the result (**passed**, **failed**, **no test: try a
   dry run**) and the time it took, with a warning beside a test that passed but would lose data.
 - **Dry run** reads the first records through the transforms and shows each one as read and what it
-  became — dropped by the transforms, or the records handed to the sinks — writing nothing and saving
-  no position. Its form sets how many records (10, at most 1000), how long to wait for them (5s) and,
-  here, whether to read **from the checkpoint** or **from the start**; it says when the source ended,
-  when the wait ended first, or when no record came. The records a dry run reads and a dead letter
-  holds are shown to the person signed in, never kept.
+  became — dropped by the transforms, or the records handed to the sinks — writing nothing and saving no
+  position. Its form sets how many records (10, at most 1000), how long to wait for them (5s, at most
+  1m) and, here, whether to read **from the checkpoint** or **from the start**; it says when the source
+  ended, when the wait ended first, or when no record came. The records a dry run reads and a dead
+  letter holds are shown to the person signed in, never kept.
 
 A pipeline that does not run (it is not in the running config) says so, with a link to its **Edit**
 page and the reminder to save and apply.
@@ -207,20 +213,39 @@ This is the checkpoint `fit sync checkpoint -c fit.conf <name>` shows, and `-set
 ### Dead letters
 
 The records a `dead_letters` sink kept, oldest first, 50 at a time with **More**, and above them how
-many are kept against `max_records` and `max_bytes`, and the file's path. The file is
-`<state_dir>/<name>.dead_letters.jsonl`, one JSON line per letter, synced before it counts as written.
+many are kept, their bytes against `max_bytes`, and the file's path. The file is
+`<state_dir>/<name>.dead_letters.jsonl` unless the sink's `path` names another (a relative one under
+`state_dir`), one JSON line per letter, synced before it counts as written.
 A row holds a checkbox, the **ID**, when it was **Saved**, **Where** it failed (the sink, or the
-transform), its **Attempts**, the **Error**, and the **Record** in its canonical JSON, folded open. The
-first error has an **Ask AI** button for the `sync-pipeline` skill.
+transform), its **Attempts**, the **Error**, and the **Record**: folded under its namespace, opening to
+its canonical JSON. The first error has an **Ask AI** button for the `sync-pipeline` skill. The page is
+read when it opens, not on a timer.
 
-**Replay selected** and **Replay all** ask first; a replay stops the pipeline, writes each record to the
-sink it failed at — through the transforms again, to every sink, when a transform failed it — as it was,
-over any later change of its key, drops the ones written, keeps and reports the ones failing again, and
-starts the pipeline again. **Drop selected** and **Drop all** ask first too, and their records are lost.
-A pipeline whose `dead_letter` sink is not a `dead_letters` sink has nothing to replay here, and the
-page says how to set one: `on_error dead_letter` with a `dead_letter` sink whose module is
-`dead_letters`. `fit sync dead-letters` lists them from the command line, and its `-replay -all` and
-`-drop` do the same as the buttons.
+**Replay selected** and **Replay all** ask first (the *selected* buttons do nothing with no row ticked);
+a replay stops the pipeline, writes each record to the sink it failed at — through the transforms again,
+to every sink, when a transform failed it — as it was, over any later change of its key, drops the ones
+written, keeps and reports the ones failing again, and starts the pipeline again. **Drop selected** and
+**Drop all** ask first too, and their records are lost. A pipeline whose `dead_letter` sink is not a
+`dead_letters` sink has nothing to replay here, and the page says how to set one: `on_error dead_letter`
+with a `dead_letter` sink whose module is `dead_letters`. `fit sync dead-letters` lists them from the
+command line, and its `-replay -all` and `-drop` do the same as the buttons.
+
+## A first pipeline, step by step
+
+1. **Sync → Pipelines → New pipeline**: keep `generate` and `memory` for a first try, or pick the real
+   source and sink; give the state directory if asked. **Make it** opens the **Edit** page.
+2. On **Edit**, fill in the source's and the sink's params (addresses, users, the `password_env`
+   variables, tables or paths), add transforms and more sinks, and set `on_error`.
+3. **Test connection** checks the draft's source and sinks; **Dry run** shows what the first records
+   become. Neither needs the draft saved.
+4. **Save and apply** in the top bar (or **Check** first). The pipeline starts and its **Overview**
+   shows it `running`, its throughput and lag.
+5. To start over, **Checkpoint → Reset**, or **New snapshot** on the Overview; to stop it for a while,
+   **Pause**.
+
+The environment variables a connector names are read from fit's own environment when the pipeline
+loads, so set them where fit is started (its service unit or container), not in the console: one that
+is not set, or empty, makes `fit validate`, **Check** and **Save and apply** refuse the pipeline.
 
 ## Key parameters
 
@@ -233,7 +258,7 @@ Only the key fields are listed here; every field with its default is in
 | Field | Default | Description |
 | --- | --- | --- |
 | `sync.state_dir` | — | Required. The directory of `<name>.json` checkpoints, made when missing; moving a pipeline to another fit means moving its file |
-| `pipelines[].name` | — | Required. Unique; letters, digits, `_`, `.` and `-`; it names the checkpoint file and the dead letters' |
+| `pipelines[].name` | — | Required. Unique; letters, digits, `_`, `.` and `-`, starting with a letter or digit; it names the checkpoint file and the dead letters' |
 | `pipelines[].source` | — | Required. A module of `sync.sources` and its `params` |
 | `pipelines[].transforms` | none | The modules of `sync.transforms`, in order; each may change, drop or split a record |
 | `pipelines[].sinks` | — | Required, at least one. Each a name, a module of `sync.sinks` and its `params`; every sink takes every record |
@@ -245,8 +270,8 @@ Only the key fields are listed here; every field with its default is in
 | `pipelines[].sinks[].batch.max_records`, `.max_bytes`, `.max_wait` | 500, 4 MiB, 1s | When a batch closes: records, bytes, or time after its first record |
 | `pipelines[].checkpoint_interval` | 5s | At most how often the checkpoint is written when it has moved; it is also written when the pipeline stops |
 | `pipelines[].retry.max_attempts`, `.backoff`, `.max_backoff` | 5, 200ms, 30s | The attempts of a failed write, and the wait before each, doubled up to the maximum |
-| `pipelines[].job.max_parallel`, `.schedule`, `.time_zone` | 4, none, `UTC` | A job's chunks read at once and its cron schedule; `mode once` only |
-| `dead_letters` sink's `max_records`, `max_bytes`, `when_full` | 10000, 64 MiB, `refuse` | The dead letters kept, and whether a full file refuses one (`refuse`, stopping the pipeline) or drops the oldest (`drop_oldest`) |
+| `pipelines[].job.max_parallel`, `.schedule`, `.time_zone` | 4, none, `UTC` | A job's chunks read at once, and its schedule: cron's five fields (`0 3 * * *`) or `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`, in an IANA zone or `Local`; `mode once` only |
+| `dead_letters` sink's `path`, `max_records`, `max_bytes`, `when_full` | `<state_dir>/<name>.dead_letters.jsonl`, 10000, 64 MiB, `refuse` | The file, the dead letters kept, and whether a full file refuses one (`refuse`, stopping the pipeline, nothing lost) or drops the oldest (`drop_oldest`) |
 
 ## In .conf
 
@@ -281,9 +306,57 @@ sync {
 
 `fit run -c fit.conf` serves it beside the gateway. `fit sync run -c fit.conf orders-log` runs this one
 pipeline alone, without serving anything else, until it is interrupted, its checkpoint saved; add
-`--once` to read it to the end as a job. For a first try with nothing to tail, swap the source for
-`source generate { records 100 }` and the sink for `sinks out { sink stdout }` — the same `.conf` shape,
-and it prints the records.
+`--once` to read it to the end as a job, which exits 0 when every record was written, 3 when records
+failed (`skip` or `dead_letter`) and 1 when the pipeline stopped. For a first try with nothing to tail,
+this prints a thousand records and stops:
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines trial {
+		mode once
+		source generate { records 1000; tx_size 10 }
+		sinks out { sink stdout }
+	}
+}
+```
+
+A database followed into another, exactly once: MySQL's binlog after a first snapshot of `shop.*`,
+deletes left out by a `filter`, upserted into PostgreSQL whose `checkpoint sink` keeps the position in
+the same transaction as the rows. The passwords come from `MYSQL_PASSWORD` and `PG_PASSWORD` in fit's
+environment, which must be set for the config to load.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines shop-to-pg {
+		source mysql {
+			address mysql.internal:3306
+			username fit_repl
+			password_env MYSQL_PASSWORD
+			tls true
+			server_id 4101
+			tables shop.*
+		}
+		transforms filter { ops delete; action drop }
+		sinks warehouse {
+			sink postgres {
+				address pg.internal:5432
+				user fit_sync
+				password_env PG_PASSWORD
+				database warehouse
+				checkpoint sink
+			}
+			batch { max_records 1000; max_wait 200ms }
+		}
+	}
+}
+```
+
+The MySQL user needs `REPLICATION SLAVE`, `REPLICATION CLIENT` and `SELECT`, and `server_id` must be
+unique among the server's replicas; the sink writes `shop.orders` to the table `orders` of the schema
+`shop`. A copy run once a night instead is the same pipeline with `mode once` and
+`job { schedule "0 3 * * *"; time_zone Asia/Shanghai }`.
 
 ## See also
 

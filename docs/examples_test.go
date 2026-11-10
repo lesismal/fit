@@ -17,8 +17,8 @@ import (
 var configBlock = regexp.MustCompile("(?s)```(fit|caddyfile|yaml|json)\n(.*?)\n```")
 
 // TestConfigExamples loads every config in the pages on config formats, in
-// the getting started guide, in the sync guide and in the README, in
-// either language: each
+// the getting started guide, in the sync guide, in the Web console tutorial
+// and in the README, in either language: each
 // .conf, YAML and JSON config loads, and each Caddyfile, on the page on
 // converting them, converts without a warning and loads.
 func TestConfigExamples(t *testing.T) {
@@ -26,12 +26,13 @@ func TestConfigExamples(t *testing.T) {
 	guide, _ := filepath.Glob("getting-started*.md")
 	readme, _ := filepath.Glob("../README*.md")
 	syncGuide, _ := filepath.Glob("sync*.md")
-	files = append(append(append(files, guide...), readme...), syncGuide...)
+	tutorial, _ := filepath.Glob("tutorial/*.md")
+	files = append(append(append(append(files, guide...), readme...), syncGuide...), tutorial...)
 	for _, f := range []string{"fit", "caddyfile", "yaml", "json"} {
 		more, _ := filepath.Glob("reference/" + f + "*.md")
 		files = append(files, more...)
 	}
-	if len(files) < 14 {
+	if len(files) < 70 {
 		t.Fatalf("only %v", files)
 	}
 	n := 0

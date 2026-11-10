@@ -42,18 +42,32 @@ Linux（amd64、arm64、armv7、386）、macOS（amd64、arm64）、Windows（am
 - **store**，用密码封存。它包含除 `admin` 外的一切，即 fit 运行所依据的**基础配置**，provider 尚未
   合并进来。
 
-第一次以这份配置启动时还没有 store：引导文件里的 `listeners` 和 `routes` 是它的初始内容，store 立即
-写入。此后每次启动，store 被合并到引导文件之上，store 的值优先：对象逐个成员合并，store 中的列表或值
+第一次以这份配置启动时还没有 store：引导文件中 `admin` 以外的全部内容就是它的初始内容，store 立即写入
+（fit 输出 `the config of <文件> is kept in the store <store> from now on`）。此后每次启动，store 被合并到引导文件之上，store 的值优先：对象逐个成员合并，store 中的列表或值
 整体替换文件中的。只有文件设置的成员会保留，合并后的配置写回 store。要重新从文件开始，删除 store。写入先
 写到 store 旁的临时文件（权限 0600），同步后重命名覆盖，所以崩溃只会留下旧的或新的 store，不会留下半个。
+
+启动失败时（处理器模块名写错、端口被其他进程占用），store 会恢复成这次启动之前的样子：首次启动失败不会留下
+store，改好文件重新启动即可。“kept in the store”这一行只在启动成功后才输出。首次启动前先
+`fit validate -c <引导文件>` 能发现其中多数问题。
 
 有 store 时，`admin` 从不进入 store，也从不显示：它在每个配置加载时放入，但不放入基础配置，所以 Admin
 API 的 `GET /config` 和 JSON 页面里没有密码、哈希或密钥路径。带 `admin` 的配置被拒绝：`admin` 只来自
 引导文件。`admin` 的设置（包括 store 和控制台的）在 fit 启动时读取，改它要重启。
 
-store 打不开（密码错或某个字节被改）时 fit 不会启动，且不会被覆盖。所以做一份副本：`fit store export -c
-<引导文件>` 以 JSON 输出 store 中的配置，`fit store import -c <引导文件> <文件>` 检查一份配置并重新封存
-它，用新的 salt 替换原有内容——改 store 的密码也靠它；运行中的 fit 要到 SIGHUP 才看到 import 的结果。
+store 打不开（密码错或某个字节被改）时 fit 不会启动，且不会被覆盖。所以做一份副本：
+
+```bash
+fit store export -c /etc/fit/fit.conf > /root/fit-config.json     # 以 JSON 输出 store 中的配置
+fit store import -c /etc/fit/fit.conf /root/fit-config.json       # 检查后封存为 store
+kill -HUP "$(pidof fit)"                                          # 运行中的 fit 重新读取 store
+```
+
+store 尚未写入时 `export` 报错。`import` 接受一份配置的文件或目录（fit 的任一格式），像 `fit validate`
+那样连同引导文件的 `admin` 一起检查，再用新的 salt 封存，替换 store 原有的内容；旧 store 能打开时，其中
+改过密码的控制台用户会保留。设置了 `admin` 的配置被拒绝。旧 store 不必能打开，所以改 store 的密码也这样
+做：导出、修改 `admin.store`、导入。运行中的 fit 要到 SIGHUP 才看到导入的结果。有 store 时
+`fit run -watch` 被拒绝：配置已不在它要监视的文件里。
 
 ### 首次启动：fit run -admin
 
@@ -66,14 +80,17 @@ fit run -admin -c site.yaml -timeout 30m
 
 - 配置未设置的 `admin` 与 `admin.console` 使用默认值：Admin API 在 `127.0.0.1:2019`，控制台在
   `127.0.0.1:2020`。没有 `admin.console.users` 时，用户 `admin` 以密码 `admin` 登录。
-- 该密码是**临时的**：必须在 `-timeout`（默认 `10m`，自启动时起算）内修改。修改之前，用它登录只能打开
-  “修改默认密码”页面（见[登录](02-login.zh-CN.md)）。超过 `-timeout` 后它无法再登录，须以 `-admin` 重启
-  fit 并及时修改。新密码不能是 `admin`，并保存在 store 中。
-- 没有 `admin.store` 时，store 是配置文件旁扩展名为 `.store` 的文件（`site.yaml` 对应 `site.store`，
-  `fit.json` 或无配置对应 `fit.store`），密码为 `$FIT_STORE_PASSWORD`，未设置时为 store 旁的**密钥文件**
+- 该密码是**临时的**：必须在 `-timeout`（默认 `10m`，自启动时起算）内修改，fit 的日志会写明截止时间。
+  修改之前，用它登录只能打开“修改默认密码”页面（见[登录](02-login.zh-CN.md)），Admin API 对所有请求答
+  `403`。超过 `-timeout` 后它无法再登录，须以 `-admin` 重启 fit 并及时修改。新密码不能是 `admin`；它保存
+  在 store 中，重启后用它登录，不再要求修改。不带 `-admin` 给出 `-timeout` 会报错。
+- 没有 `admin.store` 时，store 是配置文件旁扩展名为 `.store` 的文件（`site.yaml` 对应 `site.store`；
+  `fit.json` 或无配置对应当前工作目录下的 `fit.store`），密码为 `$FIT_STORE_PASSWORD`，未设置时为 store 旁的**密钥文件**
   （store 路径加 `.key`，如 `site.store.key`），两者都不存在时以随机密钥创建，权限 0600。密钥文件应与
   store 一起保存：复制到别处的 store 用它打开。
-- 只有 `admin.console`、没有监听和路由的配置是合法的，fit 可以在尚无服务内容时启动。
+- 只有 `admin.console`、没有监听和路由的配置是合法的，fit 可以在尚无服务内容时启动。`fit validate` 按文件
+  原样检查，不带 `-admin` 的默认值：把控制台用户留给 `-admin` 的文件通不过校验
+  （`admin.console.users: missing required field`）。
 - `-c` 也接受一个 `.store` 文件（最多一个），单独给出或与配置文件一起：`fit run -c site.store` 运行 store
   中的配置，`fit run -c base.yaml -c site.store` 则按上面的规则把它合并到 `base.yaml` 上。配置文件旁的
   `.store` 只要存在就会使用，不论是否给出 `-admin`。
@@ -92,7 +109,7 @@ echo 'correct horse battery staple' | fit hash-password
 把输出的哈希写进引导文件的 `admin.console.users`。`fit validate` 拒绝不是 bcrypt 哈希的
 `password_hash`、空用户名和重复列出的用户名。登录后也可以在“账户”页改密码（见[账户](13-account.zh-CN.md)），
 但改过的密码保存在 store 里，而 `admin` 只来自引导文件：用户本身及其初始哈希仍在文件中。没有 store 时
-没有地方保存改动：页面会说明，接口答 `409`。
+没有地方保存改动：页面会说明，接口答 `409`。增删用户要改引导文件并重启。
 
 ### 访问控制台
 
@@ -102,7 +119,7 @@ echo 'correct horse battery staple' | fit hash-password
 ssh -L 2020:127.0.0.1:2020 host
 ```
 
-在环回地址上 TLS 可选。**非环回地址需要 `cert_file` 和 `key_file`**，使密码从不以明文穿过网络；
+然后在浏览器中打开 `http://127.0.0.1:2020/`。在环回地址上 TLS 可选。**非环回地址需要 `cert_file` 和 `key_file`**，使密码从不以明文穿过网络；
 `fit validate` 拒绝没有它们的配置。`access` 决定哪些客户端地址能连上控制台，它随每次应用的配置生效，
 无需重启；被拒绝的连接一被接受就关闭。在其中写 `allow 127.0.0.1`（和 `::1`）可无论全局 `access` 如何
 都保留本机访问。
@@ -110,20 +127,23 @@ ssh -L 2020:127.0.0.1:2020 host
 ### Docker、Helm 与 systemd
 
 - **Docker**：镜像是 distroless 的 static 镜像，以 `nonroot`（65532）运行，只有 `/usr/local/bin/fit`
-  和 `/etc/fit/fit.json` 处的占位配置（它在 8080 端口应答所有请求）。store 所在目录要放在 volume 里
-  （写入方式是写一个新文件再改名覆盖），密码放在环境变量（`password_env`）或挂载的文件
-  （`password_file`）中，而不是写在配置里。要从容器外访问控制台，给它非环回的地址加 `cert_file` 和
-  `key_file`。1024 以下的端口由 sysctl `net.ipv4.ip_unprivileged_port_start=0` 放开，Helm chart 就是
-  这样做的。
-- **Helm**：chart 把 fit 作为 Gateway API 和 Ingress 的控制器运行，配置放在 ConfigMap 里；它的 values
-  只管服务部分，不管控制台与 store。要一并运行它们，在 `config` 值中给出整份配置（保留 chart 的健康检查
-  监听、路由与 Kubernetes provider），并自己为 store 提供 volume 与密码——chart 的文件系统是只读的，也没
-  挂载其他 volume。
+  和 `/etc/fit/fit.json` 处的占位配置（它在 8080 端口应答所有请求）；把引导文件挂载到那里，或以
+  `run -c <路径>` 为命令挂载到别处。store 所在目录要放在用户 65532 可写的 volume 里（写入方式是写一个新
+  文件再改名覆盖），密码放在环境变量（`password_env`）或挂载的文件（`password_file`）中，而不是写在配置里。
+  控制台在容器内监听 127.0.0.1：要从容器外访问，给它所有网卡的地址（`:2020`）加 `cert_file` 和
+  `key_file`，并发布该端口。Docker 允许容器的用户绑定 1024 以下的端口；在别处由 sysctl
+  `net.ipv4.ip_unprivileged_port_start=0` 放开，Helm chart 就这样设置。
+- **Helm**：chart 把 fit 作为 Gateway API 和 Ingress 的控制器运行，配置放在只读挂载到 `/etc/fit` 的
+  ConfigMap 里；它的 values 只管服务部分，不管控制台与 store。`config` 值可以给出整份配置（保留 chart 的
+  健康检查监听、路由与 Kubernetes provider），但 chart 的根文件系统只读，唯一可写的 volume 是内存中的
+  `/tmp`（64 MiB，随 pod 消失），也没有添加 volume 或环境变量的值：要用 store 及其密码，需要修改 chart 的
+  deployment 模板。
 - **systemd**：`fit.service` 用于配置在 `/etc/fit/fit.json` 的 fit，`fit@<name>` 用于
   `/etc/fit/<name>.json`。fit 以系统用户 `fit` 运行，只带 `CAP_NET_BIND_SERVICE`，文件系统只读，例外是
   `/var/lib/fit`（`StateDirectory`，store 的 `path` 放这里）和 `/run/fit`（`RuntimeDirectory`）。启动前
   先用 `fit validate` 检查配置；`systemctl reload fit` 检查新配置后发 SIGHUP，校验不过的重载会失败、运行
-  中的配置保持不变；SIGHUP 会重新读取 store，例如在 `fit store import` 之后。`systemctl stop fit` 发
+  中的配置保持不变。有 store 时 `fit validate` 只检查引导文件，SIGHUP 会重新读取 store，例如在
+  `sudo -u fit fit store import ...` 之后（以用户 `fit` 执行，store 仍归它所有）。`systemctl stop fit` 发
   SIGTERM，fit 最多等 30s（`-shutdown-timeout`）让进行中的请求完成。
 
 ## 参数
@@ -166,6 +186,7 @@ admin {
 		address 127.0.0.1:2020
 		users {
 			username admin
+			# 示例：写入 fit hash-password 为你的密码输出的哈希。
 			password_hash "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"
 		}
 	}

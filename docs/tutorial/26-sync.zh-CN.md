@@ -49,19 +49,20 @@ fit 重启后不会再跑；`job.schedule`（cron 的五个字段，时区由 `j
 运行、不受影响。被手工暂停的管道，在保留该管道的重载之后仍然暂停，fit 重启后则重新运行。保存发现的问题会链接到该管道的
 **编辑**页，成员本身的问题则链接到**同步配置**页。
 
-连接器覆盖 fit 能对话的每一类系统，因此任意一对都能连起来。文件（`file`）；数据库（MySQL、MariaDB 与 TiDB 用 `mysql`，
-TiDB 经 TiCDC 用 `tidb`，`postgres`，经 CDC 或变更跟踪的 `mssql`，`mongo`）；搜索与分析存储（Elasticsearch 与 OpenSearch
-用 `elasticsearch`，`clickhouse`，Doris 与 StarRocks 用 `doris`）；队列与日志（Kafka 与 Redpanda 用 `kafka`、`mqtt`、
-`rabbitmq`、NATS JetStream 用 `nats`、`pulsar`、Redis 与 Valkey 用 `redis`、S3 及兼容存储用 `s3`）；可观测性存储
-（`loki`、`otlp_logs`、`influxdb`、`tdengine`）；向量数据库（`qdrant`、`milvus`，由 `embed` 转换算向量）；`http`，作为
-路由上 `sync_ingest` 处理器背后的源；以及用于试用的 `generate`、`memory` 与 `stdout`。源与目标分别是 `sync.sources` 与
+除特别说明外，连接器既可作源也可作目标，因此大多数组合都能连起来。文件（`file`）；数据库（MySQL、MariaDB 与 TiDB 用
+`mysql`，TiDB 经 TiCDC 用 `tidb`——只能作源，TiDB 作目标时用 `mysql` 目标——`postgres`，经 CDC 或变更跟踪的 `mssql`，
+`mongo`）；搜索与分析存储（Elasticsearch 与 OpenSearch 用 `elasticsearch`，`clickhouse`，Doris 与 StarRocks 用
+`doris`）；队列与日志（Kafka 与 Redpanda 用 `kafka`、`mqtt`、`rabbitmq`、NATS JetStream 用 `nats`、`pulsar`、Redis 与
+Valkey 用 `redis`、S3 及兼容存储用 `s3`）；`http`，作为路由上 `sync_ingest` 处理器背后的源，以及按批 POST 的目标；以下
+只能作目标：可观测性存储（`loki`、`otlp_logs`、`influxdb`、`tdengine`）、向量数据库（`qdrant`、`milvus`，由 `embed`
+转换算向量）与 `dead_letters`。用于试用的有源 `generate` 与目标 `memory`、`stdout`。源与目标分别是 `sync.sources` 与
 `sync.sinks` 命名空间的模块，转换属于 `sync.transforms`（`filter`、`route`、`fields`、`key`、`cast`、`mask`、
 `envelope`、`embed`、`wasm`），编解码器属于 `sync.codecs`；内置模块覆盖不到的部分，在这四处中任何一处都可以用
 WebAssembly 插件实现。
 
 `fit validate` 会像检查其余配置一样检查每条管道：所写的模块在其命名空间中存在，`state_dir` 已设置，每条管道和每个目标的
-名称合法且不重复，至少有一个目标，`on_error dead_letter` 有其 `dead_letter` 目标而其他策略没有，并且 `job` 只与
-`mode once` 同时出现。
+（包括 `dead_letter` 目标）名称合法且不重复，至少有一个目标，`on_error dead_letter` 有其 `dead_letter` 目标而其他策略
+没有，`job` 只与 `mode once` 同时出现、其 `schedule` 与 `time_zone` 能被解析，并且 `retry.max_backoff` 不短于 `backoff`。
 
 同样的管道也可以从页面之外观察和操作：Admin API 的 `/sync/…` 接口（状态、暂停与恢复、重新快照、检查点、连接测试、试运行、
 死信），其上的 `fit sync`（`status`、`pause`、`resume`、`snapshot`、`checkpoint`、`test`、`dry-run`、`dead-letters`，
@@ -78,7 +79,8 @@ WebAssembly 插件实现。
 
 数据同步在菜单中位于 LLM 角色之后、BitTorrent 之前，标签为“管道”，有两个页面：**管道**与**同步配置**。每条管道有四个
 自己的标签页：**概览**、**编辑**、**检查点**与**死信**。每个页面都有自己的地址——`#/sync/pipelines`、`#/sync/config`、
-`#/sync/pipeline/<name>`、`#/sync/edit/<name>` 及标签页后缀——因此可以直接链接到一条管道。该模块属于控制台，只要控制台
+`#/sync/pipeline/<name>`、`#/sync/edit/<name>`、`#/sync/pipeline/<name>/checkpoint` 与
+`#/sync/pipeline/<name>/dead_letters`——因此可以直接链接到一条管道。该模块属于控制台，只要控制台
 运行就出现在菜单中，即使其角色尚未配置；此时页面会说明应如何设置，配置应用后管道即启动。
 
 ### 管道
@@ -100,8 +102,9 @@ WebAssembly 插件实现。
 
 顶栏的**新建管道**要求填写名称（字母、数字、`_`、`.` 与 `-`，且不重复；建议值为 `pipeline-1`）、**源**（`sync.sources`
 中所有模块，默认选中 `generate`）、**目标（sink）**（`sync.sinks` 中除 `dead_letters` 外的所有模块，默认选中 `memory`），
-以及草稿中还没有 `sync` 成员时的**状态目录**（`sync.state_dir`，建议 `/var/lib/fit/sync`）。**创建**会把管道加入草稿
-并打开它的**编辑**页：只有在**保存并应用**启动它之后，它才是真正运行的管道。
+以及草稿中还没有 `sync` 成员时的**状态目录**（`sync.state_dir`；留空时为 `/var/lib/fit/sync`）。**创建**会把管道加入
+草稿——包含所选的源和一个以其模块命名的目标，尚无参数——并打开它的**编辑**页：只有在**保存并应用**启动它之后，它才是真正
+运行的管道。对话框按与 `fit validate` 相同的规则检查名称：由字母、数字、`_`、`.` 与 `-` 组成，以字母或数字开头，且未被占用。
 
 ### 同步配置
 
@@ -121,12 +124,13 @@ WebAssembly 插件实现。
 
 页面上的按钮用来操作运行中的管道：
 
-- **暂停**按住源，同时已读取的记录仍会写入、检查点仍会保存；**恢复**让它继续，并重新启动因错误而停止的管道。
+- **暂停**按住源，同时已读取的记录仍会写入、检查点仍会保存。管道处于暂停、`stopped` 或 `killed` 时，这个按钮变为
+  **恢复**：让它继续，并重新启动因错误而停止的管道。
 - **重新快照**会先确认：从头重新读取源，删除检查点并重启管道，于是目标会再次收到所有记录，覆盖已有内容。
 - **测试连接**测试源、各目标与 `dead_letter` 目标的连接，不写入任何记录。结果卡片列出各个部分、其模块、结果（**通过**、
   **失败**、**无测试：请试运行**）与耗时；通过的测试若会丢数据，还会给出**警告**。
 - **试运行**把前几条记录读出来经过各转换，显示每条读到的记录及其结果——被转换丢弃，或交给 sink 的记录——不写入任何内容，
-  也不保存位置。它的表单设置记录条数（10，最多 1000）、等待时长（5s），在这一页还可以选择**从检查点**或**从起点**开始；
+  也不保存位置。它的表单设置记录条数（10，最多 1000）、等待时长（5s，最多 1m），在这一页还可以选择**从检查点**或**从起点**开始；
   页面会说明源已读完、等待先结束、或没有读到记录。试运行读取的记录与死信中的记录只显示给登录者，从不保存。
 
 不运行的管道（不在运行中的配置里）会说明这一点，并给出到其**编辑**页的链接和保存并应用的提示。
@@ -154,16 +158,30 @@ WebAssembly 插件实现。
 
 ### 死信
 
-`dead_letters` 目标保留的记录，最旧的在前，每次 50 条，用**更多**加载下一页；上方显示相对 `max_records` 与 `max_bytes`
-保留的数量，以及文件路径。该文件是 `<state_dir>/<name>.dead_letters.jsonl`，每条死信一行 JSON，写入并同步之后才算已写入。
-每行有复选框、**ID**、**保存时间**、失败的**位置**（某个 sink 或某个转换）、**尝试次数**、**错误**，以及可展开的、规范
-JSON 形式的**记录**。第一条错误旁有运行 `sync-pipeline` 技能的**问 AI** 按钮。
+`dead_letters` 目标保留的记录，最旧的在前，每次 50 条，用**更多**加载下一页；上方显示保留的条数、其字节数相对
+`max_bytes` 的占用，以及文件路径。该文件默认是 `<state_dir>/<name>.dead_letters.jsonl`，目标的 `path` 可另行指定
+（相对路径位于 `state_dir` 之下），每条死信一行 JSON，写入并同步之后才算已写入。每行有复选框、**ID**、**保存时间**、
+失败的**位置**（某个 sink 或某个转换）、**尝试次数**、**错误**，以及**记录**：折叠时显示其命名空间，展开后是规范 JSON。
+第一条错误旁有运行 `sync-pipeline` 技能的**问 AI** 按钮。该页在打开时读取，不定时刷新。
 
-**重放所选**与**全部重放**会先确认；重放会停止管道，把每条记录按原样写入它失败的那个 sink——若失败者是转换，则先经过转换、
+**重放所选**与**全部重放**会先确认（未勾选任何行时，“所选”按钮不起作用）；重放会停止管道，把每条记录按原样写入它失败的那个 sink——若失败者是转换，则先经过转换、
 交给所有 sink——并覆盖该键之后的任何修改，然后丢弃写入成功的、保留并报告再次失败的，最后重新启动管道。**丢弃所选**与
 **全部丢弃**同样会先确认，这些记录将丢失。`dead_letter` 目标不是 `dead_letters` 的管道没有可在这里重放的死信，页面会说明
 应如何配置：`on_error dead_letter`，外加一个模块为 `dead_letters` 的 `dead_letter` 目标。命令行用
 `fit sync dead-letters` 列出它们，其 `-replay -all` 与 `-drop` 与页面按钮作用相同。
+
+## 一步步建立第一条管道
+
+1. **数据同步 → 管道 → 新建管道**：初次试用保留 `generate` 与 `memory`，或选真正的源与目标；如有提示，填写状态目录。
+   **创建**后打开**编辑**页。
+2. 在**编辑**页填写源与目标的参数（地址、用户、`password_env` 环境变量名、表或路径），按需添加转换和更多目标，并设置
+   `on_error`。
+3. **测试连接**检查草稿中的源与目标；**试运行**显示前几条记录会变成什么。两者都不需要先保存草稿。
+4. 点击顶栏的**保存并应用**（也可先**检查**）。管道启动后，其**概览**显示 `running`、吞吐与延迟。
+5. 要从头再来，用**检查点 → 重置**，或概览上的**重新快照**；要暂时停下，用**暂停**。
+
+连接器所写的环境变量在管道加载时从 fit 自身的环境中读取，因此要在启动 fit 的地方（其服务单元或容器）设置，而不是在控制台里：
+变量未设置或为空时，`fit validate`、**检查**与**保存并应用**都会拒绝这条管道。
 
 ## 参数
 
@@ -175,7 +193,7 @@ JSON 形式的**记录**。第一条错误旁有运行 `sync-pipeline` 技能的
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `sync.state_dir` | — | 必填。`<name>.json` 检查点所在的目录，不存在时创建；把管道迁到另一台 fit 就是移动它的文件 |
-| `pipelines[].name` | — | 必填。唯一；由字母、数字、`_`、`.` 与 `-` 组成；检查点文件与死信文件都以它命名 |
+| `pipelines[].name` | — | 必填。唯一；由字母、数字、`_`、`.` 与 `-` 组成，以字母或数字开头；检查点文件与死信文件都以它命名 |
 | `pipelines[].source` | — | 必填。`sync.sources` 的一个模块及其 `params` |
 | `pipelines[].transforms` | 无 | 按顺序排列的 `sync.transforms` 模块；每个都可以修改、丢弃或拆分记录 |
 | `pipelines[].sinks` | — | 必填，至少一个。每个含名称、`sync.sinks` 的一个模块及其 `params`；每个 sink 都接收每一条记录 |
@@ -187,8 +205,8 @@ JSON 形式的**记录**。第一条错误旁有运行 `sync-pipeline` 技能的
 | `pipelines[].sinks[].batch.max_records`、`.max_bytes`、`.max_wait` | 500、4 MiB、1s | 批次何时关闭：达到记录数、字节数，或首条记录之后经过的时间 |
 | `pipelines[].checkpoint_interval` | 5s | 检查点移动时最多每隔多久写一次；管道停止时也会写 |
 | `pipelines[].retry.max_attempts`、`.backoff`、`.max_backoff` | 5、200ms、30s | 失败写入的尝试次数，以及每次之前的等待，逐次翻倍到最大值 |
-| `pipelines[].job.max_parallel`、`.schedule`、`.time_zone` | 4、无、`UTC` | 作业同时读取的分块数与 cron 排期；仅用于 `mode once` |
-| `dead_letters` 目标的 `max_records`、`max_bytes`、`when_full` | 10000、64 MiB、`refuse` | 保留的死信数量，以及文件满时是拒绝一条（`refuse`，管道停止）还是丢弃最旧的（`drop_oldest`） |
+| `pipelines[].job.max_parallel`、`.schedule`、`.time_zone` | 4、无、`UTC` | 作业同时读取的分块数，以及排期：cron 的五个字段（`0 3 * * *`）或 `@hourly`、`@daily`、`@weekly`、`@monthly`、`@yearly`，时区为 IANA 名称或 `Local`；仅用于 `mode once` |
+| `dead_letters` 目标的 `path`、`max_records`、`max_bytes`、`when_full` | `<state_dir>/<name>.dead_letters.jsonl`、10000、64 MiB、`refuse` | 文件、保留的死信数量，以及文件满时是拒绝一条（`refuse`，管道停止，不丢数据）还是丢弃最旧的（`drop_oldest`） |
 
 ## .conf 配置
 
@@ -220,8 +238,54 @@ sync {
 ```
 
 `fit run -c fit.conf` 让它在网关旁运行。`fit sync run -c fit.conf orders-log` 单独运行这一条管道，不提供其他任何服务，
-直到被中断，退出时保存检查点；加 `--once` 则把它当作作业读到末尾。第一次试用、没有文件可跟随时，把源换成
-`source generate { records 100 }`、目标换成 `sinks out { sink stdout }`——`.conf` 形状相同，它会直接打印记录。
+直到被中断，退出时保存检查点；加 `--once` 则把它当作作业读到末尾：所有记录都写入时退出码为 0，有记录失败（`skip` 或
+`dead_letter`）时为 3，管道停止时为 1。第一次试用、没有文件可跟随时，下面的配置打印一千条记录后停止：
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines trial {
+		mode once
+		source generate { records 1000; tx_size 10 }
+		sinks out { sink stdout }
+	}
+}
+```
+
+把一个数据库恰好一次地同步到另一个：先对 `shop.*` 做一次快照，再跟随 MySQL 的 binlog，用 `filter` 去掉删除操作，
+upsert 到 PostgreSQL；其 `checkpoint sink` 把位置与这些行写在同一个事务里。密码来自 fit 环境中的 `MYSQL_PASSWORD` 与
+`PG_PASSWORD`，必须设置，配置才能加载。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines shop-to-pg {
+		source mysql {
+			address mysql.internal:3306
+			username fit_repl
+			password_env MYSQL_PASSWORD
+			tls true
+			server_id 4101
+			tables shop.*
+		}
+		transforms filter { ops delete; action drop }
+		sinks warehouse {
+			sink postgres {
+				address pg.internal:5432
+				user fit_sync
+				password_env PG_PASSWORD
+				database warehouse
+				checkpoint sink
+			}
+			batch { max_records 1000; max_wait 200ms }
+		}
+	}
+}
+```
+
+MySQL 用户需要 `REPLICATION SLAVE`、`REPLICATION CLIENT` 与 `SELECT` 权限，`server_id` 在该服务器的副本中必须唯一；
+目标把 `shop.orders` 写入 schema `shop` 下的表 `orders`。若改为每晚跑一次的复制，只需在同一条管道上加 `mode once` 与
+`job { schedule "0 3 * * *"; time_zone Asia/Shanghai }`。
 
 ## 相关文档
 

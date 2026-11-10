@@ -126,8 +126,10 @@ curl、Gemini SDK、Ollama）；**各模型调用**列出每个模型的调用�
 
 #### API Key
 
-列出每个 Key：名称、前缀（`ah-…`）、创建时间、最近使用与调用数。**新建 API Key**只输入名称；Key 只在创建
-时显示一次，成员保存的是它的 SHA-256。**删除**会使使用它的 agent 无法调用。使用情况最多每分钟保存一次。
+列出每个 Key：名称、前缀（前 10 个字符，`ah-…`）、创建时间、最近使用与调用数。**新建 API Key**只输入名称；
+Key 只在创建时显示一次，成员保存的是它的 SHA-256。**删除**会使使用它的 agent 无法调用。没有任何 Key 时 agent 的
+每次调用都应答 `401`，所以要先建一个。最近使用与调用数只在内存中计数（自角色启动起），不写回配置，重启后清零
+（页面提示说使用情况每分钟保存一次，代码并没有这样做）。
 
 #### 设置
 
@@ -143,8 +145,8 @@ curl、Gemini SDK、Ollama）；**各模型调用**列出每个模型的调用�
   方固定的就是它。**修改监听**写入地址、密码、自签名与证书文件，并可**移除全部密码：只接受令牌连接**。
 - **连接**：每条连接的角色、名称、方向、远端地址、连接时间，以及它证明的凭据（令牌 ID，或共享密码——仍有
   这样的连接时给出警告）；**踢下线**关闭它，出站连接会自动重连。这是页面上唯一不写入配置的修改。
-- **主动连接目标**：`peers` 中的每个地址及其角色、状态与对端；**连接到…**填写对端监听签发的令牌（它替换
-  密码）、对端必须声明的角色、`pin` 或 `ca_file` 与 `server_name`。
+- **主动连接目标**：`peers` 中的每个地址及其角色、状态与对端，以及移除它的**断开**；**连接到…**填写地址、对端
+  监听签发的令牌（它替换密码）、对端必须声明的角色、`pin` 或 `ca_file` 与 `server_name`。
 - **连接令牌**：签发令牌（只显示一次）、列出令牌及其过期时间、最近使用、绑定成员与连接，修改过期时间与
   吊销。由页面、Admin API 或 `fit token` 生成，不要手写。
 
@@ -313,9 +315,33 @@ llm {
 }
 ```
 
-只有角色、没有路由的配置不需要监听。页面对这些成员的修改经 `admin.Configs` 作为一次配置编辑生效，有
-store 时加密写入 store。proxy 的成员见[配置参考：LLM](../reference/config.md#config-llmproxy)：
-`api { address 127.0.0.1:9301 }` 在本机提供 agent 接口，它的 `peers` 像 node 的一样拨号连接 hub。
+只有角色、没有路由的配置不需要监听。页面对这些成员的修改作为一次配置编辑生效，有 store 时加密写入
+store；没有 store 时只在 fit 重启或重新读取配置文件之前有效。
+
+开发者机器上的一个 proxy：用自己的令牌拨号连接同一个 hub，在回环地址上提供 agent 接口；它的 `api_keys` 来自其
+**API Key** 页：
+
+```fit
+llm {
+	proxy {
+		name laptop
+		peers {
+			address hub.example.net:9210
+			token fitt1.3b7a0c9e1d2f4a56.q8Xc2Lr0VwN5bTz7Ka1MdYp4Hs9GfJu3EoWi6RnBtQk
+			role hub
+			pin 134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9
+		}
+		api {
+			address 127.0.0.1:9301
+			max_inflight 256
+			timeout 30m
+		}
+	}
+}
+```
+
+之后 agent 以 `Authorization: Bearer <key>` 和 `"model": "qwen3-32b"` 调用
+`http://127.0.0.1:9301/v1/chat/completions`。完整字段见[配置参考：LLM](../reference/config.md#config-llmproxy)。
 
 ## 相关文档
 

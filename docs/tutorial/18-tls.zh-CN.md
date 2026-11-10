@@ -37,15 +37,16 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 
 编辑 `auto_https` 成员：表单加 `.conf`、`.yaml`、`.json` 标签，"保存并应用"校验并应用。四个字段——
 `disable`、`disable_redirects`、`http_port`、`https_port`——都在[参数](#参数)里。这一页不生成监听：它改的是
-规则，监听由 fit 按规则生成。[引擎](06-engine.zh-CN.md)页链着每个端口的 TLS 设置：监听自己的 `tls` 是
-"TLS 证书"与"ACME 证书"，用上自动 HTTPS 的是"自动 HTTPS"，生成的 80 端口上是"重定向到 HTTPS"，点开都是
-设置它的那一页。
+规则，监听由 fit 按规则生成。[引擎](06-engine.zh-CN.md)页链着每个端口的 TLS 设置：监听设置了 `tls` 的端口
+列出"TLS 证书"（打开证书页），其 `tls.acme` 写了主机名时还列出"ACME 证书"（打开 ACME 页）；自动 HTTPS 开着、
+端口提供 HTTP 且 `tls` 为空（如 `tls {}`）或是生成的 443 端口时列出"自动 HTTPS"；生成的 80 端口列出"重定向到 HTTPS"；这两项都打开本页。
 
 ### ACME（`#/gw.tls/acme`）
 
 编辑 `acme` 成员：CA 的目录、邮箱、`ca_file`、`storage` 或 `shared_storage`（`redis`、`etcd`、`consul` 三选
 一）、`challenges`、`on_demand`、`max_concurrent` 与两个超时。这一页改的设置要重启才生效；页上改的是配置，
-运行中的申请与续期按启动时读到的规则继续。
+运行中的申请与续期按启动时读到的规则继续。重启之前，[一致性检查](10-consistency-check.zh-CN.md)把 `acme`
+列在"运行值仍是启动时的值"的设置里。
 
 ## 参数
 
@@ -55,7 +56,7 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 | --- | --- | --- |
 | `disable` | 关 | 关闭默认 HTTPS：不为无监听的配置生成监听，空的 `tls` 也不得证书。 |
 | `disable_redirects` | 关 | 不建明文的重定向监听；HTTP-01 无人应答，证书走 TLS-ALPN-01。 |
-| `http_port` | `80` | 重定向监听（及 HTTP-01）的端口。 |
+| `http_port` | `80` | 重定向到 HTTPS 的明文监听的端口。 |
 | `https_port` | `443` | HTTPS 监听的端口，也是重定向所写的端口。 |
 
 `acme`（关键项）：
@@ -80,7 +81,16 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 
 `challenges` 按写的顺序试：`http-01` 由任何明文监听在 80 上答——所以 `disable_redirects` 关掉重定向后
 HTTP-01 没人答，证书只能走 TLS-ALPN-01；`tls-alpn-01` 由列出这个名字的 TLS 监听在 443 上答。一次失败会换
-下一个再试。要求客户端证书（`client_auth` 的 `mode: require`）的监听答不了 TLS-ALPN-01，因为 CA 不发证书。
+下一个再试。要求客户端证书（`client_auth` 的 `mode: require`）的监听答不了 TLS-ALPN-01，因为 CA 不发证书：
+`challenges` 只写 `tls-alpn-01` 时，这样一个证书来自 ACME（`tls.acme`、`on_demand` 或空的 `tls`）的监听校验
+不通过；改成 `mode: verify_if_given`，或允许 `http-01`。
+
+### 续期
+
+证书在剩下三分之一有效期时续期（按序列号再提前一点，使同时申请的证书不会同时续期），CA 的续期信息（ARI，
+RFC 9773）建议了更早的时间窗时则提前续期。一次失败在一分钟后重试，之后每次间隔翻倍，最长一小时。存储里的证书
+在到期续期之前照用，所以重启不会重新申请。ACME 申请的证书，以及证书链能用系统根验证的文件证书，都会获取并装订
+OCSP 应答；这一项没有配置。
 
 ### 存储与共享
 
@@ -123,15 +133,36 @@ route { handler respond { body hello } }
 ```
 
 两点要注意：`tls.on_demand` 需要顶层 `acme.on_demand` 的 `ask`，少了它校验报错；`tls.certificates` 里的
-`cert_file` 与 `key_file` 在校验时会被读取，文件不存在就报错，所以示例里只写 `acme` 的名字。多台机器共享
-证书时改用 `shared_storage`（与 `storage` 互斥），并把 `ask` 与 `email` 留着。
+`cert_file` 与 `key_file` 在校验时会被读取，文件不存在就报错，所以示例里只写 `acme` 的名字。
+
+多台机器共享证书时用 `shared_storage` 代替 `storage`：下面用 Redis，密码在每次连接时从文件读取。这同样是完整
+配置：
+
+```fit
+acme {
+	email ops@example.com
+	shared_storage {
+		redis { address 10.0.0.5:6379; password_file /etc/fit/redis-password }
+		prefix fit/
+		lock_ttl 30s
+	}
+}
+
+listener https :443 { tls { acme example.com www.example.com } }
+
+route { handler respond { body hello } }
+```
+
+每个实例写同一个存储与同一个 `prefix`；换成 `etcd { endpoints http://10.0.0.6:2379 }` 或
+`consul { endpoint http://127.0.0.1:8500 }` 的写法相同。
 
 ## 相关文档
 
 - [监听](05-listeners.zh-CN.md)：监听的 `tls`、`client_auth` 与按需证书。
 - [引擎](06-engine.zh-CN.md)：端口下把证书、ACME 与自动 HTTPS 列在何处。
 - [概览](04-overview.zh-CN.md)：14 天内到期的证书与证书表。
-- [一致性检查](10-consistency-check.zh-CN.md)：`acme` 中的名字没有证书覆盖属于 drift。
+- [一致性检查](10-consistency-check.zh-CN.md)：监听的 `tls.acme` 列出的名字没有证书覆盖属于 drift；fit 启动后
+  改过的 `acme` 在重启前会被列出。
 - [配置参考：HTTPS by default](../reference/config.md#https-by-default)：`auto_https` 的全部字段。
 - [配置参考：ACME](../reference/config.md#acme)：`acme` 的全部字段。
 - [模块文档 auto_https](../../schema/doc/auto_https.md)与[acme](../../schema/doc/acme.md)。

@@ -26,7 +26,8 @@ the one before it, and what an apply actually wrote can be read from its text.
 
 The line at the top says it: the configs applied, newest first, as many as fit keeps, and rolling back applies
 an old one again as a new version. The endpoint returns them oldest first and the page reverses that. Below it
-is a table, one row per version:
+is a table, one row per version, with **View** and **Roll back** at the end of each row (no **Roll back** on the
+running one):
 
 | Column | What it shows |
 | --- | --- |
@@ -35,6 +36,7 @@ is a table, one row per version:
 | Source | Where this config came from: `file`, `store`, `admin`, `console`, `rollback`, `certificates`, `cluster`, or a provider's name (each is described below) |
 | Size | The config's bytes as written |
 | ETag | Its strong entity tag, a hash of the config's content, the one `If-Match` compares |
+| | **View**, and **Roll back** on every row but the running one's |
 
 For example:
 
@@ -46,8 +48,9 @@ For example:
 
 **Refresh** reads the table again; it is read once when the page is opened. This page edits no member, so it has
 no format tabs, but it still has the shared save bar: a rollback is sent with `If-Match`, compared against the
-running config's ETag. A failed apply leaves no version: only an apply that went through is recorded, and the
-failed counts show in the spikes on the [Overview](04-overview.md) page. The Admin API's dashboard shows these
+running config's ETag. A failed apply leaves no version: only an apply that went through is recorded; the failures
+are counted on the **Reloads** tile of the [Overview](04-overview.md) page ("N failed"), which also flags each new
+one as a spike. The Admin API's dashboard shows these
 versions too (not when `admin.disable_dashboard` turns the dashboard off).
 
 **View** opens a window titled "Version N" with that version's text: formatted when it parses as JSON, and as it
@@ -55,8 +58,8 @@ was written otherwise. The window has **Copy**, **Roll back** (only for a versio
 and **Close**. A version keeps the config as it wrote it, not the effective config it ran then; for that, look
 at the Effective tab of the [JSON](08-json.md) page.
 
-This page and the [Overview](04-overview.md) page: the Overview shows only the running version and its source,
-while this page lists every version kept.
+This page and the [Overview](04-overview.md) page: the Overview's **Recent versions** card shows the latest five
+(version, applied, source) with an **All versions** link to this page, which lists every version kept.
 
 **Roll back** asks twice: when the draft has unsaved changes it first asks "Rolling back discards the changes
 not saved. Go on?", then "Apply version N again, as a new version?". After the confirmations it goes through
@@ -75,7 +78,7 @@ The endpoints this page uses (the Admin API's endpoints sit under `/api/m/admin/
 | --- | --- |
 | `GET /versions` | the versions kept, oldest first, with the running version's number |
 | `GET /versions/{n}` | the text of version n |
-| `POST /rollback/{n}` | applies version n again, with `If-Match` |
+| `POST /rollback/{n}` | applies version n again; the page sends `If-Match`, and a version no longer kept answers 404 |
 
 ## Key parameters
 
@@ -99,19 +102,19 @@ What a version records (each item of `GET /versions`):
 | `applied` | When it was applied |
 | `source` | Where it came from: `file`, `store`, `admin`, `console`, `rollback`, `certificates`, `cluster` or a provider's name |
 | `bytes` | The config's bytes as written |
-| `etag` | A hash of its content (the first 12 bytes, hexadecimal, quoted), as a strong entity tag |
+| `etag` | A hash of its content (the first 12 bytes of its SHA-256, 24 hex digits, quoted), as a strong entity tag |
 
 The source names are the paths a config can take in:
 
 | source | what applied it |
 | --- | --- |
-| `file` | the config file, at start, on a reload of it (`SIGHUP`) or with `-watch` |
+| `file` | the config file, at start, on a reload of it (`SIGHUP`) or with `fit run -watch` |
 | `store` | the store the config is kept in, at start, or read again on `SIGHUP` |
-| `admin` | a change through the Admin API |
-| `console` | a save on a console page |
+| `admin` | a change through the Admin API (`PUT /config`, `POST /reload` and the like) |
+| `console` | a save, a reload or a consistency fix on a console page, and a manager's change made through the member's console |
 | `rollback` | a rollback on this page |
-| `certificates` | the running config applied again because a certificate file it loaded changed |
-| `cluster` | a config a manager applied to this member through its link |
+| `certificates` | the running config applied again because a certificate file it loaded changed (`fit run -watch-certs`, on by default) |
+| `cluster` | a config a manager applied to this member through its link (`admin.cluster_member`); a manager that reaches the member over HTTP shows as `console` or `admin` |
 | a provider's name | what that provider provided changed |
 
 ## Versions and the store
@@ -133,9 +136,12 @@ when it does not match (`412`) nothing is applied.
 
 After it succeeds: a new version, written to the store, and the `admin` log records the apply. A rollback
 applies that base config again and does not change what the providers provided; it also does not restart the
-settings read only at start — `engine`, `telemetry`, `providers` and `admin` run with their new values only at
-the next restart, and that kind of difference shows on the
-[consistency check](10-consistency-check.md) page.
+settings read only at start — `engine`, `telemetry`, `acme`, `providers`, the outputs and formats of `log` and
+`access_log`, and `admin` run with their new values only at the next restart, and that kind of difference shows
+on the [consistency check](10-consistency-check.md) page.
+
+On a manager whose cluster has roles ([Cluster](12-cluster.md#users-and-audit)), only a cluster-wide admin may roll
+the manager's own config back; the page answers the others that it is read-only.
 
 ## Common cases
 
@@ -161,11 +167,20 @@ the next restart, and that kind of difference shows on the
 - **Rolling back does not change `admin`**: `admin` comes from the bootstrap file and is put into the config at
   each load; the users, the passwords and the store's settings are not in a version, so a rollback does not
   touch them.
-- **Reading versions from a script**: there is no command for it; use the Admin API —
-  `curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2019/versions`; the rollback is
-  `POST /rollback/{n}`, with `If-Match`.
-- **A manager**: a rollback through `admin.cluster` calls each member's `POST /rollback/{n}`, so the versions
-  a manager sees are that member's own.
+- **Reading versions from a script**: there is no command for it; use the Admin API (`127.0.0.1:2019` unless
+  `admin.address` says otherwise; the token only with `admin.token_file`):
+
+  ```sh
+  curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2019/versions      # the list, and "current"
+  curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2019/versions/11   # the text of version 11
+  curl -X POST -H "Authorization: Bearer $TOKEN" -H 'If-Match: "9f2c1a7b3e0d4c65a1b8e2f0"' \
+    http://127.0.0.1:2019/rollback/11                                         # roll back to it
+  ```
+
+  `If-Match` is optional on the API: without it the rollback is applied whatever changed meanwhile.
+- **A manager**: a rollback through `admin.cluster` (a group's **Roll back** operation, or a rollout rolled back)
+  calls each member's `POST /rollback/{n}`, so the versions a manager uses are that member's own; a member's own
+  Versions page, opened through the node switcher, lists them.
 
 ## In .conf
 

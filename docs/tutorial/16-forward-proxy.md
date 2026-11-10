@@ -36,7 +36,7 @@ Neither authenticates, so `clients` is the only gate.
 
 ### Forward proxy
 
-The Forward proxy module has one page in the menu. It edits the `routes` member of the config, but shows
+The Forward proxy module has one page in the menu, `#/gw.forward/routes`. It edits the `routes` member of the config, but shows
 only the routes whose `handler` is `forward_proxy`; the callout at the top says so, and reminds that
 listeners can serve SOCKS5 with the `socks` protocol too.
 
@@ -44,8 +44,9 @@ listeners can serve SOCKS5 with the `socks` protocol too.
   "Listeners serving SOCKS": each badge holds the listener's name and address and opens the
   [Listeners](05-listeners.md) page. This row is read only; `socks` itself is edited on the Listeners
   page.
-- Each route is a row: its name, with the small tags `clients`, `:ports` and `@listeners` (which
-  listeners the route serves; a route that names none serves every listener).
+- Each route is a row: its name, with small tags for its clients (the `clients` entries, joined by
+  commas), `:ports` and `@listeners` (which listeners the route serves; a route that names none serves
+  every listener).
 - "Add forward proxy route" makes a route with `match { method CONNECT }`, `clients` `127.0.0.1/32`
   and `ports` `443`, named `forward-1`, `forward-2`, …
 - A route row opens its form: `match` and the handler's params are edited field by field, `clients`,
@@ -58,14 +59,14 @@ listeners can serve SOCKS5 with the `socks` protocol too.
 ### On the Engine page
 
 The [Engine](06-engine.md) page lists the features a port serves: under this port it lists "Forward
-proxy routes", which links back to this page, and if the same port serves SOCKS, "SOCKS forward proxy",
-which links to the Listeners page. The tags of the port row name the protocols and the `proxy_protocol`.
+proxy routes", which links back to this page, and if the listener has `socks`, "SOCKS forward proxy",
+which links to the Listeners page, where the SOCKS rules are edited. The tags of the port row name the protocols and the `proxy_protocol`.
 
 ## Key parameters
 
 Only the key parameters; the full field tables are in
 [the config reference: Handlers](../reference/config.md#http-handlers-forward_proxy) and, for
-`listeners.socks`, in [the config reference: Listeners](../reference/config.md#listeners). Both are the
+`listeners.socks`, in [the config reference: `listeners[].socks`](../reference/config.md#config-forwardproxy). Both are the
 same object, so the fields are the same.
 
 | field | default | description |
@@ -93,17 +94,20 @@ These are refused whatever `allow` holds; to allow them `allow` must name them:
 ### What gets refused, and how
 
 - a client not in `clients`: the route answers 403, SOCKS answers a failure reply (code 2);
-- a destination `allow` does not hold, or one of the addresses refused by default above: the route
-  answers 403, SOCKS code 2;
-- a host name that resolves to a refused address: refused once it is connected, before anything is
-  sent, and the route answers 502 (SOCKS code 2);
+- a destination port `ports` does not hold, a destination `allow` does not hold or `deny` holds, or an
+  IP address refused by default above: the route answers 403, SOCKS code 2;
+- a host name that resolves to an address refused by default, or to one `deny` holds (or, when `allow`
+  holds the name only through a range, that the range does not hold), and a destination that turns out to
+  be the host's own address: refused once it is connected, before anything is sent, and the route answers
+  502 (SOCKS code 2);
 - a resolve or connect past `connect_timeout`: the route answers 504, SOCKS a failure reply.
 
 ### Points that are easy to misread
 
 - `clients` names the clients, not the destinations; the destinations are `allow` and `deny`.
-- A range in `allow` also holds the address a host name resolves to, so a name written in `allow` can
-  still be refused.
+- A range in `allow` also holds the address a host name resolves to, and a name `allow` names is still
+  checked by the address it resolves to: one that resolves to `127.0.0.1` is refused unless `allow` also
+  names `127.0.0.0/8`.
 - `deny` wins over `allow`: an address `allow` holds is refused by `deny` just the same.
 - `ports` bounds the destination port, not the port the proxy listens on.
 
@@ -145,6 +149,18 @@ the `socks` block, not in the listener block. `allow` holds no `127.0.0.0/8`, so
 the host itself; to allow that, write it in `allow`. `ports 443` allows only destination port 443 — the
 port the proxy goes to, not the port it listens on; leave `ports` out and any port is allowed.
 
+To try it, from a client in `10.0.0.0/8` (`proxy.example.net` standing for fit's address):
+
+```sh
+curl -x http://proxy.example.net:8080 https://www.example.com/
+curl --socks5-hostname proxy.example.net:8080 https://www.example.com/
+```
+
+The first tunnels through the route with CONNECT, the second through SOCKS5, the name resolved by fit;
+a plain `http://` URL through `-x` is sent as a GET, not a CONNECT: this route, which matches CONNECT
+only, does not take it (no route does here, so 404), and a `forward_proxy` route that did would answer
+405; `curl -p` tunnels it with CONNECT instead, to port 80, which `ports 443` refuses.
+
 The page edits the `routes` member: in JSON and YAML the same route is `routes[].handler.params`,
 and this route is the one in the JSON example of
 [the forward_proxy module doc](../../schema/doc/modules/forward_proxy.md).
@@ -155,7 +171,7 @@ and this route is the one in the JSON example of
 - [Engine](06-engine.md): where a port lists this route and SOCKS.
 - [Reverse proxy](15-reverse-proxy.md): a route's `match`, `handler` and `middleware`.
 - [the config reference: Handlers](../reference/config.md#http-handlers-forward_proxy): every field of `forward_proxy`.
-- [the config reference: Listeners](../reference/config.md#listeners): every field of `listeners.socks`.
+- [the config reference: `listeners[].socks`](../reference/config.md#config-forwardproxy): every field of `listeners.socks`.
 - [the forward_proxy module doc](../../schema/doc/modules/forward_proxy.md): the addresses refused by default and a route example.
 - [who may connect](../configuration.md#who-may-connect): `access` and the client addresses.
 - [the complete config template](../../templates/conf/conf.d/10-listeners.conf): every field, commented.

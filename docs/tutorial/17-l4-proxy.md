@@ -76,7 +76,8 @@ the `proxy_protocol`; when a port is used by HTTP, tcp and socks at once, the pa
 ## Key parameters
 
 Only the key parameters; the full field table is in
-[the config reference: Services](../reference/config.md#services).
+[the config reference: Services](../reference/config.md#services)
+([`services[]`](../reference/config.md#config-service)).
 
 | field | default | description |
 | --- | --- | --- |
@@ -93,8 +94,17 @@ Only the key parameters; the full field table is in
 
 `max_conns` counts the connections and sessions one service proxies at once: a connection past it is
 closed as soon as it is accepted, and the datagrams of a session past it are dropped. `idle_timeout`
-means nothing on either side — a side that is still talking is not idle. The page shows none of these
+counts the time with nothing either way: while either side still sends, the connection is not idle. The page shows none of these
 numbers: the connections fit holds are counted on the [Overview](04-overview.md) page.
+
+### What validation refuses
+
+- a `tcp` or `udp` listener that no service lists, and a service listener that is neither: a service takes
+  listeners whose `protocols` include `tcp`, or are `udp` alone;
+- a `udp` listener listed by two services, or by a service with `server_names` or `proxy_protocol`;
+- two services without `server_names` on one `tcp` listener, or one server name in two services on it;
+- an IP address in `server_names`: a ClientHello names host names;
+- an `upstream` or a listener that does not exist.
 
 ### What is not used
 
@@ -128,34 +138,46 @@ of its own.
 
 ## In .conf
 
-Three listeners, three upstreams and three services: one TLS pass-through split by SNI, one `udp`,
-and one that sends a PROXY header. This is a self-contained complete config, and it passes
-`fit validate`:
+Three listeners, four upstreams and four services: Postgres with a TCP health check, DNS over `udp`, and
+one port, `:8443`, split by SNI between a TLS pass-through for `mail.example.com` and a catch-all service
+that sends a PROXY header. This is a self-contained complete config, and it passes `fit validate`:
 
 ```fit
 listener pg :5432 tcp
 listener dns :53 udp
-listener mail :8443 tcp
+listener tls :8443 tcp
 
-upstream db 10.0.0.5:5432
+upstream db 10.0.0.5:5432 10.0.0.6:5432 {
+	health_check {
+		type tcp
+		interval 10s
+	}
+}
 upstream resolvers 10.0.0.53:53 10.0.0.54:53
 upstream mail 10.0.0.25:8443
+upstream web 10.0.0.30:8443 10.0.0.31:8443 {
+	load_balancing ip_hash
+}
 
-service postgres { listeners pg; upstream db; idle_timeout 30m; proxy_protocol v1 }
+service postgres { listeners pg; upstream db; idle_timeout 30m }
 service dns { listeners dns; upstream resolvers }
-service mail { listeners mail; upstream mail; server_names mail.example.com }
+service mail { listeners tls; upstream mail; server_names mail.example.com }
+service web { listeners tls; upstream web; proxy_protocol v2; max_conns 20000 }
 ```
 
 A config that writes no listener — and no route matching a host name, for which HTTPS by default
-would make listeners — fails validation: an upstream does not listen by itself. The three upstreams
-here are used by the three services.
+would make listeners — fails validation: an upstream does not listen by itself.
 
-The `mail` service is the SNI pass-through: a connection on `:8443` that asks for `mail.example.com` is
-proxied as it is to `10.0.0.25:8443`; a connection that asks for another name or for none has nowhere
-to go and is closed — to catch those, add a service without `server_names`.
+On `:8443`, a connection whose ClientHello asks for `mail.example.com` is proxied as it is to
+`10.0.0.25:8443`; every other one — another name, no name, or not TLS at all — goes to `web`, the
+listener's one service without `server_names`, which keeps a client on one of its two addresses by its IP
+address and sends each connection a PROXY v2 header first. The upstream must expect that header (nginx's
+`listen ... proxy_protocol`, HAProxy's `accept-proxy`): a server that does not, as Postgres, reads it as
+garbage, so `postgres` sends none.
 
 In form, `listener pg :5432 tcp` is the short way of writing `listener { name pg; address :5432;
-protocols tcp }`; a `service` has no short form, and its fields are written one by one in the block.
+protocols tcp }`, and `upstream db 10.0.0.5:5432 10.0.0.6:5432 { ... }` takes its `addresses` as
+arguments; a `service` takes only its name as the argument, and its other fields go in the block.
 
 ## See also
 

@@ -156,9 +156,12 @@ lines from this proxy are its own links and calls; the hub to node lines are wha
 
 #### API keys
 
-Each key: name, prefix (`ah-…`), when it was created, last used and its calls. **New API key** takes
-only a name; the key is shown only when it is created, and the member keeps its SHA-256. **Delete**
-stops the agents using it working. Usage is saved at most once a minute.
+Each key: name, prefix (its first 10 characters, `ah-…`), when it was created, last used and its calls.
+**New API key** takes only a name; the key is shown only when it is created, and the member keeps its
+SHA-256. **Delete** stops the agents using it working. Without a key every agent call is answered `401`, so
+make one first. The last use and the calls are counted in memory since the role started and are not written
+back, so a restart clears them (the page's note says usage is saved once a minute, which the code does not
+do).
 
 #### Settings
 
@@ -181,9 +184,9 @@ Every role's menu has a **Connections** page, which sets the listener and the pe
   credential it proved (a token ID, or the shared password — with a warning while any link still proves
   one); **Kick** closes it, and outgoing links reconnect. This is the only change on the pages that does
   not write the config.
-- **Dial targets**: each `peers` address with its role, state and peer; **Connect to…** takes the token
-  the peer's listener issued (it replaces the password), the role the peer must announce, `pin` or
-  `ca_file`, and `server_name`.
+- **Dial targets**: each `peers` address with its role, state and peer, and **Disconnect**, which removes it;
+  **Connect to…** takes the address, the token the peer's listener issued (it replaces the password), the
+  role the peer must announce, `pin` or `ca_file`, and `server_name`.
 - **Link tokens**: issue one (shown once), list them with their expiry, last use, bound members and
   links, change an expiry and revoke one. They come from the page, the Admin API or `fit token`; do not
   write them by hand.
@@ -356,10 +359,34 @@ llm {
 ```
 
 A config with only roles and no routes needs no listener. What the pages change in these members is
-applied as one config edit through `admin.Configs`, and goes into the store, encrypted, when there is
-one. The proxy's member is in [the config reference: LLM](../reference/config.md#config-llmproxy):
-`api { address 127.0.0.1:9301 }` serves the agent API on this machine, and its `peers` dial the hub as
-the node's do.
+applied as one config edit, and goes into the store, encrypted, when there is one; without a store it holds
+until fit restarts or reads its config file again.
+
+A proxy on a developer's machine, dialing the same hub with a token of its own and serving the agent API on
+loopback; its `api_keys` come from its **API keys** page:
+
+```fit
+llm {
+	proxy {
+		name laptop
+		peers {
+			address hub.example.net:9210
+			token fitt1.3b7a0c9e1d2f4a56.q8Xc2Lr0VwN5bTz7Ka1MdYp4Hs9GfJu3EoWi6RnBtQk
+			role hub
+			pin 134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9
+		}
+		api {
+			address 127.0.0.1:9301
+			max_inflight 256
+			timeout 30m
+		}
+	}
+}
+```
+
+An agent then calls `http://127.0.0.1:9301/v1/chat/completions` with `Authorization: Bearer <key>` and
+`"model": "qwen3-32b"`. The full fields are in
+[the config reference: LLM](../reference/config.md#config-llmproxy).
 
 ## See also
 

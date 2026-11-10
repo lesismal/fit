@@ -14,7 +14,10 @@ In the menu, the **Media library** module (`gw.medialib`, tagged **VOD / channel
 Streaming and Media auth with eight pages: **Libraries**, **Channels**, **Playback URLs** and
 **Metrics**, and the four config pages **Library config**, **VOD routes**, **Channels config** and
 **URL signing**. The first four pages read the Admin API; the last four edit the config's shared
-draft.
+draft. Their URLs are `#/gw.medialib/library`, `channels`, `playback`, `metrics`, `config`, `vod`,
+`channels_config` and `url_signing`. A save's problem in `media_library` links to Library config, one in a
+`vod` route to VOD routes, one in `streaming.channels` or `streaming.push` to Channels config, and one in a
+policy's `url_signing` to URL signing, whichever page the save came from.
 
 Off by default: without a `media_library` nothing is scanned or served, and the page says so and
 links to the config page. No page keeps a URL, a token or a signature: a preview's URL lives only in
@@ -44,10 +47,13 @@ item's largest rendition) and by **Problems** (any, with, without); 50 items a p
 row shows the title, ID, duration, resolution, codecs, the file counts (video, audio, subtitles), the
 size and its problem; below the list the files the last scan reported can be opened.
 
-A library with an `upload_dir` gets an **Upload** card: pick the files and the folder, and each file is
-sent in pieces of 8 MiB, one PATCH at the upload's offset; a piece that fails for the connection is sent
-again from the offset the server has, and can be paused, resumed and cancelled. The uploads under way —
-from this page, another page, or from before a restart — are resumed by picking their file again. Once a
+The **Upload** card works for a library with an `upload_dir`; without one it says the library takes no
+uploads and links to Library config. Pick the files (MP4, M4V, M4A, MOV, subtitles, images or a sidecar)
+and a folder under the upload directory; the files are sent one at a time, each in pieces of 8 MiB, one
+PATCH at the upload's offset; a piece that fails for the connection is sent again from the offset the
+server has, and an upload can be paused, resumed and cancelled (cancelling removes what was sent). The
+uploads under way — from this page, another page, or from before a restart — are resumed by picking their
+file again. Once a
 file is whole, the scan that follows probes it.
 
 ### Item
@@ -56,8 +62,8 @@ Clicking a row of the list opens the item page. At the top are the probe errors,
 an **Ask AI** button (skill `library-health`). The card gives the ID, the root, the path, the duration,
 the size, the modified time, the poster and the sidecar.
 
-**Preview** plays with hls.js, loaded when first needed: the URL is signed for the signed-in user by
-`POST /media/preview`, good for two minutes; the page shows whether it is a signed URL, a short-lived
+**Preview**, offered for an item without a probe error, plays with hls.js, loaded when first needed: the
+URL is signed for the signed-in user by `POST /media/preview`, good for two minutes; the page shows whether it is a signed URL, a short-lived
 token or public, with the subject and the time it expires. When the route sets no `cors` the page warns
 and links to **VOD routes**. The player is muted and stops at the first refusal (401, 403, 404, 410),
 saying why: the URL and its grant expired, the key was rotated, or the session ended.
@@ -68,9 +74,10 @@ warns about it in the confirm, and only sets `force` when going on. The **sideca
 ID, title, poster, renditions, audio files and subtitles; before writing it checks the files it names, a
 sidecar changed since the form read it is refused (409), and changing the ID is confirmed.
 
-The page also lists the **Renditions** and the **Audio files**: name, codec (RFC 6381), detail
-(resolution, or sample rate and channels), language, duration, samples and the bytes of its sample table;
-and the **Subtitles** with their name, language, format, file, size and problem.
+The page also lists the **Renditions** and the **Audio files**, each file with its name, resolution, bit
+rate, duration, codecs (RFC 6381), path and size, and a table of its tracks: kind, codec, detail (resolution,
+or sample rate and channels), language, duration, samples and the bytes of its sample table; and the
+**Subtitles** with their name, language, format, file, size and problem.
 
 ### Channels
 
@@ -87,17 +94,24 @@ total duration, and marks the item playing now. The **Schedule** draws a day in 
 a tick every three hours, a marker for now, and each slot drawn from its time with a width by its item's
 duration; dropping an item on the day starts a slot there. The slots list edits the time (`HH:MM` every
 day; `mon,wed,fri 20:00` or `sat-sun 09:30` on those days; `2026-12-31 23:00` once) and the item, or
-**Add slot**. On the right, **Library items** can be searched and dragged into the playlist or the day, or
-added with `+`.
+**Add slot**. On the right, **Library items** (the library's first 200 items, without those in error) can
+be searched and dragged into the playlist or the day, or added with `+`. These edits go into the draft:
+nothing plays them until **Save and apply**.
 
-The state is refreshed every 2 s: the state, what plays now (with its position), what is next, the next
-slot, the read ahead, and the counters for played, skipped and underruns, with **Start**, **Stop**,
-**Skip** and **Play now**; the preview card is kept across the page's redraws, so a draft's edit does not
-stop it.
+The state is refreshed every 2 s: the state (`playing`, `loading`, `idle`, `waiting`, `stopped`), what
+plays now (with its position), what is next, the next slot, the read ahead, and the counters for played,
+skipped and underruns. A channel not yet in the running config says so: Save and apply starts it.
+**Start**, **Stop** (after a confirm) and **Skip** act on the running channel at once, through the Admin
+API's `POST /streaming/channels/<name>`, and **Play now**, beside the next item, skips to it; these actions
+are not written into the config: a stopped channel stays stopped across reloads, and plays again when fit
+restarts. The channel's **Preview** plays it through the first `hls` route, as an item's does; the card is
+kept across the page's redraws, so a draft's edit does not stop it.
 
-**Push targets** list each target: its server, its state, its last error (with an **Ask AI** button, skill
-`channel-scheduler`), the bytes sent, the bit rate, the connects and failures, and start, stop and
-**Restart**; below the channel the page shows every push target.
+**Push targets** list each target of the channel: its server (scheme, host and app, never the stream key),
+its state and the wait before the next retry, its last error (with an **Ask AI** button, skill
+`channel-scheduler`), the bytes sent, the bit rate, the connects and failures, and **Start**, **Stop** and
+**Restart**, which act at once; the **Every push target** card at the bottom lists those of
+`streaming.push` too.
 
 ### Playback URLs
 
@@ -107,20 +121,23 @@ not expire, and a link to the **URL signing** page.
 - The **URL signing** card shows the settings running now: `ttl`, `play_grace`, `session_idle`,
   `max_sessions`, `on_limit`, `cookie`, `bind_address`, `referers` and `origins`; **Edit** links to the
   URL signing page.
-- The **Test URL**: a subject, an item (which fills in its path), the path, the address, the lifetime, and
-  the route to go through (a `media_tokens` route of this policy, whose `url_prefixes`, `max_ttl` and
-  `url_base` then apply). **Issue and play** shows the URL here and plays it below; it is not kept
-  anywhere and is gone when you leave the page, and its expiry and session are shown.
-- The **Keys**, by name (or the policy's secret when there is a single one), with where each is kept — its
-  `secret_file` or the config (inline) — and its age, each with **Rotate**. The key itself is never shown.
-  **Rotate every key** is only available when the ring has more than one key and all of them are kept in
-  files; an inline secret is rotated by editing the config. The confirm says that every URL and token the
+- The **Test URL**: a subject (`test-viewer` to begin with), an item (the items of the `vod` routes whose
+  `auth` is this policy; picking one fills in its path), the path, the address, the lifetime (`2m` to begin
+  with), and the route to go through (a `media_tokens` route of this policy, whose `url_prefixes`,
+  `max_ttl` and `url_base` then apply; without one the lifetime is at most an hour). **Issue and play**
+  shows the URL here, with **Copy**, and plays it below; it is not kept anywhere and is gone when you
+  leave the page, and its expiry and session are shown.
+- The **Keys**, shown with or without `url_signing`: by name (or the policy's secret when there is a single
+  one), with where each is kept — its `secret_file` or the config (inline) — and its age, each with
+  **Rotate**, which writes a new secret to the file. The key itself is never shown. **Rotate** is disabled
+  for an inline secret, which is rotated by editing the config, and **Rotate every key** is shown for a ring
+  of more than one key and enabled only when all of them are kept in files. The confirm says that every URL and token the
   key signed is refused at once and that players using them stop.
 - **Refused URLs by reason**: `expired`, `signature`, `address`, `referer`, `origin`, `session_limit` and
   `session_ended`; when there are refusals an **Ask AI** button (skill `playback-troubleshoot`) is offered.
 - **Playback sessions**, paged 50 and sorted by subject and start time, filtered by subject and refreshed
   every 5 s: the subject, its count against `max_sessions`, the session, the resource, the address, when it
-  started and its last request. Each session can be **Ended**, after which its player is refused from its
+  started and its last request. **End** (after a confirm) ends a session, whose player is refused from its
   next request on (403).
 
 ### Metrics
@@ -167,8 +184,8 @@ library page (`<prefix>/library`), listing this module's items the viewer may pl
 channels are listed there too.
 
 With `login`, a policy's user logs in once on the pages: the token the policy signs for its `token_ttl`
-comes back as the `HttpOnly`, `SameSite=Strict` cookie `fit_media_token`, which the WHIP and WHEP requests
-carry; a token pasted in, as `fit media-token` prints, works too. The player asks `api/play` for its URL:
+comes back as the `HttpOnly`, `SameSite=Strict` cookie `fit_media_token` (`Secure` over TLS), which the WHIP,
+WHEP and HLS requests carry; a token pasted in, as `fit media-token` prints, works too. The player asks `api/play` for its URL:
 with the policy's `url_signing`, and playing not public, a playback URL signed for that viewer, its address
 and a playback session of its own, whose playlists hand the player the grant it plays on; otherwise the
 plain URL, which the login's cookie lets in. A refused URL stops the player.
@@ -212,9 +229,10 @@ The key fields of the `vod` handler (the full table is in
 `cors`, `timeout` (30s) and `encrypt`.
 
 The channel's fields (`streaming.channels[]`, its `schedule[]` and its `push[]`) are in
-[the config reference](../reference/config.md#config-channelslot) and in
+[the config reference](../reference/config.md#config-streamchannel) and in
 [What a channel plays](../channels.md#what-a-channel-plays); the fields of `url_signing` are in
-[the config reference](../reference/config.md#config-mediaauth).
+[the config reference](../reference/config.md#config-urlsigning) and in
+[Media auth](21-media-auth.md#url_signing).
 
 The key fields of the `media_pages` handler (the full table is in
 [the config reference](../reference/config.md#http-handlers-media_pages)):
@@ -223,7 +241,7 @@ The key fields of the `media_pages` handler (the full table is in
 | --- | --- | --- |
 | `prefix` | `/media` | The path the pages are served under; the route must match it and what is below it |
 | `auth` | none | The policy the room API checks, and the policy whose users log in and whose tokens the pages use |
-| `login` | off | A login form for the policy's users; a token signed for `token_ttl` comes back as the cookie `fit_media_token` |
+| `login` | off | A login form for the policy's users; a token signed for `token_ttl` comes back as the cookie `fit_media_token` (`HttpOnly`, `SameSite=Strict`, `Secure` over TLS); without it the pages ask for a token when `auth` needs one |
 | `pages` | on | Serves the index, call, publish and play pages; off serves none of them, for a deployment whose page is its own |
 | `title` | fit media | The pages' title |
 | `whip`, `whep` | `/whip/{stream}`, `/whep/{stream}` | The endpoints the pages publish to and play from, with `{stream}` filled in |
@@ -247,14 +265,13 @@ listener web {
 }
 
 media_library films {
-	roots /srv/media/films /srv/media/shows
+	roots /srv/media
 	files *.mp4 *.m4a *.srt *.vtt *.jpg *.json
 	exclude **/extras/**
 	scan_interval 30m
 	max_items 50000
 	max_probes 4
-	secret_file /etc/fit/films-secret
-	upload_dir /srv/media/films/incoming
+	upload_dir /srv/media/incoming
 }
 
 media_auth staff {
@@ -290,12 +307,16 @@ route media {
 }
 ```
 
-So `http://host:8080/vod/films/films/bbb/index.m3u8` plays the item `films/bbb` for a viewer the policy
+The file `/srv/media/films/bbb.mp4` is the item `films/bbb`, its ID being its path under the root without
+the extension, and the console's uploads go into `/srv/media/incoming`. So
+`http://host:8080/vod/films/films/bbb/index.m3u8` plays the item `films/bbb` for a viewer the policy
 lets in: the console's preview signs a short-lived URL for the console user, and a player of the pages' logs
 in as `operator`. The item page's preview loads its media through this route's listener, so the route should
 set `cors`; otherwise the browser may refuse the preview from the console's origin. The staff open
 `http://host:8080/media/`, log in as `operator`, and play the library from the pages' own player, on a
-playback URL the pages sign for them, good for two minutes.
+playback URL the pages sign for them, good for `url_signing`'s `ttl`, two minutes, while the grant its
+playlists hand out lasts `play_grace` past the film's end. To encrypt the segments, add the library's
+`secret_file` (at least 16 bytes) and `encrypt true` to the `vod` handler.
 
 ## See also
 

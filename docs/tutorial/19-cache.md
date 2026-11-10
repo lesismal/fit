@@ -11,16 +11,18 @@ itself is enabled by the `cache` middleware on a route; this page shows the zone
 size, and purges by URL, by tag or everything.
 
 A key is a response's scheme + host + target, which is the URL the request named, the host in lower
-case; each variant `Vary` names has a key of its own. So the URLs in the purge card must be absolute,
-written as the requests name them. A response is fresh for the lifetime it gives itself (`s-maxage`,
+case; the variants `Vary` names are kept under it, and purging a URL removes every variant. So the URLs
+in the purge card must be absolute `http` or `https` URLs, written as the requests name them. A response is fresh for the lifetime it gives itself (`s-maxage`,
 `max-age`, `Expires`), and only when it gives none is `default_ttl` used; a response that says
 `must-revalidate`, `proxy-revalidate` or `s-maxage` is never answered stale. Conditional requests
 (`If-Modified-Since`, `If-None-Match`) are answered from the cache itself, and a request with `Range`
-goes on to the handler.
+goes on to the handler. A request's own `no-cache`, `max-age` and `min-fresh` send it on, its `max-stale`
+lets it have a stale response that allows it, and `only-if-cached` gets `504` when nothing is kept.
 
 The tags come from the `Cache-Tag` or `Surrogate-Key` headers, written on the response, and purging by
 tag removes the whole batch. A request whose method is not GET, HEAD, OPTIONS or TRACE (CONNECT among
-those that can change something) that succeeds drops what the cache keeps for its target, and for its
+those that can change something) that succeeds, with a 2xx or 3xx status, drops what the cache keeps for
+its target, and for its
 response's `Location` and `Content-Location` on the same host. A response is kept only after all of it
 has gone: it passes through a fib body filter that copies what passes, so a response is never held
 back to be stored. The disk is read and written on a pool of bounded goroutines of its own, never by a
@@ -33,16 +35,18 @@ fib worker.
 The Cache module has one page in the menu: Cache zones. It edits no config; it reads the running state
 (the Admin API's `GET /cache`).
 
-- **The zones table** (refreshed every 5 seconds): each zone's name, its keys, the memory bytes, the
-  disk entries and bytes, and the disk path; each row has a **Purge all** button (run only after
-  confirming). When no zone is in use the page says so: add the `cache` middleware to a route.
+- **The zones table** (refreshed every 5 seconds, or at once with **Refresh**): each zone's name, its
+  keys, the memory bytes, the disk entries and bytes, and the disk path; each row has a **Purge all**
+  button (run only after confirming). When no zone is in use the page says so: add the `cache` middleware to a route.
 - **The purge card**: choose a zone (or "Every zone"), enter URLs (one per line, absolute, as requests
   name them), tags (Cache-Tag / Surrogate-Key, one per line), or check "Everything in the zone"; at
   least one of the three is needed, or the page says so. Purging everything asks for confirmation. The
-  result gives the number of keys purged.
+  result gives the number of keys purged; a URL that is not absolute is refused with the reason.
 - Purging goes through the Admin API's `POST /cache/purge` (the body `{"zone", "urls", "prefixes",
   "tags", "all"}`) and takes effect at once, not through the config draft and with no new version. The
-  card has only URLs, tags and everything; `prefixes` is an API-only field.
+  card has only URLs, tags and everything; `prefixes` is an API-only field (see below). The page purges
+  this fit's zones only; on a [cluster](12-cluster.md) manager, the group operation **Purge cache** purges
+  the members selected.
 
 Caching is enabled on a route, in the route's form, on the
 [Reverse proxy](15-reverse-proxy.md) page. The Engine page lists "Cache zones" under the port, linking
@@ -54,6 +58,23 @@ The page has no form and no Save and apply: it only reads the running state. Cac
 route's middleware, where the zone's name, its size and its disk are set; purging takes effect at once,
 is not written into the config and makes no new version. The numbers shown are taken from `GET /cache`
 every 5 seconds.
+
+### Purging by prefix through the Admin API
+
+`prefixes` removes every response whose URL starts with one, as `https://example.com/img/` for
+everything under `/img/` on that host. It goes to the Admin API itself, with its token when it has
+`token_file`:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"zone": "assets", "prefixes": ["https://example.com/img/"]}' \
+  http://127.0.0.1:2019/cache/purge
+```
+
+It answers `{"purged": <keys>}`; a body with none of `urls`, `prefixes`, `tags` or `all`, or a URL that is
+not absolute, is `400`, and a `zone` no cache uses is `404`. `"zone": ""`, or no `zone`, purges every
+zone. Finding a prefix walks the zone's keys, in memory and on disk, so purge by URL or tag where you
+can.
 
 ## Key parameters
 
@@ -121,8 +142,11 @@ are the .conf way of writing them; in JSON they are byte counts.
 
 - [Reverse proxy](15-reverse-proxy.md): routes and middleware, and where `cache` sits on a route.
 - [Engine](06-engine.md): where a port lists the cache zones and the cached routes.
-- [Consistency check](10-consistency-check.md): a zone a route uses but the runtime does not have is drift.
+- [Consistency check](10-consistency-check.md): a zone a route uses but the runtime does not have is drift;
+  a zone kept though no route uses it now is listed as info.
+- [Cluster management](../cluster.md#groups-and-operations): **Purge cache** across members, with prefixes.
 - [the config reference: Middleware](../reference/config.md#http-middleware-cache): every field of `cache`.
 - [the Admin API](../reference/config.md#admin-api): `GET /cache` and `POST /cache/purge`.
 - [the cache module doc](../../schema/doc/modules/cache.md): what the middleware does, with an example.
-- [the complete config template](../../templates/conf/conf.d/60-apps.conf): every field, commented.
+- [the complete config template](../../templates/conf/conf.d/sites/example.com.conf): every field of
+  `cache`, commented, in its route.

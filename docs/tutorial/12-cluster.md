@@ -17,7 +17,8 @@ API, and shows what it reads in the **Cluster** menu. The manager is not on the 
 does or does not run, the members serve by their own configs; losing the manager loses only management.
 
 A manager needs a console (which serves the pages) and a store: `admin.store`, or the one `fit run
--admin` keeps beside the config. Without a store, `fit run` refuses `admin.cluster`. Credentials are
+-admin` keeps beside the config. `fit validate` refuses `admin.cluster` without `admin.console`, and `fit run`
+refuses it without a store. Credentials are
 written once, kept encrypted, and never appear in an answer, a log line or any page.
 
 The menu shows when the console serves the module `cluster`; every page draws only what the user's role
@@ -49,8 +50,11 @@ distribution is under way, a card above the filter sums the fleet's BitTorrent s
 
 Each member's labels, URL, access, credentials (only whether one is saved), how its certificate is
 trusted, and its state, with the manager's recent changes at the end of the page. **Add a node** opens
-the form: name, labels, URL, access (a console user's name and password, or the Admin API's token), and
-for `https` how to trust its certificate (the system CAs, a CA's PEM, or a pinned fingerprint).
+the form: name (letters, digits, `_`, `.` and `-`), labels (`env=prod, region=eu`), URL — the member's console,
+or its Admin API for a token; `https`, or `http` only to a loopback address — access (a console user's name and
+password, or the Admin API's token), and for `https` how to trust its certificate (the system CAs, a CA's PEM,
+or a pinned SHA-256 fingerprint). The secrets are written once and never shown again; leaving them empty on
+**Edit** keeps them.
 **Test** reaches a member as the form has it without saving: it shows the fit version, host and node ID,
 or why it failed, and the certificate the member presented. An untrusted certificate (a self-signed one)
 is trusted by its fingerprint: **Trust this certificate** shows the certificate whole, asks you to
@@ -58,10 +62,10 @@ compare it with the member's own, then pins the fingerprint into the form and te
 **Test**, **Trust**, **Edit** and **Remove** (with a confirm first). Every change carries the ETag the
 page read; if something changed elsewhere meanwhile it is refused (`412`) and the page reads again.
 
-**Add by enrollment** (in the bar beside Add a node) is for a member behind NAT or with no port open:
-the name, labels, the token's lifetime (24h when left empty, 30 days at most) and the URL the member
-reaches the manager at, with the token and the config line to paste into the member's `admin` shown
-once.
+**Add by enrollment** (in the bar beside Add a node) is for a member behind NAT or with no port open; it needs
+`admin.cluster.link_address` (see [Members behind NAT](#members-behind-nat)): the name, labels, the token's
+lifetime (as `24h` or `7d`; 24h when left empty, 30 days at most) and the URL the member reaches the manager at,
+with the token and the config line to paste into the member's `admin` shown once.
 
 ### Groups
 
@@ -69,10 +73,13 @@ A group is a set of members: those its label selector matches, those named, or b
 group's selector, its named members (a missing one in amber), the members it has now (counted by state)
 and its variables; **Add a group** previews what it selects as you type. A group's page shows its
 selector, members, variables and their states, a checkbox per member (all picked at first) and the
-**operations bar**: **Reload**, **Roll back**, **Check**, **Purge cache** and **Test**, each
-listing the members it will act on and confirming first, then following each member's result (waiting,
-running, done with what it did, or failed with the reason). **Operate on any member** is the same page
-over every member.
+**operations bar**: **Reload** (each member applies its running config again), **Roll back** (each
+applies again the latest version it keeps whose content differs from the running one), **Check** (its
+consistency check), **Purge cache** (a zone or every zone: keys, prefixes, tags, or everything) and **Test**
+(reads its `GET /node`), each listing the members it will act on and confirming first, then following each
+member's result (waiting, running, done with what it did, or failed with the reason); at most
+`max_concurrency` members are called at once. **Operations on any members** (on the Groups page) is the same
+page over every member.
 
 ### Templates
 
@@ -83,8 +90,8 @@ with the parts the templates own replaced. **Variables** in strings render per m
 (`${node.name}`, `${node.id}`, `${node.hostname}`, `${node.labels.<key>}` and the group's `${<name>}`). The
 list shows each template's groups, order, the parts it owns and its members counted by sync state; a
 template's page shows its form and its `.conf`, `.yaml` and `.json` text, its variables and warnings, and
-each member's sync state with its value and the rendered one side by side. Below it are the **rendered
-config** of a member, **Compare** for two members and **Import from a node**. Nothing is applied here:
+each member's sync state with its value and the rendered one side by side. Below it are the **Rendered result** of a member (its config and its desired config side by side);
+the list has **Compare two nodes** and **Import from a node**. Nothing is applied here:
 rollouts apply.
 
 ### Rollouts
@@ -94,12 +101,18 @@ can come from a template's change or a draft of one, a sync of members with thei
 member's config copied to others, or a patch of members' configs (a cluster-wide admin only). **Planning**
 reads every member, builds the desired config and its per-part diff, and has each member check it with its
 own dry run; a member is ready, unchanged or not ready with the reason, and a member changed since the plan is
-skipped. The **strategy** is chosen at start: `all`, `rolling` (`batch_size` or `batch_percent` per batch,
-`pause_ms` between them) or `canary` (the first batch, then a person confirms to go on). After each batch a
-health check runs (reachable, running the config the rollout applied, no more drift than before, and the 5xx
-ratio under `max_5xx_ratio`); a failed check stops the rollout and rolls back. The page lists the history and
-**New rollout**; a rollout's page shows each member's state and diff, the strategy form and **Start rollout**,
-then the progress batch by batch with **Pause**, **Resume**, **Go on**, **Abort** and **Rollback**.
+skipped. A plan not started within an hour expires. The **strategy** is chosen at start: **All at once**, **Rolling, in
+batches** (members or a percentage of them per batch, a pause in seconds between batches) or **A canary first,
+then the rest** (the first members by name, then the rollout waits for a person to go on). After each batch, and
+the wait the form gives (**Check after**, 5 s by default), a health gate checks each of its members: reachable,
+running the config the rollout applied, no more drift than before, and, when **At most 5xx (%)** is set, the
+share of 5xx answers over a window (30 s by default) once at least 20 requests came (this needs metrics in the
+members' configs). A failed gate stops the rollout and rolls back its batch, or every member applied, as the form
+says. Each member is applied by its own `PUT /config` with `If-Match`, so a member changed since the plan is
+skipped, never overwritten. At most 4 rollouts are active at once, and the last 50 are kept. The page lists the
+history and **New rollout**; a rollout's page shows each member's state and diff, the strategy form and **Start
+the rollout**, then the progress batch by batch with **Pause**, **Resume**, **Go on**, **Abort** (what was
+applied stays) and **Roll back** (each member to the version it ran before).
 
 ### Drift and alerts
 
@@ -109,7 +122,9 @@ lists the members, can show only those with drift, and gives each its **diff**, 
 rollout, which a person starts on the Rollouts page), **Fix all out of sync** and **Reload**. The
 **Alerts** tab shows the counts, the alerts firing (with **Silence**), the pending and the past ones;
 **Rules** (`member_down`, `drift`, `rollout_failed`, `cert_expiry`, `backends_down`, `reload_failed`),
-**Webhooks** (their sending, **Test**, edit and delete) and **Silences** each have their own tab. While
+**Webhooks** (their sending, **Test**, edit and delete; fit's own JSON, Slack/Mattermost/Rocket.Chat, Discord,
+Feishu, DingTalk, WeCom or a body of your own; an `https` URL, or `http` to a loopback address, kept encrypted)
+and **Silences** each have their own tab; with no webhook, alerts are shown here and sent nowhere. While
 alerts fire that are not silenced, the Cluster menu's row shows their count, red when one is critical.
 
 ### Users and audit
@@ -117,10 +132,15 @@ alerts fire that are not silenced, the Cluster menu's row shows their count, red
 The console users of a manager have **roles** on the cluster: `viewer` (reads), `operator` (also runs
 operations and the rollouts of existing templates) and `admin` (also adds, changes and removes members
 and their credentials and templates, makes enrollment tokens, writes on a member, and changes groups and
-the roles), cluster-wide and per group, the highest of them counting. **Users and roles** lists every user
-with its cluster-wide role, its roles on groups, its assistant level and the default level, and **Save
-roles** (only a cluster-wide admin may); others read only. **Audit log** filters by user, member, action and
-time, each entry opening its diff, digest, versions and per-member results, and **Export JSON Lines**. A user
+the roles), cluster-wide and per group, the highest of them counting. Until a role is saved or
+`admin.cluster.admins` is set, every console user is a cluster-wide admin. Once roles are set, the manager's own
+pages (its config, versions, consistency fixes, logs actions and the account pages' **Users**) are changed only by
+a cluster-wide admin; the others read them, and still change their own password. **Users and roles** lists
+every user with its cluster-wide role, its roles on groups, its assistant level, and the role of **Users not
+listed**, and **Save roles** (only a cluster-wide admin may; the roles take effect at once); others read only.
+The users named in `admin.cluster.admins` are marked and stay admins whatever the roles say. **Audit log** filters by user, member, operation and
+time, each entry opening its diff, digest, versions and per-member results, and **Export JSON lines**; it keeps
+the latest 1,000 entries, across restarts. A user
 with no role is told so.
 
 ### Metrics
@@ -134,8 +154,9 @@ poll, shorter with a shorter `poll_interval`.
 
 ### Logs
 
-The logs of the chosen members (16 at most), tracked at once and merged by time; each member keeps its
-latest 1,000 messages and the page its latest 2,000 lines, and **Follow** reads again with the cursor
+The logs of the chosen members (16 at most), tracked at once and merged by time, from each member's
+`GET /logs/recent` (capability `logs.recent`); each member keeps its latest 1,000 messages in memory and the page
+its latest 2,000 lines, and **Follow** reads again with the cursor
 every 2 seconds. Filter by the lowest level, the logger and text; picking a group picks its members.
 
 ### Certificates
@@ -217,8 +238,17 @@ from the manager's, or one not read yet, opens **read only**.
 A member that links out to the manager (`admin.cluster_member`: the manager's URL, its certificate's
 fingerprint and an enrollment token used once) is managed through that link exactly as the others are
 over HTTP — the same polling, tests, member page, states and API. Its row says **Linked** (with the
-source address) or **Waiting**, and **New token** makes it a new enrollment token. The manager opens its
-link listener with `admin.cluster.link_address`.
+source address) or **Waiting** (for it to enroll, until the token expires, or to link again), and **New token**
+makes it a new enrollment token; it keeps linking with its credential until it enrolls with the new one. The
+manager opens its link listener with `admin.cluster.link_address`; without it **Add by enrollment** says the
+manager takes no links. A config a manager applies through the link shows on the member's Versions page with
+the source `cluster`.
+
+The steps: set `link_address` (and `link_url` when members reach the manager at another name or port) on the
+manager and restart it; **Add by enrollment**, copy the config line shown; paste it into the member's `admin`
+(as `cluster_member` below, the token in `token` or in a file named by `token_file`); start the member. After it
+enrolls, its credential is kept in its store, or without one in `fit.cluster-member` beside its config, and the
+token can be left out.
 
 ## Key parameters
 
@@ -229,12 +259,21 @@ Only the key parameters; the full table is in [the config reference: Admin API](
 | --- | --- | --- |
 | `poll_interval` | `10s` (1s at least) | how often each member's `GET /node`, `/status` and `/config/check` are read |
 | `timeout` | `10s` (1s at least) | the longest one call to a member may take: connect, the answer's header and the whole call |
-| `max_nodes` | 256 | the most members the manager keeps; one more is refused |
-| `max_concurrency` | 8 | the most members polled at once; the pages' tests run beside them, 4 at most |
-| `max_response_bytes` | 4194304 (4 MiB, 16 KiB at least) | the largest answer read from a member |
+| `max_nodes` | 256 (10000 at most) | the most members the manager keeps; one more is refused |
+| `max_concurrency` | 8 (256 at most) | the most members polled at once, and called at once by one operation on many members; the pages' tests run beside them, 4 at most |
+| `max_response_bytes` | 4194304 (4 MiB; 16 KiB to 64 MiB) | the largest answer read from a member; a larger one fails its call |
 | `link_address` | off | where members that link out reach the manager: a WebSocket listener over TLS whose self-signed certificate is made once and kept in the store; without it no member can enroll |
-| `link_url` | the host the page was opened at plus the port | the manager's URL in the enrollment config line; only a `wss` URL |
-| `admins` | none | the console users who are cluster-wide admins whatever the roles say: the way back in when no admin is left |
+| `link_url` | the host the page was opened at plus `link_address`'s port | the manager's URL in the enrollment config line, as `wss://manager.example.com:7444/cluster/link`; only a `wss` URL, and only with `link_address` |
+| `admins` | none | console users (of `admin.console.users`) who are cluster-wide admins whatever the roles say: the way back in when no admin is left; 64 at most |
+
+The member's side, `admin.cluster_member`, read when the member starts:
+
+| field | default | description |
+| --- | --- | --- |
+| `manager` | required | the manager's link URL, `wss://host:port/cluster/link`, as **Add by enrollment** gives it |
+| `fingerprint` | required | the SHA-256 of the manager's link certificate, 64 hex digits, with or without colons: the only certificate the member links to |
+| `token` | none | the enrollment token, `fite1.<ID>.<secret>`, used once; left out once the member has its credential |
+| `token_file` | none | a file holding the token, in place of `token` (not both) |
 
 ## In .conf
 
@@ -267,9 +306,29 @@ admin {
 }
 ```
 
-The simplest manager is a config holding only `admin.cluster`, run with `fit run -admin`. A member needs
-nothing in its own config: its address, credentials and role are in the manager's store; only a member
-behind NAT needs `admin.cluster_member`.
+The simplest manager is a config holding only `admin.cluster`, run with `fit run -admin`, which adds the
+console and the store with their defaults. A member reached over HTTP needs nothing in its own config: its
+address, credentials and role are in the manager's store; only a member behind NAT needs
+`admin.cluster_member`, as in this member's bootstrap file:
+
+```fit
+# a member behind NAT: it links out to the manager
+admin {
+	store {
+		path /var/lib/fit/member.store
+		password_env FIT_STORE_PASSWORD
+	}
+	cluster_member {
+		manager wss://manager.example.com:7444/cluster/link
+		fingerprint 3f9a1c0e5b7d2468ace13579bdf02468ace13579bdf02468ace13579bdf02468
+		token_file /etc/fit/enroll.token
+	}
+}
+
+listener web :8080
+
+route { handler respond { body "hello from a member" } }
+```
 
 ## See also
 

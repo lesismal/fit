@@ -30,13 +30,13 @@ HTTP 请求给 HTTP。SOCKS5 的命令里只有 CONNECT 被服务，SOCKS4 只�
 
 ### 正向代理
 
-"正向代理"模块在菜单里只有一个页面。它编辑配置的 `routes` 成员，但只显示 `handler` 为
+"正向代理"模块在菜单里只有一个页面：`#/gw.forward/routes`。它编辑配置的 `routes` 成员，但只显示 `handler` 为
 `forward_proxy` 的路由；页顶的提示说明这一点，并提醒监听也能通过 `socks` 协议提供 SOCKS5。
 
 - 如果草稿里有监听设置了 `socks`（或在 `protocols` 里写了它），页面列出"提供 SOCKS 的监听"：每个徽章写着
   监听的名字与地址，点开是[监听](05-listeners.zh-CN.md)页。这一行只读，`socks` 本身在监听页编辑。
-- 每条路由一行：名字，加上小标签——`clients`、`:ports`、`@listeners`（这条路由服务哪些监听；没写
-  `listeners` 的路由服务所有监听）。
+- 每条路由一行：名字，加上小标签——客户端（`clients` 各项以逗号连接）、`:ports`、`@listeners`（这条路由
+  服务哪些监听；没写 `listeners` 的路由服务所有监听）。
 - "添加正向代理路由"新建一条 `match { method CONNECT }` 的路由，`clients` 为 `127.0.0.1/32`、`ports` 为
   `443`，名字取 `forward-1`、`forward-2`……
 - 路由行点开是它的表单：`match` 与 `handler` 的参数逐项编辑，`clients`、`allow`、`deny`、`ports`
@@ -47,13 +47,13 @@ HTTP 请求给 HTTP。SOCKS5 的命令里只有 CONNECT 被服务，SOCKS4 只�
 ### 在引擎页中
 
 [引擎](06-engine.zh-CN.md)页按端口列出正在提供的功能：这个端口下列出"正向代理路由"，链回本页；
-同一端口若提供 SOCKS，列出"SOCKS 正向代理"，链到监听页。端口行的小标签写着协议与
+该监听若设置了 `socks`，列出"SOCKS 正向代理"，链到编辑 SOCKS 规则的监听页。端口行的小标签写着协议与
 `proxy_protocol`。
 
 ## 参数
 
 只列关键参数；完整字段表见[配置参考：Handlers](../reference/config.md#http-handlers-forward_proxy)，
-`listeners.socks` 的表在[配置参考：Listeners](../reference/config.md#listeners)。两处是同一个对象，
+`listeners.socks` 的表在[配置参考：`listeners[].socks`](../reference/config.md#config-forwardproxy)。两处是同一个对象，
 所以字段相同。
 
 | 字段 | 默认值 | 说明 |
@@ -79,14 +79,17 @@ HTTP 请求给 HTTP。SOCKS5 的命令里只有 CONNECT 被服务，SOCKS4 只�
 ### 被拒的几种情形
 
 - 客户端不在 `clients`：路由答 403，SOCKS 回一个失败应答（代码 2）；
-- 目的地不在 `allow`，或属于上面那些默认拒绝的地址：路由答 403，SOCKS 回代码 2；
-- 一个主机名解析到被拒的地址：在连上之后、送出任何字节之前被拒，路由答 502（SOCKS 回代码 2）；
+- 目的端口不在 `ports`，目的地不在 `allow` 或在 `deny` 中，或是上面默认拒绝的 IP 地址：路由答 403，SOCKS 回
+  代码 2；
+- 主机名解析到默认拒绝的地址或 `deny` 所含的地址（或者 `allow` 只经某个段包含该名字时，解析到该段之外的地址），
+  以及实际是本机自己地址的目的地：在连上之后、送出任何字节之前被拒，路由答 502（SOCKS 回代码 2）；
 - 解析或连接超过 `connect_timeout`：路由答 504，SOCKS 回一个失败应答。
 
 ### 几点常被误读
 
 - `clients` 说的是客户端，不是目的地；目的地是 `allow` 与 `deny`。
-- `allow` 里的段也含主机名解析到的地址，所以一个写在 `allow` 里的名字仍可能被拒。
+- `allow` 里的段也含主机名解析到的地址；`allow` 点名的主机名仍按它解析到的地址检查：解析到 `127.0.0.1` 的
+  名字会被拒，除非 `allow` 也写了 `127.0.0.0/8`。
 - `deny` 优先于 `allow`：`allow` 含的地址，`deny` 一样拒。
 - `ports` 限的是要去的那一端的目的端口，不限监听的端口。
 
@@ -126,6 +129,17 @@ route {
 块里。`allow` 里没有 `127.0.0.0/8`，所以客户端连不到本机；要连本机，把它写进 `allow`。`ports 443`
 只放行目的端口 443——限的是要去的那一端，不是监听的这一端；去掉 `ports` 就是任意端口。
 
+试用时，从 `10.0.0.0/8` 中的客户端执行（`proxy.example.net` 代表 fit 的地址）：
+
+```sh
+curl -x http://proxy.example.net:8080 https://www.example.com/
+curl --socks5-hostname proxy.example.net:8080 https://www.example.com/
+```
+
+第一条经路由用 CONNECT 建隧道，第二条经 SOCKS5，由 fit 解析主机名；经 `-x` 访问明文的 `http://` URL 发的是
+GET 而不是 CONNECT：这条只匹配 CONNECT 的路由不接它（这里也没有别的路由，所以答 404），即使有 `forward_proxy`
+路由接了它也会答 405；`curl -p` 会改用 CONNECT 连 80 端口，而 `ports 443` 会拒绝它。
+
 这一页编辑的是 `routes` 成员：在 JSON 与 YAML 里，同一条路由是 `routes[].handler.params`，这条路由就是
 [模块文档](../../schema/doc/modules/forward_proxy.md) 中 JSON 示例的那条。
 
@@ -135,7 +149,7 @@ route {
 - [引擎](06-engine.zh-CN.md)：端口上把这条路由与 SOCKS 列在何处。
 - [反向代理](15-reverse-proxy.zh-CN.md)：路由的 `match`、`handler` 与 `middleware`。
 - [配置参考：Handlers](../reference/config.md#http-handlers-forward_proxy)：`forward_proxy` 的全部字段。
-- [配置参考：Listeners](../reference/config.md#listeners)：`listeners.socks` 的全部字段。
+- [配置参考：`listeners[].socks`](../reference/config.md#config-forwardproxy)：`listeners.socks` 的全部字段。
 - [模块文档 forward_proxy](../../schema/doc/modules/forward_proxy.md)：默认拒绝的地址与一个路由示例。
 - [谁可以连接](../configuration.zh-CN.md#谁可以连接)：`access` 与客户端地址。
 - [完整配置模板](../../templates/conf/conf.d/10-listeners.conf)：每个字段带注释。

@@ -9,14 +9,15 @@
 被重新找到。缓存本身由路由上的 `cache` 中间件启用：这一页显示正在使用的区及其规模，并按 URL、标签或全部
 清除。
 
-一个键是一条响应的 scheme + host + target，也就是请求的 URL，主机名按小写算；`Vary` 点名的每个变体各有一个
-键。所以清除卡片里的 URL 要写成绝对 URL，与请求写它的方式一致。响应按它自己的生命周期算新鲜（`s-maxage`、
+一个键是一条响应的 scheme + host + target，也就是请求的 URL，主机名按小写算；`Vary` 点名的各个变体都存在这个
+键下，按 URL 清除会移除全部变体。所以清除卡片里的 URL 要写成绝对的 `http` 或 `https` URL，与请求写它的方式一致。响应按它自己的生命周期算新鲜（`s-maxage`、
 `max-age`、`Expires`），没有生命周期时才用 `default_ttl`；写了 `must-revalidate`、`proxy-revalidate` 或
 `s-maxage` 的响应从不以过期状态应答。条件请求（`If-Modified-Since`、`If-None-Match`）从缓存直接应答，带
-`Range` 的请求则继续交给处理器。
+`Range` 的请求则继续交给处理器。请求自己的 `no-cache`、`max-age` 与 `min-fresh` 让它继续交给处理器，`max-stale`
+让它拿到允许这样做的过期响应，`only-if-cached` 在没有缓存时得到 `504`。
 
 标签来自 `Cache-Tag` 或 `Surrogate-Key` 头，写在响应上，清除时按标签整批移除。方法不是 GET、HEAD、OPTIONS、
-TRACE（CONNECT 也在会改动内容的那些里）的请求成功时，会清掉它目标的缓存，以及它应答的 `Location` 与
+TRACE（CONNECT 也在会改动内容的那些里）的请求成功（状态为 2xx 或 3xx）时，会清掉它目标的缓存，以及它应答的 `Location` 与
 `Content-Location` 在同一主机上的缓存。响应在全部送出之后才被保存：它经过一个 fib 的 body filter 复制，所以
 响应不会被为了存储而扣下。磁盘的读写在自己的有界协程池上，从不占用 fib worker。
 
@@ -26,13 +27,14 @@ TRACE（CONNECT 也在会改动内容的那些里）的请求成功时，会清�
 
 "缓存"模块在菜单里只有一个页面：缓存区。它不编辑配置，它读运行中的状态（Admin API 的 `GET /cache`）。
 
-- **区表**（每 5 秒刷新）：每个区的名字、键数、内存字节、磁盘条目与字节、磁盘路径；每行一个**全部清除**
+- **区表**（每 5 秒刷新，点**刷新**立即刷新）：每个区的名字、键数、内存字节、磁盘条目与字节、磁盘路径；每行一个**全部清除**
   按钮（确认后才执行）。没有缓存区时，页上说"没有使用中的缓存区：在路由中添加 cache 中间件"。
 - **清除卡片**：选区（或"所有缓存区"），输入 URL（每行一个，绝对 URL，与请求一致）、标签（Cache-Tag /
   Surrogate-Key，每行一个），或勾选"清除缓存区中的全部内容"；三者至少要有一个，否则页上提示。全部清除需
-  确认。结果给出清除的键数。
+  确认。结果给出清除的键数；不是绝对 URL 的会被拒绝并说明原因。
 - 清除经 Admin API 的 `POST /cache/purge`（请求体 `{"zone", "urls", "prefixes", "tags", "all"}`），立即
-  生效，不经过配置草稿，也不产生新版本。卡片上只有 URL、标签与全部；`prefixes` 是 API 才有的。
+  生效，不经过配置草稿，也不产生新版本。卡片上只有 URL、标签与全部；`prefixes` 是 API 才有的（见下文）。这一页
+  只清除本 fit 的缓存区；在[集群](12-cluster.zh-CN.md)管理端上，分组操作**清除缓存**清除所选成员的缓存。
 
 缓存是在路由上启用的：路由的表单里加 `cache` 中间件，在[反向代理](15-reverse-proxy.zh-CN.md)页编辑。引擎页
 在这个端口下列出"缓存区"（链回本页）与"缓存的路由"（链到路由页）。
@@ -41,6 +43,21 @@ TRACE（CONNECT 也在会改动内容的那些里）的请求成功时，会清�
 
 这一页没有表单，也没有"保存并应用"：它只读运行中的状态。缓存的开关在路由的中间件里，区的名、大小与磁盘
 都在那里定；清除立即生效，不写进配置，也不产生新版本。页上显示的数每 5 秒从 `GET /cache` 取一次。
+
+### 经 Admin API 按前缀清除
+
+`prefixes` 移除 URL 以其中之一开头的全部响应，如 `https://example.com/img/` 清除该主机 `/img/` 之下的一切。
+它直接发给 Admin API，Admin API 设了 `token_file` 时要带令牌：
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"zone": "assets", "prefixes": ["https://example.com/img/"]}' \
+  http://127.0.0.1:2019/cache/purge
+```
+
+应答 `{"purged": <键数>}`；`urls`、`prefixes`、`tags`、`all` 都没有，或 URL 不是绝对的，应答 `400`；没有缓存使用
+的 `zone` 应答 `404`。`"zone": ""` 或不写 `zone` 清除所有缓存区。按前缀查找要遍历区在内存与磁盘上的键，所以能按
+URL 或标签清除时就按 URL 或标签。
 
 ## 参数
 
@@ -95,15 +112,17 @@ route {
 }
 ```
 
-`fit validate` 会创建 `disk.path`，所以它得写在进程能建目录的地方；目录不存在时校验会报错。去掉 `disk`
+`fit validate` 会创建 `disk.path`，所以它得写在进程能建目录的地方；建不了目录时校验会报错。去掉 `disk`
 就是纯内存的缓存。`max_bytes 256MiB` 与 `10GiB` 是 .conf 里允许的写法，JSON 里是字节数。
 
 ## 相关文档
 
 - [反向代理](15-reverse-proxy.zh-CN.md)：路由与中间件，`cache` 在路由上的位置。
 - [引擎](06-engine.zh-CN.md)：端口下把缓存区与缓存的路由列在何处。
-- [一致性检查](10-consistency-check.zh-CN.md)：路由用了某个区而运行中没有对应的区属于 drift。
+- [一致性检查](10-consistency-check.zh-CN.md)：路由用了某个区而运行中没有对应的区属于 drift；已无路由使用却仍
+  保留的区作为提示列出。
+- [集群管理](../cluster.zh-CN.md#分组与操作)：在多个成员上**清除缓存**，可按前缀。
 - [配置参考：Middleware](../reference/config.md#http-middleware-cache)：`cache` 的全部字段。
 - [Admin API](../reference/config.md#admin-api)：`GET /cache` 与 `POST /cache/purge`。
 - [模块文档 cache](../../schema/doc/modules/cache.md)：这一中间件的说明与示例。
-- [完整配置模板](../../templates/conf/conf.d/60-apps.conf)：每个字段带注释。
+- [完整配置模板](../../templates/conf/conf.d/sites/example.com.conf)：路由里的 `cache`，每个字段带注释。

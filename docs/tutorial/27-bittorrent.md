@@ -43,10 +43,10 @@ through the whole apply path without applying them; **Discard** drops them. A sa
 
 | Change | What happens |
 | --- | --- |
-| `limits`, `access`, `categories`, `alt_speed`, `watch_dir`, `save_interval`, the queue and disk bounds, `rss` | applied in place, keeping the connected peers (except those a lowered connection limit or the new `access` refuses) |
-| `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers`, `disk_queue_bytes` | a new client: every torrent's resume data is saved and the torrents are added to the new client without a check |
+| `limits`, `access`, `categories`, `alt_speed`, `watch_dir`, `save_interval`, `url_timeout`, the queue and disk bounds, `rss`, `publish` | applied in place, keeping the connected peers (except those a lowered connection limit or the new `access` refuses) |
+| `listen`, `encryption`, `dht`, `pex`, `utp`, `lsd`, `disk_workers`, `disk_queue_bytes` | a new client: every torrent's resume data is saved and the torrents are added to the new client without a check; when the new one cannot be made (its port taken), the one before is made again and the apply fails |
 | `data_dir` | a new client on the new directory's state, as a restart would; the old directory keeps what was saved there |
-| tracker `allow`, `auth`, `access`, `console`, the bounds, `peer_ttl` | applied in place, keeping the swarms |
+| tracker `allow`, `auth`, `access`, `console`, `interval`, `min_interval`, the bounds, `peer_ttl` | applied in place, keeping the swarms |
 | tracker `listen` | the UDP port moves, keeping the swarms |
 | tracker `store` | a new store; this instance's swarms start anew in memory, the shared ones stay in Redis |
 
@@ -54,12 +54,13 @@ through the whole apply path without applying them; **Discard** drops them. A sa
 
 ### A torrent, its metadata and its pieces
 
-A torrent's data is described by **metadata** (its file tree and piece hashes), identified by its
-**info hash**. fit handles v1, v2 and hybrid torrents: a torrent's **ID** is its v1 info hash in hex,
-or its v2 hash (64 digits) whose first 20 bytes are the ID. Metadata arrives with a .torrent file, or
-with the peers when the torrent is added by a **magnet link** (`magnet:?xt=urn:btih:…`); until then a
-torrent has no files to show. Files are cut into **pieces** whose hashes are checked, so a piece is
-either had or not; fit reports how many of a torrent's pieces it has.
+A torrent's data is described by **metadata** (its file tree and piece hashes), identified by its **info
+hash**. fit handles v1, v2 and hybrid torrents: a torrent's **ID** is always 40 hex digits — its v1 info
+hash, or for a v2-only torrent the first 20 bytes of its v2 hash; the API takes the whole 64-digit v2
+hash too. Metadata arrives with a .torrent file, or with the peers when the torrent is added by a
+**magnet link** (`magnet:?xt=urn:btih:…`); until then a torrent has no files to show. Files are cut into
+**pieces** whose hashes are checked, so a piece is either had or not; fit reports how many of a
+torrent's pieces it has.
 
 ### States
 
@@ -72,14 +73,14 @@ starting, queued by the role, or short of disk space.
 ### Seeding, ratio and limits
 
 Seeding is uploading what a torrent has; a torrent seeds once it has every piece it wants.
-`limits.seed_ratio` (uploaded bytes over the torrent's size) and `limits.seed_time` pause a torrent
-when reached — when left out, it seeds for ever — and the status and the events say so
-(`seed_limit`). `limits` holds the client's rates, connections, upload slots and seeding bounds; a
-category's `limits` are each of its torrents', and a torrent's own limits take the place of those they
-set (zero takes the client's; a negative count, ratio or time is no limit for that torrent).
-**Blocklists** are the role's `access` and the global one: `deny`/`allow` addresses and
-`deny_files`/`allow_files`, which read eMule `ipfilter.dat` and PeerGuardian `.p2p` lines beside
-addresses, prefixes and ranges; a refused peer is closed at once, never dialed and given no DHT
+`limits.seed_ratio` (uploaded bytes over the torrent's size) and `limits.seed_time`, both counted since
+the torrent was added or fit started, pause a torrent when reached — when left out, it seeds for ever —
+and the status and the events say so (`seed_limit`). `limits` holds the client's rates, connections,
+upload slots and seeding bounds; a category's `limits` are each of its torrents', and a torrent's own
+limits take the place of those they set (zero takes the client's; a negative count, ratio or time is no
+limit for that torrent). **Blocklists** are the role's `access` and the global one: `deny`/`allow`
+addresses and `deny_files`/`allow_files`, which read eMule `ipfilter.dat` and PeerGuardian `.p2p` lines
+beside addresses, prefixes and ranges; a refused peer is closed at once, never dialed and given no DHT
 answers, and a change of the policy or a list file applies at once, closing the peers now refused.
 
 ### Categories and their directories
@@ -110,9 +111,10 @@ starts it by itself once the space is there. Seeds need no space and are not che
 
 `alt_speed` sets an upload and a download rate (0 is unlimited) that take the place of
 `limits.upload_rate` and `limits.download_rate` while one of its weekly `schedules` holds (`days`,
-`from`, `to`; a range running past midnight holds into the next day). The client pages' top bar turns
-them `on` or `off` whatever the schedules say, or back to `auto`; that choice is kept in the state
-across restarts.
+`from`, `to` as `HH:MM`, `to` not included; a range running past midnight holds into the next day), in
+`alt_speed.time_zone` (local when left out). Without `schedules` they hold only while turned on. The
+Torrents page's and a torrent's top bar turns them `on` or `off` whatever the schedules say, or back to
+`auto`; that choice is kept in the state across restarts.
 
 ### Adding from `watch_dir`
 
@@ -125,17 +127,18 @@ then moved into `.done` (added, or held already) or `.failed` with a `.error` fi
 ### Publishing a directory
 
 A `publish` entry builds hybrid torrents of a directory's files with fib's metainfo builder — one
-torrent per file (mode `per_file`, the default), or one of the whole directory (mode `whole_dir`) —
-and seeds them where the files are, through storage that refuses every write, so a published file is
-never downloaded over. A published torrent seeds for ever, whatever `seed_ratio` and `seed_time` say;
-it is not in the client's list of torrents nor counted by `max_torrents`. `web_seed` is the URL at
-which the directory is served, as by a `static` route, put in every torrent as its web seed, so a
-client can download from fit's seed, the web seed, or both. `announce` lists tracker URLs, `private`
-marks the torrents private (BEP 27: peers only through the announced trackers), and `files`/`exclude`
-pick what is published. An entry walks the directory every `check_interval` and builds a file once it
-has stopped changing; a file changed or removed stops its torrent, and a changed one gets a new
-torrent of a new info hash. `bt_publish` serves an index in JSON, each torrent's `.torrent` file and
-its magnet link.
+torrent per file (mode `per_file`, the default), or one of the whole directory (mode `whole_dir`) — and
+seeds them where the files are, through storage that refuses every write, so a published file is never
+downloaded over. A published torrent seeds for ever, whatever `seed_ratio` and `seed_time` say; it is
+not in the client's list of torrents nor counted by `max_torrents`. `web_seed` is the URL at which the
+directory is served, as by a `static` route, put in every torrent as its web seed, so a client can
+download from fit's seed, the web seed, or both. `announce` lists tracker URLs, `private` marks the
+torrents private (BEP 27: peers only through the announced trackers), and `files`/`exclude` pick what is
+published (names starting with `.` and symbolic links are always left out). In mode `whole_dir` the web
+seed's URL must end in `dir`'s last element. An entry walks the directory every `check_interval` and
+builds a file once it has stopped changing; a file changed or removed stops its torrent, and a changed
+one gets a new torrent of a new info hash. `bt_publish` serves an index in JSON, each torrent's
+`.torrent` file and its magnet link.
 
 ### RSS auto-download
 
@@ -146,7 +149,21 @@ whole title, or `re:` and a regular expression), and `min_size` and `max_size` i
 the item's magnet link or .torrent URL in its `category`, `paused` if it says, at most `max_per_poll`
 a poll. With `episodes`, each episode (`S01E02`, `1x02`, or a date) of a show is added once. Every
 item read is remembered with its outcome in `data_dir/rss.json`. A feed or a rule can be turned on or
-off from the RSS page, whatever the config's `enabled` says.
+off from the RSS page (or `fit bt rss enable|disable`), whatever the config's `enabled` says; the choice
+is kept in `data_dir` until *back to the config* (`fit bt rss reset`) hands it back. A rule's `category`
+must be one of `categories`.
+
+### Playing a file while it downloads
+
+A route whose handler is `bt_stream` serves a torrent's file with `Range`, fetching the pieces asked
+for (and `readahead_bytes` past them) before all others: `/bt/<id>/<file path>`, `/bt/<id>/<n>` (the
+file of index `n`) or `/bt/<id>/` (its largest file), after `prefix` (`/bt/`). With `auth`, a request
+must `play` `bt/<id>` under that `media_auth` policy (a bearer token, Basic, `?token=` or the
+`fit_media_token` cookie). With `magnet true` (which needs `auth`), a request carrying
+`?magnet=<the torrent's magnet link>` adds a torrent the client does not have, if it may also
+`publish` `bt/<id>`: such a torrent is *on the fly* — it downloads only the files streamed and is
+removed with its data `temporary_ttl` after its last stream ended. Ticking **Download its pieces in
+order** when adding a torrent is the other way to play one as it comes.
 
 ### Private trackers and passkeys
 
@@ -171,6 +188,12 @@ removes the torrent from them at the end (keeping their files) or leaves it seed
 [the cluster chapter](12-cluster.md).
 
 ## Pages
+
+The menu entry has five pages — **Torrents** (`#/bittorrent/torrents`), **Tracker**
+(`#/bittorrent/tracker`), **RSS** (`#/bittorrent/rss`), **Publishing** (`#/bittorrent/publish`) and
+**BitTorrent config** (`#/bittorrent/config`) — and a torrent has its own page,
+`#/bittorrent/torrent/<id>`. A page whose role does not run here says so, with a link to the config
+page.
 
 ### Torrents
 
@@ -205,7 +228,9 @@ says **live** or **polling**. A role that does not run here is said, with a link
 
 `#/bittorrent/torrent/<id>` shows one torrent, in four tabs (Overview, Files, Peers, Trackers; the
 last three at `.../files`, `.../peers`, `.../trackers`), its head carrying its name, state, why the
-role holds it, and its category, and the toolbar **Pause** or **Resume**, **Recheck** and **Remove**.
+role holds it, and its category, and the toolbar **Pause** or **Resume**, **Recheck** (after a confirm:
+the files are checked piece by piece, the peers kept, and pieces that fail downloaded again) and
+**Remove** (with the same *Delete its downloaded files too* checkbox).
 
 - **Overview**: progress, rates, downloaded and uploaded bytes, peers and seeders, ratio and time
   left, and the pieces it has of all; a card with the ID, the v1 and v2 info hashes, the size (and
@@ -226,7 +251,9 @@ role holds it, and its category, and the toolbar **Pause** or **Resume**, **Rech
   seeders, leechers and downloads of its last answer or scrape; a hybrid's v2 hash in a table of its
   own. Below them are the **peer sources** — trackers, DHT, peer exchange, local discovery, added by
   hand, other sources — each on or off with the peers found and connected, and the **web seeds** with
-  their state, failures, next try and pieces being fetched. This tab is read every four seconds.
+  their state, failures, next try and pieces being fetched.
+
+The Files and Trackers tabs are read every four seconds, the others every two.
 
 ### Tracker
 
@@ -236,8 +263,9 @@ announce** (*Private* or *Public*, the allow-list's count or *none: every torren
 address). **Swarms** are paged 100 at a time: with an allow-list, its torrents in its order, tracked
 or not; a public tracker, the torrents it has peers of, by info hash; each with its seeders, leechers,
 completed count and whether it is tracked. For a private tracker, **A user's passkey** looks up a
-`media_auth` user's passkey for the user's announce URL — shown to the person signed in and never
-kept; a public tracker has no passkeys and says so.
+`media_auth` user's passkey for the user's announce URL (`https://<host>/tracker/<passkey>/announce`
+with the example's route) — shown to the person signed in and never kept; a public tracker has no
+passkeys and says so. The totals are read every four seconds.
 
 ### RSS
 
@@ -248,8 +276,9 @@ seen, torrents added and items failed, and **Poll now**, which says what the pol
 added, failed, left for the next poll). **Rules** lists each rule with its switch, its feeds (or
 *every feed*), category, episodes remembered, torrents added and when it last added one. **Recent
 items** lists the items seen (200), filtered by feed and outcome — added, held already, episode had,
-no rule, no torrent link, failed — each with the rule and a link to the torrent it added. With no
-`rss` in the config the page says where to add it.
+no rule, no torrent link, failed — each with the rule and a link to the torrent it added. The page is
+read every ten seconds. With no `rss` (or no feed) in the config the page says where to add it, and a
+`rss.json` that cannot be saved is shown above the feeds.
 
 ### Publishing
 
@@ -264,9 +293,10 @@ says where to add a publish entry when there is none.
 
 The whole `bittorrent` member on one form: `bittorrent.client` (its `listen`, `data_dir`,
 `download_dir`, encryption and peer discovery, the disk pool, `save_interval`, `limits`,
-`categories`, `watch_dir`, `url_timeout`, `alt_speed`, `access`, `rss` and `publish`) and
-`bittorrent.tracker` (its `listen`, `interval`, `peer_ttl`, bounds, `auth`, `allow` and
-`allow_files`, `access` and `store`), with the UI, `.conf`, `.yaml` and `.json` tabs. It is why
+`categories`, `watch_dir` with `watch_interval` and `watch_max_files`, `url_timeout`, `alt_speed`,
+`access`, `console`, `rss` and `publish`) and `bittorrent.tracker` (its `listen`, `interval`,
+`min_interval`, `peer_ttl`, bounds, `auth`, `allow` and `allow_files`, `access`, `console` and
+`store`), with the UI, `.conf`, `.yaml` and `.json` tabs. It is why
 `bittorrent` has its own page rather than sitting on Global settings' **Other** page; a save's
 problems under this member link here.
 
@@ -288,18 +318,21 @@ downloads or 32 event streams running, or a client that does not run, `503` with
 `fit bt` steers a running fit's client (and its RSS auto-download) through that API, found and
 authenticated as `fit check` and `fit sync` find it (`-c` the bootstrap config, `-timeout`, `-json`,
 and the TLS flags): `fit bt ls`, `add`, `info`, `pause`, `resume`, `rm`, `limit`, `alt` and `rss`
-(its `items`, `poll`, `enable`, `disable` and `reset` subcommands); `add` takes magnet links, http and
-https URLs and .torrent files, with `-paused`, `-sequential`, `-up` and `-down`, the rates in bytes
-per second with `K`, `M` or `G`. It exits 1 when the Admin API refuses one, after trying the rest.
+(its `items`, `poll`, `enable`, `disable` and `reset` subcommands, `-rule` for rules). A torrent is
+named by its ID, a unique start of it, or its name. `add` takes magnet links, http and https URLs and
+.torrent files, with `-category`, `-paused`, `-sequential`, `-up` and `-down`, the rates in bytes per
+second with `K`, `M` or `G`; `rm -delete-data` deletes the files too; `limit` sets a torrent's own
+`-up`, `-down`, `-conns`, `-slots`, `-ratio` and `-seed-time`, or `-clear`s them. It exits 1 when the
+Admin API refuses one, after trying the rest.
 
-`GET /bittorrent/events` streams the client's events as server-sent events; the console serves them
-on a route of its own, `GET /api/m/admin/bittorrent/events`, behind the session, which is the stream
-the pages read. Events are torrents added and removed, state changes (`previous` to `state`), the
+`GET /bittorrent/events` streams the client's events as server-sent events; the console serves them on a
+route of its own, `GET /api/m/admin/bittorrent/events`, behind the session, which is the stream the
+pages read. Events are torrents added and removed, state changes (`previous` to `state`), the
 alternative rates starting or stopping, completions, storage errors, peers banned, seed limits and RSS
-additions, and the stream reconnects with `Last-Event-ID` (a `reset` event means the missed ones are
-gone, so the pages read the list again); past 256 events waiting for a slow client it is disconnected
-with a `lagged` event, and at most 32 streams run at once. The events also go to the log under the
-logger `bittorrent`.
+additions, and the stream reconnects with `Last-Event-ID`, going on from the last 1024 events kept (a
+`reset` event means the missed ones are gone, so the pages read the list again); past 256 events waiting
+for a slow client it is disconnected with a `lagged` event, and at most 32 streams run at once. The
+events also go to the log under the logger `bittorrent`.
 
 The metrics are at the Admin API's `/metrics` and in OpenTelemetry's export: the client's bytes,
 rates, peers, torrents by state and category, hash failures, bans, the alternative rates and RSS
@@ -402,7 +435,8 @@ Only the key parameters; the full field tables are in
 
 A minimal but complete config: a client downloading and seeding, a private tracker whose passkeys
 come from the `media_auth` policy, a category and an RSS rule, a published directory, and routes for
-the tracker's HTTP announces and for published .torrent files. It passes `./bin/fit validate -c`.
+the tracker's HTTP announces, for published .torrent files and for playing a torrent's files. It passes
+`fit validate -c`.
 
 ```fit
 listener web :8080 http/1.1 h2c
@@ -417,7 +451,7 @@ media_auth members {
 	}
 	users alice {
 		password replace-with-a-password
-		play bittorrent/*
+		play bittorrent/* bt/*
 	}
 }
 
@@ -468,16 +502,20 @@ bittorrent {
 
 route tracker { match { path /tracker/* }; handler bt_tracker }
 route torrents { match { path /torrents/* }; handler bt_publish }
+route stream { match { path /bt/* }; handler bt_stream { auth members } }
 ```
 
-The torrents of category `iso` download into `/srv/downloads/iso`; downloads anywhere stop when the
-disk would keep less than 10 GiB free; the alternative rates hold on weekdays from 08:00 to 18:00; a
-`.torrent` or `.magnet` file left in `/srv/torrents/watch` is added; the episode rule adds what it
-picks into `iso`; `/srv/releases` is published with `https://example.com/releases/` as the web seed;
-the tracker is private, and its HTTP announces and scrapes are served at `/tracker/announce` (and
-`/tracker/<passkey>/announce`), its UDP ones on `:6969`; `/torrents/` serves the published .torrent
-files and magnet links. The `media_auth` users and tokens must play `bittorrent/<info hash>` to
-announce; `allow_files` limits what is tracked.
+The torrents of category `iso` download into `/srv/downloads/iso`; downloads anywhere stop when the disk
+would keep less than 10 GiB free; the alternative rates hold on weekdays from 08:00 to 18:00; a
+`.torrent` or `.magnet` file left in `/srv/torrents/watch` is added; the episode rule adds what it picks
+into `iso`; `/srv/releases` is published with `https://example.com/releases/` as the web seed; the
+tracker is private, and its HTTP announces and scrapes are served at `/tracker/announce` (and
+`/tracker/<passkey>/announce`, and scrapes at `.../scrape`), its UDP ones on `:6969`; `/torrents/`
+serves the index of what is published in JSON, `/torrents/<id>.torrent` a .torrent file and
+`/torrents/<id>.magnet` its magnet link; `/bt/<id>/` plays a torrent's largest file to a request
+carrying `members` credentials that may play `bt/*`, as alice's user and password do over Basic. The
+`media_auth` users and tokens must play `bittorrent/<info hash>` to announce; `allow_files` limits what
+is tracked.
 
 Two details of the example: the `static` route the web seed's URL would need
 (`route { match { path /releases/* }; handler static { root /srv/releases; strip_prefix /releases } }`)

@@ -1,4 +1,4 @@
-# fit Web 控制台教程（总纲）
+# fit Web 控制台教程
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -9,6 +9,18 @@
 读者应已了解 [fit 是什么](../../README.zh-CN.md)、[.conf 格式](../reference/fit.zh-CN.md)
 与[配置如何加载](../configuration.zh-CN.md)。教程中的完整字段表不重复罗列，以链接指向
 [配置参考](../reference/config.zh-CN.md)（由代码生成，与二进制一致）。
+
+## 从哪里开始
+
+- **第一次使用**：按顺序读 01 → 02 → 03，从装好二进制一直到登录控制台，并认识其余各章都会提到的菜单。
+- **对外提供站点或 API**：05 监听 → 15 反向代理 → 18 TLS 证书，需要时再读 19 缓存。
+- **日常运维**：04 概览、09 版本、10 一致性检查、11 日志。
+- **多台 fit**：12 集群；隧道与 LLM 角色见 24、25。
+- **音视频**：20 流媒体 → 21 媒体认证 → 22 媒体库，以及 23 WebRTC。
+- **数据与文件**：26 数据同步、27 BitTorrent。
+
+03 之后的每一章都可单独阅读：说明它在菜单中的位置、页面上能做什么、关键参数，以及一份可以用
+`fit validate -c <文件>` 校验通过的完整 `.conf`。
 
 ## 教程结构
 
@@ -139,7 +151,7 @@
 ### 14 助手
 
 - `admin.assistant`：提供方（Anthropic、OpenAI、Gemini、Azure OpenAI、Ollama、OpenAI 兼容、`llm.proxy`）、密钥（只写不读）、默认模型、上限。
-- 用户级别：`off`、`read`、`edit`、`propose`、`apply`；对话面板（以当前页面为上下文）；提案（审阅并应用）；技能（22 个内置 + 自定义）；MCP 服务器（`/mcp` 与令牌）；审计日志；数据同步与 BitTorrent 两组工具，以及把它们的记录原样发送的设置。
+- 用户级别：`off`、`read`、`edit`、`propose`、`apply`；对话面板（以当前页面为上下文）；提案（审阅并应用）；技能（22 个内置，未管理集群时为 19 个，另可自定义）；MCP 服务器（`/mcp` 与令牌）；审计日志；数据同步与 BitTorrent 两组工具，以及把它们的记录原样发送的设置。
 - 资料来源：[控制台与 store](../console.zh-CN.md#助手)、`app/workbench/web/ai/`。
 
 ### 15 反向代理
@@ -151,7 +163,7 @@
 
 ### 16 正向代理
 
-- `forward_proxy` 路由：为所列客户端（`clients`）提供 HTTP CONNECT 与 HTTP 代理，可限定端口（`ports`）；环回、链路本地、未指定、组播与本机地址默认拒绝。
+- `forward_proxy` 路由：为所列客户端（`clients`）提供 HTTP CONNECT 代理（其他方法回 405），可限定端口（`ports`）；环回、链路本地、未指定、组播与本机地址默认拒绝。
 - 监听的 `socks` 协议提供 SOCKS5。
 - 资料来源：[配置参考：Handlers](../reference/config.md#http-handlers-forward_proxy)、[配置参考：Listeners](../reference/config.md#listeners)。
 
@@ -238,7 +250,8 @@
    - `## 相关文档`（`## See also`）：链接到深入文档与参考。
    不编辑配置的页面（概览、引擎、版本、一致性检查、集群等）省略“参数”与“.conf 配置”或只写所涉及的成员。
 3. **.conf 示例必须能通过校验**：把示例（含必要的注释行）存成临时文件，运行
-   `./bin/fit validate -c <临时文件>`，通过才可写入。示例应是自包含的完整配置：
+   `./bin/fit validate -c <临时文件>`，通过才可写入。`go test ./docs`（`TestConfigExamples`）会加载教程中
+   每个 `fit` 与 `json` 代码块，示例一旦无法加载就会构建失败。示例应是自包含的完整配置：
    只写 `upstream` 而没有监听器会报错，需要时补一个最小 `listener`。示例中的 `admin` 只出现在以
    `admin` 本身为主题的章节：01（引导文件）、02（用户）、12（`admin.cluster`）与 14
    （`admin.assistant`）；控制台页面从不编辑 `admin`，其他章的配置都没有它。

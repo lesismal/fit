@@ -49,11 +49,33 @@ What can be done on the page:
 - Write `proxy`'s port, `public_ips`, the session and relay limits, the idle timeout, and the source address
   `relay_ip` and the port range of the sockets toward the media servers.
 
-On reload, `turn`'s `users`, `secret`, peer lists, quotas, lifetimes and certificates change in place, with the
-allocations kept; a change of the addresses starts a new server and drains the old one. A reload of `media` that
-keeps `listen` and `public_ips` keeps every session; changing them starts the media server again, ending the
-sessions and sending each peer a DTLS close. A reload of `proxy` that keeps `listen` keeps its sessions and
-relays.
+On reload, `turn`'s `users`, `secret`, `access`, peer lists, quotas, bandwidth, lifetimes and certificates change
+in place, with the allocations kept. A change of its addresses, `realm`, `relay_ip`, `public_ip`, port range,
+`nonce_secret`, `mptcp`, `max_stream_message` or `stream_idle_timeout` starts a new server: beside the old one,
+which drains its allocations for the listeners' drain timeout, or, when the two share an address, after the old
+one has closed, which ends its allocations. A reload of `media` that keeps `listen` and `public_ips` keeps every
+session, and the rest applies to the next session; changing them starts the media server again, ending the
+sessions and telling each peer. A reload of `proxy` that keeps `listen` keeps its sessions and relays; changing
+`listen` ends them.
+
+The roles' metrics are `fit_turn_*`, `fit_webrtc_media_*` and `fit_webrtc_proxy_*`: allocations, sessions,
+streams, relayed bytes, refusals by code and restarts.
+
+### The handlers on routes
+
+| Handler | Params | What it does |
+| --- | --- | --- |
+| `whip` | `stream`, `auth` | A `POST` of an `application/sdp` offer publishes a stream; the name is `stream`, or the path's last segment (`cam1` in `/whip/cam1` on a route of `/whip/*`) |
+| `whep` | `stream`, `auth` | A `POST` of an offer plays a published stream, named as `whip`'s |
+| `webrtc_proxy` | `upstream` (required), `media_addrs`, `timeout` (10s), `max_sdp_bytes` (32 KiB), `auth`, `action` | Sends each offer to a media server of `upstream` and answers with its answer, the candidates replaced by `webrtc.proxy`'s port; `action` (`publish` or `play`) is required with `auth` |
+
+A `POST` is answered `201` with the answer and a `Location`, the session's URL (the path followed by the session's
+32-hex-digit ID), which the route must match too; a `DELETE` of that URL ends the session without credentials,
+the ID being the capability. `PATCH` (trickle ICE, ICE restarts) is answered `405`: an ICE restart is a new
+session. Other refusals: `409` for a stream published already, `404` for a viewer of a stream not published,
+`415` for a body that is not `application/sdp`, `422` for an offer with no codec fit forwards. `auth` checks a
+bearer token or a user and password for `publish` or `play` on the stream's name: `401` without credentials,
+`403` without the right.
 
 ## Key parameters
 
@@ -179,7 +201,49 @@ route whep { match { path /whep/* }; handler whep }
 example leaves them out; the watched files serve the next handshake after a renewal, with nothing restarted. A
 browser uses the server as an ICE server: `{urls: ["turn:turn.example.com:3478",
 "turn:turn.example.com:3478?transport=tcp", "turns:turn.example.com:5349?transport=tcp"], username,
-credential}`, with the time-limited credentials made by the web service that knows the `secret`.
+credential}`, with the time-limited credentials made by the web service that knows the `secret`. With
+`turn_urls`, `media` hands them out itself: each WHIP or WHEP answer's `Link` headers carry those URLs with
+credentials good for `turn_credential_ttl`. `allowed_peers 10.0.0.5:8189` lets the relay reach `media`'s own port
+on `relay_ip`, which the default denial of private addresses would refuse.
+
+Media servers behind fit, two hosts of an upstream, each peer relayed through fit's UDP port `:8190`:
+
+```fit
+listener web :8080
+
+upstream {
+	name media-servers
+	addresses 10.0.0.2:8080 10.0.0.3:8080
+	health_check { path /healthz }
+}
+
+route publish {
+	match { path /whip/* }
+	handler webrtc_proxy {
+		upstream media-servers
+		media_addrs { 10.0.0.3:8080 10.0.0.3:8189 }
+	}
+}
+
+route play {
+	match { path /whep/* }
+	handler webrtc_proxy { upstream media-servers }
+}
+
+webrtc {
+	proxy {
+		listen :8190
+		public_ips 203.0.113.5
+		relay_ip 10.0.0.1
+		port_min 40000
+		port_max 40999
+	}
+}
+```
+
+`media_addrs` names where a media server's peers are relayed to, by its address in the upstream; an IP alone takes
+the port of its answer's candidate. Without it, fit relays to the answer's first host candidate, or its
+server-reflexive one, IPv4 first.
 
 ## See also
 

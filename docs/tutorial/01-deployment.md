@@ -47,13 +47,19 @@ A file cannot hold the password that opens it, so a config with a store is in tw
 - the **store**, sealed with the password. It holds everything but `admin`: the **base config** fit runs
   from, before providers are merged into it.
 
-The first time fit starts with this file there is no store yet: the bootstrap file's `listeners` and
-`routes` are its first content, and the store is written at once. From then on the store is merged onto
+The first time fit starts with this file there is no store yet: everything the bootstrap file sets
+beside `admin` is its first content, and the store is written at once (fit says
+`the config of <file> is kept in the store <store> from now on`). From then on the store is merged onto
 the bootstrap file at each start, the store's values winning: objects are merged member by member, and a
 list or a value the store holds replaces the file's whole. A member only the file sets is kept, and the
 merged config is written back to the store. To start again from the file, delete the store. A write goes to
 a temporary file beside the store, 0600, is synced and then renamed over it, so a crash leaves either the
 old or the new store, never half of one.
+
+A start that fails, for an unknown handler module or a port another process holds, puts the store back
+as it was before that start: a first start leaves no store, so fixing the file and starting again is
+enough. The "kept in the store" line is printed only once the start has succeeded.
+`fit validate -c <bootstrap file>` before the first start catches most of these failures.
 
 With a store, `admin` never enters it and is never shown: it is put in at each config load, but not into
 the base config, so the Admin API's `GET /config` and the JSON page hold no passwords, hashes or key
@@ -62,10 +68,21 @@ paths. A config that carries `admin` is rejected: `admin` comes only from the bo
 effect at a restart.
 
 A store that does not open, for a wrong password or a changed byte, stops fit from starting and is never
-overwritten. So keep a copy: `fit store export -c <bootstrap file>` prints the config it holds as JSON, and
-`fit store import -c <bootstrap file> <file>` checks a config and seals it again, replacing what was there
-with a new salt — changing the store's password is done this way too; a running fit sees the import only
-after a SIGHUP.
+overwritten. So keep a copy:
+
+```bash
+fit store export -c /etc/fit/fit.conf > /root/fit-config.json     # the config the store holds, as JSON
+fit store import -c /etc/fit/fit.conf /root/fit-config.json       # check it and seal it as the store
+kill -HUP "$(pidof fit)"                                          # a running fit reads the store again
+```
+
+`export` is an error while the store has not been written yet. `import` takes the files or directories
+of a config, in any of fit's formats, checks them as `fit validate` does with the bootstrap file's `admin`
+put in, and seals them, replacing what the store held, with a new salt; the console users whose passwords
+changed are kept when the old store opens. A config that sets `admin` is refused. The old store need not
+open, so changing the store's password is done this way too: export, change `admin.store`, import. A
+running fit sees an import only after a SIGHUP. With a store, `fit run -watch` is refused: the config is
+no longer in the files it would watch.
 
 ### First start: fit run -admin
 
@@ -81,16 +98,20 @@ fit run -admin -c site.yaml -timeout 30m
   `127.0.0.1:2019`, the console on `127.0.0.1:2020`. With no `admin.console.users`, the user `admin` logs
   in with the password `admin`.
 - That password is **temporary**: it must be changed within `-timeout` (`10m` when left out), counted from
-  the start. Until it is changed, a login with it opens only the "change the default password" page (see
-  [Login](02-login.md)). After `-timeout` it no longer logs in, and fit must be restarted with `-admin` to
-  change it in time. The new password cannot be `admin`, and is kept in the store.
+  the start, and fit's log says until when. Until it is changed, a login with it opens only the "change the
+  default password" page (see [Login](02-login.md)), and the Admin API answers every request `403`. After
+  `-timeout` it no longer logs in, and fit must be restarted with `-admin` to change it in time. The new
+  password cannot be `admin`; it is kept in the store, so a restart logs in with it and asks for nothing.
+  `-timeout` without `-admin` is an error.
 - Without `admin.store`, the store is the file beside the config with `.store` for its extension
-  (`site.yaml` gives `site.store`, `fit.json` or no config gives `fit.store`), and its password is
+  (`site.yaml` gives `site.store`; `fit.json`, or no config, gives `fit.store` in the working directory), and
+  its password is
   `$FIT_STORE_PASSWORD` or, without it, the **key file** beside the store, the store's path with `.key`
   added (`site.store.key`), made 0600 with a random key when neither exists yet. Keep the key file with the
   store: a store copied elsewhere opens with it.
 - A config with only `admin.console` and no listener or route is valid, so that fit can start with nothing
-  to serve yet.
+  to serve yet. `fit validate` checks the file as written, without `-admin`'s defaults: a file that leaves
+  the console users to `-admin` does not validate (`admin.console.users: missing required field`).
 - `-c` takes a `.store` file too, at most one, alone or beside config files: `fit run -c site.store` runs
   what the store holds, and `fit run -c base.yaml -c site.store` merges it onto `base.yaml` as above. A
   `.store` beside the config files is used once it exists, whether or not `-admin` is given.
@@ -113,7 +134,7 @@ Write the hash it prints into the bootstrap file's `admin.console.users`. `fit v
 password can also be changed on the Account page (see [Account](13-account.md)), but changed passwords are
 kept in the store while `admin` comes only from the bootstrap file: the user itself and its first hash stay
 in the file. Without a store there is nowhere to keep a change: the page says so and the endpoint answers
-`409`.
+`409`. Adding or removing a user is an edit of the bootstrap file and a restart.
 
 ### Reaching the console
 
@@ -124,7 +145,7 @@ tunnelling the port through SSH:
 ssh -L 2020:127.0.0.1:2020 host
 ```
 
-TLS is optional on a loopback address. **A host that is not a loopback address needs `cert_file` and
+Then open `http://127.0.0.1:2020/` in a browser. TLS is optional on a loopback address. **A host that is not a loopback address needs `cert_file` and
 `key_file`**, so that passwords never cross a network in the clear; `fit validate` rejects a config without
 them. `access` says which client addresses the console serves, and it follows every config applied, without
 a restart; a connection it refuses is closed as soon as it is accepted. Writing `allow 127.0.0.1` (and
@@ -134,24 +155,28 @@ a restart; a connection it refuses is closed as soon as it is accepted. Writing 
 
 - **Docker**: the image is distroless's static image, run as `nonroot` (65532), holding only
   `/usr/local/bin/fit` and a placeholder config at `/etc/fit/fit.json`, which answers every request on
-  port 8080. The store's directory must be in a volume (a write is a new file renamed over the store),
-  and the password goes in an environment variable (`password_env`) or a mounted file
-  (`password_file`), not in the config. To reach the console from outside the container, give it a
-  non-loopback address with `cert_file` and `key_file`. Ports below 1024 are let through by the sysctl
-  `net.ipv4.ip_unprivileged_port_start=0`, which is what the Helm chart does.
+  port 8080; mount your bootstrap file there, or anywhere with `run -c <path>` as the command. The store's
+  directory must be in a volume that the user 65532 can write (a write is a new file renamed over the
+  store), and the password goes in an environment variable (`password_env`) or a mounted file
+  (`password_file`), not in the config. The console listens on 127.0.0.1 inside the container: to reach it
+  from outside, give it an address of every interface (`:2020`) with `cert_file` and `key_file`, and
+  publish the port. Docker lets the container's user bind ports below 1024; elsewhere the sysctl
+  `net.ipv4.ip_unprivileged_port_start=0` does, as the Helm chart sets it.
 - **Helm**: the chart runs fit as the Gateway API and Ingress controller, with the config in a
-  ConfigMap; its values cover the serving, not the console or the store. To run those too, pass a whole
-  config in the `config` value (keeping the chart's health listener, route and Kubernetes provider)
-  and give the store a volume and its password yourself — the chart's file system is read-only and it
-  mounts no other volume.
+  ConfigMap mounted read-only at `/etc/fit`; its values cover the serving, not the console or the store. A
+  whole config can be passed in the `config` value (keeping the chart's health listener, route and
+  Kubernetes provider), but the chart's root file system is read-only and its only writable volume is an
+  in-memory `/tmp` of 64 MiB, lost with the pod, and it has no value for another volume or an environment
+  variable: a store, and its password, need the chart's deployment template changed.
 - **systemd**: `fit.service` is for a fit whose config is at `/etc/fit/fit.json`, and `fit@<name>` for
   `/etc/fit/<name>.json`. fit runs as the system user `fit` with `CAP_NET_BIND_SERVICE` alone and a
   read-only file system but for `/var/lib/fit` (the `StateDirectory`, where the store's `path` goes) and
   `/run/fit` (the `RuntimeDirectory`). The config is checked with `fit validate` before the start;
   `systemctl reload fit` checks the new config and sends SIGHUP, and a config that does not validate
-  fails the reload while the running one stays; a SIGHUP re-reads the store, for example after a
-  `fit store import`. `systemctl stop fit` sends SIGTERM, and fit waits at most 30s
-  (`-shutdown-timeout`) for requests in flight.
+  fails the reload while the running one stays. With a store, `fit validate` checks the bootstrap file
+  only, and a SIGHUP re-reads the store, for example after `sudo -u fit fit store import ...` (as the
+  user `fit`, so that the store stays its own). `systemctl stop fit` sends SIGTERM, and fit waits at most
+  30s (`-shutdown-timeout`) for requests in flight.
 
 ## Key parameters
 
@@ -196,6 +221,7 @@ admin {
 		address 127.0.0.1:2020
 		users {
 			username admin
+			# An example: write the hash fit hash-password prints for your password.
 			password_hash "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"
 		}
 	}

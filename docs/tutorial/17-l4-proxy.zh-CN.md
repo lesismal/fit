@@ -59,7 +59,8 @@
 
 ## 参数
 
-只列关键参数；完整字段表见[配置参考：Services](../reference/config.md#services)。
+只列关键参数；完整字段表见[配置参考：Services](../reference/config.md#services)
+（[`services[]`](../reference/config.md#config-service)）。
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -75,8 +76,17 @@
 ### 计数与上限
 
 `max_conns` 数的是一条服务同时代理的连接与会话：超出的连接一被接受就合上，超出的会话的数据报被丢掉。
-`idle_timeout` 说的是两边都没有字节——一侧还在说话就不算空闲。页上不显示这些数，fit 持有的连接数在
+`idle_timeout` 计的是两个方向都没有字节的时间：只要任一侧还在发送，连接就不算空闲。页上不显示这些数，fit 持有的连接数在
 [概览](04-overview.zh-CN.md)页看。
+
+### 校验会拒绝的写法
+
+- 没有任何服务列出的 `tcp` 或 `udp` 监听，以及服务列出的不是这两种的监听：服务接的监听，其 `protocols` 要么
+  包含 `tcp`，要么只有 `udp`；
+- 一个 `udp` 监听被两条服务列出，或被带 `server_names` 或 `proxy_protocol` 的服务列出；
+- 同一个 `tcp` 监听上有两条没有 `server_names` 的服务，或同一个名字出现在它的两条服务里；
+- `server_names` 里写 IP 地址：ClientHello 里只有主机名；
+- 不存在的 `upstream` 或监听。
 
 ### 用不上的那些
 
@@ -104,31 +114,43 @@ HTTP 请求给 HTTP；其他字节给没有 `server_names` 的服务，没有就
 
 ## .conf 配置
 
-三个监听、三个上游、三条服务：一条按 SNI 分出的 TLS 透传，一条 `udp`，一条发 PROXY 头。这是自包含的完整
-配置，能通过 `fit validate`：
+三个监听、四个上游、四条服务：带 TCP 健康检查的 Postgres，走 `udp` 的 DNS，以及按 SNI 拆分的一个端口
+`:8443`——`mail.example.com` 的 TLS 透传，加一条发 PROXY 头的兜底服务。这是自包含的完整配置，能通过
+`fit validate`：
 
 ```fit
 listener pg :5432 tcp
 listener dns :53 udp
-listener mail :8443 tcp
+listener tls :8443 tcp
 
-upstream db 10.0.0.5:5432
+upstream db 10.0.0.5:5432 10.0.0.6:5432 {
+	health_check {
+		type tcp
+		interval 10s
+	}
+}
 upstream resolvers 10.0.0.53:53 10.0.0.54:53
 upstream mail 10.0.0.25:8443
+upstream web 10.0.0.30:8443 10.0.0.31:8443 {
+	load_balancing ip_hash
+}
 
-service postgres { listeners pg; upstream db; idle_timeout 30m; proxy_protocol v1 }
+service postgres { listeners pg; upstream db; idle_timeout 30m }
 service dns { listeners dns; upstream resolvers }
-service mail { listeners mail; upstream mail; server_names mail.example.com }
+service mail { listeners tls; upstream mail; server_names mail.example.com }
+service web { listeners tls; upstream web; proxy_protocol v2; max_conns 20000 }
 ```
 
 不写任何监听——也没有匹配主机名的路由、HTTPS by default 因此会生成监听——的配置通不过校验：上游自己不听。
-这里的三个上游由三条服务使用。
 
-`mail` 那条是 SNI 透传：`:8443` 上问 `mail.example.com` 的连接原样送到 `10.0.0.25:8443`；问别的名字或没问
-名字的连接没有归属，会被合上——要兜底，再加一条没有 `server_names` 的服务。
+在 `:8443` 上，ClientHello 问 `mail.example.com` 的连接原样送到 `10.0.0.25:8443`；其他连接——问别的名字、
+没问名字，或根本不是 TLS——都归 `web`，即这个监听上唯一没有 `server_names` 的服务：它按客户端 IP 把客户端固定在
+两个地址之一，并给每条连接先发一个 PROXY v2 头。上游必须能接这个头（nginx 的 `listen ... proxy_protocol`、
+HAProxy 的 `accept-proxy`）；不认它的服务器（如 Postgres）会把它当成乱码，所以 `postgres` 不发。
 
 写法上，`listener pg :5432 tcp` 是简写，与 `listener { name pg; address :5432; protocols tcp }` 等价；
-`service` 没有简写，块里的字段逐项写。
+`upstream db 10.0.0.5:5432 10.0.0.6:5432 { ... }` 把 `addresses` 作为参数；`service` 只把名字作为参数，
+其余字段写在块里。
 
 ## 相关文档
 

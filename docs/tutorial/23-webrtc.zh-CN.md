@@ -41,9 +41,29 @@ HTTP 一侧不在这一页：`whip`、`whep` 与 `webrtc_proxy` 是路由上的�
   以及 PeerConnection、流、观看者、码率的上限和超时。
 - 写 `proxy` 的端口、`public_ips`、会话与中继的上限、空闲超时，以及通往媒体服务器的源地址 `relay_ip` 与端口范围。
 
-重载时 `turn` 的 `users`、`secret`、对端列表、配额、生存期和证书在原处生效，已有的 allocation 保留；修改地址会
-启动新服务器并排空旧的。`media` 保持 `listen` 和 `public_ips` 不变的重载保留所有会话；修改它们会重新启动，会话
-结束，每个对端收到 DTLS close。`proxy` 保持 `listen` 不变的重载保留会话与其中继。
+重载时 `turn` 的 `users`、`secret`、`access`、对端列表、配额、带宽、生存期和证书在原处生效，已有的 allocation
+保留。修改它的地址、`realm`、`relay_ip`、`public_ip`、端口范围、`nonce_secret`、`mptcp`、`max_stream_message` 或
+`stream_idle_timeout` 会启动新服务器：与旧服务器并存，旧的在监听的排空超时内排空其 allocation；两者共用某个地址时，
+则先关闭旧的，其 allocation 随之结束。`media` 保持 `listen` 和 `public_ips` 不变的重载保留所有会话，其余设置用于
+之后的会话；修改它们会重新启动媒体服务器，会话结束，并通知每个对端。`proxy` 保持 `listen` 不变的重载保留会话与
+其中继；修改 `listen` 则全部结束。
+
+各角色的指标为 `fit_turn_*`、`fit_webrtc_media_*` 与 `fit_webrtc_proxy_*`：allocation、会话、流、中继字节数、按
+状态码统计的拒绝次数以及重启次数。
+
+### 路由上的处理器
+
+| 处理器 | 参数 | 作用 |
+| --- | --- | --- |
+| `whip` | `stream`、`auth` | `POST` 一个 `application/sdp` 的 offer 即推一路流；流名取 `stream`，或路径的最后一段（路由 `/whip/*` 上 `/whip/cam1` 中的 `cam1`） |
+| `whep` | `stream`、`auth` | `POST` 一个 offer 播放已推送的流，流名的取法与 `whip` 相同 |
+| `webrtc_proxy` | `upstream`（必填）、`media_addrs`、`timeout`（10s）、`max_sdp_bytes`（32 KiB）、`auth`、`action` | 把每个 offer 发给 `upstream` 中的一台媒体服务器，用它的 answer 应答，并把其中的候选替换为 `webrtc.proxy` 的端口；设了 `auth` 时必须设 `action`（`publish` 或 `play`） |
+
+`POST` 成功时应答 `201`，带 answer 和 `Location`，即会话的 URL（请求路径后接 32 位十六进制的会话 ID），路由也必须
+匹配它；对该 URL 的 `DELETE` 结束会话，无需凭据，会话 ID 本身就是凭证。`PATCH`（trickle ICE、ICE 重启）应答
+`405`：ICE 重启就是新建一个会话。其他拒绝：流已在推送时 `409`，观看未推送的流时 `404`，请求体不是
+`application/sdp` 时 `415`，offer 中没有 fit 转发的编解码器时 `422`。`auth` 按流名检查 bearer 令牌或用户名与密码
+是否有 `publish` 或 `play` 权限：没有凭据时 `401`，没有权限时 `403`。
 
 ## 参数
 
@@ -62,7 +82,7 @@ HTTP 一侧不在这一页：`whip`、`whep` 与 `webrtc_proxy` 是路由上的�
 | `mptcp` | 关闭 | 内核支持时（Linux 5.6+）以多路径 TCP 承载 `listen_tcp` 与 `listen_tls`；`listen` 的 UDP socket 没有 |
 | `realm` | — | 必填。凭据的 realm，写在每个质询里 |
 | `users` | 无 | 静态用户，各带 `password` 或它导出的 `key`；与 `secret` 同时设置时先在 `users` 中查找 |
-| `secret` | 无 | coturn `use-auth-secret` 的共享密钥：用户名 `<过期时间>:<任意内容>`，密码是 `base64(HMAC-SHA1(secret, username))`，过期前有效 |
+| `secret` | 无 | coturn `use-auth-secret` 的共享密钥：用户名 `<过期时间（Unix 秒）>:<任意内容>`，密码是 `base64(HMAC-SHA1(secret, username))`，过期前有效 |
 | `relay_ip` | — | 必填。中继 socket 绑定的地址，必须是本机的地址之一，不能是通配 |
 | `public_ip` | 无 | 1:1 NAT 之后告知客户端的地址 |
 | `port_min`、`port_max` | 无 | 中继端口范围，便于防火墙开放；都不设时由内核选择 |
@@ -74,8 +94,8 @@ HTTP 一侧不在这一页：`whip`、`whep` 与 `webrtc_proxy` 是路由上的�
 | `default_lifetime`、`max_lifetime` | 10m、1h | allocation 的生存期，由客户端刷新 |
 | `nonce_lifetime`、`nonce_secret` | 10m、随机 | nonce 的有效时间（更旧的应答 `438`），以及生成 nonce 用的密钥——同一个负载均衡器后的各服务器共享它，因为客户端的请求可能落到任何一台 |
 | `max_stream_message` | 8 KiB | TCP 或 TLS 客户端最大的消息；声称更大的连接立即关闭 |
-| `stream_idle_timeout` | 30s | 没有 allocation 的 TCP 或 TLS 连接 |
-| `allowed_peers`、`denied_peers` | 无 | 环回、私有、链路本地、组播等内部地址默认被拒绝；`allowed_peers` 可放行其中一部分。两者都接受带端口的地址，如 `10.0.0.5:8189` |
+| `stream_idle_timeout` | 30s | 没有 allocation 的 TCP 或 TLS 连接可以保持打开多久 |
+| `allowed_peers`、`denied_peers` | 无 | 环回、私有、链路本地、组播等内部地址默认被拒绝；`allowed_peers` 可放行其中一部分。两者都接受带端口的地址，如 `10.0.0.5:8189`，只针对该端口 |
 | `access` | 无 | 客户端地址的允许与拒绝列表，先于全局 `access` 决定；被拒绝的连接在接受时立即关闭，数据报被丢弃 |
 
 每个 allocation 在引擎的每个事件循环上各占一个 socket；这些 socket 在 fib 服务器自己的 goroutine 上打开，绝不
@@ -113,7 +133,7 @@ HTTP 一侧不在这一页：`whip`、`whep` 与 `webrtc_proxy` 是路由上的�
 | `max_sessions` | 4096 | 同时存在的会话，从 offer 起计；再多一个应答 `503` |
 | `max_relays` | 4096 | 同时中继的对端地址，各占一个 socket；超过时新地址被丢弃 |
 | `session_timeout` | 30s | 没有任何中继的会话，超时后被遗忘，其 URL 应答 `404` |
-| `idle_timeout` | 30s | 不发送任何数据的对端地址失去其中继 |
+| `idle_timeout` | 30s | 对端地址可以多久不发送任何数据，超过即关闭其中继 |
 | `relay_ip` | 无 | 通往媒体服务器的 socket 从本机哪个地址发出；与媒体服务器同一地址族 |
 | `port_min`、`port_max` | 无 | 通往媒体服务器的 socket 的本地端口范围；被占用的端口会跳过，范围占满时丢弃该对端地址 |
 | `access` | 无 | 对端地址的允许与拒绝列表，先于全局 `access` 决定 |
@@ -167,7 +187,47 @@ route whep { match { path /whep/* }; handler whep }
 下一次握手，什么都不必重启。浏览器把 TURN 作为 ICE 服务器使用：
 `{urls: ["turn:turn.example.com:3478", "turn:turn.example.com:3478?transport=tcp",
 "turns:turn.example.com:5349?transport=tcp"], username, credential}`，其中限时凭据由知道 `secret` 的 Web 服务
-生成。
+生成。设置了 `turn_urls` 时由 `media` 自己发放：每个 WHIP 或 WHEP answer 的 `Link` 头携带这些 URL 和有效期为
+`turn_credential_ttl` 的凭据。`allowed_peers 10.0.0.5:8189` 让中继能到达 `relay_ip` 上 `media` 自己的端口，否则
+它会被默认拒绝私有地址的规则挡住。
+
+把媒体服务器放在 fit 后面：一个上游中的两台主机，每个对端经 fit 的 UDP 端口 `:8190` 中继：
+
+```fit
+listener web :8080
+
+upstream {
+	name media-servers
+	addresses 10.0.0.2:8080 10.0.0.3:8080
+	health_check { path /healthz }
+}
+
+route publish {
+	match { path /whip/* }
+	handler webrtc_proxy {
+		upstream media-servers
+		media_addrs { 10.0.0.3:8080 10.0.0.3:8189 }
+	}
+}
+
+route play {
+	match { path /whep/* }
+	handler webrtc_proxy { upstream media-servers }
+}
+
+webrtc {
+	proxy {
+		listen :8190
+		public_ips 203.0.113.5
+		relay_ip 10.0.0.1
+		port_min 40000
+		port_max 40999
+	}
+}
+```
+
+`media_addrs` 按媒体服务器在上游中的地址，写明把它的对端中继到哪里；只写 IP 时端口取其 answer 中候选的端口。不写时，
+fit 中继到 answer 的第一个 host 候选，或其 server-reflexive 候选，IPv4 优先。
 
 ## 相关文档
 

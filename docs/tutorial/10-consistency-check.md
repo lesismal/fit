@@ -21,8 +21,8 @@ then applied as one new config version and written to the store.
 ### Consistency check
 
 The tools show the running config's version, when this check ran, and **Check again**. Below them, when there
-is drift, two badges: how many drift and how many info; when there is no drift the page says "The running
-service and its config agree".
+is drift, a badge with how many drift and, when there are any, one with how many info; when there is no drift
+the page says "The running service and its config agree", and lists the info items, if any, below.
 
 The differences are grouped by category, in this order: Settings, Listeners, Routes, Upstreams, Layer 4
 services, TLS certificates, Roles, Cache, Config sources; each group's heading carries its number of items, and
@@ -44,8 +44,8 @@ A fix's action is one of four:
 | `replace` | Change the config to the running value | changes the config to what actually runs |
 | `reapply` | Apply the config again | changes nothing and applies it again, to retry or to stop it |
 
-The select shows the action and, when the fix has one, the patch it writes (`Write it into the config · add
-/listeners/1`, like that). Where no fix is offered, the page says so: edit the config on its page, or apply the
+The select shows the action in the page's own words and, when the fix has one, the patch it writes (`Write it
+into the config · add /listeners/1`, like that); the server's own wording (`label`) is what `fit check` prints. Where no fix is offered, the page says so: edit the config on its page, or apply the
 config again.
 
 The bar at the bottom applies only the rows you ticked: **Apply the selected fixes (N)** opens a confirmation
@@ -53,8 +53,8 @@ window listing each difference, its category and the fix picked for it. Nothing 
 After that the selected fixes go together through the same save path: they are checked first, then applied as
 one new config version and written to the store, so a fix that cannot load rejects the whole set; the page says
 "Applied as config version V" and the check runs again. If the config was changed elsewhere since this check
-(`412`), the page asks you to check again before applying; a `400` error is shown in the toast and the check
-runs again.
+(`412`), the page asks you to check again before applying; a `400` (a difference that is gone, or a fix it no
+longer offers) is shown in the toast and the check runs again.
 
 Each group's heading carries its category and its number of items (1 item / N items); the two summary badges
 are the drift count and the info count. The select defaults to its first option, the bar's count follows the
@@ -65,8 +65,11 @@ but for a setting read only at start, if you change the config's value instead o
 difference stays until the next restart — the config says the new value and the running service still uses the
 one from start.
 
-Beside every difference there is an Ask AI button that asks the skill drift-explain about it (see the
-[assistant](14-assistant.md) chapter).
+When the assistant is on, every difference has an Ask AI button that asks the skill drift-explain about it
+(see the [assistant](14-assistant.md) chapter).
+
+On a manager whose cluster has roles ([Cluster](12-cluster.md#users-and-audit)), only a cluster-wide admin may
+apply fixes to the manager's own config; the others can still run the check.
 
 The confirmation window has three columns: **Difference** (the name, with the ID under it when the two differ),
 **Category** and **Fix**.
@@ -78,18 +81,22 @@ What a drift row looks like:
 
 ```text
 drift · Settings · log
-  the config sets log differently from the value fit started with, which is in force until fit restarts.
-  Config:   {"level": "warn"}
-  Running:  {"level": "info"}
+  the config sets log differently from the value fit started with, which is in force until fit restarts
+  Config:   {"output": "/var/log/fit/new.log", "level": "warn"}
+  Running:  {"output": "/var/log/fit/fit.log", "level": "info"}
   Fix:      [Change the config to the running value · replace /log]   ☐ Apply this fix
 ```
+
+Here `output` was changed after start (it takes a restart); the level, which a reload applies, is shown because
+the two sides are the whole member: the config's, and the one fit started with. The `replace` fix writes that
+start value back whole, so it also takes back the level `warn` that already runs.
 
 The endpoints this page uses (the Admin API's endpoints sit under `/api/m/admin/` on the console):
 
 | endpoint | |
 | --- | --- |
 | `GET /config/check` | the running version, the ETag, when the check ran, the differences and their counts |
-| `POST /config/reconcile` | the selected fixes, `{"fixes": [{"id", "action"}]}`, with `If-Match` |
+| `POST /config/reconcile` | the selected fixes, `{"fixes": [{"id", "action"}]}`, with `If-Match` (required: `428` without it) |
 
 ## Key parameters
 
@@ -110,22 +117,23 @@ The fields of a difference (each item of `GET /config/check`):
 
 | Kind | What it can find |
 | --- | --- |
-| Settings read only at start | `log`, `access_log`, `telemetry`, `engine`, `acme` or `providers` changed after fit started: the config says one thing and the running service still uses the values from start. The fix is to write the running values back into the config (or keep the config and wait for a restart). `limits.max_conns`, `max_pending_bytes` and `max_write_queue_bytes` are the same, taken from the running engine. `admin` is only info: it comes from the bootstrap file |
-| Roles | A role the config sets but that is not running (it failed to start): remove it from the config, or apply the config again to retry starting it. A role still running that the config no longer sets: apply the config again to stop it |
+| Settings read only at start | A part read only at start changed after fit started: the `output` or `format` of any logger of `log`; the `output`, `format`, `flush_interval` or `buffer_bytes` of `access_log`; `telemetry`, `engine` or `providers` at all; `acme`'s account, CA, storage, timeouts, challenges or on-demand settings. The config says one thing and the running service still uses the values from start. The one fix, `replace`, writes the whole member back as fit started with it (a `delete` patch when fit started without it); or keep the config and wait for a restart. Levels, `time_zone` and `rotate` take effect on reload and are never drift. `limits.max_conns`, `max_pending_bytes` and `max_write_queue_bytes`, when the config sets them, are compared with the running engine the same way. `admin` (its address, token, TLS files, history, node ID and limits) is only info: it comes from the bootstrap file |
+| Roles | A role the config sets but that is not running (it failed to start): `delete` it from the config, or `reapply` to retry starting it. A role still running that the config no longer sets: `reapply` to stop it |
 | The providers' parts | Elements a provider (`docker`, `consul`, `consul_kv`, `etcd`, `kubernetes`) added to the effective config but that are not in the base config: write them into the config (`listeners`, `routes`, `upstreams`, `services`), or leave them to the provider; they are listed under the member they belong to. Shadowed provider elements are info, under Config sources |
-| Listeners | A listener in the config that is not bound, or a bound listener the config no longer has, is drift; a listener whose address is port `0` reports the port the kernel chose, which is info (a dynamic port is deliberate) |
-| TLS | A name the base config writes in a listener's `tls.acme` that no certificate served covers is drift, and the fix removes the name from the config; names HTTPS by default added while their certificate is obtained, and certificates served that no name asked for (on-demand TLS, or a certificate from a file), are info |
-| Upstreams | An upstream in the config with no pool for it, or a pool whose upstream the config no longer has, is drift; an upstream with all its backends down is info |
-| Cache | A cache zone the config uses that does not exist at runtime is drift; a zone kept from an earlier config is info |
+| Listeners | A listener in the config that is not bound is drift (`delete` when the base config has it, or `reapply` to retry binding it); a bound listener the config no longer has is drift (`reapply` to stop it); a listener whose address is port `0` reports the port the kernel chose, which is info (a dynamic port is deliberate) |
+| TLS | A name the base config writes in a listener's `tls.acme` that no certificate served covers is drift, and the fix (`delete`) removes the name from the config; names HTTPS by default added while their certificate is obtained, and certificates served that no name asked for (on-demand TLS, or a certificate from a file), are info |
+| Upstreams | An upstream in the config with no pool for it is drift (`delete` when the base config has it, or `reapply`); a pool whose upstream the config no longer has is drift (`reapply` to stop it); an upstream with all its backends out of rotation is info |
+| Cache | A cache zone a route uses that does not exist at runtime is drift (`reapply` to open it); a zone kept from an earlier config, which no route uses now, is info |
 
 The check's answer carries `summary` (the drift and info counts) and `checked_at` (when it ran), which is what
 the page's summary and its tools show, and the running version and ETag, the one `If-Match` uses.
 
 ## Common cases
 
-- **A setting read only at start was changed**: `log`, `access_log`, `telemetry`, `engine`, `acme` or
-  `providers` changed while fit runs. Use `replace` to write the running value back into the config, or keep the
-  config and wait for a restart; either works, and the choice is which side you want to be right.
+- **A setting read only at start was changed**: say `log.output`, `access_log.format`, `engine` or `providers`
+  changed while fit runs. Use `replace` to write the start value back into the config, or keep the config and
+  restart fit; either works, and the choice is which side you want to be right. `replace` writes back the whole
+  member, so redo any reloadable change made in it since (a level, `rotate`) on its page afterwards.
 - **An element a provider provided should become part of the config**: use `add` to write it into
   `listeners`, `routes`, `upstreams` or `services`; if it should stay the provider's, tick nothing and leave it.
 - **A role failed to start**: use `reapply` to apply the config again and retry it; a role still running that
@@ -153,17 +161,28 @@ fit check -c /etc/fit/fit.json -json    # prints the check as JSON
 fit check -c /etc/fit/fit.json -fix     # picks a fix per difference, then applies them together
 ```
 
-`-timeout` (30s by default) bounds how long `fit check` waits for the Admin API. `-json` and `-fix` are given
-one at a time.
+`-c` names the bootstrap file fit was started with, or a directory of them (`fit.json` when left out; give `-c`
+again for more). `-timeout` (30s by default) bounds how long `fit check` waits for the Admin API. `-json` and
+`-fix` are given one at a time.
 
-`admin.address` (and `token_file`) in the bootstrap file says where the Admin API is. With `admin.cert_file`
-set, `fit check` uses https and verifies the API's certificate: when it can read `cert_file` (as on the host
-fit runs on) it verifies with that certificate and the system CAs, otherwise with the CAs in `-ca`; the name
-verified is the host in the address, or localhost when the address names none, and `-server-name` can name it.
-With `admin.client_ca_file` set, `-cert` and `-key` must give the client certificate it presents.
+`-fix` lists the differences, then asks for each drift that has fixes which one to take: its number, or `s` (or
+an empty line) to skip it. The fixes chosen are sent together with the check's ETag, the result is printed
+("applied config version V"), and the check runs again:
 
-Exit codes: `0` when there is no drift; `1` when drift remains (including after `-fix`); `2` for a usage,
-config loading, connection or decoding error.
+```text
+fix [1] setting:log — choose 1) replace: revert the config to the value in force (replace /log), s) skip [s]: 1
+fit check: applied config version 13
+```
+
+`admin.address` (and `token_file`) in the bootstrap file says where the Admin API is (`127.0.0.1:2019` when left
+out); a config with no `admin` cannot be checked. With `admin.cert_file` set, `fit check` uses https and
+verifies the API's certificate: without `-ca` it trusts the system CAs and, when it can read `cert_file` (as on
+the host fit runs on), that certificate; with `-ca`, the CAs in that file. The name verified is the host in the
+address, or localhost when the address names none, and `-server-name` can name it. With
+`admin.client_ca_file` set, `-cert` and `-key` must give the client certificate it presents.
+
+Exit codes: `0` when there is no drift; `1` when drift remains (including after `-fix`), when `-fix` chose no
+fix, or when the fixes could not be applied; `2` for a usage, config loading, connection or decoding error.
 
 ## In .conf
 

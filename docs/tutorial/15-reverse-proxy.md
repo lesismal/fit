@@ -14,8 +14,9 @@ A request goes to one route: first the routes of the listener it came on whose `
 every field of `match` must hold, and within a field one of the values listed is enough; of those,
 the one with the highest `priority`; among equal priorities, the most specific host (exact, then
 `*.`, then `**.`, then none), then the most specific path (exact, then the longest prefix), then the
-one with the most other matchers set, then the one written first. A request no route takes is
-answered 404. The path is made canonical before any route sees it: dot-segments are removed
+one with the most other matchers set, then the one written first. An `expr` counts as one matcher, and
+the hosts and paths inside it make a route no more specific: give such a route a `priority`. A request no
+route takes is answered 404. The path is made canonical before any route sees it: dot-segments are removed
 (`/a/./b/../c` is `/a/c`), repeated slashes are one (`//a` is `/a`), and a path whose `..` climbs
 above `/` is answered 400.
 
@@ -56,8 +57,8 @@ respond answers itself; forward proxy routes are on their own page.
 
 `#/gw.reverse/upstreams`. The page edits the config's `upstreams` member.
 
-- **Each row** shows the upstream's name, `{n} addresses`, a badge for its `load_balancing`, and
-  `{up} / {all} up`: up and total come from `GET /status`, green when all are up, amber when some,
+- **Each row** shows the upstream's name, `{n} addresses`, a badge for its `load_balancing` when it is
+  set, and `{up} / {all} up`: up and total come from the running status (`GET /status`), green when all are up, amber when some,
   red when none. When a backend is down the row ends with the **Ask AI** button, which asks the
   `diagnose` skill why and what to fix. Health is extra: a row still shows when it cannot be read.
 - **Add upstream** makes a new row: `name` `backend-N` and `addresses` `127.0.0.1:8081` by default.
@@ -86,7 +87,7 @@ Only the key parameters are listed; the full field tables are in
 | `name` | none | A name unique among the routes, for logs and metrics. |
 | `listeners` | every listener | The names of the listeners the route serves. |
 | `priority` | none (0) | Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one with the most other matchers set (method, header, query, remote_ip, path_regexp, expr), then the one written first. |
-| `match` | every request | What a request must match: `host` (exact, or with a leading `*.` or `**.` wildcard), `path` (exact or ending in `*` for a prefix), `path_regexp`, `method`, `header`, `query`, `remote_ip` (the connection's address, not X-Forwarded-For's), `expr` (the matchers `Host`, `Path`, `PathPrefix`, `PathRegexp`, `Method`, `Header`, `Query` and `RemoteIP` combined with `&&`, `\|\|`, `!` and parentheses). |
+| `match` | every request | What a request must match: `host` (exact, or with a leading `*.`, one label, or `**.`, one label or more; case is ignored), `path` (exact or ending in `*` for a prefix), `path_regexp` (Go's syntax, unanchored unless written with `^` and `$`), `method` (case-sensitive), `header` and `query` (each name with one of the values listed, or any value when none is), `remote_ip` (addresses and CIDR ranges of the connection's address, not X-Forwarded-For's), `expr` (the matchers `Host`, `Path`, `PathPrefix`, `PathRegexp`, `Method`, `Header`, `Query` and `RemoteIP` combined with `&&`, `\|\|`, `!` and parentheses). |
 | `access` | none | The client addresses the route serves, deciding before its listener's access and the global one; the address is the connection's, or the one its PROXY header names, and a request it refuses is answered 403. |
 | `middleware` | none | The middleware a request passes through, in order, before the handler; a middleware may answer itself. |
 | `handler` | required | The module that answers the request. |
@@ -97,12 +98,12 @@ Only the key parameters are listed; the full field tables are in
 | --- | --- | --- |
 | `name` | required | A name unique among the upstreams, by which handlers refer to this one. |
 | `addresses` | required | The upstream's servers, each a host and a port, as `10.0.0.1:8080` or `backend:80`. |
-| `weights` | 1 each | Each address's weight (1 to 1000), in the order of `addresses`: its share under `weighted_round_robin`, and the requests it takes to be as busy as an address of weight 1 under `least_conn`. |
+| `weights` | 1 each | Each address's weight (1 to 1000), in the order of `addresses`, one for each: its share under `weighted_round_robin`, and the requests it takes to be as busy as an address of weight 1 under `least_conn`; refused with `round_robin`. |
 | `load_balancing` | `round_robin`, or `weighted_round_robin` when `weights` are given | How requests are spread over the addresses; see the nine strategies below. |
-| `hash_key` | none | The header `header_hash` and the cookie `cookie_hash` hash by. |
+| `hash_key` | none | The header `header_hash` and the cookie `cookie_hash` hash by: needed by those two, refused with any other strategy. |
 | `sticky_cookie` | none | Keeps each client on one address with a cookie: `name` `fit_sticky`, `path` `/`, `max_age` until the browser closes, `secure` off; it is always HttpOnly and SameSite=Lax. |
 | `max_conns` | `256` | The most connections open, or being opened, to one address; a request past it waits for one to be free. |
-| `max_pending` | `1024` | How many requests may wait for a connection once `max_conns` are busy; one past it is answered 503 at once. |
+| `max_pending` | `1024` | How many requests may wait for a connection to one address once its `max_conns` are busy; one past it is answered 503 at once. |
 | `max_idle_conns` | `32` | The idle connections kept to one address; 0 keeps none. |
 | `idle_timeout` | `60s` | How long an idle connection is kept before it is closed. |
 | `connect_timeout` | `10s` | How long opening a connection may take; a request whose connect times out gets 504. |
@@ -111,9 +112,9 @@ Only the key parameters are listed; the full field tables are in
 | `response_timeout` | `1h` | How long a whole response may take; past it before the response began a request gets 504, and past it later it is cut short. |
 | `max_fails` | `1` | The failed requests to an address within `fail_timeout` that take it out of rotation for `fail_timeout` (passive health); 0 keeps every address in. |
 | `fail_timeout` | `10s` | The window `max_fails` are counted in, and how long an address that reached them stays out. |
-| `health_check` | none | Active health checks: probe each address every `interval` (`5s`); `http` (the default) sends a GET of `path` `/` and passes on 200–399, `tcp` passes once a connection opens. An address is out after `fails` (`2`) in a row, back after `passes` (`2`); `timeout` `2s`, `jitter` a tenth of `interval`. |
+| `health_check` | none | Active health checks: probe each address every `interval` (`5s`); `type` `http` (the default) sends a GET of `path` (`/`), with `host` as its Host (the address's host), over the upstream's `protocol`, and passes on `expect_status` (any of 200–399), `tcp` passes once a connection opens; `port` probes another port than the address's. An address is out after `fails` (`2`) in a row, back after `passes` (`2`); `timeout` `2s` (no longer than `interval`), `jitter` a tenth of `interval`. Probes and `max_fails` take an address out each on their own account. |
 | `deny_internal` | off | Refuse a connection whose address, or the address its host name resolved to, is loopback, link-local (`169.254.169.254`, the metadata service of most clouds), unspecified, multicast or the host's own, decided once the connection is open and before anything is sent; a request refused so gets 502. |
-| `protocol` | `http/1.1` | How requests reach the upstream: `http/1.1`, `h2c`, or `h2` (TLS, with `tls_server_name`, `tls_ca_file`, `tls_cert_file`, `tls_key_file`). |
+| `protocol` | `http/1.1` | How requests reach the upstream: `http/1.1` in the clear, `h2c` (HTTP/2 in the clear, which the servers must expect), or `h2` (TLS, HTTP/2 when the server picks it by ALPN and HTTP/1.1 otherwise; with `tls_server_name`, `tls_ca_file`, and `tls_cert_file` with `tls_key_file` for mutual TLS). |
 
 ### The nine load balancing strategies
 
@@ -129,6 +130,23 @@ Only the key parameters are listed; the full field tables are in
 
 The last four keep the same key on the same address while it is up, and adding or removing an address
 moves only the keys that went to it or will. A request without the header or cookie goes in turn.
+
+### The `proxy` handler
+
+The handler most routes use; the full table is in
+[the config reference: proxy](../reference/config.md#http-handlers-proxy).
+
+| field | default | description |
+| --- | --- | --- |
+| `upstream` | none | The upstream requests go to, by name; or `upstreams`. |
+| `upstreams` | none | Several upstreams, each with a `weight`, requests spread over them at random by weight, as a canary release does. |
+| `failover` | none | An upstream that takes the requests while none of the chosen upstream's addresses is in rotation. |
+| `retry` | none | Sends a failed request again, to the next address picked: `attempts` (2) times after the first, also on the 5xx `statuses` listed, within a budget (`budget_ratio` 0.2 of the requests, plus `budget_min_per_second` 10). A connect that failed is retried for any method, other failures only for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, and a body that streams (past 64KB) never. |
+| `mirror` | none | Copies a share of the requests (bodies of 64KB at most) to another upstream and drops its answers. |
+| `host_header` | the client's | The Host sent upstream. |
+| `trusted_proxies` | none | The proxies in front of fit whose X-Forwarded-* and Forwarded fields are believed. |
+| `timeout` | none | The most a request may take, retries included: 504 before its response began, cut short after. |
+| `tunnel_idle_timeout` | `10m` | How long a WebSocket, or another upgraded connection, may carry nothing either way. |
 
 ## Handler and middleware modules
 
@@ -194,9 +212,16 @@ The per-module docs are in `schema/doc/modules/`, as
 | [`wasm`](../reference/config.md#http-middleware-wasm) | Runs a WebAssembly plugin on each request |
 
 The per-module docs are in `schema/doc/modules/`, as
-[cache.md](../../schema/doc/modules/cache.md), [jwt.md](../../schema/doc/modules/jwt.md),
-[rate_limit.md](../../schema/doc/modules/rate_limit.md),
+[basic_auth.md](../../schema/doc/modules/basic_auth.md),
+[body_limit.md](../../schema/doc/modules/body_limit.md), [cache.md](../../schema/doc/modules/cache.md),
+[circuit_breaker.md](../../schema/doc/modules/circuit_breaker.md),
+[client_cert.md](../../schema/doc/modules/client_cert.md),
+[compress.md](../../schema/doc/modules/compress.md),
+[concurrency_limit.md](../../schema/doc/modules/concurrency_limit.md),
 [forward_auth.md](../../schema/doc/modules/forward_auth.md),
+[headers.md](../../schema/doc/modules/headers.md), [jwt.md](../../schema/doc/modules/jwt.md),
+[rate_limit.md](../../schema/doc/modules/rate_limit.md),
+[redirect.md](../../schema/doc/modules/redirect.md), [rewrite.md](../../schema/doc/modules/rewrite.md),
 [wasm.md](../../schema/doc/modules/wasm.md).
 
 ## In .conf
@@ -311,8 +336,8 @@ route {
 }
 ```
 
-This config passes `./bin/fit validate -c`. An `upstream` without a listener is refused, so the
-example adds a minimal `listener`; a `static` handler's `root` must exist on disk for `fit validate`
+This config passes `./bin/fit validate -c`. It writes a `listener`: without one, a config is served
+by HTTPS by default on ports 443 and 80 when a route matches a host name, and refused when none does; a `static` handler's `root` must exist on disk for `fit validate`
 to read it, so the example has no static route. The last four routes are the handlers the BitTorrent
 and Sync roles add: the roles' own config members, and the pages that edit them, are in the
 [BitTorrent chapter](27-bittorrent.md) and the [Sync chapter](26-sync.md); where no role (or, for

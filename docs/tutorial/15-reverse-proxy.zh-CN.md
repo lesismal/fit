@@ -10,8 +10,8 @@
 
 一条请求只走一条路由：先是它所在的监听中匹配它的路由——`match` 的每个字段都要成立，字段内则
 列出的值中有一个成立即可；其中 `priority` 最高的先选；同优先级时按 host 的具体程度（精确、`*.`、
-`**.`、无），再按 path 的具体程度（精确、最长的前缀），再按设了多少其他匹配器，最后按书写顺序。
-没有路由接住的请求答 404。路径在任何路由看到它之前先规范化：点段被去掉（`/a/./b/../c` 即 `/a/c`），
+`**.`、无），再按 path 的具体程度（精确、最长的前缀），再按设了多少其他匹配器，最后按书写顺序。`expr` 只算一个匹配器，其中的 host 与 path 也不会让路由更具体：
+这样的路由要给它一个 `priority`。没有路由接住的请求答 404。路径在任何路由看到它之前先规范化：点段被去掉（`/a/./b/../c` 即 `/a/c`），
 重复的斜杠合成一个（`//a` 即 `/a`），`..` 越过 `/` 往上爬的路径答 400。
 
 反向代理模块有两页：**路由**和**上游**。处理器与中间件是模块，按 `module` 命名，带各自的 `params`；
@@ -43,8 +43,8 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 
 `#/gw.reverse/upstreams`。本页编辑配置的 `upstreams` 成员。
 
-- **每一行**显示上游的名字、`{n} 个地址`、`load_balancing` 的标记，以及 `{up} / {all} 可用`：可用与总数
-  来自 `GET /status`，全可用是绿色，部分可用是黄色，全不可用是红色。有后端不可用时行末是**问 AI**按钮，
+- **每一行**显示上游的名字、`{n} 个地址`、设置了 `load_balancing` 时它的标记，以及 `{up} / {all} 可用`：
+  可用与总数来自运行状态（`GET /status`），全可用是绿色，部分可用是黄色，全不可用是红色。有后端不可用时行末是**问 AI**按钮，
   以技能 `diagnose` 问原因与该修什么。健康状态只是附加信息，读不到时行仍然显示。
 - **添加上游**新建一行：默认 `name` 为 `backend-N`、`addresses` 为 `127.0.0.1:8081`。每行可**删除**、
   **上移**、**下移**。
@@ -69,7 +69,7 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | `name` | 无 | 路由之间唯一的名字，供日志与指标。 |
 | `listeners` | 所有监听 | 这条路由服务的监听的名字。 |
 | `priority` | 无（0） | 优先级高的先选；同优先级时按 host、path 的具体程度，再按其他匹配器（method、header、query、remote_ip、path_regexp、expr）的数量多者，再按书写顺序。 |
-| `match` | 所有请求 | 请求必须匹配什么：`host`（精确或 `*.`、`**.` 通配）、`path`（精确或以 `*` 结尾的前缀）、`path_regexp`、`method`、`header`、`query`、`remote_ip`（连接的地址，不是 X-Forwarded-For）、`expr`（用 `&&`、`\|\|`、`!` 与括号组合 `Host`、`Path`、`PathPrefix`、`PathRegexp`、`Method`、`Header`、`Query`、`RemoteIP` 这些匹配器）。 |
+| `match` | 所有请求 | 请求必须匹配什么：`host`（精确，或以 `*.` 开头代表一级标签、以 `**.` 开头代表一级或多级；不区分大小写）、`path`（精确或以 `*` 结尾的前缀）、`path_regexp`（Go 语法，除非用 `^` 与 `$` 锚定，否则匹配路径中的任意位置）、`method`（区分大小写）、`header` 与 `query`（每个名字取所列值之一，未列值时任意值均可）、`remote_ip`（连接地址所属的 IP 与 CIDR 范围，不是 X-Forwarded-For 的）、`expr`（用 `&&`、`\|\|`、`!` 与括号组合 `Host`、`Path`、`PathPrefix`、`PathRegexp`、`Method`、`Header`、`Query`、`RemoteIP` 这些匹配器）。 |
 | `access` | 无 | 这条路由服务的客户端地址，先于其监听与全局的 `access` 决定；地址取连接的，或它的 PROXY 头所指的，被拒绝的请求答 403。 |
 | `middleware` | 无 | 请求在处理器之前按顺序穿过的中间件；中间件也可以自己应答。 |
 | `handler` | 必填 | 应答请求的模块。 |
@@ -80,12 +80,12 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | --- | --- | --- |
 | `name` | 必填 | 上游之间唯一的名字，处理器用它引用。 |
 | `addresses` | 必填 | 上游的服务器地址，如 `10.0.0.1:8080` 或 `backend:80`。 |
-| `weights` | 每个 1 | 按 `addresses` 顺序的权重（1 到 1000）：`weighted_round_robin` 下的份额，以及 `least_conn` 下与权重 1 一样忙所需的请求数。 |
+| `weights` | 每个 1 | 按 `addresses` 顺序、每个地址一个的权重（1 到 1000）：`weighted_round_robin` 下的份额，以及 `least_conn` 下与权重 1 一样忙所需的请求数；与 `round_robin` 同用会被拒绝。 |
 | `load_balancing` | `round_robin`（写了 `weights` 时 `weighted_round_robin`） | 请求如何分给各地址，见下面九种策略。 |
-| `hash_key` | 无 | `header_hash` 的头部与 `cookie_hash` 的 cookie 的名字。 |
+| `hash_key` | 无 | `header_hash` 的头部与 `cookie_hash` 的 cookie 的名字：这两种策略必填，其他策略写了会被拒绝。 |
 | `sticky_cookie` | 无 | 用 cookie 把每个客户端固定在一个地址上：`name` 默认 `fit_sticky`，`path` 默认 `/`，`max_age` 默认到浏览器关闭，`secure` 默认关；它总是 HttpOnly、SameSite=Lax。 |
 | `max_conns` | `256` | 到一个地址最多打开（或正在打开）的连接数；超过的请求等一个空出来。 |
-| `max_pending` | `1024` | `max_conns` 占满后还能等待的请求数；超过的立刻答 503。 |
+| `max_pending` | `1024` | 一个地址的 `max_conns` 占满后还能等待该地址连接的请求数；超过的立刻答 503。 |
 | `max_idle_conns` | `32` | 为一个地址保留的空闲连接数；0 不保留。 |
 | `idle_timeout` | `60s` | 空闲连接保留多久后关闭。 |
 | `connect_timeout` | `10s` | 建立连接最多多久；超时的请求答 504。 |
@@ -94,9 +94,9 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | `response_timeout` | `1h` | 整个响应最多多久；开始前超过答 504，之后超过被截断。 |
 | `max_fails` | `1` | `fail_timeout` 内多少次失败请求把一个地址取出轮转（被动健康检查）；0 不取出。 |
 | `fail_timeout` | `10s` | 计数的窗口，也是地址被取出的时长。 |
-| `health_check` | 无 | 主动健康检查：按 `interval`（默认 `5s`）探测每个地址；`http`（默认）发一个 `path` 默认 `/` 的 GET，200–399 算通过，`tcp` 连上就算通过。连续 `fails`（默认 2）次失败取出，连续 `passes`（默认 2）次通过放回；`timeout` 默认 `2s`，`jitter` 默认 `interval` 的十分之一。 |
+| `health_check` | 无 | 主动健康检查：按 `interval`（默认 `5s`）探测每个地址；`type` 为 `http`（默认）时按上游的 `protocol` 发一个 `path`（默认 `/`）的 GET，Host 为 `host`（默认地址的主机），状态码在 `expect_status` 中（默认 200–399 任一）算通过；`tcp` 连上就算通过；`port` 改探测另一个端口。连续 `fails`（默认 2）次失败取出，连续 `passes`（默认 2）次通过放回；`timeout` 默认 `2s`（不超过 `interval`），`jitter` 默认 `interval` 的十分之一。主动探测与 `max_fails` 各自独立地取出地址。 |
 | `deny_internal` | 关闭 | 拒绝地址、或主机名解析到的地址，是环回、链路本地（`169.254.169.254`，多数云的元数据服务）、未指定、组播或本机自己的连接；连接打开后、送出任何东西之前判定，被拒绝的请求答 502。 |
-| `protocol` | `http/1.1` | 请求如何到达上游：`http/1.1`、`h2c`，或 `h2`（TLS，配 `tls_server_name`、`tls_ca_file`、`tls_cert_file`、`tls_key_file`）。 |
+| `protocol` | `http/1.1` | 请求如何到达上游：明文的 `http/1.1`、`h2c`（明文 HTTP/2，服务器须支持），或 `h2`（TLS，服务器经 ALPN 选择时用 HTTP/2，否则 HTTP/1.1；配 `tls_server_name`、`tls_ca_file`，双向 TLS 再配 `tls_cert_file` 与 `tls_key_file`）。 |
 
 ### 九种负载均衡策略
 
@@ -112,6 +112,22 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 
 后四种在地址可用期间把同一个 key 送到同一地址；增删一个地址只移动原本归它或会归它的 key。没有该头部
 或 cookie 的请求依次轮流。
+
+### `proxy` 处理器
+
+大多数路由用的处理器；完整字段表见[配置参考：proxy](../reference/config.md#http-handlers-proxy)。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `upstream` | 无 | 请求去往的上游，按名字；或用 `upstreams`。 |
+| `upstreams` | 无 | 多个上游，各带 `weight`，请求按权重随机分到它们，如金丝雀发布。 |
+| `failover` | 无 | 所选上游没有任何地址在轮转中时接管请求的上游。 |
+| `retry` | 无 | 把失败的请求再发给下一个选出的地址：首次之后最多 `attempts`（2）次，所列的 5xx `statuses` 也重试，受预算限制（`budget_ratio` 为请求数的 0.2，另加每秒 `budget_min_per_second` 10 次）。连接失败的请求任何方法都重试，其他失败只对 GET、HEAD、OPTIONS、TRACE、PUT、DELETE 重试，流式请求体（超过 64KB）从不重试。 |
+| `mirror` | 无 | 把一部分请求（请求体最多 64KB）复制一份发给另一个上游，丢弃其应答。 |
+| `host_header` | 客户端的 | 发往上游的 Host。 |
+| `trusted_proxies` | 无 | fit 前面的代理，其 X-Forwarded-* 与 Forwarded 字段被采信。 |
+| `timeout` | 无 | 一个请求（含重试）最多多久：响应开始前超过答 504，之后超过被截断。 |
+| `tunnel_idle_timeout` | `10m` | WebSocket 等升级后的连接两个方向都无数据时最多保持多久。 |
 
 ## 处理器与中间件模块
 
@@ -176,9 +192,16 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | [`wasm`](../reference/config.md#http-middleware-wasm) | 在每个请求上运行 WebAssembly 插件 |
 
 各模块的详细文档在 `schema/doc/modules/`，如
-[cache.md](../../schema/doc/modules/cache.md)、[jwt.md](../../schema/doc/modules/jwt.md)、
-[rate_limit.md](../../schema/doc/modules/rate_limit.md)、
+[basic_auth.md](../../schema/doc/modules/basic_auth.md)、
+[body_limit.md](../../schema/doc/modules/body_limit.md)、[cache.md](../../schema/doc/modules/cache.md)、
+[circuit_breaker.md](../../schema/doc/modules/circuit_breaker.md)、
+[client_cert.md](../../schema/doc/modules/client_cert.md)、
+[compress.md](../../schema/doc/modules/compress.md)、
+[concurrency_limit.md](../../schema/doc/modules/concurrency_limit.md)、
 [forward_auth.md](../../schema/doc/modules/forward_auth.md)、
+[headers.md](../../schema/doc/modules/headers.md)、[jwt.md](../../schema/doc/modules/jwt.md)、
+[rate_limit.md](../../schema/doc/modules/rate_limit.md)、
+[redirect.md](../../schema/doc/modules/redirect.md)、[rewrite.md](../../schema/doc/modules/rewrite.md)、
 [wasm.md](../../schema/doc/modules/wasm.md)。
 
 ## .conf 配置
@@ -293,8 +316,8 @@ route {
 }
 ```
 
-这份配置用 `./bin/fit validate -c` 校验通过。只写 `upstream` 而没有监听器会被拒绝，所以示例补了一个最小的
-`listener`；`static` 的 `root` 要磁盘上真实存在，`fit validate` 才会通过，所以示例里没有它。最后四条路由是
+这份配置用 `./bin/fit validate -c` 校验通过。示例写了一个 `listener`：不写监听时，有路由匹配主机名的配置
+按默认 HTTPS 在 443 与 80 端口提供服务，没有这样的路由则被拒绝；`static` 的 `root` 要磁盘上真实存在，`fit validate` 才会通过，所以示例里没有它。最后四条路由是
 BitTorrent 与数据同步角色新增的处理器：两个角色自己的配置成员、以及编辑它们的页面，在 [BitTorrent 一章](27-bittorrent.zh-CN.md)
 与[数据同步一章](26-sync.zh-CN.md)里；没有运行角色（对 `sync_ingest` 则是没有运行中的管道）时，这些路由答 503。
 

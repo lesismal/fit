@@ -5,8 +5,9 @@
 ## 功能
 
 `media_auth` 是配置里一组具名的策略，规定谁可以推送、播放哪些流。取媒体的处理器与角色用 `auth` 按名称引用一条策略：
-`whip`、`whep`、`webrtc_proxy`、`hls`、`httpflv`、`vod`、`media_pages`、`media_tokens`，以及[流媒体](20-streaming.zh-CN.md)
-的每个监听器。策略检查的是流的路径：推流需要 `publish`，播放需要 `play`；没有 `auth` 的处理器任何人都能进，按路由
+`whip`、`whep`、`webrtc_proxy`、`stream_whip`、`stream_whep`、`hls`、`httpflv`、`vod`、`media_pages`、`media_tokens`、
+`bt_stream`，[流媒体](20-streaming.zh-CN.md)的 `rtmp`、`rtsp`、`srt` 监听器，以及 [BitTorrent](27-bittorrent.zh-CN.md)
+的 tracker（它接受策略的 token 与各用户的 passkey）。策略检查的是流的路径：推流需要 `publish`，播放需要 `play`；没有 `auth` 的处理器任何人都能进，按路由
 自己的中间件放行。
 
 一条策略有三类凭据：`tokens` 中的静态 token（写明文 `token`，或写它的 `token_sha256`，这样配置里不保存 token
@@ -26,12 +27,13 @@
 
 ## 页面与操作
 
-### 媒体认证
+### 媒体认证（`#/gw.mediaauth/media_auth`）
 
 菜单里的“媒体认证”模块只有一个页面，编辑配置的 `media_auth` 成员：各策略及其 `tokens`、`users`、`keys`、`public`、
 `token_ttl` 与 `url_signing`。页面有 UI、`.conf`、`.yaml`、`.json` 四个标签页，编辑的是共享草稿中属于这一页的部分；
 顶栏的**保存并应用**保存整份草稿，**检查**走完整的应用流程只检查不应用，**放弃修改**丢弃草稿。保存的问题链接回
-这一页，无论问题是在哪个页面被发现的——例如某条路由的 `auth` 指向配置中没有的策略。
+这一页，无论问题是在哪个页面被发现的——例如某条路由的 `auth` 指向配置中没有的策略；只有策略 `url_signing` 里的
+问题链接到“媒体库”模块的 **URL 签名**页。
 
 在这一页能做的事：
 
@@ -39,13 +41,16 @@
   或 `keys`），写 `public` 的动作。
 - 写 `tokens`：静态 token 或它的 SHA-256，以及它可以 `publish` 与 `play` 的流。日志里只出现 `token:<name>`，从不
   写出 token 本身。
-- 写 `users`：明文密码或 bcrypt 哈希，以及他们的流。密码是机密：草稿里 `[redacted]` 的值不会被读出，助手抄回的
-  值按草稿中保存的样子放回。
+- 写 `users`：明文密码或 bcrypt 哈希，以及他们的流。机密由人来填写：[助手](14-assistant.zh-CN.md)看到的是
+  `[redacted]`，它抄回的 `[redacted]` 值按草稿中的原值放回，它对机密字段的其他任何修改都会被拒绝。
 - 写 `keys` 密钥环：每个密钥一个名字与它自己的 `secret` 或 `secret_file`，用于按分片签发与吊销——轮换一个密钥只
-  拒绝它签发的 token，其他分片照常运行。`secret_file` 在启动时必须至少 16 字节，进程还必须能写入它所在的目录。
+  拒绝它签发的 token，其他分片照常运行。`secret_file` 必须存在且至少 16 字节，否则配置不通过；轮换（由
+  `media_tokens`，或“媒体库”模块**播放 URL**页上的**轮换**）把新密钥写入它旁边的临时文件再改名替换，所以进程必须
+  能写入它所在的目录。
 
-`url_signing` 也在“媒体库”模块的 **URL 签名**页编辑，测试 URL 在**播放 URL**页签发与播放（
-[媒体库](22-media-library.zh-CN.md)）；两处编辑的是同一份草稿。重载在原处修改策略，作用于之后的请求与会话：已建立
+`url_signing` 也在“媒体库”模块的 **URL 签名**页编辑；测试 URL 的签发与播放、密钥的轮换与播放会话的结束在
+**播放 URL**页（[媒体库](22-media-library.zh-CN.md)）；两个配置页编辑的是同一份草稿。写在配置里的密钥（`secret`，
+或某个密钥的 `secret`）不能在页面上轮换：修改它再应用配置。重载在原处修改策略，作用于之后的请求与会话：已建立
 的会话保留。
 
 ## 参数
@@ -86,7 +91,7 @@
 | --- | --- | --- |
 | `name` | — | 必填。用户名，不含冒号或控制字符 |
 | `password` | — | 明文密码；RTSP 的 Digest 需要它；或 `password_hash`，二选一 |
-| `password_hash` | — | bcrypt 哈希（`fit hash-password` 生成），只能在 Basic 与查询参数上用，在自己的池上检查 |
+| `password_hash` | — | bcrypt 哈希（`fit hash-password` 生成），只能在 Basic 与查询参数上用，在 fib 的 worker 之外检查；在密码被确认正确之前，RTMP、RTSP 与 SRT 会先以“请重试”拒绝这样的用户一次 |
 | `publish` | 无 | 他可以推送的流的模式 |
 | `play` | 无 | 他可以播放的流的模式 |
 
@@ -119,7 +124,8 @@
 ### media_tokens
 
 处理器 `media_tokens` 是业务后端经自己的路由批量签发令牌与播放 URL 的方式：它本身不校验调用方凭据——由路由上的
-`jwt`、`basic_auth`、`forward_auth` 或不带 `optional` 的 `client_cert` 校验——并且需要一条带 `secret_file` 的策略，
+`jwt`、`basic_auth`、`forward_auth` 或不带 `optional` 的 `client_cert` 校验，一个都没有的路由配置不通过（`rate_limit`
+不认证任何人）——并且需要一条带 `secret_file` 的策略，
 或每个密钥都带 `secret_file` 的密钥环，这样吊销才能改写文件并在重启后仍然有效。完整字段见
 [配置参考：Handlers](../reference/config.md#http-handlers-media_tokens)。
 
@@ -152,7 +158,7 @@ media_auth site {
 	token_ttl 12h
 
 	tokens studio {
-		token_sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+		token_sha256 751213bf907c13a8ffdc4f2bb17f74e8e4567c724395bc4eb3cb5fc661b58ae5
 		publish live/*
 	}
 
@@ -178,9 +184,11 @@ route flv { match { path /live/* }; handler httpflv { auth site } }
 route hls { match { path /hls/* }; handler hls { prefix /hls/; auth site } }
 ```
 
-于是 `fit media-token -policy site -publish 'live/*' -ttl 1h` 打印一个带过期时间的令牌，OBS 用它推流；网站的 API
-为观众签发会过期的播放地址，`hls` 与 `httpflv` 在每个请求上校验它。命令行还接受 `-play`（与 `-publish` 一样可重复，
-或用逗号分隔）、`-subject`，以及密钥环上的 `-key`；它需要策略的 `secret`、`secret_file` 或 `keys`，因为用进程随机密钥
+静态 token `studio-publish-token` 可以推 `live/*`（配置里只存它的 SHA-256），`alice` 用密码推 `live/*` 并播放一切，
+任何人无需凭据即可播放。于是 `fit media-token -c fit.conf -policy site -publish 'live/*' -ttl 1h` 打印一个带过期时间
+的令牌，OBS 用它推流；网站的 API 为观众签发会过期的播放地址，`hls` 与 `httpflv` 在每个请求上校验它。命令行接受
+`-c`（从哪个配置读取策略）、`-policy`、一个或多个 `-publish` 与 `-play` 模式（可重复，或用逗号分隔）、`-ttl`
+（不写时为策略的 `token_ttl`）、`-subject`（默认 `media-token`），以及密钥环上的 `-key`；它需要策略的 `secret`、`secret_file` 或 `keys`，因为用进程随机密钥
 签发的令牌无法被运行中的 fit 校验。要经路由签发大量 token（一个会议、一个分组、一个区域一个密钥），用 `media_tokens`
 处理器：它需要策略的 `secret_file` 或密钥环的 `secret_file`，并且必须放在 `jwt`、`basic_auth`、`forward_auth` 或不带
 `optional` 的 `client_cert` 之后——它不检查任何调用方凭据。见
