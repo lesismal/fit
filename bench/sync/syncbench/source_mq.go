@@ -21,6 +21,20 @@ func message(i int) []byte {
 	return fmt.Appendf(nil, `{"id":%d,"k":%d,"c":"%s","pad":"%s"}`, i, i*7919%1000003, digits(i, 120), digits(i+7, 60))
 }
 
+// readingsEpoch is the first reading's time: a reading's time is its
+// number of milliseconds after it.
+var readingsEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// reading is record i as an IoT reading for the mqtt-influxdb scenario,
+// about 110 bytes: a sensor of a hundred (the point's tag), a time of its
+// own (i milliseconds after readingsEpoch, so that no two readings are the
+// same point, a point being its series and its time) and three numbers.
+func reading(i int) []byte {
+	at := readingsEpoch.Add(time.Duration(i) * time.Millisecond).Format("2006-01-02T15:04:05.000Z07:00")
+	return fmt.Appendf(nil, `{"sensor":"s%02d","ts":"%s","id":%d,"temp":%d.%d,"hum":%d.%d}`,
+		i%100, at, i, 15+i%20, i%10, 30+i*7%50, i*3%10)
+}
+
 // publisher sends messages, returning once the broker has them all.
 type publisher interface {
 	publish(ctx context.Context, bodies [][]byte) error
@@ -32,6 +46,8 @@ type publisher interface {
 type pubSource struct {
 	pubs  []publisher
 	batch int
+	// body is record i as a message: message, or reading.
+	body func(int) []byte
 }
 
 func (s *pubSource) write(ctx context.Context, first, n int) error {
@@ -45,7 +61,7 @@ func (s *pubSource) write(ctx context.Context, first, n int) error {
 			for r := range work {
 				bodies := make([][]byte, 0, r[1]-r[0])
 				for i := r[0]; i < r[1]; i++ {
-					bodies = append(bodies, message(i+1))
+					bodies = append(bodies, s.body(i+1))
 				}
 				if err := p.publish(ctx, bodies); err != nil {
 					errs <- err
@@ -273,5 +289,9 @@ func openPubSource(ctx context.Context, o *options, n int) (source, error) {
 		}
 		pubs = append(pubs, p)
 	}
-	return &pubSource{pubs: pubs, batch: max(o.txRows, 1) * 10}, nil
+	body := message
+	if o.sc.sink == "influxdb" {
+		body = reading
+	}
+	return &pubSource{pubs: pubs, batch: max(o.txRows, 1) * 10, body: body}, nil
 }

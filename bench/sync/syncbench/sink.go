@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -260,6 +261,75 @@ func (k *canalCounter) count(ctx context.Context) (int64, error) {
 
 func (k *canalCounter) close() { _ = k.client.Close() }
 
+// influxCounter counts the points of the measurement reading in InfluxDB
+// 2, through its v1 query API (the bucket a database of its name):
+// count(id) over the readings' times, every point having an id. A point is
+// its series and its time, and each reading has a time of its own, so a
+// reading written twice is one point: no extras show.
+type influxCounter struct {
+	client *http.Client
+	url    string
+	token  string
+}
+
+// influxCount is the query: every reading's time is in its first days
+// after readingsEpoch.
+var influxCount = "SELECT count(id) FROM reading WHERE time >= '" + readingsEpoch.Format(time.RFC3339) +
+	"' AND time < '" + readingsEpoch.AddDate(0, 0, 30).Format(time.RFC3339) + "'"
+
+func (c *influxCounter) count(ctx context.Context) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
+	if err != nil {
+		return 0, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Token "+c.token)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("influxdb: %s: %s", resp.Status, bytes.TrimSpace(body))
+	}
+	var r struct {
+		Results []struct {
+			Error  string `json:"error"`
+			Series []struct {
+				Values [][]any `json:"values"`
+			} `json:"series"`
+		} `json:"results"`
+	}
+	d := json.NewDecoder(bytes.NewReader(body))
+	d.UseNumber()
+	if err := d.Decode(&r); err != nil || len(r.Results) != 1 {
+		return 0, fmt.Errorf("influxdb: no result in %q", body)
+	}
+	if e := r.Results[0].Error; e != "" {
+		return 0, fmt.Errorf("influxdb: %s", e)
+	}
+	// No series: no point yet.
+	if len(r.Results[0].Series) == 0 {
+		return 0, nil
+	}
+	v := r.Results[0].Series[0].Values
+	if len(v) != 1 || len(v[0]) != 2 {
+		return 0, fmt.Errorf("influxdb: no count in %q", body)
+	}
+	n, ok := v[0][1].(json.Number)
+	if !ok {
+		return 0, fmt.Errorf("influxdb: no count in %q", body)
+	}
+	return n.Int64()
+}
+
+func (c *influxCounter) close() {}
+
 // sqlCounter counts a table's rows.
 type sqlCounter struct {
 	c   execer
@@ -279,6 +349,9 @@ func openCounter(ctx context.Context, o *options) (counter, error) {
 	case "es":
 		return &esCounter{client: &http.Client{Timeout: 10 * time.Second},
 			url: strings.TrimRight(o.es, "/") + "/" + o.esIndex + "/_count"}, nil
+	case "influxdb":
+		return &influxCounter{client: &http.Client{Timeout: 10 * time.Second}, token: o.influxdbToken,
+			url: strings.TrimRight(o.influxdb, "/") + "/query?" + url.Values{"db": {o.influxdbBucket}, "q": {influxCount}}.Encode()}, nil
 	case "kafka":
 		c, err := kafkawire.New(kafkawire.Config{Brokers: []string{o.kafka}, ClientID: "syncbench",
 			MetadataMaxAge: time.Second, RetryFor: time.Second})

@@ -69,6 +69,10 @@ func TestCompareNames(t *testing.T) {
 		{"w0-fixed-x", "w0-fixed-1", false},
 		{"w0-fixed-1", "w0-fixed-x", true},
 		{"plain", "w0", true},
+		{"s9-mssql-kafka.json", "s10-mqtt-influxdb.json", true},
+		{"s10-mqtt-influxdb", "s2-mysql-es", false},
+		{"s1-files-128b-1f", "s10-mqtt-influxdb", true},
+		{"s10-mqtt-influxdb", "w0-fixed-1", true},
 	} {
 		if got := compareNames(c.a, c.b) < 0; got != c.less {
 			t.Errorf("compareNames(%q, %q) < 0 = %v", c.a, c.b, got)

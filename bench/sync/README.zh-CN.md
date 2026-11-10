@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 同步基准测试（dev-plan I193）将 fit 的 [sync](../../docs/sync.zh-CN.md) 与它所替代的工具对比：文件对比
-Filebeat，MySQL 与 PostgreSQL 的变更对比 Canal 和 Debezium，批量复制对比 DataX。每个搬运者（mover）都在
+Filebeat，MySQL 与 PostgreSQL 的变更对比 Canal 和 Debezium，批量复制对比 DataX，MQTT 到 InfluxDB 对比 Telegraf。每个搬运者（mover）都在
 Docker 中运行，面对使用相同固定镜像与设置的全新服务器，绑定到相同的 CPU，并以相同方式测量：在它写入的地方
 清点它搬运的记录。
 
@@ -18,9 +18,15 @@ Docker 中运行，面对使用相同固定镜像与设置的全新服务器，�
 | `rabbitmq-kafka` | RabbitMQ 4.1 队列中的消息 → Kafka 3.9 | fit（`rabbitmq` → `kafka`，编解码器 `raw`）、Kafka Connect（Debezium 3.0.8 镜像）加 Apache Camel 的 `spring-rabbitmq-source` 连接器 4.14.5 |
 | `mqtt-kafka` | Mosquitto 2.0 主题上 QoS 1 的消息 → Kafka 3.9 | fit（`mqtt` → `kafka`，编解码器 `raw`）、Kafka Connect 加 Apache Camel 的 `mqtt5-source` 连接器 4.14.5 |
 | `mssql-kafka` | SQL Server 2022 的 CDC 表 → Kafka 3.9 | fit（`mssql` → `kafka`，Debezium 信封）、Debezium 3.0.8（SQL Server 连接器） |
+| `mqtt-influxdb` | Mosquitto 2.0 主题上 QoS 1 的 JSON 读数 → InfluxDB 2.7 | fit（`mqtt` → `influxdb`，编解码器 `json`）、Telegraf 1.40.3（`inputs.mqtt_consumer` → `outputs.influxdb_v2`） |
 
 行为 sysbench 的表结构（`id`、`k`、`c CHAR(120)`、`pad CHAR(60)`，约 200 字节），以每个事务 `TX_ROWS` 条单行
-INSERT 写入。
+INSERT 写入。`mqtt-influxdb` 的消息是 IoT 读数（约 110 字节）：百个之一的 `sensor`、各自不同的时间 `ts`（2026-01-01
+之后的第 i 毫秒，i 为读数序号）以及 `id`、`temp`、`hum` 三个数；一个点就是它的序列加时间，所以没有两个读数是同一个点。
+InfluxDB 中按 v1 查询 API 计数（`SELECT count(id) FROM reading`，桶 `bench` 作为数据库）；写入两次的读数仍是同一个点，
+所以 InfluxDB 不会显示 extra。两个搬运者的批次对齐：每批 500 个点、最多等待 1s（fit 的默认值；Telegraf 的
+`metric_batch_size` 与 `flush_interval`，其默认为 1000 与 10s），未确认的消息最多 1000 条（fit 的 `receive_maximum`、
+Telegraf 的 `max_undelivered_messages`、Mosquitto 的 `max_inflight_messages`）。
 
 ## 运行
 
@@ -73,6 +79,6 @@ Central）下载到 `CACHE`，按固定的 sha256 校验，并据此构建四个
 ## 报告
 
 `benchreport` 将同步结果渲染为每个场景一张表；`-plan` 给出权重与得分，`-scores` 给出总排名（规则 24）。
-权重：S1 文件 20%，S2 MySQL→Elasticsearch 15%，S3 MySQL→Kafka 15%，S4 PostgreSQL→Kafka 10%，
+权重：S1 文件 15%，S2 MySQL→Elasticsearch 15%，S3 MySQL→Kafka 15%，S4 PostgreSQL→Kafka 10%，
 S5 MySQL 批量复制 15%（无延迟项），S6 文件→Loki 5%，S7 RabbitMQ→Kafka 7%，S8 MQTT→Kafka 6%，
-S9 SQL Server→Kafka 7%。
+S9 SQL Server→Kafka 7%，S10 MQTT→InfluxDB 5%。
