@@ -5692,7 +5692,10 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    uint 以及 decimal、时间和 JSON 为字符串。部分成功记为警告，因为接收端不说明丢弃了哪些记录。
 8. **[changed]**（2026-11-10：loki 的测试请求 `/loki/api/v1/labels`，需要读权限：只能推送的凭据（托管 Loki 的只写令牌、只转发推送 API 的网关）无法通过。现在改为以该租户、按目标的编码推送一个没有条目的流，Loki 3.5.5 答 204 且不存任何东西（不含流的推送它答 422 拒绝）；互操作 `TestLokiPush` 会运行它。otlp_logs 的空导出保持不变。）
    **连接测试**：loki 以该租户请求 `/loki/api/v1/labels`；otlp_logs 导出一个空请求。
-9. **[needs the user]**（2026-11-10：Promtail 已被弃用并到了生命周期终点，与它对比可能显得是在和已停止维护的工具比：见本节开头的列表。）
+9. **[ruled 2026-11-10: done as recommended]**（2026-11-10：Promtail 已被弃用并到了生命周期终点，与它对比可能显得是在和已停止维护的工具比：见本节开头的列表。）
+   已完成：Grafana Alloy（`grafana/alloy:v1.21.3`）作为 `files-loki` 的第三个默认搬运者，与 fit 和 Promtail 并列
+   （`bench/sync/configs/alloy/config.alloy`：`local.file_match` + `loki.source.file` → `loki.write`，与 Promtail 相同的标签、
+   1 MiB 批次最多等待 1s 发送、从文件开头读、位置保存在容器内、相同的 CPU 与全新的 Loki）；该场景的权重不变。
    **基准对比 Promtail 而不是 Filebeat**（Filebeat 没有 Loki 输出），尽管 Promtail 已被 Alloy 取代；`files-loki` 还未加入
    `plan.sh`，由 I222 连同权重加入。
 10. **[kept]**（2026-11-10：不开认证的 Loki 把所有推送都归入同一个租户，在那里区分不了租户；单元测试逐个请求检查请求头。）

@@ -1,6 +1,6 @@
 // Command syncbench is the sync benchmark's driver (bench/sync/README.md).
 // bench/sync/run.sh starts the servers and each mover (fit, Filebeat,
-// Canal, Debezium, DataX) in Docker, and runs syncbench beside them, in a
+// Promtail, Alloy, Canal, Debezium, DataX, ...) in Docker, and runs syncbench beside them, in a
 // container on the same private network, for what is measured:
 //
 //	syncbench prepare -scenario S [flags]   tables, indices, files, a batch job's rows

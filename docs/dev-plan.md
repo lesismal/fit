@@ -8011,8 +8011,13 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
    interop `TestLokiPush` runs it. otlp_logs's empty export is kept.)
    **Connection tests**: loki asks `/loki/api/v1/labels` as the tenant; otlp_logs exports an empty
    request.
-9. **[needs the user]** (2026-11-10: Promtail is deprecated and at its end of life, so the
-   comparison may read as one against a dead tool: see the list at the top of this section.)
+9. **[ruled 2026-11-10: done as recommended]** (2026-11-10: Promtail is deprecated and at its end of
+   life, so the comparison may read as one against a dead tool: see the list at the top of this
+   section.) Built: Grafana Alloy (`grafana/alloy:v1.21.3`) is a third default mover of `files-loki`
+   beside fit and Promtail (`bench/sync/configs/alloy/config.alloy`: `local.file_match` +
+   `loki.source.file` → `loki.write`, Promtail's labels, 1 MiB batches sent after at most 1s, read
+   from the files' start, positions in the container, the same CPUs and a fresh Loki); the
+   scenario's weight is unchanged.
    **The benchmark compares Promtail, not Filebeat** (Filebeat has no Loki output), though Promtail
    is deprecated for Alloy; `files-loki` is not in `plan.sh` yet, which I222 adds with its weight.
 10. **[kept]** (2026-11-10: Loki without authentication files every push under one tenant, so
