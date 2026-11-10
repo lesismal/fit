@@ -1,0 +1,20 @@
+23:47:31 s2-mysql-es: movers fit,canal,debezium, 3 rounds, 500000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+23:47:31 s2-mysql-es round 1: fit
+ "records_per_sec": 47095.78542248514, "cpu_cores": 0.408319852952724, "rss_peak_bytes": 46088192, 
+23:48:28 s2-mysql-es round 1: canal
+ "records_per_sec": 16939.254194314435, "cpu_cores": 0.5050615128686589, "rss_peak_bytes": 2502860800, 
+23:49:47 s2-mysql-es round 1: debezium
+ "records_per_sec": 26126.488617983767, "cpu_cores": 1.820626559534609, "rss_peak_bytes": 1491062784, 
+23:51:00 s2-mysql-es round 2: debezium
+ "records_per_sec": 25656.29196257061, "cpu_cores": 1.8111227766810982, "rss_peak_bytes": 1260580864, 
+23:52:14 s2-mysql-es round 2: canal
+ "records_per_sec": 15517.052238910974, "cpu_cores": 0.4788099719468338, "rss_peak_bytes": 2504540160, 
+23:53:35 s2-mysql-es round 2: fit
+ "records_per_sec": 50470.90940654251, "cpu_cores": 0.4395727509521623, "rss_peak_bytes": 46448640, 
+23:54:31 s2-mysql-es round 3: fit
+ "records_per_sec": 50573.74646056998, "cpu_cores": 0.4378766879584542, "rss_peak_bytes": 47337472, 
+23:55:26 s2-mysql-es round 3: canal
+ "records_per_sec": 16551.94930175988, "cpu_cores": 0.56416077471842, "rss_peak_bytes": 2497536000, 
+23:56:47 s2-mysql-es round 3: debezium
+ "records_per_sec": 26120.3897879361, "cpu_cores": 1.8136281973086386, "rss_peak_bytes": 1444691968, 
+23:58:00 s2-mysql-es: /root/fitbench/sync2/bench/results/sync-2026-11-10/s2-mysql-es.json (0 runs failed)

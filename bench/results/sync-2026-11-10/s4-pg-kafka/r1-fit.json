@@ -1,0 +1,25 @@
+{
+  "mover": "fit",
+  "scenario": "pg-kafka",
+  "variant": "s4-pg-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 130971.90330285935,
+  "drain_seconds": 3.699266696,
+  "cpu_cores": 1.7538102908382467,
+  "startup_seconds": 2.867827338,
+  "write_seconds": 2.188666813,
+  "rss_peak_bytes": 16080896,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 299.758161,
+    "p99": 500.048988,
+    "max": 660.682429,
+    "mean": 297.58311674000004
+  },
+  "profiles": [
+    "fit-s4-pg-kafka-cpu.pprof",
+    "fit-s4-pg-kafka-heap.pprof"
+  ]
+}

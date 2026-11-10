@@ -1,0 +1,21 @@
+{
+  "mover": "debezium",
+  "scenario": "pg-kafka",
+  "variant": "s4-pg-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 124416.31717423596,
+  "drain_seconds": 3.998221546,
+  "cpu_cores": 3.968148042189556,
+  "startup_seconds": 2.655194684,
+  "write_seconds": 2.180866159,
+  "rss_peak_bytes": 1460326400,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 820.432423,
+    "p99": 1180.323856,
+    "max": 1220.458818,
+    "mean": 817.4789075050004
+  }
+}

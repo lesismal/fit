@@ -2,12 +2,12 @@
 
 | Rank | Server        | Score |    S1 |    S2 |   S3 |    S4 |   S5 |    S6 |    S7 |    S8 |   S9 | Coverage |
 | ---- | ------------- | ----: | ----: | ----: | ---: | ----: | ---: | ----: | ----: | ----: | ---: | -------: |
-| 1    | fit           |  98.6 | 100.0 | 100.0 | 94.0 | 100.0 | 96.5 | 100.0 | 100.0 | 100.0 | 99.5 |     100% |
-| 2    | datax         |  78.7 |     — |     — |    — |     — | 78.7 |     — |     — |     — |    — |      15% |
+| 1    | fit           |  98.8 | 100.0 | 100.0 | 94.0 | 100.0 | 98.0 | 100.0 | 100.0 | 100.0 | 99.5 |     100% |
+| 2    | datax         |  72.4 |     — |     — |    — |     — | 72.4 |     — |     — |     — |    — |      15% |
 | 3    | promtail      |  70.7 |     — |     — |    — |     — |    — |  70.7 |     — |     — |    — |       5% |
-| 4    | filebeat      |  42.4 |  42.4 |     — |    — |     — |    — |     — |     — |     — |    — |      20% |
-| 5    | debezium      |  38.2 |     — |  38.5 | 26.7 |  60.6 |    — |     — |     — |     — | 30.4 |      47% |
-| 6    | canal         |  29.9 |     — |  31.0 | 28.8 |     — |    — |     — |     — |     — |    — |      30% |
+| 4    | filebeat      |  43.0 |  43.0 |     — |    — |     — |    — |     — |     — |     — |    — |      20% |
+| 5    | debezium      |  38.2 |     — |  37.6 | 27.2 |  61.2 |    — |     — |     — |     — | 30.4 |      47% |
+| 6    | canal         |  30.4 |     — |  31.2 | 29.7 |     — |    — |     — |     — |     — |    — |      30% |
 | 7    | kafka-connect |  16.3 |     — |     — |    — |     — |    — |     — |  30.3 |   0.0 |    — |      13% |
 
 The score is the weighted mean of a server's item scores over the items it ran in, out of 100; each workload's column is the same over that workload's items. Coverage is the share of the plan's weight those items hold: a server the plan does not run in a workload has no score there, and one that cannot serve a scenario it is run in scores 0 for it.
@@ -32,14 +32,14 @@ An item is one table: a scenario's variant in one results file, its servers the 
 
 | Item                                                 | Weight | filebeat |       fit | canal | debezium | datax | promtail | kafka-connect |
 | ---------------------------------------------------- | -----: | -------: | --------: | ----: | -------: | ----: | -------: | ------------: |
-| s1-files-128b-1f: files, s1-files-128b-1f            |  5.00% |     28.7 | **100.0** |     — |        — |     — |        — |             — |
-| s1-files-128b-16f: files, s1-files-128b-16f          |  5.00% |     46.9 | **100.0** |     — |        — |     — |        — |             — |
-| s1-files-1k-1f: files, s1-files-1k-1f                |  5.00% |     37.8 | **100.0** |     — |        — |     — |        — |             — |
-| s1-files-1k-16f: files, s1-files-1k-16f              |  5.00% |     56.3 | **100.0** |     — |        — |     — |        — |             — |
-| s2-mysql-es: mysql-es, s2-mysql-es                   | 15.00% |        — | **100.0** |  31.0 |     38.5 |     — |        — |             — |
-| s3-mysql-kafka: mysql-kafka, s3-mysql-kafka          | 15.00% |        — |  **94.0** |  28.8 |     26.7 |     — |        — |             — |
-| s4-pg-kafka: pg-kafka, s4-pg-kafka                   | 10.00% |        — | **100.0** |     — |     60.6 |     — |        — |             — |
-| s5-mysql-batch: mysql-batch, s5-mysql-batch          | 15.00% |        — |  **96.5** |     — |        — |  78.7 |        — |             — |
+| s1-files-128b-1f: files, s1-files-128b-1f            |  5.00% |     28.5 | **100.0** |     — |        — |     — |        — |             — |
+| s1-files-128b-16f: files, s1-files-128b-16f          |  5.00% |     46.4 | **100.0** |     — |        — |     — |        — |             — |
+| s1-files-1k-1f: files, s1-files-1k-1f                |  5.00% |     38.7 | **100.0** |     — |        — |     — |        — |             — |
+| s1-files-1k-16f: files, s1-files-1k-16f              |  5.00% |     58.6 | **100.0** |     — |        — |     — |        — |             — |
+| s2-mysql-es: mysql-es, s2-mysql-es                   | 15.00% |        — | **100.0** |  31.2 |     37.6 |     — |        — |             — |
+| s3-mysql-kafka: mysql-kafka, s3-mysql-kafka          | 15.00% |        — |  **94.0** |  29.7 |     27.2 |     — |        — |             — |
+| s4-pg-kafka: pg-kafka, s4-pg-kafka                   | 10.00% |        — | **100.0** |     — |     61.2 |     — |        — |             — |
+| s5-mysql-batch: mysql-batch, s5-mysql-batch          | 15.00% |        — |  **98.0** |     — |        — |  72.4 |        — |             — |
 | s6-files-loki: files-loki, s6-files-loki             |  5.00% |        — | **100.0** |     — |        — |     — |     70.7 |             — |
 | s7-rabbitmq-kafka: rabbitmq-kafka, s7-rabbitmq-kafka |  7.00% |        — | **100.0** |     — |        — |     — |        — |          30.3 |
 | s8-mqtt-kafka: mqtt-kafka, s8-mqtt-kafka             |  6.00% |        — | **100.0** |     — |        — |     — |        — |           0.0 |

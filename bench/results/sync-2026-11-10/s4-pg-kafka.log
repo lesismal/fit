@@ -1,0 +1,14 @@
+00:05:26 s4-pg-kafka: movers fit,debezium, 3 rounds, 500000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+00:05:26 s4-pg-kafka round 1: fit
+ "records_per_sec": 130971.90330285935, "cpu_cores": 1.7538102908382467, "rss_peak_bytes": 16080896, 
+00:06:02 s4-pg-kafka round 1: debezium
+ "records_per_sec": 124416.31717423596, "cpu_cores": 3.968148042189556, "rss_peak_bytes": 1460326400, 
+00:06:45 s4-pg-kafka round 2: debezium
+ "records_per_sec": 121863.60952285618, "cpu_cores": 3.9570619273030636, "rss_peak_bytes": 1549017088, 
+00:07:26 s4-pg-kafka round 2: fit
+ "records_per_sec": 130542.61832036094, "cpu_cores": 1.7509732747478712, "rss_peak_bytes": 17117184, 
+00:08:03 s4-pg-kafka round 3: fit
+ "records_per_sec": 130958.75311029775, "cpu_cores": 1.7477665992188003, "rss_peak_bytes": 16412672, 
+00:08:40 s4-pg-kafka round 3: debezium
+ "records_per_sec": 121876.82787866452, "cpu_cores": 4.023269335508865, "rss_peak_bytes": 1591242752, 
+00:09:22 s4-pg-kafka: /root/fitbench/sync2/bench/results/sync-2026-11-10/s4-pg-kafka.json (0 runs failed)

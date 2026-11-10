@@ -1,0 +1,224 @@
+{
+  "kind": "sync",
+  "name": "s4-pg-kafka",
+  "finished": "2026-11-10T00:09:22.370791225Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-38-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "20482001",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "500000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "debezium": "quay.io/debezium/connect:3.0.8.Final",
+    "kafka": "apache/kafka:3.9.1",
+    "postgres": "postgres:17.5-bookworm"
+  },
+  "results": [
+    {
+      "mover": "debezium",
+      "scenario": "pg-kafka",
+      "variant": "s4-pg-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 121876.82787866452,
+      "drain_seconds": 4.100402092,
+      "cpu_cores": 4.023269335508865,
+      "startup_seconds": 2.656936858,
+      "write_seconds": 2.198855421,
+      "rss_peak_bytes": 1591242752,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 819.864795,
+        "p99": 1179.240925,
+        "max": 1220.280084,
+        "mean": 811.1962005959995
+      },
+      "rounds": 3,
+      "spread": 0.02094497941742584
+    },
+    {
+      "mover": "fit",
+      "scenario": "pg-kafka",
+      "variant": "s4-pg-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 130958.75311029775,
+      "drain_seconds": 3.699638157,
+      "cpu_cores": 1.7477665992188003,
+      "startup_seconds": 3.266816903,
+      "write_seconds": 2.179426884,
+      "rss_peak_bytes": 16412672,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 299.913717,
+        "p99": 519.847611,
+        "max": 659.65766,
+        "mean": 300.1175421529996
+      },
+      "profiles": [
+        "fit-s4-pg-kafka-cpu.pprof",
+        "fit-s4-pg-kafka-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.0032780167213172623
+    }
+  ],
+  "runs": [
+    {
+      "mover": "debezium",
+      "scenario": "pg-kafka",
+      "variant": "s4-pg-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 124416.31717423596,
+      "drain_seconds": 3.998221546,
+      "cpu_cores": 3.968148042189556,
+      "startup_seconds": 2.655194684,
+      "write_seconds": 2.180866159,
+      "rss_peak_bytes": 1460326400,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 820.432423,
+        "p99": 1180.323856,
+        "max": 1220.458818,
+        "mean": 817.4789075050004
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "pg-kafka",
+      "variant": "s4-pg-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 130971.90330285935,
+      "drain_seconds": 3.699266696,
+      "cpu_cores": 1.7538102908382467,
+      "startup_seconds": 2.867827338,
+      "write_seconds": 2.188666813,
+      "rss_peak_bytes": 16080896,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 299.758161,
+        "p99": 500.048988,
+        "max": 660.682429,
+        "mean": 297.58311674000004
+      },
+      "profiles": [
+        "fit-s4-pg-kafka-cpu.pprof",
+        "fit-s4-pg-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "debezium",
+      "scenario": "pg-kafka",
+      "variant": "s4-pg-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 121863.60952285618,
+      "drain_seconds": 4.100551444,
+      "cpu_cores": 3.9570619273030636,
+      "startup_seconds": 2.657145469,
+      "write_seconds": 2.17659799,
+      "rss_peak_bytes": 1549017088,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 820.672693,
+        "p99": 1180.637713,
+        "max": 1299.549766,
+        "mean": 814.7999022470008
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "pg-kafka",
+      "variant": "s4-pg-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 130542.61832036094,
+      "drain_seconds": 3.699941109,
+      "cpu_cores": 1.7509732747478712,
+      "startup_seconds": 3.266943813,
+      "write_seconds": 2.183445456,
+      "rss_peak_bytes": 17117184,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 300.122338,
+        "p99": 519.528036,
+        "max": 659.605602,
+        "mean": 303.78212443299986
+      },
+      "profiles": [
+        "fit-s4-pg-kafka-cpu.pprof",
+        "fit-s4-pg-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "debezium",
+      "scenario": "pg-kafka",
+      "variant": "s4-pg-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 121876.82787866452,
+      "drain_seconds": 4.100402092,
+      "cpu_cores": 4.023269335508865,
+      "startup_seconds": 2.656936858,
+      "write_seconds": 2.198855421,
+      "rss_peak_bytes": 1591242752,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 819.864795,
+        "p99": 1179.240925,
+        "max": 1220.280084,
+        "mean": 811.1962005959995
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "pg-kafka",
+      "variant": "s4-pg-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 130958.75311029775,
+      "drain_seconds": 3.699638157,
+      "cpu_cores": 1.7477665992188003,
+      "startup_seconds": 3.266816903,
+      "write_seconds": 2.179426884,
+      "rss_peak_bytes": 16412672,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 299.913717,
+        "p99": 519.847611,
+        "max": 659.65766,
+        "mean": 300.1175421529996
+      },
+      "profiles": [
+        "fit-s4-pg-kafka-cpu.pprof",
+        "fit-s4-pg-kafka-heap.pprof"
+      ]
+    }
+  ]
+}
