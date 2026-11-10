@@ -1,0 +1,34 @@
+// Grafana Alloy, Promtail's successor, in the sync benchmark's files-loki
+// scenario: the files' lines, as they are, into Loki, as Promtail's and
+// fit's configs do (configs/promtail/promtail.yml, configs/fit/files-loki.conf):
+// one stream, labelled job=bench (loki.source.file adds each file's
+// filename, as Promtail does), batches of 1 MiB sent after at most 1s
+// (Alloy's defaults, as Promtail's, and fit's max_request_bytes and batch
+// max_wait), snappy protobuf as all three send it. The files are read from
+// their start (tail_from_end false, the default); the positions are kept
+// in the container, under its storage path (run.sh's --storage.path).
+// Alloy looks for new lines every 250ms (file_watch's default), as
+// Promtail and fit do. No stage parses a line, and no rate limit reads
+// them.
+local.file_match "bench" {
+	path_targets = [{"__path__" = "/data/in/*.log", "job" = "bench"}]
+}
+
+loki.source.file "bench" {
+	targets       = local.file_match.bench.targets
+	forward_to    = [loki.write.loki.receiver]
+	tail_from_end = false
+
+	file_watch {
+		min_poll_frequency = "250ms"
+		max_poll_frequency = "250ms"
+	}
+}
+
+loki.write "loki" {
+	endpoint {
+		url        = "http://loki:3100/loki/api/v1/push"
+		batch_wait = "1s"
+		batch_size = "1MiB"
+	}
+}

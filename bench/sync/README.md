@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 The sync benchmark (dev-plan I193) measures fit's [sync](../../docs/sync.md) against the tools it
-stands in for: Filebeat for files, Promtail for files to Loki, Canal and Debezium for MySQL's,
+stands in for: Filebeat for files, Promtail and Grafana Alloy for files to Loki, Canal and Debezium for MySQL's,
 PostgreSQL's and SQL Server's changes, Kafka Connect for RabbitMQ and MQTT into Kafka, DataX for a
 batch copy, Telegraf for MQTT into InfluxDB. Every mover runs in Docker against fresh servers of the same pinned images and
 settings, pinned to the same CPUs, and is measured the same way: the records it moves are counted
@@ -12,7 +12,7 @@ where it writes them.
 | Scenario | Source → sink | Movers |
 | --- | --- | --- |
 | `files` | lines in files (`LINE_BYTES`, `FILES`) → one file | fit (`file` → `file`), Filebeat 8.17.4 (`filestream` → `output.file`) |
-| `files-loki` | lines in files → Loki 3.5 | fit (`file` → `loki`), Promtail 3.5.5 (Filebeat has no Loki output) |
+| `files-loki` | lines in files → Loki 3.5 | fit (`file` → `loki`), Promtail 3.5.5 (Filebeat has no Loki output), Grafana Alloy 1.21.3, Promtail's successor (`local.file_match` + `loki.source.file` → `loki.write`) |
 | `mysql-es` | MySQL 8.0's binlog → Elasticsearch 7.17 | fit (`mysql` → `elasticsearch`), Canal 1.1.8 (canal-server + client adapter `es7`), Debezium 3.0.8 (MySQL connector → Kafka → Confluent's Elasticsearch sink 14.1.2, in one Kafka Connect) |
 | `mysql-kafka` | MySQL 8.0's binlog → Kafka 3.9 | fit (`mysql` → `kafka`, Debezium's envelope), Canal 1.1.8 (canal-server in Kafka mode, flat messages), Debezium 3.0.8 (MySQL connector, JSON without schemas) |
 | `pg-kafka` | PostgreSQL 17's logical replication → Kafka 3.9 | fit (`postgres` → `kafka`), Debezium 3.0.8 (PostgreSQL connector, `pgoutput`) |
@@ -97,7 +97,8 @@ Before the plan, clean the host as for fit's plan (no other benchmark, the LLM s
 restored after). The first run downloads Canal's adapter (291 MB), DataX (1.7 GB, of which only the
 engine and the MySQL plugins are kept), Confluent's Elasticsearch sink (43 MB) and Camel's RabbitMQ
 and MQTT connectors (45 MB, from Maven Central) into `CACHE`, checked against their pinned sha256,
-and builds four images from them ([`images/`](images)); later runs reuse them. Where the host cannot
+and builds four images from them ([`images/`](images)); the pinned images, Promtail's and Alloy's
+among them, come from their registries (Docker Hub for Grafana's); later runs reuse them. Where the host cannot
 reach a download (the benchmark host gets 504s from GitHub), fetch it elsewhere and copy it into
 `CACHE` under the name `run.sh` gives it. The plan takes about two hours at the full sizes with 3
 rounds.
@@ -141,10 +142,12 @@ Each mover runs with its defaults but where the comparison needs the same:
 
 - Filebeat looks for new lines every 250ms (fit's `poll_interval`) and its queue flushes after 1s
   (fit's batch `max_wait`), not after up to 10s each, so that their lags compare.
-- Promtail and fit push to Loki in snappy protobuf, requests of up to 1 MiB of lines sent after at
-  most 1s (Promtail's defaults, fit's `max_request_bytes` and `max_wait`), the lines as they are,
-  labelled `job=bench` (Promtail adds each file's `filename`); Loki's rate limits are raised past
-  what either reaches (`configs/loki/loki.yaml`).
+- Promtail, Alloy and fit push to Loki in snappy protobuf, requests of up to 1 MiB of lines sent
+  after at most 1s (Promtail's and Alloy's defaults, fit's `max_request_bytes` and `max_wait`), the
+  lines as they are, read from the files' start and looked for every 250ms, labelled `job=bench`
+  (Promtail and Alloy add each file's `filename`); their positions are kept in the container; each
+  gets a Loki of its own, whose rate limits are raised past what any reaches
+  (`configs/loki/loki.yaml`). Alloy runs without its usage report (`--disable-reporting`).
 - fit writes Debezium's envelope to Kafka (`codec debezium`), as Debezium does; Canal its flat
   messages; every topic one partition, made on first write.
 - The batch: four readers and writers each (DataX's `channel`, fit's `job.max_parallel`), batches of

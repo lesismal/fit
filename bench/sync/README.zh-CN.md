@@ -3,14 +3,14 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 同步基准测试（dev-plan I193）将 fit 的 [sync](../../docs/sync.zh-CN.md) 与它所替代的工具对比：文件对比
-Filebeat，MySQL 与 PostgreSQL 的变更对比 Canal 和 Debezium，批量复制对比 DataX，MQTT 到 InfluxDB 对比 Telegraf。每个搬运者（mover）都在
+Filebeat，文件到 Loki 对比 Promtail 与 Grafana Alloy，MySQL 与 PostgreSQL 的变更对比 Canal 和 Debezium，批量复制对比 DataX，MQTT 到 InfluxDB 对比 Telegraf。每个搬运者（mover）都在
 Docker 中运行，面对使用相同固定镜像与设置的全新服务器，绑定到相同的 CPU，并以相同方式测量：在它写入的地方
 清点它搬运的记录。
 
 | 场景 | 源 → 目标 | 搬运者 |
 | --- | --- | --- |
 | `files` | 文件中的行（`LINE_BYTES`、`FILES`）→ 一个文件 | fit（`file` → `file`）、Filebeat 8.17.4（`filestream` → `output.file`） |
-| `files-loki` | 文件中的行 → Loki 3.5 | fit（`file` → `loki`）、Promtail 3.5.5（Filebeat 没有 Loki 输出） |
+| `files-loki` | 文件中的行 → Loki 3.5 | fit（`file` → `loki`）、Promtail 3.5.5（Filebeat 没有 Loki 输出）、Promtail 的后继 Grafana Alloy 1.21.3（`local.file_match` + `loki.source.file` → `loki.write`） |
 | `mysql-es` | MySQL 8.0 的 binlog → Elasticsearch 7.17 | fit、Canal 1.1.8（canal-server + client adapter `es7`）、Debezium 3.0.8（MySQL 连接器 → Kafka → Confluent Elasticsearch sink 14.1.2，同一个 Kafka Connect） |
 | `mysql-kafka` | MySQL 8.0 的 binlog → Kafka 3.9 | fit（Debezium 信封）、Canal 1.1.8（Kafka 模式，flat message）、Debezium 3.0.8（无 schema 的 JSON） |
 | `pg-kafka` | PostgreSQL 17 的逻辑复制 → Kafka 3.9 | fit、Debezium 3.0.8（`pgoutput`） |
@@ -56,7 +56,8 @@ bench/sync/plan.sh 2026-11-09           # 整个计划：每个场景 3 轮，�
 `bench/cmd` 与 `bin`，以 `FIT_REV`、`BIN`、`BENCHREPORT` 在 `flock /root/bench.lock` 下 `nohup` 运行
 `plan.sh`）。运行前按 fit 计划的方式清理主机。首次运行会把 Canal adapter（291 MB）、DataX（1.7 GB，只保留引擎
 与 MySQL 插件）、Confluent Elasticsearch sink（43 MB）和 Camel 的 RabbitMQ 与 MQTT 连接器（45 MB，来自 Maven
-Central）下载到 `CACHE`，按固定的 sha256 校验，并据此构建四个镜像（[`images/`](images)）。主机下载不到时（基准
+Central）下载到 `CACHE`，按固定的 sha256 校验，并据此构建四个镜像（[`images/`](images)）；固定版本的镜像（包括 Promtail 与 Alloy 的）从各自的镜像仓库拉取（Grafana 的来自
+Docker Hub）。主机下载不到时（基准
 主机从 GitHub 下载得到 504），在别处下载，按 `run.sh` 给它的文件名复制到 `CACHE`。完整规模 3 轮约需两小时。
 
 ## 测量内容
@@ -73,7 +74,7 @@ Central）下载到 `CACHE`，按固定的 sha256 校验，并据此构建四个
 - 通过 Admin API 保存 fit 的 CPU profile（从排空开始 10 秒）与堆 profile（结束时）。
 - `merge` 将一个项目的多轮合并，取每个搬运者按吞吐的中位轮，附带离散度与失败。
 
-对齐的设置（Filebeat 的轮询与刷新等待、Promtail 与 fit 推送 Loki 的批大小与等待、Kafka 信封与分区、批量的并行度与批大小、无 TLS、放宽的持久化、JVM 堆
+对齐的设置（Filebeat 的轮询与刷新等待、Promtail、Alloy 与 fit 推送 Loki 的批大小与等待（每个搬运者一个全新的 Loki）、Kafka 信封与分区、批量的并行度与批大小、无 TLS、放宽的持久化、JVM 堆
 保持镜像默认）以及 arm64（Apple M4）上 Java 的 SVE 问题，见英文版说明。
 
 ## 报告

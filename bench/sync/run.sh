@@ -54,7 +54,7 @@ done
 sc=$1
 case $sc in
 files) all=fit,filebeat ;;
-files-loki) all=fit,promtail ;;
+files-loki) all=fit,promtail,alloy ;;
 mysql-es | mysql-kafka) all=fit,canal,debezium ;;
 pg-kafka) all=fit,debezium ;;
 mysql-batch) all=fit,datax ;;
@@ -77,6 +77,7 @@ KAFKA_IMAGE=${KAFKA_IMAGE:-apache/kafka:3.9.1}
 FILEBEAT_IMAGE=${FILEBEAT_IMAGE:-docker.elastic.co/beats/filebeat:8.17.4}
 LOKI_IMAGE=${LOKI_IMAGE:-grafana/loki:3.5.5}
 PROMTAIL_IMAGE=${PROMTAIL_IMAGE:-grafana/promtail:3.5.5}
+ALLOY_IMAGE=${ALLOY_IMAGE:-grafana/alloy:v1.21.3}
 CANAL_IMAGE=${CANAL_IMAGE:-canal/canal-server:v1.1.8}
 DEBEZIUM_IMAGE=${DEBEZIUM_IMAGE:-quay.io/debezium/connect:3.0.8.Final}
 JRE_IMAGE=${JRE_IMAGE:-eclipse-temurin:8u452-b09-jre-jammy}
@@ -434,6 +435,14 @@ mover_up() {
 			"$PROMTAIL_IMAGE" -config.file=/etc/promtail/config.yml
 		containers=$PREFIX-promtail
 		;;
+	alloy)
+		# Its positions under the storage path, in the container; no usage
+		# report sent out.
+		run_d alloy --cpuset-cpus "$MOVER_CPUS" -v "$PREFIX-data:/data" \
+			-v "$here/configs/alloy/config.alloy:/etc/alloy/config.alloy:ro" \
+			"$ALLOY_IMAGE" run /etc/alloy/config.alloy --storage.path=/var/lib/alloy/data --disable-reporting
+		containers=$PREFIX-alloy
+		;;
 	telegraf)
 		run_d telegraf --cpuset-cpus "$MOVER_CPUS" -e INFLUX_TOKEN=$PW \
 			-v "$here/configs/telegraf/$sc.conf:/etc/telegraf/telegraf.conf:ro" "$TELEGRAF_IMAGE"
@@ -574,7 +583,7 @@ binaries
 pull "$BASE_IMAGE"
 case $sc in
 files) pull "$FILEBEAT_IMAGE" ;;
-files-loki) pull "$LOKI_IMAGE" "$PROMTAIL_IMAGE" ;;
+files-loki) pull "$LOKI_IMAGE" "$PROMTAIL_IMAGE" "$ALLOY_IMAGE" ;;
 mysql-es) pull "$MYSQL_IMAGE" "$ES_IMAGE" "$KAFKA_IMAGE" "$CANAL_IMAGE" "$DEBEZIUM_IMAGE" "$JRE_IMAGE" ;;
 mysql-kafka) pull "$MYSQL_IMAGE" "$KAFKA_IMAGE" "$CANAL_IMAGE" "$DEBEZIUM_IMAGE" ;;
 pg-kafka) pull "$PG_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
@@ -604,7 +613,7 @@ done
 images="-image base=$BASE_IMAGE"
 case $sc in
 files) images="$images -image filebeat=$FILEBEAT_IMAGE" ;;
-files-loki) images="$images -image loki=$LOKI_IMAGE -image promtail=$PROMTAIL_IMAGE" ;;
+files-loki) images="$images -image loki=$LOKI_IMAGE -image promtail=$PROMTAIL_IMAGE -image alloy=$ALLOY_IMAGE" ;;
 mysql-es) images="$images -image mysql=$MYSQL_IMAGE -image es=$ES_IMAGE -image kafka=$KAFKA_IMAGE -image canal=$CANAL_IMAGE -image canal-adapter=$ADAPTER_IMAGE -image debezium=$CONNECT_ES_IMAGE" ;;
 mysql-kafka) images="$images -image mysql=$MYSQL_IMAGE -image kafka=$KAFKA_IMAGE -image canal=$CANAL_IMAGE -image debezium=$DEBEZIUM_IMAGE" ;;
 pg-kafka) images="$images -image postgres=$PG_IMAGE -image kafka=$KAFKA_IMAGE -image debezium=$DEBEZIUM_IMAGE" ;;
