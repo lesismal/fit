@@ -5539,7 +5539,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     仍在 2022 与 2019 上。2025 允许 TLS 1.2 与 1.3（strict 协商为 1.3）；2022 按微软指南保持 1.2，因为允许 1.3 时它的 TDS 7
     登录会挂起。证书放在属于 mssql 用户的卷中（700、600），CN 为容器主机名 `mssql.fit.test`。备选：所有测试也在 2025 上跑
     （CI 中第三次完整运行）。
-14. **[pending review]**（2026-11-10） **代码页转换**：排序规则代码页既不是 1252 也不是 65001 的 varchar、char 或 text 列转换为
+14. **[ruled 2026-11-10: kept, with a warning at discovery]**（2026-11-10：已实现：发现表时以及之后接入新表时，对通过 CDC 读取的表，源从表自身的 `sys.columns` 读出排序规则代码页既不是 65001 也不是数据库代码页（`DATABASEPROPERTYEX(DB_NAME(), 'Collation')`）的 varchar、char 与 text 列，每次运行每列记录一次警告，写明表、列、两种排序规则，以及数据库代码页没有的字符经 CDC 以 `?` 到达目标。决定：排序规则不同于数据库但代码页相同的列不警告（CDC 保留其字符，互操作中的 Chinese_PRC_BIN 列即如此）；连接测试把同样内容报告为警告而不失败（`fitsync.WarningTester`、`TestResult.Warnings`，由 `fit sync test` 与工作台的测试卡片显示），管道状态不显示（它只含计数与错误，日志中已有）。互操作 `TestMSSQLSourceCodePage`（2022、2019）：fit_sync_cp936 中的 Latin1_General_CI_AS 列被警告，其 `cañón` 由快照完整读取，经 CDC 为 `ca?ón`。提交 `b89fc3d7`） **代码页转换**：排序规则代码页既不是 1252 也不是 65001 的 varchar、char 或 text 列转换为
     `nvarchar(n)`（n 为其字节长度，字符数不会超过它），超过 4000 字节及 `max` 与 text 用 `nvarchar(max)`；键列也转换（其值
     成为文本，由服务器与列比较），快照的表加别名，使键的顺序与条件仍作用于表自身的列。只有在数据库自身的排序规则下，CDC
     才保留这类列中的非 ASCII 字符（否则为问号，微软记载的限制）：写入文档，不做检测。备选：在客户端用 `x/text` 解码字节；
