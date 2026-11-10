@@ -31,6 +31,8 @@ type fakeNet struct {
 	// Unsubscribe.
 	present  bool
 	unsubErr error
+	// noSubIDs says the brokers take no subscription identifiers.
+	noSubIDs bool
 }
 
 type fakeClient struct {
@@ -121,6 +123,12 @@ func (c *fakeClient) SessionPresent() bool {
 	c.n.mu.Lock()
 	defer c.n.mu.Unlock()
 	return c.n.present
+}
+
+func (c *fakeClient) SubscriptionIDsAvailable() bool {
+	c.n.mu.Lock()
+	defer c.n.mu.Unlock()
+	return c.cfg.Version == mqttwire.Version5 && !c.n.noSubIDs
 }
 
 func (c *fakeClient) Messages() <-chan *mqttwire.Message { return c.msgs }

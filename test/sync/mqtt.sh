@@ -7,7 +7,10 @@
 #     third over TLS (a CA of the script's own). Not per_listener_settings:
 #     with it, Mosquitto 2 drops the messages of a persistent session while
 #     its client is away;
-#   - EMQX 5, one node, anonymous;
+#   - EMQX 5, one node, anonymous, with a topic rewrite rule: the filters
+#     subscribed and the topics published under fit-rewrite/ are moved to
+#     fit-rewritten/, so a message comes under a topic its subscription's
+#     filter, as the client sent it, does not match;
 #   - EMQX 5 again, with SCRAM-SHA-256 enhanced authentication (MQTT 5's
 #     AUTH) as its only authenticator, the user fit added by its REST API:
 #     an authenticator refuses the clients it cannot judge, anonymous ones
@@ -88,6 +91,7 @@ EMQX=${EMQX:-1}
 if [ "$EMQX" = 1 ] && ! docker inspect "$E" >/dev/null 2>&1; then
 	docker run -d --name "$E" -p "127.0.0.1:$((MQTT_PORT + 5)):1883" \
 		-e EMQX_MQTT__MAX_INFLIGHT=1000 -e EMQX_MQTT__MAX_MQUEUE_LEN=100000 \
+		-e 'EMQX_REWRITE=[{action = all, source_topic = "fit-rewrite/#", re = "^fit-rewrite/(.+)$", dest_topic = "fit-rewritten/$1"}]' \
 		"$EMQX_IMAGE" >/dev/null
 fi
 S=${PREFIX}emqx-scram

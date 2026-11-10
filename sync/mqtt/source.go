@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strconv"
 	"sync"
@@ -85,6 +86,14 @@ type session struct {
 	// the filters this run unsubscribes, whose messages, queued before,
 	// are acknowledged and not emitted.
 	filters, dropped []string
+	// ids are the subscription identifiers of filters, those subscribed
+	// with one, and nextID the next one given; current is the set of
+	// topics', when the run subscribes with them (useIDs). Those below
+	// given were given by the runs before.
+	ids           map[string]int
+	nextID, given int
+	current       map[int]bool
+	useIDs        bool
 }
 
 type pending struct {
@@ -96,11 +105,18 @@ type pending struct {
 
 // position is the source's: a run and a message's number in it, and the
 // topic filters the session may hold. It is not resumed from: the
-// broker's session is; its filters say what to unsubscribe from.
+// broker's session is; its filters say what to unsubscribe from, and
+// their identifiers which messages are theirs.
 type position struct {
 	Run     string   `json:"run"`
 	Seq     uint64   `json:"seq"`
 	Filters []string `json:"filters,omitempty"`
+	// IDs are the subscription identifiers (MQTT 5) of those of Filters
+	// subscribed with one, a dropped filter's kept until its UNSUBACK;
+	// NextID is the next identifier given, never one given before, so
+	// that an identifier no filter of topics has is a dropped filter's.
+	IDs    map[string]int `json:"ids,omitempty"`
+	NextID int            `json:"next_id,omitempty"`
 }
 
 // Provision checks the params and reads the password and TLS files;
@@ -201,6 +217,7 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 		}
 		st.filters = append(slices.Clone(s.Topics), st.dropped...)
 	}
+	s.identify(st, &from)
 	s.mu.Lock()
 	s.cur = st
 	s.mu.Unlock()
@@ -254,11 +271,12 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 				timer = time.NewTimer(idle)
 				idleC = timer.C
 			}
-			// A filter set the checkpoint does not hold yet is handed on in
-			// a position-only record, which the pipeline takes once nothing
-			// was emitted for checkpoint_interval: saved though no message
-			// comes. A message's record carries the filters too.
-			if !slices.Equal(from.Filters, s.Topics) {
+			// A filter set, or identifiers, the checkpoint does not hold
+			// yet are handed on in a position-only record, which the
+			// pipeline takes once nothing was emitted for
+			// checkpoint_interval: saved though no message comes. A
+			// message's record carries them too.
+			if !slices.Equal(from.Filters, s.Topics) || !maps.Equal(from.IDs, st.ids) || from.NextID != st.nextID {
 				posTicker = time.NewTicker(positionRetry)
 				posC = posTicker.C
 			}
@@ -289,8 +307,39 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	}
 }
 
+// identify gives the run's subscriptions their identifiers, in version 5
+// with a broker that takes them: a filter of topics keeps the one the
+// checkpoint gave it, since the messages the session kept carry it, and a
+// new filter takes a new one. A dropped filter keeps its own until its
+// UNSUBACK. Otherwise none, the messages told apart by their topics.
+func (s *Source) identify(st *session, from *position) {
+	st.nextID = max(from.NextID, 1)
+	for _, id := range from.IDs {
+		st.nextID = max(st.nextID, id+1)
+	}
+	st.given = st.nextID
+	if !st.c.SubscriptionIDsAvailable() {
+		return
+	}
+	st.useIDs, st.ids, st.current = true, map[string]int{}, map[int]bool{}
+	for _, f := range st.filters {
+		id := from.IDs[f]
+		if id <= 0 && slices.Contains(s.Topics, f) {
+			id = st.nextID
+			st.nextID++
+		}
+		if id > 0 {
+			st.ids[f] = id
+		}
+	}
+	for _, f := range s.Topics {
+		st.current[st.ids[f]] = true
+	}
+}
+
 // subscribe unsubscribes from the filters dropped, then subscribes to
-// topics.
+// topics: each in a SUBSCRIBE of its own, of its identifier, when the run
+// uses them.
 func (s *Source) subscribe(ctx context.Context, st *session) error {
 	if len(st.dropped) > 0 {
 		uctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
@@ -301,31 +350,64 @@ func (s *Source) subscribe(ctx context.Context, st *session) error {
 		}
 		s.mu.Lock()
 		st.filters = s.Topics
+		for _, f := range st.dropped {
+			delete(st.ids, f)
+		}
 		s.mu.Unlock()
 	}
-	sctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-	defer cancel()
-	_, err := st.c.Subscribe(sctx, s.subscriptions()...)
-	return err
+	subs := s.subscriptions()
+	if !st.useIDs {
+		sctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+		defer cancel()
+		_, err := st.c.Subscribe(sctx, subs...)
+		return err
+	}
+	for _, sub := range subs {
+		sub.ID = st.ids[sub.Filter]
+		sctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+		_, err := st.c.Subscribe(sctx, sub)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // position is the position of the run's message seq; s.mu is held, or
 // the run not yet shared.
 func (s *Source) position(st *session, seq uint64) fitsync.Position {
-	b, _ := json.Marshal(position{Run: st.run, Seq: seq, Filters: st.filters})
+	b, _ := json.Marshal(position{Run: st.run, Seq: seq, Filters: st.filters, IDs: st.ids, NextID: st.nextID})
 	return b
 }
 
-// unwanted reports whether a message is of the filters dropped alone:
-// queued before their UNSUBSCRIBE, it is acknowledged and not emitted.
-// A topic matching a filter of topics too is emitted: a broker that
-// rewrites topics (EMQX's rewrite rules) may send what the filters ask
-// under a topic they do not match, so topics are checked only against
-// the filters dropped.
-func (s *Source) unwanted(st *session, topic string) bool {
+// unwanted reports whether a message is of the filters dropped alone,
+// queued before their UNSUBSCRIBE: it is acknowledged and not emitted.
+// When it carries subscription identifiers, it is when none of them is
+// a filter's of topics and each was given by fit before: a dropped
+// filter's, since none is given twice. Its topic is checked only when it
+// carries none (a subscription made before identifiers were used, a
+// broker that does not send them, or version 3.1.1), or one fit did not
+// give (a checkpoint lost): then it is when it matches a filter dropped
+// and none of topics. A broker that rewrites topics (EMQX's rewrite
+// rules) may send what the filters ask under a topic they do not match,
+// so topics are checked only against the filters dropped.
+func (s *Source) unwanted(st *session, m *mqttwire.Message) bool {
+	if st.useIDs && len(m.SubscriptionIDs) > 0 {
+		ours := true
+		for _, id := range m.SubscriptionIDs {
+			if st.current[id] {
+				return false
+			}
+			ours = ours && id < st.given
+		}
+		if ours {
+			return true
+		}
+	}
 	match := func(filters []string) bool {
 		for _, f := range filters {
-			if mqttwire.MatchTopic(f, topic) {
+			if mqttwire.MatchTopic(f, m.Topic) {
 				return true
 			}
 		}
@@ -408,7 +490,7 @@ func (s *Source) answer(st *session) {
 // position its acknowledgement waits for.
 func (s *Source) emit(st *session, r *fitsync.Run, m *mqttwire.Message) error {
 	var recs []*fitsync.Record
-	if !s.unwanted(st, m.Topic) {
+	if !s.unwanted(st, m) {
 		recs = s.records(m)
 	}
 	s.mu.Lock()

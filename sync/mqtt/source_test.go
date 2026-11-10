@@ -172,7 +172,7 @@ func TestSourceAcks(t *testing.T) {
 	col := newCollect()
 	cancel, done := started(src, col.run(false))
 	c := n.last(t, 1)
-	if c.cfg.ClientID != "fit-test" || c.cfg.CleanStart || len(c.subs) != 1 || c.subs[0] != (mqttwire.Subscription{Filter: "t/#", QoS: 2, RetainHandling: 1}) {
+	if c.cfg.ClientID != "fit-test" || c.cfg.CleanStart || len(c.subs) != 1 || c.subs[0] != (mqttwire.Subscription{Filter: "t/#", QoS: 2, RetainHandling: 1, ID: 1}) {
 		t.Fatalf("%+v %+v", c.cfg, c.subs)
 	}
 	ms := []*mqttwire.Message{{Topic: "t/a", QoS: 1, Payload: []byte("1")}, {Topic: "t/b", QoS: 0}, {Topic: "t/c", QoS: 2, Retain: true}}
