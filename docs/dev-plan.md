@@ -7196,42 +7196,42 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
     add MQTT to InfluxDB as S10 only with the next plan run. **Ruled** 2026-11-10: weights kept, MQTT to
     InfluxDB added as S10 at 5%, taken from S1 (now 15%); see decision 8.
 - I217–I219:
-  - **Doris labels outlive a reset** (I218 decision 1): records reloaded within
+  - **Ruled 2026-11-10: as recommended (the lineage in the label).** **Doris labels outlive a reset** (I218 decision 1): records reloaded within
     `label_keep_max_second` (three days) after a pipeline reset or a table made again are refused as
     already loaded, silently, unless `label_prefix` is changed by hand. Choice: keep that, or put the
     pipeline's lineage in the label (every sink told the lineage, not only a `CheckpointSink`).
     Recommended: the lineage, so a reset changes the labels by itself; `label_prefix` stays.
-  - **The Loki benchmark's competitor** (I219 decision 9): Promtail, deprecated and at its end of
+  - **Ruled 2026-11-10: as recommended (Alloy beside Promtail).** **The Loki benchmark's competitor** (I219 decision 9): Promtail, deprecated and at its end of
     life, or Grafana Alloy, its successor. Recommended: Alloy beside Promtail when I222 puts
     `files-loki` in `plan.sh`.
-  - **Two template syntaxes** (I219 decision 11): name templates (SQL sinks' and doris's `table`,
+  - **Ruled 2026-11-10: as recommended (both, `{$namespace}` accepted in name templates).** **Two template syntaxes** (I219 decision 11): name templates (SQL sinks' and doris's `table`,
     influxdb, tdengine, qdrant) write the namespace `{namespace}`; record templates (loki, otlp_logs,
     the file sink) write it `{$namespace}`, where `{namespace}` is a field. Choice: keep both, or one.
     Recommended: keep both and accept `{$namespace}` in name templates too, which breaks no config.
 - I211–I213
-  - [I212](#i212-nats-jetstream-as-a-source-and-a-sink) decision 6, keys on NATS messages: the RabbitMQ
+  - **Ruled 2026-11-10: as recommended (a `Fit-Key` header).** [I212](#i212-nats-jetstream-as-a-source-and-a-sink) decision 6, keys on NATS messages: the RabbitMQ
     connectors carry a record's key in a `fit-key` header, the NATS ones not at all, so a keyed
     NATS-to-NATS copy loses its keys. Recommendation: write and read a `Fit-Key` header as RabbitMQ does.
 - I214–I216 (of 40 decisions 34 kept, 2 changed, 4 for the user; the changes in I216 decisions 5 and 12; below, those 4 and three open items the review found):
-  - **MQTT filters dropped from the config** (I214 decision 8, and the open UNSUBSCRIBE): their
+  - **Ruled 2026-11-10: as recommended (UNSUBSCRIBE dropped filters).** **MQTT filters dropped from the config** (I214 decision 8, and the open UNSUBSCRIBE): their
     messages keep coming in the session and are emitted. Recommended: UNSUBSCRIBE the filters
     subscribed before and no longer named, remembered in the checkpoint; not a topic check on each
     message, which EMQX's topic rewrite would make drop wanted messages.
-  - **MQTT will messages and enhanced authentication** (I214's open list). Recommended: leave both
+  - **Ruled 2026-11-10: not as recommended: do both, will messages and enhanced AUTH.** **MQTT will messages and enhanced authentication** (I214's open list). Recommended: leave both
     out until a broker in use needs AUTH (SCRAM, Kerberos); a sync client's will has no reader.
-  - **TDS 8 `strict`, never run against a server** (I215 decision 2). Recommended: give
+  - **Ruled 2026-11-10: as recommended (a certificate in `mssql.sh`, strict interop in CI).** **TDS 8 `strict`, never run against a server** (I215 decision 2). Recommended: give
     `mssql.sh` the certificate TDS 8 wants and run its interop in CI; until then call `strict`
     untested in the guide.
-  - **varchar of code pages other than 1252 and UTF-8** (I215 decision 5): non-ASCII values reach
+  - **Ruled 2026-11-10: as recommended (cast to nvarchar in the source's queries).** **varchar of code pages other than 1252 and UTF-8** (I215 decision 5): non-ASCII values reach
     the sinks as bytes. Recommended: the source casts such columns to nvarchar in its queries
     (no dependency); `x/text` only if the sink must write them too.
-  - **Entra ID and Windows authentication** (I215 decision 12). Recommended: Entra ID (a service
+  - **Ruled 2026-11-10: not as recommended: do both, Entra ID and Kerberos.** **Entra ID and Windows authentication** (I215 decision 12). Recommended: Entra ID (a service
     principal's token) first if Azure SQL is wanted; Kerberos after.
-  - **A quiet table's checkpoint** (I216 decision 12): it moves only on the read tables' records,
+  - **Ruled 2026-11-10: as recommended (a position-only record in `sync`).** **A quiet table's checkpoint** (I216 decision 12): it moves only on the read tables' records,
     so a restart after CDC's cleanup retention fails asking for a snapshot though nothing was lost.
     Recommended: a position-only record in `sync` that a source emits after a window with none of
     its tables' records (MySQL's and PostgreSQL's filtered tables would use it too).
-  - **An exact snapshot hand-over** (I216 decision 3, optional): rows changed during a snapshot
+  - **Ruled 2026-11-10: as recommended (keep at least once; nothing to build).** **An exact snapshot hand-over** (I216 decision 3, optional): rows changed during a snapshot
     come again, as I175's. Exact needs each batch's LSN and key range kept in the checkpoint and
     the server's collation order for text keys. Recommended: keep at least once (idempotent sinks
     absorb it); if an append-only Kafka consumer needs exact, do it for integer keys only.
@@ -7738,7 +7738,7 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
    the sequence value, so an update's two rows never split): such a transaction's records come table
    by table, not in the server's order across tables. Alternative: a connection per capture instance
    and a streaming merge (no MARS on one connection).
-3. **[kept]** (2026-11-10: read committed batches take short shared locks and are made whole by the replay from the LSN read before; refusing would shut out databases that cannot allow snapshot isolation. S9's copies of 11-10 were not this replay (S9 runs with `snapshot never`; see the Done note). The replay could be made exact, at a cost: not done, see the list at the top of the section) **The snapshot reads each batch in a snapshot isolation transaction where the database allows
+3. **[kept; ruled 2026-11-10: stays at least once]** (2026-11-10: read committed batches take short shared locks and are made whole by the replay from the LSN read before; refusing would shut out databases that cannot allow snapshot isolation. S9's copies of 11-10 were not this replay (S9 runs with `snapshot never`; see the Done note). The replay could be made exact, at a cost: not done, see the list at the top of the section) **The snapshot reads each batch in a snapshot isolation transaction where the database allows
    it, read committed otherwise** (short shared locks, never `NOLOCK`, which reads uncommitted
    rows); it is handed over at CDC's highest LSN read before the tables are found, saved as the
    start before the first record (I175). Alternative: refuse to snapshot without snapshot isolation.
