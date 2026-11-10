@@ -211,6 +211,59 @@ func TestSourceLost(t *testing.T) {
 	s.Cleanup()
 }
 
+// TestSourceLag reports the queues' ready messages, at once and every
+// lagEvery, until a declare fails; streams have no count.
+func TestSourceLag(t *testing.T) {
+	defer func(d time.Duration) { lagEvery = d }(lagEvery)
+	lagEvery = 5 * time.Millisecond
+	f := &fake{setup: func(c *fakeClient) { c.ready = map[string]uint32{"a": 3, "b": 4, "s": 100} }}
+	s := source(t, f, map[string]any{"queues": []string{"a", "b"}, "streams": []string{"s"}})
+	var mu sync.Mutex
+	var lags []fitsync.SourceLag
+	ctx, cancel := context.WithCancel(context.Background())
+	errc := make(chan error, 1)
+	go func() {
+		errc <- s.Run(ctx, &fitsync.Run{Emit: func(*fitsync.Record) error { return nil }, Lag: func(l fitsync.SourceLag) {
+			mu.Lock()
+			lags = append(lags, l)
+			mu.Unlock()
+		}})
+	}()
+	n := func() int { mu.Lock(); defer mu.Unlock(); return len(lags) }
+	eventually(t, "two lags", func() bool { return n() >= 2 })
+	mu.Lock()
+	if l := lags[0]; l.Behind != 7 || l.Unit != fitsync.LagMessages {
+		t.Errorf("lag %+v", l)
+	}
+	mu.Unlock()
+	c := f.last()
+	c.mu.Lock()
+	c.declareErr = errors.New("NOT_FOUND")
+	c.mu.Unlock()
+	time.Sleep(30 * time.Millisecond)
+	stopped := n()
+	time.Sleep(30 * time.Millisecond)
+	if n() != stopped {
+		t.Error("lags after a failed declare")
+	}
+	cancel()
+	if err := <-errc; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	// Without a Lag to tell, nothing is asked.
+	f2 := &fake{}
+	s2 := source(t, f2, map[string]any{"queues": []string{"a"}})
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	go func() { errc <- s2.Run(ctx2, &fitsync.Run{Emit: func(*fitsync.Record) error { return nil }}) }()
+	eventually(t, "dialled", func() bool { f2.mu.Lock(); defer f2.mu.Unlock(); return len(f2.conns) == 1 })
+	time.Sleep(20 * time.Millisecond)
+	cancel2()
+	<-errc
+	if c := f2.last(); c.declares != 0 {
+		t.Errorf("%d declares without a Lag", c.declares)
+	}
+}
+
 func TestSourceErrors(t *testing.T) {
 	ctx := context.Background()
 	run := &fitsync.Run{Emit: func(*fitsync.Record) error { return nil }}

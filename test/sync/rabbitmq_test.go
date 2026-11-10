@@ -25,6 +25,9 @@ import (
 // and FIT_SYNC_RABBITMQ_PASSWORD, as test/sync/rabbitmq.sh prints them.
 type rabbitServer struct {
 	name, addr, tlsAddr, ca, user, password string
+	// cert and key are a client certificate of the CA, CN=fit, for
+	// EXTERNAL (FIT_SYNC_RABBITMQ_CERT, FIT_SYNC_RABBITMQ_KEY).
+	cert, key string
 }
 
 func rabbitServers(t *testing.T) []rabbitServer {
@@ -46,7 +49,8 @@ func rabbitServers(t *testing.T) []rabbitServer {
 	for _, kv := range strings.Split(addrs, ",") {
 		v, a, _ := strings.Cut(kv, "=")
 		out = append(out, rabbitServer{name: "rabbitmq-" + v, addr: a, tlsAddr: tlsAddrs[v], ca: os.Getenv("FIT_SYNC_RABBITMQ_CA"),
-			user: os.Getenv("FIT_SYNC_RABBITMQ_USER"), password: os.Getenv("FIT_SYNC_RABBITMQ_PASSWORD")})
+			user: os.Getenv("FIT_SYNC_RABBITMQ_USER"), password: os.Getenv("FIT_SYNC_RABBITMQ_PASSWORD"),
+			cert: os.Getenv("FIT_SYNC_RABBITMQ_CERT"), key: os.Getenv("FIT_SYNC_RABBITMQ_KEY")})
 	}
 	return out
 }
@@ -268,5 +272,87 @@ func TestRabbitMQConfirms(t *testing.T) {
 		if len(got) != 500 {
 			t.Errorf("drained %d", len(got))
 		}
+	})
+}
+
+// TestRabbitMQExternal authenticates with EXTERNAL, the TLS client
+// certificate as the credential: the sink's connection test and a batch
+// over it, then the source reading the batch back over it, its lag the
+// queue's ready messages.
+func TestRabbitMQExternal(t *testing.T) {
+	eachRabbit(t, func(t *testing.T, s rabbitServer) {
+		if s.tlsAddr == "" || s.cert == "" {
+			t.Skip("no TLS address or client certificate")
+		}
+		c := s.conn(t)
+		q := s.queue(t, c, "quorum")
+		ext := map[string]any{"addresses": []string{s.tlsAddr}, "tls": true, "ca_file": s.ca, "auth": "EXTERNAL",
+			"cert_file": s.cert, "key_file": s.key}
+		sinkParams := map[string]any{"routing_key": q}
+		for k, v := range ext {
+			sinkParams[k] = v
+		}
+		cfg := loadSync(t, t.TempDir(), map[string]any{"name": "p", "source": map[string]any{"module": "generate"},
+			"sinks": []any{map[string]any{"name": "r", "sink": map[string]any{"module": "rabbitmq", "params": sinkParams}}}})
+		m, err := module.Load(fitsync.Sinks, cfg.Sync.Pipelines[0].Sinks[0].Sink, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { module.Cleanup(m) })
+		sink := m.(fitsync.Sink)
+		if err := sink.(fitsync.Tester).Test(hangGuard(t)); err != nil {
+			t.Fatal(err)
+		}
+		var batch []*fitsync.Record
+		for i := range 100 {
+			batch = append(batch, fitsync.GenerateRecord("ns", int64(i), 100, 1))
+		}
+		if err := sink.Write(hangGuard(t), batch); err != nil {
+			t.Fatal(err)
+		}
+		srcParams := map[string]any{"queues": []string{q}, "prefetch": 10}
+		for k, v := range ext {
+			srcParams[k] = v
+		}
+		cfg2 := loadSync(t, t.TempDir(), map[string]any{"name": "p", "source": map[string]any{"module": "rabbitmq", "params": srcParams},
+			"sinks": []any{map[string]any{"name": "n", "sink": map[string]any{"module": "stdout"}}}})
+		sm, err := module.Load(fitsync.Sources, cfg2.Sync.Pipelines[0].Source, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { module.Cleanup(sm) })
+		src := sm.(fitsync.Source)
+		ctx, cancel := context.WithCancel(hangGuard(t))
+		defer cancel()
+		got := make(chan *fitsync.Record, 200)
+		lags := make(chan fitsync.SourceLag, 100)
+		errc := make(chan error, 1)
+		go func() {
+			errc <- src.Run(ctx, &fitsync.Run{Emit: func(r *fitsync.Record) error { got <- r; return nil },
+				Lag: func(l fitsync.SourceLag) {
+					select {
+					case lags <- l:
+					default:
+					}
+				}})
+		}()
+		// Nothing is acknowledged, so the prefetch holds the rest ready.
+		for range 10 {
+			select {
+			case <-got:
+			case err := <-errc:
+				t.Fatal(err)
+			}
+		}
+		select {
+		case l := <-lags:
+			if l.Unit != fitsync.LagMessages || l.Behind < 80 || l.Behind > 100 {
+				t.Errorf("lag %+v", l)
+			}
+		case <-time.After(15 * time.Second):
+			t.Error("no lag reported")
+		}
+		cancel()
+		<-errc
 	})
 }
