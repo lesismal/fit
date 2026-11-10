@@ -7288,7 +7288,7 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
    `idle_end` (2s), after waiting for every emitted record's acknowledgement. Why: a queue has no
    end; message counts from `queue.declare` exclude unacknowledged and redelivered messages and race
    with producers. Alternative: drain to the count read at start.
-7. **[kept]** (2026-11-10: the same shape as the NATS and Pulsar sources' metadata; `fit-key` round-trips keys through a RabbitMQ-to-RabbitMQ copy (NATS has none: I212 decision 6, for the user).) **Message metadata.** Choice: a message record (raw codec, or a codec's error record) has
+7. **[kept]** (2026-11-10: the same shape as the NATS and Pulsar sources' metadata; `fit-key` round-trips keys through a RabbitMQ-to-RabbitMQ copy, as NATS's `Fit-Key` does since I212 decision 6's ruling.) **Message metadata.** Choice: a message record (raw codec, or a codec's error record) has
    `exchange`, `routing_key`, `queue`, `redelivered`, `headers` (a map, in name order) and the
    properties set (`message_id`, `content_type`, `timestamp`, ...) as fields beside `value`; rows a
    codec makes get them under `metadata_field` only. Keys come from the `fit-key` header the sink
@@ -7361,7 +7361,7 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
    one, of its anchor position and its distance from it; see decision 12): a batch written again is dropped by the stream's duplicate window, 2 minutes by default;
    a replay after a longer outage stores copies (at least once). The window is the stream's, documented,
    not set by fit. Alternative: IDs from the record's content (two equal records would be dropped).
-6. **[needs the user]** (2026-11-10: a message-format choice: the RabbitMQ connectors write and read `fit-key`, the NATS ones nothing, so a keyed NATS-to-NATS copy loses its keys. Recommendation: write and read a `Fit-Key` header as RabbitMQ does.) **No key in the messages**: NATS has no message key; the sink sends only `Nats-Msg-Id`, and the
+6. **[ruled 2026-11-10: done as recommended]** (2026-11-10: a message-format choice: the RabbitMQ connectors write and read `fit-key`, the NATS ones nothing, so a keyed NATS-to-NATS copy loses its keys. Recommendation: write and read a `Fit-Key` header as RabbitMQ does. Built: the sink writes `Fit-Key` (RabbitMQ's encoding: strings and bytes as they are, else plain JSON), and `Fit-Op` and `Fit-Namespace` as RabbitMQ writes `fit-op` and `fit-namespace`, on JetStream and core publishes; a value a header line cannot hold (CR, LF, space at either end) is left out rather than failing the record. The source reads `Fit-Key` back when the codec sets no key, and, as RabbitMQ's, not `Fit-Op` or `Fit-Namespace`: op comes from the codec and namespace from the subject or `namespace`, which a header must not override; the two stay in the message metadata's `headers`. Unit tests and interop `TestNATSKeys`, a NATS-to-NATS copy.) **No key in the messages**: NATS has no message key; the sink sends only `Nats-Msg-Id`, and the
    source's records have no key unless the codec sets one (a `key` transform makes one from fields).
    Deletes are encoded by the codec like any record. Alternative: a `Fit-Key` header written and read
    back — invented, and nothing else reads it.
@@ -8018,11 +8018,16 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 10. **[kept]** (2026-11-10: Loki without authentication files every push under one tenant, so
     tenants cannot be told apart there; the unit tests check the header per request.)
     **Interop runs Loki without authentication**, so tenants are checked by the unit tests only.
-11. **[changed]** (2026-11-10: one client package holds (five connectors and `embed` on it). Its
+11. **[ruled 2026-11-10: done as recommended]** (2026-11-10, changed: one client package holds (five connectors and `embed` on it). Its
     redirects, followed with the credentials and the body, went from https to http in the clear;
     such a redirect is now an error that names the way out, the backend's own http URL in `urls`
-    (`TestTLS`, commit `fix(sync/fibrest)`). The two template syntaxes are for the user: see the
-    list at the top of this section.)
+    (`TestTLS`, commit `fix(sync/fibrest)`). The two template syntaxes were for the user, ruled
+    2026-11-10 as recommended. Built: name templates take `{$namespace}` as `{namespace}`
+    (`tmpl.Parse`, for influxdb, tdengine, qdrant and milvus; `tmpl.Canonical` for the SQL sinks'
+    `table`, which has its own parser: clickhouse, doris, mysql, postgres, mssql), so one spelling
+    works in both kinds; a name template's other `{$...}` is now an error at load rather than a field
+    named `$...`. The topic, subject, routing key, Redis key, S3 key, index and route templates keep
+    `{namespace}` only: their placeholder sets differ, and the ruling named the name templates.)
     **One HTTP client package and one template package for the seven HTTP sinks** (made when merging
     with I220 and I221, 2026-11-10): I218/I219's `sync/internal/httpconn` and I220/I221's
     `sync/internal/fibrest` did the same; `fibrest` stays, since five connectors (and `embed`'s pinned

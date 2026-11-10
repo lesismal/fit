@@ -253,6 +253,15 @@ and cannot be turned off; a client certificate is `cert_file` and `key_file`. Ev
 connection can be tested without writing a record ([Test connection](#the-admin-api-fit-sync-and-the-workbench)),
 but the `wasm` ones, whose reach is the plugin's.
 
+Templates come in two kinds. Name templates, of where a record goes (the SQL sinks' and `doris`'s
+`table`, `influxdb`'s and `tdengine`'s `measurement` and `subtable`, `qdrant`'s and `milvus`'s
+`collection`), write the record's namespace `{namespace}` and a row's field `{name}`. Record templates,
+of what a record says (`loki`'s labels, `otlp_logs`' attributes, the `file` sink's `template`), write
+a field `{name}` and the record's parts `{$namespace}`, `{$op}`, `{$source}`, `{$key}` and
+`{$commit_time}`, so that a field named `namespace` stays reachable. Name templates take
+`{$namespace}` too, meaning the same, so one spelling works in both; no other `{$...}` names
+anything in them.
+
 ### Files
 
 The `file` source tails files as Filebeat does: globs matched again every `scan_interval` (10s), each
@@ -979,6 +988,11 @@ with a `Nats-Msg-Id` made from the record's origin (see [Delivery guarantees](#d
 duplicate window (`duplicate_window`, 2 minutes by default) is stored once; up to `max_in_flight`
 publishes wait for the stream's acknowledgement at once, and a batch is acknowledged only once each of
 its messages is. `mode core` publishes to core NATS, confirmed as far as the server reading them.
+Each message carries the record's op, namespace and key in the `Fit-Op`, `Fit-Namespace` and
+`Fit-Key` headers, as the RabbitMQ sink's `fit-op`, `fit-namespace` and `fit-key` (a key's string or
+bytes as they are, anything else as plain JSON; a value a header line cannot hold, a line break or
+space at either end, is left out). The `nats` source reads `Fit-Key` back into a record's key when
+its codec sets none, so a NATS-to-NATS copy keeps its keys.
 
 Both connect to `servers` (the cluster's others are learnt, and the client moves to another when one
 fails), over TLS with `tls`, and authenticate with a token (`token_env`), a user and password

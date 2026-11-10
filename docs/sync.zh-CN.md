@@ -214,6 +214,12 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 关闭；客户端证书为 `cert_file` 和 `key_file`。除 `wasm` 连接器（其可达范围是插件自己的）外，每个连接器的连接都可以在不写
 任何记录的情况下测试（[测试连接](#admin-apifit-sync-与工作台)）。
 
+模板分两种。名称模板说明记录发往哪里（SQL 目标和 `doris` 的 `table`，`influxdb` 和 `tdengine` 的 `measurement` 与
+`subtable`，`qdrant` 和 `milvus` 的 `collection`），记录的命名空间写作 `{namespace}`，行的字段写作 `{name}`。记录模板
+说明记录的内容（`loki` 的标签、`otlp_logs` 的属性、`file` 目标的 `template`），字段写作 `{name}`，记录本身的部分写作
+`{$namespace}`、`{$op}`、`{$source}`、`{$key}` 和 `{$commit_time}`，使名为 `namespace` 的字段仍可引用。名称模板也接受
+`{$namespace}`，含义相同，所以一种写法两处通用；在名称模板中其他 `{$...}` 不指代任何东西。
+
 ### 文件
 
 `file` 源像 Filebeat 那样跟踪文件：每隔 `scan_interval`（10s）重新匹配通配符，每个文件以其设备号、inode 和文件头的
@@ -844,6 +850,9 @@ sync {
 `nats` 目标为每条记录向 `subject`（`{namespace}`）发布一条消息，数据来自 `codec`，带由记录来源生成的 `Nats-Msg-Id`（见[投递保证](#投递保证)），
 所以在流的去重窗口（`duplicate_window`，默认 2 分钟）内再次写入的批次只存一次；最多 `max_in_flight` 个发布同时等待流的
 确认，批次在其每条消息都被确认后才确认。`mode core` 发布到 core NATS，只确认到服务器读到为止。
+每条消息在 `Fit-Op`、`Fit-Namespace` 和 `Fit-Key` 头中带上记录的操作、命名空间和键，与 RabbitMQ 目标的 `fit-op`、
+`fit-namespace` 和 `fit-key` 相同（键为字符串或字节时原样，其他为普通 JSON；头的一行容不下的值，即含换行或两端有空白的，
+不写）。`nats` 源在编解码器未设置键时把 `Fit-Key` 读回记录的键，所以 NATS 到 NATS 的复制保留键。
 
 两者都连接 `servers`（集群的其他服务器会被获知，一台失败时客户端换到另一台），`tls` 时走 TLS，用令牌（`token_env`）、
 用户名和密码（`username`、`password_env`）、NKey 种子（`nkey_file`）或 JWT 及其种子的 creds 文件（`creds_file`）认证。

@@ -5220,7 +5220,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    `stream:` 前缀，或 HTTP 管理 API。
 6. **[kept]**（2026-11-10：`queue.declare` 的计数不含未确认与重投的消息且与生产者竞争；所有确认后的静默才是不丢消息的终点。）**作业在静默时结束**：`mode once` 下 `idle_end`（2s）内无消息、且所有已发出的记录都已确认时结束。队列没有终点，
    `queue.declare` 的计数不含未确认与重投的消息，且与生产者竞争。备选：消费到开始时读到的数量。
-7. **[kept]**（2026-11-10：与 NATS、Pulsar 源的元数据同形；`fit-key` 让键在 RabbitMQ 到 RabbitMQ 的复制中往返（NATS 没有：I212 决策 6，待用户裁定）。）**消息元数据**：消息记录（raw 编解码器或编解码器的错误记录）在 `value` 旁有 `exchange`、`routing_key`、`queue`、
+7. **[kept]**（2026-11-10：与 NATS、Pulsar 源的元数据同形；`fit-key` 让键在 RabbitMQ 到 RabbitMQ 的复制中往返，I212 决策 6 裁定后 NATS 的 `Fit-Key` 也是如此。）**消息元数据**：消息记录（raw 编解码器或编解码器的错误记录）在 `value` 旁有 `exchange`、`routing_key`、`queue`、
    `redelivered`、`headers`（按名排序的 map）和已设置的属性（`message_id`、`content_type`、`timestamp` 等）；编解码器生成的行
    只在 `metadata_field` 下带有它们。键取自目标写入的 `fit-key` 头（字符串与字节原样，其他键为纯 JSON），否则为 null。备选：
    以消息 ID 或路由键为键。
@@ -5268,7 +5268,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 5. **[kept]**（2026-11-10：窗口属于流，由用户设定大小。ID 现在还包含流水线名（I213 决策 12），两条来源相同的流水线写入同一个流时不再把对方的消息当作重复丢弃。）**`Nats-Msg-Id` 来自 `fitsync.RecordIDs`**（记录来源的哈希；没有来源的源，为记录的锚定位置及与它的距离的哈希；见决策 12）：流的去重窗口（默认 2 分钟）丢弃重写的
    一批；更长中断后的重放会存下副本（至少一次）。窗口属于流，写入文档，fit 不设置。备选：按记录内容生成 ID（两条相同的记录
    会被丢弃）。
-6. **[needs the user]**（2026-11-10：这是消息格式的选择：RabbitMQ 连接器写入并读取 `fit-key`，NATS 的什么都不写，带键的 NATS 到 NATS 复制会丢掉键。建议：像 RabbitMQ 一样写入并读取 `Fit-Key` 头。）**消息中没有键**：NATS 没有消息键；目标只发送 `Nats-Msg-Id`，源的记录除非编解码器设置否则没有键（`key` 变换可从字段生成）。
+6. **[ruled 2026-11-10: done as recommended]**（2026-11-10：这是消息格式的选择：RabbitMQ 连接器写入并读取 `fit-key`，NATS 的什么都不写，带键的 NATS 到 NATS 复制会丢掉键。建议：像 RabbitMQ 一样写入并读取 `Fit-Key` 头。已实现：目标在 JetStream 与 core 发布中写 `Fit-Key`（与 RabbitMQ 相同的编码：字符串和字节原样，其他为普通 JSON），并像 RabbitMQ 写 `fit-op`、`fit-namespace` 那样写 `Fit-Op`、`Fit-Namespace`；头的一行容不下的值（CR、LF、两端空白）不写，而不是让记录失败。源在编解码器未设置键时读回 `Fit-Key`，与 RabbitMQ 一样不读 `Fit-Op`、`Fit-Namespace`：操作来自编解码器，命名空间来自主题或 `namespace`，不应被头覆盖；这两个头仍在消息元数据的 `headers` 中。有单元测试和 interop `TestNATSKeys`（NATS 到 NATS 的复制）。）**消息中没有键**：NATS 没有消息键；目标只发送 `Nats-Msg-Id`，源的记录除非编解码器设置否则没有键（`key` 变换可从字段生成）。
    删除与其他记录一样由编解码器编码。备选：写入再读回一个 `Fit-Key` 头——自创，别的程序不读。
 7. **[kept]**（2026-11-10：与 RabbitMQ、Pulsar 源的元数据同形。）**消息元数据**：消息记录（raw、json plain、编解码器的错误）在其值旁有 `subject`、`headers`（map，多值为数组），以及来自
    JetStream 的 `stream`、`sequence`、`time`，编解码器生成的字段优先；其他编解码器生成的行只在 `metadata_field` 下带有它们。
@@ -5697,7 +5697,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    `plan.sh`，由 I222 连同权重加入。
 10. **[kept]**（2026-11-10：不开认证的 Loki 把所有推送都归入同一个租户，在那里区分不了租户；单元测试逐个请求检查请求头。）
     **互操作中的 Loki 不开认证**，所以租户只由单元测试检查。
-11. **[changed]**（2026-11-10：一个客户端包的做法成立（五个连接器和 `embed` 在用）。它带着凭据和请求体跟随重定向，从 https 到 http 时会明文发送；现在这样的重定向是一个错误，并指明出路：在 `urls` 中写后端自己的 http 地址（`TestTLS`，提交 `fix(sync/fibrest)`）。两种模板语法交给用户：见本节开头的列表。）
+11. **[ruled 2026-11-10: done as recommended]**（2026-11-10，修改：一个客户端包的做法成立（五个连接器和 `embed` 在用）。它带着凭据和请求体跟随重定向，从 https 到 http 时会明文发送；现在这样的重定向是一个错误，并指明出路：在 `urls` 中写后端自己的 http 地址（`TestTLS`，提交 `fix(sync/fibrest)`）。两种模板语法曾交给用户，2026-11-10 按建议裁定。已实现：名称模板把 `{$namespace}` 当作 `{namespace}`（influxdb、tdengine、qdrant 与 milvus 经 `tmpl.Parse`；SQL 目标自行解析的 `table` 经 `tmpl.Canonical`：clickhouse、doris、mysql、postgres、mssql），一种写法两类模板通用；名称模板中其他 `{$...}` 现在在加载时报错，而不是当作名为 `$...` 的字段。主题、subject、路由键、Redis 键、S3 键、索引与 route 的模板仍只认 `{namespace}`：它们的占位符集合不同，裁定针对的是名称模板。）
     **七个 HTTP 目标共用一个客户端包和一个模板包**（与 I220、I221 合并时决定，2026-11-10）：I218/I219 的
     `sync/internal/httpconn` 与 I220/I221 的 `sync/internal/fibrest` 做的是同一件事；保留 `fibrest`，因为已有五个连接器
     （以及 `embed` 的固定证书）在用它，并补上 `httpconn` 有的部分：多个 `urls` 依次尝试（502、503、504 与连接错误换下一个）、
