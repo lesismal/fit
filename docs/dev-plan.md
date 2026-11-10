@@ -7625,7 +7625,7 @@ Decisions of the `RecordIDs` fix (decision 1's, 2026-11-10, branch `fix-recordid
 
 Made after the rulings (2026-11-10), pending review:
 
-16. **The filters subscribed are kept in every position**, the checkpoint the last acknowledged one's,
+16. **[ruled 2026-11-10: kept]** **The filters subscribed are kept in every position**, the checkpoint the last acknowledged one's,
     and saved at once (`SaveStart`) in a pipeline's first run; until a dropped filter's UNSUBACK the
     positions carry it too, so that a run ended first tries again. A run whose filters differ from its
     checkpoint's offers, once subscribed, a position-only record of them (`Run.EmitPosition`, I216
@@ -7641,27 +7641,27 @@ Made after the rulings (2026-11-10), pending review:
     is emitted. Topics are never checked otherwise: EMQX's rewrite rules may deliver what a filter asks
     under a topic it does not match. Alternative: version 5's subscription identifiers, which would
     say which subscription a message is for, at the cost of an identifier per filter.
-18. **A refused UNSUBSCRIBE fails the run**, as a refused SUBSCRIBE does (version 5 codes 0x80 and
+18. **[ruled 2026-11-10: kept]** **A refused UNSUBSCRIBE fails the run**, as a refused SUBSCRIBE does (version 5 codes 0x80 and
     up); 0x11, no subscription existed, is success. A session not resumed (`SessionPresent` false)
     unsubscribes from nothing.
-19. **`will` is one object for the source and the sink**, its payload text; a close by fit (a stop, a
+19. **[ruled 2026-11-10: kept]** **`will` is one object for the source and the sink**, its payload text; a close by fit (a stop, a
     reload, Cleanup) is a normal DISCONNECT, which discards the will, so only a lost connection or a
     keep-alive in vain publishes it. The will delay is rounded up to seconds; a session that ends
     first publishes it sooner, at once for the sink, whose session is clean. Alternatives: a payload
     of bytes (base64); DISCONNECT 0x04 (with will) on a stop.
-20. **Enhanced authentication is SCRAM only**, `auth_method` `SCRAM-SHA-1`, `SCRAM-SHA-256` or
+20. **[ruled 2026-11-10: kept]** **Enhanced authentication is SCRAM only**, `auth_method` `SCRAM-SHA-1`, `SCRAM-SHA-256` or
     `SCRAM-SHA-512`, version 5 with `username` and `password_env`; CONNECT then carries the user name
     but not the password. No channel binding (`n,,`), no SASLprep (the password is used as it is,
     the same for ASCII), at most 2^20 iterations from a server, and a wrong server signature ends the
     connection. EMQX 5 offers SHA-256 and SHA-512 only; SHA-1 is for other brokers, checked by RFC
     5802's vector and the fake broker.
-21. **Re-authentication is in the wire client only** (`Reauthenticate`); the connectors do not
+21. **[ruled 2026-11-10: kept]** **Re-authentication is in the wire client only** (`Reauthenticate`); the connectors do not
     re-authenticate on a timer: nothing asks for it yet, and EMQX 5.8.6 drops a connection after a
     re-authentication's exchange (above). Alternative: a `reauth_interval` param.
-22. **Kerberos (GSSAPI) over MQTT's AUTH is not done**: brokers rarely offer it, and it needs a krb5
+22. **[ruled 2026-11-10: kept]** **Kerberos (GSSAPI) over MQTT's AUTH is not done**: brokers rarely offer it, and it needs a krb5
     implementation; the one being written for SQL Server could carry it later. Alternative: build
     it now.
-23. **The SCRAM interop runs on an EMQX node of its own** (`${PREFIX}emqx-scram`, port 29456): an
+23. **[ruled 2026-11-10: kept]** **The SCRAM interop runs on an EMQX node of its own** (`${PREFIX}emqx-scram`, port 29456): an
     EMQX authenticator refuses the clients it cannot judge, anonymous ones too, which would fail the
     other tests on a shared node. EMQX holds one SCRAM algorithm per authenticator, so the interop
     covers SCRAM-SHA-256; SHA-512 is shown refused there.
@@ -7759,7 +7759,7 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     transaction manager requests. Alternative: TM_BEGIN_XACT and friends.
 12. **[ruled 2026-11-10: done]** (2026-11-10: built: Entra ID (LOGIN7's FEDAUTH, security token flavour; `EntraClient` on net/http: client secret, certificate assertion, managed identity, or a token from an env var or file), Windows authentication by SSPI with Kerberos in SPNEGO (`sync/mssql/wire/krb5`, written in fit) and NTLMv2, Azure's routing ENVCHANGE followed once, the param `auth` of the source and sink. Interop: Kerberos against an MIT KDC and SQL Server 2022 (the ticket taken, the login then refused for want of AD); Entra ID and NTLM against fakes only. MARS, Always Encrypted, the UTF-8 feature extension and table-valued parameters stay out. Commits `35523fbe`, `07036415`; decisions 15 to 19) **Left out**: Windows, Kerberos and Entra ID authentication, Azure's routing ENVCHANGE (ignored),
     MARS, Always Encrypted, the UTF-8 feature extension, table-valued parameters.
-13. **[pending review]** (2026-11-10) **`strict` is tested on SQL Server 2025, a server of its own**: `mssql.sh`
+13. **[ruled 2026-11-10: kept]** (2026-11-10) **`strict` is tested on SQL Server 2025, a server of its own**: `mssql.sh`
     starts 2025 beside 2022 and 2019 for TDS 8 only (`MSSQL_STRICT`, on by default, off in the light
     matrix), since 2022's Linux image refuses strict; the other tests stay on 2022 and 2019. 2025
     allows TLS 1.2 and 1.3 (strict negotiates 1.3); 2022 keeps 1.2, as Microsoft's guide sets it,
@@ -7774,7 +7774,7 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     characters of such a column only in the database's own collation (question marks otherwise, a
     limit Microsoft documents): documented, not detected. Alternative: `x/text` to decode bytes in the
     client; a warning at discovery for CDC columns of a collation not the database's.
-15. **[pending review]** (2026-11-10) **Entra ID by the security token flavour only**: the client gets the
+15. **[ruled 2026-11-10: kept]** (2026-11-10) **Entra ID by the security token flavour only**: the client gets the
     token before LOGIN7 (`Config.AccessToken`), from a service principal (client credentials, a
     secret or a certificate's RS256 assertion with `x5t`), a managed identity (IMDS, or App Service's
     endpoint when `IDENTITY_ENDPOINT` is set) or an env var or file read at each connection; kept until
@@ -7782,7 +7782,7 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     which a sync service has no user for. `encrypt off` is refused with a token. Azure's routing
     ENVCHANGE is now followed once (a managed identity's connections inside Azure are redirected).
     Untested against Azure: unit tests against fake token endpoints and a fake TDS server.
-16. **[pending review]** (2026-11-10) **Kerberos written in fit, not `github.com/jcmturner/gokrb5/v8`**:
+16. **[ruled 2026-11-10: kept]** (2026-11-10) **Kerberos written in fit, not `github.com/jcmturner/gokrb5/v8`**:
     decision 036 item 1 prefers protocols in fit, and gokrb5 would bring seven modules (its own
     asn1 fork among them); the crypto fit needs is AES, HMAC-SHA1 and PBKDF2 (the standard library
     and `x/crypto`, already required). `sync/mssql/wire/krb5`: AS-REQ (password with
@@ -7791,17 +7791,17 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     Server 2022. Left out: RC4 and DES, UDP, DNS lookups of KDCs, cross-realm referrals, renewal,
     FAST, PKINIT, the MS-KRB5 OID offered first. Alternative: gokrb5, wider (RC4, UDP, referrals) at
     the cost of the dependencies.
-17. **[pending review]** (2026-11-10) **NTLMv2 offered too** (`auth method ntlm`): common with SQL Server
+17. **[ruled 2026-11-10: kept]** (2026-11-10) **NTLMv2 offered too** (`auth method ntlm`): common with SQL Server
     for Windows accounts outside a domain, about 190 lines on `x/crypto/md4`; NTLMv1 and LM are not,
     and no MIC or signing (TDS does not sign). Documented as weaker (the server unauthenticated, an
     exchange open to offline guessing). Tested only against MS-NLMP's vectors and a fake server:
     SQL Server on Linux takes no NTLM for AD logins. Alternative: Kerberos alone.
-18. **[pending review]** (2026-11-10) **The param `auth`, an object shared by the source and the sink**
+18. **[ruled 2026-11-10: kept]** (2026-11-10) **The param `auth`, an object shared by the source and the sink**
     (`method` entra, kerberos or ntlm, and each method's params, the others' refused), so that
     SQL authentication's params stay as they were; `username` is no longer required by the schema but
     by provisioning, unless `method entra`. `Config.SSPI` makes each login's exchange (Kerberos's
     has state per login).
-19. **[pending review]** (2026-11-10) **Kerberos interop without Active Directory**: `mssql.sh` builds an
+19. **[ruled 2026-11-10: kept]** (2026-11-10) **Kerberos interop without Active Directory**: `mssql.sh` builds an
     MIT KDC (`test/sync/krb5`) and gives SQL Server 2022 its SPN's keytab: the server takes the
     ticket, answers the AP-REP (checked by the client), then refuses the login (18452), since SQL
     Server on Linux maps a principal to a Windows login through AD's LDAP. A TDS server in the test
@@ -7897,7 +7897,7 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     captured tables are read again after a restart.
 13. **[kept]** (2026-11-10: the sink shares the params and their checks without a third package) **`ConnParams` and `WireConfig` are exported** from `sync/mssql`, for I217's sink to share the
     connection's params and their checks.
-14. **[pending review]** (2026-11-10, with decision 12's ruling) **A position-only record is gated by
+14. **[ruled 2026-11-10: kept]** (2026-11-10, with decision 12's ruling) **A position-only record is gated by
     the pipeline, not the source**: a source calls `Run.EmitPosition(func() Position)` after every
     stretch of none of its records, and the pipeline calls the function, and queues the record, only
     when no record of either kind was emitted for `checkpoint_interval` (5s), so a busy table's
@@ -7907,14 +7907,14 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     dead letter sees one, the status's read, acknowledged and sink counts leave it out, and record IDs
     and a transform's numbering are untouched. Alternatives: a new `Op` (every transform and sink
     would have to skip it); a rate in each source.
-15. **[pending review]** (2026-11-10) **Sinks keeping the checkpoint and position-only records**: such
+15. **[ruled 2026-11-10: kept]** (2026-11-10) **Sinks keeping the checkpoint and position-only records**: such
     a sink holds the last position it wrote, which position-only records pass without a write. Rather
     than write the sink's table for each, the checkpoint file keeps that position (`wrote`) while its
     `position` is a position-only record's, and a run whose sinks agree on `wrote` starts from the
     file's later position (no replay); sinks agreeing on any other position are taken as before.
     Alternative: tell `CheckpointSink`s each position-only record, a transaction on their servers per
     checkpoint interval of a quiet table.
-16. **[pending review]** (2026-11-10) **Where each source hands one on**: `mssql` after every CDC
+16. **[ruled 2026-11-10: kept]** (2026-11-10) **Where each source hands one on**: `mssql` after every CDC
     window read (its end LSN, transactions of tables not read or not captured) and every change
     tracking version range with none of the read tables' changes; `mysql` at every transaction's end
     with none of the read tables' records (DDL of other databases too), not on heartbeats (an idle
@@ -8095,7 +8095,7 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     **Interop on Doris 2.1 and StarRocks 3.4**: StarRocks's frontend redirects to `127.0.0.1:8040`,
     its backend's own address, which a test on the host cannot reach beside Doris's, so its loads go
     to the backend directly; Doris's redirect is tested. Doris 3.0 is not in the run.
-12. **[pending review]** (2026-11-10, with decision 1's ruling) **The lineage, every pipeline's**: a
+12. **[ruled 2026-11-10: kept]** (2026-11-10, with decision 1's ruling) **The lineage, every pipeline's**: a
     random ID in the checkpoint file (`lineage`, which only `CheckpointSink` pipelines had), made when
     a stream starts with none and no position, saved at once before the source runs (a stream's start
     now writes a checkpoint of no position, so a crash before the first checkpoint keeps the
@@ -8107,7 +8107,7 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     under new labels; a pipeline whose sink keeps the checkpoint already had one. Alternatives: a
     generation number (an ID needs no compare); a lineage for old checkpoints too (labels changed by
     the upgrade, the records after the checkpoint loaded twice into duplicate key tables).
-13. **[pending review]** (2026-11-10) **Which names take the lineage**: `doris`'s labels and `http`'s
+13. **[ruled 2026-11-10: kept]** (2026-11-10) **Which names take the lineage**: `doris`'s labels and `http`'s
     `Idempotency-Key`, whose servers keep what they took past a target made afresh, so a reset's
     records are written again. Not the record IDs (`nats`'s `Nats-Msg-Id`, `pulsar`'s `fit-id`,
     `rabbitmq`'s `message_id`): a message read again after a reset is the same message, which its

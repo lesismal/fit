@@ -5441,7 +5441,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 裁定之后做出的决定（2026-11-10），待审查：
 
-16. **已订阅的过滤器保存在每个位置中**，检查点即最后确认的那个位置，流水线首次运行时立即保存（`SaveStart`）；去掉的过滤器在
+16. **[2026-11-10 已裁定：保留]** **已订阅的过滤器保存在每个位置中**，检查点即最后确认的那个位置，流水线首次运行时立即保存（`SaveStart`）；去掉的过滤器在
     收到 UNSUBACK 之前也留在位置中，使先结束的运行下次再试。过滤器与检查点中不同的运行在订阅后每 200ms 提供一条只含位置的
     记录（`Run.EmitPosition`，I216 决定 14–16），直到流水线接受一条（在 `checkpoint_interval` 内没有记录时接受）或某条消息
     的记录带上它们：在没有消息的运行中加上又去掉的过滤器同样会被保存并取消订阅。（2026-11-10，合入只含位置的记录之后；此前
@@ -5451,20 +5451,20 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     匹配某个去掉的过滤器且不匹配 `topics` 中任何过滤器的消息被确认而不交出；也匹配 `topics` 中某个过滤器的照样交出。除此之外
     从不检查主题：EMQX 的重写规则可能以过滤器不匹配的主题投递它所要的消息。备选：版本 5 的订阅标识符，可说明消息属于哪个
     订阅，代价是每个过滤器一个标识符。
-18. **被拒绝的 UNSUBSCRIBE 使运行失败**，与被拒绝的 SUBSCRIBE 一样（版本 5 的 0x80 及以上）；0x11（订阅不存在）视为成功。
+18. **[2026-11-10 已裁定：保留]** **被拒绝的 UNSUBSCRIBE 使运行失败**，与被拒绝的 SUBSCRIBE 一样（版本 5 的 0x80 及以上）；0x11（订阅不存在）视为成功。
     未恢复的会话（`SessionPresent` 为 false）不取消任何订阅。
-19. **`will` 是源与目标共用的一个对象**，负载为文本；fit 关闭连接（停止、重载、Cleanup）发送正常的 DISCONNECT，遗嘱随之作废，
+19. **[2026-11-10 已裁定：保留]** **`will` 是源与目标共用的一个对象**，负载为文本；fit 关闭连接（停止、重载、Cleanup）发送正常的 DISCONNECT，遗嘱随之作废，
     因此只有连接丢失或保活超时才发布遗嘱。遗嘱延迟向上取整到秒；会话先结束时更早发布，目标的会话是 clean 的，因此立即发布。
     备选：字节负载（base64）；停止时发送 DISCONNECT 0x04（带遗嘱）。
-20. **增强认证只做 SCRAM**：`auth_method` 为 `SCRAM-SHA-1`、`SCRAM-SHA-256` 或 `SCRAM-SHA-512`，需要版本 5、`username` 与
+20. **[2026-11-10 已裁定：保留]** **增强认证只做 SCRAM**：`auth_method` 为 `SCRAM-SHA-1`、`SCRAM-SHA-256` 或 `SCRAM-SHA-512`，需要版本 5、`username` 与
     `password_env`；此时 CONNECT 带用户名但不带密码。不做通道绑定（`n,,`），不做 SASLprep（密码原样使用，对 ASCII 无差别），
     服务器给出的迭代次数最多 2^20，服务器签名错误则结束连接。EMQX 5 只提供 SHA-256 与 SHA-512；SHA-1 留给其他 broker，由
     RFC 5802 的向量和假 broker 验证。
-21. **重新认证只在线协议客户端中提供**（`Reauthenticate`）；连接器不按定时器重新认证：目前没有需求，且 EMQX 5.8.6 在重新认证
+21. **[2026-11-10 已裁定：保留]** **重新认证只在线协议客户端中提供**（`Reauthenticate`）；连接器不按定时器重新认证：目前没有需求，且 EMQX 5.8.6 在重新认证
     的交换之后会断开连接（见上）。备选：`reauth_interval` 参数。
-22. **不做基于 MQTT AUTH 的 Kerberos（GSSAPI）**：broker 很少提供，且需要一个 krb5 实现；正在为 SQL Server 编写的实现以后可以
+22. **[2026-11-10 已裁定：保留]** **不做基于 MQTT AUTH 的 Kerberos（GSSAPI）**：broker 很少提供，且需要一个 krb5 实现；正在为 SQL Server 编写的实现以后可以
     承载它。备选：现在就做。
-23. **SCRAM 互通在单独的 EMQX 节点上运行**（`${PREFIX}emqx-scram`，端口 29456）：EMQX 的认证器会拒绝它无法判断的客户端，
+23. **[2026-11-10 已裁定：保留]** **SCRAM 互通在单独的 EMQX 节点上运行**（`${PREFIX}emqx-scram`，端口 29456）：EMQX 的认证器会拒绝它无法判断的客户端，
     包括匿名客户端，共用节点会让其他测试失败。EMQX 每个认证器只有一种 SCRAM 算法，因此互通覆盖 SCRAM-SHA-256；SHA-512 在
     那里验证为被拒绝。
 
@@ -5534,7 +5534,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     ALL_HEADERS，不使用 TDS 的事务管理器请求。备选：TM_BEGIN_XACT 等。
 12. **[ruled 2026-11-10: done]** （2026-11-10：已实现：Entra ID（LOGIN7 的 FEDAUTH，安全令牌方式；基于 net/http 的 `EntraClient`：客户端密码、证书断言、托管标识，或来自环境变量或文件的令牌）、经 SSPI 的 Windows 认证（SPNEGO 中的 Kerberos，`sync/mssql/wire/krb5`，在 fit 中实现）与 NTLMv2、Azure 的 routing ENVCHANGE 跟随一次、源与目标的参数 `auth`。互操作：Kerberos 对 MIT KDC 与 SQL Server 2022（票据被接受，随后因没有 AD 而拒绝登录）；Entra ID 与 NTLM 只对假服务测试。MARS、Always Encrypted、UTF-8 功能扩展与表值参数仍不包括。提交 `35523fbe`、`07036415`；决定 15 到 19） **未包括**：Windows、Kerberos 与 Entra ID 认证，Azure 的 routing ENVCHANGE（忽略），MARS，Always Encrypted，UTF-8 功能
     扩展，表值参数。
-13. **[pending review]**（2026-11-10） **`strict` 在 SQL Server 2025 上测试，单独一个服务器**：`mssql.sh` 在 2022 与 2019 之外
+13. **[2026-11-10 已裁定：保留]**（2026-11-10） **`strict` 在 SQL Server 2025 上测试，单独一个服务器**：`mssql.sh` 在 2022 与 2019 之外
     另启动只用于 TDS 8 的 2025（`MSSQL_STRICT`，默认开启，轻量矩阵中关闭），因为 2022 的 Linux 镜像拒绝 strict；其余测试
     仍在 2022 与 2019 上。2025 允许 TLS 1.2 与 1.3（strict 协商为 1.3）；2022 按微软指南保持 1.2，因为允许 1.3 时它的 TDS 7
     登录会挂起。证书放在属于 mssql 用户的卷中（700、600），CN 为容器主机名 `mssql.fit.test`。备选：所有测试也在 2025 上跑
@@ -5544,24 +5544,24 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     成为文本，由服务器与列比较），快照的表加别名，使键的顺序与条件仍作用于表自身的列。只有在数据库自身的排序规则下，CDC
     才保留这类列中的非 ASCII 字符（否则为问号，微软记载的限制）：写入文档，不做检测。备选：在客户端用 `x/text` 解码字节；
     在发现表时对排序规则不同于数据库的 CDC 列给出警告。
-15. **[pending review]**（2026-11-10） **Entra ID 只用安全令牌方式**：客户端在 LOGIN7 之前取得令牌（`Config.AccessToken`），来自
+15. **[2026-11-10 已裁定：保留]**（2026-11-10） **Entra ID 只用安全令牌方式**：客户端在 LOGIN7 之前取得令牌（`Config.AccessToken`），来自
     服务主体（客户端凭据：密码，或证书的 RS256 断言并带 `x5t`）、托管标识（IMDS，设置了 `IDENTITY_ENDPOINT` 时为 App Service
     的端点）或每次连接时读取的环境变量或文件；在过期前五分钟内保留。不用 ADAL 方式（FEDAUTHINFO、交互或密码流程），同步服务
     没有用户来完成它们。带令牌时拒绝 `encrypt off`。现在跟随 Azure 的 routing ENVCHANGE 一次（Azure 内托管标识的连接会被
     重定向）。未对 Azure 测试：只有对假令牌端点与假 TDS 服务器的单元测试。
-16. **[pending review]**（2026-11-10） **Kerberos 在 fit 中实现，而不是 `github.com/jcmturner/gokrb5/v8`**：决定 036 第 1 条倾向
+16. **[2026-11-10 已裁定：保留]**（2026-11-10） **Kerberos 在 fit 中实现，而不是 `github.com/jcmturner/gokrb5/v8`**：决定 036 第 1 条倾向
     在 fit 中实现协议，gokrb5 会带来七个模块（包括它自己的 asn1 分支）；fit 需要的密码学是 AES、HMAC-SHA1 与 PBKDF2（标准库
     与已经依赖的 `x/crypto`）。`sync/mssql/wire/krb5`：AS-REQ（密码加加密时间戳预认证，或 keytab）、TGS-REQ、SPNEGO 中带
     相互认证的 AP-REQ，连同测试用的接受方约 1750 行，按 RFC 3961/3962 的测试向量、MIT KDC 与 SQL Server 2022 检验。未包括：RC4 与 DES、UDP、
     用 DNS 查找 KDC、跨领域引用、续期、FAST、PKINIT、优先提供 MS-KRB5 OID。备选：gokrb5，覆盖更广（RC4、UDP、引用），
     代价是这些依赖。
-17. **[pending review]**（2026-11-10） **也提供 NTLMv2**（`auth method ntlm`）：SQL Server 对域外 Windows 账户常用它，基于
+17. **[2026-11-10 已裁定：保留]**（2026-11-10） **也提供 NTLMv2**（`auth method ntlm`）：SQL Server 对域外 Windows 账户常用它，基于
     `x/crypto/md4` 约 190 行；不提供 NTLMv1 与 LM，没有 MIC 与签名（TDS 不签名）。文档说明它较弱（服务器不被验证，交换可被
     离线猜测）。只对 MS-NLMP 的向量与假服务器测试：Linux 上的 SQL Server 不接受 AD 登录的 NTLM。备选：只有 Kerberos。
-18. **[pending review]**（2026-11-10） **参数 `auth`，源与目标共用的对象**（`method` 为 entra、kerberos 或 ntlm，加各方式的参数，
+18. **[2026-11-10 已裁定：保留]**（2026-11-10） **参数 `auth`，源与目标共用的对象**（`method` 为 entra、kerberos 或 ntlm，加各方式的参数，
     其他方式的参数被拒绝），使 SQL 认证的参数保持原样；`username` 不再由 schema 要求，而由预配要求，`method entra` 除外。
     `Config.SSPI` 为每次登录生成交换（Kerberos 的每次登录有状态）。
-19. **[pending review]**（2026-11-10） **没有 Active Directory 的 Kerberos 互操作**：`mssql.sh` 构建 MIT KDC（`test/sync/krb5`）并把
+19. **[2026-11-10 已裁定：保留]**（2026-11-10） **没有 Active Directory 的 Kerberos 互操作**：`mssql.sh` 构建 MIT KDC（`test/sync/krb5`）并把
     SPN 的 keytab 交给 SQL Server 2022：服务器接受票据、回答 AP-REP（客户端校验），随后拒绝登录（18452），因为 Linux 上的
     SQL Server 经 AD 的 LDAP 把主体映射到 Windows 登录名。测试中的 TDS 服务器用 `krb5.Acceptor` 接受 KDC 的票据，完成整个
     登录。未测试：对域中 SQL Server 的完整登录（在 Docker 中运行 Samba AD 并配置 SQL Server 的 AD 设置，眼下判断过重）、
@@ -5625,16 +5625,16 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 12. **[ruled 2026-11-10: done as recommended]**（2026-11-10：现在报告延迟：位置之后 `cdc.lsn_time_mapping` 中的事务数（取窗口的数目，窗口满时最多每秒一次 `COUNT_BIG`），change tracking 时为版本数，作为 `fit_sync_source_lag`（提交 `ae364b6a`）。作业不提供 `Chunker`：保留，与其他 CDC 源一致。检查点曾只随所读表的记录前进：被捕获的忙表之间的一张冷表会保留旧检查点，清理的保留期越过它之后重启会要求新的快照，尽管它什么也没丢。已实现：`sync` 中只含位置的记录（`Run.EmitPosition`），按顺序经过队列，跳过转换和目标，不计为记录，在它之前的记录都确认后移动检查点；`mssql` 在每个 CDC 窗口和 change tracking 版本区间之后交出一条，`mysql` 在其他表的 binlog 事务结束时，`postgres` 在空事务结束和事务之间的 keepalive 时。见决定 14 至 16。） **未包括**：作业逐表读取快照，不分块（没有 `Chunker`）；不报告延迟；检查点只随所读表的记录前进，因此其他被捕获表的事务
     在重启后会被再次读取。
 13. **[kept]**（2026-11-10：目标无需第三个包即可共用参数及其检查） **`ConnParams` 与 `WireConfig` 从 `sync/mssql` 导出**，供 I217 的目标共用连接参数及其检查。
-14. **[pending review]**（2026-11-10，随决定 12 的裁定）**只含位置的记录由流水线而不是源限流**：源在每段没有自己记录的读取之后
+14. **[2026-11-10 已裁定：保留]**（2026-11-10，随决定 12 的裁定）**只含位置的记录由流水线而不是源限流**：源在每段没有自己记录的读取之后
     调用 `Run.EmitPosition(func() Position)`，流水线只在 `checkpoint_interval`（5s）内没有任何一种记录时才调用该函数并入队，所以
     忙表靠自己的记录移动检查点，冷表每个检查点间隔至多移动一次；用函数可让 binlog 源不必为每个跳过的事务序列化 GTID 集合。
     试运行和分块读取不取它。这种记录不导出（`Record.posOnly`）：转换、目标和死信都看不到，状态中的读取、确认和目标计数不含
     它，记录 ID 和转换的编号不受影响。备选：新的 `Op`（每个转换和目标都得跳过它）；每个源自己限流。
-15. **[pending review]**（2026-11-10）**保存检查点的目标与只含位置的记录**：这样的目标保存它写过的最后位置，只含位置的记录越过
+15. **[2026-11-10 已裁定：保留]**（2026-11-10）**保存检查点的目标与只含位置的记录**：这样的目标保存它写过的最后位置，只含位置的记录越过
     它而不写入。与其为每条记录写目标的表，检查点文件在其 `position` 是只含位置的记录的位置时记下那个位置（`wrote`），各目标都
     停在 `wrote` 的运行从文件中更靠后的位置开始（不重放）；目标停在其他位置时照旧采用。备选：把每条只含位置的记录告诉
     `CheckpointSink`，冷表每个检查点间隔要在其服务器上做一次事务。
-16. **[pending review]**（2026-11-10）**各个源在何处交出**：`mssql` 在读完每个 CDC 窗口之后（其末尾 LSN，含未读或未被捕获的表
+16. **[2026-11-10 已裁定：保留]**（2026-11-10）**各个源在何处交出**：`mssql` 在读完每个 CDC 窗口之后（其末尾 LSN，含未读或未被捕获的表
     的事务），以及每个不含所读表变更的 change tracking 版本区间之后；`mysql` 在每个不含所读表记录的事务结束时（包括其他数据库的
     DDL），心跳时不交（空闲服务器的 binlog 不动）；`postgres` 在没有记录的事务结束时（其他表的，15 之前的服务器会发送）以及没有
     暂存流式事务时事务之间的 keepalive（15 及以后跳过空事务），只在运行起点之后。`postgres` 的复制槽本来就在事务之间被告知位置
@@ -5743,14 +5743,14 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 11. **[kept]**（2026-11-10：“完成标准”要求 Doris 2.1 或 3.0；StarRocks 直接导入后端，与 Doris 重定向之后走的是同一段代码。）
     **互操作用 Doris 2.1 与 StarRocks 3.4**：StarRocks 的前端重定向到其后端自己的地址 `127.0.0.1:8040`，在宿主机上与 Doris
     的后端冲突，所以它的导入直接发往后端；Doris 的重定向经过测试。Doris 3.0 不在其中。
-12. **[pending review]**（2026-11-10，随决定 1 的裁定）**每条流水线都有谱系**：检查点文件中的一个随机 ID（`lineage`，此前只有
+12. **[2026-11-10 已裁定：保留]**（2026-11-10，随决定 1 的裁定）**每条流水线都有谱系**：检查点文件中的一个随机 ID（`lineage`，此前只有
     `CheckpointSink` 的流水线才有），在流没有谱系也没有位置而启动时生成，并在源运行前立即保存（流的启动现在会写一个没有位置的
     检查点，所以第一次检查点之前的崩溃不会改变 label），重置、手动设置位置和新的作业（按块从头再跑的作业；从位置再跑的不分块
     作业保留它）也会生成；重启和恢复的作业保留它。目标以 `Record.Lineage()` 读取，在记录到达目标前与流水线名一起设置；死信也带
     着它。旧版 fit 保存的、有位置的检查点在重置前没有谱系，其目标生成的名字逐字节不变，所以升级不会用新 label 重放；目标保存
     检查点的流水线本来就有谱系。备选：代数编号（ID 无需比较）；给旧检查点也生成谱系（升级会改变 label，检查点之后的记录会
     在 Duplicate Key 表中导入两次）。
-13. **[pending review]**（2026-11-10）**哪些名字带谱系**：`doris` 的 label 和 `http` 的 `Idempotency-Key`，它们的服务器在目标
+13. **[2026-11-10 已裁定：保留]**（2026-11-10）**哪些名字带谱系**：`doris` 的 label 和 `http` 的 `Idempotency-Key`，它们的服务器在目标
     重建后仍保留已接收的内容，所以重置后的记录会再次写入。记录 ID（`nats` 的 `Nats-Msg-Id`、`pulsar` 的 `fit-id`、`rabbitmq`
     的 `message_id`）不带：重置后再次读到的消息仍是同一条消息，消费者丢弃它是对的，而且 JetStream 的窗口只有几分钟。`s3` 的
     对象名不带：再次写入的对象覆盖自身，这正是重置想要的。`clickhouse` 的去重令牌不带：ClickHouse 把它保存在表中，随重建的
