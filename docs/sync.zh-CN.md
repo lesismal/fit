@@ -329,7 +329,8 @@ sync {
 `label` 由这段记录的第一条和最后一条记录的来源生成，没有来源的源用位置（见[投递保证](#投递保证)）：崩溃后再次导入的同一段会被以“已导入”拒绝，所以即使是 Duplicate Key 表，
 一个批次也只存一份。更新和删除需要 merge on write 的 Unique Key 表（Doris）或主键表（StarRocks）：删除写出行或其键，
 并把 `__DORIS_DELETE_SIGN__`（或 `__op`）设为 1。`partial_columns` 只更新记录带有的列。前端到后端的重定向会带着凭据跟随，
-所以后端地址必须是 fit 能访问到的；`urls` 也可以直接写后端的 HTTP 端口。因行而被拒绝的导入会被拆分，直到找出它不能
+所以后端地址必须是 fit 能访问到的，但从 https 到 http 的重定向不跟随，否则凭据和行都会明文发送；`urls` 也可以直接写后端的
+HTTP 端口。因行而被拒绝的导入会被拆分，直到找出它不能
 接受的那条记录：该记录交给 `on_error`，它之前的记录都已导入。
 
 label 比表活得久：Doris 会保留 `label_keep_max_second`（默认三天），所以重置流水线或重建它的表之后，要改 `label_prefix`，
@@ -389,7 +390,8 @@ PROPERTIES ("enable_unique_key_merge_on_write" = "true");
 绝不会每条记录一个流；取值很多的值放进 `structured_metadata`（Loki 3）。行的时间取 `timestamp_field`，否则取记录的提交
 时间，再否则取写入时间。`tenant`（或 `tenant_field`）以 `X-Scope-OrgID` 发送。每个流的条目按时间排序；Loki 拒绝的请求
 （条目太旧、行太长）会被拆分，直到找出它拒绝的记录，交给 `on_error`。Loki 对流、时间和行都相同的条目只保留一份，所以
-记录带时间时，崩溃后再写一次的批次只存一份。
+记录带时间时，崩溃后再写一次的批次只存一份。连接测试推送一个没有条目的流，Loki 不会存下任何东西，所以只能推送、不能
+查询的凭据也能通过。
 
 ### OpenTelemetry 日志
 
@@ -642,8 +644,10 @@ sync {
 （`INSERT BULK`）到临时表再合并进来。每个源事务是服务器的一个事务（`transactions source`），或一个批次的合在一起
 （`batch`），从不只提交一部分；服务器永久拒绝的语句只让它的那条记录失败，之前的记录都已提交。`checkpoint sink` 时位置在同一
 事务中写入 `_fit_sync_checkpoints`，做到恰好一次。`identity_insert` 把源的值写入 `IDENTITY` 列。表名由命名空间得出，为
-`schema.table`（或 `db.schema.table`）：MySQL 源的 `shop.orders` 是 schema `shop` 中的 `orders`，所以要设 `table`，例如
-`dbo.{namespace}`，或直接写一张表的名字。表由你建好，在键列上要有主键或唯一索引。
+`schema.table`（或 `db.schema.table`）：MySQL 源的 `shop.orders` 是 schema `shop` 中的 `orders`，所以要用 `route` 变换改名
+（`rules { match shop.*; to dbo.{rest} }`），或直接写一张表的名字（`dbo.{namespace}` 只适用于不含点的命名空间，例如主题名）。
+表由你建好，在键列上要有主键或唯一索引。NULL 以其列的类型发送，类型每个连接读一次；语句被拒绝时（例如列的类型在此期间
+改了），会先重新读取类型，再让记录失败。
 
 ```fit
 sync {

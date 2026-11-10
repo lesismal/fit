@@ -5146,6 +5146,18 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 的 goroutine 上，基于 HTTP 的系统用 fib 的异步客户端，至少一次写入幂等的目标，用 `fitsync.Tester` 做连接测试，用针对假
 服务端的单元测试满足 98% 的覆盖率门槛，在 Docker 中做互通并归入 `sync-interop` 自己的一组，每一节记录待审查的决策。
 
+**待用户裁定**（来自 2026-11-10 对决定的评审）：
+
+- I217–I219：
+  - **Doris 的 label 比重置活得久**（I218 决定 1）：流水线重置或表重建后，在 `label_keep_max_second`（三天）之内重新导入的
+    记录会被静默地以“已导入”拒绝，除非手动修改 `label_prefix`。选择：保持现状，或把流水线的 lineage 放进 label（告知每个
+    目标 lineage，而不只是 `CheckpointSink`）。建议：用 lineage，这样重置会自动改变 label；`label_prefix` 保留。
+  - **Loki 基准的对比对象**（I219 决定 9）：已弃用并到了生命周期终点的 Promtail，或其后继 Grafana Alloy。建议：I222 把
+    `files-loki` 加入 `plan.sh` 时，在 Promtail 旁边加上 Alloy。
+  - **两种模板语法**（I219 决定 11）：名称模板（SQL 目标与 doris 的 `table`、influxdb、tdengine、qdrant）把命名空间写作
+    `{namespace}`；记录模板（loki、otlp_logs、file 目标）写作 `{$namespace}`，其中 `{namespace}` 是字段。选择：两种都保留，
+    或统一为一种。建议：都保留，并让名称模板也接受 `{$namespace}`，这不会破坏任何配置。
+
 ### I211 RabbitMQ 作为源与目标
 
 - **做**：AMQP 0-9-1 客户端（`sync/rabbitmq/wire`）：连接与信道协商、TLS、PLAIN 与 EXTERNAL 认证、心跳、流控、
@@ -5509,22 +5521,31 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待评审的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **一个写入者，不是 `ParallelSink`**：作业经一个连接写入。备选：MySQL 目标那样的备用写入者，各有连接和事务。
-2. **没有 `max_transaction_bytes`**：源事务无论多大都是 SQL Server 的一个事务（其日志随之增长）；MySQL 的上限是为 TiDB 设的。
+1. **[kept]**（2026-11-10：一个连接把每个源事务及检查点放在服务器的同一个事务里；备用写入者会把它们拆开，而目前没有需要这点速度的场景。）
+   **一个写入者，不是 `ParallelSink`**：作业经一个连接写入。备选：MySQL 目标那样的备用写入者，各有连接和事务。
+2. **[kept]**（2026-11-10：分段提交源事务正是目标承诺绝不做的，SQL Server 能承受大事务。顺带修复：未提交事务持有的操作不再在每个批次整体复制（长事务的代价是平方级，提交 `fix(sync/mssql)`）。）
+   **没有 `max_transaction_bytes`**：源事务无论多大都是 SQL Server 的一个事务（其日志随之增长）；MySQL 的上限是为 TiDB 设的。
    备选：像 MySQL 目标那样把大事务分段提交。
-3. **`SET XACT_ABORT ON`，语句被拒后查 `XACT_STATE()`**：被拒语句的事务整体回滚（编译错误时保持原样），目标重新开始事务、
+3. **[kept]**（2026-11-10：语句级回滚对转换错误不成立；`XACT_STATE()` 加上重写事务，才使被拒记录单独失败，互操作中的坏行测试证明了这一点。）
+   **`SET XACT_ABORT ON`，语句被拒后查 `XACT_STATE()`**：被拒语句的事务整体回滚（编译错误时保持原样），目标重新开始事务、
    重写其中的语句，再查找那条记录。备选：`XACT_ABORT OFF`，依赖语句级回滚，但有些错误（转换）并不遵守。
-4. **批量装载经临时表再合并进目标表**（`SELECT TOP 0 ... INTO #fit_stage ... UNION ALL`，不带 `IDENTITY` 属性），这样重放的
+4. **[kept]**（2026-11-10：直接批量装载到表会因重放快照中已有的行而失败；经临时表能收敛，互操作中带批量装载的重放证明了这一点。）
+   **批量装载经临时表再合并进目标表**（`SELECT TOP 0 ... INTO #fit_stage ... UNION ALL`，不带 `IDENTITY` 属性），这样重放的
    快照也能收敛；直接装载到目标表会因已有的行而失败。只用于不属于源事务的插入，且达到 `bulk_rows` 条；因某个值失败的装载
    改写成语句，由语句找出那条记录。
-5. **NULL 参数按其列的类型发送**，每张表每个连接用 `SELECT TOP 0 *` 读一次：客户端默认的 `nvarchar` NULL 不能转换为
+5. **[changed]**（2026-11-10：类型每个连接只读一次，而永久错误不会重连，所以连接期间被修改的列会一直拒绝按旧类型发送的 NULL（257），直到重启。现在永久拒绝的语句会丢弃该表的类型缓存，并在记录失败前逐个重写其操作（`TestSinkTypesChanged`；互操作 `TestMSSQLSinkTypeRefusals`，SQL Server 2022）。）
+   **NULL 参数按其列的类型发送**，每张表每个连接用 `SELECT TOP 0 *` 读一次：客户端默认的 `nvarchar` NULL 不能转换为
    `varbinary`（错误 257）。改变列类型的 DDL 在下一个连接时才会看到。
-6. **表名由命名空间按点拆成** `schema.table` 或 `db.schema.table`，所以 MySQL 源的 `shop.orders` 是 schema `shop` 中的表：
+6. **[kept]**（2026-11-10：带点的命名空间是所有 SQL 目标的约定，`route` 变换可以改名。指南原先建议的 `dbo.{namespace}` 会把带点的命名空间变成 `db.schema.table`；现在改为建议 `route`（`rules { match shop.*; to dbo.{rest} }`）。）
+   **表名由命名空间按点拆成** `schema.table` 或 `db.schema.table`，所以 MySQL 源的 `shop.orders` 是 schema `shop` 中的表：
    用 `dbo.{namespace}` 这样的 `table` 或直接写表名来改变映射。备选：一个默认 schema 参数。
-7. **永久拒绝的错误** 是一组错误号（转换 245、8114、8115，截断 8152 和 2628，NULL 写入 NOT NULL 515，约束 547、2601、2627，
+7. **[changed]**（2026-11-10：缺少类型冲突的错误号：206（时间写入 int）和 257（文本写入 varbinary），以及批量装载的 4815、4864 和 8102（更新 `IDENTITY` 列）：这样的记录会被流水线无限重试，而不是交给 `on_error`。已补上，并有互操作测试。）
+   **永久拒绝的错误** 是一组错误号（转换 245、8114、8115，截断 8152 和 2628，NULL 写入 NOT NULL 515，约束 547、2601、2627，
    对象和列 207、208，语法 102、156 等）；其余（死锁 1205、锁与快照冲突、超时）重试。
-8. **默认用 `MERGE`**，带 `WITH (HOLDLOCK)` 防止同一键的并发插入；不用 `MERGE` 的用户用 `update_insert`。
-9. **本地互操作只在 SQL Server 2022 上运行**（2019 在 `mssql.sh` 的默认集合中，由 CI 的 `mssql` 族运行），MySQL 流水线用
+8. **[kept]**（2026-11-10：`MERGE ... WITH (HOLDLOCK)` 是在并发写入下仍成立的单语句 upsert；`update_insert` 服务于不用 `MERGE` 的用户。）
+   **默认用 `MERGE`**，带 `WITH (HOLDLOCK)` 防止同一键的并发插入；不用 `MERGE` 的用户用 `update_insert`。
+9. **[kept]**（2026-11-10：2022 覆盖了目标的所有路径；2019 由 CI 的 `mssql` 族运行。）
+   **本地互操作只在 SQL Server 2022 上运行**（2019 在 `mssql.sh` 的默认集合中，由 CI 的 `mssql` 族运行），MySQL 流水线用
    `mysql.sh` 的环境在 MySQL 8.4 上运行；没有它时跳过。
 
 ### I218 Doris 与 StarRocks 作为目标与源
@@ -5547,28 +5568,39 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待评审的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **一次导入的 label 是前缀加上数据库、表、这段记录首末位置和条数的哈希**，与 ClickHouse 的令牌相同。label 比删除重建的
+1. **[needs the user]**（2026-11-10：在 `label_keep_max_second` 之内重置流水线或重建表，记录会被静默地以“已导入”拒绝，除非用户改 `label_prefix`：见本节开头的列表。）
+   **一次导入的 label 是前缀加上数据库、表、这段记录首末位置和条数的哈希**，与 ClickHouse 的令牌相同。label 比删除重建的
    表活得久（Doris 保留 `label_keep_max_second`，三天），所以重置或新建表之后用户要改 `label_prefix`，否则记录会以“已导入”
    被拒绝。备选：label 中带上流水线的谱系（目前只有 `CheckpointSink` 能拿到）；用 Stream Load 的两阶段提交配合检查点做到
    恰好一次。
-2. **每次导入都指明列**，即这段记录各行列的并集，因此缺少其中某列的行把它导入为 null（`partial_columns` 时保持不变）。备选：
+2. **[kept]**（2026-11-10：CDC 源的行是完整的，并集就是所有列；对某行缺少的列用表默认值，会让同一次导入中的行彼此不同，稀疏的行用 `partial_columns`。）
+   **每次导入都指明列**，即这段记录各行列的并集，因此缺少其中某列的行把它导入为 null（`partial_columns` 时保持不变）。备选：
    整行时不发 `columns`（缺少的列取表的默认值）；按列集合切分。
-3. **只有含删除的一段才发送删除列**，删除写删除前的行或键；这样插入可导入任何模型，`deletes ignore` 适用于 Duplicate Key
+3. **[kept]**（2026-11-10：总是发送删除列会让导入 Duplicate Key 表的每次导入都失败；为删除单独做 `merge_type: DELETE` 导入会让混合的一段导入次数加倍。）
+   **只有含删除的一段才发送删除列**，删除写删除前的行或键；这样插入可导入任何模型，`deletes ignore` 适用于 Duplicate Key
    表。备选：总是发送；删除用单独的 `merge_type: DELETE` 导入。
-4. **JSON 在 Doris 上每行一个（`read_json_by_line`），在 StarRocks 上为数组（`strip_outer_array`）**，各自的常用形式。
+4. **[kept]**（2026-11-10：各系统文档中的形式，两者都在互操作中运行过；StarRocks CSV 的 `\N` 限制已写入文档，默认是 JSON。）
+   **JSON 在 Doris 上每行一个（`read_json_by_line`），在 StarRocks 上为数组（`strip_outer_array`）**，各自的常用形式。
    **CSV 用 `enclose` 与 `escape` 加引号**，Doris 上加 `trim_double_quotes`（否则保留引号），null 在 Doris 上写 `\N`，在先做
    反转义的 StarRocks 上写 `\\N`：字符串 `\N` 无法以 CSV 写入 StarRocks（默认是 JSON）。
-5. **因行被拒的导入对半拆分**，各用自己的 label 导入，直到找出那一条，它永久失败；其余都导入。备选：整段交给 `on_error`；
+5. **[kept]**（2026-11-10：对半拆分用 log n 次导入找到那条记录，每半的 label 都能同样地再次生成，所以重放会遇到相同的 label；每条记录一次导入则要 n 次。）
+   **因行被拒的导入对半拆分**，各用自己的 label 导入，直到找出那一条，它永久失败；其余都导入。备选：整段交给 `on_error`；
    每条记录一次导入。
-6. **`Label Already Exists` 在之前的导入为 `FINISHED`、`VISIBLE` 或 `COMMITTED` 时算已导入**，仍在运行时再问（不是交给
+6. **[kept]**（2026-11-10：这是 Stream Load 自己的状态；仍在运行的 label 再问一次，而不是交给 `on_error`。）
+   **`Label Already Exists` 在之前的导入为 `FINISHED`、`VISIBLE` 或 `COMMITTED` 时算已导入**，仍在运行时再问（不是交给
    `on_error` 的错误）；`Publish Timeout` 算已导入（已提交，稍后可见）。
-7. **时间写成 `time_zone` 中的 `DATETIME` 文本，默认 UTC；字节为 base64**，与其他 JSON 目标相同。
-8. **目标的连接测试请求 `/api/health`**，不检查凭据；用一次空导入可以检查，但需要一张表。**源不支持作业的分块读取**
+7. **[kept]**（2026-11-10：与其他 JSON 目标的写法相同。）
+   **时间写成 `time_zone` 中的 `DATETIME` 文本，默认 UTC；字节为 base64**，与其他 JSON 目标相同。
+8. **[kept]**（2026-11-10：检查凭据需要一张表，而目标只有从记录中才知道表，第一次导入的错误会指明原因。源的分块作业读取可以等作业需要时再做。）
+   **目标的连接测试请求 `/api/health`**，不检查凭据；用一次空导入可以检查，但需要一张表。**源不支持作业的分块读取**
    （clickhouse 源的 `chunk_rows`）：作业按游标读。位置中保存 SQL 字面量，读回时校验。
-9. **元组比较展开书写**（`(a > x) OR (a = x AND b > y)`），因为两个系统都不比较行值。
-10. **第二轮基于 HTTP 的目标共用一个客户端包**（`sync/internal/fibrest`，见 I219 的决定 11），而不是像 `clickhouse` 和 `elasticsearch` 那样各包
+9. **[kept]**（2026-11-10：两个系统的文档都没有行值比较；展开的写法是同一个条件。）
+   **元组比较展开书写**（`(a > x) OR (a = x AND b > y)`），因为两个系统都不比较行值。
+10. **[kept]**（2026-11-10：已完成，见 I219 的决定 11。）
+    **第二轮基于 HTTP 的目标共用一个客户端包**（`sync/internal/fibrest`，见 I219 的决定 11），而不是像 `clickhouse` 和 `elasticsearch` 那样各包
     一份。
-11. **互操作用 Doris 2.1 与 StarRocks 3.4**：StarRocks 的前端重定向到其后端自己的地址 `127.0.0.1:8040`，在宿主机上与 Doris
+11. **[kept]**（2026-11-10：“完成标准”要求 Doris 2.1 或 3.0；StarRocks 直接导入后端，与 Doris 重定向之后走的是同一段代码。）
+    **互操作用 Doris 2.1 与 StarRocks 3.4**：StarRocks 的前端重定向到其后端自己的地址 `127.0.0.1:8040`，在宿主机上与 Doris
     的后端冲突，所以它的导入直接发往后端；Doris 的重定向经过测试。Doris 3.0 不在其中。
 
 ### I219 Loki 与 OpenTelemetry 日志作为目标
@@ -5590,24 +5622,35 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待评审的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **流的标签只来自 `labels` 模板**，默认 `{"job": "fit", "namespace": "{$namespace}"}`，值为空的标签不写；此外不限制一批的
+1. **[kept]**（2026-11-10：只有配置中写出的字段才成为标签，这就是上限；超出时 Loki 自己的流数限制会拒绝（429，会重试），而 fit 自己设上限就只能丢弃记录。）
+   **流的标签只来自 `labels` 模板**，默认 `{"job": "fit", "namespace": "{$namespace}"}`，值为空的标签不写；此外不限制一批的
    流数。备选：限制流数；每个字段都作标签，另加排除列表。
-2. **没有时间的记录使用写入时间，同一批中相差一纳秒**，这样 Loki 的去重不会合并不同的行，但它们重放后会再存一次（至少一次）。
+2. **[kept]**（2026-11-10：目前没有哪个源的位置是时间，没有更好的时间可用；指南写的就是至少一次。）
+   **没有时间的记录使用写入时间，同一批中相差一纳秒**，这样 Loki 的去重不会合并不同的行，但它们重放后会再存一次（至少一次）。
    备选：取源位置作时间（文件源目前没有可用作时间的位置）。
-3. **一次推送中每个流的条目按时间排序**；400 或 413 拆分直到找出那条记录，Loki 拒绝其余之前已接收的条目由它的去重吸收。
-4. **snappy 用 `klauspost/compress/s2`**，fit 为 Kafka 已依赖它，不是新依赖。
-5. **请求在目标内重试**：408、429 与 5xx，共五次（fibrest 的默认），遵从 `Retry-After`（最多 30s），之后交给流水线自己的重试；不像
+3. **[kept]**（2026-11-10：Loki 对被拒的推送接收它能接收的部分，再次发送的内容只存一份；互操作中的重放只存了一份。）
+   **一次推送中每个流的条目按时间排序**；400 或 413 拆分直到找出那条记录，Loki 拒绝其余之前已接收的条目由它的去重吸收。
+4. **[kept]**（2026-11-10：没有新增依赖。）
+   **snappy 用 `klauspost/compress/s2`**，fit 为 Kafka 已依赖它，不是新依赖。
+5. **[kept]**（2026-11-10：之后还有流水线的重试，所以长时间的 429 仍会等待；五次尝试避免一个请求占住目标。）
+   **请求在目标内重试**：408、429 与 5xx，共五次（fibrest 的默认），遵从 `Retry-After`（最多 30s），之后交给流水线自己的重试；不像
    elasticsearch 目标那样在 429 持续期间一直等。
-6. **otlp_logs 复用 fit 追踪导出的部分**：资源（`service.name`、取自 `observe.Version` 的 `service.version`）、scope `fit`、
+6. **[kept]**（2026-11-10：沿用 fit 遥测的资源；目标必须用 fib 的客户端并发送 protobuf。）
+   **otlp_logs 复用 fit 追踪导出的部分**：资源（`service.name`、取自 `observe.Version` 的 `service.version`）、scope `fit`、
    由 `config.ParseHeaders` 读取的 `headers_file`；不复用其 `net/http` 导出器（目标用 fib 的客户端），也不复用其只有 JSON 的
    编码（protobuf 手写，JSON 作为选项）。
-7. **otlp_logs 的默认值**：body 为编解码器生成的行，属性 `fit.namespace` 与 `fit.op`，开启 gzip；`body row` 时超过 int64 的
+7. **[kept]**（2026-11-10：部分成功不指明是哪些记录，`on_error` 无从接手；只能给出警告。）
+   **otlp_logs 的默认值**：body 为编解码器生成的行，属性 `fit.namespace` 与 `fit.op`，开启 gzip；`body row` 时超过 int64 的
    uint 以及 decimal、时间和 JSON 为字符串。部分成功记为警告，因为接收端不说明丢弃了哪些记录。
-8. **连接测试**：loki 以该租户请求 `/loki/api/v1/labels`；otlp_logs 导出一个空请求。
-9. **基准对比 Promtail 而不是 Filebeat**（Filebeat 没有 Loki 输出），尽管 Promtail 已被 Alloy 取代；`files-loki` 还未加入
+8. **[changed]**（2026-11-10：loki 的测试请求 `/loki/api/v1/labels`，需要读权限：只能推送的凭据（托管 Loki 的只写令牌、只转发推送 API 的网关）无法通过。现在改为以该租户、按目标的编码推送一个没有条目的流，Loki 3.5.5 答 204 且不存任何东西（不含流的推送它答 422 拒绝）；互操作 `TestLokiPush` 会运行它。otlp_logs 的空导出保持不变。）
+   **连接测试**：loki 以该租户请求 `/loki/api/v1/labels`；otlp_logs 导出一个空请求。
+9. **[needs the user]**（2026-11-10：Promtail 已被弃用并到了生命周期终点，与它对比可能显得是在和已停止维护的工具比：见本节开头的列表。）
+   **基准对比 Promtail 而不是 Filebeat**（Filebeat 没有 Loki 输出），尽管 Promtail 已被 Alloy 取代；`files-loki` 还未加入
    `plan.sh`，由 I222 连同权重加入。
-10. **互操作中的 Loki 不开认证**，所以租户只由单元测试检查。
-11. **七个 HTTP 目标共用一个客户端包和一个模板包**（与 I220、I221 合并时决定，2026-11-10）：I218/I219 的
+10. **[kept]**（2026-11-10：不开认证的 Loki 把所有推送都归入同一个租户，在那里区分不了租户；单元测试逐个请求检查请求头。）
+    **互操作中的 Loki 不开认证**，所以租户只由单元测试检查。
+11. **[changed]**（2026-11-10：一个客户端包的做法成立（五个连接器和 `embed` 在用）。它带着凭据和请求体跟随重定向，从 https 到 http 时会明文发送；现在这样的重定向是一个错误，并指明出路：在 `urls` 中写后端自己的 http 地址（`TestTLS`，提交 `fix(sync/fibrest)`）。两种模板语法交给用户：见本节开头的列表。）
+    **七个 HTTP 目标共用一个客户端包和一个模板包**（与 I220、I221 合并时决定，2026-11-10）：I218/I219 的
     `sync/internal/httpconn` 与 I220/I221 的 `sync/internal/fibrest` 做的是同一件事；保留 `fibrest`，因为已有五个连接器
     （以及 `embed` 的固定证书）在用它，并补上 `httpconn` 有的部分：多个 `urls` 依次尝试（502、503、504 与连接错误换下一个）、
     带凭据跟随重定向（`Request.Redirects`，用于 Doris 的前端）、`Authorization`（来自环境变量的 basic 或 bearer）、
