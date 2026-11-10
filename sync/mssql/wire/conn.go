@@ -495,6 +495,14 @@ func (c *Conn) ServerVersion() string {
 // parameters are sent in.
 func (c *Conn) Collation() Collation { return c.collation }
 
+// TLS is the connection's TLS state, and false without TLS.
+func (c *Conn) TLS() (tls.ConnectionState, bool) {
+	if tc, ok := c.nc.(*tls.Conn); ok {
+		return tc.ConnectionState(), true
+	}
+	return tls.ConnectionState{}, false
+}
+
 // PacketSize is the packet size the server set.
 func (c *Conn) PacketSize() int { return c.packetSize }
 
