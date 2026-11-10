@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
@@ -52,6 +53,9 @@ type Sink struct {
 	client     *fibrest.Client
 	collection []tmpl.Part
 	db         json.RawMessage
+
+	mu      sync.Mutex
+	pkTypes map[string]string // a collection's primary key's type, from describe
 }
 
 var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -275,6 +279,15 @@ func (s *Sink) send(ctx context.Context, ops []op) error {
 		if s.db != nil {
 			head = append(append(head, `,"dbName":`...), s.db...)
 		}
+		if len(p.deletes) > 0 {
+			typ, err := s.pkType(ctx, c, head)
+			if err != nil {
+				return err
+			}
+			for i, d := range p.deletes {
+				p.deletes[i] = literalFor(typ, d)
+			}
+		}
 		del := append(append([]byte(nil), head...), `,"filter":`...)
 		if err := s.chunks(ctx, "/v2/vectordb/entities/delete", del, s.PrimaryKey+" in [", "]", p.deletes, true); err != nil {
 			return err
@@ -285,6 +298,74 @@ func (s *Sink) send(ctx context.Context, ops []op) error {
 		}
 	}
 	return nil
+}
+
+// pkType returns the type of collection c's primary key, VarChar or
+// Int64, describing c at its first delete: a delete's filter must hold the
+// key as the field's type, where an upsert's entity is converted (an int
+// key into a VarChar, a string of digits into an Int64). "" when Milvus
+// does not say (a token that may not describe), the key then as it is.
+func (s *Sink) pkType(ctx context.Context, c string, head []byte) (string, error) {
+	s.mu.Lock()
+	typ, ok := s.pkTypes[c]
+	s.mu.Unlock()
+	if ok {
+		return typ, nil
+	}
+	const path = "/v2/vectordb/collections/describe"
+	resp, err := s.post(ctx, path, append(append([]byte(nil), head...), '}'))
+	if err != nil {
+		return "", err
+	}
+	var a struct {
+		milvusAnswer
+		Data struct {
+			Fields []struct {
+				Name       string `json:"name"`
+				Type       string `json:"type"`
+				PrimaryKey bool   `json:"primaryKey"`
+			} `json:"fields"`
+		} `json:"data"`
+	}
+	switch {
+	case resp.Status != stdhttp.StatusOK || json.Unmarshal(resp.Body, &a) != nil || busy(a.Code):
+		// Not answered, after the tries: the pipeline tries again.
+		return "", fibrest.StatusError(path, resp)
+	case a.Code == 100:
+		// No collection (yet): the delete's own answer tells.
+		return "", nil
+	}
+	for _, f := range a.Data.Fields {
+		if f.PrimaryKey {
+			typ = f.Type
+		}
+	}
+	s.mu.Lock()
+	if s.pkTypes == nil {
+		s.pkTypes = map[string]string{}
+	}
+	s.pkTypes[c] = typ
+	s.mu.Unlock()
+	return typ, nil
+}
+
+// literalFor returns a primary key's JSON as a filter's literal of the
+// field's type: a number quoted for a VarChar, a string of an int64's
+// digits unquoted for an Int64; as it is otherwise.
+func literalFor(typ string, pk []byte) []byte {
+	switch {
+	case typ == "VarChar" && len(pk) > 0 && pk[0] != '"':
+		b, _ := json.Marshal(string(pk))
+		return b
+	case typ == "Int64" && len(pk) > 0 && pk[0] == '"':
+		var t string
+		if json.Unmarshal(pk, &t) == nil {
+			if n, err := strconv.ParseInt(t, 10, 64); err == nil {
+				return strconv.AppendInt(nil, n, 10)
+			}
+		}
+	}
+	return pk
 }
 
 // chunks sends items in requests of at most max_request_bytes: head, then
@@ -330,6 +411,16 @@ type milvusAnswer struct {
 
 // request sends one upsert or delete.
 func (s *Sink) request(ctx context.Context, path string, body []byte) error {
+	resp, err := s.post(ctx, path, body)
+	if err != nil {
+		return err
+	}
+	return answer(path, resp)
+}
+
+// post sends a request of JSON, again while the answer is a 408, 429 or
+// 5xx, or a Milvus error of a busy server.
+func (s *Sink) post(ctx context.Context, path string, body []byte) (*fibrest.Response, error) {
 	r := fibrest.Request{Method: stdhttp.MethodPost, Path: path, Body: body, Header: stdhttp.Header{"Content-Type": {"application/json"}}}
 	r.Retry = func(resp *fibrest.Response) bool {
 		if fibrest.Transient(resp.Status) {
@@ -338,11 +429,7 @@ func (s *Sink) request(ctx context.Context, path string, body []byte) error {
 		var a milvusAnswer
 		return json.Unmarshal(resp.Body, &a) == nil && busy(a.Code)
 	}
-	resp, err := s.client.DoRetry(ctx, r, 0)
-	if err != nil {
-		return err
-	}
-	return answer(path, resp)
+	return s.client.DoRetry(ctx, r, 0)
 }
 
 // answer turns an answer into the write's error: nil for code 0, a

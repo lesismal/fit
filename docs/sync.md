@@ -1195,7 +1195,10 @@ key goes in `api_key_env`.
 
 The `milvus` sink upserts the row as an entity of `collection` through the RESTful API v2 (Milvus 2.4
 and later, Zilliz Cloud), its `primary_key` (`id`) set from the key: an `Int64` from a single integer,
-a `VarChar` from any other key's text; deletes delete by it. The collection is made by you, with a
+a `VarChar` from any other key's text; deletes delete by it. Milvus converts an upsert's key to the
+field's type, but a delete's filter must hold it as that type, so the sink describes the collection at
+its first delete and writes the key as its primary key's type (an integer key quoted for a `VarChar`, a
+string of digits as a number for an `Int64`). The collection is made by you, with a
 primary key that is not `auto_id`, and the row's fields (or `fields`) must be in its schema or its
 dynamic field. A token goes in `token_env`, or `username` and `password_env`.
 

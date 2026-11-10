@@ -50,6 +50,11 @@ type fake struct {
 	refuse   string
 	busy     int
 	answer   string
+	// pkType is the type describe answers for a collection's primary key;
+	// describe answers no fields when it is empty, and code 100 when
+	// noColl.
+	pkType string
+	noColl bool
 }
 
 func newFake(t *testing.T) *fake {
@@ -91,6 +96,16 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.entities[req.CollectionName] = c
 	}
 	switch r.URL.Path {
+	case "/v2/vectordb/collections/describe":
+		switch {
+		case f.noColl:
+			_, _ = w.Write([]byte(`{"code":100,"message":"can't find collection"}`))
+		case f.pkType != "":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"fields":[{"name":"v","type":"FloatVector"},{"name":"id","type":"` + f.pkType + `","primaryKey":true}]}}`))
+		default:
+			_, _ = w.Write([]byte(`{"code":0,"data":{}}`))
+		}
+		return
 	case "/v2/vectordb/entities/upsert":
 		for _, d := range req.Data {
 			e, _ := json.Marshal(d)
@@ -161,7 +176,9 @@ func TestWrite(t *testing.T) {
 	if len(got) != 2 || got["1"] != `{"embedding":[0.5,1],"id":1,"t":"b"}` || got["2"] != `{"embedding":[0.5,1],"id":2}` {
 		t.Fatalf("%v", got)
 	}
-	if f.auth != "Bearer root:Milvus" || !strings.Contains(f.bodies[1], `"dbName":"db"`) || !strings.Contains(f.bodies[1], `"filter":"id in [9,3]"`) {
+	// The busy answer to describe, describe again, the delete.
+	if f.auth != "Bearer root:Milvus" || f.bodies[1] != `/v2/vectordb/collections/describe {"collectionName":"c_docs","dbName":"db"}` ||
+		!strings.Contains(f.bodies[2], `"dbName":"db"`) || !strings.Contains(f.bodies[2], `"filter":"id in [9,3]"`) {
 		t.Fatal(f.auth, f.bodies)
 	}
 	// String keys, fields kept, user and password.
@@ -300,5 +317,93 @@ func TestProvisionErrors(t *testing.T) {
 	}
 	if err := dead.Test(context.Background()); err == nil {
 		t.Fatal("no server")
+	}
+}
+
+// TestDeleteKeyType deletes by the key as the collection's primary key's
+// type, which describe gives at the first delete: Milvus converts an
+// upsert's key, but a filter's literal of the other type is refused.
+func TestDeleteKeyType(t *testing.T) {
+	f := newFake(t)
+	s, err := load(t, map[string]any{"url": f.srv.URL, "collection": "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	describes := func() (n int) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, b := range f.bodies {
+			if strings.HasPrefix(b, "/v2/vectordb/collections/describe ") {
+				n++
+			}
+		}
+		return n
+	}
+	last := func() string {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.bodies[len(f.bodies)-1]
+	}
+	f.pkType = "VarChar"
+	if err := s.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpDelete, id(9)), rec(fitsync.OpDelete, fitsync.String("k"))}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(last(), `"filter":"id in [\"9\",\"k\"]"`) || describes() != 1 {
+		t.Fatal(f.bodies)
+	}
+	// Described once: the type is kept.
+	f.pkType = "Int64"
+	if err := s.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpDelete, id(8))}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(last(), `id in [\"8\"]`) || describes() != 1 {
+		t.Fatal(f.bodies)
+	}
+	// An Int64 key given as a string of digits.
+	n, err := load(t, map[string]any{"url": f.srv.URL, "collection": "n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpDelete, fitsync.String("42")), rec(fitsync.OpDelete, fitsync.String("k")), rec(fitsync.OpDelete, id(7))}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(last(), `id in [42,\"k\",7]`) {
+		t.Fatal(f.bodies)
+	}
+	// No collection yet: the key as it is, described again next time.
+	f.noColl = true
+	m, err := load(t, map[string]any{"url": f.srv.URL, "collection": "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := describes()
+	for range 2 {
+		if err := m.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpDelete, id(1))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(last(), `id in [1]`) || describes() != before+2 {
+		t.Fatal(f.bodies)
+	}
+	// describe not answered, after the tries: the batch fails, to be tried
+	// again.
+	f.noColl, f.answer = false, `{"code":8,"message":"rate limit exceeded"}`
+	if err := m.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpDelete, id(1))}); err == nil || fitsync.IsPermanent(err) {
+		t.Fatal(err)
+	}
+	dead, err := load(t, map[string]any{"url": "http://127.0.0.1:1", "collection": "c", "timeout": "1s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dead.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpDelete, id(1))}); err == nil || fitsync.IsPermanent(err) {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ typ, pk, want string }{
+		{"VarChar", `5`, `"5"`}, {"VarChar", `"a"`, `"a"`}, {"Int64", `"-5"`, `-5`}, {"Int64", `"x"`, `"x"`},
+		{"Int64", `"99999999999999999999"`, `"99999999999999999999"`}, {"", `5`, `5`}, {"VarChar", ``, ``},
+	} {
+		if got := string(literalFor(c.typ, []byte(c.pk))); got != c.want {
+			t.Errorf("%s %s: %s, want %s", c.typ, c.pk, got, c.want)
+		}
 	}
 }

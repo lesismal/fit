@@ -295,6 +295,57 @@ func TestMilvusConverges(t *testing.T) {
 	}
 }
 
+// TestMilvusDeleteKeyTypes deletes by keys of the other type than the
+// collection's primary key: int keys from a VarChar key, strings of digits
+// from an Int64 one. Milvus takes either in an upsert, but a delete's
+// filter only of the field's type, which the sink reads by describe.
+func TestMilvusDeleteKeyTypes(t *testing.T) {
+	m := milvusServer(t)
+	m.call(t, "/v2/vectordb/collections/drop", `{"collectionName": "fit_keys_varchar"}`)
+	m.call(t, "/v2/vectordb/collections/create", fmt.Sprintf(`{"collectionName": "fit_keys_varchar", "dimension": %d, "primaryFieldName": "id",
+		"idType": "VarChar", "params": {"max_length": 64}, "vectorFieldName": "embedding", "metricType": "L2", "autoId": false}`, vecDims))
+	m.collection(t, "fit_keys_int64")
+	vec := make([]fitsync.Value, vecDims)
+	for i := range vec {
+		vec[i] = fitsync.Float(float64(i))
+	}
+	recs := func(ns string, key func(int) fitsync.Value, op fitsync.Op) []*fitsync.Record {
+		var out []*fitsync.Record
+		for i := range 10 {
+			row := fitsync.Map(fitsync.Field{Name: "v", Value: fitsync.String(fmt.Sprint(i))}, fitsync.Field{Name: "embedding", Value: fitsync.Array(vec...)})
+			r := &fitsync.Record{Namespace: ns, Op: op, Key: key(i), After: row}
+			if op == fitsync.OpDelete {
+				r.Before, r.After = row, fitsync.Null()
+			}
+			out = append(out, r)
+		}
+		return out
+	}
+	count := func(c string) int {
+		data := m.call(t, "/v2/vectordb/entities/query", fmt.Sprintf(`{"collectionName": %q, "filter": "", "outputFields": ["count(*)"], "consistencyLevel": "Strong"}`, c))
+		var n []struct {
+			Count int `json:"count(*)"`
+		}
+		if json.Unmarshal(data, &n) != nil || len(n) != 1 {
+			t.Fatalf("%s: %s", c, data)
+		}
+		return n[0].Count
+	}
+	s := m.sink(t, map[string]any{"collection": "fit_keys_{namespace}"})
+	intKey := func(i int) fitsync.Value { return fitsync.Map(fitsync.Field{Name: "id", Value: fitsync.Int(int64(i))}) }
+	digits := func(i int) fitsync.Value { return fitsync.String(fmt.Sprint(i)) }
+	write(t, s, recs("varchar", intKey, fitsync.OpInsert), 10)
+	write(t, s, recs("int64", digits, fitsync.OpInsert), 10)
+	if a, b := count("fit_keys_varchar"), count("fit_keys_int64"); a != 10 || b != 10 {
+		t.Fatalf("%d and %d entities, want 10 each", a, b)
+	}
+	write(t, s, recs("varchar", intKey, fitsync.OpDelete)[:6], 10)
+	write(t, s, recs("int64", digits, fitsync.OpDelete)[:6], 10)
+	if a, b := count("fit_keys_varchar"), count("fit_keys_int64"); a != 4 || b != 4 {
+		t.Fatalf("%d and %d entities after the deletes, want 4 each", a, b)
+	}
+}
+
 // TestEmbedToVectorsAcrossKills copies generate's records, inserts,
 // updates and deletes, through the embed transform (against a fake
 // embeddings API) into Qdrant and Milvus, killed at random points and

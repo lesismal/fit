@@ -1035,7 +1035,9 @@ sync {
 （`wait=true`）；API 密钥放在 `api_key_env`。
 
 `milvus` 目标经 RESTful API v2（Milvus 2.4 及以后、Zilliz Cloud）把行 upsert 为 `collection` 的一个实体，其
-`primary_key`（`id`）取自键：单个整数为 `Int64`，其他键为其文本的 `VarChar`；删除按它删除。集合由你创建，主键不能是
+`primary_key`（`id`）取自键：单个整数为 `Int64`，其他键为其文本的 `VarChar`；删除按它删除。Milvus 会把 upsert 的键转换为
+字段的类型，但删除的 filter 必须按该类型书写，所以该目标在第一次删除时读取集合的描述，按主键的类型写键（整数键对 `VarChar`
+加引号，数字字符串对 `Int64` 写成数字）。集合由你创建，主键不能是
 `auto_id`，行的字段（或 `fields`）必须在其 schema 或动态字段中。令牌放在 `token_env`，或用 `username` 和 `password_env`。
 
 两者都只写一个批次中每个键的最后一条记录（删除和 upsert），所以一个请求中不会有重复的键；429、5xx 或 Milvus 忙时重试，被拒绝的
