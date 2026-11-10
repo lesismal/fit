@@ -1,0 +1,20 @@
+{
+  "mover": "promtail",
+  "scenario": "files-loki",
+  "variant": "s6-files-loki",
+  "records": 2000000,
+  "counted": 2000000,
+  "records_per_sec": 199153.16933612886,
+  "drain_seconds": 10.001066047,
+  "cpu_cores": 1.0561527091572862,
+  "startup_seconds": 5.103327299,
+  "rss_peak_bytes": 46194688,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 764.273352,
+    "p99": 1383.656443,
+    "max": 1423.336032,
+    "mean": 770.069109241999
+  }
+}

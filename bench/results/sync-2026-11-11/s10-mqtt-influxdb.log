@@ -1,0 +1,14 @@
+20:31:49 s10-mqtt-influxdb: movers fit,telegraf, 3 rounds, 500000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+20:31:49 s10-mqtt-influxdb round 1: fit
+ "records_per_sec": 81927.47248879299, "cpu_cores": 1.7490359242481575, "rss_peak_bytes": 19120128, 
+20:33:11 s10-mqtt-influxdb round 1: telegraf
+ "records_per_sec": 62517.90605436811, "cpu_cores": 1.8113777538532982, "rss_peak_bytes": 54554624, 
+20:34:38 s10-mqtt-influxdb round 2: telegraf
+ "records_per_sec": 62453.04978991328, "cpu_cores": 1.8160212863002703, "rss_peak_bytes": 55087104, 
+20:36:02 s10-mqtt-influxdb round 2: fit
+ "records_per_sec": 81940.78252450711, "cpu_cores": 1.7559159333724341, "rss_peak_bytes": 19017728, 
+20:37:24 s10-mqtt-influxdb round 3: fit
+ "records_per_sec": 83252.65739081215, "cpu_cores": 1.7665377987502067, "rss_peak_bytes": 19279872, 
+20:38:46 s10-mqtt-influxdb round 3: telegraf
+ "records_per_sec": 62458.72286020342, "cpu_cores": 1.8061976577427166, "rss_peak_bytes": 55496704, 
+20:40:10 s10-mqtt-influxdb: /root/fitbench/sync3/bench/results/sync-2026-11-11/s10-mqtt-influxdb.json (0 runs failed)

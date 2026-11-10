@@ -1,0 +1,28 @@
+start 2026-11-10T18:00:37Z rounds=3
+s1-files-128b-1f start 2026-11-10T18:00:37Z
+s1-files-128b-1f exit 0 2026-11-10T18:03:32Z
+s1-files-128b-16f start 2026-11-10T18:03:32Z
+s1-files-128b-16f exit 0 2026-11-10T18:06:18Z
+s1-files-1k-1f start 2026-11-10T18:06:18Z
+s1-files-1k-1f exit 0 2026-11-10T18:09:12Z
+s1-files-1k-16f start 2026-11-10T18:09:12Z
+s1-files-1k-16f exit 0 2026-11-10T18:11:57Z
+s2-mysql-es start 2026-11-10T18:11:57Z
+s2-mysql-es exit 0 2026-11-10T18:22:33Z
+s3-mysql-kafka start 2026-11-10T18:22:33Z
+s3-mysql-kafka exit 0 2026-11-10T18:30:01Z
+s4-pg-kafka start 2026-11-10T18:30:01Z
+s4-pg-kafka exit 0 2026-11-10T18:33:57Z
+s5-mysql-batch start 2026-11-10T18:33:57Z
+s5-mysql-batch exit 0 2026-11-10T18:36:48Z
+s6-files-loki start 2026-11-10T18:36:48Z
+s6-files-loki exit 0 2026-11-10T18:44:39Z
+s7-rabbitmq-kafka start 2026-11-10T18:44:39Z
+s7-rabbitmq-kafka exit 0 2026-11-10T18:49:02Z
+s8-mqtt-kafka start 2026-11-10T18:49:02Z
+s8-mqtt-kafka exit 0 2026-11-10T20:25:08Z
+s9-mssql-kafka start 2026-11-10T20:25:08Z
+s9-mssql-kafka exit 0 2026-11-10T20:31:49Z
+s10-mqtt-influxdb start 2026-11-10T20:31:49Z
+s10-mqtt-influxdb exit 0 2026-11-10T20:40:10Z
+end 2026-11-10T20:40:10Z

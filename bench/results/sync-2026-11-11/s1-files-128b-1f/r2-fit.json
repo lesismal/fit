@@ -1,0 +1,24 @@
+{
+  "mover": "fit",
+  "scenario": "files",
+  "variant": "s1-files-128b-1f",
+  "records": 2000000,
+  "counted": 2000000,
+  "records_per_sec": 913017.0207966064,
+  "drain_seconds": 2.100179905,
+  "cpu_cores": 1.1864654994877688,
+  "startup_seconds": 0.101479536,
+  "rss_peak_bytes": 41971712,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 319.754821,
+    "p99": 559.932589,
+    "max": 560.839818,
+    "mean": 321.262453035
+  },
+  "profiles": [
+    "fit-s1-files-128b-1f-cpu.pprof",
+    "fit-s1-files-128b-1f-heap.pprof"
+  ]
+}

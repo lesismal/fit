@@ -1,0 +1,20 @@
+18:22:33 s3-mysql-kafka: movers fit,canal,debezium, 3 rounds, 500000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+18:22:34 s3-mysql-kafka round 1: fit
+ "records_per_sec": 318390.9741985203, "cpu_cores": 2.3801588992067946, "rss_peak_bytes": 46243840, 
+18:23:21 s3-mysql-kafka round 1: canal
+ "records_per_sec": 83399.26954077999, "cpu_cores": 3.3249418567715527, "rss_peak_bytes": 1280020480, 
+18:24:11 s3-mysql-kafka round 1: debezium
+ "records_per_sec": 111008.780006413, "cpu_cores": 3.2373967181902596, "rss_peak_bytes": 724172800, 
+18:25:04 s3-mysql-kafka round 2: debezium
+ "records_per_sec": 111103.63724253136, "cpu_cores": 3.3137419490669644, "rss_peak_bytes": 764170240, 
+18:25:57 s3-mysql-kafka round 2: canal
+ "records_per_sec": 84846.82371698768, "cpu_cores": 3.139921691582134, "rss_peak_bytes": 1282142208, 
+18:26:47 s3-mysql-kafka round 2: fit
+ "records_per_sec": 297778.7441737839, "cpu_cores": 2.3196632958683594, "rss_peak_bytes": 47591424, 
+18:27:32 s3-mysql-kafka round 3: fit
+ "records_per_sec": 317818.0963956627, "cpu_cores": 2.404076128806172, "rss_peak_bytes": 43937792, 
+18:28:18 s3-mysql-kafka round 3: canal
+ "records_per_sec": 87813.45551699257, "cpu_cores": 2.829678338403338, "rss_peak_bytes": 1260560384, 
+18:29:08 s3-mysql-kafka round 3: debezium
+ "records_per_sec": 111068.79408829406, "cpu_cores": 3.3400707470288467, "rss_peak_bytes": 703623168, 
+18:30:01 s3-mysql-kafka: /root/fitbench/sync3/bench/results/sync-2026-11-11/s3-mysql-kafka.json (0 runs failed)

@@ -1,0 +1,21 @@
+{
+  "mover": "debezium",
+  "scenario": "mysql-es",
+  "variant": "s2-mysql-es",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 26139.877429569442,
+  "drain_seconds": 19.088804121,
+  "cpu_cores": 1.7971740808141745,
+  "startup_seconds": 2.719556064,
+  "write_seconds": 10.514712548,
+  "rss_peak_bytes": 1374072832,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 939.018098,
+    "p99": 1579.770544,
+    "max": 1696.633146,
+    "mean": 934.1796889060008
+  }
+}

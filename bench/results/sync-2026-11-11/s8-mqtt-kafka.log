@@ -1,0 +1,14 @@
+18:49:02 s8-mqtt-kafka: movers fit,kafka-connect, 3 rounds, 500000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+18:49:03 s8-mqtt-kafka round 1: fit
+ "records_per_sec": 100301.59639061675, "cpu_cores": 1.798768219256947, "rss_peak_bytes": 17997824, 
+18:50:26 s8-mqtt-kafka round 1: kafka-connect
+ "records_per_sec": 0, "cpu_cores": 0, "rss_peak_bytes": 622141440, "error": "the sink had 499971 of 500010 records after 30m0s" 
+19:21:04 s8-mqtt-kafka round 2: kafka-connect
+ "records_per_sec": 0, "cpu_cores": 0, "rss_peak_bytes": 675880960, "error": "the sink had 499987 of 500010 records after 30m0s" 
+19:51:42 s8-mqtt-kafka round 2: fit
+ "records_per_sec": 100203.53268089157, "cpu_cores": 1.7886922417031559, "rss_peak_bytes": 18493440, 
+19:53:06 s8-mqtt-kafka round 3: fit
+ "records_per_sec": 100189.2603900021, "cpu_cores": 1.7896281130733276, "rss_peak_bytes": 19312640, 
+19:54:29 s8-mqtt-kafka round 3: kafka-connect
+ "records_per_sec": 0, "cpu_cores": 0, "rss_peak_bytes": 642842624, "error": "the sink had 500008 of 500010 records after 30m0s" 
+20:25:07 s8-mqtt-kafka: /root/fitbench/sync3/bench/results/sync-2026-11-11/s8-mqtt-kafka.json (0 runs failed)

@@ -1,0 +1,151 @@
+{
+  "kind": "sync",
+  "name": "s5-mysql-batch",
+  "finished": "2026-11-10T18:36:48.173112789Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-42-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "1f794c1b",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "2000000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "datax": "fit-syncbench/datax:202309",
+    "mysql": "mysql:8.0.42"
+  },
+  "results": [
+    {
+      "mover": "datax",
+      "scenario": "mysql-batch",
+      "variant": "s5-mysql-batch",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 195381.0384027086,
+      "drain_seconds": 9.530095731,
+      "cpu_cores": 0.524393787959946,
+      "startup_seconds": 1.005828238,
+      "rss_peak_bytes": 452427776,
+      "rounds": 3,
+      "spread": 0.35420884204095016
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-batch",
+      "variant": "s5-mysql-batch",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 236822.08367146755,
+      "drain_seconds": 8.022900443,
+      "cpu_cores": 0.7567834155660605,
+      "startup_seconds": 0.510672849,
+      "rss_peak_bytes": 51314688,
+      "profiles": [
+        "fit-s5-mysql-batch-cpu.pprof",
+        "fit-s5-mysql-batch-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.00211447153009782
+    }
+  ],
+  "runs": [
+    {
+      "mover": "datax",
+      "scenario": "mysql-batch",
+      "variant": "s5-mysql-batch",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 236347.11219796495,
+      "drain_seconds": 8.030561416,
+      "cpu_cores": 0.6405517290174971,
+      "startup_seconds": 1.004058193,
+      "rss_peak_bytes": 451190784
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-batch",
+      "variant": "s5-mysql-batch",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 236822.08367146755,
+      "drain_seconds": 8.022900443,
+      "cpu_cores": 0.7567834155660605,
+      "startup_seconds": 0.510672849,
+      "rss_peak_bytes": 51314688,
+      "profiles": [
+        "fit-s5-mysql-batch-cpu.pprof",
+        "fit-s5-mysql-batch-heap.pprof"
+      ]
+    },
+    {
+      "mover": "datax",
+      "scenario": "mysql-batch",
+      "variant": "s5-mysql-batch",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 167141.42082858313,
+      "drain_seconds": 11.469329329,
+      "cpu_cores": 0.46005549658935946,
+      "startup_seconds": 1.067124588,
+      "rss_peak_bytes": 450523136
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-batch",
+      "variant": "s5-mysql-batch",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 236733.173052575,
+      "drain_seconds": 8.025917853,
+      "cpu_cores": 0.7614292984217017,
+      "startup_seconds": 0.50772558,
+      "rss_peak_bytes": 48685056,
+      "profiles": [
+        "fit-s5-mysql-batch-cpu.pprof",
+        "fit-s5-mysql-batch-heap.pprof"
+      ]
+    },
+    {
+      "mover": "datax",
+      "scenario": "mysql-batch",
+      "variant": "s5-mysql-batch",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 195381.0384027086,
+      "drain_seconds": 9.530095731,
+      "cpu_cores": 0.524393787959946,
+      "startup_seconds": 1.005828238,
+      "rss_peak_bytes": 452427776
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-batch",
+      "variant": "s5-mysql-batch",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 237233.92660619676,
+      "drain_seconds": 8.025833519,
+      "cpu_cores": 0.7588642333013237,
+      "startup_seconds": 0.508284683,
+      "rss_peak_bytes": 50081792,
+      "profiles": [
+        "fit-s5-mysql-batch-cpu.pprof",
+        "fit-s5-mysql-batch-heap.pprof"
+      ]
+    }
+  ]
+}

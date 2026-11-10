@@ -1,0 +1,24 @@
+{
+  "mover": "fit",
+  "scenario": "files-loki",
+  "variant": "s6-files-loki",
+  "records": 2000000,
+  "counted": 2000000,
+  "records_per_sec": 278966.4109754072,
+  "drain_seconds": 7.099421013,
+  "cpu_cores": 1.3678426708626021,
+  "startup_seconds": 0.104813598,
+  "rss_peak_bytes": 42938368,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 283.500957,
+    "p99": 463.994885,
+    "max": 504.488868,
+    "mean": 280.1389317770003
+  },
+  "profiles": [
+    "fit-s6-files-loki-cpu.pprof",
+    "fit-s6-files-loki-heap.pprof"
+  ]
+}

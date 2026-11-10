@@ -1,0 +1,25 @@
+{
+  "mover": "fit",
+  "scenario": "rabbitmq-kafka",
+  "variant": "s7-rabbitmq-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 113964.81681942966,
+  "drain_seconds": 4.299572567,
+  "cpu_cores": 1.1470098301983143,
+  "startup_seconds": 2.858714961,
+  "write_seconds": 4.737303263,
+  "rss_peak_bytes": 16769024,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 159.528001,
+    "p99": 299.417015,
+    "max": 300.479089,
+    "mean": 163.18937270599994
+  },
+  "profiles": [
+    "fit-s7-rabbitmq-kafka-cpu.pprof",
+    "fit-s7-rabbitmq-kafka-heap.pprof"
+  ]
+}

@@ -1,0 +1,13 @@
+2026-11-10T20:33:14Z W! Strict environment variable handling is the new default starting with v1.38.0! If your configuration does not work with strict handling please explicitly add the --non-strict-env-handling flag to switch to the previous behavior!
+2026-11-10T20:33:14Z I! Loading config: /etc/telegraf/telegraf.conf
+2026-11-10T20:33:14Z I! Starting Telegraf 1.40.3 brought to you by InfluxData the makers of InfluxDB
+2026-11-10T20:33:14Z I! Available plugins: 244 inputs, 9 aggregators, 35 processors, 26 parsers, 68 outputs, 8 secret stores
+2026-11-10T20:33:14Z I! Loaded inputs: mqtt_consumer
+2026-11-10T20:33:14Z I! Loaded aggregators:
+2026-11-10T20:33:14Z I! Loaded processors:
+2026-11-10T20:33:14Z I! Loaded secretstores:
+2026-11-10T20:33:14Z I! Loaded outputs: influxdb_v2
+2026-11-10T20:33:14Z I! Tags enabled:
+2026-11-10T20:33:14Z I! [agent] Config: Interval:10s, Quiet:false, Hostname:"", Flush Interval:1s
+2026-11-10T20:33:14Z W! [agent] The default value of 'skip_processors_after_aggregators' will change to 'true' with Telegraf v1.41.0! If you need the current default behavior, please explicitly set the option to 'false'!
+2026-11-10T20:33:14Z I! [inputs.mqtt_consumer] Connected [tcp://mosquitto:1883]

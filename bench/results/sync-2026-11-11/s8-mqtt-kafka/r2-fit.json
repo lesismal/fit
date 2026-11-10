@@ -1,0 +1,25 @@
+{
+  "mover": "fit",
+  "scenario": "mqtt-kafka",
+  "variant": "s8-mqtt-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 100203.53268089157,
+  "drain_seconds": 4.900026844,
+  "cpu_cores": 1.7886922417031559,
+  "startup_seconds": 2.851693849,
+  "write_seconds": 27.124233129,
+  "rss_peak_bytes": 18493440,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 999,
+    "p50": 271.786027,
+    "p99": 548.665236,
+    "max": 559.171759,
+    "mean": 272.7626535595596
+  },
+  "profiles": [
+    "fit-s8-mqtt-kafka-cpu.pprof",
+    "fit-s8-mqtt-kafka-heap.pprof"
+  ]
+}

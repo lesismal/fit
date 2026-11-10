@@ -1,0 +1,2000 @@
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,815 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000111375]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,816 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000011137A on ExchangeId: EF1AD48BB8321F2-000000000011137A). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,816 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000111378]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,816 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000011137D on ExchangeId: EF1AD48BB8321F2-000000000011137D). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,816 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000011137B]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,817 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000111380 on ExchangeId: EF1AD48BB8321F2-0000000000111380). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,817 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000011137E]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,818 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000111543 on ExchangeId: EF1AD48BB8321F2-0000000000111543). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,818 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000111541]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,827 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000112346 on ExchangeId: EF1AD48BB8321F2-0000000000112346). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,827 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000112344]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,827 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000112349 on ExchangeId: EF1AD48BB8321F2-0000000000112349). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,827 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000112347]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,827 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000011234C on ExchangeId: EF1AD48BB8321F2-000000000011234C). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,828 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000011234A]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,828 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000011234F on ExchangeId: EF1AD48BB8321F2-000000000011234F). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,828 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000011234D]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,828 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000112352 on ExchangeId: EF1AD48BB8321F2-0000000000112352). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,828 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000112350]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,935 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000011D3F5 on ExchangeId: EF1AD48BB8321F2-000000000011D3F5). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:06,935 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000011D3F3]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,964 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018D308 on ExchangeId: EF1AD48BB8321F2-000000000018D308). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,964 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018D306]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,965 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018D30B on ExchangeId: EF1AD48BB8321F2-000000000018D30B). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,965 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018D309]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,965 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018D30E on ExchangeId: EF1AD48BB8321F2-000000000018D30E). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,965 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018D30C]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,965 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018D311 on ExchangeId: EF1AD48BB8321F2-000000000018D311). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,965 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018D30F]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,966 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018D314 on ExchangeId: EF1AD48BB8321F2-000000000018D314). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,966 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018D312]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,966 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018D317 on ExchangeId: EF1AD48BB8321F2-000000000018D317). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,966 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018D315]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,971 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DA1A on ExchangeId: EF1AD48BB8321F2-000000000018DA1A). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,971 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DA18]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,971 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DA1D on ExchangeId: EF1AD48BB8321F2-000000000018DA1D). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,971 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DA1B]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,971 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DA20 on ExchangeId: EF1AD48BB8321F2-000000000018DA20). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,971 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DA1E]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,972 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DA23 on ExchangeId: EF1AD48BB8321F2-000000000018DA23). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,972 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DA21]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,972 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DA26 on ExchangeId: EF1AD48BB8321F2-000000000018DA26). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,972 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DA24]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,975 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DDA9 on ExchangeId: EF1AD48BB8321F2-000000000018DDA9). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,975 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DDA7]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,975 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DDAC on ExchangeId: EF1AD48BB8321F2-000000000018DDAC). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,975 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DDAA]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,975 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DDAF on ExchangeId: EF1AD48BB8321F2-000000000018DDAF). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,976 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DDAD]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,976 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DDB2 on ExchangeId: EF1AD48BB8321F2-000000000018DDB2). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,976 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DDB0]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,977 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018DDB5 on ExchangeId: EF1AD48BB8321F2-000000000018DDB5). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,977 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018DDB3]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,981 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000018E4B8 on ExchangeId: EF1AD48BB8321F2-000000000018E4B8). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:07,981 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000018E4B6]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,019 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000019265B on ExchangeId: EF1AD48BB8321F2-000000000019265B). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,019 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000192659]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,019 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000019265E on ExchangeId: EF1AD48BB8321F2-000000000019265E). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,019 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000019265C]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,020 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000192821 on ExchangeId: EF1AD48BB8321F2-0000000000192821). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,020 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000019281F]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,020 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000192824 on ExchangeId: EF1AD48BB8321F2-0000000000192824). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,020 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000192822]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,020 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000192827 on ExchangeId: EF1AD48BB8321F2-0000000000192827). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,021 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000192825]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,021 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000019282A on ExchangeId: EF1AD48BB8321F2-000000000019282A). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,021 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-0000000000192828]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,021 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-000000000019282D on ExchangeId: EF1AD48BB8321F2-000000000019282D). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,021 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000019282B]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,021 ERROR  ||  Failed delivery for (MessageId: EF1AD48BB8321F2-0000000000192830 on ExchangeId: EF1AD48BB8321F2-0000000000192830). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Queue full
+
+Message History (source location and message history is disabled)
+---------------------------------------------------------------------------------------------------------------------------------------
+Source                                   ID                             Processor                                          Elapsed (ms)
+                                         ckcRemoveHeader-2/ckcRemoveHea from[kamelet://source?routeId=ckcRemoveHeader-2]              0
+	...
+                                         ckcRemoveHeader-2/toD1         seda:end?pollingConsumerQueueSize=1000&pollingCons            0
+
+Stacktrace
+---------------------------------------------------------------------------------------------------------------------------------------   [org.apache.camel.processor.errorhandler.DefaultErrorHandler]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:08,021 WARN   ||  Error processing exchange. Exchange[EF1AD48BB8321F2-000000000019282E]. Caused by: [java.lang.IllegalStateException - Queue full]   [org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer]
+java.lang.IllegalStateException: Queue full
+	at java.base/java.util.AbstractQueue.add(AbstractQueue.java:98)
+	at org.apache.camel.component.seda.SedaProducer.addToQueue(SedaProducer.java:258)
+	at org.apache.camel.component.seda.SedaProducer.process(SedaProducer.java:150)
+	at org.apache.camel.processor.SendDynamicProcessor.lambda$process$1(SendDynamicProcessor.java:225)
+	at org.apache.camel.support.cache.DefaultProducerCache.doInAsyncProducer(DefaultProducerCache.java:281)
+	at org.apache.camel.processor.SendDynamicProcessor.process(SendDynamicProcessor.java:205)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.handleFirst(RedeliveryErrorHandler.java:440)
+	at org.apache.camel.processor.errorhandler.RedeliveryErrorHandler$SimpleTask.run(RedeliveryErrorHandler.java:416)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.doRun(DefaultReactiveExecutor.java:199)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.executeReactiveWork(DefaultReactiveExecutor.java:189)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.tryExecuteReactiveWork(DefaultReactiveExecutor.java:166)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor$Worker.schedule(DefaultReactiveExecutor.java:148)
+	at org.apache.camel.impl.engine.DefaultReactiveExecutor.scheduleMain(DefaultReactiveExecutor.java:59)
+	at org.apache.camel.processor.Pipeline.process(Pipeline.java:162)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.processNonTransacted(CamelInternalProcessor.java:377)
+	at org.apache.camel.impl.engine.CamelInternalProcessor.process(CamelInternalProcessor.java:353)
+	at org.apache.camel.component.paho.mqtt5.PahoMqtt5Consumer$1.messageArrived(PahoMqtt5Consumer.java:116)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.deliverMessage(CommsCallback.java:637)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.handleMessage(CommsCallback.java:481)
+	at org.eclipse.paho.mqttv5.client.internal.CommsCallback.run(CommsCallback.java:224)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-11-10 18:51:34,058 INFO   ||  WorkerSourceTask{id=bench-0} Committing offsets for 499971 acknowledged messages   [org.apache.kafka.connect.runtime.WorkerSourceTask]

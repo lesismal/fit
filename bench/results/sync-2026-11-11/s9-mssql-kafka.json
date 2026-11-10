@@ -1,0 +1,224 @@
+{
+  "kind": "sync",
+  "name": "s9-mssql-kafka",
+  "finished": "2026-11-10T20:31:49.017971419Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-42-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "1f794c1b",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "500000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "debezium": "quay.io/debezium/connect:3.0.8.Final",
+    "kafka": "apache/kafka:3.9.1",
+    "mssql": "mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04"
+  },
+  "results": [
+    {
+      "mover": "debezium",
+      "scenario": "mssql-kafka",
+      "variant": "s9-mssql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 94179.77703924771,
+      "drain_seconds": 5.300235525,
+      "cpu_cores": 2.806836777314721,
+      "startup_seconds": 3.649831658,
+      "write_seconds": 16.634957695,
+      "rss_peak_bytes": 1475403776,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 858.532858,
+        "p99": 1498.296265,
+        "max": 1579.265596,
+        "mean": 856.0105844539996
+      },
+      "rounds": 3,
+      "spread": 0.12174239251691021
+    },
+    {
+      "mover": "fit",
+      "scenario": "mssql-kafka",
+      "variant": "s9-mssql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 344026.4998004057,
+      "drain_seconds": 1.399601485,
+      "cpu_cores": 1.8313127182770887,
+      "startup_seconds": 6.106880718,
+      "write_seconds": 17.001507548,
+      "rss_peak_bytes": 52101120,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 1398.242507,
+        "p99": 2408.363498,
+        "max": 2607.802698,
+        "mean": 1398.5413923680003
+      },
+      "profiles": [
+        "fit-s9-mssql-kafka-cpu.pprof",
+        "fit-s9-mssql-kafka-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.06801272180253294
+    }
+  ],
+  "runs": [
+    {
+      "mover": "debezium",
+      "scenario": "mssql-kafka",
+      "variant": "s9-mssql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 103704.09046160156,
+      "drain_seconds": 4.800553168,
+      "cpu_cores": 2.9445819065658143,
+      "startup_seconds": 5.188417026,
+      "write_seconds": 16.317058483,
+      "rss_peak_bytes": 1156005888,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 879.382036,
+        "p99": 1548.96683,
+        "max": 1687.739876,
+        "mean": 872.6242380839999
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mssql-kafka",
+      "variant": "s9-mssql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 321684.1984554825,
+      "drain_seconds": 1.49991825,
+      "cpu_cores": 1.755702352444875,
+      "startup_seconds": 6.019874395,
+      "write_seconds": 17.097684809,
+      "rss_peak_bytes": 55459840,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 1439.47065,
+        "p99": 2018.745637,
+        "max": 2418.708174,
+        "mean": 1427.2629507320023
+      },
+      "profiles": [
+        "fit-s9-mssql-kafka-cpu.pprof",
+        "fit-s9-mssql-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mssql-kafka",
+      "variant": "s9-mssql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 92238.41907813438,
+      "drain_seconds": 5.400406956,
+      "cpu_cores": 2.565158350633011,
+      "startup_seconds": 5.699397198,
+      "write_seconds": 17.350907385,
+      "rss_peak_bytes": 1145729024,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 917.909346,
+        "p99": 1738.645747,
+        "max": 1938.540481,
+        "mean": 916.5588868510001
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mssql-kafka",
+      "variant": "s9-mssql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 345082.37707910663,
+      "drain_seconds": 1.399665796,
+      "cpu_cores": 1.8474867410420024,
+      "startup_seconds": 6.109164112,
+      "write_seconds": 17.258086609,
+      "rss_peak_bytes": 52019200,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 1008.240089,
+        "p99": 1618.411975,
+        "max": 2308.741183,
+        "mean": 1010.7376074019994
+      },
+      "profiles": [
+        "fit-s9-mssql-kafka-cpu.pprof",
+        "fit-s9-mssql-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mssql-kafka",
+      "variant": "s9-mssql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 94179.77703924771,
+      "drain_seconds": 5.300235525,
+      "cpu_cores": 2.806836777314721,
+      "startup_seconds": 3.649831658,
+      "write_seconds": 16.634957695,
+      "rss_peak_bytes": 1475403776,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 858.532858,
+        "p99": 1498.296265,
+        "max": 1579.265596,
+        "mean": 856.0105844539996
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mssql-kafka",
+      "variant": "s9-mssql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 344026.4998004057,
+      "drain_seconds": 1.399601485,
+      "cpu_cores": 1.8313127182770887,
+      "startup_seconds": 6.106880718,
+      "write_seconds": 17.001507548,
+      "rss_peak_bytes": 52101120,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 1398.242507,
+        "p99": 2408.363498,
+        "max": 2607.802698,
+        "mean": 1398.5413923680003
+      },
+      "profiles": [
+        "fit-s9-mssql-kafka-cpu.pprof",
+        "fit-s9-mssql-kafka-heap.pprof"
+      ]
+    }
+  ]
+}

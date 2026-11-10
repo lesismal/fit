@@ -276,7 +276,7 @@ worker），不含页缓存；相当于 RSS 去掉文件映射的部分。WebSoc
 `sweep-DATE`）中，每轮 fitbench 一个 JSON，以工作负载和档位命名（`w1-api-500.json`），还有为它推导的方案（`plan.txt`、
 `plan-derived.json`）和报告 `report.md`、`report.zh-CN.md`，报告引用的表格在 `tables.md`。单独运行 fitbench 时写出
 `results/run-<时间>/results.json`，git 忽略它。同步基准测试（I193）的报告单独放在 `results/sync-日期` 下，最新的是
-[2026-11-10 的同步计划](results/sync-2026-11-10/report.zh-CN.md)。最新的报告是
+[2026-11-11 的同步计划](results/sync-2026-11-11/report.zh-CN.md)。最新的报告是
 [2026-11-06 的方案，基于 fib v1.7.2 的 fit v1.0.0](results/plan-2026-11-06/report.zh-CN.md)。要复现某个结果，在压测机上用其中记录的
 `params` 运行：
 

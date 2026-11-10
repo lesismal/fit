@@ -1,0 +1,311 @@
+{
+  "kind": "sync",
+  "name": "s3-mysql-kafka",
+  "finished": "2026-11-10T18:30:01.348488565Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-42-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "1f794c1b",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "500000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "canal": "canal/canal-server:v1.1.8",
+    "debezium": "quay.io/debezium/connect:3.0.8.Final",
+    "kafka": "apache/kafka:3.9.1",
+    "mysql": "mysql:8.0.42"
+  },
+  "results": [
+    {
+      "mover": "canal",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 84846.82371698768,
+      "drain_seconds": 5.892595363,
+      "cpu_cores": 3.139921691582134,
+      "startup_seconds": 2.461622885,
+      "write_seconds": 10.522396603,
+      "rss_peak_bytes": 1282142208,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 79.811889,
+        "p99": 120.660524,
+        "max": 122.869444,
+        "mean": 77.54630196999992
+      },
+      "rounds": 3,
+      "spread": 0.05202535325230793
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 111068.79408829406,
+      "drain_seconds": 4.499355594,
+      "cpu_cores": 3.3400707470288467,
+      "startup_seconds": 2.434140321,
+      "write_seconds": 10.484638997,
+      "rss_peak_bytes": 703623168,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 299.429699,
+        "p99": 578.332321,
+        "max": 599.921264,
+        "mean": 308.24816295399995
+      },
+      "rounds": 3,
+      "spread": 0.0008540403890849376
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 317818.0963956627,
+      "drain_seconds": 1.4992853,
+      "cpu_cores": 2.404076128806172,
+      "startup_seconds": 2.85478661,
+      "write_seconds": 10.435960268,
+      "rss_peak_bytes": 43937792,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 159.396343,
+        "p99": 299.276059,
+        "max": 300.7804,
+        "mean": 163.10814432500007
+      },
+      "profiles": [
+        "fit-s3-mysql-kafka-cpu.pprof",
+        "fit-s3-mysql-kafka-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.06485543226926732
+    }
+  ],
+  "runs": [
+    {
+      "mover": "canal",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 83399.26954077999,
+      "drain_seconds": 5.99487265,
+      "cpu_cores": 3.3249418567715527,
+      "startup_seconds": 2.463176503,
+      "write_seconds": 10.483069661,
+      "rss_peak_bytes": 1280020480,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 79.751747,
+        "p99": 120.496816,
+        "max": 121.428921,
+        "mean": 77.51386756000004
+      }
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 111008.780006413,
+      "drain_seconds": 4.500526895,
+      "cpu_cores": 3.2373967181902596,
+      "startup_seconds": 2.436454021,
+      "write_seconds": 10.623611975,
+      "rss_peak_bytes": 724172800,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 299.827865,
+        "p99": 578.212606,
+        "max": 599.272939,
+        "mean": 306.35361799799983
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 318390.9741985203,
+      "drain_seconds": 1.499728443,
+      "cpu_cores": 2.3801588992067946,
+      "startup_seconds": 2.853788568,
+      "write_seconds": 12.561831966,
+      "rss_peak_bytes": 46243840,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 159.486086,
+        "p99": 299.408056,
+        "max": 300.025629,
+        "mean": 163.17874753299984
+      },
+      "profiles": [
+        "fit-s3-mysql-kafka-cpu.pprof",
+        "fit-s3-mysql-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "canal",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 84846.82371698768,
+      "drain_seconds": 5.892595363,
+      "cpu_cores": 3.139921691582134,
+      "startup_seconds": 2.461622885,
+      "write_seconds": 10.522396603,
+      "rss_peak_bytes": 1282142208,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 79.811889,
+        "p99": 120.660524,
+        "max": 122.869444,
+        "mean": 77.54630196999992
+      }
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 111103.63724253136,
+      "drain_seconds": 4.499573663,
+      "cpu_cores": 3.3137419490669644,
+      "startup_seconds": 2.436253566,
+      "write_seconds": 10.523037411,
+      "rss_peak_bytes": 764170240,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 299.308891,
+        "p99": 579.134317,
+        "max": 599.273024,
+        "mean": 304.5241178190001
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 297778.7441737839,
+      "drain_seconds": 1.600181374,
+      "cpu_cores": 2.3196632958683594,
+      "startup_seconds": 2.855439505,
+      "write_seconds": 10.470590945,
+      "rss_peak_bytes": 47591424,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 159.567456,
+        "p99": 299.487701,
+        "max": 301.554456,
+        "mean": 163.24810764399993
+      },
+      "profiles": [
+        "fit-s3-mysql-kafka-cpu.pprof",
+        "fit-s3-mysql-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "canal",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 87813.45551699257,
+      "drain_seconds": 5.6935238120000005,
+      "cpu_cores": 2.829678338403338,
+      "startup_seconds": 2.465564648,
+      "write_seconds": 10.952427771,
+      "rss_peak_bytes": 1260560384,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 79.790601,
+        "p99": 120.738317,
+        "max": 123.380883,
+        "mean": 77.43124697199995
+      }
+    },
+    {
+      "mover": "debezium",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 111068.79408829406,
+      "drain_seconds": 4.499355594,
+      "cpu_cores": 3.3400707470288467,
+      "startup_seconds": 2.434140321,
+      "write_seconds": 10.484638997,
+      "rss_peak_bytes": 703623168,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 299.429699,
+        "p99": 578.332321,
+        "max": 599.921264,
+        "mean": 308.24816295399995
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mysql-kafka",
+      "variant": "s3-mysql-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 317818.0963956627,
+      "drain_seconds": 1.4992853,
+      "cpu_cores": 2.404076128806172,
+      "startup_seconds": 2.85478661,
+      "write_seconds": 10.435960268,
+      "rss_peak_bytes": 43937792,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 159.396343,
+        "p99": 299.276059,
+        "max": 300.7804,
+        "mean": 163.10814432500007
+      },
+      "profiles": [
+        "fit-s3-mysql-kafka-cpu.pprof",
+        "fit-s3-mysql-kafka-heap.pprof"
+      ]
+    }
+  ]
+}

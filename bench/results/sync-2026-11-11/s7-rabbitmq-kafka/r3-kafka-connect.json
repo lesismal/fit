@@ -1,0 +1,21 @@
+{
+  "mover": "kafka-connect",
+  "scenario": "rabbitmq-kafka",
+  "variant": "s7-rabbitmq-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 46199.28647014836,
+  "drain_seconds": 10.801032616,
+  "cpu_cores": 1.8108397312888922,
+  "startup_seconds": 2.442661363,
+  "write_seconds": 4.595788991,
+  "rss_peak_bytes": 586317824,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 259.050488,
+    "p99": 499.310709,
+    "max": 499.970537,
+    "mean": 259.1302307600001
+  }
+}

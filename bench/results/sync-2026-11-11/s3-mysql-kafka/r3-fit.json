@@ -1,0 +1,25 @@
+{
+  "mover": "fit",
+  "scenario": "mysql-kafka",
+  "variant": "s3-mysql-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 317818.0963956627,
+  "drain_seconds": 1.4992853,
+  "cpu_cores": 2.404076128806172,
+  "startup_seconds": 2.85478661,
+  "write_seconds": 10.435960268,
+  "rss_peak_bytes": 43937792,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 159.396343,
+    "p99": 299.276059,
+    "max": 300.7804,
+    "mean": 163.10814432500007
+  },
+  "profiles": [
+    "fit-s3-mysql-kafka-cpu.pprof",
+    "fit-s3-mysql-kafka-heap.pprof"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "mover": "fit",
+  "scenario": "mqtt-influxdb",
+  "variant": "s10-mqtt-influxdb",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 81927.47248879299,
+  "drain_seconds": 6.011414548,
+  "cpu_cores": 1.7490359242481575,
+  "startup_seconds": 2.100002234,
+  "write_seconds": 26.959508559,
+  "rss_peak_bytes": 19120128,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 275.173578,
+    "p99": 554.574776,
+    "max": 570.43941,
+    "mean": 281.55606065999996
+  },
+  "profiles": [
+    "fit-s10-mqtt-influxdb-cpu.pprof",
+    "fit-s10-mqtt-influxdb-heap.pprof"
+  ]
+}

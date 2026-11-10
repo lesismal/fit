@@ -1,0 +1,14 @@
+18:33:57 s5-mysql-batch: movers fit,datax, 3 rounds, 2000000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+18:33:57 s5-mysql-batch round 1: fit
+ "records_per_sec": 236822.08367146755, "cpu_cores": 0.7567834155660605, "rss_peak_bytes": 51314688, 
+18:34:24 s5-mysql-batch round 1: datax
+ "records_per_sec": 236347.11219796495, "cpu_cores": 0.6405517290174971, "rss_peak_bytes": 451190784 
+18:34:51 s5-mysql-batch round 2: datax
+ "records_per_sec": 167141.42082858313, "cpu_cores": 0.46005549658935946, "rss_peak_bytes": 450523136 
+18:35:26 s5-mysql-batch round 2: fit
+ "records_per_sec": 236733.173052575, "cpu_cores": 0.7614292984217017, "rss_peak_bytes": 48685056, 
+18:35:52 s5-mysql-batch round 3: fit
+ "records_per_sec": 237233.92660619676, "cpu_cores": 0.7588642333013237, "rss_peak_bytes": 50081792, 
+18:36:19 s5-mysql-batch round 3: datax
+ "records_per_sec": 195381.0384027086, "cpu_cores": 0.524393787959946, "rss_peak_bytes": 452427776 
+18:36:48 s5-mysql-batch: /root/fitbench/sync3/bench/results/sync-2026-11-11/s5-mysql-batch.json (0 runs failed)

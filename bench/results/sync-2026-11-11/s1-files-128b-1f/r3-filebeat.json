@@ -1,0 +1,20 @@
+{
+  "mover": "filebeat",
+  "scenario": "files",
+  "variant": "s1-files-128b-1f",
+  "records": 2000000,
+  "counted": 2000000,
+  "records_per_sec": 300610.33601379103,
+  "drain_seconds": 6.599906132,
+  "cpu_cores": 2.1798526694561176,
+  "startup_seconds": 0.101170759,
+  "rss_peak_bytes": 56344576,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 560.707092,
+    "p99": 1019.433006,
+    "max": 1219.581942,
+    "mean": 568.0691893860003
+  }
+}

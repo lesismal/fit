@@ -1,0 +1,14 @@
+20:25:08 s9-mssql-kafka: movers fit,debezium, 3 rounds, 500000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+20:25:08 s9-mssql-kafka round 1: fit
+ "records_per_sec": 321684.1984554825, "cpu_cores": 1.755702352444875, "rss_peak_bytes": 55459840, 
+20:26:13 s9-mssql-kafka round 1: debezium
+ "records_per_sec": 103704.09046160156, "cpu_cores": 2.9445819065658143, "rss_peak_bytes": 1156005888, 
+20:27:22 s9-mssql-kafka round 2: debezium
+ "records_per_sec": 92238.41907813438, "cpu_cores": 2.565158350633011, "rss_peak_bytes": 1145729024, 
+20:28:33 s9-mssql-kafka round 2: fit
+ "records_per_sec": 345082.37707910663, "cpu_cores": 1.8474867410420024, "rss_peak_bytes": 52019200, 
+20:29:38 s9-mssql-kafka round 3: fit
+ "records_per_sec": 344026.4998004057, "cpu_cores": 1.8313127182770887, "rss_peak_bytes": 52101120, 
+20:30:42 s9-mssql-kafka round 3: debezium
+ "records_per_sec": 94179.77703924771, "cpu_cores": 2.806836777314721, "rss_peak_bytes": 1475403776, 
+20:31:49 s9-mssql-kafka: /root/fitbench/sync3/bench/results/sync-2026-11-11/s9-mssql-kafka.json (0 runs failed)
