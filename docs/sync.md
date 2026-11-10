@@ -742,8 +742,53 @@ sync {
 ```
 
 The connection is TLS by default (`encrypt on`, negotiated in TDS's pre-login, the server's
-certificate checked against `ca_file` or the system's roots), `strict` for TDS 8 (SQL Server 2022),
-or `off`; SQL logins only, not Windows or Entra ID authentication.
+certificate checked against `ca_file` or the system's roots), `strict` for TDS 8 (TLS first, with
+TLS 1.3 where the server allows it), or `off`. `strict` needs SQL Server 2022 or later on Windows,
+2025 or later on Linux (2022's Linux image closes every strict connection), and a certificate made
+as Microsoft's guide says (its CN the server's host name, server authentication, the key the
+`mssql` user's); it is tested against SQL Server 2025.
+
+varchar, char and text columns whose collation's code page is neither 1252 (the Latin collations)
+nor UTF-8 (`Chinese_PRC_CI_AS`'s 936, `Japanese_CI_AS`'s 932) are read as `nvarchar`, so their
+values reach the sinks as text. With CDC, keep such a column in the database's own collation: CDC
+writes the non-ASCII characters of a varchar whose collation is not the database's into its change
+table as question marks, a limit of SQL Server's.
+
+The login is SQL authentication (`username`, `password_env`) unless `auth` names another, in the
+source and the sink alike:
+
+- `method entra`, Microsoft Entra ID, for Azure SQL Database and Managed Instance: an access token
+  sent in TDS's FEDAUTH. The token is a service principal's (`tenant_id`, `client_id`, and
+  `client_secret_env` or `client_certificate_file`, by OAuth's client credentials flow; `authority`
+  for another cloud), the host's managed identity's (`managed_identity true`, `client_id` for a
+  user-assigned one), or one got elsewhere (`token_env`, `token_file`, read at each connection).
+  No `username`; `encrypt` must not be `off`. Not tested against Azure.
+- `method kerberos`, Windows authentication with a Kerberos ticket: `username` is the principal
+  (`user` or `user@REALM`), its key from `password_env` or `keytab_file` (AES keys only); the realm
+  and KDCs from `realm` and `kdc`, or the `krb5_conf` (`/etc/krb5.conf`); the server's SPN
+  `MSSQLSvc/host:port` of `address`, or `spn`. Tested against an MIT KDC and SQL Server 2022 on
+  Linux, which takes the ticket but, without Active Directory, has no login to map it to; a whole
+  login against a domain's SQL Server is not tested.
+- `method ntlm`, Windows authentication with NTLMv2 for a server outside a domain: `username`
+  `DOMAIN\user`, `password_env`. Weaker than Kerberos (the server is not authenticated, and a
+  captured exchange can be guessed at offline); not tested against a server.
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-from-azure-sql {
+		source mssql {
+			address sql-prod.database.windows.net:1433
+			database shop
+			tables dbo.orders
+			auth { method entra; tenant_id contoso.onmicrosoft.com; client_id 0f1e5a52-1b9e-4c1d-9e2a-6c2f3b7d8a10; client_secret_env AZURE_SQL_SECRET }
+		}
+		sinks search {
+			sink elasticsearch { urls https://es:9200; username fit; password_env ES_PASSWORD }
+		}
+	}
+}
+```
 
 The `mssql` sink writes upserts by the record's key with `MERGE ... WITH (HOLDLOCK)` of each run of a
 batch's rows for one table (`upsert update_insert`: an `UPDATE`, then an `INSERT` when it found no

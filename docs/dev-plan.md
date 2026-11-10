@@ -7630,13 +7630,17 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
   a wrong password, bulk load of 5000 rows with max types and text, a rolled-back and a committed
   transaction, `WAITFOR` cancelled (no request left on the server, the connection goes on), a
   result closed early, and a session killed mid-result failing rather than hanging.
+- **Rulings built** (2026-11-10): TDS 8 `strict` run against SQL Server 2025 in Docker (2022's Linux
+  image refuses it), in CI's mssql family; varchar of other code pages read as nvarchar by the
+  source; Entra ID (FEDAUTH and `EntraClient`), Windows authentication by Kerberos (`krb5`, in fit)
+  and NTLMv2, the param `auth`. Unit tests: `mssqlwire` 98.0 %, `krb5` 97.5 %, `syncmssql` 98.0 %.
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
 1. **[kept]** (2026-11-10: the source and the sink send one request at a time, as the MySQL and PostgreSQL clients do; MARS would add state no caller uses) **The package and its shape**: `sync/mssql/wire`, named `mssqlwire`, a blocking `Conn` for one
    goroutine, as the MySQL and PostgreSQL clients are (decision 036): no pool, no MARS, one request
    at a time. Alternative: MARS sessions on one connection, which the source and sink do not need.
-2. **[needs the user]** (2026-11-10: `strict` (TDS 8) passes the unit tests but has never connected to a real server; see the list at the top of the section) **Encryption modes `on` (the default), `strict` and `off`**: `on` is TLS for the whole
+2. **[ruled 2026-11-10: done]** (2026-11-10: built: `mssql.sh` makes the certificate as SQL Server on Linux wants it and starts SQL Server 2025 for TDS 8; `TestMSSQLWireStrict` passes there on TLS 1.3, `protocol_version` 0x08000000, the certificate checked against the script's CA, CI's mssql family runs it; the client needed no fix. 2022's Linux image closes every strict connection after its ServerHello whatever the certificate (error 17821, microsoft/mssql-docker#878); 2019 has no TDS 8. Commit `e0ec5fc9`; decision 13) **Encryption modes `on` (the default), `strict` and `off`**: `on` is TLS for the whole
    connection, negotiated in the pre-login with the handshake inside TDS packets, the certificate
    verified (no "trust server certificate"); `strict` is TDS 8 (TLS first, ALPN `tds/8.0`); `off` is
    no TLS at all, and a server that requires encryption is refused. TDS's login-only encryption
@@ -7656,7 +7660,7 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
    `uniqueidentifier` a `UUID` in its text's byte order; char, nchar, text, ntext and xml `string`
    (xml's byte order mark dropped); binary, image, rowversion and CLR types `[]byte`; `sql_variant`
    its base type's value. Alternative: `time` as a `time.Time` on day one, decimals as `*big.Rat`.
-5. **[needs the user]** (2026-11-10: a varchar of a code page other than 1252 or UTF-8 (Chinese_PRC_CI_AS's 936, Japanese_CI_AS's 932) with non-ASCII bytes reaches the sinks as bytes, not text; see the list at the top of the section) **Code pages without a dependency**: varchar in a UTF-8 collation or code page 1252 (the Latin
+5. **[ruled 2026-11-10: done]** (2026-11-10: built: the source reads each column's cast length from `sys.columns` (`COLLATIONPROPERTY(collation_name, 'CodePage')`) and selects varchar, char and text of other code pages as `CAST(col AS nvarchar(n|max)) AS col` in the snapshot's, CDC's and change tracking's queries; interop `TestMSSQLSourceCodePage` (2022, 2019), Chinese_PRC_CI_AS text reaches the records as text. Commit `78078483`; decision 14) **Code pages without a dependency**: varchar in a UTF-8 collation or code page 1252 (the Latin
    collations, SQL Server's default) is decoded; a value of another code page with non-ASCII bytes
    comes as `[]byte`, and a varchar parameter refuses a character its code page lacks. Why: fit has
    no `golang.org/x/text`, and nvarchar, which most schemas use for text that is not Latin, is
@@ -7685,8 +7689,57 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 11. **[kept]** (2026-11-10: the descriptor from ENVCHANGE is what TDS needs either way; SQL statements keep the isolation level and errors where the server reports them) **Transactions through SQL** (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`, an isolation level set
     first), the descriptor from ENVCHANGE carried in every request's ALL_HEADERS, not TDS's
     transaction manager requests. Alternative: TM_BEGIN_XACT and friends.
-12. **[needs the user]** (2026-11-10: MARS, Always Encrypted, the UTF-8 feature extension and table-valued parameters stay out (no caller needs them); Entra ID (Azure SQL) and Windows or Kerberos authentication are a product choice: see the list at the top of the section) **Left out**: Windows, Kerberos and Entra ID authentication, Azure's routing ENVCHANGE (ignored),
+12. **[ruled 2026-11-10: done]** (2026-11-10: built: Entra ID (LOGIN7's FEDAUTH, security token flavour; `EntraClient` on net/http: client secret, certificate assertion, managed identity, or a token from an env var or file), Windows authentication by SSPI with Kerberos in SPNEGO (`sync/mssql/wire/krb5`, written in fit) and NTLMv2, Azure's routing ENVCHANGE followed once, the param `auth` of the source and sink. Interop: Kerberos against an MIT KDC and SQL Server 2022 (the ticket taken, the login then refused for want of AD); Entra ID and NTLM against fakes only. MARS, Always Encrypted, the UTF-8 feature extension and table-valued parameters stay out. Commits `35523fbe`, `07036415`; decisions 15 to 19) **Left out**: Windows, Kerberos and Entra ID authentication, Azure's routing ENVCHANGE (ignored),
     MARS, Always Encrypted, the UTF-8 feature extension, table-valued parameters.
+13. **[pending review]** (2026-11-10) **`strict` is tested on SQL Server 2025, a server of its own**: `mssql.sh`
+    starts 2025 beside 2022 and 2019 for TDS 8 only (`MSSQL_STRICT`, on by default, off in the light
+    matrix), since 2022's Linux image refuses strict; the other tests stay on 2022 and 2019. 2025
+    allows TLS 1.2 and 1.3 (strict negotiates 1.3); 2022 keeps 1.2, as Microsoft's guide sets it,
+    since its TDS 7 logins hung with 1.3 allowed. The certificate is in a volume owned by the mssql
+    user (700, 600), its CN the containers' host name `mssql.fit.test`. Alternative: run every test on
+    2025 too (a third full run in CI).
+14. **[pending review]** (2026-11-10) **Code-page casts**: a varchar, char or text column whose collation's
+    code page is neither 1252 nor 65001 is cast to `nvarchar(n)` (n its byte length, which bounds its
+    characters), `nvarchar(max)` past 4000 bytes and for `max` and text; key columns too (their
+    values then text, compared to the column by the server), the snapshot's table aliased so that
+    the key's order and conditions stay on the table's own columns. CDC keeps the non-ASCII
+    characters of such a column only in the database's own collation (question marks otherwise, a
+    limit Microsoft documents): documented, not detected. Alternative: `x/text` to decode bytes in the
+    client; a warning at discovery for CDC columns of a collation not the database's.
+15. **[pending review]** (2026-11-10) **Entra ID by the security token flavour only**: the client gets the
+    token before LOGIN7 (`Config.AccessToken`), from a service principal (client credentials, a
+    secret or a certificate's RS256 assertion with `x5t`), a managed identity (IMDS, or App Service's
+    endpoint when `IDENTITY_ENDPOINT` is set) or an env var or file read at each connection; kept until
+    five minutes before expiry. Not the ADAL workflow (FEDAUTHINFO, interactive or password flows),
+    which a sync service has no user for. `encrypt off` is refused with a token. Azure's routing
+    ENVCHANGE is now followed once (a managed identity's connections inside Azure are redirected).
+    Untested against Azure: unit tests against fake token endpoints and a fake TDS server.
+16. **[pending review]** (2026-11-10) **Kerberos written in fit, not `github.com/jcmturner/gokrb5/v8`**:
+    decision 036 item 1 prefers protocols in fit, and gokrb5 would bring seven modules (its own
+    asn1 fork among them); the crypto fit needs is AES, HMAC-SHA1 and PBKDF2 (the standard library
+    and `x/crypto`, already required). `sync/mssql/wire/krb5`: AS-REQ (password with
+    encrypted-timestamp pre-authentication, or keytab), TGS-REQ, AP-REQ in SPNEGO with mutual
+    authentication, about 1,750 lines with the test acceptor, checked against RFC 3961/3962's vectors, an MIT KDC and SQL
+    Server 2022. Left out: RC4 and DES, UDP, DNS lookups of KDCs, cross-realm referrals, renewal,
+    FAST, PKINIT, the MS-KRB5 OID offered first. Alternative: gokrb5, wider (RC4, UDP, referrals) at
+    the cost of the dependencies.
+17. **[pending review]** (2026-11-10) **NTLMv2 offered too** (`auth method ntlm`): common with SQL Server
+    for Windows accounts outside a domain, about 190 lines on `x/crypto/md4`; NTLMv1 and LM are not,
+    and no MIC or signing (TDS does not sign). Documented as weaker (the server unauthenticated, an
+    exchange open to offline guessing). Tested only against MS-NLMP's vectors and a fake server:
+    SQL Server on Linux takes no NTLM for AD logins. Alternative: Kerberos alone.
+18. **[pending review]** (2026-11-10) **The param `auth`, an object shared by the source and the sink**
+    (`method` entra, kerberos or ntlm, and each method's params, the others' refused), so that
+    SQL authentication's params stay as they were; `username` is no longer required by the schema but
+    by provisioning, unless `method entra`. `Config.SSPI` makes each login's exchange (Kerberos's
+    has state per login).
+19. **[pending review]** (2026-11-10) **Kerberos interop without Active Directory**: `mssql.sh` builds an
+    MIT KDC (`test/sync/krb5`) and gives SQL Server 2022 its SPN's keytab: the server takes the
+    ticket, answers the AP-REP (checked by the client), then refuses the login (18452), since SQL
+    Server on Linux maps a principal to a Windows login through AD's LDAP. A TDS server in the test
+    takes the KDC's tickets (`krb5.Acceptor`) for a whole login. Untested: a login through to the end
+    against a domain's SQL Server (Samba AD in Docker, with SQL Server's AD settings, was judged too
+    heavy for now), NTLM against any server, Entra ID against Azure.
 
 ### I216 SQL Server as a source
 
