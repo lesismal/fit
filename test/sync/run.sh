@@ -54,7 +54,8 @@
 #             three), Pulsar 3 and 4, Mosquitto 2 and EMQX 5
 #             (test/sync/rabbitmq.sh, nats.sh, pulsar.sh, mqtt.sh):
 #             TestRabbitMQ*, TestNATS*, TestPulsar*, TestMQTT*
-#   mssql     SQL Server 2022 and 2019 (test/sync/mssql.sh): TestMSSQL*
+#   mssql     SQL Server 2022 and 2019, and 2025 for TDS 8 strict
+#             (test/sync/mssql.sh): TestMSSQL*
 #   olap      Doris 2.1 and StarRocks 3.4 (test/sync/olap.sh): TestDoris*
 #   obs       Loki, the OpenTelemetry Collector, InfluxDB 2 and 3,
 #             TDengine 3, Qdrant and Milvus (test/sync/obs.sh), with
@@ -140,6 +141,7 @@ else
 		PULSAR_VERSIONS=${PULSAR_VERSIONS:-4}
 		EMQX=${EMQX:-0}
 		MSSQL_VERSIONS=${MSSQL_VERSIONS:-2022}
+		MSSQL_STRICT=${MSSQL_STRICT:-0}
 		OLAP=${OLAP:-doris}
 		if [ -z "${FIT_SYNC_MATRIX_SOURCES:-}" ]; then
 			# With a second round's family named, its sources alone: the
@@ -170,7 +172,7 @@ mq_has() {
 	case " $MQ_SYSTEMS " in *" $1 "*) return 0 ;; esac
 	return 1
 }
-export RABBITMQ_IMAGES NATS_VERSIONS PULSAR_VERSIONS EMQX MSSQL_VERSIONS OLAP
+export RABBITMQ_IMAGES NATS_VERSIONS PULSAR_VERSIONS EMQX MSSQL_VERSIONS MSSQL_STRICT OLAP
 has() {
 	case " $SYNC_FAMILIES " in *" $1 "*) return 0 ;; esac
 	return 1

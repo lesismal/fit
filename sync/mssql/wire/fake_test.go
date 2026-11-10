@@ -37,6 +37,10 @@ type fake struct {
 	handle    func(s *session, typ byte, body []byte)
 	// login, when set, answers the login in place of the usual answer.
 	login func(s *session, body []byte)
+	// pre, when set, is the pre-login's answer; preIn is the client's
+	// pre-login, the last read.
+	pre   []byte
+	preIn []byte
 
 	mu       sync.Mutex
 	sessions []*session
@@ -215,13 +219,21 @@ func (s *session) serve() {
 		if tc.Handshake() != nil {
 			return
 		}
+		f.mu.Lock()
 		s.nc, s.rd = tc, tc
+		f.mu.Unlock()
 	}
-	if _, _, err := s.readMsg(); err != nil {
+	_, preIn, err := s.readMsg()
+	if err != nil {
 		return
 	}
+	f.mu.Lock()
+	f.preIn = preIn
+	f.mu.Unlock()
 	var pre []byte
-	if f.noEnc {
+	if f.pre != nil {
+		pre = f.pre
+	} else if f.noEnc {
 		pre = []byte{0, 0, 6, 0, 6, 0xff, 16, 0, 0x10, 0x2d, 0, 0}
 		pre[1], pre[2] = 0, 6
 	} else {
@@ -235,7 +247,9 @@ func (s *session) serve() {
 			return
 		}
 		h.done = true
+		f.mu.Lock()
 		s.nc, s.rd = tc, tc
+		f.mu.Unlock()
 	}
 	typ, body, err := s.readMsg()
 	if err != nil || typ != pktLogin7 {

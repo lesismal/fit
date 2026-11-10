@@ -86,13 +86,7 @@ func mssqlExec(t *testing.T, c *mssqlwire.Conn, sql string, args ...any) {
 
 func TestMSSQLWireLogin(t *testing.T) {
 	eachMSSQL(t, func(t *testing.T, s mssqlServer) {
-		modes := []string{mssqlwire.EncryptOn, mssqlwire.EncryptOff}
-		if os.Getenv("FIT_SYNC_MSSQL_STRICT") == "1" {
-			// TDS 8 needs a certificate the server takes for strict
-			// connections, which mssql.sh's is not yet.
-			modes = append(modes, mssqlwire.EncryptStrict)
-		}
-		for _, mode := range modes {
+		for _, mode := range []string{mssqlwire.EncryptOn, mssqlwire.EncryptOff} {
 			c := s.dial(t, mode)
 			_, rows, err := c.QueryAll(context.Background(), "SELECT DB_NAME(), encrypt_option FROM sys.dm_exec_connections WHERE session_id = @@SPID")
 			if err != nil {
@@ -108,6 +102,58 @@ func TestMSSQLWireLogin(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// TestMSSQLWireStrict connects with TDS 8's strict encryption (TLS first,
+// ALPN tds/8.0) to the servers of FIT_SYNC_MSSQL_STRICT (mssql.sh's SQL
+// Server 2025, which allows TLS 1.3), the certificate verified against
+// mssql.sh's CA: a session encrypted from its first byte, on TLS 1.3, the
+// server's TDS 8. A server name the certificate does not hold, and roots
+// without the CA, are refused before any TDS. TDS 7.x's on and off still
+// work beside it.
+func TestMSSQLWireStrict(t *testing.T) {
+	servers := mssqlServers(t)
+	list := os.Getenv("FIT_SYNC_MSSQL_STRICT")
+	if list == "" {
+		t.Skip("no SQL Server taking strict: FIT_SYNC_MSSQL_STRICT is not set (test/sync/mssql.sh sets it)")
+	}
+	for _, e := range strings.Split(list, ",") {
+		name, addr, ok := strings.Cut(e, "=")
+		if !ok {
+			t.Fatalf("FIT_SYNC_MSSQL_STRICT: %q is not version=host:port", e)
+		}
+		s := servers[0]
+		s.name, s.addr = name, addr
+		t.Run(name, func(t *testing.T) {
+			c := s.dial(t, mssqlwire.EncryptStrict)
+			st, ok := c.TLS()
+			if !ok || st.Version != tls.VersionTLS13 || st.NegotiatedProtocol != "tds/8.0" || len(st.VerifiedChains) == 0 {
+				t.Fatalf("TLS %v: version %x, ALPN %q, %d chains", ok, st.Version, st.NegotiatedProtocol, len(st.VerifiedChains))
+			}
+			_, rows, err := c.QueryAll(context.Background(), "SELECT DB_NAME(), encrypt_option, protocol_version FROM sys.dm_exec_connections WHERE session_id = @@SPID")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rows[0][0] != "fit_sync" || rows[0][1] != "TRUE" || rows[0][2] != int64(0x08000000) {
+				t.Fatalf("%v (protocol_version %x)", rows, rows[0][2])
+			}
+			for _, mode := range []string{mssqlwire.EncryptOn, mssqlwire.EncryptOff} {
+				if _, _, err := s.dial(t, mode).QueryAll(context.Background(), "SELECT 1"); err != nil {
+					t.Fatal(mode, err)
+				}
+			}
+			cfg := s.config(mssqlwire.EncryptStrict)
+			cfg.TLS.ServerName = "elsewhere.fit.test"
+			if _, err := mssqlwire.Dial(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "certificate is valid for") {
+				t.Fatal(err)
+			}
+			cfg = s.config(mssqlwire.EncryptStrict)
+			cfg.TLS.RootCAs = x509.NewCertPool()
+			if _, err := mssqlwire.Dial(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "unknown authority") {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestMSSQLWireTypes(t *testing.T) {

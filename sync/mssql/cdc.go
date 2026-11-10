@@ -396,7 +396,7 @@ func (t *table) segments(at, to lsn) []segment {
 // the sequence number @p3 when seq.
 func changesQuery(in *instance, n int, seq bool) string {
 	q := fmt.Sprintf("SELECT TOP (%d) WITH TIES __$start_lsn, __$seqval, __$operation, %s FROM cdc.%s(@p1, @p2, N'all update old')",
-		n, list("", in.cols), quoteName("fn_cdc_get_all_changes_"+in.name))
+		n, selectList("", in.cols, in.casts), quoteName("fn_cdc_get_all_changes_"+in.name))
 	if seq {
 		q += " WHERE __$seqval > @p3"
 	}

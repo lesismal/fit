@@ -40,13 +40,14 @@ const (
 // Sink is the sink mssql.
 type Sink struct {
 	Address         string          `json:"address,omitempty" default:"\"127.0.0.1:1433\"" doc:"The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out."`
-	Username        string          `json:"username" fit:"required" doc:"The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and ALTER, with identity_insert)."`
+	Username        string          `json:"username,omitempty" doc:"The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and ALTER, with identity_insert); with auth, the Windows account (kerberos, ntlm). Needed but with auth's entra."`
 	PasswordEnv     string          `json:"password_env,omitempty" doc:"The environment variable holding username's password, read when the pipeline loads; none when left out."`
 	Database        string          `json:"database,omitempty" doc:"The database the tables are in; the login's default when left out."`
-	Encrypt         string          `json:"encrypt,omitempty" enum:"on,strict,off" default:"\"on\"" doc:"How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out."`
+	Encrypt         string          `json:"encrypt,omitempty" enum:"on,strict,off" default:"\"on\"" doc:"How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and later); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out."`
 	CAFile          string          `json:"ca_file,omitempty" doc:"A PEM file of the certificates the server's is checked against, in place of the system's roots."`
 	ServerName      string          `json:"server_name,omitempty" doc:"The name the server's certificate must have; address's host when left out."`
 	Timeout         config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long connecting, and each wait for the server, may take. 60s when left out or 0."`
+	Auth            *Auth           `json:"auth,omitempty" doc:"A login other than SQL authentication's username and password: Microsoft Entra ID (Azure SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out."`
 	Table           string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; its parts, split at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema shop's table orders). The table is not made: it is the user's, with a primary key or unique index on the record's key columns. {namespace} when left out."`
 	Upsert          string          `json:"upsert,omitempty" enum:"merge,update_insert" default:"\"merge\"" doc:"How a row is written: merge, a MERGE ... WITH (HOLDLOCK) of the run's rows; update_insert, an UPDATE by the key and, when it found no row, an INSERT, for those who keep MERGE out of their servers. merge when left out."`
 	IdentityInsert  bool            `json:"identity_insert,omitempty" doc:"Write the rows' values in the tables' IDENTITY columns (SET IDENTITY_INSERT ON around each statement), as a copy of another database's keys needs; the login then needs ALTER on the tables. false when left out."`
@@ -175,7 +176,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 		encrypt = mssqlwire.EncryptOn
 	}
 	cfg, errs := WireConfig(ctx, ConnParams{Address: s.Address, Username: s.Username, PasswordEnv: s.PasswordEnv, Database: s.Database,
-		Encrypt: encrypt, CAFile: s.CAFile, ServerName: s.ServerName, Timeout: s.Timeout})
+		Encrypt: encrypt, CAFile: s.CAFile, ServerName: s.ServerName, Timeout: s.Timeout, Auth: s.Auth})
 	s.cfg = cfg
 	if s.dial == nil {
 		s.dial = dialSink

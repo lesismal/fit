@@ -54,6 +54,9 @@ type fakeTable struct {
 	pk           []string
 	rows         map[int64][]any
 	ct           bool
+	// casts are the columns sys.columns says are cast to nvarchar, and
+	// their lengths.
+	casts map[string]string
 	// ctChanges are change tracking's: a key's last change and version.
 	ctChanges map[int64]fakeCT
 }
@@ -291,7 +294,7 @@ func (c *fakeConn) QueryAll(_ context.Context, sql string, args ...any) ([]mssql
 			if args[0] == "cdc."+quoteName(in.name+"_CT") {
 				var rows [][]any
 				for _, col := range in.cols {
-					rows = append(rows, []any{col})
+					rows = append(rows, []any{col, castOf(in.table, col)})
 				}
 				return nil, rows, nil
 			}
@@ -314,7 +317,7 @@ func (c *fakeConn) QueryAll(_ context.Context, sql string, args ...any) ([]mssql
 		t := f.byFrom(args[0])
 		var rows [][]any
 		for _, col := range t.cols {
-			rows = append(rows, []any{col})
+			rows = append(rows, []any{col, castOf(t, col)})
 		}
 		return nil, rows, nil
 	case strings.Contains(sql, "FROM sys.indexes"):
@@ -372,6 +375,14 @@ func (c *fakeConn) QueryAll(_ context.Context, sql string, args ...any) ([]mssql
 		return f.snapshot(sql, top, args)
 	}
 	return nil, nil, fmt.Errorf("fake: no answer to %q", sql)
+}
+
+// castOf is sys.columns' cast length of t's column col, nil without one.
+func castOf(t *fakeTable, col string) any {
+	if n, ok := t.casts[col]; ok {
+		return n
+	}
+	return nil
 }
 
 func (f *fake) byFrom(a any) *fakeTable {

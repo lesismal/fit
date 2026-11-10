@@ -665,7 +665,43 @@ sync {
 ```
 
 连接默认使用 TLS（`encrypt on`，在 TDS 的 pre-login 中协商，服务器证书按 `ca_file` 或系统根证书校验），TDS 8 用 `strict`
-（SQL Server 2022），或 `off`；只支持 SQL 登录，不支持 Windows 或 Entra ID 认证。
+（先 TLS，服务器允许时用 TLS 1.3），或 `off`。`strict` 需要 Windows 上的 SQL Server 2022 及以后、Linux 上的 2025 及以后
+（2022 的 Linux 镜像会关闭每个 strict 连接），以及按微软指南制作的证书（CN 为服务器主机名、用于服务器身份验证、私钥属于
+`mssql` 用户）；已对 SQL Server 2025 测试。
+
+排序规则的代码页既不是 1252（拉丁排序规则）也不是 UTF-8 的 varchar、char 与 text 列（如 `Chinese_PRC_CI_AS` 的 936、
+`Japanese_CI_AS` 的 932）按 `nvarchar` 读取，其值以文本到达 sink。使用 CDC 时，请让这样的列保持数据库自身的排序规则：
+排序规则不同于数据库的 varchar 中的非 ASCII 字符，CDC 会在变更表中写成问号，这是 SQL Server 的限制。
+
+登录默认为 SQL 身份验证（`username`、`password_env`），除非 `auth` 指定其他方式，source 与 sink 相同：
+
+- `method entra`，Microsoft Entra ID，用于 Azure SQL Database 与 Managed Instance：在 TDS 的 FEDAUTH 中发送访问令牌。
+  令牌来自服务主体（`tenant_id`、`client_id`，以及 `client_secret_env` 或 `client_certificate_file`，走 OAuth 的客户端
+  凭据流程；其他云用 `authority`）、主机的托管标识（`managed_identity true`，用户分配的标识加 `client_id`），或在别处
+  获取的令牌（`token_env`、`token_file`，每次连接时读取）。不用 `username`；`encrypt` 不能是 `off`。未对 Azure 测试。
+- `method kerberos`，用 Kerberos 票据的 Windows 身份验证：`username` 为主体（`user` 或 `user@REALM`），密钥来自
+  `password_env` 或 `keytab_file`（仅 AES 密钥）；领域与 KDC 来自 `realm` 与 `kdc`，或 `krb5_conf`（`/etc/krb5.conf`）；
+  服务器的 SPN 为 `address` 的 `MSSQLSvc/host:port`，或 `spn`。已对 MIT KDC 与 Linux 上的 SQL Server 2022 测试：它接受
+  票据，但没有 Active Directory，无法把它映射到登录名；对域中 SQL Server 的完整登录未测试。
+- `method ntlm`，用 NTLMv2 的 Windows 身份验证，用于域外的服务器：`username` 为 `DOMAIN\user`，加 `password_env`。
+  比 Kerberos 弱（服务器不被验证，截获的交换可被离线猜测）；未对服务器测试。
+
+```fit
+sync {
+	state_dir /var/lib/fit/sync
+	pipelines orders-from-azure-sql {
+		source mssql {
+			address sql-prod.database.windows.net:1433
+			database shop
+			tables dbo.orders
+			auth { method entra; tenant_id contoso.onmicrosoft.com; client_id 0f1e5a52-1b9e-4c1d-9e2a-6c2f3b7d8a10; client_secret_env AZURE_SQL_SECRET }
+		}
+		sinks search {
+			sink elasticsearch { urls https://es:9200; username fit; password_env ES_PASSWORD }
+		}
+	}
+}
+```
 
 目标 `mssql` 用 `MERGE ... WITH (HOLDLOCK)` 按记录的键 upsert 一个批次中同一张表的每段连续行（`upsert update_insert`：先
 `UPDATE`，找不到行时再 `INSERT`），按键删除；不属于源事务的连续插入（快照的）达到 `bulk_rows`（1000）条时，先批量装载

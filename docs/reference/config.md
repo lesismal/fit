@@ -7618,13 +7618,14 @@ Follows SQL Server (2016 and later): a snapshot of the tables read by key withou
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string | `"127.0.0.1:1433"` | The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out. |
-| `username` | string |  | Required. The SQL login, which needs SELECT on the tables, and on the cdc schema (db_owner, or the role CDC was enabled with) or VIEW CHANGE TRACKING on them. |
+| `username` | string |  | The SQL login, which needs SELECT on the tables, and on the cdc schema (db_owner, or the role CDC was enabled with) or VIEW CHANGE TRACKING on them; with auth, the Windows account (kerberos, ntlm). Needed but with auth's entra. |
 | `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
 | `database` | string |  | Required. The database whose tables are read. |
-| `encrypt` | string: `on`, `strict`, `off` | `"on"` | How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out. |
+| `encrypt` | string: `on`, `strict`, `off` | `"on"` | How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and later); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out. |
 | `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots. |
 | `server_name` | string |  | The name the server's certificate must have; address's host when left out. |
 | `timeout` | duration | `"60s"` | How long connecting, and each wait for the server, may take. 60s when left out or 0. |
+| `auth` | [object](#syncmssql-auth) |  | A login other than SQL authentication's username and password: Microsoft Entra ID (Azure SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out. |
 | `tables` | list of string |  | The tables read, as schema.table globs (* and ? within a name, [ranges]): dbo.orders, sales.*. A table named whole must have CDC (or change tracking) on, or the pipeline fails saying how to turn it on; a glob matches the tables that have it, and picks up a table CDC begins to capture later. Every table CDC (or change tracking) follows when left out. |
 | `exclude` | list of string |  | Tables left out of those tables names, as schema.table globs. |
 | `keys` | object of list of string |  | The key's columns of tables, by schema.table, in place of the primary key (or the unique index CDC was enabled with): for a table without one. A table with neither has records without a key, and its snapshot is read in one query. |
@@ -7634,6 +7635,29 @@ Follows SQL Server (2016 and later): a snapshot of the tables read by key withou
 | `poll_interval` | duration | `"1s"` | How long the source waits, once it has read every change, before it looks again. 1s when left out or 0. |
 | `window_transactions` | integer, 0 to 100000 | `1000` | With cdc, the most transactions read from the change tables at once. 1000 when left out or 0. |
 | `window_rows` | integer, 0 to 1000000 | `10000` | With cdc, the most changed rows held at once to put the change tables' rows in order: a window of transactions with more is read again smaller, and a single transaction with more is read in pages of this many. 10000 when left out or 0. |
+
+<a id="syncmssql-auth"></a>
+
+### `auth` in `mssql`
+
+Also at `auth`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `method` | string: `entra`, `kerberos`, `ntlm` |  | Required. How the login is made: entra, Microsoft Entra ID (Azure SQL Database and Managed Instance), an access token (a service principal's, a managed identity's, or one given) sent in TDS's FEDAUTH, username and password_env unused; kerberos, Windows authentication with a Kerberos ticket, username the principal (user, or user@REALM), its key from password_env or keytab_file; ntlm, Windows authentication with NTLMv2, username DOMAIN\user and password_env its password, for a server outside a domain (weaker than Kerberos: the server is not authenticated). |
+| `tenant_id` | string |  | With entra, the service principal's directory (tenant) ID or domain. |
+| `client_id` | string |  | With entra, the service principal's application (client) ID; with managed_identity, a user-assigned identity's client ID (the system-assigned identity when left out). |
+| `client_secret_env` | string |  | With entra, the environment variable holding the service principal's client secret, read when the pipeline loads. |
+| `client_certificate_file` | string |  | With entra, a PEM file of the service principal's certificate and its RSA private key, which signs the client assertion in place of a secret. |
+| `managed_identity` | boolean |  | With entra, the token is the host's managed identity's, from Azure's instance metadata service (or App Service's identity endpoint, when IDENTITY_ENDPOINT is set). false when left out. |
+| `token_env` | string |  | With entra, the environment variable holding an access token for https://database.windows.net/, read at each connection, for a token got elsewhere. |
+| `token_file` | string |  | With entra, a file holding an access token for https://database.windows.net/, read at each connection, so that whatever renews it may replace it. |
+| `authority` | string | `"https://login.microsoftonline.com"` | With entra and a service principal, the token endpoint's origin: another cloud's (https://login.microsoftonline.us, https://login.chinacloudapi.cn). https://login.microsoftonline.com when left out. |
+| `realm` | string |  | With kerberos, the principal's realm; username's @REALM, or krb5_conf's default_realm, when left out. |
+| `kdc` | list of string |  | With kerberos, the realm's KDCs, as host or host:port (88), tried in turn over TCP; krb5_conf's when left out. |
+| `krb5_conf` | string | `"/etc/krb5.conf"` | With kerberos, the krb5.conf whose default_realm and realms' kdc lines are read when realm or kdc is left out. /etc/krb5.conf when left out. |
+| `keytab_file` | string |  | With kerberos, a keytab file holding the principal's keys (AES), in place of password_env. |
+| `spn` | string |  | With kerberos, the server's service principal name, as MSSQLSvc/host.example.com:1433; MSSQLSvc/ with address's host and port when left out (the host must then be the name the SPN was registered with, not an IP address). |
 
 <a id="sync-sources-mysql"></a>
 
@@ -9398,13 +9422,14 @@ Writes records to SQL Server (2016 and later): inserts, updates and messages as 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string | `"127.0.0.1:1433"` | The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out. |
-| `username` | string |  | Required. The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and ALTER, with identity_insert). |
+| `username` | string |  | The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and ALTER, with identity_insert); with auth, the Windows account (kerberos, ntlm). Needed but with auth's entra. |
 | `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
 | `database` | string |  | The database the tables are in; the login's default when left out. |
-| `encrypt` | string: `on`, `strict`, `off` | `"on"` | How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out. |
+| `encrypt` | string: `on`, `strict`, `off` | `"on"` | How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and later); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out. |
 | `ca_file` | string |  | A PEM file of the certificates the server's is checked against, in place of the system's roots. |
 | `server_name` | string |  | The name the server's certificate must have; address's host when left out. |
 | `timeout` | duration | `"60s"` | How long connecting, and each wait for the server, may take. 60s when left out or 0. |
+| `auth` | [object](#syncmssql-auth) |  | A login other than SQL authentication's username and password: Microsoft Entra ID (Azure SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out. |
 | `table` | string | `"{namespace}"` | The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; its parts, split at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema shop's table orders). The table is not made: it is the user's, with a primary key or unique index on the record's key columns. {namespace} when left out. |
 | `upsert` | string: `merge`, `update_insert` | `"merge"` | How a row is written: merge, a MERGE ... WITH (HOLDLOCK) of the run's rows; update_insert, an UPDATE by the key and, when it found no row, an INSERT, for those who keep MERGE out of their servers. merge when left out. |
 | `identity_insert` | boolean |  | Write the rows' values in the tables' IDENTITY columns (SET IDENTITY_INSERT ON around each statement), as a copy of another database's keys needs; the login then needs ALTER on the tables. false when left out. |

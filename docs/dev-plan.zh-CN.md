@@ -5492,12 +5492,15 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
   镜像，amd64 模拟运行）上通过：每种类型作为参数写入并读回，服务器生成的字面量，`encrypt` 为 on 与 off，错误密码，
   含 max 类型与 text 的 5000 行批量导入，回滚与提交的事务，被取消的 `WAITFOR`（服务端不留请求，连接继续可用），提前关闭
   的结果，以及结果中途被 KILL 的会话返回错误而不是挂起。
+- **裁决已实现**（2026-11-10）：TDS 8 `strict` 在 Docker 中对 SQL Server 2025 运行（2022 的 Linux 镜像拒绝它），纳入 CI 的
+  mssql 组；源把其他代码页的 varchar 读为 nvarchar；Entra ID（FEDAUTH 与 `EntraClient`）、Kerberos（`krb5`，在 fit 中实现）
+  与 NTLMv2 的 Windows 认证、参数 `auth`。单元测试：`mssqlwire` 98.0 %、`krb5` 97.5 %、`syncmssql` 98.0 %。
 
 **待审查的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
 1. **[kept]**（2026-11-10：源与目标一次只发一个请求，与 MySQL 和 PostgreSQL 客户端一样；MARS 会增加无人使用的状态） **包及其形态**：`sync/mssql/wire`，包名 `mssqlwire`，一个供单个 goroutine 使用的阻塞式 `Conn`，与 MySQL 和 PostgreSQL
    客户端一致（决定 036）：无连接池、无 MARS、一次一个请求。备选：在一个连接上用 MARS 会话，源与目标都不需要。
-2. **[needs the user]**（2026-11-10：`strict`（TDS 8）通过了单元测试，但从未连上过真实服务器；见本节开头的清单） **加密方式 `on`（默认）、`strict` 与 `off`**：`on` 为整个连接使用 TLS，在 prelogin 中协商、握手放在 TDS 包内，证书
+2. **[ruled 2026-11-10: done]** （2026-11-10：已实现：`mssql.sh` 按 Linux 上 SQL Server 的要求制作证书，并为 TDS 8 启动 SQL Server 2025；`TestMSSQLWireStrict` 在其上通过，使用 TLS 1.3，`protocol_version` 为 0x08000000，证书按脚本的 CA 校验，CI 的 mssql 组运行它；客户端无需修改。2022 的 Linux 镜像无论证书如何都会在 ServerHello 之后关闭 strict 连接（错误 17821，microsoft/mssql-docker#878）；2019 没有 TDS 8。提交 `e0ec5fc9`；决定 13） **加密方式 `on`（默认）、`strict` 与 `off`**：`on` 为整个连接使用 TLS，在 prelogin 中协商、握手放在 TDS 包内，证书
    必须验证（没有"信任服务器证书"）；`strict` 为 TDS 8（先 TLS，ALPN `tds/8.0`）；`off` 完全不用 TLS，服务器要求加密时
    拒绝连接。不提供 TDS 的仅登录加密（密码加密、数据不加密）：看似加密实则不然。`strict` 通过单元测试但未通过互通：镜像
    在证书未按 TDS 8 的要求配置前拒绝它（`mssql.sh` 的证书尚未如此），因此其互通测试只在 `FIT_SYNC_MSSQL_STRICT=1` 时运行。
@@ -5511,7 +5514,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    `time.Duration`；`uniqueidentifier` 为按文本字节序的 `UUID`；char、nchar、text、ntext 与 xml 为 `string`（去掉 xml 的
    字节序标记）；binary、image、rowversion 与 CLR 类型为 `[]byte`；`sql_variant` 为其基础类型的值。备选：`time` 作为
    第一天的 `time.Time`，decimal 作为 `*big.Rat`。
-5. **[needs the user]**（2026-11-10：代码页不是 1252 或 UTF-8 的 varchar（Chinese_PRC_CI_AS 的 936、Japanese_CI_AS 的 932）中含非 ASCII 字节的值以字节而非文本到达目标；见本节开头的清单） **不加依赖的代码页**：UTF-8 排序规则或代码页 1252（拉丁排序规则，SQL Server 的默认）的 varchar 会被解码；其他代码页中
+5. **[ruled 2026-11-10: done]** （2026-11-10：已实现：源从 `sys.columns` 读取每列的转换长度（`COLLATIONPROPERTY(collation_name, 'CodePage')`），在快照、CDC 与变更跟踪的查询中把其他代码页的 varchar、char 与 text 选为 `CAST(col AS nvarchar(n|max)) AS col`；互操作 `TestMSSQLSourceCodePage`（2022、2019）中 Chinese_PRC_CI_AS 的文本以文本到达记录。提交 `78078483`；决定 14） **不加依赖的代码页**：UTF-8 排序规则或代码页 1252（拉丁排序规则，SQL Server 的默认）的 varchar 会被解码；其他代码页中
    含非 ASCII 字节的值以 `[]byte` 返回，varchar 参数拒绝其代码页没有的字符。原因：fit 没有 `golang.org/x/text`，而多数
    模式对非拉丁文本使用 UTF-16 的 nvarchar。备选：用 `x/text` 支持所有代码页；或由源在查询中把这类列转为 nvarchar。
 6. **[kept]**（2026-11-10：`datetimeoffset` 列保留时刻；`datetime2` 或 `datetime` 列取值自身的钟面时间（SQL Server 丢弃偏移），而目标发送的是 UTC（`AsTime().UTC()`），因此这类列得到 UTC 的钟面时间，决定 4 读回的正是同一时刻。`datetime2(7)` 会无谓地丢掉 `datetimeoffset` 列的偏移） **由 Go 类型决定参数类型**（`Param.Type` 未指定时）：整数 `bigint`，`float32` `real`，`float64` `float`，`string`
@@ -5529,8 +5532,40 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     因此调用方按自己的节奏读取长结果时，只要服务器还在发送就不会超时。
 11. **[kept]**（2026-11-10：两种做法都需要 ENVCHANGE 给出的描述符；SQL 语句让隔离级别与错误由服务器在其位置报告） **事务经 SQL 完成**（`BEGIN TRANSACTION`、`COMMIT`、`ROLLBACK`，先设置隔离级别），ENVCHANGE 给出的描述符放进每个请求的
     ALL_HEADERS，不使用 TDS 的事务管理器请求。备选：TM_BEGIN_XACT 等。
-12. **[needs the user]**（2026-11-10：MARS、Always Encrypted、UTF-8 功能扩展与表值参数仍不包括（无调用方需要）；Entra ID（Azure SQL）与 Windows 或 Kerberos 认证是产品选择：见本节开头的清单） **未包括**：Windows、Kerberos 与 Entra ID 认证，Azure 的 routing ENVCHANGE（忽略），MARS，Always Encrypted，UTF-8 功能
+12. **[ruled 2026-11-10: done]** （2026-11-10：已实现：Entra ID（LOGIN7 的 FEDAUTH，安全令牌方式；基于 net/http 的 `EntraClient`：客户端密码、证书断言、托管标识，或来自环境变量或文件的令牌）、经 SSPI 的 Windows 认证（SPNEGO 中的 Kerberos，`sync/mssql/wire/krb5`，在 fit 中实现）与 NTLMv2、Azure 的 routing ENVCHANGE 跟随一次、源与目标的参数 `auth`。互操作：Kerberos 对 MIT KDC 与 SQL Server 2022（票据被接受，随后因没有 AD 而拒绝登录）；Entra ID 与 NTLM 只对假服务测试。MARS、Always Encrypted、UTF-8 功能扩展与表值参数仍不包括。提交 `35523fbe`、`07036415`；决定 15 到 19） **未包括**：Windows、Kerberos 与 Entra ID 认证，Azure 的 routing ENVCHANGE（忽略），MARS，Always Encrypted，UTF-8 功能
     扩展，表值参数。
+13. **[pending review]**（2026-11-10） **`strict` 在 SQL Server 2025 上测试，单独一个服务器**：`mssql.sh` 在 2022 与 2019 之外
+    另启动只用于 TDS 8 的 2025（`MSSQL_STRICT`，默认开启，轻量矩阵中关闭），因为 2022 的 Linux 镜像拒绝 strict；其余测试
+    仍在 2022 与 2019 上。2025 允许 TLS 1.2 与 1.3（strict 协商为 1.3）；2022 按微软指南保持 1.2，因为允许 1.3 时它的 TDS 7
+    登录会挂起。证书放在属于 mssql 用户的卷中（700、600），CN 为容器主机名 `mssql.fit.test`。备选：所有测试也在 2025 上跑
+    （CI 中第三次完整运行）。
+14. **[pending review]**（2026-11-10） **代码页转换**：排序规则代码页既不是 1252 也不是 65001 的 varchar、char 或 text 列转换为
+    `nvarchar(n)`（n 为其字节长度，字符数不会超过它），超过 4000 字节及 `max` 与 text 用 `nvarchar(max)`；键列也转换（其值
+    成为文本，由服务器与列比较），快照的表加别名，使键的顺序与条件仍作用于表自身的列。只有在数据库自身的排序规则下，CDC
+    才保留这类列中的非 ASCII 字符（否则为问号，微软记载的限制）：写入文档，不做检测。备选：在客户端用 `x/text` 解码字节；
+    在发现表时对排序规则不同于数据库的 CDC 列给出警告。
+15. **[pending review]**（2026-11-10） **Entra ID 只用安全令牌方式**：客户端在 LOGIN7 之前取得令牌（`Config.AccessToken`），来自
+    服务主体（客户端凭据：密码，或证书的 RS256 断言并带 `x5t`）、托管标识（IMDS，设置了 `IDENTITY_ENDPOINT` 时为 App Service
+    的端点）或每次连接时读取的环境变量或文件；在过期前五分钟内保留。不用 ADAL 方式（FEDAUTHINFO、交互或密码流程），同步服务
+    没有用户来完成它们。带令牌时拒绝 `encrypt off`。现在跟随 Azure 的 routing ENVCHANGE 一次（Azure 内托管标识的连接会被
+    重定向）。未对 Azure 测试：只有对假令牌端点与假 TDS 服务器的单元测试。
+16. **[pending review]**（2026-11-10） **Kerberos 在 fit 中实现，而不是 `github.com/jcmturner/gokrb5/v8`**：决定 036 第 1 条倾向
+    在 fit 中实现协议，gokrb5 会带来七个模块（包括它自己的 asn1 分支）；fit 需要的密码学是 AES、HMAC-SHA1 与 PBKDF2（标准库
+    与已经依赖的 `x/crypto`）。`sync/mssql/wire/krb5`：AS-REQ（密码加加密时间戳预认证，或 keytab）、TGS-REQ、SPNEGO 中带
+    相互认证的 AP-REQ，连同测试用的接受方约 1750 行，按 RFC 3961/3962 的测试向量、MIT KDC 与 SQL Server 2022 检验。未包括：RC4 与 DES、UDP、
+    用 DNS 查找 KDC、跨领域引用、续期、FAST、PKINIT、优先提供 MS-KRB5 OID。备选：gokrb5，覆盖更广（RC4、UDP、引用），
+    代价是这些依赖。
+17. **[pending review]**（2026-11-10） **也提供 NTLMv2**（`auth method ntlm`）：SQL Server 对域外 Windows 账户常用它，基于
+    `x/crypto/md4` 约 190 行；不提供 NTLMv1 与 LM，没有 MIC 与签名（TDS 不签名）。文档说明它较弱（服务器不被验证，交换可被
+    离线猜测）。只对 MS-NLMP 的向量与假服务器测试：Linux 上的 SQL Server 不接受 AD 登录的 NTLM。备选：只有 Kerberos。
+18. **[pending review]**（2026-11-10） **参数 `auth`，源与目标共用的对象**（`method` 为 entra、kerberos 或 ntlm，加各方式的参数，
+    其他方式的参数被拒绝），使 SQL 认证的参数保持原样；`username` 不再由 schema 要求，而由预配要求，`method entra` 除外。
+    `Config.SSPI` 为每次登录生成交换（Kerberos 的每次登录有状态）。
+19. **[pending review]**（2026-11-10） **没有 Active Directory 的 Kerberos 互操作**：`mssql.sh` 构建 MIT KDC（`test/sync/krb5`）并把
+    SPN 的 keytab 交给 SQL Server 2022：服务器接受票据、回答 AP-REP（客户端校验），随后拒绝登录（18452），因为 Linux 上的
+    SQL Server 经 AD 的 LDAP 把主体映射到 Windows 登录名。测试中的 TDS 服务器用 `krb5.Acceptor` 接受 KDC 的票据，完成整个
+    登录。未测试：对域中 SQL Server 的完整登录（在 Docker 中运行 Samba AD 并配置 SQL Server 的 AD 设置，眼下判断过重）、
+    对任何服务器的 NTLM、对 Azure 的 Entra ID。
 
 ### I216 SQL Server 作为源
 
