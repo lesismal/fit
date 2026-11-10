@@ -5833,6 +5833,23 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     `vecutil`（向量目标的）与 `pb`（日志目标的 protobuf）没有重复。备选：保留 `httpconn`，把那四个目标改过去；所有目标用一种
     模板语法，会破坏其中一方的配置。
 
+**注 2026-11-11：文件到 Loki，更快、更省。** `sync-2026-11-11` 的 S6 中，fit 用 1.38 核每秒 278.9k 行（每 CPU 秒 201k
+行），Alloy 1.21.3 用 0.84 核每秒 431.6k（514k）。剖析显示一半 CPU 在 GC，且 loki 目标为它转义的每个标签值新建一个
+`strings.Replacer`：占分配字节的 68%、CPU 的 17%。改动（`sync/loki`、`sync/file`、`sync/internal/tmpl`）：不含 `\`、`"`
+或换行的标签值原样使用，其余由一个共享的 Replacer 转义；标签值与前一条记录相同的记录沿用它的流，一串同流记录只拼一次标签；
+Write 的临时数据放在池里复用（条目、编解码器写入各行的 arena、按下标分组且只在时间乱序时才排序的流、protobuf 正文——每条
+消息的长度先算好而不是事后上移——以及 snappy 的输出；上下文结束时客户端可能仍在读，便放弃不用）。file 源为 line 编解码器
+构造记录时，把 after 的字段与 key 的字段放进同一次分配，并复用一个单元的记录切片。只含 `{$namespace}` 或 `{$source}` 的
+记录模板直接返回记录里的字符串。本地（M4 Pro）：7000 行的一批编码快 9.5 倍（6.1 ms 到 0.64 ms），总共 3 次分配，而不是每行
+13 次；file 源读一行 190 ns 而不是 232，2 次分配而不是 7（`BenchmarkEncode`、`BenchmarkWrite`、`BenchmarkRead`）。在 .51 上
+`run.sh -n 1 files-loki`，三个搬运者：fit 0.53 核每秒 418.9k 行（每 CPU 秒 787k），p99 延迟 563 ms，43 MiB；Alloy 0.82 核
+431.4k（526k），1,344 ms，129 MiB；Promtail 1.06 核 199.2k。Loki 收到 fit 4080 次推送（每批 500 条，`batch.max_records` 的
+默认值），Alloy 283 次，Promtail 260 次，字节同为 259 MB。1 MiB 的批并不提高 fit 的速率：`batch { max_records 6500 }` 推送
+420 次、每秒 417.8k 行，再加 `queue { max_records 40000 }` 推送 328 次、427.8k，两者 p99 延迟都是 1.32 s（批要等满一秒），
+后者 128 MiB；各搬运者接近 420-430k 的速率是 Loki（及写入方）在服务器四个 CPU 上的上限，不是 fit 的——fit 一半时间空闲。
+因此配置保留原来的批，也没有加入多个并发请求：这里限制 fit 的不是 Loki 的延迟。fit 余下的 CPU 在核心：较大的
+`sync.Record`（每行约 1.1 KB）带来的 GC、`Record.Size` 与 `run.emit`/`dispatch`（25%）；目标只占 5%。
+
 ### I220 InfluxDB 与 TDengine 作为目标
 
 - **做**：目标 `influxdb`：以 line protocol 写入 InfluxDB 2 的 `/api/v2/write`（可选 3 的 `/api/v3/write_lp`、1.x 的

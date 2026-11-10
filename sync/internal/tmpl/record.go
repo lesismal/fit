@@ -74,8 +74,16 @@ func Row(r *fitsync.Record) fitsync.Value {
 
 // Render returns the template made with r.
 func (t *Record) Render(r *fitsync.Record) string {
-	if len(t.parts) == 1 && t.parts[0].field == "" {
-		return t.parts[0].text
+	if len(t.parts) == 1 {
+		// A template of one part is that part, as it is: nothing to copy.
+		switch t.parts[0].field {
+		case "":
+			return t.parts[0].text
+		case "$namespace":
+			return r.Namespace
+		case "$source":
+			return r.Source
+		}
 	}
 	var b strings.Builder
 	for _, p := range t.parts {

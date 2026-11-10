@@ -8245,6 +8245,32 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     `pb` (the log sinks' protobuf) have no twin. Alternatives: keep `httpconn` and move the four
     sinks to it; one template syntax for every sink, a break in one side's config.
 
+**Note 2026-11-11: files to Loki, faster and cheaper.** S6 of `sync-2026-11-11` had fit at 278.9k
+lines/s on 1.38 cores (201k lines a CPU-second) against Alloy 1.21.3's 431.6k on 0.84 (514k). Its
+profiles showed half the CPU in the GC, and the loki sink building a `strings.Replacer` for every label
+value it escaped: 68% of the bytes allocated, 17% of the CPU. Changed (`sync/loki`, `sync/file`,
+`sync/internal/tmpl`): a label value without `\`, `"` or a newline is taken as it is, one shared
+Replacer escapes the others; a record whose labels' values are the record before's takes its stream,
+so a run of one stream makes its labels once; a Write keeps its scratch in a pool (the entries, an
+arena the codec encodes the lines into, the streams grouped by index and sorted only when out of time
+order, the protobuf body, each message's length reckoned before it rather than moved up, snappy's
+output; given up when the context ends while the client may still read it). The file source makes a
+line codec's record, its after's field and its key's in one allocation, and reuses a unit's slice of
+records. A record template of `{$namespace}` or `{$source}` alone returns the record's string.
+Locally (M4 Pro): a batch of 7000 lines encodes 9.5x faster (6.1 ms to 0.64 ms), 3 allocations in all
+rather than 13 a line; the file source reads a line in 190 ns rather than 232, 2 allocations rather
+than 7 (`BenchmarkEncode`, `BenchmarkWrite`, `BenchmarkRead`). On .51, `run.sh -n 1 files-loki`, the
+three movers: fit 418.9k lines/s on 0.53 cores (787k a CPU-second), p99 lag 563 ms, 43 MiB; Alloy
+431.4k on 0.82 (526k), 1,344 ms, 129 MiB; Promtail 199.2k on 1.06. Loki took 4080 pushes from fit
+(500 records a batch, `batch.max_records`'s default), 283 from Alloy and 260 from Promtail, the same
+259 MB. Batches of 1 MiB do not raise fit's rate: `batch { max_records 6500 }` made 420 pushes at 417.8k
+lines/s, with `queue { max_records 40000 }` 328 at 427.8k, both at a p99 lag of 1.32 s (the batch now
+waits its second) and the latter at 128 MiB; the movers' rates near 420-430k are Loki's (and the
+writer's) on the servers' four CPUs, not fit's, which is half idle. So the config keeps its batches, and
+no requests in flight beside one were added: Loki's latency does not bound fit here. What is left of
+fit's CPU is the core's: the GC of a large `sync.Record` (about 1.1 KB a line), `Record.Size` and
+`run.emit`/`dispatch` (25%); the sink is 5%.
+
 ### I220 InfluxDB and TDengine as sinks
 
 - **Do**: sink `influxdb`: line protocol written to InfluxDB 2's `/api/v2/write` (and 3's

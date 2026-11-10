@@ -199,7 +199,7 @@ func (f *fakeLoki) got() []pushed {
 	return append([]pushed(nil), f.entries...)
 }
 
-func loadSink(t *testing.T, params map[string]any) (*Sink, error) {
+func loadSink(t testing.TB, params map[string]any) (*Sink, error) {
 	t.Helper()
 	b, _ := json.Marshal(params)
 	v, err := config.ParseValue(b, "params")
