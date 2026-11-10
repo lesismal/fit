@@ -14,6 +14,14 @@
 #     whatever the certificate (error 17821, "A valid TLS certificate is
 #     not configured to accept strict connections"; microsoft/mssql-docker
 #     issue 878), which 2025's does not. It allows TLS 1.2 and 1.3.
+#   - An MIT Kerberos KDC of the realm FIT.TEST (test/sync/krb5, built here;
+#     MSSQL_KRB5=0 leaves it out), on a network with SQL Server 2022, which
+#     is given the keytab of its SPN MSSQLSvc/mssql.fit.test:1433
+#     (network.kerberoskeytabfile, the KDC from /etc/krb5.conf): it accepts
+#     Kerberos tickets, but with no Active Directory to map them to logins
+#     (SQL Server on Linux looks Windows logins up in AD's LDAP) refuses
+#     the login after the exchange (error 18452). The keytabs are copied
+#     to $STATE/keytabs.
 #
 # The certificate is made as SQL Server on Linux wants it (Microsoft's
 # "Encrypt connections to SQL Server on Linux"): its CN the server's host
@@ -32,7 +40,10 @@
 # MSSQL_VERSIONS picks the servers the tests run on ("2022 2019"; 2025 may
 # be among them). The tests read FIT_SYNC_MSSQL (version=address, comma
 # separated), FIT_SYNC_MSSQL_PASSWORD (sa's), FIT_SYNC_MSSQL_CA, and
-# FIT_SYNC_MSSQL_STRICT (version=address of the servers taking strict).
+# FIT_SYNC_MSSQL_STRICT (version=address of the servers taking strict),
+# FIT_SYNC_KRB5_KDC (the KDC's address, port MSSQL_PORT + 3),
+# FIT_SYNC_KRB5_KEYTABS (the keytabs' directory) and FIT_SYNC_MSSQL_KRB5
+# (version=address of the server that has its SPN's keytab).
 # On an arm64 host the amd64 images run emulated, slowly: the first start
 # takes a minute or more.
 set -eu
@@ -42,6 +53,7 @@ PREFIX=${PREFIX:-fit-sync-}
 MSSQL_PORT=${MSSQL_PORT:-29430}
 MSSQL_VERSIONS=${MSSQL_VERSIONS:-2022 2019}
 MSSQL_STRICT=${MSSQL_STRICT:-1}
+MSSQL_KRB5=${MSSQL_KRB5:-1}
 PASSWORD='Fit-sync-1nterop!'
 STATE=${TMPDIR:-/tmp}/${PREFIX}mssql
 IMAGE=mcr.microsoft.com/mssql/server
@@ -49,8 +61,10 @@ IMAGE=mcr.microsoft.com/mssql/server
 if [ "${1:-}" = down ]; then
 	for v in 2025 2022 2019; do
 		docker rm -f "${PREFIX}mssql$v" >/dev/null 2>&1 || true
-		docker volume rm "${PREFIX}mssql$v-certs" >/dev/null 2>&1 || true
+		docker volume rm "${PREFIX}mssql$v-certs" "${PREFIX}mssql$v-secrets" >/dev/null 2>&1 || true
 	done
+	docker rm -f "${PREFIX}kdc" >/dev/null 2>&1 || true
+	docker network rm "${PREFIX}krb5" >/dev/null 2>&1 || true
 	rm -rf "$STATE"
 	exit 0
 fi
@@ -79,9 +93,42 @@ conf() {
 	protocols=1.2
 	if [ "$1" = 2025 ]; then protocols=1.2,1.3; fi
 	printf '%s\n' '[network]' 'tlscert = /var/opt/mssql/certs/server.pem' 'tlskey = /var/opt/mssql/certs/server.key' \
-		"tlsprotocols = $protocols" 'forceencryption = 0' '' '[sqlagent]' 'enabled = true' >"$STATE/mssql$1.conf"
+		"tlsprotocols = $protocols" 'forceencryption = 0' >"$STATE/mssql$1.conf"
+	if [ "$1" = 2022 ] && [ "$MSSQL_KRB5" = 1 ]; then
+		printf '%s\n' 'kerberoskeytabfile = /var/opt/mssql/secrets/mssql.keytab' 'enablekdcfromkrb5conf = true' \
+			'disablesssd = true' >>"$STATE/mssql$1.conf"
+	fi
+	printf '%s\n' '' '[sqlagent]' 'enabled = true' >>"$STATE/mssql$1.conf"
 	chmod 644 "$STATE/mssql$1.conf"
 }
+
+# The KDC, first: the 2022 server takes its SPN's keytab.
+KRB5=
+if [ "$MSSQL_KRB5" = 1 ]; then
+	kp=$((MSSQL_PORT + 3))
+	if ! docker inspect "${PREFIX}kdc" >/dev/null 2>&1; then
+		docker build -q -t "${PREFIX}krb5" test/sync/krb5 >/dev/null
+		docker network inspect "${PREFIX}krb5" >/dev/null 2>&1 || docker network create "${PREFIX}krb5" >/dev/null
+		docker run -d --name "${PREFIX}kdc" --network "${PREFIX}krb5" --network-alias kdc.fit.test \
+			-p "127.0.0.1:$kp:88" "${PREFIX}krb5" >/dev/null
+	fi
+	i=0
+	until docker logs "${PREFIX}kdc" 2>&1 | grep -q 'KDC ready'; do
+		i=$((i + 1))
+		if [ $i -gt 60 ]; then
+			echo "The KDC did not start:" >&2
+			docker logs --tail 50 "${PREFIX}kdc" >&2
+			exit 1
+		fi
+		sleep 1
+	done
+	mkdir -p "$STATE/keytabs"
+	docker cp -q "${PREFIX}kdc:/keytabs/." "$STATE/keytabs/"
+	printf '%s\n' '[libdefaults]' '	default_realm = FIT.TEST' '	dns_lookup_kdc = false' '[realms]' '	FIT.TEST = {' \
+		'		kdc = kdc.fit.test' '	}' '[domain_realm]' '	.fit.test = FIT.TEST' >"$STATE/krb5.conf"
+	chmod 644 "$STATE/krb5.conf"
+	KRB5="FIT_SYNC_KRB5_KDC='127.0.0.1:$kp' FIT_SYNC_KRB5_KEYTABS='$STATE/keytabs'"
+fi
 
 SERVERS=$MSSQL_VERSIONS
 case " $SERVERS " in
@@ -109,13 +156,24 @@ for v in $SERVERS; do
 		docker run --rm --platform linux/amd64 --user root --entrypoint sh \
 			-v "$name-certs:/certs" -v "$STATE:/src:ro" "$IMAGE:$v-latest" \
 			-c 'cp /src/server.pem /src/server.key /certs/ && chown -R mssql /certs && chmod 700 /certs && chmod 600 /certs/*'
+		# 2022 with the KDC: on its network, the SPN's keytab in a volume
+		# as the mssql user's (400), krb5.conf naming the KDC.
+		set --
+		if [ "$v" = 2022 ] && [ "$MSSQL_KRB5" = 1 ]; then
+			docker volume create "$name-secrets" >/dev/null
+			docker run --rm --platform linux/amd64 --user root --entrypoint sh \
+				-v "$name-secrets:/s" -v "$STATE/keytabs:/src:ro" "$IMAGE:$v-latest" \
+				-c 'cp /src/mssql.keytab /s/ && chown -R mssql /s && chmod 700 /s && chmod 400 /s/*'
+			set -- --network "${PREFIX}krb5" -v "$name-secrets:/var/opt/mssql/secrets" -v "$STATE/krb5.conf:/etc/krb5.conf:ro"
+		fi
 		docker run -d --name "$name" --hostname mssql.fit.test --platform linux/amd64 -p "127.0.0.1:$p:1433" \
 			-e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$PASSWORD" -e MSSQL_AGENT_ENABLED=true -e MSSQL_PID=Developer \
-			-v "$name-certs:/var/opt/mssql/certs" -v "$STATE/mssql$v.conf:/var/opt/mssql/mssql.conf:ro" \
+			-v "$name-certs:/var/opt/mssql/certs" -v "$STATE/mssql$v.conf:/var/opt/mssql/mssql.conf:ro" "$@" \
 			"$IMAGE:$v-latest" >/dev/null
 	fi
 	case " $MSSQL_VERSIONS " in *" $v "*) ADDRS="$ADDRS,$v=127.0.0.1:$p" ;; esac
 	if [ "$v" = 2025 ]; then STRICT="$STRICT,$v=127.0.0.1:$p"; fi
+	if [ "$v" = 2022 ] && [ -n "$KRB5" ]; then KRB5="$KRB5 FIT_SYNC_MSSQL_KRB5='$v=127.0.0.1:$p'"; fi
 done
 
 sqlcmd() {
@@ -143,4 +201,4 @@ for v in $SERVERS; do
 	done
 done
 
-echo "export FIT_SYNC_MSSQL='${ADDRS#,}' FIT_SYNC_MSSQL_PASSWORD='$PASSWORD' FIT_SYNC_MSSQL_CA='$STATE/ca.pem' FIT_SYNC_MSSQL_STRICT='${STRICT#,}'"
+echo "export FIT_SYNC_MSSQL='${ADDRS#,}' FIT_SYNC_MSSQL_PASSWORD='$PASSWORD' FIT_SYNC_MSSQL_CA='$STATE/ca.pem' FIT_SYNC_MSSQL_STRICT='${STRICT#,}' $KRB5"
