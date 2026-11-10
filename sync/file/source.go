@@ -199,9 +199,13 @@ type tail struct {
 	buf    []byte
 	hbuf   []byte
 	held   *fitsync.Record
-	since  int
-	full   bool
-	log    *logs.Logger
+	// recs are a unit's records, collect the codec's emit adding to them:
+	// both kept from one unit to the next.
+	recs    []*fitsync.Record
+	collect func(*fitsync.Record)
+	since   int
+	full    bool
+	log     *logs.Logger
 }
 
 // Run reads the files from the checkpoint on.
@@ -209,6 +213,7 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	t := &tail{s: s, r: r, files: map[fileID]*tracked{}, buf: make([]byte, max(s.maxLine()+1, 64<<10)),
 		hbuf: make([]byte, s.fpBytes()),
 		log:  logs.Named(config.LoggerSync)}
+	t.collect = func(r *fitsync.Record) { t.recs = append(t.recs, r) }
 	defer t.closeAll()
 	if r.From != nil {
 		if err := t.restore(r.From); err != nil {
@@ -747,13 +752,20 @@ func (t *tail) flushEvent(f *tracked) error {
 // unit makes records of a line or event that began at start, f's state
 // already past it.
 func (t *tail) unit(f *tracked, data []byte, start int64) error {
-	var recs []*fitsync.Record
-	if err := t.s.codec.Decode(data, func(r *fitsync.Record) { recs = append(recs, r) }); err != nil {
-		recs = []*fitsync.Record{{Op: fitsync.OpMessage, After: fitsync.Map(
-			fitsync.Field{Name: "line", Value: fitsync.String(string(data))},
-			fitsync.Field{Name: "error", Value: fitsync.String(err.Error())})}}
-	}
 	key := t.keyOf(f, data, start)
+	recs := t.recs[:0]
+	if lc, ok := t.s.codec.(*fitsync.LineCodec); ok {
+		recs = append(recs, lineRecord(lc, data, key, start))
+	} else {
+		t.recs = recs
+		if err := t.s.codec.Decode(data, t.collect); err != nil {
+			t.recs = append(t.recs[:0], &fitsync.Record{Op: fitsync.OpMessage, After: fitsync.Map(
+				fitsync.Field{Name: "line", Value: fitsync.String(string(data))},
+				fitsync.Field{Name: "error", Value: fitsync.String(err.Error())})})
+		}
+		recs = t.recs
+	}
+	defer func() { clear(recs); t.recs = recs[:0] }()
 	for i, r := range recs {
 		r.Source, r.Namespace, r.Position, r.Tx = "file", f.path, nil, fitsync.Tx{}
 		if r.Key.IsNull() {
@@ -775,6 +787,30 @@ func (t *tail) unit(f *tracked, data []byte, start int64) error {
 		return t.commit()
 	}
 	return nil
+}
+
+// lineMade is a line's record as the codec line decodes it, made with its
+// after's field and its key's in one allocation rather than three.
+type lineMade struct {
+	rec    fitsync.Record
+	fields [3]fitsync.Field // after's line; the key's file and offset
+}
+
+// lineRecord makes the record the codec line decodes data to, keyed by
+// the file's key and the line's offset.
+func lineRecord(lc *fitsync.LineCodec, data []byte, key string, start int64) *fitsync.Record {
+	name := lc.Field
+	if name == "" {
+		name = "line"
+	}
+	m := &lineMade{}
+	m.fields[0] = fitsync.Field{Name: name, Value: fitsync.String(string(data))}
+	m.fields[1] = fitsync.Field{Name: "file", Value: fitsync.String(key)}
+	m.fields[2] = fitsync.Field{Name: "offset", Value: fitsync.Int(start)}
+	m.rec.Op = fitsync.OpMessage
+	m.rec.After = fitsync.Map(m.fields[0:1:1]...)
+	m.rec.Key = fitsync.Map(m.fields[1:3:3]...)
+	return &m.rec
 }
 
 // commit hands on the record held with the position of every file, as the
