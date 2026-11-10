@@ -14,6 +14,7 @@ import (
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
+	nametmpl "github.com/lesismal/fit/sync/internal/tmpl"
 	mssqlwire "github.com/lesismal/fit/sync/mssql/wire"
 )
 
@@ -46,7 +47,7 @@ type Sink struct {
 	CAFile          string          `json:"ca_file,omitempty" doc:"A PEM file of the certificates the server's is checked against, in place of the system's roots."`
 	ServerName      string          `json:"server_name,omitempty" doc:"The name the server's certificate must have; address's host when left out."`
 	Timeout         config.Duration `json:"timeout,omitempty" default:"\"60s\"" doc:"How long connecting, and each wait for the server, may take. 60s when left out or 0."`
-	Table           string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace}, the record's namespace; its parts, split at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema shop's table orders). The table is not made: it is the user's, with a primary key or unique index on the record's key columns. {namespace} when left out."`
+	Table           string          `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; its parts, split at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema shop's table orders). The table is not made: it is the user's, with a primary key or unique index on the record's key columns. {namespace} when left out."`
 	Upsert          string          `json:"upsert,omitempty" enum:"merge,update_insert" default:"\"merge\"" doc:"How a row is written: merge, a MERGE ... WITH (HOLDLOCK) of the run's rows; update_insert, an UPDATE by the key and, when it found no row, an INSERT, for those who keep MERGE out of their servers. merge when left out."`
 	IdentityInsert  bool            `json:"identity_insert,omitempty" doc:"Write the rows' values in the tables' IDENTITY columns (SET IDENTITY_INSERT ON around each statement), as a copy of another database's keys needs; the login then needs ALTER on the tables. false when left out."`
 	Transactions    string          `json:"transactions,omitempty" enum:"source,batch" default:"\"source\"" doc:"How records are grouped in the server's transactions: source, each source transaction as one, and the records without one (a snapshot's) of a batch together; batch, a batch's records up to the last that ends a source transaction in one, and those after it, a part of one source transaction, in one held open into the next batch. Either way a source transaction is never committed in part. source when left out."`
@@ -179,7 +180,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 	if s.dial == nil {
 		s.dial = dialSink
 	}
-	tmpl := s.Table
+	tmpl := nametmpl.Canonical(s.Table)
 	if tmpl == "" {
 		tmpl = "{namespace}"
 	}
@@ -194,7 +195,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 		rest = rest[i+len("{namespace}"):]
 	}
 	if strings.ContainsAny(strings.ReplaceAll(tmpl, "{namespace}", ""), "{}") {
-		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s", tmpl))
+		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s (or {$namespace}'s)", s.Table))
 	}
 	s.batch = s.Transactions == "batch"
 	s.stop = s.DDL == "stop"

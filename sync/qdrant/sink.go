@@ -46,7 +46,7 @@ type Sink struct {
 	KeyFile         string          `json:"key_file,omitempty" doc:"The PEM file of cert_file's private key."`
 	ServerName      string          `json:"server_name,omitempty" doc:"The name the server's certificate must have, and the TLS server name sent; the URL's host when left out."`
 	Timeout         config.Duration `json:"timeout,omitempty" default:"\"30s\"" doc:"How long one request may take, from connecting to the end of its answer. 30s when left out or 0."`
-	Collection      string          `json:"collection" fit:"required" doc:"The collection a record's point goes to, which must exist: text with placeholders, {namespace} the record's namespace and {name} the row's field name; {{ is a brace."`
+	Collection      string          `json:"collection" fit:"required" doc:"The collection a record's point goes to, which must exist: text with placeholders, {namespace} (or {$namespace}, as record templates write it) the record's namespace and {name} the row's field name; {{ is a brace."`
 	VectorField     string          `json:"vector_field,omitempty" default:"\"embedding\"" doc:"The row's field holding the point's vector: an array of numbers, or JSON of one, as the embed transform makes. A record without it fails. embedding when left out."`
 	VectorName      string          `json:"vector_name,omitempty" doc:"The collection's named vector the vector is, for a collection of several; its one unnamed vector when left out."`
 	Payload         []string        `json:"payload,omitempty" doc:"The row's fields kept in the point's payload; every field but vector_field when left out."`

@@ -171,7 +171,7 @@ func TestLoadJSON(t *testing.T) {
 
 func TestLoadStarRocksAndCSV(t *testing.T) {
 	f := newFake(t)
-	s := fakeSink(t, f, map[string]any{"flavor": "starrocks", "partial_columns": true, "database": "shop", "table": "t_{namespace}", "label_prefix": "p-1"})
+	s := fakeSink(t, f, map[string]any{"flavor": "starrocks", "partial_columns": true, "database": "shop", "table": "t_{$namespace}", "label_prefix": "p-1"})
 	batch := []*fitsync.Record{rec("a", 1, fitsync.OpInsert, 1, "x"), rec("a", 2, fitsync.OpDelete, 1, "x")}
 	batch[1].Before = fitsync.Null()
 	if err := s.Write(context.Background(), batch); err != nil {

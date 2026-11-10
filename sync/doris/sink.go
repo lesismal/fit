@@ -27,6 +27,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
+	nametmpl "github.com/lesismal/fit/sync/internal/tmpl"
 	"github.com/lesismal/fit/sync/internal/fibrest"
 )
 
@@ -59,7 +60,7 @@ type Sink struct {
 	Timeout         config.Duration   `json:"timeout,omitempty" default:"\"60s\"" doc:"How long one load may take, from connecting to the end of its answer. 60s when left out or 0."`
 	Flavor          string            `json:"flavor,omitempty" enum:"doris,starrocks" default:"\"doris\"" doc:"The system loaded into: doris, whose deletes set __DORIS_DELETE_SIGN__ and whose partial updates are partial_columns; starrocks, whose deletes set __op and whose partial updates are partial_update. doris when left out."`
 	Database        string            `json:"database,omitempty" doc:"The database of a table named without one. Needed unless every table is named as db.table."`
-	Table           string            `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace}, the record's namespace; db.table names the database too. The table is not made: it is the user's, of the unique key model (merge on write) on Doris or the primary key model on StarRocks for updates and deletes. {namespace} when left out."`
+	Table           string            `json:"table,omitempty" default:"\"{namespace}\"" doc:"The table a record goes to: text with {namespace} (or {$namespace}, as record templates write it), the record's namespace; db.table names the database too. The table is not made: it is the user's, of the unique key model (merge on write) on Doris or the primary key model on StarRocks for updates and deletes. {namespace} when left out."`
 	Format          string            `json:"format,omitempty" enum:"json,csv" default:"\"json\"" doc:"How rows are sent: json, a JSON object of each row's columns; csv, comma-separated values, quoted with escapes, null as \\N (Doris 2.0 and StarRocks 3.0 or later). Either way the load names its columns, the union of the run's rows', so a row without a column of the union loads it null. json when left out."`
 	Deletes         string            `json:"deletes,omitempty" enum:"sign,ignore" default:"\"sign\"" doc:"How deletes are written: sign, as the row before (or the key, when the source has no row before) with the flavor's delete column set to 1, which a table of the unique or primary key model takes as deleting the key; ignore, not at all, for a table of another model. A run without deletes sends no delete column. sign when left out."`
 	PartialColumns  bool              `json:"partial_columns,omitempty" doc:"Update only the columns a run's rows have, keeping the others as they are, rather than replacing the row: Doris's partial_columns, StarRocks's partial_update. Needs a unique key table with merge on write, or a primary key table. false when left out."`
@@ -125,7 +126,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 	if !labelPrefix.MatchString(s.LabelPrefix) {
 		errs = append(errs, ctx.Params.Field("label_prefix").Errorf("%q is not 1 to 64 letters, digits, _ and -", s.LabelPrefix))
 	}
-	tmpl := s.Table
+	tmpl := nametmpl.Canonical(s.Table)
 	if tmpl == "" {
 		tmpl = "{namespace}"
 	}
@@ -140,7 +141,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 		rest = rest[i+len("{namespace}"):]
 	}
 	if strings.ContainsAny(strings.ReplaceAll(tmpl, "{namespace}", ""), "{}/") {
-		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s, or a slash", tmpl))
+		errs = append(errs, ctx.Params.Field("table").Errorf("%q has a brace other than {namespace}'s (or {$namespace}'s), or a slash", s.Table))
 	}
 	var err error
 	s.zone = time.UTC

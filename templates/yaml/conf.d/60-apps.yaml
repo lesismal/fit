@@ -4629,9 +4629,9 @@
         # # Or, with mode core, core NATS subjects, at most once: what arrives while fit is down, or
         # # faster than it keeps up, is lost, for telemetry. Each message goes through a codec (raw when
         # # none is named) into records, the subject their namespace unless the codec or namespace sets
-        # # one; a message record holds the subject, headers, stream, sequence and time beside its
-        # # value. In a job (mode once) it reads up to the stream's last message as it was when the job
-        # # started.
+        # # one, the Fit-Key header (as the nats sink writes it) their key unless the codec sets one; a
+        # # message record holds the subject, headers, stream, sequence and time beside its value. In a
+        # # job (mode once) it reads up to the stream's last message as it was when the job started.
         # module: "nats"
         # params:
           # # The servers, host:port each; the others of the cluster are learnt from them, and the client
@@ -6505,11 +6505,11 @@
               # # object of string.
               # settings: {}
 
-              # # The table a record goes to: text with {namespace}, the record's namespace; db.table names
-              # # the database too. The table is not made: it is the user's, a ReplacingMergeTree(_version,
-              # # _deleted) ordered by the key for updates and deletes, with
-              # # non_replicated_deduplication_window set unless it is replicated, so that the deduplication
-              # # token works. {namespace} when left out.
+              # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+              # # write it), the record's namespace; db.table names the database too. The table is not made:
+              # # it is the user's, a ReplacingMergeTree(_version, _deleted) ordered by the key for updates
+              # # and deletes, with non_replicated_deduplication_window set unless it is replicated, so that
+              # # the deduplication token works. {namespace} when left out.
               # # string; default "{namespace}".
               # table: "{namespace}"
 
@@ -6641,10 +6641,10 @@
               # # string.
               # database: ""
 
-              # # The table a record goes to: text with {namespace}, the record's namespace; db.table names
-              # # the database too. The table is not made: it is the user's, of the unique key model (merge on
-              # # write) on Doris or the primary key model on StarRocks for updates and deletes. {namespace}
-              # # when left out.
+              # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+              # # write it), the record's namespace; db.table names the database too. The table is not made:
+              # # it is the user's, of the unique key model (merge on write) on Doris or the primary key model
+              # # on StarRocks for updates and deletes. {namespace} when left out.
               # # string; default "{namespace}".
               # table: "{namespace}"
 
@@ -7240,9 +7240,10 @@
               # # duration, as "1.5s" or "2m"; default "30s".
               # timeout: "30s"
 
-              # # The measurement a record's point goes to: text with placeholders, {namespace} the record's
-              # # namespace and {name} the row's field name (which the point still has as a field or tag); {{
-              # # is a brace. {namespace} when left out.
+              # # The measurement a record's point goes to: text with placeholders, {namespace} (or
+              # # {$namespace}, as record templates write it) the record's namespace and {name} the row's
+              # # field name (which the point still has as a field or tag); {{ is a brace. {namespace} when
+              # # left out.
               # # string; default "{namespace}".
               # measurement: "{namespace}"
 
@@ -7803,8 +7804,8 @@
               # database: ""
 
               # # The collection a record's entity goes to, which must exist with a primary key that is not
-              # # auto_id: text with placeholders, {namespace} the record's namespace and {name} the row's
-              # # field name; {{ is a brace.
+              # # auto_id: text with placeholders, {namespace} (or {$namespace}, as record templates write it)
+              # # the record's namespace and {name} the row's field name; {{ is a brace.
               # # string; required.
               # collection: ""
 
@@ -8216,10 +8217,11 @@
               # # duration, as "1.5s" or "2m"; default "60s".
               # timeout: "60s"
 
-              # # The table a record goes to: text with {namespace}, the record's namespace; its parts, split
-              # # at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema
-              # # shop's table orders). The table is not made: it is the user's, with a primary key or unique
-              # # index on the record's key columns. {namespace} when left out.
+              # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+              # # write it), the record's namespace; its parts, split at dots, are schema.table or
+              # # db.schema.table (a MySQL source's shop.orders is the schema shop's table orders). The table
+              # # is not made: it is the user's, with a primary key or unique index on the record's key
+              # # columns. {namespace} when left out.
               # # string; default "{namespace}".
               # table: "{namespace}"
 
@@ -8340,9 +8342,10 @@
               # # duration, as "1.5s" or "2m"; default "60s".
               # timeout: "60s"
 
-              # # The table a record goes to: text with {namespace}, the record's namespace; db.table names
-              # # the database too. The table is not made: it is the user's, with a primary or unique key on
-              # # the record's key columns, which the upserts rely on. {namespace} when left out.
+              # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+              # # write it), the record's namespace; db.table names the database too. The table is not made:
+              # # it is the user's, with a primary or unique key on the record's key columns, which the
+              # # upserts rely on. {namespace} when left out.
               # # string; default "{namespace}".
               # table: "{namespace}"
 
@@ -8388,11 +8391,13 @@
             # # Publishes records to NATS JetStream: each a message to the subject its namespace names (or
             # # subject's template), its data what the codec makes of it (raw when none is named), with a
             # # Nats-Msg-Id made from the record's origin (a Kafka offset, a Pulsar message ID, a stream
-            # # sequence, a CDC transaction and place) or, without one, its position, so that a batch
-            # # written again within the stream's duplicate window (2 minutes by default) is stored once; a
-            # # batch's messages are published together, max_in_flight at a time, and acknowledged by the
-            # # stream before the batch is. With mode core, published to core NATS, confirmed only as far as
-            # # the server reading them: at most once.
+            # # sequence, a CDC transaction and place) or, without one, its position, and the record's op,
+            # # namespace and key in the Fit-Op, Fit-Namespace and Fit-Key headers (as RabbitMQ's fit-op,
+            # # fit-namespace and fit-key; the key's strings and bytes as they are, anything else as plain
+            # # JSON), so that a batch written again within the stream's duplicate window (2 minutes by
+            # # default) is stored once; a batch's messages are published together, max_in_flight at a time,
+            # # and acknowledged by the stream before the batch is. With mode core, published to core NATS,
+            # # confirmed only as far as the server reading them: at most once.
             # module: "nats"
             # params:
               # # The servers, host:port each; the others of the cluster are learnt from them, and the client
@@ -8892,10 +8897,11 @@
               # # duration, as "1.5s" or "2m"; default "60s".
               # timeout: "60s"
 
-              # # The table a record goes to: text with {namespace}, the record's namespace; split at its
-              # # first dot into the schema and the table (shop.orders is the table orders of the schema
-              # # shop), a name without a dot found by the search_path. The table is not made: it must have a
-              # # primary key or unique index on the key's columns. {namespace} when left out.
+              # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+              # # write it), the record's namespace; split at its first dot into the schema and the table
+              # # (shop.orders is the table orders of the schema shop), a name without a dot found by the
+              # # search_path. The table is not made: it must have a primary key or unique index on the key's
+              # # columns. {namespace} when left out.
               # # string; default "{namespace}".
               # table: "{namespace}"
 
@@ -9201,7 +9207,8 @@
               # timeout: "30s"
 
               # # The collection a record's point goes to, which must exist: text with placeholders,
-              # # {namespace} the record's namespace and {name} the row's field name; {{ is a brace.
+              # # {namespace} (or {$namespace}, as record templates write it) the record's namespace and
+              # # {name} the row's field name; {{ is a brace.
               # # string; required.
               # collection: ""
 
@@ -9836,8 +9843,9 @@
               # # one of: schemaless, sql; default "schemaless".
               # mode: "schemaless"
 
-              # # The super table a record's row goes to: text with placeholders, {namespace} the record's
-              # # namespace and {name} the row's field name; {{ is a brace. {namespace} when left out.
+              # # The super table a record's row goes to: text with placeholders, {namespace} (or
+              # # {$namespace}, as record templates write it) the record's namespace and {name} the row's
+              # # field name; {{ is a brace. {namespace} when left out.
               # # string; default "{namespace}".
               # measurement: "{namespace}"
 
@@ -10027,11 +10035,11 @@
             # # object of string.
             # settings: {}
 
-            # # The table a record goes to: text with {namespace}, the record's namespace; db.table names
-            # # the database too. The table is not made: it is the user's, a ReplacingMergeTree(_version,
-            # # _deleted) ordered by the key for updates and deletes, with
-            # # non_replicated_deduplication_window set unless it is replicated, so that the deduplication
-            # # token works. {namespace} when left out.
+            # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+            # # write it), the record's namespace; db.table names the database too. The table is not made:
+            # # it is the user's, a ReplacingMergeTree(_version, _deleted) ordered by the key for updates
+            # # and deletes, with non_replicated_deduplication_window set unless it is replicated, so that
+            # # the deduplication token works. {namespace} when left out.
             # # string; default "{namespace}".
             # table: "{namespace}"
 
@@ -10163,10 +10171,10 @@
             # # string.
             # database: ""
 
-            # # The table a record goes to: text with {namespace}, the record's namespace; db.table names
-            # # the database too. The table is not made: it is the user's, of the unique key model (merge on
-            # # write) on Doris or the primary key model on StarRocks for updates and deletes. {namespace}
-            # # when left out.
+            # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+            # # write it), the record's namespace; db.table names the database too. The table is not made:
+            # # it is the user's, of the unique key model (merge on write) on Doris or the primary key model
+            # # on StarRocks for updates and deletes. {namespace} when left out.
             # # string; default "{namespace}".
             # table: "{namespace}"
 
@@ -10762,9 +10770,10 @@
             # # duration, as "1.5s" or "2m"; default "30s".
             # timeout: "30s"
 
-            # # The measurement a record's point goes to: text with placeholders, {namespace} the record's
-            # # namespace and {name} the row's field name (which the point still has as a field or tag); {{
-            # # is a brace. {namespace} when left out.
+            # # The measurement a record's point goes to: text with placeholders, {namespace} (or
+            # # {$namespace}, as record templates write it) the record's namespace and {name} the row's
+            # # field name (which the point still has as a field or tag); {{ is a brace. {namespace} when
+            # # left out.
             # # string; default "{namespace}".
             # measurement: "{namespace}"
 
@@ -11325,8 +11334,8 @@
             # database: ""
 
             # # The collection a record's entity goes to, which must exist with a primary key that is not
-            # # auto_id: text with placeholders, {namespace} the record's namespace and {name} the row's
-            # # field name; {{ is a brace.
+            # # auto_id: text with placeholders, {namespace} (or {$namespace}, as record templates write it)
+            # # the record's namespace and {name} the row's field name; {{ is a brace.
             # # string; required.
             # collection: ""
 
@@ -11738,10 +11747,11 @@
             # # duration, as "1.5s" or "2m"; default "60s".
             # timeout: "60s"
 
-            # # The table a record goes to: text with {namespace}, the record's namespace; its parts, split
-            # # at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema
-            # # shop's table orders). The table is not made: it is the user's, with a primary key or unique
-            # # index on the record's key columns. {namespace} when left out.
+            # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+            # # write it), the record's namespace; its parts, split at dots, are schema.table or
+            # # db.schema.table (a MySQL source's shop.orders is the schema shop's table orders). The table
+            # # is not made: it is the user's, with a primary key or unique index on the record's key
+            # # columns. {namespace} when left out.
             # # string; default "{namespace}".
             # table: "{namespace}"
 
@@ -11862,9 +11872,10 @@
             # # duration, as "1.5s" or "2m"; default "60s".
             # timeout: "60s"
 
-            # # The table a record goes to: text with {namespace}, the record's namespace; db.table names
-            # # the database too. The table is not made: it is the user's, with a primary or unique key on
-            # # the record's key columns, which the upserts rely on. {namespace} when left out.
+            # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+            # # write it), the record's namespace; db.table names the database too. The table is not made:
+            # # it is the user's, with a primary or unique key on the record's key columns, which the
+            # # upserts rely on. {namespace} when left out.
             # # string; default "{namespace}".
             # table: "{namespace}"
 
@@ -11910,11 +11921,13 @@
           # # Publishes records to NATS JetStream: each a message to the subject its namespace names (or
           # # subject's template), its data what the codec makes of it (raw when none is named), with a
           # # Nats-Msg-Id made from the record's origin (a Kafka offset, a Pulsar message ID, a stream
-          # # sequence, a CDC transaction and place) or, without one, its position, so that a batch
-          # # written again within the stream's duplicate window (2 minutes by default) is stored once; a
-          # # batch's messages are published together, max_in_flight at a time, and acknowledged by the
-          # # stream before the batch is. With mode core, published to core NATS, confirmed only as far as
-          # # the server reading them: at most once.
+          # # sequence, a CDC transaction and place) or, without one, its position, and the record's op,
+          # # namespace and key in the Fit-Op, Fit-Namespace and Fit-Key headers (as RabbitMQ's fit-op,
+          # # fit-namespace and fit-key; the key's strings and bytes as they are, anything else as plain
+          # # JSON), so that a batch written again within the stream's duplicate window (2 minutes by
+          # # default) is stored once; a batch's messages are published together, max_in_flight at a time,
+          # # and acknowledged by the stream before the batch is. With mode core, published to core NATS,
+          # # confirmed only as far as the server reading them: at most once.
           # module: "nats"
           # params:
             # # The servers, host:port each; the others of the cluster are learnt from them, and the client
@@ -12414,10 +12427,11 @@
             # # duration, as "1.5s" or "2m"; default "60s".
             # timeout: "60s"
 
-            # # The table a record goes to: text with {namespace}, the record's namespace; split at its
-            # # first dot into the schema and the table (shop.orders is the table orders of the schema
-            # # shop), a name without a dot found by the search_path. The table is not made: it must have a
-            # # primary key or unique index on the key's columns. {namespace} when left out.
+            # # The table a record goes to: text with {namespace} (or {$namespace}, as record templates
+            # # write it), the record's namespace; split at its first dot into the schema and the table
+            # # (shop.orders is the table orders of the schema shop), a name without a dot found by the
+            # # search_path. The table is not made: it must have a primary key or unique index on the key's
+            # # columns. {namespace} when left out.
             # # string; default "{namespace}".
             # table: "{namespace}"
 
@@ -12723,7 +12737,8 @@
             # timeout: "30s"
 
             # # The collection a record's point goes to, which must exist: text with placeholders,
-            # # {namespace} the record's namespace and {name} the row's field name; {{ is a brace.
+            # # {namespace} (or {$namespace}, as record templates write it) the record's namespace and
+            # # {name} the row's field name; {{ is a brace.
             # # string; required.
             # collection: ""
 
@@ -13358,8 +13373,9 @@
             # # one of: schemaless, sql; default "schemaless".
             # mode: "schemaless"
 
-            # # The super table a record's row goes to: text with placeholders, {namespace} the record's
-            # # namespace and {name} the row's field name; {{ is a brace. {namespace} when left out.
+            # # The super table a record's row goes to: text with placeholders, {namespace} (or
+            # # {$namespace}, as record templates write it) the record's namespace and {name} the row's
+            # # field name; {{ is a brace. {namespace} when left out.
             # # string; default "{namespace}".
             # measurement: "{namespace}"
 
