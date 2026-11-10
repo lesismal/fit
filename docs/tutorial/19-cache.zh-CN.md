@@ -35,6 +35,11 @@ fib 的 body filter 复制，所以响应不会被为了存储而扣下。磁盘
 缓存是在路由上启用的：路由的表单里加 `cache` 中间件，在[反向代理](15-reverse-proxy.zh-CN.md)页编辑。引擎页
 在这个端口下列出"缓存区"（链回本页）与"缓存的路由"（链到路由页）。
 
+### 页上不编辑什么
+
+这一页没有表单，也没有"保存并应用"：它只读运行中的状态。缓存的开关在路由的中间件里，区的名、大小与磁盘
+都在那里定；清除立即生效，不写进配置，也不产生新版本。页上显示的数每 5 秒从 `GET /cache` 取一次。
+
 ## 参数
 
 路由的 `cache` 中间件（关键项）；完整字段表见
@@ -54,6 +59,16 @@ fib 的 body filter 复制，所以响应不会被为了存储而扣下。磁盘
 
 `disk` 里：`path` 必填（区独有，不存在时创建，启动时重新找到）、`max_bytes`（默认 `1 GiB`）、
 `max_entries`（默认 `100000`，它界定索引占的内存，每个几百字节）。
+
+### 什么会被保存
+
+只有共享缓存可以保存的 GET 响应被保存：状态它认得，没有 `no-store`、`private` 或 `no-cache`，不是
+`Vary: *`，没设 cookie，没有 trailers，且不超过 `max_entry_bytes`。带 `Authorization` 的请求——或被认证
+中间件放行的请求，它可能已把 `Authorization` 去掉或读了 cookie——它的响应只在写了 `public`、`s-maxage`
+或 `must-revalidate` 时才保存。
+
+新鲜的响应答 GET 与 HEAD，对 `If-None-Match` 或 `If-Modified-Since` 对得上的请求答 304，并带着正确的
+`Age`。响应经过一个 fib 的 body filter 复制，所以不会被为了存储而扣下：存储发生在全部送出之后。
 
 ## .conf 配置
 

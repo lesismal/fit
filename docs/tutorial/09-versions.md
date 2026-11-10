@@ -136,12 +136,17 @@ the next restart, and that kind of difference shows on the
 - **A row whose source is a provider's name**: that is an apply taken when what the provider provided changed.
   The version still records the base config itself; the provider's part is seen in the effective config. The
   same content is not applied again, so it does not make another version.
+- **Roll back and reapply are not the same**: `reapply` on the consistency check applies the config as it is
+  now, a rollback applies the config a version wrote; both go through the same path.
 - **Look before rolling back**: **View** the text first, then roll back. After the confirmation there is no
   undoing it, because it is an apply.
 - **Think about `If-Match` before rolling back**: it compares the running config's ETag, not a version's; if
   the config was changed elsewhere while the rollback was being sent, you get `412` and nothing is applied.
 - **Comparing two versions**: this page has no side-by-side comparison; use **View** to copy one text and
   compare it with the other.
+- **Rolling back does not change `admin`**: `admin` comes from the bootstrap file and is put into the config at
+  each load; the users, the passwords and the store's settings are not in a version, so a rollback does not
+  touch them.
 - **Reading versions from a script**: there is no command for it; use the Admin API —
   `curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2019/versions`; the rollback is
   `POST /rollback/{n}`, with `If-Match`.

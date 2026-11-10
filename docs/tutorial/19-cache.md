@@ -46,6 +46,13 @@ Caching is enabled on a route, in the route's form, on the
 [Reverse proxy](15-reverse-proxy.md) page. The Engine page lists "Cache zones" under the port, linking
 back here, and "Cached routes", linking to the routes page.
 
+### What the page does not edit
+
+The page has no form and no Save and apply: it only reads the running state. Caching is switched on in a
+route's middleware, where the zone's name, its size and its disk are set; purging takes effect at once,
+is not written into the config and makes no new version. The numbers shown are taken from `GET /cache`
+every 5 seconds.
+
 ## Key parameters
 
 The `cache` middleware on a route (the key fields); the full field table is in
@@ -66,6 +73,18 @@ The `cache` middleware on a route (the key fields); the full field table is in
 Inside `disk`: `path` is required (the zone's alone, made if missing, found again at start),
 `max_bytes` (default `1 GiB`) and `max_entries` (default `100000`, which bounds the memory the index
 takes, a few hundred bytes each).
+
+### What gets kept
+
+Only the responses to GET requests that a shared cache may keep are kept: ones whose status the cache
+understands, that say no `no-store`, `private` or `no-cache`, do not vary on everything (`Vary: *`), set
+no cookie, carry no trailers and are no larger than `max_entry_bytes`. A request with `Authorization`, or
+one an auth middleware or check let in (which may have removed `Authorization`, or read a cookie), has its
+response kept only when it says `public`, `s-maxage` or `must-revalidate`.
+
+A fresh response answers GET and HEAD, as a 304 for a request whose `If-None-Match` or
+`If-Modified-Since` it meets, with the right `Age`. A response is kept only after all of it has gone: it
+passes through a fib body filter that copies what passes, so it is never held back to be stored.
 
 ## In .conf
 

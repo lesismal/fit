@@ -134,6 +134,10 @@ the page's summary and its tools show, and the running version and ETag, the one
 - **After applying, the check runs again**: the fixes go through the same path as saving, so one that cannot
   load rejects the whole set; the successful one is a new config version, written to the store and recorded in
   the `admin` log.
+- **This page's check is not the check when saving**: this page compares the running services with the
+  effective config; **Check** on the other pages takes a draft through loading and compiling and tries its new
+  listener addresses, but applies nothing. The two complement each other: this one says what is running differs,
+  that one says whether a draft can be applied.
 
 - **Picking fixes in the terminal**: `fit check -fix` is the same thing as the page's select plus tick — one fix
   per difference, applied together; both go through `POST /config/reconcile`.

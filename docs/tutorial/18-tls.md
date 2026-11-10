@@ -35,7 +35,12 @@ says so.
 
 This page edits no config: it reads the running state (the Admin API's `GET /status`). The
 certificates come from a listener's `tls.certificates`, `tls.acme` and `tls.on_demand`, or from HTTPS
-by default.
+by default. The same table is on the [Overview](04-overview.md) page, which lists only those expiring
+within 14 days.
+
+What can be done on this page is only looking: no form, no Save and apply. To change what a listener
+serves, edit its `tls` on the Listeners page; to have the certificates come from ACME, edit `acme` here,
+or write a listener's `tls` empty.
 
 ### Automatic HTTPS (`#/gw.tls/auto_https`)
 
@@ -81,6 +86,33 @@ running issuance and renewal go on by the rules read at start.
 The full field tables are in
 [the config reference: HTTPS by default](../reference/config.md#https-by-default) and
 [the config reference: ACME](../reference/config.md#acme).
+
+### The challenges and the ports
+
+The challenges are tried in the order written: `http-01` is answered by any listener of fit's in the
+clear on port 80 — so with `disable_redirects` on, HTTP-01 is answered by none and certificates can only
+come through TLS-ALPN-01 — and `tls-alpn-01` by the TLS listener that lists the name, on port 443. A
+listener that requires client certificates (`client_auth` with `mode: require`) cannot answer
+TLS-ALPN-01, because the CA sends none.
+
+### Storage and sharing
+
+`storage` is a directory, which several instances of fit on one host may share. Across hosts, use
+`shared_storage` — one of `redis`, `etcd` or `consul`, and not with `storage`: one instance obtains a
+certificate while holding a lock there and the others take it from there; each challenge's answer is kept
+there too, so whichever instance the CA reaches can answer it. `prefix` (default `fit/`), `lock_ttl`
+(default `30s`, at least `10s`) and `request_timeout` (default `10s`) are the shared fields.
+
+### Issuing on demand
+
+`on_demand` has one required field, `ask`: a URL fit asks with the name in the query as
+`domain=<name>`; an answer of 2xx allows the certificate and any other refuses it, and refusals are
+remembered for a minute. At most 8 asks are under way at once, 5 a second on average and 20 at once,
+however they are answered; a handshake past them fails without asking. `rate` (default 10) and `interval`
+(default `1m`) bound how many certificates may be obtained each interval, `max_names` (default 1000) how
+many names may have one at all, `timeout` (default `10s`) how long a handshake waits, and `idle_timeout`
+(default `168h`) how long a name is kept with no handshake asking for it — after that it no longer counts
+against `max_names`, its certificate stays in the storage, and the next ask must allow it again.
 
 ## In .conf
 

@@ -27,7 +27,11 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 提供证书时，页上说"没有监听在提供证书"。
 
 这一页不编辑配置：它读的是运行中的状态（Admin API 的 `GET /status`）。证书来自监听的 `tls.certificates`、
-`tls.acme` 与 `tls.on_demand`，或来自自动 HTTPS。
+`tls.acme` 与 `tls.on_demand`，或来自自动 HTTPS。同一张表也在[概览](04-overview.zh-CN.md)页上，那里只列
+14 天内要到期的。
+
+页上能做的只有看：没有表单，没有"保存并应用"。要改变一个监听提供什么证书，去监听页改它的 `tls`；要让
+证书由 ACME 来，去 ACME 页改 `acme`，或在监听页把 `tls` 写成空的。
 
 ### 自动 HTTPS（`#/gw.tls/auto_https`）
 
@@ -69,6 +73,27 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 
 完整字段表见[配置参考：HTTPS by default](../reference/config.md#https-by-default)与
 [配置参考：ACME](../reference/config.md#acme)。
+
+### 挑战与端口
+
+`challenges` 按写的顺序试：`http-01` 由任何明文监听在 80 上答——所以 `disable_redirects` 关掉重定向后
+HTTP-01 没人答，证书只能走 TLS-ALPN-01；`tls-alpn-01` 由列出这个名字的 TLS 监听在 443 上答。要求客户端
+证书（`client_auth` 的 `mode: require`）的监听答不了 TLS-ALPN-01，因为 CA 不发证书。
+
+### 存储与共享
+
+`storage` 是一个目录，同一台机器上的多个实例可以共享它。跨机器改用 `shared_storage`，三选一（`redis`、
+`etcd`、`consul`），与 `storage` 互斥：一个实例持锁申请证书，其余从那里取；每个挑战的应答也存那里，所以
+CA 访问到哪台，哪台就能答。`prefix`（默认 `fit/`）、`lock_ttl`（默认 `30s`，至少 `10s`）与
+`request_timeout`（默认 `10s`）是共享存储的公共字段。
+
+### 按需申请
+
+`on_demand` 只有一个必填的 `ask`：一个 URL，名字在查询里作为 `domain=<name>` 送去，答 2xx 才算可以，其他
+都算不可以；被拒的名字记一分钟。同时最多 8 个询问，平均每秒 5 个、瞬时 20 个，超出的握手不问就失败。
+`rate`（默认 10）与 `interval`（默认 `1m`）限每个区间内可申请的证书数，`max_names`（默认 1000）限总共多少
+个名字可按需申请，`timeout`（默认 `10s`）是握手等证书的时间，`idle_timeout`（默认 `168h`）是一个名字没人
+再问时保留多久——之后它不再计入 `max_names`，证书留在存储里，下一次询问还要 `ask` 再同意。
 
 ## .conf 配置
 
