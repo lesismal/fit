@@ -47,6 +47,9 @@ type stream struct {
 	header stdhttp.Header
 }
 
+// testHookPump, set by tests, runs as open is about to start pump.
+var testHookPump func()
+
 func newStream(h *BTStream, c *fibhttp.Context, role *bittorrent.Role, req request) *stream {
 	s := &stream{h: h, c: c, role: role, req: req}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -67,7 +70,7 @@ func (s *stream) open() {
 	// waited for, and a torrent it removed looked up, or added, again.
 	s.k = key{role: s.role, id: s.req.id}
 	if !acquire(s.ctx, s.k) {
-		s.finish()
+		s.stop()
 		return
 	}
 	s.acquired = true
@@ -142,6 +145,9 @@ func (s *stream) open() {
 	}
 	s.remaining = n
 	s.buf = make([]byte, min(int64(chunkBytes), n))
+	if testHookPump != nil {
+		testHookPump()
+	}
 	s.pump()
 }
 
@@ -154,7 +160,7 @@ func (s *stream) torrent() (t *fibbt.Torrent, added, ok bool) {
 	if errors.Is(err, bittorrent.ErrNotFound) && s.req.magnet != "" {
 		if err := s.allowAdd(); err != nil {
 			if s.ctx.Err() != nil {
-				s.finish()
+				s.stop()
 				return nil, false, false
 			}
 			s.refuse(err)
@@ -234,7 +240,7 @@ func (s *stream) waitInfo(t *fibbt.Torrent) bool {
 	case <-t.Removed():
 		s.answer(stdhttp.StatusServiceUnavailable, "the torrent was removed", "Retry-After", "1")
 	case <-s.ctx.Done():
-		s.finish()
+		s.stop()
 	}
 	return false
 }
@@ -302,7 +308,7 @@ func equal(a, b []int) bool {
 func (s *stream) pump() {
 	for {
 		if s.ctx.Err() != nil {
-			s.finish()
+			s.stop()
 			return
 		}
 		p := s.buf[:min(int64(len(s.buf)), s.remaining)]
@@ -362,13 +368,7 @@ func (s *stream) writable(err error) {
 // answered, one begun cut short, so that the client sees it broke off.
 func (s *stream) readFailed(err error) {
 	if errors.Is(err, context.Canceled) || s.ctx.Err() != nil {
-		// The client went, or the config was swapped out and drained.
-		if s.begun {
-			_ = s.c.Finish()
-		} else if s.c.Err() == nil {
-			s.h.respond(s.c, stdhttp.StatusServiceUnavailable, "the stream was ended", "Retry-After", "1")
-		}
-		s.finish()
+		s.stop()
 		return
 	}
 	if s.begun {
@@ -384,6 +384,21 @@ func (s *stream) readFailed(err error) {
 	default:
 		s.answer(stdhttp.StatusInternalServerError, "reading the torrent: "+err.Error())
 	}
+}
+
+// stop ends a stream its ctx ended: the client went, or the config was
+// swapped out and drained. Whatever the wait the stream was in, a response
+// not begun is answered 503 when the client is still there, so that it is
+// never left to the empty 200 fib answers a request released unanswered,
+// and one begun is cut short: fib closes the connection, or resets the
+// stream, after a body shorter than its Content-Length.
+func (s *stream) stop() {
+	if s.begun {
+		_ = s.c.Finish()
+	} else if s.c.Err() == nil {
+		s.h.respond(s.c, stdhttp.StatusServiceUnavailable, "the stream was ended", "Retry-After", "1")
+	}
+	s.finish()
 }
 
 // removed reports whether the torrent was removed from the client.

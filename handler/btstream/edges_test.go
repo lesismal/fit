@@ -324,9 +324,14 @@ func TestDrainWhileWaitingForClient(t *testing.T) {
 		t.Fatalf("the stream handed on all %d bytes to a client that read 64 KiB", last)
 	}
 	h.Drain()
-	rest, _ := io.ReadAll(resp.Body)
+	rest, err := io.ReadAll(resp.Body)
 	if n := int64(64<<10 + len(rest)); n >= size {
 		t.Fatalf("a drained stream sent the whole file: %d bytes", n)
+	}
+	// The connection ends short of the Content-Length: the client can
+	// tell the file was cut, not that it is shorter.
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("reading the cut body: %v", err)
 	}
 	waitFor(t, "the stream to end", func() bool { return h.Streams() == 0 })
 }

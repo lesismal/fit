@@ -140,3 +140,21 @@ func TestDrain(t *testing.T) {
 	waitFor(t, "the stream to end", func() bool { return h.Streams() == 0 })
 	f.must(t, "GET", "/bt/"+c.id+"/show/ep1.mp4", http.StatusServiceUnavailable)
 }
+
+// TestDrainBeforeHead drains a stream as it is about to read its first
+// chunk: the response, not begun, is 503 with Retry-After, not an empty 200.
+func TestDrainBeforeHead(t *testing.T) {
+	c := makeContent(t, 1<<20, 64<<10)
+	f := startFit(t, `{"prefix": "/bt"}`, "")
+	h := f.handler(t)
+	if _, err := f.role.Add(bittorrent.AddRequest{Torrent: c.torrent}); err != nil {
+		t.Fatal(err)
+	}
+	testHookPump = h.Drain
+	t.Cleanup(func() { testHookPump = nil })
+	r := fetch("GET", f.base+"/bt/"+c.id+"/show/ep1.mp4")
+	if r.err != nil || r.resp.StatusCode != http.StatusServiceUnavailable || r.resp.Header.Get("Retry-After") == "" {
+		t.Fatalf("err %v status %d len %d hdr %v", r.err, r.resp.StatusCode, len(r.body), r.resp.Header)
+	}
+	waitFor(t, "the stream to end", func() bool { return h.Streams() == 0 })
+}
