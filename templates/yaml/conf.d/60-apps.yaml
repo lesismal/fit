@@ -4182,8 +4182,10 @@
         # # message is taken once in a connection. Each message is a record whose namespace is its
         # # topic, unless namespace sets one, and whose key is the topic, unless the codec sets one: its
         # # after holds the topic, payload, QoS, retain and MQTT 5 properties when no codec is named.
-        # # The checkpoint holds nothing to resume from: the session is the position. In a job (mode
-        # # once) it reads until no message comes for idle, then ends once the sinks have what it read.
+        # # The checkpoint holds nothing to resume from, the session being the position, but the topic
+        # # filters subscribed: a filter dropped from topics is unsubscribed at the next run. In a job
+        # # (mode once) it reads until no message comes for idle, then ends once the sinks have what it
+        # # read.
         # module: "mqtt"
         # params:
           # # The brokers, host:port each (1883, or 8883 with tls), tried in turn until one takes the
@@ -4403,6 +4405,54 @@
           # # sinks have every message it read. 5s when left out or 0.
           # # duration, as "1.5s" or "2m"; default "5s".
           # idle: "5s"
+
+          # # A will message the broker publishes once the source's connection ends other than by fit
+          # # closing it: lost, or kept alive in vain. None when left out.
+          # # object.
+          # will:
+            # # The will's topic: a topic name, without + or #.
+            # # string; required.
+            # topic: ""
+
+            # # The will's payload, as text. Empty when left out.
+            # # string.
+            # payload: ""
+
+            # # The will's QoS: 0, 1 or 2. 0 when left out.
+            # # integer, 0 to 2.
+            # qos: 0
+
+            # # Publish the will retained: the broker keeps it for clients that subscribe later, until a
+            # # message to the topic replaces it.
+            # # boolean.
+            # retain: true
+
+            # # In version 5, how long the broker waits, once the connection is lost, before it publishes
+            # # the will, rounded up to seconds: nothing is published if fit is back within it. The broker
+            # # publishes it sooner when the session ends first: at once for the sink, whose session ends
+            # # with its connection. At once when left out.
+            # # duration, as "1.5s" or "2m".
+            # delay: "10s"
+
+            # # In version 5, how long the broker keeps the will for a subscriber not connected, rounded up
+            # # to seconds. None when left out.
+            # # duration, as "1.5s" or "2m".
+            # message_expiry: "10s"
+
+            # # In version 5, the will's content type, as text/plain.
+            # # string.
+            # content_type: ""
+
+            # # In version 5, user properties the will carries, in the order of their names.
+            # # object of string.
+            # user_properties: {}
+
+          # # In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of
+          # # username and password_env's password, rather than with the password in CONNECT: the password
+          # # does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator
+          # # takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out.
+          # # one of: SCRAM-SHA-1, SCRAM-SHA-256, SCRAM-SHA-512.
+          # auth_method: "SCRAM-SHA-1"
 
         # # Or mssql, with every one of its params:
         # # Follows SQL Server (2016 and later): a snapshot of the tables read by key without locks (in
@@ -8167,6 +8217,54 @@
               # # integer, 0 to 65535; default 64.
               # max_inflight: 64
 
+              # # A will message the broker publishes once the sink's connection ends other than by fit
+              # # closing it: lost, or kept alive in vain. None when left out.
+              # # object.
+              # will:
+                # # The will's topic: a topic name, without + or #.
+                # # string; required.
+                # topic: ""
+
+                # # The will's payload, as text. Empty when left out.
+                # # string.
+                # payload: ""
+
+                # # The will's QoS: 0, 1 or 2. 0 when left out.
+                # # integer, 0 to 2.
+                # qos: 0
+
+                # # Publish the will retained: the broker keeps it for clients that subscribe later, until a
+                # # message to the topic replaces it.
+                # # boolean.
+                # retain: true
+
+                # # In version 5, how long the broker waits, once the connection is lost, before it publishes
+                # # the will, rounded up to seconds: nothing is published if fit is back within it. The broker
+                # # publishes it sooner when the session ends first: at once for the sink, whose session ends
+                # # with its connection. At once when left out.
+                # # duration, as "1.5s" or "2m".
+                # delay: "10s"
+
+                # # In version 5, how long the broker keeps the will for a subscriber not connected, rounded up
+                # # to seconds. None when left out.
+                # # duration, as "1.5s" or "2m".
+                # message_expiry: "10s"
+
+                # # In version 5, the will's content type, as text/plain.
+                # # string.
+                # content_type: ""
+
+                # # In version 5, user properties the will carries, in the order of their names.
+                # # object of string.
+                # user_properties: {}
+
+              # # In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of
+              # # username and password_env's password, rather than with the password in CONNECT: the password
+              # # does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator
+              # # takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out.
+              # # one of: SCRAM-SHA-1, SCRAM-SHA-256, SCRAM-SHA-512.
+              # auth_method: "SCRAM-SHA-1"
+
             # # Or mssql, with every one of its params:
             # # Writes records to SQL Server (2016 and later): inserts, updates and messages as upserts by
             # # the record's key, with MERGE (or UPDATE then INSERT), deletes as DELETE by the key, each run
@@ -11688,6 +11786,54 @@
             # # receive maximum in version 5. 64 when left out or 0.
             # # integer, 0 to 65535; default 64.
             # max_inflight: 64
+
+            # # A will message the broker publishes once the sink's connection ends other than by fit
+            # # closing it: lost, or kept alive in vain. None when left out.
+            # # object.
+            # will:
+              # # The will's topic: a topic name, without + or #.
+              # # string; required.
+              # topic: ""
+
+              # # The will's payload, as text. Empty when left out.
+              # # string.
+              # payload: ""
+
+              # # The will's QoS: 0, 1 or 2. 0 when left out.
+              # # integer, 0 to 2.
+              # qos: 0
+
+              # # Publish the will retained: the broker keeps it for clients that subscribe later, until a
+              # # message to the topic replaces it.
+              # # boolean.
+              # retain: true
+
+              # # In version 5, how long the broker waits, once the connection is lost, before it publishes
+              # # the will, rounded up to seconds: nothing is published if fit is back within it. The broker
+              # # publishes it sooner when the session ends first: at once for the sink, whose session ends
+              # # with its connection. At once when left out.
+              # # duration, as "1.5s" or "2m".
+              # delay: "10s"
+
+              # # In version 5, how long the broker keeps the will for a subscriber not connected, rounded up
+              # # to seconds. None when left out.
+              # # duration, as "1.5s" or "2m".
+              # message_expiry: "10s"
+
+              # # In version 5, the will's content type, as text/plain.
+              # # string.
+              # content_type: ""
+
+              # # In version 5, user properties the will carries, in the order of their names.
+              # # object of string.
+              # user_properties: {}
+
+            # # In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of
+            # # username and password_env's password, rather than with the password in CONNECT: the password
+            # # does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator
+            # # takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out.
+            # # one of: SCRAM-SHA-1, SCRAM-SHA-256, SCRAM-SHA-512.
+            # auth_method: "SCRAM-SHA-1"
 
           # # Or mssql, with every one of its params:
           # # Writes records to SQL Server (2016 and later): inserts, updates and messages as upserts by

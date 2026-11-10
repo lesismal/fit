@@ -4,6 +4,17 @@
 // 配置 schema 描述的中文，以英文原文为键，供 config.js 使用。schema 中有此处缺少的描述、或此处有 schema 已不再包含的描述时，
 // app/workbench 中的测试会失败。
 window.FitSchemaZh = {
+"The will's topic: a topic name, without + or #.": "遗嘱消息的主题：一个主题名，不含 + 或 #。",
+"The will's payload, as text. Empty when left out.": "遗嘱消息的负载，为文本。不设置时为空。",
+"In version 5, the will's content type, as text/plain.": "在版本 5 中，遗嘱消息的内容类型，例如 text/plain。",
+"The will's QoS: 0, 1 or 2. 0 when left out.": "遗嘱消息的 QoS：0、1 或 2。不设置时为 0。",
+"In version 5, how long the broker keeps the will for a subscriber not connected, rounded up to seconds. None when left out.": "在版本 5 中，代理为未连接的订阅者保留遗嘱消息的时长，向上取整到秒。不设置时不限。",
+"Publish the will retained: the broker keeps it for clients that subscribe later, until a message to the topic replaces it.": "以保留消息发布遗嘱：代理为之后订阅的客户端保留它，直到该主题的新消息替换它。",
+"In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of username and password_env's password, rather than with the password in CONNECT: the password does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out.": "在版本 5 中，用此 SCRAM 方法、以 username 和 password_env 的密码做增强认证（AUTH），而不是在 CONNECT 中发送密码：密码不经过网络传输，且 fit 会校验代理确实知道该密码。EMQX 5 的 SCRAM 认证器支持 SCRAM-SHA-256 和 SCRAM-SHA-512。不设置时在 CONNECT 中发送密码。",
+"A will message the broker publishes once the source's connection ends other than by fit closing it: lost, or kept alive in vain. None when left out.": "源的连接不是由 fit 关闭而结束时（连接丢失，或保活超时），代理发布的遗嘱消息。不设置时没有。",
+"A will message the broker publishes once the sink's connection ends other than by fit closing it: lost, or kept alive in vain. None when left out.": "目标端的连接不是由 fit 关闭而结束时（连接丢失，或保活超时），代理发布的遗嘱消息。不设置时没有。",
+"In version 5, how long the broker waits, once the connection is lost, before it publishes the will, rounded up to seconds: nothing is published if fit is back within it. The broker publishes it sooner when the session ends first: at once for the sink, whose session ends with its connection. At once when left out.": "在版本 5 中，连接丢失后代理等待多久再发布遗嘱，向上取整到秒：fit 在此期间重新连上则不发布。会话先结束时代理会更早发布：目标端的会话随连接结束，因此立即发布。不设置时立即发布。",
+"In version 5, user properties the will carries, in the order of their names.": "在版本 5 中，遗嘱消息携带的用户属性，按名称排序。",
 "With cdc, the most transactions read from the change tables at once. 1000 when left out or 0.": "使用 cdc 时，一次从变更表读取的最多事务数。不设置或为 0 时为 1000。",
 "How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out.": "连接的加密方式：on，在 TDS 的 pre-login 中协商 TLS，不支持的服务器会被拒绝；strict，TDS 8 的先 TLS（SQL Server 2022）；off，不加密，密码与行都以明文传输。服务器证书按系统根证书或 ca_file 中的证书校验，校验不能关闭。不设置时为 on。",
 "The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out.": "服务器的主机与端口：SQL Server 2016 或更高版本。不设置时为 127.0.0.1:1433。",

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -17,7 +18,7 @@ import (
 
 func init() {
 	module.Register(module.Info{ID: fitsync.Sources + ".mqtt", New: func() any { return new(Source) },
-		Doc: "Subscribes to MQTT topic filters, of version 3.1.1 or 5, in a persistent session of its client ID, which the broker keeps while fit is away, with the messages of QoS 1 and 2 sent to it. A message of QoS 1 or 2 is acknowledged (PUBACK, PUBREC) only once every sink has its records, in the order the messages came, so the broker sends again, after a restart, those a pipeline stopped or killed had not written: at least once into the sinks, and a QoS 2 message is taken once in a connection. Each message is a record whose namespace is its topic, unless namespace sets one, and whose key is the topic, unless the codec sets one: its after holds the topic, payload, QoS, retain and MQTT 5 properties when no codec is named. The checkpoint holds nothing to resume from: the session is the position. In a job (mode once) it reads until no message comes for idle, then ends once the sinks have what it read."})
+		Doc: "Subscribes to MQTT topic filters, of version 3.1.1 or 5, in a persistent session of its client ID, which the broker keeps while fit is away, with the messages of QoS 1 and 2 sent to it. A message of QoS 1 or 2 is acknowledged (PUBACK, PUBREC) only once every sink has its records, in the order the messages came, so the broker sends again, after a restart, those a pipeline stopped or killed had not written: at least once into the sinks, and a QoS 2 message is taken once in a connection. Each message is a record whose namespace is its topic, unless namespace sets one, and whose key is the topic, unless the codec sets one: its after holds the topic, payload, QoS, retain and MQTT 5 properties when no codec is named. The checkpoint holds nothing to resume from, the session being the position, but the topic filters subscribed: a filter dropped from topics is unsubscribed at the next run. In a job (mode once) it reads until no message comes for idle, then ends once the sinks have what it read."})
 }
 
 // The defaults of the source's params.
@@ -49,6 +50,8 @@ type Source struct {
 	Codec          *config.ModuleRef `json:"codec,omitempty" module:"sync.codecs" doc:"What makes records of a message's payload, as json for a JSON object. When left out, a message record whose after holds topic, payload (bytes), qos, retain, and those of the MQTT 5 properties the message has: content_type, response_topic, correlation_data and user_properties (a map, a name sent more than once an array of its values)."`
 	Namespace      string            `json:"namespace,omitempty" doc:"The records' namespace. The codec's, or the topic, when left out."`
 	Idle           config.Duration   `json:"idle,omitempty" default:"\"5s\"" doc:"In a job (mode once), how long without a message ends the reading: the source ends once the sinks have every message it read. 5s when left out or 0."`
+	Will           *Will             `json:"will,omitempty" doc:"A will message the broker publishes once the source's connection ends other than by fit closing it: lost, or kept alive in vain. None when left out."`
+	AuthMethod     string            `json:"auth_method,omitempty" enum:"SCRAM-SHA-1,SCRAM-SHA-256,SCRAM-SHA-512" doc:"In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of username and password_env's password, rather than with the password in CONNECT: the password does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out."`
 
 	cfg   mqttwire.Config
 	dial  dialer
@@ -74,6 +77,11 @@ type session struct {
 	quit          chan struct{}
 	ackMu         sync.Mutex
 	stopped       bool
+	// filters are those the session may hold, which positions carry:
+	// topics, and the filters dropped until their UNSUBACK. dropped are
+	// the filters this run unsubscribes, whose messages, queued before,
+	// are acknowledged and not emitted.
+	filters, dropped []string
 }
 
 type pending struct {
@@ -83,11 +91,13 @@ type pending struct {
 	free bool
 }
 
-// position is the source's: a run and a message's number in it. It is not
-// resumed from: the broker's session is.
+// position is the source's: a run and a message's number in it, and the
+// topic filters the session may hold. It is not resumed from: the
+// broker's session is; its filters say what to unsubscribe from.
 type position struct {
-	Run string `json:"run"`
-	Seq uint64 `json:"seq"`
+	Run     string   `json:"run"`
+	Seq     uint64   `json:"seq"`
+	Filters []string `json:"filters,omitempty"`
 }
 
 // Provision checks the params and reads the password and TLS files;
@@ -95,7 +105,7 @@ type position struct {
 func (s *Source) Provision(ctx *module.Context) error {
 	cfg, errs := wireConfig(ctx, connParams{Servers: s.Servers, ClientID: s.ClientID, Version: s.Version, Username: s.Username,
 		PasswordEnv: s.PasswordEnv, TLS: s.TLS, CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName,
-		Timeout: s.Timeout, KeepAlive: s.KeepAlive, MaxPacketSize: s.MaxPacketSize})
+		Timeout: s.Timeout, KeepAlive: s.KeepAlive, MaxPacketSize: s.MaxPacketSize, Will: s.Will, AuthMethod: s.AuthMethod})
 	if s.ClientID == "" {
 		errs = append(errs, ctx.Params.Field("client_id").Errorf("no client ID: it names the session"))
 	}
@@ -161,31 +171,48 @@ func (s *Source) subscriptions() []mqttwire.Subscription {
 	return subs
 }
 
-// Run connects, resuming the session, subscribes, and emits the messages as
-// they come, until ctx ends or the connection is lost. Its connection
-// stays up after ctx ends, so that the records the sinks write then are
-// acknowledged still, until Cleanup or the next Run.
+// Run connects, resuming the session, unsubscribes from the filters the
+// checkpoint names and topics no longer does, subscribes, and emits the
+// messages as they come, until ctx ends or the connection is lost. Its
+// connection stays up after ctx ends, so that the records the sinks write
+// then are acknowledged still, until Cleanup or the next Run.
 func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	s.stop()
+	var from position
+	if r.From != nil {
+		_ = json.Unmarshal(r.From, &from)
+	}
 	c, err := connect(ctx, s.cfg, s.Servers, s.dial)
 	if err != nil {
 		return err
 	}
 	var id [6]byte
 	_, _ = rand.Read(id[:])
-	st := &session{c: c, run: hex.EncodeToString(id[:]), wake: make(chan struct{}, 1), acked: make(chan struct{}, 1), quit: make(chan struct{})}
+	st := &session{c: c, run: hex.EncodeToString(id[:]), wake: make(chan struct{}, 1), acked: make(chan struct{}, 1), quit: make(chan struct{}),
+		filters: s.Topics}
+	if c.SessionPresent() {
+		for _, f := range from.Filters {
+			if !slices.Contains(s.Topics, f) {
+				st.dropped = append(st.dropped, f)
+			}
+		}
+		st.filters = append(slices.Clone(s.Topics), st.dropped...)
+	}
 	s.mu.Lock()
 	s.cur = st
 	s.mu.Unlock()
 	go s.acker(st)
+	// The filters subscribed are the checkpoint from the start: a run
+	// killed before its first message is acknowledged still knows them.
+	if err := r.SaveStart(s.position(st, 0)); err != nil {
+		s.stop()
+		return err
+	}
 	// The broker may send the session's messages before the SUBACK, more
 	// of them than the client holds: they are taken while it subscribes.
 	subscribed := make(chan error, 1)
 	go func() {
-		sctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-		_, err := c.Subscribe(sctx, s.subscriptions()...)
-		cancel()
-		subscribed <- err
+		subscribed <- s.subscribe(ctx, st)
 	}()
 	idle := DefaultIdle
 	if s.Idle > 0 {
@@ -225,6 +252,51 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 			return s.finish(ctx, st)
 		}
 	}
+}
+
+// subscribe unsubscribes from the filters dropped, then subscribes to
+// topics.
+func (s *Source) subscribe(ctx context.Context, st *session) error {
+	if len(st.dropped) > 0 {
+		uctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+		_, err := st.c.Unsubscribe(uctx, st.dropped...)
+		cancel()
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		st.filters = s.Topics
+		s.mu.Unlock()
+	}
+	sctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	defer cancel()
+	_, err := st.c.Subscribe(sctx, s.subscriptions()...)
+	return err
+}
+
+// position is the position of the run's message seq; s.mu is held, or
+// the run not yet shared.
+func (s *Source) position(st *session, seq uint64) fitsync.Position {
+	b, _ := json.Marshal(position{Run: st.run, Seq: seq, Filters: st.filters})
+	return b
+}
+
+// unwanted reports whether a message is of the filters dropped alone:
+// queued before their UNSUBSCRIBE, it is acknowledged and not emitted.
+// A topic matching a filter of topics too is emitted: a broker that
+// rewrites topics (EMQX's rewrite rules) may send what the filters ask
+// under a topic they do not match, so topics are checked only against
+// the filters dropped.
+func (s *Source) unwanted(st *session, topic string) bool {
+	match := func(filters []string) bool {
+		for _, f := range filters {
+			if mqttwire.MatchTopic(f, topic) {
+				return true
+			}
+		}
+		return false
+	}
+	return len(st.dropped) > 0 && match(st.dropped) && !match(s.Topics)
 }
 
 // finish waits, in a job, for every message emitted to be acknowledged,
@@ -300,7 +372,10 @@ func (s *Source) answer(st *session) {
 // emit makes the message's records and emits them, the last carrying the
 // position its acknowledgement waits for.
 func (s *Source) emit(st *session, r *fitsync.Run, m *mqttwire.Message) error {
-	recs := s.records(m)
+	var recs []*fitsync.Record
+	if !s.unwanted(st, m.Topic) {
+		recs = s.records(m)
+	}
 	s.mu.Lock()
 	st.seq++
 	p := &pending{seq: st.seq, m: m, free: len(recs) == 0}
@@ -308,11 +383,11 @@ func (s *Source) emit(st *session, r *fitsync.Run, m *mqttwire.Message) error {
 	if p.free {
 		s.release(st, 0)
 	}
+	pos := s.position(st, p.seq)
 	s.mu.Unlock()
 	if p.free {
 		return nil
 	}
-	pos, _ := json.Marshal(position{st.run, p.seq})
 	tx := ""
 	if len(recs) > 1 {
 		tx = "mqtt-" + st.run + "-" + strconv.FormatUint(p.seq, 10)

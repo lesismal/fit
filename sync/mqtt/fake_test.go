@@ -27,6 +27,10 @@ type fakeNet struct {
 	// sendErr and waitErr, when not nil, fail a publish of a message.
 	sendErr func(m *mqttwire.Message) error
 	waitErr func(m *mqttwire.Message) error
+	// present says the clients dialed resume a session; unsubErr fails
+	// Unsubscribe.
+	present  bool
+	unsubErr error
 }
 
 type fakeClient struct {
@@ -39,6 +43,7 @@ type fakeClient struct {
 	err    error
 	acks   []*mqttwire.Message
 	subs   []mqttwire.Subscription
+	unsubs []string
 	sent   []*mqttwire.Message
 	closed bool
 }
@@ -95,6 +100,27 @@ func (c *fakeClient) Subscribe(ctx context.Context, subs ...mqttwire.Subscriptio
 	c.n.mu.Lock()
 	defer c.n.mu.Unlock()
 	return make([]byte, len(subs)), c.n.subErr
+}
+
+func (c *fakeClient) Unsubscribe(ctx context.Context, filters ...string) ([]byte, error) {
+	c.mu.Lock()
+	c.unsubs = append(c.unsubs, filters...)
+	c.mu.Unlock()
+	c.n.mu.Lock()
+	defer c.n.mu.Unlock()
+	return make([]byte, len(filters)), c.n.unsubErr
+}
+
+func (c *fakeClient) unsubscribed() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.unsubs...)
+}
+
+func (c *fakeClient) SessionPresent() bool {
+	c.n.mu.Lock()
+	defer c.n.mu.Unlock()
+	return c.n.present
 }
 
 func (c *fakeClient) Messages() <-chan *mqttwire.Message { return c.msgs }

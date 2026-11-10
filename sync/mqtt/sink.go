@@ -48,6 +48,8 @@ type Sink struct {
 	ContentType    string            `json:"content_type,omitempty" doc:"In version 5, the messages' content type, as application/json."`
 	UserProperties map[string]string `json:"user_properties,omitempty" doc:"In version 5, user properties every message carries, in the order of their names."`
 	MaxInflight    int               `json:"max_inflight,omitempty" min:"0" max:"65535" default:"64" doc:"The most messages of QoS 1 and 2 published and not yet acknowledged; lowered to the broker's receive maximum in version 5. 64 when left out or 0."`
+	Will           *Will             `json:"will,omitempty" doc:"A will message the broker publishes once the sink's connection ends other than by fit closing it: lost, or kept alive in vain. None when left out."`
+	AuthMethod     string            `json:"auth_method,omitempty" enum:"SCRAM-SHA-1,SCRAM-SHA-256,SCRAM-SHA-512" doc:"In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of username and password_env's password, rather than with the password in CONNECT: the password does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out."`
 
 	cfg   mqttwire.Config
 	dial  dialer
@@ -62,7 +64,7 @@ type Sink struct {
 func (s *Sink) Provision(ctx *module.Context) error {
 	cfg, errs := wireConfig(ctx, connParams{Servers: s.Servers, ClientID: s.ClientID, Version: s.Version, Username: s.Username,
 		PasswordEnv: s.PasswordEnv, TLS: s.TLS, CAFile: s.CAFile, CertFile: s.CertFile, KeyFile: s.KeyFile, ServerName: s.ServerName,
-		Timeout: s.Timeout, KeepAlive: s.KeepAlive, MaxPacketSize: s.MaxPacketSize})
+		Timeout: s.Timeout, KeepAlive: s.KeepAlive, MaxPacketSize: s.MaxPacketSize, Will: s.Will, AuthMethod: s.AuthMethod})
 	add := func(field, format string, args ...any) {
 		errs = append(errs, ctx.Params.Field(field).Errorf(format, args...))
 	}
@@ -96,14 +98,7 @@ func (s *Sink) Provision(ctx *module.Context) error {
 			}
 		}
 	}
-	names := make([]string, 0, len(s.UserProperties))
-	for k := range s.UserProperties {
-		names = append(names, k)
-	}
-	slices.Sort(names)
-	for _, k := range names {
-		s.ups = append(s.ups, mqttwire.UserProperty{Key: k, Value: s.UserProperties[k]})
-	}
+	s.ups = userProperties(s.UserProperties)
 	s.cfg = cfg
 	if len(errs) > 0 {
 		return errs
