@@ -201,10 +201,11 @@ func measureInto(ctx context.Context, o *options, r *Result) error {
 	var wrote chan error
 	if o.sc.stream {
 		var err error
-		if base, next, err = m.warm(ctx, src); err != nil {
+		var ready time.Time
+		if base, next, ready, err = m.warm(ctx, src); err != nil {
 			return fmt.Errorf("waiting for the warm-up rows: %w", err)
 		}
-		r.StartupSeconds = time.Since(m.start).Seconds()
+		r.StartupSeconds = ready.Sub(m.start).Seconds()
 		if o.pause {
 			if err := m.each(ctx, m.dk.pause); err != nil {
 				return err
@@ -314,27 +315,37 @@ func (m *meter) each(ctx context.Context, f func(context.Context, string) error)
 
 // warm writes a transaction of warm-up rows at a time, from the first,
 // until the sink's count rises: the mover follows the source. Once the
-// count has stayed put for a second, it returns it and the rows written.
-func (m *meter) warm(ctx context.Context, src source) (int64, int, error) {
+// count has stayed put long enough, it returns it, the rows written and
+// when the count first stayed put for warmSettle (the startup's end).
+//
+// With more than one transaction written, the later ones may still be on
+// their way when an earlier one's rows raise the count: a mover that polls
+// a CDC table every second can take more than warmSettle between two
+// transactions written 2s apart. A count taken before they arrive counts
+// them as copies of the measured rows (S9's 10 extra rows of 11-10, for
+// fit in round 3 and Debezium in round 2), so then the count must stay put
+// for warmWait more.
+func (m *meter) warm(ctx context.Context, src source) (int64, int, time.Time, error) {
 	o := m.o
 	deadline := time.Now().Add(o.startupFor)
 	n0, err := m.ctr.count(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("counting the sink: %w", err)
+		return 0, 0, time.Time{}, fmt.Errorf("counting the sink: %w", err)
 	}
-	next := 0
+	next, writes := 0, 0
 	for seen := false; !seen; {
 		if time.Now().After(deadline) {
-			return 0, next, fmt.Errorf("the sink had none of %d rows after %s", next, o.startupFor)
+			return 0, next, time.Time{}, fmt.Errorf("the sink had none of %d rows after %s", next, o.startupFor)
 		}
 		if err := src.write(ctx, next, o.txRows); err != nil {
-			return 0, next, err
+			return 0, next, time.Time{}, err
 		}
 		next += o.txRows
+		writes++
 		for wait := time.Now().Add(warmWait); !seen && time.Now().Before(wait); {
 			s, err := m.poll(ctx)
 			if err != nil {
-				return 0, next, err
+				return 0, next, time.Time{}, err
 			}
 			seen = s.n > n0
 			if !seen {
@@ -342,21 +353,32 @@ func (m *meter) warm(ctx context.Context, src source) (int64, int, error) {
 			}
 		}
 	}
+	quiet := warmSettle
+	if writes > 1 {
+		quiet += warmWait
+	}
 	last, still := int64(-1), time.Now()
-	for time.Since(still) < warmSettle {
+	var ready time.Time
+	for {
 		if time.Now().After(deadline) {
-			return 0, next, fmt.Errorf("the sink's count did not settle in %s", o.startupFor)
+			return 0, next, time.Time{}, fmt.Errorf("the sink's count did not settle in %s", o.startupFor)
 		}
 		s, err := m.poll(ctx)
 		if err != nil {
-			return 0, next, err
+			return 0, next, time.Time{}, err
 		}
 		if s.n != last {
-			last, still = s.n, time.Now()
+			last, still, ready = s.n, s.t, time.Time{}
+		}
+		d := s.t.Sub(still)
+		if ready.IsZero() && d >= warmSettle {
+			ready = s.t
+		}
+		if d >= quiet {
+			return last, next, ready, nil
 		}
 		time.Sleep(o.interval)
 	}
-	return last, next, nil
 }
 
 // How long warm waits for a transaction to reach the sink before it

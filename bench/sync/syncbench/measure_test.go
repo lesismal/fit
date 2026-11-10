@@ -291,18 +291,77 @@ func TestWarm(t *testing.T) {
 	ctr, _ := openCounter(ctx, o)
 	m := &meter{o: o, ctr: ctr}
 	src := &sqlSource{conns: []execer{db}, table: "t", txRows: 1}
-	if _, _, err := m.warm(ctx, src); err == nil || !strings.Contains(err.Error(), "did not settle") {
+	if _, _, _, err := m.warm(ctx, src); err == nil || !strings.Contains(err.Error(), "did not settle") {
 		t.Errorf("a count that never settles: %v", err)
 	}
 	n.Store(0)
 	failAfter.Store(3)
-	if _, _, err := m.warm(ctx, src); err == nil {
+	if _, _, _, err := m.warm(ctx, src); err == nil {
 		t.Error("a sink that fails once seen: no error")
 	}
 	n.Store(0)
 	failAfter.Store(2)
-	if _, _, err := m.warm(ctx, src); err == nil {
+	if _, _, _, err := m.warm(ctx, src); err == nil {
 		t.Error("a sink that fails before: no error")
+	}
+}
+
+// lateSource is a source whose transactions reach the sink late: the
+// first once the second is written, the second late after that.
+type lateSource struct {
+	mu     sync.Mutex
+	writes []time.Time
+}
+
+func (l *lateSource) write(context.Context, int, int) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.writes = append(l.writes, time.Now())
+	return nil
+}
+
+func (l *lateSource) close() {}
+
+// count is the transactions at the sink: none until the second is
+// written, the first then, the second late after.
+func (l *lateSource) count(late time.Duration) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	switch {
+	case len(l.writes) < 2:
+		return 0
+	case time.Since(l.writes[1]) < late:
+		return 1
+	}
+	return len(l.writes)
+}
+
+// A warm-up transaction that arrives after an earlier one raised the count,
+// later than warmSettle, is in the count the warm-up returns: S9's 10
+// extra rows of 11-10.
+func TestWarmLateTransaction(t *testing.T) {
+	ctx := ctxT(t)
+	src := &lateSource{}
+	late := warmSettle * 3 / 2
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"count": %d}`, src.count(late))
+	}))
+	defer srv.Close()
+	o := opts(t, "measure", "-scenario", "mysql-es", "-mover", "m", "-es", srv.URL, "-interval", "5ms", "-startup-timeout", "5s")
+	ctr, _ := openCounter(ctx, o)
+	m := &meter{o: o, ctr: ctr}
+	base, next, ready, err := m.warm(ctx, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != 2 || next != 2*o.txRows {
+		t.Errorf("base %d, next %d: want 2 and %d", base, next, 2*o.txRows)
+	}
+	src.mu.Lock()
+	arrived := src.writes[1].Add(late)
+	src.mu.Unlock()
+	if ready.IsZero() || ready.Before(arrived) {
+		t.Errorf("ready %v, before the second transaction arrived at %v", ready, arrived)
 	}
 }
 
