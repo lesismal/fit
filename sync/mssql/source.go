@@ -469,6 +469,8 @@ type reader struct {
 	c      conn
 	srv    server
 	tables []*table
+	// lagAt is when the lag was last counted.
+	lagAt time.Time
 }
 
 // head is where the changes are now: CDC's highest LSN, or change

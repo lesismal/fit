@@ -708,8 +708,12 @@ A table named whole in `tables` must be captured, or the pipeline fails with the
 `sys.sp_cdc_enable_table` call that captures it; a glob such as `dbo.*` matches the captured tables,
 and a table CDC begins to capture while the pipeline runs is read whole, then followed. A second
 capture instance of a table (made after a schema change, with the new columns) is followed from its
-start, the older one up to there. A checkpoint older than what CDC's cleanup keeps (three days by
-default) stops the pipeline: a new snapshot is needed. `mode change_tracking` reads SQL Server's change
+start, the older one up to there; an older instance dropped (`sys.sp_cdc_disable_table`) while the
+pipeline runs, before it read that instance's changes up to the newer one's start, stops the pipeline
+asking for a new snapshot (a drop while it is stopped leaves no trace to find), and a table no longer
+captured at all is logged and no longer read. A checkpoint older than what CDC's cleanup keeps (three days by
+default) stops the pipeline: a new snapshot is needed. The lag reported is the transactions of
+`cdc.lsn_time_mapping` after the position (with `mode change_tracking`, the versions). `mode change_tracking` reads SQL Server's change
 tracking instead, lighter on the server: the keys changed since the version in the checkpoint, each
 row read back as it is then (a row gone a delete), every table's changes of one poll a transaction;
 changes between two polls are merged into the last, and updates have no row before.
@@ -1526,7 +1530,7 @@ The Admin API's `/metrics` carries each pipeline's as `fit_sync_*`, labelled `pi
 | `fit_sync_queue_records`, `fit_sync_queue_bytes`, `fit_sync_queue_max_records`, `fit_sync_queue_max_bytes` | gauge | the queue against its bounds |
 | `fit_sync_lag_seconds` | gauge | from the last acknowledged record's commit time to its acknowledgement |
 | `fit_sync_last_commit_timestamp_seconds` | gauge | the last acknowledged record's commit time |
-| `fit_sync_source_lag` | gauge | behind the source's server, in its unit: a PostgreSQL slot's bytes of WAL, MySQL's binlog bytes, Kafka's offsets |
+| `fit_sync_source_lag` | gauge | behind the source's server, in its unit: a PostgreSQL slot's bytes of WAL, MySQL's binlog bytes, Kafka's offsets, SQL Server's CDC transactions or change tracking versions |
 | `fit_sync_sink_records_total`, `fit_sync_sink_bytes_total`, `fit_sync_sink_batches_total`, `fit_sync_sink_errors_total`, `fit_sync_sink_retries_total`, `fit_sync_sink_failed_total` | counter | per sink: written, batches tried, failed, tried again, records failed |
 | `fit_sync_dead_letters_total`, `fit_sync_dead_letters_replayed_total`, `fit_sync_dead_letters_dropped_total` | counter | dead letters written, replayed and dropped |
 | `fit_sync_dead_letters_kept`, `fit_sync_dead_letters_kept_bytes` | gauge | dead letters kept |

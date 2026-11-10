@@ -37,6 +37,7 @@ func (rd *reader) track(ctx context.Context, from position) error {
 		if end >= 0 {
 			cur = min(cur, end)
 		}
+		rd.r.ReportLag(p.Version-v, lagVersions)
 		if cur <= v {
 			if rd.r.Once {
 				return nil

@@ -3,6 +3,7 @@ package syncmssql
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -561,5 +562,182 @@ func TestValues(t *testing.T) {
 	rd := &reader{srv: server{zone: time.UTC}}
 	if !rd.serverTime("x").IsZero() {
 		t.Fatal("serverTime")
+	}
+}
+
+// follow runs s from position at until it fails, calling the n-th step at
+// the n-th poll; the context ends at the poll after the last step.
+func follow(t *testing.T, s *Source, at lsn, steps ...func()) ([]*fitsync.Record, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	n := 0
+	s.sleep = func(ctx context.Context, d time.Duration) error {
+		if n < len(steps) {
+			steps[n]()
+		} else {
+			cancel()
+		}
+		n++
+		return ctx.Err()
+	}
+	var recs []*fitsync.Record
+	err := s.Run(ctx, &fitsync.Run{From: position{LSN: at}.marshal(), Emit: func(r *fitsync.Record) error {
+		recs = append(recs, r)
+		return nil
+	}})
+	return recs, err
+}
+
+// drop removes a capture instance, as sys.sp_cdc_disable_table does.
+func (f *fake) drop(in *fakeInst) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, x := range f.instances {
+		if x == in {
+			f.instances = append(f.instances[:i], f.instances[i+1:]...)
+			return
+		}
+	}
+}
+
+// TestDroppedInstance fails asking for a snapshot when an older capture
+// instance is dropped before its changes were read, found by its query
+// failing or by the capture instances changing while caught up; a dropped
+// instance a remaining one covers, or a table no longer captured, goes on.
+func TestDroppedInstance(t *testing.T) {
+	lsn1 := lsn("00000000000000000001")
+	t.Run("read", func(t *testing.T) {
+		f := newFake()
+		tb := f.table("t", 0)
+		old := f.capture(tb, "dbo_t")
+		f.commit(old, int64(cdcInsert), row2(1, "a"))
+		s := newSource(t, f, map[string]any{"poll_interval": "1ms"})
+		_, err := follow(t, s, lsn1, func() {
+			f.commit(old, int64(cdcInsert), row2(2, "b"))
+			nu := f.capture(tb, "dbo_t2")
+			f.commit(old, int64(cdcInsert), row2(3, "c"), nu, int64(cdcInsert), row2(3, "c"))
+			f.drop(old)
+		})
+		if !errors.Is(err, errNeedSnapshot) || !strings.Contains(err.Error(), "dbo_t of dbo.t was dropped") {
+			t.Fatal(err)
+		}
+	})
+	t.Run("caught up", func(t *testing.T) {
+		f := newFake()
+		tb := f.table("t", 0)
+		old := f.capture(tb, "dbo_t")
+		f.commit(old, int64(cdcInsert), row2(1, "a"))
+		s := newSource(t, f, map[string]any{"poll_interval": "1ms"})
+		_, err := follow(t, s, lsn1, func() {
+			// The newer instance starts past changes not yet in
+			// lsn_time_mapping.
+			nu := f.capture(tb, "dbo_t2")
+			nu.start += 2
+			f.drop(old)
+		})
+		if !errors.Is(err, errNeedSnapshot) {
+			t.Fatal(err)
+		}
+	})
+	t.Run("covered", func(t *testing.T) {
+		f := newFake()
+		tb := f.table("t", 0)
+		old := f.capture(tb, "dbo_t")
+		f.commit(old, int64(cdcInsert), row2(1, "a"))
+		s := newSource(t, f, map[string]any{"poll_interval": "1ms"})
+		// The newer instance starts right after the position: dropping the
+		// older loses nothing, and the read's failure is the error.
+		_, err := follow(t, s, lsn1, func() {
+			nu := f.capture(tb, "dbo_t2")
+			f.commit(old, int64(cdcInsert), row2(2, "b"), nu, int64(cdcInsert), row2(2, "b"))
+			f.drop(old)
+		})
+		if errors.Is(err, errNeedSnapshot) || err == nil || !strings.Contains(err.Error(), "invalid object name") {
+			t.Fatal(err)
+		}
+		// Found while caught up, it goes on with the newer instance.
+		recs, err := follow(t, s, lsn("00000000000000000002"), func() {
+			f.capture(tb, "dbo_t3")
+			f.drop(f.instances[0])
+		}, func() {
+			f.commit(f.instances[0], int64(cdcInsert), row2(3, "c"))
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		checkRecs(t, recs, `insert dbo.t {"id":3} {"id":3,"v":"c"} @3`)
+	})
+	t.Run("uncaptured", func(t *testing.T) {
+		f := newFake()
+		a, b := f.table("a", 0), f.table("b", 0)
+		ia, ib := f.capture(a, "dbo_a"), f.capture(b, "dbo_b")
+		f.commit(ia, int64(cdcInsert), row2(1, "a"))
+		s := newSource(t, f, map[string]any{"poll_interval": "1ms"})
+		// b is no longer captured: logged, and a goes on.
+		recs, err := follow(t, s, lsn1, func() {
+			f.drop(ib)
+		}, func() {
+			f.commit(ia, int64(cdcInsert), row2(2, "b"))
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		checkRecs(t, recs, `insert dbo.a {"id":2} {"id":2,"v":"b"} @2`)
+		// A failing read whose instances changed and cannot be found
+		// again is its own error.
+		f.fail["FROM cdc.change_tables ct JOIN"] = errors.New("fake: down")
+		f.skip["FROM cdc.change_tables ct JOIN"] = 1
+		_, err = follow(t, s, lsn("00000000000000000002"), func() {
+			nb := f.capture(b, "dbo_b2")
+			f.commit(ia, int64(cdcInsert), row2(3, "c"), nb, int64(cdcInsert), row2(3, "c"))
+			f.drop(ia)
+		})
+		if err == nil || !strings.Contains(err.Error(), "invalid object name") {
+			t.Fatal(err)
+		}
+	})
+}
+
+// TestLag reports the transactions behind CDC's head, counted when a window
+// is full, and change tracking's versions behind.
+func TestLag(t *testing.T) {
+	f := newFake()
+	tb := f.table("t", 0)
+	in := f.capture(tb, "dbo_t")
+	for i := int64(1); i <= 5; i++ {
+		f.commit(in, int64(cdcInsert), row2(i, "a"))
+	}
+	s := newSource(t, f, map[string]any{"snapshot": "never", "window_transactions": 2})
+	var lags []string
+	lag := func(l fitsync.SourceLag) { lags = append(lags, fmt.Sprint(l.Behind, " ", l.Unit)) }
+	ctx := context.Background()
+	err := s.Run(ctx, &fitsync.Run{From: position{LSN: zeroLSN}.marshal(), Once: true, Lag: lag, Emit: func(*fitsync.Record) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Counted once (then not again within a second), then the windows'.
+	if got := strings.Join(lags, ","); got != "5 transactions,1 transactions,0 transactions" {
+		t.Fatal(got)
+	}
+	f.fail["SELECT COUNT_BIG(*)"] = errors.New("fake: down")
+	err = s.Run(ctx, &fitsync.Run{From: position{LSN: zeroLSN}.marshal(), Once: true, Lag: lag, Emit: func(*fitsync.Record) error { return nil }})
+	if err == nil || !strings.Contains(err.Error(), "fake: down") {
+		t.Fatal(err)
+	}
+
+	f = newFake()
+	f.ct = true
+	tb = f.table("t", 1)
+	tb.ct = true
+	f.ctVersion = 5
+	s = newSource(t, f, map[string]any{"mode": "change_tracking", "snapshot": "never"})
+	lags = nil
+	err = s.Run(ctx, &fitsync.Run{From: position{Version: 3}.marshal(), Once: true, Lag: lag, Emit: func(*fitsync.Record) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(lags, ","); got != "2 versions,0 versions" {
+		t.Fatal(got)
 	}
 }

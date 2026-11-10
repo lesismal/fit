@@ -611,7 +611,10 @@ sync {
 
 `tables` 中完整写出名称的表必须被捕获，否则流水线失败，并给出捕获它的 `sys.sp_cdc_enable_table` 调用；`dbo.*` 这样的
 通配模式匹配已被捕获的表，流水线运行期间 CDC 开始捕获的表会先整表读取，再跟随。表的第二个捕获实例（模式变化后建立，
-含新列）从其起点开始跟随，旧实例读到那里为止。比 CDC 清理所保留的（默认三天）更旧的检查点会让流水线停止：需要新的快照。
+含新列）从其起点开始跟随，旧实例读到那里为止；流水线运行期间旧实例被删除（`sys.sp_cdc_disable_table`），而它到新实例起点
+为止的变更尚未读完时，流水线停止并要求新的快照（停止期间的删除不留下可查的痕迹），完全不再被捕获的表记一条日志并不再读取。
+比 CDC 清理所保留的（默认三天）更旧的检查点会让流水线停止：需要新的快照。报告的延迟是位置之后 `cdc.lsn_time_mapping` 中的
+事务数（`mode change_tracking` 时为版本数）。
 `mode change_tracking` 改读 SQL Server 的 change tracking，对服务器更轻：读取检查点中的版本之后变更过的键，每行按当时的
 状态读回（行已不存在则为删除），一次轮询中所有表的变更是一个事务；两次轮询之间的变更合并为最后一个，更新没有变更前的行。
 
@@ -1342,7 +1345,7 @@ Admin API 的 `/metrics` 以 `fit_sync_*` 输出每条流水线的指标，标�
 | `fit_sync_queue_records`、`fit_sync_queue_bytes`、`fit_sync_queue_max_records`、`fit_sync_queue_max_bytes` | gauge | 队列与其上限 |
 | `fit_sync_lag_seconds` | gauge | 最后确认的记录从提交时间到被确认的时长 |
 | `fit_sync_last_commit_timestamp_seconds` | gauge | 最后确认的记录的提交时间 |
-| `fit_sync_source_lag` | gauge | 落后于源服务器的量，以源自己的单位：PostgreSQL 复制槽的 WAL 字节数、MySQL 的 binlog 字节数、Kafka 的 offset 数 |
+| `fit_sync_source_lag` | gauge | 落后于源服务器的量，以源自己的单位：PostgreSQL 复制槽的 WAL 字节数、MySQL 的 binlog 字节数、Kafka 的 offset 数、SQL Server 的 CDC 事务数或 change tracking 版本数 |
 | `fit_sync_sink_records_total`、`fit_sync_sink_bytes_total`、`fit_sync_sink_batches_total`、`fit_sync_sink_errors_total`、`fit_sync_sink_retries_total`、`fit_sync_sink_failed_total` | counter | 每个目标：写入量、尝试的批次、失败、重试、失败的记录 |
 | `fit_sync_dead_letters_total`、`fit_sync_dead_letters_replayed_total`、`fit_sync_dead_letters_dropped_total` | counter | 写入、重放和丢弃的死信 |
 | `fit_sync_dead_letters_kept`、`fit_sync_dead_letters_kept_bytes` | gauge | 保存着的死信 |
