@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/signal"
 	"slices"
@@ -147,6 +148,26 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	stdout, stderr = logWriter{server, logs.LevelInfo}, logWriter{server, logs.LevelError}
 	printWarnings(warnWriter(stderr), set)
 	data := set.JSON
+	// A store written from the files below is put back as it was when the
+	// start fails after it: a config that does not compile, or a port
+	// another process holds, must not stay sealed in the store, whose
+	// values would then win over the fixed files at the next start.
+	startedOK, storeNote := false, ""
+	if boot != nil && (boot.seeded || boot.merged) {
+		path := boot.st.Path()
+		old, readErr := os.ReadFile(path)
+		defer func() {
+			if startedOK {
+				return
+			}
+			switch {
+			case readErr == nil:
+				_ = os.WriteFile(path, old, 0o600)
+			case errors.Is(readErr, fs.ErrNotExist):
+				_ = os.Remove(path)
+			}
+		}()
+	}
 	if boot != nil {
 		data = boot.base
 		if boot.seeded {
@@ -154,13 +175,13 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 				fmt.Fprintf(stderr, "fit run: %v\n", err)
 				return 1
 			}
-			fmt.Fprintf(stdout, "fit: the config of %s is kept in the store %s from now on\n", strings.Join(paths, ", "), boot.st.Path())
+			storeNote = fmt.Sprintf("fit: the config of %s is kept in the store %s from now on", strings.Join(paths, ", "), boot.st.Path())
 		} else if boot.merged {
 			if err := boot.st.Write(boot.base); err != nil {
 				fmt.Fprintf(stderr, "fit run: %v\n", err)
 				return 1
 			}
-			fmt.Fprintf(stdout, "fit: the store %s merged onto %s, the store's values winning\n", boot.st.Path(), strings.Join(paths, ", "))
+			storeNote = fmt.Sprintf("fit: the store %s merged onto %s, the store's values winning", boot.st.Path(), strings.Join(paths, ", "))
 		}
 	}
 	// Upstream connections are dialed through an engine of their own, so
@@ -437,6 +458,10 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		}
 		_ = s.Close()
 		return 1
+	}
+	startedOK = true
+	if storeNote != "" {
+		fmt.Fprintln(stdout, storeNote)
 	}
 
 	var watcher *file.Watcher

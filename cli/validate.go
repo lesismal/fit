@@ -14,6 +14,7 @@ import (
 
 	"github.com/lesismal/fit/adapter"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/mediaauth"
 	fitruntime "github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/schema"
 )
@@ -42,6 +43,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 			var g *fitruntime.Graph
 			if g, err = fitruntime.Compile(c, fitruntime.Env{}); err == nil {
 				g.Release()
+				err = checkMediaAuth(c)
 			}
 		}
 		err = set.MapErrors(err)
@@ -54,6 +56,20 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	printDeprecated(stderr, set, c.Warnings())
 	fmt.Fprintf(stdout, "%s: valid\n", name)
 	return 0
+}
+
+// checkMediaAuth compiles every media_auth policy as the role does when the
+// config is applied, reading its secret files: a policy only a streaming
+// listener names is not provisioned by any module, so compiling the graph
+// alone would not find a missing or short secret_file.
+func checkMediaAuth(c *config.Config) error {
+	var errs []error
+	for i := range c.MediaAuth {
+		if _, err := mediaauth.New(&c.MediaAuth[i]); err != nil {
+			errs = append(errs, fmt.Errorf("media_auth %q: %w", c.MediaAuth[i].Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // printWarnings prints what adapting each of a config's files left out or

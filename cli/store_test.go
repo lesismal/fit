@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -202,5 +203,27 @@ func TestServeStoreMergeUnwritable(t *testing.T) {
 	s := startServe(t, "-c", cfg, "-watch-certs=false")
 	if code := s.stop(t); code != 1 || !strings.Contains(s.err.String(), "store: open ") || strings.Contains(s.out.String(), "merged onto") {
 		t.Errorf("an unwritable store: %d %q %q", code, s.out.String(), s.err.String())
+	}
+}
+
+// TestServeStoreFailedFirstStart checks that a first start which fails after
+// the store is seeded, here on a port another process holds, leaves no store
+// behind: the fixed files are what the next start reads.
+func TestServeStoreFailedFirstStart(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	dir := t.TempDir()
+	cfg, path := filepath.Join(dir, "fit.json"), filepath.Join(dir, "fit.store")
+	writeFile(t, cfg, `{"admin": {"address": "127.0.0.1:0", "store": {"path": `+js(path)+`, "password": "s3cret"}},
+"listeners": [{"name": "web", "address": `+js(held.Addr().String())+`}],
+"routes": [{"handler": {"module": "respond", "params": {"body": "one"}}}]}`)
+	if code, stdout, stderr := runFit("run", "-c", cfg, "-watch-certs=false"); code != 1 || strings.Contains(stdout, "is kept in the store") {
+		t.Fatalf("run: %d %q %q", code, stdout, stderr)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the store is left behind: %v", err)
 	}
 }

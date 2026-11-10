@@ -165,3 +165,30 @@ func TestRun(t *testing.T) {
 		t.Fatalf("extra argument: %d", code)
 	}
 }
+
+// TestValidateMediaAuthSecretFile checks that fit validate reads a media_auth
+// policy's secret_file even when only a streaming listener names the policy,
+// as applying the config does.
+func TestValidateMediaAuthSecretFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "media.json")
+	secret := filepath.Join(dir, "secret")
+	doc := func() string {
+		s, _ := json.Marshal(secret)
+		return `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+"media_auth": [{"name": "live", "secret_file": ` + string(s) + `}],
+"streaming": {"rtmp": {"listen": "127.0.0.1:0", "auth": "live"}}}`
+	}
+	if err := os.WriteFile(path, []byte(doc()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runFit("validate", "-c", path); code != 1 || !strings.Contains(stderr, `media_auth "live": secret_file`) {
+		t.Fatalf("a missing secret_file: %d %q", code, stderr)
+	}
+	if err := os.WriteFile(secret, []byte("0123456789abcdef0123\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, stdout, stderr := runFit("validate", "-c", path); code != 0 || stdout != path+": valid\n" {
+		t.Fatalf("with the file: %d %q %q", code, stdout, stderr)
+	}
+}
