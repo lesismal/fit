@@ -53,12 +53,8 @@ func newFakeLoki(t *testing.T) *fakeLoki {
 }
 
 func (f *fakeLoki) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/loki/api/v1/labels" {
-		if r.Header.Get("X-Scope-OrgID") == "nobody" {
-			w.WriteHeader(401)
-			return
-		}
-		_, _ = io.WriteString(w, `{"status":"success","data":[]}`)
+	if r.Header.Get("X-Scope-OrgID") == "nobody" {
+		w.WriteHeader(401)
 		return
 	}
 	if r.URL.Path != pushPath || r.Method != http.MethodPost {
@@ -266,8 +262,14 @@ func TestPushEncodings(t *testing.T) {
 					t.Errorf("%d: %s %v, want %s", i, s, e.meta, want[i])
 				}
 			}
+			// The test pushes a stream without entries, in the encoding.
 			if err := s.Test(context.Background()); err != nil {
 				t.Fatal(err)
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.entries) != 3 || f.pushes != 2 || f.types[0] != f.types[1] {
+				t.Fatal(len(f.entries), f.pushes, f.types)
 			}
 		})
 	}
