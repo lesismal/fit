@@ -236,6 +236,26 @@ func TestTLS(t *testing.T) {
 	if resp, err := c.Do(context.Background(), Request{Method: "GET"}); err != nil || resp.Status != 200 {
 		t.Fatal(resp, err)
 	}
+	// A redirect from https to http is not followed: the credentials and
+	// the body would go in the clear. One to https is.
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer plain.Close()
+	var loc atomic.Value
+	loc.Store(plain.URL)
+	fe := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", loc.Load().(string))
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer fe.Close()
+	_ = os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: fe.Certificate().Raw}), 0o600)
+	feClient := newClient(t, Params{URL: fe.URL, CAFile: ca, ServerName: "example.com"})
+	if _, err := feClient.Do(context.Background(), Request{Method: "PUT", Body: []byte("rows"), Redirects: MaxRedirects}); err == nil || !strings.Contains(err.Error(), "in the clear") {
+		t.Fatal(err)
+	}
+	loc.Store(fe.URL + "/be")
+	if resp, err := feClient.Do(context.Background(), Request{Method: "PUT", Body: []byte("rows"), Redirects: 1}); err != nil || resp.Status != http.StatusTemporaryRedirect {
+		t.Fatal(resp, err)
+	}
 	pinned := newClient(t, Params{URL: srv.URL, PinnedCert: der})
 	if resp, err := pinned.Do(context.Background(), Request{Method: "GET"}); err != nil || resp.Status != 200 {
 		t.Fatal(resp, err)

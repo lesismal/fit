@@ -49,7 +49,7 @@ const (
 
 // Sink is the sink doris.
 type Sink struct {
-	URLs            []string          `json:"urls" fit:"required" doc:"The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends' (http://be1:8040) to load into directly: the one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). A frontend's redirect to a backend is followed, with the credentials; the backend's address must be one fit reaches."`
+	URLs            []string          `json:"urls" fit:"required" doc:"The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends' (http://be1:8040) to load into directly: the one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). A frontend's redirect to a backend is followed, with the credentials, but not from https to http; the backend's address must be one fit reaches."`
 	Username        string            `json:"username" fit:"required" doc:"The user to load as, which needs LOAD on the tables (INSERT on StarRocks), sent with basic authentication."`
 	PasswordEnv     string            `json:"password_env,omitempty" doc:"The environment variable holding username's password, read when the pipeline loads; none when left out."`
 	CAFile          string            `json:"ca_file,omitempty" doc:"A PEM file of the certificates the server's is checked against over https, in place of the system's roots, for a CA of its own. The check cannot be turned off."`
