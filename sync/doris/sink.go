@@ -27,8 +27,8 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	fitsync "github.com/lesismal/fit/sync"
-	nametmpl "github.com/lesismal/fit/sync/internal/tmpl"
 	"github.com/lesismal/fit/sync/internal/fibrest"
+	nametmpl "github.com/lesismal/fit/sync/internal/tmpl"
 )
 
 func init() {

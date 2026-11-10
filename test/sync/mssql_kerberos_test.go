@@ -55,7 +55,9 @@ type checkedSSPI struct {
 	checked int
 }
 
-func (c *checkedSSPI) Start(ctx context.Context, spn string) ([]byte, error) { return c.in.Start(ctx, spn) }
+func (c *checkedSSPI) Start(ctx context.Context, spn string) ([]byte, error) {
+	return c.in.Start(ctx, spn)
+}
 func (c *checkedSSPI) Next(ctx context.Context, b []byte) ([]byte, error) {
 	out, err := c.in.Next(ctx, b)
 	if err == nil {
