@@ -423,6 +423,87 @@ func TestSinkTypedNulls(t *testing.T) {
 	}
 }
 
+// TestSinkTypesChanged: a column's type changed while connected refuses a
+// NULL sent as the old one; the types are read again and the record
+// written, alone or in a run, and one the new type refuses too fails.
+func TestSinkTypesChanged(t *testing.T) {
+	f := newSinkFake()
+	id, _ := mssqlwire.ParseType("bigint", mssqlwire.Collation{})
+	id.Name = "id"
+	col := func(typ string) mssqlwire.Column {
+		c, _ := mssqlwire.ParseType(typ, mssqlwire.Collation{})
+		c.Name = "b"
+		return c
+	}
+	f.types["[dbo].[t]"] = []mssqlwire.Column{id, col("int")}
+	s := newSink(t, f, nil)
+	r := func(n int) *fitsync.Record {
+		return &fitsync.Record{Namespace: "dbo.t", Op: fitsync.OpInsert, Key: fitsync.Map(fitsync.Field{Name: "id", Value: fitsync.Int(int64(n))}),
+			After: fitsync.Map(fitsync.Field{Name: "id", Value: fitsync.Int(int64(n))}, fitsync.Field{Name: "b", Value: fitsync.Null()})}
+	}
+	ctx := context.Background()
+	if err := s.Write(ctx, []*fitsync.Record{r(1)}); err != nil {
+		t.Fatal(err)
+	}
+	// ALTER COLUMN b varbinary(8), on another connection.
+	f.mu.Lock()
+	f.types["[dbo].[t]"] = []mssqlwire.Column{id, col("varbinary(8)")}
+	f.nullRefused = "int"
+	f.mu.Unlock()
+	if err := s.Write(ctx, []*fitsync.Record{r(2)}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.types["[dbo].[t]"] = []mssqlwire.Column{id, col("int")}
+	f.nullRefused = "varbinary(8)"
+	f.mu.Unlock()
+	if err := s.Write(ctx, []*fitsync.Record{r(3), r(4), r(5)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.rows("[dbo].[t]"); len(got) != 5 {
+		t.Fatal(got)
+	}
+	// A type the column refuses whatever it is read as fails its record.
+	f.mu.Lock()
+	f.nullRefused = "int"
+	f.mu.Unlock()
+	var be *fitsync.BatchError
+	if err := s.Write(ctx, []*fitsync.Record{r(6)}); !errors.As(err, &be) || be.Index != 0 || !fitsync.IsPermanent(err) {
+		t.Fatal(err)
+	}
+	for _, n := range []int32{206, 257, 4815, 4864, 8102} {
+		if !permanent(&mssqlwire.Error{Number: n}) {
+			t.Error(n, "is not permanent")
+		}
+	}
+	if permanent(&mssqlwire.Error{Number: 1205}) {
+		t.Error("a deadlock is permanent")
+	}
+}
+
+// TestSinkLongTransaction: a source transaction over many batches keeps
+// each op once, acknowledged ones written again on a new connection.
+func TestSinkLongTransaction(t *testing.T) {
+	f := newSinkFake()
+	s := newSink(t, f, map[string]any{"transactions": "batch"})
+	ctx := context.Background()
+	for i := range 50 {
+		if err := s.Write(ctx, []*fitsync.Record{chg(i+1, fitsync.OpInsert, int64(i), "v", "big", false)}); err != nil {
+			t.Fatal(err)
+		}
+		if len(s.acked.ops) != i+1 || cap(s.acked.ops) != len(s.acked.ops) {
+			t.Fatal(i, len(s.acked.ops), cap(s.acked.ops))
+		}
+	}
+	s.conn.(*sinkFakeConn).broken = errors.New("gone")
+	if err := s.Write(ctx, []*fitsync.Record{chg(51, fitsync.OpInsert, 50, "v", "big", true)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.rows("[dbo].[t]"); len(got) != 51 || f.inTx {
+		t.Fatal(len(got), f.inTx)
+	}
+}
+
 // TestSinkKeyChange deletes the row of a key an update changed.
 func TestSinkKeyChange(t *testing.T) {
 	f := newSinkFake()

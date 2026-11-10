@@ -486,7 +486,8 @@ func permanent(err error) bool {
 		return false
 	}
 	switch se.Number {
-	case 102, 156, 207, 208, 213, 220, 241, 242, 245, 295, 515, 544, 547, 2601, 2627, 2628, 4145, 8114, 8115, 8152, 8169, 9455, 9809, 1934:
+	case 102, 156, 206, 207, 208, 213, 220, 241, 242, 245, 257, 295, 515, 544, 547, 1934, 2601, 2627, 2628, 4145, 4815, 4864,
+		8102, 8114, 8115, 8152, 8169, 9455, 9809:
 		return true
 	}
 	return false
@@ -617,7 +618,10 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 		}
 	}
 	s.acked = s.tx
-	s.acked.ops = slices.Clone(s.tx.ops)
+	// The ops are only appended to, so acked shares them, up to their
+	// length: copying them each batch would cost a long transaction's
+	// square.
+	s.acked.ops = s.tx.ops[:len(s.tx.ops):len(s.tx.ops)]
 	return nil
 }
 
@@ -751,7 +755,12 @@ func (s *Sink) flush(ctx context.Context, g []*op) error {
 	if err := s.recover(ctx); err != nil {
 		return err
 	}
-	if len(g) > 1 {
+	// A column's type read earlier may have changed since (an ALTER while
+	// connected), which a NULL sent as the old one is refused for: the
+	// types are read again and the ops written again, one at a time.
+	_, stale := s.types[g[0].table]
+	delete(s.types, g[0].table)
+	if len(g) > 1 || stale {
 		for k := range g {
 			if err = s.exec(ctx, g[k:k+1]); err != nil {
 				if !permanent(err) {
