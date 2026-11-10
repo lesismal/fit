@@ -18,7 +18,7 @@ import (
 )
 
 // The test's connectors with connection tests: a source whose test fails,
-// and a sink with none.
+// a sink with none, and a sink whose test passes with a warning.
 
 type failingTestSource struct {
 	Records int64 `json:"records"`
@@ -33,6 +33,14 @@ func (*failingTestSource) Test(context.Context) error { return errors.New("conne
 type untestedSink struct{}
 
 func (untestedSink) Write(context.Context, []*Record) error { return nil }
+
+type warnedSink struct{ untestedSink }
+
+func (warnedSink) Test(context.Context) error { panic("TestWarnings is called") }
+
+func (warnedSink) TestWarnings(context.Context) ([]string, error) {
+	return []string{"a column loses data"}, nil
+}
 
 // stubbornSource emits one record and then waits a while, whatever its
 // context says.
@@ -49,6 +57,7 @@ type notAModule struct{}
 func init() {
 	module.Register(module.Info{ID: Sources + ".untestable", New: func() any { return new(failingTestSource) }, Doc: "Tests'."})
 	module.Register(module.Info{ID: Sinks + ".untested", New: func() any { return new(untestedSink) }, Doc: "Tests'."})
+	module.Register(module.Info{ID: Sinks + ".warned", New: func() any { return new(warnedSink) }, Doc: "Tests'."})
 	module.Register(module.Info{ID: Sources + ".stubborn", New: func() any { return new(stubbornSource) }, Doc: "Tests'."})
 	module.Register(module.Info{ID: Sources + ".notsource", New: func() any { return new(notAModule) }, Doc: "Tests'."})
 	module.Register(module.Info{ID: Transforms + ".nottransform", New: func() any { return new(notAModule) }, Doc: "Tests'."})
@@ -477,23 +486,26 @@ func TestConnectionTests(t *testing.T) {
 	defer rt.Close(context.Background())
 	p := fmt.Sprintf(`{"name": "p", "on_error": "dead_letter",
 		"source": {"module": "untestable", "params": {"records": 1}},
-		"sinks": [{"name": "m", "sink": {"module": "memory", "params": {"store": %q}}}, {"name": "u", "sink": {"module": "untested"}}],
+		"sinks": [{"name": "m", "sink": {"module": "memory", "params": {"store": %q}}}, {"name": "u", "sink": {"module": "untested"}},
+			{"name": "w", "sink": {"module": "warned"}}],
 		"dead_letter": {"name": "d", "sink": {"module": "stdout"}}}`, sn)
 	applyOne(t, rt, dir, p)
 	check := func(res []TestResult, err error) {
 		t.Helper()
-		if err != nil || len(res) != 4 {
+		if err != nil || len(res) != 5 {
 			t.Fatalf("%+v %v", res, err)
 		}
 		want := []TestResult{
 			{Part: "source", Module: "untestable", Tested: true, Err: "connection refused"},
 			{Part: "sink m", Module: "memory", Tested: true, OK: true},
 			{Part: "sink u", Module: "untested"},
+			{Part: "sink w", Module: "warned", Tested: true, OK: true, Warnings: []string{"a column loses data"}},
 			{Part: "dead_letter d", Module: "stdout", Tested: true, OK: true},
 		}
 		for i, w := range want {
 			g := res[i]
-			if g.Part != w.Part || g.Module != w.Module || g.Tested != w.Tested || g.OK != w.OK || w.Err != "" && g.Err != w.Err || !w.Tested && g.Err == "" {
+			if g.Part != w.Part || g.Module != w.Module || g.Tested != w.Tested || g.OK != w.OK || w.Err != "" && g.Err != w.Err || !w.Tested && g.Err == "" ||
+				strings.Join(g.Warnings, "|") != strings.Join(w.Warnings, "|") {
 				t.Errorf("%d: %+v, want %+v", i, g, w)
 			}
 		}

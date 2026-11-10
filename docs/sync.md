@@ -787,9 +787,14 @@ as Microsoft's guide says (its CN the server's host name, server authentication,
 
 varchar, char and text columns whose collation's code page is neither 1252 (the Latin collations)
 nor UTF-8 (`Chinese_PRC_CI_AS`'s 936, `Japanese_CI_AS`'s 932) are read as `nvarchar`, so their
-values reach the sinks as text. With CDC, keep such a column in the database's own collation: CDC
-writes the non-ASCII characters of a varchar whose collation is not the database's into its change
-table as question marks, a limit of SQL Server's.
+values reach the sinks as text. With CDC, keep such a column in the database's own collation (or a
+UTF-8 one): CDC writes the non-ASCII characters of a varchar, char or text column whose collation is
+not the database's, those the database's code page lacks, into its change table as question marks, a
+limit of SQL Server's. The source warns of each such column of the tables it reads through CDC, its
+collation's code page neither UTF-8's nor the database's, when it finds the tables and when it picks
+one up later, once per column in a run, naming the table, the column and the two collations; the
+connection test lists the same as warnings, and passes. A snapshot reads the table itself and keeps
+them, and change tracking reads the rows themselves, so neither is warned of.
 
 The login is SQL authentication (`username`, `password_env`) unless `auth` names another, in the
 source and the sink alike:
@@ -1601,7 +1606,7 @@ The Admin API, and the console under `/api/m/admin/`, show and steer the running
 | `{"action": "resume"}` | lets it go on; also starts again a pipeline stopped on an error, from its checkpoint |
 | `{"action": "snapshot", "confirm": true}` | reads the source again from its start (the checkpoint removed) |
 | `GET`, `PUT {"position", "confirm"}`, `DELETE ?confirm=1` `.../checkpoint` | shows, sets or resets the checkpoint, the pipeline restarted from there |
-| `POST .../test` | tests the source's and sinks' connections, writing no record |
+| `POST .../test` | tests the source's and sinks' connections, writing no record: `{"ok", "results"}`, each result `{"part", "module", "tested", "ok", "error", "warnings", "took_ms"}`, `warnings` what passes but loses data |
 | `POST .../dry-run` `{"limit", "timeout", "from": "start"}` | reads the first records (10 within 5s) through the transforms and returns what each became, writing nothing and saving no position |
 | `POST /sync/test`, `/sync/dry-run` `{"pipeline": {...}}` | the same for a pipeline's config not applied yet |
 | `GET`, `POST .../dead-letters/replay`, `DELETE` `.../dead-letters` | lists, replays and drops [dead letters](#dead-letters) |

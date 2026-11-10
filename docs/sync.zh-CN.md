@@ -670,8 +670,11 @@ sync {
 `mssql` 用户）；已对 SQL Server 2025 测试。
 
 排序规则的代码页既不是 1252（拉丁排序规则）也不是 UTF-8 的 varchar、char 与 text 列（如 `Chinese_PRC_CI_AS` 的 936、
-`Japanese_CI_AS` 的 932）按 `nvarchar` 读取，其值以文本到达 sink。使用 CDC 时，请让这样的列保持数据库自身的排序规则：
-排序规则不同于数据库的 varchar 中的非 ASCII 字符，CDC 会在变更表中写成问号，这是 SQL Server 的限制。
+`Japanese_CI_AS` 的 932）按 `nvarchar` 读取，其值以文本到达 sink。使用 CDC 时，请让这样的列保持数据库自身的排序规则
+（或 UTF-8 排序规则）：排序规则不同于数据库的 varchar、char 与 text 列中的非 ASCII 字符，凡数据库代码页没有的，CDC
+会在变更表中写成问号，这是 SQL Server 的限制。对通过 CDC 读取的表中排序规则代码页既不是 UTF-8 也不是数据库代码页的
+每个这样的列，源在发现表时以及之后接入新表时给出警告，每次运行每列一次，写明表、列与两种排序规则；连接测试把同样的
+内容列为警告，测试仍通过。快照直接读表，会保留这些字符；变更跟踪直接读行，二者都不警告。
 
 登录默认为 SQL 身份验证（`username`、`password_env`），除非 `auth` 指定其他方式，source 与 sink 相同：
 
@@ -1388,7 +1391,7 @@ Admin API，以及控制台中 `/api/m/admin/` 之下的同一组端点，显示
 | `{"action": "resume"}` | 让它继续；也会让因错误停止的流水线从检查点重新开始 |
 | `{"action": "snapshot", "confirm": true}` | 从头重新读源（删除检查点） |
 | `.../checkpoint` 的 `GET`、`PUT {"position", "confirm"}`、`DELETE ?confirm=1` | 显示、设置或重置检查点，流水线从那里重启 |
-| `POST .../test` | 测试源和目标的连接，不写任何记录 |
+| `POST .../test` | 测试源和目标的连接，不写任何记录：`{"ok", "results"}`，每个结果为 `{"part", "module", "tested", "ok", "error", "warnings", "took_ms"}`，`warnings` 为能通过但会丢数据之处 |
 | `POST .../dry-run` `{"limit", "timeout", "from": "start"}` | 经变换读取最初的记录（5s 内 10 条），返回每条变成了什么，不写任何东西，也不保存位置 |
 | `POST /sync/test`、`/sync/dry-run` `{"pipeline": {...}}` | 对尚未应用的流水线配置做同样的事 |
 | `.../dead-letters` 的 `GET`、`POST .../dead-letters/replay`、`DELETE` | 列出、重放和丢弃[死信](#死信) |

@@ -43,9 +43,11 @@ type fake struct {
 	// skip lets that many of a failing key's queries pass first.
 	skip map[string]int
 	// noDB answers sys.databases with no row.
-	noDB    bool
-	queries []string
-	txs     []string
+	noDB bool
+	// collation is the database's.
+	collation string
+	queries   []string
+	txs       []string
 }
 
 type fakeTable struct {
@@ -57,6 +59,9 @@ type fakeTable struct {
 	// casts are the columns sys.columns says are cast to nvarchar, and
 	// their lengths.
 	casts map[string]string
+	// lossy are the columns whose collation's code page is neither
+	// UTF-8's nor the database's, and their collations.
+	lossy map[string]string
 	// ctChanges are change tracking's: a key's last change and version.
 	ctChanges map[int64]fakeCT
 }
@@ -94,7 +99,7 @@ type fakeDDL struct {
 }
 
 func newFake() *fake {
-	return &fake{cdc: true, snapIso: true, tables: map[string]*fakeTable{}, fail: map[string]error{}, skip: map[string]int{}, now: time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)}
+	return &fake{cdc: true, snapIso: true, collation: "SQL_Latin1_General_CP1_CI_AS", tables: map[string]*fakeTable{}, fail: map[string]error{}, skip: map[string]int{}, now: time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)}
 }
 
 func lsnBytes(n uint64) []byte {
@@ -267,7 +272,7 @@ func (c *fakeConn) QueryAll(_ context.Context, sql string, args ...any) ([]mssql
 		if f.snapIso {
 			iso = 1
 		}
-		return nil, [][]any{{f.cdc, iso, f.tz}}, nil
+		return nil, [][]any{{f.cdc, iso, f.tz, f.collation}}, nil
 	case strings.Contains(sql, "sys.change_tracking_databases"):
 		if f.ct {
 			return nil, [][]any{{int64(1)}}, nil
@@ -294,7 +299,11 @@ func (c *fakeConn) QueryAll(_ context.Context, sql string, args ...any) ([]mssql
 			if args[0] == "cdc."+quoteName(in.name+"_CT") {
 				var rows [][]any
 				for _, col := range in.cols {
-					rows = append(rows, []any{col, castOf(in.table, col)})
+					var lossy any
+					if c, ok := in.table.lossy[col]; ok {
+						lossy = c
+					}
+					rows = append(rows, []any{col, castOf(in.table, col), lossy})
 				}
 				return nil, rows, nil
 			}
