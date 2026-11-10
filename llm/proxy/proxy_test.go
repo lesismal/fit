@@ -176,12 +176,22 @@ func newFixture(t *testing.T, peers ...*peer) *fixture {
 	if cur := string(f.fit.Current()); !strings.Contains(cur, hashKey(f.key)) || strings.Contains(cur, f.key) {
 		t.Fatalf("key not saved hashed: %s", cur)
 	}
+	// Every peer's models in the catalog: a count of routes is not it, as
+	// one peer with two models has two. / 每个对端的模型都已进入目录：不能数路由，
+	// 一个对端有两个模型就有两条路由。
 	waitFor(t, "catalog", func() bool {
-		n := 0
+		seen := map[string]bool{}
 		for _, m := range f.c.cat.list() {
-			n += len(m.Routes)
+			for _, r := range m.Routes {
+				seen[r.ID] = true
+			}
 		}
-		return n >= len(peers)
+		for _, p := range peers {
+			if !seen[p.id] {
+				return false
+			}
+		}
+		return true
 	})
 	return f
 }
