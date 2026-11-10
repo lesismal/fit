@@ -244,3 +244,60 @@ func TestNATSBatchSentTwice(t *testing.T) {
 		})
 	}
 }
+
+// TestNATSKeys copies keyed records NATS to NATS: the sink's Fit-Key
+// header, read back by the source, keeps their keys, written again by the
+// second sink.
+func TestNATSKeys(t *testing.T) {
+	for _, n := range natsClusters(t) {
+		t.Run(n.name, func(t *testing.T) {
+			c := n.client(t)
+			src, dst := n.stream(t, c, "ksrc"), n.stream(t, c, "kdst")
+			keys := []fitsync.Value{fitsync.String("a"), fitsync.Map(fitsync.Field{Name: "id", Value: fitsync.Int(7)}), fitsync.Null()}
+			batch := make([]*fitsync.Record, len(keys))
+			for i, k := range keys {
+				batch[i] = fitsync.GenerateRecord("gen", int64(i), int64(len(keys)), 1)
+				batch[i].Key = k
+			}
+			ctx := hangGuard(t)
+			if err := natsSink(t, n.params(t, map[string]any{"subject": src + ".{namespace}"})).Write(ctx, batch); err != nil {
+				t.Fatal(err)
+			}
+			cfg := loadSync(t, t.TempDir(), map[string]any{"name": "p", "source": map[string]any{"module": "nats",
+				"params": n.params(t, map[string]any{"stream": src, "consumer": "fit", "create_consumer": true, "max_wait": "200ms"})},
+				"sinks": []any{map[string]any{"name": "n", "sink": map[string]any{"module": "nats", "params": map[string]any{"servers": n.servers}}}}})
+			m, err := module.Load(fitsync.Sources, cfg.Sync.Pipelines[0].Source, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { module.Cleanup(m) })
+			got := collect(t, m.(fitsync.Source), nil, true, 0)
+			if len(got) != len(keys) {
+				t.Fatal(got)
+			}
+			want := []string{"a", `{"id":7}`, ""}
+			for i, r := range got {
+				if r.Key.Text() != want[i] || r.Key.IsNull() != (i == 2) {
+					t.Fatalf("%d: %v", i, r.Key)
+				}
+				r.Namespace = "copy"
+			}
+			if err := natsSink(t, n.params(t, map[string]any{"subject": dst + ".{namespace}"})).Write(ctx, got); err != nil {
+				t.Fatal(err)
+			}
+			cons := "read" + strconv.FormatInt(time.Now().UnixNano(), 36)
+			if _, err := c.CreateConsumer(ctx, dst, natswire.ConsumerConfig{Durable: cons, AckPolicy: "none", DeliverPolicy: "all"}); err != nil {
+				t.Fatal(err)
+			}
+			msgs, err := c.Fetch(ctx, dst, cons, natswire.FetchRequest{Batch: 10, Expires: time.Second})
+			if err != nil || len(msgs) != len(keys) {
+				t.Fatal(msgs, err)
+			}
+			for i, m := range msgs {
+				if m.Header.Get("Fit-Key") != want[i] || m.Header.Get("Fit-Namespace") != "copy" || m.Header.Get("Fit-Op") == "" {
+					t.Fatalf("%d: %v", i, m.Header)
+				}
+			}
+		})
+	}
+}

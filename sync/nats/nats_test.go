@@ -927,3 +927,61 @@ func TestAcker(t *testing.T) {
 	})
 	s.Cleanup()
 }
+
+// Keys go as Fit-Key, with Fit-Op and Fit-Namespace, and come back as the
+// records' keys: strings and bytes as they are, anything else as plain
+// JSON; a value a header line cannot hold is left out.
+func TestKeyHeaders(t *testing.T) {
+	srv := server(t, natstest.Options{})
+	srv.AddStream("S", "s.>")
+	k := sink(t, srv, map[string]any{})
+	recs := gen(6)
+	recs[0].Key = fitsync.String("k0")
+	recs[1].Key = fitsync.Map(fitsync.Field{Name: "id", Value: fitsync.Int(7)})
+	recs[2].Key = fitsync.Bytes([]byte{0xff, 'x'})
+	recs[3].Key = fitsync.Null()
+	recs[4].Key = fitsync.String("a\r\nb")
+	recs[5].Key, recs[5].Namespace = fitsync.String(""), "s.gen"
+	if err := k.Write(context.Background(), recs); err != nil {
+		t.Fatal(err)
+	}
+	h := string(srv.Messages("S")[1].Header)
+	if !strings.Contains(h, "Fit-Op: insert") || !strings.Contains(h, "Fit-Namespace: s.gen") || !strings.Contains(h, `Fit-Key: {"id":7}`) {
+		t.Fatal(h)
+	}
+	if h := string(srv.Messages("S")[4].Header); strings.Contains(h, "Fit-Key") {
+		t.Fatal(h)
+	}
+	got, err := collect(t, source(t, srv, map[string]any{"create_consumer": true, "max_wait": "50ms"}), nil, true, 0, true)
+	if err != nil || len(got) != 6 {
+		t.Fatal(err, got)
+	}
+	want := []fitsync.Value{fitsync.String("k0"), fitsync.String(`{"id":7}`), fitsync.Bytes([]byte{0xff, 'x'}), fitsync.Null(), fitsync.Null(), fitsync.String("")}
+	for i, r := range got {
+		if r.Key.Kind() != want[i].Kind() || r.Key.Text() != want[i].Text() {
+			t.Fatalf("%d: %v, want %v", i, r.Key, want[i])
+		}
+	}
+	// The header's name is matched without regard to case.
+	s := source(t, srv, map[string]any{"mode": "core", "subjects": []string{"x.>"}})
+	m := &natswire.Msg{Subject: "x.a", Header: natswire.Header{"fit-key": {"h"}}, Data: []byte("v")}
+	if r := s.records(m, nil)[0]; r.Key.Text() != "h" {
+		t.Fatal(r.Key)
+	}
+	// Core publishes carry them too; a namespace with a line break is
+	// left out.
+	c := sink(t, srv, map[string]any{"mode": "core", "subject": "c.x"})
+	ch := make(chan *natswire.Msg, 1)
+	sub, _ := natswire.Dial(context.Background(), natswire.Config{Servers: []string{srv.Addr()}})
+	defer sub.Close()
+	sub.Subscribe("c.x", "", ch)
+	sub.Flush(context.Background())
+	one := gen(1)
+	one[0].Key, one[0].Namespace = fitsync.Int(3), "n\n"
+	if err := c.Write(context.Background(), one); err != nil {
+		t.Fatal(err)
+	}
+	if m := <-ch; m.Header.Get("Fit-Key") != "3" || m.Header.Get("Fit-Op") == "" || m.Header.Get("Fit-Namespace") != "" {
+		t.Fatal(m.Header)
+	}
+}

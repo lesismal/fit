@@ -8,8 +8,10 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
@@ -19,7 +21,7 @@ import (
 
 func init() {
 	module.Register(module.Info{ID: fitsync.Sources + ".nats", New: func() any { return new(Source) },
-		Doc: "Reads a NATS JetStream stream through a durable pull consumer, each message acknowledged once every sink has it, so that none is lost to a crash: at least once. The stream sequence is in the record's position and the pipeline's checkpoint; a consumer fit makes (create_consumer) is made again from the checkpoint when it is lost, or when a run finds it holding messages delivered and not acknowledged, so that they come again first and in order. Or, with mode core, core NATS subjects, at most once: what arrives while fit is down, or faster than it keeps up, is lost, for telemetry. Each message goes through a codec (raw when none is named) into records, the subject their namespace unless the codec or namespace sets one; a message record holds the subject, headers, stream, sequence and time beside its value. In a job (mode once) it reads up to the stream's last message as it was when the job started."})
+		Doc: "Reads a NATS JetStream stream through a durable pull consumer, each message acknowledged once every sink has it, so that none is lost to a crash: at least once. The stream sequence is in the record's position and the pipeline's checkpoint; a consumer fit makes (create_consumer) is made again from the checkpoint when it is lost, or when a run finds it holding messages delivered and not acknowledged, so that they come again first and in order. Or, with mode core, core NATS subjects, at most once: what arrives while fit is down, or faster than it keeps up, is lost, for telemetry. Each message goes through a codec (raw when none is named) into records, the subject their namespace unless the codec or namespace sets one, the Fit-Key header (as the nats sink writes it) their key unless the codec sets one; a message record holds the subject, headers, stream, sequence and time beside its value. In a job (mode once) it reads up to the stream's last message as it was when the job started."})
 }
 
 // The defaults of the source's params.
@@ -693,6 +695,11 @@ func (s *Source) records(m *natswire.Msg, meta *natswire.Meta) []*fitsync.Record
 				r.Namespace = m.Subject
 			}
 		}
+		if r.Key.IsNull() {
+			if k, ok := headerValue(m.Header, keyHeader); ok {
+				r.Key = text(k)
+			}
+		}
 		if r.CommitTime.IsZero() && meta != nil {
 			r.CommitTime = meta.Timestamp
 		}
@@ -714,6 +721,26 @@ func (s *Source) records(m *natswire.Msg, meta *natswire.Meta) []*fitsync.Record
 		}
 	}
 	return recs
+}
+
+// headerValue is name's first value in h, the name matched without regard
+// to case, and whether h has it.
+func headerValue(h natswire.Header, name string) (string, bool) {
+	for k, v := range h {
+		if strings.EqualFold(k, name) && len(v) > 0 {
+			return v[0], true
+		}
+	}
+	return "", false
+}
+
+// text is a header's value as a key: a string, or bytes when it is not
+// UTF-8, as the RabbitMQ source has fit-key.
+func text(b string) fitsync.Value {
+	if utf8.ValidString(b) {
+		return fitsync.String(b)
+	}
+	return fitsync.Bytes([]byte(b))
 }
 
 // metadata is what a message's record says of it: its subject, headers,
