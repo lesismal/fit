@@ -75,9 +75,20 @@ func (cs *Console) uploadChunk(r *console.Request) {
 		return
 	}
 	user := r.User
-	if err := r.Context.LimitBody(c.Remaining()); err != nil {
-		// Answered 413: the upload is given up.
+	// A body declared longer than the upload gives it up before LimitBody
+	// answers 413, as a client that reads the answer may look for the
+	// upload at once, and finds it gone, as the API's PATCH has it.
+	n := c.Remaining()
+	over := r.Request.ContentLength > n
+	if over {
 		c.Abort(medialib.ErrTooLarge)
+	}
+	if err := r.Context.LimitBody(n); err != nil {
+		// Answered 413: the upload is given up, here when the body is of
+		// no declared length and already longer.
+		if !over {
+			c.Abort(medialib.ErrTooLarge)
+		}
 		cs.auditFile(user, "media.upload", map[string]any{"library": name, "id": id}, medialib.ErrTooLarge)
 		return
 	}

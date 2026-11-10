@@ -67,24 +67,43 @@ type Source struct {
 	codec   fitsync.Codec
 	cl      holder
 
-	// acks are the messages emitted and not yet acknowledged to the
-	// server, and the stream sequence every sink has, which Acknowledged
-	// raises and the acker goroutine acts on.
-	ackMu    sync.Mutex
-	pending  []pendingAck
-	acked    uint64
-	policy   string
-	ackKick  chan struct{}
-	ackStop  chan struct{}
-	ackDone  chan struct{}
-	ackStart sync.Once
+	// acks are the messages emitted, until their acknowledgement is
+	// settled (see ackState), and the stream sequence every sink has,
+	// which Acknowledged raises and the acker goroutine acts on.
+	ackMu     sync.Mutex
+	pending   []pendingAck
+	acked     uint64
+	policy    string
+	ackKick   chan struct{}
+	ackStop   chan struct{}
+	ackDone   chan struct{}
+	ackCtx    context.Context
+	ackCancel context.CancelFunc
+	ackStart  sync.Once
 }
 
-// pendingAck is a message to acknowledge once the sinks have its sequence.
+// pendingAck is a message emitted, to acknowledge once the sinks have its
+// sequence.
 type pendingAck struct {
 	seq   uint64
 	reply string
+	state ackState
 }
+
+// ackState is where a message emitted is in its acknowledgement. It is kept
+// after its acknowledgement is sent, so that a delivery of it again, which
+// the server sent before it took the acknowledgement, is known and not
+// emitted twice: until the server answers the acknowledgement (confirmed),
+// and then until the pull asked for after the answer is taken whole, as a
+// pull asked for after the server took it cannot bring it again.
+type ackState uint8
+
+const (
+	ackWaiting   ackState = iota // the sinks do not have it yet, or its acknowledgement failed
+	ackSent                      // its acknowledgement sent
+	ackConfirmed                 // the server answered its acknowledgement
+	ackSettled                   // confirmed before a pull was asked for: let go at the next
+)
 
 // position is the source's: the stream sequence of the last message read.
 type position struct {
@@ -137,6 +156,7 @@ func (s *Source) Provision(ctx *module.Context) error {
 func (s *Source) Cleanup() {
 	if s.ackStop != nil {
 		close(s.ackStop)
+		s.ackCancel()
 		<-s.ackDone
 	}
 	s.cl.close()
@@ -371,6 +391,7 @@ func (rd *reader) loop(ctx context.Context) error {
 		if idle {
 			req = wait
 		}
+		s.settle()
 		fctx, cancel := context.WithTimeout(ctx, wait.Expires+s.timeout)
 		msgs, err := rd.c.Fetch(fctx, s.Stream, s.Consumer, req)
 		cancel()
@@ -427,14 +448,20 @@ func (rd *reader) finished(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("nats: consumer %s of %s: %w", rd.s.Consumer, rd.s.Stream, err)
 	}
 	rd.s.ackMu.Lock()
-	ours := len(rd.s.pending)
+	ours := 0
+	for _, p := range rd.s.pending {
+		if p.state == ackWaiting {
+			ours++
+		}
+	}
 	rd.s.ackMu.Unlock()
 	return ci.NumPending == 0 && ci.NumAckPending <= ours, nil
 }
 
 // take emits a message's records, or, for a message the sinks have, only
-// acknowledges it, and for one emitted and not yet acknowledged (delivered
-// again), only keeps its reply to acknowledge it by.
+// acknowledges it, and for one emitted already (delivered again), only
+// keeps its reply to acknowledge it by, or acknowledges it again when its
+// acknowledgement went before this delivery.
 func (rd *reader) take(m *natswire.Msg) error {
 	meta, err := natswire.ParseMeta(m.Reply)
 	if err != nil {
@@ -450,7 +477,10 @@ func (rd *reader) take(m *natswire.Msg) error {
 	if meta.StreamSeq <= rd.done {
 		return rd.c.Ack(m.Reply)
 	}
-	if s.addPending(meta.StreamSeq, m.Reply) {
+	if kept, sent := s.addPending(meta.StreamSeq, m.Reply); sent {
+		return rd.c.Ack(m.Reply)
+	} else if kept {
+		s.kick() // its acknowledgement, when the sinks have it and it failed
 		return nil
 	}
 	recs := s.records(m, &meta)
@@ -468,17 +498,38 @@ func (rd *reader) take(m *natswire.Msg) error {
 
 // addPending keeps a message to acknowledge, in sequence order, and
 // reports whether it was kept already: emitted, and delivered again, its
-// new reply kept in place of the old, as a consumer made again has it.
-func (s *Source) addPending(seq uint64, reply string) bool {
+// new reply kept in place of the old, as a consumer made again has it; and
+// whether its acknowledgement was sent already, before this delivery.
+func (s *Source) addPending(seq uint64, reply string) (kept, sent bool) {
 	s.ackMu.Lock()
 	defer s.ackMu.Unlock()
 	i := sort.Search(len(s.pending), func(i int) bool { return s.pending[i].seq >= seq })
 	if i < len(s.pending) && s.pending[i].seq == seq {
 		s.pending[i].reply = reply
-		return true
+		return true, s.pending[i].state != ackWaiting
 	}
-	s.pending = slices.Insert(s.pending, i, pendingAck{seq, reply})
-	return false
+	s.pending = slices.Insert(s.pending, i, pendingAck{seq: seq, reply: reply})
+	return false, false
+}
+
+// settle lets go of the messages whose acknowledgement the server answered
+// before the last pull was asked for, that pull taken whole, and marks
+// those answered since, before the pull about to be asked for.
+func (s *Source) settle() {
+	s.ackMu.Lock()
+	defer s.ackMu.Unlock()
+	out := s.pending[:0]
+	for _, p := range s.pending {
+		switch p.state {
+		case ackSettled:
+			continue
+		case ackConfirmed:
+			p.state = ackSettled
+		}
+		out = append(out, p)
+	}
+	clear(s.pending[len(out):])
+	s.pending = out
 }
 
 // Acknowledged has the messages up to p's sequence acknowledged to the
@@ -491,6 +542,11 @@ func (s *Source) Acknowledged(p fitsync.Position) {
 	s.ackMu.Lock()
 	s.acked = max(s.acked, pos.Seq)
 	s.ackMu.Unlock()
+	s.kick()
+}
+
+// kick has the acker look for what is due.
+func (s *Source) kick() {
 	if s.ackKick != nil {
 		select {
 		case s.ackKick <- struct{}{}:
@@ -501,11 +557,17 @@ func (s *Source) Acknowledged(p fitsync.Position) {
 
 func (s *Source) startAcker() {
 	s.ackKick, s.ackStop, s.ackDone = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	s.ackCtx, s.ackCancel = context.WithCancel(context.Background())
 	go s.acker()
 }
 
 // acker acknowledges what the sinks have: under the ack policy all, the
 // last message alone, which covers those before it; under explicit, each.
+// The last acknowledgement asks for the server's answer, which comes once
+// the server took it and those before it; until then, and until a pull
+// asked for after it is taken (settle), the messages are kept, so that one
+// delivered again before the server took its acknowledgement is not
+// emitted twice. Under ack policy none, nothing is delivered again.
 func (s *Source) acker() {
 	defer close(s.ackDone)
 	for {
@@ -514,23 +576,55 @@ func (s *Source) acker() {
 			return
 		case <-s.ackKick:
 		}
-		s.ackMu.Lock()
-		n := sort.Search(len(s.pending), func(i int) bool { return s.pending[i].seq > s.acked })
-		due := s.pending[:n:n]
-		s.pending = s.pending[n:]
-		policy := s.policy
-		s.ackMu.Unlock()
 		c := s.cl.current()
-		if c == nil || len(due) == 0 || policy == "none" {
+		var due []pendingAck
+		s.ackMu.Lock()
+		policy := s.policy
+		n := sort.Search(len(s.pending), func(i int) bool { return s.pending[i].seq > s.acked })
+		if policy == "none" {
+			s.pending = slices.Delete(s.pending, 0, n)
+		} else if c != nil {
+			for i := range s.pending[:n] {
+				if p := &s.pending[i]; p.state == ackWaiting {
+					p.state = ackSent
+					due = append(due, *p)
+				}
+			}
+		}
+		s.ackMu.Unlock()
+		if len(due) == 0 {
 			continue
 		}
 		if policy == "all" {
 			due = due[len(due)-1:]
 		}
-		for _, p := range due {
-			c.Ack(p.reply) // a message not acknowledged is delivered again
+		for _, p := range due[:len(due)-1] {
+			c.Ack(p.reply)
 		}
+		state := ackConfirmed
+		if !s.ackSync(c, due[len(due)-1].reply) {
+			state = ackWaiting // sent again at the next kick, or delivered again
+		}
+		s.ackMu.Lock()
+		for i := range s.pending {
+			if s.pending[i].state == ackSent {
+				s.pending[i].state = state
+			}
+		}
+		s.ackMu.Unlock()
 	}
+}
+
+// ackSync acknowledges a message and waits for the server's answer.
+func (s *Source) ackSync(c *natswire.Client, reply string) bool {
+	t := s.timeout
+	if t <= 0 {
+		t = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(s.ackCtx, t)
+	defer cancel()
+	_, err := c.Request(ctx, reply, nil, []byte("+ACK"))
+	return err == nil
 }
 
 // runCore reads core subjects until ctx ends.
