@@ -54,6 +54,20 @@ wait_sql() {
 		fi
 		sleep 2
 	done
+	# A backend reported alive may not take tablets yet ("Create failed
+	# replications" on CI): wait until a table of one replica can be made.
+	probe="CREATE DATABASE IF NOT EXISTS fit_olap_probe; DROP TABLE IF EXISTS fit_olap_probe.t;
+CREATE TABLE fit_olap_probe.t (id BIGINT) DUPLICATE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES (\"replication_num\" = \"1\");
+DROP DATABASE fit_olap_probe"
+	until docker exec "$name" mysql -h127.0.0.1 -P9030 -uroot -e "$probe" >/dev/null 2>&1; do
+		i=$((i + 1))
+		if [ $i -gt 180 ]; then
+			echo "olap.sh: $name cannot make a table after 6 minutes" >&2
+			docker logs --tail 50 "$name" >&2
+			exit 1
+		fi
+		sleep 2
+	done
 }
 
 for s in $OLAP; do
