@@ -711,11 +711,12 @@ may call, and is narrowed again by the user's level and the settings (`ask_user`
 skill is at most 32 KiB. Front matter that is not this — a key not listed, a value of the wrong
 kind, a name taken, YAML that does not parse — is refused with the line it is about.
 
-fit has eighteen built-in skills, embedded in the binary: `explain`, `route-builder`,
+fit has twenty-two built-in skills, embedded in the binary: `explain`, `route-builder`,
 `reverse-proxy`, `tls-acme`, `rate-limit-auth`, `cache-tuning`, `diagnose`, `drift-explain`,
-`log-analysis`, `security-review`, `migrate`, `media-setup`, `llm-mesh-setup`, `tunnel-setup`, and
-the media library's `vod-setup`, `channel-scheduler`, `library-health` and `playback-troubleshoot`
-([below](#the-media-library)).
+`log-analysis`, `security-review`, `migrate`, `media-setup`, `llm-mesh-setup`, `tunnel-setup`, the
+media library's `vod-setup`, `channel-scheduler`, `library-health` and `playback-troubleshoot`
+([below](#the-media-library)), the cluster's `fleet-health`, `rollout-planner` and `cluster-drift`
+([below](#across-a-cluster)), and the sync role's `sync-pipeline`.
 The **Skills** page lists them with those users added: each one's title and what it is for, the
 tools it names (those the user may not call struck through), and whether it is enabled; a skill is
 viewed whole, exported as its `.md`, and run from one of its examples with **Try**. A user whose
@@ -870,7 +871,7 @@ last error and its dead letters have Ask AI buttons that run it.
 
 ### BitTorrent
 
-The [BitTorrent pages](bittorrent.md#the-pages) (I204) have three read tools and three propose
+The [BitTorrent pages](bittorrent.md#the-pages) (I204) have four read tools and three propose
 tools, which read the `bittorrent.client` and `bittorrent.tracker` roles through the Admin API and
 add steps to the conversation's proposal, as the media tools do:
 
@@ -900,7 +901,8 @@ its step is counted as gone. On a manager, the read tools take `member`.
 
 On a manager of other fits (`admin.cluster`), the assistant also reads the cluster and proposes
 changes across its members (I153): the tools `cluster_members`, `cluster_templates`,
-`cluster_rollouts`, `cluster_metrics`, `cluster_certs` and `cluster_log_tail`, a `member` argument on the read tools
+`cluster_rollouts`, `cluster_metrics`, `cluster_certs`, `cluster_log_tail` and `cluster_bittorrent`
+(the members' BitTorrent roles and distributions), a `member` argument on the read tools
 that read the Admin API, and `rollout_propose`, `cluster_op_propose` and `drift_fix_propose`, which
 make a rollout plan or a checked operation that a person starts on the Cluster pages with its own
 confirm, never a step of the conversation's proposal. The user's roles on the manager and the
