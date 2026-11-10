@@ -69,7 +69,16 @@ func TestBrokenTorrentKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Its resume data is written only once its check ends: stopped while
+	// checking, it saves none, and there is no resume file to spoil below.
+	waitFor(t, "the good torrent's first check", func() bool {
+		tor, err := r.Torrent(good.ID)
+		return err == nil && tor.HaveAll()
+	})
 	r.Stop(context.Background())
+	if _, err := os.Stat(filepath.Join(data, resumeDir, good.ID+".resume")); err != nil {
+		t.Fatal(err)
+	}
 
 	// A torrent whose .torrent file is garbage, and one with no source.
 	bad1, bad2 := strings.Repeat("11", 20), strings.Repeat("22", 20)
