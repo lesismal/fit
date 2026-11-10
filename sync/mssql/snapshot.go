@@ -77,6 +77,19 @@ AND COLLATIONPROPERTY(%[1]scollation_name, 'CodePage') NOT IN (1252, 65001)
 THEN CASE WHEN %[1]smax_length = -1 OR %[1]smax_length > 4000 OR %[1]ssystem_type_id = 35 THEN 'max' ELSE CAST(%[1]smax_length AS varchar(4)) END END`, prefix)
 }
 
+// lossyCollation is the SELECT expression, over sys.columns' columns each
+// with prefix, of the collation of a varchar, char or text column whose
+// collation's code page is neither UTF-8's nor the database's, NULL for
+// any other: CDC writes such a column's non-ASCII characters into its
+// change table as question marks (I215 decision 14). A collation other
+// than the database's of the same code page keeps them.
+func lossyCollation(prefix string) string {
+	return fmt.Sprintf(`CASE WHEN %[1]ssystem_type_id IN (35, 167, 175) AND %[1]scollation_name IS NOT NULL
+AND COLLATIONPROPERTY(%[1]scollation_name, 'CodePage') NOT IN (65001,
+COLLATIONPROPERTY(CONVERT(nvarchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')), 'CodePage'))
+THEN %[1]scollation_name END`, prefix)
+}
+
 // after is the condition that a row's key, of columns cols each with
 // prefix, comes after key, and its parameters, named @k1 and on.
 func after(prefix string, cols []string, key fitsync.Value) (string, []any, error) {

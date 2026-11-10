@@ -510,6 +510,14 @@ type Tester interface {
 	Test(ctx context.Context) error
 }
 
+// WarningTester is a Tester that can also find what reaches its database
+// but loses data, as warnings that do not fail the test; testModules calls
+// TestWarnings in place of Test.
+type WarningTester interface {
+	Tester
+	TestWarnings(ctx context.Context) (warnings []string, err error)
+}
+
 // TestResult is the test of one of a pipeline's connectors.
 type TestResult struct {
 	// Part is source, sink <name> or dead_letter <name>; Module the
@@ -518,10 +526,13 @@ type TestResult struct {
 	Module string `json:"module"`
 	// Tested is false for a connector that has no test; OK says the test
 	// passed, Err why it did not.
-	Tested bool    `json:"tested"`
-	OK     bool    `json:"ok"`
-	Err    string  `json:"error,omitempty"`
-	Took   float64 `json:"took_ms"`
+	Tested bool   `json:"tested"`
+	OK     bool   `json:"ok"`
+	Err    string `json:"error,omitempty"`
+	// Warnings are what a WarningTester found that passes but loses
+	// data.
+	Warnings []string `json:"warnings,omitempty"`
+	Took     float64  `json:"took_ms"`
 }
 
 // Passed reports whether every connector tested passed.
@@ -593,7 +604,12 @@ func testModules(ctx context.Context, cfg *config.SyncPipeline, m *modules) []Te
 		go func() {
 			defer wg.Done()
 			start := time.Now()
-			err := t.Test(ctx)
+			var err error
+			if wt, ok := t.(WarningTester); ok {
+				out[i].Warnings, err = wt.TestWarnings(ctx)
+			} else {
+				err = t.Test(ctx)
+			}
 			out[i].Took = float64(time.Since(start).Microseconds()) / 1000
 			if err != nil {
 				out[i].Err = err.Error()

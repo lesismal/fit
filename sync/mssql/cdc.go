@@ -107,6 +107,7 @@ func (rd *reader) follow(ctx context.Context, from position) error {
 				return err
 			}
 			rd.tables, known = tables, now
+			rd.warnLossy()
 			if len(rd.newTables(since)) > 0 {
 				p, err := rd.snapshot(ctx, position{LSN: at, Since: since}, &snapPos{Added: true})
 				if err != nil {

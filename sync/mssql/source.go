@@ -151,13 +151,48 @@ func (s *Source) included(ns string) bool {
 // Test connects and checks that CDC (or change tracking) is on for the
 // database and the tables.
 func (s *Source) Test(ctx context.Context) error {
+	_, err := s.TestWarnings(ctx)
+	return err
+}
+
+// TestWarnings tests as Test does, and returns what passes but loses data:
+// the columns read through CDC whose non-ASCII characters reach the sinks
+// as question marks (lossyWarning).
+func (s *Source) TestWarnings(ctx context.Context) ([]string, error) {
 	c, err := s.dial(ctx, s.cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer c.Close()
-	_, _, err = s.discover(ctx, c)
-	return err
+	srv, tables, err := s.discover(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, t := range tables {
+		for _, col := range t.lossyColumns() {
+			out = append(out, lossyWarning(srv, t, col))
+		}
+	}
+	return out, nil
+}
+
+// lossyWarning says that CDC loses the non-ASCII characters of column col
+// of table t, its collation's code page neither UTF-8's nor the
+// database's (I215 decision 14).
+func lossyWarning(srv server, t *table, col string) string {
+	return fmt.Sprintf("the column %s of %s is of the collation %s, not the database's %s: CDC writes those of its non-ASCII characters the database's code page lacks into the change table as question marks, so they reach the sinks as ? in the changes (a snapshot reads the table and keeps them); keep the column in the database's collation or a UTF-8 one, or read the table with mode change_tracking",
+		col, t.ns(), t.lossy[col], srv.collation)
+}
+
+// lossyColumns are the names of t.lossy's columns, in order.
+func (t *table) lossyColumns() []string {
+	cols := make([]string, 0, len(t.lossy))
+	for col := range t.lossy {
+		cols = append(cols, col)
+	}
+	sort.Strings(cols)
+	return cols
 }
 
 // server is what the source learns of the database.
@@ -166,6 +201,8 @@ type server struct {
 	snapshotIso bool
 	// zone is the server's, which CDC's commit times are in.
 	zone *time.Location
+	// collation is the database's.
+	collation string
 }
 
 // instance is a CDC capture instance of a table.
@@ -190,6 +227,11 @@ type table struct {
 	// casts are the columns read as nvarchar, and their lengths
 	// (selectList).
 	casts map[string]string
+	// lossy are the columns, of any of its capture instances, whose
+	// collation's code page is neither UTF-8's nor the database's, and
+	// their collations: CDC writes their non-ASCII characters as question
+	// marks. None with change tracking.
+	lossy map[string]string
 	key   []string
 	// instances are its capture instances, the oldest first.
 	instances []*instance
@@ -207,7 +249,8 @@ func str(v any) string {
 // name order.
 func (s *Source) discover(ctx context.Context, c conn) (server, []*table, error) {
 	var srv server
-	_, rows, err := c.QueryAll(ctx, "SELECT is_cdc_enabled, snapshot_isolation_state, DATEPART(TZOFFSET, SYSDATETIMEOFFSET()) FROM sys.databases WHERE name = DB_NAME()")
+	_, rows, err := c.QueryAll(ctx, `SELECT is_cdc_enabled, snapshot_isolation_state, DATEPART(TZOFFSET, SYSDATETIMEOFFSET()),
+CONVERT(nvarchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')) FROM sys.databases WHERE name = DB_NAME()`)
 	if err != nil {
 		return srv, nil, err
 	}
@@ -217,6 +260,7 @@ func (s *Source) discover(ctx context.Context, c conn) (server, []*table, error)
 	srv.snapshotIso = rows[0][1] == int64(1)
 	off, _ := rows[0][2].(int64)
 	srv.zone = time.FixedZone("", int(off)*60)
+	srv.collation = str(rows[0][3])
 	db := quoteName(s.Database)
 	var tracked map[string]*table
 	if s.tracking() {
@@ -298,14 +342,23 @@ ORDER BY s.name, t.name, ct.create_date`)
 		in := &instance{name: str(r[2]), start: lsnOf(r[3])}
 		in.created, _ = r[4].(time.Time)
 		// The change table's columns have the table's types and
-		// collations.
-		_, cols, err := c.QueryAll(ctx, "SELECT cc.column_name, "+castLength("c.")+` FROM cdc.captured_columns cc
+		// collations; whether CDC loses a column's characters is read of
+		// the table's own column (sc).
+		_, cols, err := c.QueryAll(ctx, "SELECT cc.column_name, "+castLength("c.")+", "+lossyCollation("sc.")+` FROM cdc.captured_columns cc
 LEFT JOIN sys.columns c ON c.object_id = cc.object_id AND c.name = cc.column_name
-WHERE cc.object_id = OBJECT_ID(@p1) ORDER BY cc.column_ordinal`, "cdc."+quoteName(in.name+"_CT"))
+LEFT JOIN sys.columns sc ON sc.object_id = OBJECT_ID(@p2) AND sc.name = cc.column_name
+WHERE cc.object_id = OBJECT_ID(@p1) ORDER BY cc.column_ordinal`, "cdc."+quoteName(in.name+"_CT"), t.from())
 		if err != nil {
 			return nil, err
 		}
-		in.cols, in.casts = columnsOf(cols)
+		var lossy map[string]string
+		in.cols, in.casts, lossy = columnsOf(cols)
+		for col, coll := range lossy {
+			if t.lossy == nil {
+				t.lossy = map[string]string{}
+			}
+			t.lossy[col] = coll
+		}
 		t.instances = append(t.instances, in)
 		t.cols, t.casts = in.cols, in.casts
 		if idx := str(r[5]); idx != "" && t.key == nil {
@@ -336,17 +389,16 @@ JOIN sys.schemas s ON s.schema_id = t.schema_id ORDER BY s.name, t.name`)
 		if err != nil {
 			return nil, err
 		}
-		t.cols, t.casts = columnsOf(cols)
+		t.cols, t.casts, _ = columnsOf(cols)
 		out[t.ns()] = t
 	}
 	return out, nil
 }
 
-// columnsOf reads rows of a column's name and, when it is cast, the
-// length it is cast to (castLength).
-func columnsOf(rows [][]any) ([]string, map[string]string) {
-	var cols []string
-	var casts map[string]string
+// columnsOf reads rows of a column's name, when it is cast the length it
+// is cast to (castLength), and when CDC loses its characters its collation
+// (lossyCollation).
+func columnsOf(rows [][]any) (cols []string, casts, lossy map[string]string) {
 	for _, r := range rows {
 		cols = append(cols, str(r[0]))
 		if len(r) > 1 && str(r[1]) != "" {
@@ -355,8 +407,14 @@ func columnsOf(rows [][]any) ([]string, map[string]string) {
 			}
 			casts[str(r[0])] = str(r[1])
 		}
+		if len(r) > 2 && str(r[2]) != "" {
+			if lossy == nil {
+				lossy = map[string]string{}
+			}
+			lossy[str(r[0])] = str(r[2])
+		}
 	}
-	return cols, casts
+	return cols, casts, lossy
 }
 
 // keyColumns reads a table's primary key's columns, or keeps those of the
@@ -448,6 +506,7 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	if rd.srv, rd.tables, err = s.discover(ctx, c); err != nil {
 		return err
 	}
+	rd.warnLossy()
 	for _, t := range rd.tables {
 		if c := t.created(); c.After(head.Since) && !head.Since.IsZero() {
 			head.Since = c
@@ -495,6 +554,28 @@ type reader struct {
 	tables []*table
 	// lagAt is when the lag was last counted.
 	lagAt time.Time
+	// warned are the columns warnLossy logged, as schema.table.column and
+	// collation.
+	warned map[string]bool
+}
+
+// warnLossy logs, once per column in the run, each column of the tables
+// read through CDC whose non-ASCII characters CDC writes as question
+// marks (I215 decision 14).
+func (rd *reader) warnLossy() {
+	for _, t := range rd.tables {
+		for _, col := range t.lossyColumns() {
+			k := t.ns() + "." + col + " " + t.lossy[col]
+			if rd.warned[k] {
+				continue
+			}
+			if rd.warned == nil {
+				rd.warned = map[string]bool{}
+			}
+			rd.warned[k] = true
+			rd.s.log.Warnf("sync mssql: %s", lossyWarning(rd.srv, t, col))
+		}
+	}
 }
 
 // head is where the changes are now: CDC's highest LSN, or change

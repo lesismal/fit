@@ -300,6 +300,9 @@ func printSync(cmd string, out []byte, stdout, stderr io.Writer) int {
 				res = "failed: " + r.Err
 			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\n", r.Part, r.Module, res)
+			for _, w := range r.Warnings {
+				fmt.Fprintf(tw, "\t\twarning: %s\n", w)
+			}
 		}
 		_ = tw.Flush()
 		if !t.OK {

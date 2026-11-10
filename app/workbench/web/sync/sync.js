@@ -83,7 +83,7 @@
       '{name} 未运行：它不在运行中的配置里。保存并应用草稿即可启动。'],
     // tests and dry runs / 测试与试运行
     ['t.title', 'Connection test', '连接测试'], ['t.part', 'Part', '部分'], ['t.module', 'Module', '模块'], ['t.result', 'Result', '结果'],
-    ['t.took', 'Took', '耗时'], ['t.ok', 'passed', '通过'], ['t.fail', 'failed', '失败'], ['t.untested', 'no test: try a dry run', '无测试：请试运行'],
+    ['t.took', 'Took', '耗时'], ['t.ok', 'passed', '通过'], ['t.fail', 'failed', '失败'], ['t.untested', 'no test: try a dry run', '无测试：请试运行'], ['t.warn', 'warning', '警告'],
     ['t.allOk', 'Every connection tested passed.', '所有已测试的连接均通过。'], ['t.someFail', 'A connection failed.', '有连接失败。'],
     ['d.title', 'Dry run', '试运行'], ['d.limit', 'Records', '记录数'], ['d.wait', 'Wait', '等待'], ['d.from', 'From', '起点'],
     ['d.fromCk', 'the checkpoint', '检查点'], ['d.fromStart', 'the start', '起始位置'], ['d.run', 'Run', '运行'],
@@ -421,7 +421,9 @@
             { label: t('t.module'), render: function (x) { return h('code.small', x.module); } },
             { label: t('t.result'), render: function (x) {
               if (!x.tested) return UI.badge(t('t.untested'), 'info');
-              return h('div', UI.badge(x.ok ? t('t.ok') : t('t.fail'), x.ok ? 'ok' : 'danger', true), x.error ? h('div.small.sy-error', x.error) : null);
+              // A passed test's warnings: what works but loses data. / 通过的测试的警告：能用但会丢数据之处。
+              return h('div', UI.badge(x.ok ? t('t.ok') : t('t.fail'), x.ok ? 'ok' : 'danger', true), x.error ? h('div.small.sy-error', x.error) : null,
+                (x.warnings || []).map(function (w) { return h('div.small', UI.badge(t('t.warn'), 'warn'), ' ', w); }));
             } },
             { label: t('t.took'), render: function (x) { return (+x.took_ms || 0).toFixed(0) + ' ms'; } }
           ], list)));
