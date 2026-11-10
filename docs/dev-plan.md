@@ -8417,6 +8417,34 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
   start on this Mac (`.erlang.cookie: eacces` with the script's mounts), so its tests and matrix run
   are CI's first. Fixed on the way: `TestNATSStreamAcrossKills` raced on its random source, and
   `TestLokiFilesAcrossKills` counted replayed lines towards the lines it waited for.
+- **Note** 2026-11-11 (the sync plan's CPU a record, and S9's lag): from 20482001 (11-10) to 1f794c1b
+  (11-11) fit's CPU a record rose 8–20% at the same throughput (S1 128-byte lines 0.99 → 1.18 cores,
+  S3 2.23 → 2.40, S9 1.52 → 1.83), all in the GC: pprof's diff of S1 put +0.47s of 2.15s in
+  `runtime.scanObject`. The pipeline's name and lineage, added to every `Record` as two strings, took
+  it from 504 to 536 bytes, past 512, the largest object Go allocates without a malloc header and marks
+  by its span, so each record went from the 512-byte size class to the 576 one, and to `scanObject`;
+  `emit` also read the clock for every record (EmitPosition's quiet interval). Fixed (bc1f6f7b): one
+  pointer to the run's constants (`recordRun`) in place of the two strings, `posOnly`, `made` and `sub`
+  in the padding after `Op` (504 bytes again; `TestRecordSize` keeps it at most 512), `emitPosition`
+  counts its quiet interval from the first call that saw no record emitted since the last one, and
+  `entry` is 72 bytes again. `BenchmarkPipeline` (new; a source of lines through dispatch to a sink that
+  drops them), on the benchmark host, ns and bytes a record: 20482001 427/914, 1f794c1b 505/987, fixed
+  426/916. Full-size runs on the host, fit only, one round each, this build against 1f794c1b back to
+  back, with strata (the LLM service) running: S1 128b-1f 1.03 against 1.17 cores (912k records/s
+  each; 11-10's report 0.99, 11-11's 1.18), S3 2.22 against 2.27 (299k each; 2.23, 2.40), S9 (nine
+  rounds of each, alternating) 5.13 against 5.38 µs of CPU a record (−4.6%; 11-10's report 5.17,
+  11-11's 5.32), its throughput the same within its ±12% spread between rounds (medians 305k and 323k).
+  Of the two parts, the record's size is nearly all of it: this build with the clock read again in
+  `emit` took 5.14 µs, 1f794c1b with only `emitPosition` changed 5.31. S9's p99 lag (1,597 → 2,408 ms)
+  is not a regression of the code: across those nine rounds each, 1f794c1b's p99 ran 1,579–2,419 ms
+  (median 1,879), this build's 1,379–2,319 (median 1,820). CDC's capture job scans every second and
+  the source polls every second (`poll_interval`) once caught up, so a run's lag depends on where the
+  two timers fall against each other, fixed within a run and random between runs: 11-11's three rounds
+  of one build had p50s of 1,439, 1,008 and 1,398 ms. The p50s did differ, 1f794c1b's median 1,289 ms
+  (979–1,468), this build's 879 (748–1,379), 11-10's 859–997; three rounds of each half of the change
+  (above) did not tell which part, nor is a way known for either to move the lag; left open. Not
+  changed: a shorter `poll_interval` (Debezium's default is 500ms) would narrow the spread, at more
+  queries when idle.
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
