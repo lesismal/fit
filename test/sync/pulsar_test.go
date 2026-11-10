@@ -2,6 +2,8 @@ package synctest
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -317,5 +319,78 @@ func TestPulsarBatchTwice(t *testing.T) {
 				t.Fatalf("%d messages of %d", n, 2*len(batch))
 			}
 		})
+	}
+}
+
+// TestPulsarTokenTLS uses pulsar-auth, a standalone that takes only TLS
+// clients with a token (FIT_SYNC_PULSAR_AUTH_URL, _ADMIN, _CA, _TOKEN): a
+// client without the token, or without the CA, is refused; the sink's
+// connection test and a batch, its producer reading back over the same
+// connection, and the source reading the batch back as a job all work
+// with both.
+func TestPulsarTokenTLS(t *testing.T) {
+	url, ca, token := os.Getenv("FIT_SYNC_PULSAR_AUTH_URL"), os.Getenv("FIT_SYNC_PULSAR_AUTH_CA"), os.Getenv("FIT_SYNC_PULSAR_AUTH_TOKEN")
+	if url == "" || ca == "" || token == "" {
+		if os.Getenv("FIT_SYNC_INTEROP") == "required" && os.Getenv("FIT_SYNC_PULSAR_4_URL") != "" {
+			t.Fatal("FIT_SYNC_PULSAR_AUTH_URL, _CA or _TOKEN is not set")
+		}
+		t.Skip("no Pulsar with authentication: FIT_SYNC_PULSAR_AUTH_URL is not set (eval \"$(test/sync/pulsar.sh up)\" sets it)")
+	}
+	ctx := hangGuard(t)
+	topic := fmt.Sprintf("persistent://public/default/fit-sync-auth-%d", rand.Uint64())
+	pem, err := os.ReadFile(ca)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(pem)
+	for name, cfg := range map[string]pulsarwire.Config{
+		"no token": {URL: url, TLS: &tls.Config{RootCAs: roots}, RequestTimeout: 10 * time.Second},
+		"no CA":    {URL: url, Token: token, RequestTimeout: 10 * time.Second},
+	} {
+		c, err := pulsarwire.New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.PartitionedMetadata(ctx, topic); err == nil {
+			t.Errorf("%s: a client was let in", name)
+		} else {
+			t.Logf("%s: %v", name, err)
+		}
+		c.Close()
+	}
+	t.Setenv("FIT_TEST_PULSAR_TOKEN", token)
+	load := func(ns, module_ string, params map[string]any) any {
+		params["url"], params["ca_file"], params["token_env"] = url, ca, "FIT_TEST_PULSAR_TOKEN"
+		b, _ := json.Marshal(params)
+		v, err := config.ParseValue(b, "params")
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := module.Load(ns, config.ModuleRef{Module: module_, Params: v}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { module.Cleanup(m) })
+		return m
+	}
+	sink := load(fitsync.Sinks, "pulsar", map[string]any{"topic": topic, "codec": map[string]any{"module": "json"}}).(fitsync.Sink)
+	if err := sink.(fitsync.Tester).Test(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var batch []*fitsync.Record
+	for n := range int64(100) {
+		batch = append(batch, fitsync.GenerateRecord("g", n, 100, 1))
+	}
+	if err := sink.Write(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	src := load(fitsync.Sources, "pulsar", map[string]any{"topics": []string{topic}}).(fitsync.Source)
+	n := 0
+	if err := src.Run(ctx, &fitsync.Run{Once: true, Emit: func(*fitsync.Record) error { n++; return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if n != len(batch) {
+		t.Fatalf("read %d of %d", n, len(batch))
 	}
 }
