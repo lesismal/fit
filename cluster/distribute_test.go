@@ -361,7 +361,9 @@ func TestDistributeSourceRefused(t *testing.T) {
 func TestDistributeBounds(t *testing.T) {
 	f := distFixture(t)
 	slow := newFakeMember(t, false)
-	slow.set(func(f *fakeMember) { f.caps, f.delay = btCaps, 300*time.Millisecond })
+	// Slow enough that the distributions are still preparing when the
+	// bounds are tried, on a loaded runner with the race detector too.
+	slow.set(func(f *fakeMember) { f.caps, f.delay = btCaps, 3*time.Second })
 	f.add(tokenInput("src", slow.srv.URL))
 	var many []string
 	for i := range MaxDistTargets + 1 {

@@ -31,9 +31,8 @@ func TestServeStore(t *testing.T) {
 "routes": [{"handler": {"module": "respond", "params": {"body": "one"}}}]}`)
 	s := startServe(t, "-c", cfg, "-watch-certs=false")
 	out := s.out.waitFor(t, "fit: admin API on ", 1)
-	if !strings.Contains(out, "is kept in the store "+path) {
-		t.Fatalf("seeded: %q %q", out, s.err.String())
-	}
+	// The seed is reported once the start has succeeded.
+	s.out.waitFor(t, "is kept in the store "+path, 1)
 	adminAddr := adminRE.FindStringSubmatch(out)[1]
 	data := exportStore(t, cfg)
 	if !strings.Contains(data, `"one"`) || strings.Contains(data, "admin") || strings.Contains(data, "s3cret") {

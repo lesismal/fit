@@ -129,9 +129,9 @@ func TestServeAdminFlag(t *testing.T) {
 	if strings.Contains(s.err.String(), "temporary") || strings.Contains(s.err.String(), `has the password "admin"`) {
 		t.Errorf("a temporary password after the change: %q", s.err.String())
 	}
-	if !strings.Contains(out, "merged onto") {
-		t.Errorf("no word of the merge: %q", out)
-	}
+	// The merge is reported once the start has succeeded, after the
+	// console's line.
+	s.out.waitFor(t, "merged onto", 1)
 	if got := get(t, "http://"+listenerRE.FindStringSubmatch(out)[1]+"/"); got != "console" {
 		t.Errorf("served after the restart: %q", got)
 	}
