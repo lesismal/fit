@@ -187,15 +187,21 @@ func TestTrackersState(t *testing.T) {
 		t.Fatalf("no tracker %s in %+v", u, list)
 		return TrackerStatus{}
 	}
-	waitFor(t, "every tracker tried, the answering one scraped", func() bool {
-		tr, err := r.Trackers(st.ID)
+	// An announce made while the torrent was still checking its data
+	// reports it a leecher; fib announces again once the check ends (see
+	// fib's announceLoop), so the answering tracker is read once that
+	// announce is done and counts the torrent a seeder, under both hashes.
+	var tr Trackers
+	waitFor(t, "every tracker tried, the answering one scraped and told of the seed", func() bool {
+		var err error
+		tr, err = r.Trackers(st.ID)
 		if err != nil || len(tr.Trackers) != 3 {
 			return false
 		}
 		ok, dead, refused := find(tr.Trackers, okURL), find(tr.Trackers, deadURL), find(tr.Trackers, refuseURL)
-		return ok.Scraped != nil && ok.V2 != nil && ok.V2.Scraped != nil && !dead.Updating && dead.Fails > 0 && !refused.Updating && refused.Fails > 0
+		return ok.Scraped != nil && ok.V2 != nil && ok.V2.Scraped != nil && !dead.Updating && dead.Fails > 0 && !refused.Updating && refused.Fails > 0 &&
+			!ok.Updating && ok.Seeders == 1 && !ok.V2.Updating && ok.V2.Seeders == 1
 	})
-	tr, _ := r.Trackers(st.ID)
 	ok, dead, refused := find(tr.Trackers, okURL), find(tr.Trackers, deadURL), find(tr.Trackers, refuseURL)
 	if refused.Tier != 0 || dead.Tier != 1 || ok.Tier != 2 {
 		t.Fatalf("tiers %d %d %d", refused.Tier, dead.Tier, ok.Tier)
