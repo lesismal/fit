@@ -13,10 +13,12 @@ import (
 // twice by its ID (a NATS JetStream message ID, a message property): 32
 // hex digits of a SHA-256.
 //
-// A record with an Origin is named by it: its source, its origin and its
-// place among the records the transforms made of its source record, which
-// a replay after a restart repeats however the source's partitions
-// interleave and however batches are cut.
+// A record with an Origin is named by it: the pipeline it goes through,
+// its source, its origin and its place among the records the transforms
+// made of its source record, which a replay after a restart repeats
+// however the source's partitions interleave and however batches are cut,
+// and which two pipelines of equal origins (a topic of one name on two
+// Kafka clusters) do not share.
 //
 // A record without one is named by a position and a distance: by the
 // anchor at or after it in the batch, the last of a run of records with
@@ -63,7 +65,7 @@ func RecordIDs(batch []*Record) []string {
 }
 
 // AppendOrigin appends to dst the bytes that name r by its origin, which
-// RecordIDs hashes: its source, its Origin and its place among the records
+// RecordIDs hashes: the pipeline's name, its source, its Origin and its place among the records
 // the transforms made of its source record. It returns dst as it was when
 // r has no origin. Sinks that name a request, a load or an object by its
 // records use it in place of their positions.
@@ -71,6 +73,8 @@ func (r *Record) AppendOrigin(dst []byte) []byte {
 	if r.Origin.Stream == "" {
 		return dst
 	}
+	dst = binary.AppendUvarint(dst, uint64(len(r.pipeline)))
+	dst = append(dst, r.pipeline...)
 	dst = binary.AppendUvarint(dst, uint64(len(r.Source)))
 	dst = append(dst, r.Source...)
 	dst = binary.AppendUvarint(dst, uint64(len(r.Origin.Stream)))

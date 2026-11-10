@@ -175,7 +175,9 @@ file and offset) and the row's place in it; `postgres` the commit LSN and the ch
 message's records (a codec's) and a transform's records of one record numbered by their place, the
 ID follows the record, not the position: a replay after a crash gets the IDs it had, whatever order
 the run met the partitions in (a `kafka` or `pulsar` source writes every partition's place in each
-position, in that order). A record without an origin (a queue's message, MQTT, files, snapshots,
+position, in that order). An origin's ID also holds the pipeline's name, so two pipelines whose
+sources give equal origins (a topic of one name on two Kafka clusters, one binlog file and offset on
+two MySQL servers) feeding one stream do not take each other's records for repeats. A record without an origin (a queue's message, MQTT, files, snapshots,
 change tracking) is named by the position at or after it and its distance from it, which repeats
 when the source reads the record again at the same position: a database's log, files, a single
 partition.
@@ -914,7 +916,8 @@ goes through `codec` (`raw` by default); a message record holds `exchange`, `rou
 `redelivered`, `headers` and the properties set beside its `value`, and `metadata_field` puts them in
 a field of the rows a codec makes. The record's key is the `fit-key` header the `rabbitmq` sink
 writes. In a job (`mode once`) the source ends once no message has come for `idle_end` (2s), every
-record acknowledged.
+record acknowledged. The lag reported is the queues' ready messages (asked every 10s; a stream queue
+has no such count).
 
 The `rabbitmq` sink publishes a persistent message per record to `exchange` (the default exchange
 when left out) with `routing_key` (`{namespace}`; `{key}` too), its `message_id` the same each time
@@ -1533,7 +1536,7 @@ The Admin API's `/metrics` carries each pipeline's as `fit_sync_*`, labelled `pi
 | `fit_sync_queue_records`, `fit_sync_queue_bytes`, `fit_sync_queue_max_records`, `fit_sync_queue_max_bytes` | gauge | the queue against its bounds |
 | `fit_sync_lag_seconds` | gauge | from the last acknowledged record's commit time to its acknowledgement |
 | `fit_sync_last_commit_timestamp_seconds` | gauge | the last acknowledged record's commit time |
-| `fit_sync_source_lag` | gauge | behind the source's server, in its unit: a PostgreSQL slot's bytes of WAL, MySQL's binlog bytes, Kafka's offsets |
+| `fit_sync_source_lag` | gauge | behind the source's server, in its unit: a PostgreSQL slot's bytes of WAL, MySQL's binlog bytes, Kafka's offsets, the messages a RabbitMQ queue holds ready or a JetStream consumer has pending |
 | `fit_sync_sink_records_total`, `fit_sync_sink_bytes_total`, `fit_sync_sink_batches_total`, `fit_sync_sink_errors_total`, `fit_sync_sink_retries_total`, `fit_sync_sink_failed_total` | counter | per sink: written, batches tried, failed, tried again, records failed |
 | `fit_sync_dead_letters_total`, `fit_sync_dead_letters_replayed_total`, `fit_sync_dead_letters_dropped_total` | counter | dead letters written, replayed and dropped |
 | `fit_sync_dead_letters_kept`, `fit_sync_dead_letters_kept_bytes` | gauge | dead letters kept |

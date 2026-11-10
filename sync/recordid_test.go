@@ -193,6 +193,13 @@ func TestRecordIDsOrigin(t *testing.T) {
 	if b := r.AppendOrigin(nil); len(b) == 0 {
 		t.Error("an origin appended nothing")
 	}
+	// Another pipeline's record of the same origin has an ID of its own:
+	// two Kafka clusters' topics of one name feeding one stream.
+	piped := same.Clone()
+	piped.pipeline = "other"
+	if again := RecordIDs([]*Record{piped}); again[0] == got[0] {
+		t.Errorf("two pipelines share an origin's ID %s", got[0])
+	}
 	if n := testing.AllocsPerRun(100, func() { _ = originID(r) }); n > 1 {
 		t.Errorf("originID: %v allocations, want at most 1", n)
 	}

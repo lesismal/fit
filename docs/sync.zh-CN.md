@@ -149,7 +149,9 @@ JSON、array 和 map，map 保持字段顺序，就像行保持列的顺序。�
 （ledger、entry、批内序号）；`nats` 是流序列号；`rabbitmq` 是 stream 的偏移；`mysql` 是事务的 GTID（或 binlog 文件和偏移）
 加行在其中的序号；`postgres` 是提交 LSN 加变更的序号；`mssql`（CDC）是事务的 LSN 加变更的序号；`mongo` 是 resume token。
 一条消息的多条记录（编解码器生成的）和转换由一条记录生成的多条记录按序号区分，于是 ID 跟着记录而不是位置：崩溃后的重放
-得到原来的 ID，不论运行以什么顺序遇到各分区（`kafka`、`pulsar` 源在每个位置中按这个顺序写入所有分区的进度）。没有来源的
+得到原来的 ID，不论运行以什么顺序遇到各分区（`kafka`、`pulsar` 源在每个位置中按这个顺序写入所有分区的进度）。来源的 ID 还
+包含流水线的名字，所以两条流水线的源给出相同的来源（两个 Kafka 集群上同名的主题、两台 MySQL 上相同的 binlog 文件和偏移）
+并写入同一个流时，不会把对方的记录当作重复。没有来源的
 记录（队列的消息、MQTT、文件、快照、变更跟踪）按其处或其后的位置及与它的距离命名，源以相同位置再次读到记录时才重复：
 数据库日志、文件、单个分区。
 
@@ -790,7 +792,8 @@ Mosquitto 的 `max_inflight_messages` 默认 20；请把它们以及版本 5 中
 再次投递。`streams` 是流队列，从检查点中最后一个 offset 之后读（没有检查点时从 `stream_start`，默认 `first`）。消息体经
 `codec` 处理（默认 `raw`）；消息记录在 `value` 旁还有 `exchange`、`routing_key`、`queue`、`redelivered`、`headers` 以及已设置
 的属性，`metadata_field` 把它们放进编解码器生成的行的一个字段。记录的键是 `rabbitmq` 目标写入的 `fit-key` 头。在作业
-（`mode once`）中，源在 `idle_end`（2s）内没有消息到来、且所有记录都已确认时结束。
+（`mode once`）中，源在 `idle_end`（2s）内没有消息到来、且所有记录都已确认时结束。报告的延迟是各队列就绪的消息数（每 10s
+查询一次；stream 队列没有这个计数）。
 
 `rabbitmq` 目标为每条记录向 `exchange`（不写时为默认交换机）以 `routing_key`（`{namespace}`；也可用 `{key}`）发布一条持久
 消息，其 `message_id` 在记录再次写入时不变，并在 broker 确认整批之前一直持有该批次（发布确认）。没有队列接收的消息使其
@@ -1348,7 +1351,7 @@ Admin API 的 `/metrics` 以 `fit_sync_*` 输出每条流水线的指标，标�
 | `fit_sync_queue_records`、`fit_sync_queue_bytes`、`fit_sync_queue_max_records`、`fit_sync_queue_max_bytes` | gauge | 队列与其上限 |
 | `fit_sync_lag_seconds` | gauge | 最后确认的记录从提交时间到被确认的时长 |
 | `fit_sync_last_commit_timestamp_seconds` | gauge | 最后确认的记录的提交时间 |
-| `fit_sync_source_lag` | gauge | 落后于源服务器的量，以源自己的单位：PostgreSQL 复制槽的 WAL 字节数、MySQL 的 binlog 字节数、Kafka 的 offset 数 |
+| `fit_sync_source_lag` | gauge | 落后于源服务器的量，以源自己的单位：PostgreSQL 复制槽的 WAL 字节数、MySQL 的 binlog 字节数、Kafka 的 offset 数、RabbitMQ 队列就绪的或 JetStream 消费者待处理的消息数 |
 | `fit_sync_sink_records_total`、`fit_sync_sink_bytes_total`、`fit_sync_sink_batches_total`、`fit_sync_sink_errors_total`、`fit_sync_sink_retries_total`、`fit_sync_sink_failed_total` | counter | 每个目标：写入量、尝试的批次、失败、重试、失败的记录 |
 | `fit_sync_dead_letters_total`、`fit_sync_dead_letters_replayed_total`、`fit_sync_dead_letters_dropped_total` | counter | 写入、重放和丢弃的死信 |
 | `fit_sync_dead_letters_kept`、`fit_sync_dead_letters_kept_bytes` | gauge | 保存着的死信 |

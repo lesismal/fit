@@ -30,6 +30,10 @@ const (
 	offsetHeader = "x-stream-offset"
 )
 
+// lagEvery is how often the source asks how many messages its queues hold
+// ready, as its lag.
+var lagEvery = 10 * time.Second
+
 // Source is the source rabbitmq.
 type Source struct {
 	Addresses       []string          `json:"addresses" fit:"required" doc:"The nodes, host:port each (5672, or 5671 for TLS), tried in order until one answers."`
@@ -253,6 +257,12 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	if err := rd.consume(ctx, from); err != nil {
 		return err
 	}
+	if len(s.Queues) > 0 && r.Lag != nil {
+		lctx, stop := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go rd.lag(lctx, done)
+		defer func() { stop(); <-done }()
+	}
 	var idle *time.Timer
 	var idleC <-chan time.Time
 	if r.Once {
@@ -318,6 +328,32 @@ func (rd *reader) consume(ctx context.Context, from position) error {
 		rd.streams[q] = true
 	}
 	return nil
+}
+
+// lag reports, at once and every lagEvery, how many messages the queues
+// hold ready (queue.declare passive): what the broker has not sent yet,
+// the unacknowledged ones not counted. Stream queues have no such count.
+// It stops at the first failure, which ends the run too.
+func (rd *reader) lag(ctx context.Context, done chan struct{}) {
+	defer close(done)
+	t := time.NewTicker(lagEvery)
+	defer t.Stop()
+	for {
+		var n int64
+		for _, q := range rd.s.Queues {
+			info, err := rd.ss.c.QueueDeclare(ctx, q, true, false, nil)
+			if err != nil {
+				return
+			}
+			n += int64(info.Messages)
+		}
+		rd.run.ReportLag(n, fitsync.LagMessages)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // drain waits, in a job, until every record emitted is acknowledged.

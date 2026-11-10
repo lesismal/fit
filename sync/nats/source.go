@@ -462,7 +462,7 @@ func (rd *reader) take(m *natswire.Msg) error {
 			return err
 		}
 	}
-	rd.run.ReportLag(int64(meta.Pending), fitsync.LagOffsets)
+	rd.run.ReportLag(int64(meta.Pending), fitsync.LagMessages)
 	return nil
 }
 

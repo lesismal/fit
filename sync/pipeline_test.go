@@ -515,6 +515,11 @@ func TestTransforms(t *testing.T) {
 	if got := ids(s.Records()); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("got %v\nwant %v", got, want)
 	}
+	for _, r := range s.Records() {
+		if r.pipeline != "p" {
+			t.Fatalf("a record reached its sink of pipeline %q", r.pipeline)
+		}
+	}
 	if dl := d.Records(); len(dl) != 1 || keyID(dl[0]) != 13 {
 		t.Fatalf("%d dead letters", len(dl))
 	}

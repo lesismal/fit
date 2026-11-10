@@ -63,6 +63,10 @@ type fakeClient struct {
 	nackKeys, returnKeys map[string]bool
 	// ackHook, when set, is called for each ack.
 	ackHook func(tag uint64, multiple bool) error
+	// ready is each queue's ready messages, as queue.declare counts them,
+	// and declares how many times it was asked.
+	ready    map[string]uint32
+	declares int
 }
 
 func (f *fake) dial(ctx context.Context, cfg amqpwire.Config) (client, error) {
@@ -109,7 +113,10 @@ func (c *fakeClient) Ack(tag uint64, multiple bool) error {
 }
 
 func (c *fakeClient) QueueDeclare(ctx context.Context, name string, passive, durable bool, args amqpwire.Table) (amqpwire.QueueInfo, error) {
-	return amqpwire.QueueInfo{Name: name}, c.declareErr
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.declares++
+	return amqpwire.QueueInfo{Name: name, Messages: c.ready[name]}, c.declareErr
 }
 
 func (c *fakeClient) ConfirmSelect(ctx context.Context) error { c.confirm = true; return c.confirmErr }

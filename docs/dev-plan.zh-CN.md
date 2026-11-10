@@ -5166,6 +5166,9 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
   - **两种模板语法**（I219 决定 11）：名称模板（SQL 目标与 doris 的 `table`、influxdb、tdengine、qdrant）把命名空间写作
     `{namespace}`；记录模板（loki、otlp_logs、file 目标）写作 `{$namespace}`，其中 `{namespace}` 是字段。选择：两种都保留，
     或统一为一种。建议：都保留，并让名称模板也接受 `{$namespace}`，这不会破坏任何配置。
+- I211–I213
+  - [I212](#i212-nats-jetstream-作为源与目标) 决策 6，NATS 消息上的键：RabbitMQ 连接器把记录的键放在 `fit-key` 头中，
+    NATS 的完全不带，带键的 NATS 到 NATS 复制会丢掉键。建议：像 RabbitMQ 一样写入并读取 `Fit-Key` 头。
 
 ### I211 RabbitMQ 作为源与目标
 
@@ -5186,33 +5189,33 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决策**（I211，实现时所做，2026-11-10；在用户裁定前有效）：
 
-1. **每个连接一个信道，每个源或目标一个连接**：源的各消费者（每个队列和 stream 一个）共用信道 1 及其投递标签，一次
+1. **[kept]**（2026-11-10：一个标签序列使一次 `basic.ack multiple` 覆盖所有队列；预取本就按消费者，每队列一个信道只增状态、不增吞吐。）**每个连接一个信道，每个源或目标一个连接**：源的各消费者（每个队列和 stream 一个）共用信道 1 及其投递标签，一次
    `basic.ack multiple` 即可覆盖所有队列直到流水线的水位。备选：每个队列一个信道；客户端中的信道池。
-2. **在水位（`fitsync.Acknowledger`）上确认，而非检查点保存后（`Confirmer`）**：`Acknowledged` 记下位置中的标签，由会话的
+2. **[kept]**（2026-11-10：队列的位置在代理处，等检查点文件只会占住预取名额。它留下的缺口（没有延迟）已补上：源每 10s 以被动 `queue.declare` 查询各队列就绪的消息数，作为以 `messages` 计的延迟报告，`TestRabbitMQExternal` 在 3.13 与 4.1 上检查（bb76f5e9）。）**在水位（`fitsync.Acknowledger`）上确认，而非检查点保存后（`Confirmer`）**：`Acknowledged` 记下位置中的标签，由会话的
    goroutine 发送 `basic.ack multiple=true`；其他会话（位置中的运行 ID）的位置被忽略。队列的位置在代理处，无需等待本地
    检查点文件；早确认可释放预取。stream 队列的偏移也在检查点中，检查点尚未保存时从较旧的偏移重放（至少一次）。备选：在
    `Confirm` 时确认。
-3. **会话比 `Run` 活得久**：`Run` 返回后连接仍保持，使目标中仍在处理的记录的确认能到达代理；在下一次 `Run` 或 `Cleanup` 时
+3. **[kept]**（2026-11-10：`Run` 结束即关闭会让每次重启都把在途消息重新入队。）**会话比 `Run` 活得久**：`Run` 返回后连接仍保持，使目标中仍在处理的记录的确认能到达代理；在下一次 `Run` 或 `Cleanup` 时
    关闭，余下的重新入队。备选：`Run` 结束即关闭（重复更多）。
-4. **不产生记录的投递立即单独确认**，stream 中早于所请求偏移的消息也一样，否则它会占用预取名额直到之后的批量确认。备选：
+4. **[kept]**（2026-11-10：单独确认在之后任何投递发出之前写出，不会与水位的批量确认竞争；占位记录白费一轮目标写入。）**不产生记录的投递立即单独确认**，stream 中早于所请求偏移的消息也一样，否则它会占用预取名额直到之后的批量确认。备选：
    占位记录。
-5. **stream 队列单独列出（`streams`）**，不做探测：AMQP 0-9-1 无法在没有管理 API 的情况下查询队列类型。备选：`queues` 中加
+5. **[kept]**（2026-11-10：AMQP 0-9-1 无法查询队列类型，stream 需要 `x-stream-offset`；分开列出明确且廉价。）**stream 队列单独列出（`streams`）**，不做探测：AMQP 0-9-1 无法在没有管理 API 的情况下查询队列类型。备选：`queues` 中加
    `stream:` 前缀，或 HTTP 管理 API。
-6. **作业在静默时结束**：`mode once` 下 `idle_end`（2s）内无消息、且所有已发出的记录都已确认时结束。队列没有终点，
+6. **[kept]**（2026-11-10：`queue.declare` 的计数不含未确认与重投的消息且与生产者竞争；所有确认后的静默才是不丢消息的终点。）**作业在静默时结束**：`mode once` 下 `idle_end`（2s）内无消息、且所有已发出的记录都已确认时结束。队列没有终点，
    `queue.declare` 的计数不含未确认与重投的消息，且与生产者竞争。备选：消费到开始时读到的数量。
-7. **消息元数据**：消息记录（raw 编解码器或编解码器的错误记录）在 `value` 旁有 `exchange`、`routing_key`、`queue`、
+7. **[kept]**（2026-11-10：与 NATS、Pulsar 源的元数据同形；`fit-key` 让键在 RabbitMQ 到 RabbitMQ 的复制中往返（NATS 没有：I212 决策 6，待用户裁定）。）**消息元数据**：消息记录（raw 编解码器或编解码器的错误记录）在 `value` 旁有 `exchange`、`routing_key`、`queue`、
    `redelivered`、`headers`（按名排序的 map）和已设置的属性（`message_id`、`content_type`、`timestamp` 等）；编解码器生成的行
    只在 `metadata_field` 下带有它们。键取自目标写入的 `fit-key` 头（字符串与字节原样，其他键为纯 JSON），否则为 null。备选：
    以消息 ID 或路由键为键。
-8. **目标的头与 ID**：每条消息带 `fit-key`（记录有键时）、`fit-op` 与 `fit-namespace` 头，`message_id` 来自
+8. **[kept]**（2026-11-10：官方镜像没有代理端去重，稳定的 `message_id` 是目标能给消费者的全部；ID 现在还包含流水线名（I213 决策 12）。）**目标的头与 ID**：每条消息带 `fit-key`（记录有键时）、`fit-op` 与 `fit-namespace` 头，`message_id` 来自
    `fitsync.RecordIDs`，`timestamp` 为提交时间，除 `transient` 外投递模式为 2。RabbitMQ 没有代理端去重，重写的一批会再发布一次，
    消费者按 `message_id` 丢弃重复。备选：社区的消息去重插件（`x-deduplication-header`），镜像中没有。
-9. **默认不可路由的消息为永久错误**：以 `mandatory` 发布，`basic.return` 以 `fitsync.Permanent` 使其记录失败，由 `on_error` 处理
+9. **[kept]**（2026-11-10：默认大声失败是安全的一侧（丢弃即静默丢失），`unroutable: drop` 留给本就要丢弃的交换机。）**默认不可路由的消息为永久错误**：以 `mandatory` 发布，`basic.return` 以 `fitsync.Permanent` 使其记录失败，由 `on_error` 处理
    而不是无休止重试；`unroutable: drop` 不带 `mandatory` 发布。`basic.nack` 从其记录起失败并重试。超过 `max_message_bytes`
    （16 MiB）的消息体为永久错误。
-10. **流控**：`connection.blocked` 或 `channel.flow` 生效时，发布最多等待 `timeout`，之后这一批失败由流水线重试；源从不因此
+10. **[kept]**（2026-11-10：最多等 `timeout` 再交给流水线重试，只有一条恢复路径；源有自己的连接，告警不会挡住它。）**流控**：`connection.blocked` 或 `channel.flow` 生效时，发布最多等待 `timeout`，之后这一批失败由流水线重试；源从不因此
     阻塞。心跳默认 30s（代理的更小时用代理的）；错过两次即结束连接。
-11. **互通服务器**：`test/sync/rabbitmq.sh` 运行 RabbitMQ 3.13 和 4.1，各一个节点，带用户与 TLS 监听；尚未接入
+11. **[changed]**（2026-11-10：EXTERNAL 现已对真实代理测试：`rabbitmq.sh` 启用 `rabbitmq_auth_mechanism_ssl`（`ssl_cert_login_from = common_name`、`verify_peer`）并生成客户端证书（CN=fit）；`TestRabbitMQExternal` 在 3.13 与 4.1 上经 TLS 以 EXTERNAL 写入并读取一个 quorum 队列，通过；脚本现在连同容器的卷一起删除（bb76f5e9）。集群故障转移仍未测试。）**互通服务器**：`test/sync/rabbitmq.sh` 运行 RabbitMQ 3.13 和 4.1，各一个节点，带用户与 TLS 监听；尚未接入
     `test/sync/run.sh`（I222 的 `mq` 分组）。未测试：对真实代理的 EXTERNAL（需要 `rabbitmq_auth_mechanism_ssl` 与客户端证书）、
     集群节点故障转移（每次拨号按顺序尝试各地址）。
 
@@ -5234,37 +5237,47 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决策**（I212，实现时所做，2026-11-10；在用户裁定前有效）：
 
-1. **源何时确认**：在 `fitsync.Acknowledger`（所有目标都拿到的水位）上，而非 `Confirmer`（检查点已保存）。两者之间崩溃会让
+1. **[kept]**（2026-11-10：在水位处所有目标都已拿到消息；更晚确认只会占住 `max_ack_pending` 名额。）**源何时确认**：在 `fitsync.Acknowledger`（所有目标都拿到的水位）上，而非 `Confirmer`（检查点已保存）。两者之间崩溃会让
    consumer 领先于检查点，这是安全的：目标已有这些消息。`Acknowledged` 把工作交给源的确认 goroutine（不得阻塞）。备选：
    `Confirm`，确认更晚，待确认消息（max_ack_pending）更多而无益。
-2. **fit 创建的 consumer 用 ack 策略 all，且当某次运行开始时发现它持有已投递未确认的消息（上次运行被 kill）时，从下限重建**：
+2. **[kept]**（2026-11-10：在 ack all 下这是保持位置单调的办法，配合决策 13 互通在多次 kill 中把 20,000 条消息恰好复制一次；显式确认加集合会让检查点不再是下限。）**fit 创建的 consumer 用 ack 策略 all，且当某次运行开始时发现它持有已投递未确认的消息（上次运行被 kill）时，从下限重建**：
    下限为检查点的序号与 consumer 确认下限中较晚者。JetStream 只在 ack_wait 之后才在较新消息之间重投这些消息；ack all 下确认
    较新的消息会把它们未读就确认掉（第一次互通运行因此丢失约 15%）。重建后按序投递，位置单调，ack all 安全且廉价。备选：
    ack 策略 explicit 加已发出序号集合（位置可回退，检查点不再是下限）；每次开始时等过 ack_wait。
-3. **用户自己的 consumer（create_consumer 关闭）从其确认下限读起，而非检查点，且必须为 ack 策略 explicit**（none 为至多一次），
+3. **[kept]**（2026-11-10：fit 无法重建用户的 consumer，只有显式确认与服务器的下限安全；开始时报错胜过静默丢失。）**用户自己的 consumer（create_consumer 关闭）从其确认下限读起，而非检查点，且必须为 ack 策略 explicit**（none 为至多一次），
    ack 策略 all 在开始时报错：fit 无法重建它，其重投会乱序，只有显式确认和服务器自己的下限是安全的。备选：接受 all 并告警。
-4. **一次拉取取走 consumer 现有的（no_wait，至多 batch），只有在没有时才以拉取一条等待至多 max_wait**：消息一到即读，而非整批
+4. **[kept]**（2026-11-10：消息一到即读，没有拉取把一批压到 `max_wait`；nats.go 的 Fetch 也如此。）**一次拉取取走 consumer 现有的（no_wait，至多 batch），只有在没有时才以拉取一条等待至多 max_wait**：消息一到即读，而非整批
    拉取等到 max_wait（nats.go 的 Fetch 也如此）。备选：短过期的一次整批拉取；心跳（idle_heartbeat）——短拉取下不需要。
-5. **`Nats-Msg-Id` 来自 `fitsync.RecordIDs`**（记录来源的哈希；没有来源的源，为记录的锚定位置及与它的距离的哈希；见决策 12）：流的去重窗口（默认 2 分钟）丢弃重写的
+5. **[kept]**（2026-11-10：窗口属于流，由用户设定大小。ID 现在还包含流水线名（I213 决策 12），两条来源相同的流水线写入同一个流时不再把对方的消息当作重复丢弃。）**`Nats-Msg-Id` 来自 `fitsync.RecordIDs`**（记录来源的哈希；没有来源的源，为记录的锚定位置及与它的距离的哈希；见决策 12）：流的去重窗口（默认 2 分钟）丢弃重写的
    一批；更长中断后的重放会存下副本（至少一次）。窗口属于流，写入文档，fit 不设置。备选：按记录内容生成 ID（两条相同的记录
    会被丢弃）。
-6. **消息中没有键**：NATS 没有消息键；目标只发送 `Nats-Msg-Id`，源的记录除非编解码器设置否则没有键（`key` 变换可从字段生成）。
+6. **[needs the user]**（2026-11-10：这是消息格式的选择：RabbitMQ 连接器写入并读取 `fit-key`，NATS 的什么都不写，带键的 NATS 到 NATS 复制会丢掉键。建议：像 RabbitMQ 一样写入并读取 `Fit-Key` 头。）**消息中没有键**：NATS 没有消息键；目标只发送 `Nats-Msg-Id`，源的记录除非编解码器设置否则没有键（`key` 变换可从字段生成）。
    删除与其他记录一样由编解码器编码。备选：写入再读回一个 `Fit-Key` 头——自创，别的程序不读。
-7. **消息元数据**：消息记录（raw、json plain、编解码器的错误）在其值旁有 `subject`、`headers`（map，多值为数组），以及来自
+7. **[kept]**（2026-11-10：与 RabbitMQ、Pulsar 源的元数据同形。）**消息元数据**：消息记录（raw、json plain、编解码器的错误）在其值旁有 `subject`、`headers`（map，多值为数组），以及来自
    JetStream 的 `stream`、`sequence`、`time`，编解码器生成的字段优先；其他编解码器生成的行只在 `metadata_field` 下带有它们。
-8. **core 模式至多一次且没有位置**：记录不带位置，检查点从不移动；core 模式的作业（mode once）报错，因为 core 主题没有终点。
+8. **[kept]**（2026-11-10：core NATS 本就至多一次，其上的作业没有终点。报告的延迟（pending）现以 `messages` 而非 `offsets` 计（f43478c6）。仍未解决：`buffer` 满时的丢弃不在流水线状态中。）**core 模式至多一次且没有位置**：记录不带位置，检查点从不移动；core 模式的作业（mode once）报错，因为 core 主题没有终点。
    `buffer` 满时丢弃消息（客户端计数，尚未在状态中报告）。
-9. **重连**：连接断开、两个 PING 无应答或服务器进入 lame duck 模式时，客户端换到它所知（配置与 INFO 的 connect_urls）的下一个
+9. **[kept]**（2026-11-10：不缓冲意味着失败可见并由流水线重试，目标由流的窗口兜底；nats.go 的缓冲会把它掩盖。）**重连**：连接断开、两个 PING 无应答或服务器进入 lame duck 模式时，客户端换到它所知（配置与 INFO 的 connect_urls）的下一个
    服务器；进行中的发布与拉取以 ErrDisconnected 失败（重连期间不缓冲），于是目标的批次被重写（去重），源的运行重启。备选：
    nats.go 的重连缓冲——以内存为代价掩盖失败。
-10. **TLS 在 INFO 之后升级**，与 nats-server 的默认一致；不支持 `handshake_first`（2.10.4 的 TLS 优先）。不接受 `tls://` 或
+10. **[kept]**（2026-11-10：INFO 之后升级 TLS 是 nats-server 的默认；`handshake_first` 只用于要求它的服务器，等有人要再加。）**TLS 在 INFO 之后升级**，与 nats-server 的默认一致；不支持 `handshake_first`（2.10.4 的 TLS 优先）。不接受 `tls://` 或
     `nats://` URL：服务器写成 host:port。
-11. **假服务器是一个包 `sync/nats/natstest`**，供 wire 与连接器的测试共用；它计入仓库的覆盖率（两包测试合计 98%）。
-12. **在 I213 的互通中发现，这里同样成立**：`fitsync.RecordIDs` 只对在相同位置被再次读到的记录重复；`kafka` 与 `pulsar` 源在
+11. **[kept]**（2026-11-10：两个包的测试共用一个假服务器，而非两个各自漂移的。）**假服务器是一个包 `sync/nats/natstest`**，供 wire 与连接器的测试共用；它计入仓库的覆盖率（两包测试合计 98%）。
+12. **[kept]**（2026-11-10：已由 `Origin` 修复（I213 决策 10-13）。）**在 I213 的互通中发现，这里同样成立**：`fitsync.RecordIDs` 只对在相同位置被再次读到的记录重复；`kafka` 与 `pulsar` 源在
     每个位置中写入所有分区的进度，按运行时交错的顺序，所以由它们供给的 NATS 流会再次存下重放的记录（至少一次）。修复属于
     `RecordIDs` 与这些源（I213 的决策 1）。**已修复** 2026-11-10（分支 `fix-recordid`，I213 的决策 1 与 10-13）：记录带有源设置的
     `Origin`，不论运行怎样交错各分区都不变，`RecordIDs` 先按它命名记录，再按位置；`kafka`、`pulsar` 源设置它，`nats`（流与
     序列号）也设置，所以由它们任一供给的 NATS 流在去重窗口内丢弃重放。
+13. **[kept]**（2026-11-10：在 2.10 与 2.11 上每次投递（包括重投）都会递增 consumer 序号，缺口是可靠的信号；信任 info 正是失败的做法。）**在 sync2 的 CI 中发现（2026-11-10）：fit 创建的 consumer 投递了运行从未读到的消息时，重建它。**
+    `TestNATSStreamAcrossKills` 在 nats-2.10 上丢失 20,000 条中的 236 条（复制了 19764 条）；本地约十次运行有一次丢失 46 到
+    1,631 条，两个版本都有。与 `RecordIDs` 无关：每条丢失的消息都被发出或投递过，从未被发布，来源的 ID 也不冲突。两条路径，
+    都以 ack all 下确认了较新的消息、从而把丢失的那些一并确认告终：(a) 节点重启后开始的运行从状态落后的 leader 读到 consumer 的
+    info（没有待处理，已投递等于下限），保留了 consumer，随后从被 kill 的运行停下处起接收投递；(b) consumer 已向一次拉取投递后，
+    该拉取因 leader 迁移得到 409，再次找到 consumer 后越过它们继续读。每次投递（包括重投）都会递增 consumer 序号（在 2.10 与
+    2.11 上验证），所以源现在检查每次投递都紧接它取到的上一次，起点为开始时创建或找到 consumer 时 info 中的值；出现缺口时，或
+    409 之后再次找到的 consumer 的已投递序号不是自己的时，从下限重建 consumer。备选：ack 策略 explicit（决策 2 的备选）；信任
+    info（失败的做法）。**已修复** 2026-11-10（分支 `fix-recordid`，I213 的决策 1 与 10-13）：记录带有源设置的 `Origin`，`nats`
+    也设置（流与序列号），所以由任一这样的源供给的 NATS 流在去重窗口内丢弃重放。
 
 ### I213 Apache Pulsar 作为源与目标
 
@@ -5284,7 +5297,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决策**（I213，实现时所做，2026-11-10；在用户裁定前有效）：
 
-1. **"重发的一批只存一次"如何成立**：每条消息带属性 `fit-id`（`fitsync.RecordIDs`，取自记录的位置）；`dedup read_back`（默认）时，
+1. **[kept]**（2026-11-10：读回对目标是本地的，不需要 fit 的状态；有了 `Origin`，68 次 kill 运行中 65 次精确复制，其余至多 0.65%（被 kill 进程的最后一次发送），至少一次；事务需要协调器且提交要与检查点绑定。）**"重发的一批只存一次"如何成立**：每条消息带属性 `fit-id`（`fitsync.RecordIDs`，取自记录的位置）；`dedup read_back`（默认）时，
    目标在创建一个分区的 producer 时读回该分区最后 64 个条目（`GET_LAST_MESSAGE_ID` 之后在 `last - 64` 处的 reader），记下其
    producer 名存下的 `fit-id`（以及之后存下的每一个，每分区至多 100,000），并丢弃一批中 `fit-id` 已有的记录。producer 的序列号
    接着 `PRODUCER_SUCCESS` 的 `last_sequence_id`，使代理去重接受它们，只丢弃客户端自己重复的发送。原因：Pulsar 的代理去重按
@@ -5302,33 +5315,33 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    跨 kill 的 Pulsar 互通现在 68 次运行中有 65 次把 2000 条消息复制为 2000 条（Pulsar 3.0.11 与 4.0.5，两种模式）；其余三次有 2、
    4、13 份副本（136,000 条消息中的 19 条，单次最多 0.65%，修复前为 0-22%），来自此修复不涉及之处：被 kill 的进程的一次发送，
    代理在新生产者读回之后才存下。
-2. **按 Java 客户端的默认方式路由分区**：`JavaStringHash`（分区键的 Java `String.hashCode`，`& Integer.MAX_VALUE`，对分区数
+2. **[kept]**（2026-11-10：Java 与 Go 客户端的默认，fit 的键与其他生产者的落在同一分区。）**按 Java 客户端的默认方式路由分区**：`JavaStringHash`（分区键的 Java `String.hashCode`，`& Integer.MAX_VALUE`，对分区数
    取模），pulsar-client-go 默认也用它；字节键按 Java 客户端发送时的 base64 计算哈希。没有键的记录每个目标批次去一个分区，下一批
    换下一个。备选：Murmur3_32Hash（Java 客户端的另一方案，C++ 客户端的默认又不同）。
-3. **源的位置是每个分区最后发出的消息**（ledger、entry、批内序号，一个条目读完时为 -1），以分区全名为键。reader 从它开始；
+3. **[kept]**（2026-11-10：批内序号级确认需要代理设置；读了一部分的批次其余部分只是被重读并跳过。）**源的位置是每个分区最后发出的消息**（ledger、entry、批内序号，一个条目读完时为 -1），以分区全名为键。reader 从它开始；
    读了一部分的批次会被代理重发，源跳过检查点已有的部分。`mode subscription` 中同样用这些 ID 过滤订阅重发的消息，并在开始时
    对检查点再做一次累积确认以防确认丢失；读了一部分的批次只确认到它之前的条目（不用 `ack_set`），其余部分重启后重来并被跳过。
    备选：批内序号级确认（`ack_set`），需要代理的 `acknowledgmentAtBatchIndexLevelEnabled`。
-4. **记录中的消息元数据**，与 RabbitMQ 和 NATS 源一致：消息记录（raw 编解码器或编解码器错误）在 `value` 旁有 `topic`（分区
+4. **[kept]**（2026-11-10：与 RabbitMQ、NATS 元数据一致；携带源的属性是要等人提出的功能。）**记录中的消息元数据**，与 RabbitMQ 和 NATS 源一致：消息记录（raw 编解码器或编解码器错误）在 `value` 旁有 `topic`（分区
    全名）、`message_id`、`properties`（map）、`producer`、`publish_time` 与 `event_time`；编解码器生成的行只在设置了
    `metadata_field` 时在其下带有它们。CommitTime 为事件时间，否则为发布时间。目标只写入 `fit-id` 属性；Pulsar 到 Pulsar 的复制
    不带源的属性。
-5. **不读取**：加密消息与分块消息（超过 `maxMessageSize` 被 producer 拆开的消息）使源报错而非被跳过；标记消息被跳过。备选：
+5. **[kept]**（2026-11-10：报错胜过静默跳过；分块重组等有人要再做。）**不读取**：加密消息与分块消息（超过 `maxMessageSize` 被 producer 拆开的消息）使源报错而非被跳过；标记消息被跳过。备选：
    有界的分块重组，日后按需。
-6. **客户端内部不重连**：连接丢失时其 producer 与 consumer 失败，源的运行或目标的写入返回错误；流水线的重试重新创建它们
+6. **[kept]**（2026-11-10：一条恢复路径，即流水线的，与 Kafka 连接器一致。）**客户端内部不重连**：连接丢失时其 producer 与 consumer 失败，源的运行或目标的写入返回错误；流水线的重试重新创建它们
    （目标的 producer 重新读回）。keep-alive 每 30s 一次 ping，60s 内未收到代理任何数据的连接被关闭。原因：只有一条恢复路径，
    即流水线的，与 Kafka 连接器一致。
-7. **接收队列受 flow 许可约束**（`receiver_queue`，默认 1000，降到一半时补充）；代理超出许可两倍队列加 10,000 条时连接失败。
+7. **[kept]**（2026-11-10：在代理无视许可时约束内存。）**接收队列受 flow 许可约束**（`receiver_queue`，默认 1000，降到一半时补充）；代理超出许可两倍队列加 10,000 条时连接失败。
    帧受代理的 `maxMessageSize`（默认 5 MiB，来自 `CONNECTED`）加 10 KiB 限制，消息解压后的大小受 64 MiB 限制。
-8. **互通服务器为不带认证的 standalone**：Pulsar 3.0.11 与 4.0.5，开启去重，在 127.0.0.1 的主机端口上发布（`test/sync/pulsar.sh`，
+8. **[changed]**（2026-11-10：`pulsar.sh` 还启动 pulsar-auth（4.0.5）：只开 TLS 代理端口，令牌认证，HS256 密钥与角色 fit 的令牌由脚本生成；`TestPulsarTokenTLS` 检查不带令牌或不带 CA 的客户端被拒绝，目标（读回）与源（作业）两者齐备时可用；通过（915612a8）。尚未报告延迟：reader 的积压需要 `mode reader` 不发送的确认。）**互通服务器为不带认证的 standalone**：Pulsar 3.0.11 与 4.0.5，开启去重，在 127.0.0.1 的主机端口上发布（`test/sync/pulsar.sh`，
    与 `kafka.sh` 一样独立，尚未加入 `run.sh` 的分组，由 I222 加为 `mq`）。令牌认证与 TLS 只针对进程内假代理测试。备选：带
    `authenticationEnabled` 与脚本生成密钥的 standalone。
-9. **LZ4 使用 kafkawire 的块代码**，导出为 `kafkawire.LZ4Block` 与 `LZ4Unblock`（Pulsar 的 LZ4 是原始块，大小在元数据中）；
+9. **[kept]**（2026-11-10：LZ4 块代码只有一份；移入 internal 包只是口味。）**LZ4 使用 kafkawire 的块代码**，导出为 `kafkawire.LZ4Block` 与 `LZ4Unblock`（Pulsar 的 LZ4 是原始块，大小在元数据中）；
    zstd 与 snappy 用 klauspost/compress（已是依赖），zlib 用标准库。备选：把 LZ4 代码移入两者共用的 internal 包。
 
 `RecordIDs` 修复的决策（决策 1 的，2026-11-10，分支 `fix-recordid`；待审阅）：
 
-10. **`Origin` 是 `Record` 上的固定结构，`Stream string` 与 `N [4]uint64`**，由源设置；`Stream` 非空即有来源。只比较相等，所以
+10. **[kept]**（2026-11-10：固定结构，热路径无分配，ID 只需要相等比较。）**`Origin` 是 `Record` 上的固定结构，`Stream string` 与 `N [4]uint64`**，由源设置；`Stream` 非空即有来源。只比较相等，所以
     各源自选内容：`kafka` 主题 / 分区、偏移、消息内序号；`pulsar` 分区名 / ledger、entry、批内序号、序号；`nats` 流 / 序列号、
     序号；`rabbitmq` stream 队列 / 偏移、序号（classic 与 quorum 队列没有：再次投递的消息可能换了 tag）；`mysql` 事务的 GTID 或
     binlog 文件与偏移（其 `Tx.ID`）/ 记录在其中的序号；`postgres` `"lsn"` / 提交 LSN、变更序号；`mssql` CDC 事务的 LSN / 变更
@@ -5337,13 +5350,13 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     快照与作业的分块（它们的位置已是逐记录的），以及未要求的源（Redis streams、TiDB、Elasticsearch、ClickHouse、Doris、S3、
     HTTP）。备选：每条记录构造一个字符串（热路径上的分配）；`func() []byte`（每条记录一个闭包）；由 `RecordIDs` 计算记录在消息
     中的序号（批次在消息内被切开时会变）。
-11. **转换由一条源记录生成的多条记录按序号区分**，即 `Record.sub`，管道在一条源记录生成多条时、在它们到达目标之前设置；它是
+11. **[kept]**（2026-11-10：源记录内的序号在批次切开时不变，距离做不到。）**转换由一条源记录生成的多条记录按序号区分**，即 `Record.sub`，管道在一条源记录生成多条时、在它们到达目标之前设置；它是
     ID 的一部分，所以批次在一条源记录的记录中间切开时 ID 不变。备选：像位置那样用到这段最后一条记录的距离（切开会让两条记录
     同一个 ID）。
-12. **ID 是 `'o'` 加 `Record.AppendOrigin`**（源、来源的流与数字、序号）**的 SHA-256 的 32 位十六进制**，用栈上缓冲：一次分配，
+12. **[changed]**（2026-11-10：两条流水线相同的来源（两个 Kafka 集群上同名的主题、两台 MySQL 上相同的 binlog 文件和偏移）写入同一个 NATS 流时 ID 相同，流的窗口丢掉了第二条流水线的记录。现在流水线在记录交给目标前设置其流水线名（未导出的 `Record.pipeline`），`AppendOrigin` 以它开头：流水线、源、来源、序号。改名的流水线本就从头开始（检查点按名字）；没有来源的记录的 ID 逐字节不变（f43478c6）。）**ID 是 `'o'` 加 `Record.AppendOrigin`**（源、来源的流与数字、序号）**的 SHA-256 的 32 位十六进制**，用栈上缓冲：一次分配，
     即字符串本身。没有来源的记录的 ID 逐字节不变，所以重放中途升级的管道只改变带来源的记录的 ID，一次。备选：来源的可读文本
     （更长，目标还得限制属性或头的长度）。
-13. **其他按位置命名记录的目标也用来源**：`http` 的 `Idempotency-Key` 用每条记录的来源代替位置做哈希（长度的最高位置 1，没有
+13. **[kept]**（2026-11-10：所有按记录命名的目标用同样的名字，随决策 12 现在也按流水线区分。）**其他按位置命名记录的目标也用来源**：`http` 的 `Idempotency-Key` 用每条记录的来源代替位置做哈希（长度的最高位置 1，没有
     来源的记录的键不变）；`doris` 的 label 用这段第一条和最后一条记录的来源定位；`s3` 的 `{position}` 取第一条记录的来源。来自
     Kafka 或 Pulsar、切法相同的重放于是重复同样的键、label 或对象名。Loki 不按位置命名任何东西，不变。备选：保持原样，那里
     至少一次。
