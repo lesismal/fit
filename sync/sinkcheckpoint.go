@@ -42,6 +42,23 @@ func newLineage() string {
 	return hex.EncodeToString(b[:])
 }
 
+// mintLineage gives a stream's checkpoint a lineage when it has none and
+// no position, as when it starts anew or was reset, and saves it at once,
+// so that the sinks' names made with it (Record.Lineage) are the same
+// after a restart. A checkpoint of a position and no lineage, saved by a
+// fit before lineages, keeps none until it is reset, so that the names its
+// sinks gave the records are the same after the upgrade.
+func (p *pipe) mintLineage(from Position) error {
+	if p.store.lineage != "" || from != nil {
+		return nil
+	}
+	p.store.lineage, p.store.wrote = newLineage(), nil
+	p.mu.Lock()
+	job := p.job
+	p.mu.Unlock()
+	return p.store.save(from, job)
+}
+
 // keepsCheckpoint reports whether a sink of the pipeline keeps the
 // checkpoint.
 func (p *pipe) keepsCheckpoint() bool {
@@ -60,7 +77,7 @@ func (p *pipe) keepsCheckpoint() bool {
 // file's, or a new one when the file has none.
 func (p *pipe) sinkCheckpoint(from Position) (Position, error) {
 	if !p.keepsCheckpoint() {
-		return from, nil
+		return from, p.mintLineage(from)
 	}
 	c, err := p.store.read()
 	if err != nil {
@@ -113,9 +130,15 @@ func (p *pipe) sinkCheckpoint(from Position) (Position, error) {
 		}
 		agreed, shared = compact, kept
 	}
-	if all && agreed != nil {
+	switch {
+	case !all || agreed == nil:
+	case c != nil && from != nil && bytes.Equal(p.store.wrote, agreed):
+		// The file is past the sinks' position by position-only records
+		// alone, which no sink was handed.
+	default:
 		if cur, err := appendCompact(nil, from); err != nil || !bytes.Equal(cur, agreed) {
 			p.rt.opts.Log.Infof("pipeline %s starts from its sinks' checkpoint %s, in preference to its file's", p.cfg.Name, agreed)
+			p.store.wrote = nil
 		}
 		from = agreed
 	}

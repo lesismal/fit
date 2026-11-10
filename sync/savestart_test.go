@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/lesismal/fit/module"
@@ -71,6 +72,22 @@ func startPipeline(sn, params, extra string) string {
 	return fmt.Sprintf(`{"name": "p", "checkpoint_interval": "1ms", "retry": {"backoff": "1ms"}%s,
 		"source": {"module": "starter", "params": %s},
 		"sinks": [{"name": "m", "sink": {"module": "memory", "params": {"store": %q}}, "batch": {"max_wait": "1ms"}}]}`, extra, params, sn)
+}
+
+// noPosition checks the checkpoint file holds a lineage and no position.
+func noPosition(t *testing.T, dir string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "p.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c Checkpoint
+	if err := json.Unmarshal(data, &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Position != nil || c.Lineage == "" {
+		t.Fatalf("the checkpoint: %s", data)
+	}
 }
 
 func readPosition(t *testing.T, dir string) string {
@@ -181,16 +198,17 @@ func TestSaveStartOnce(t *testing.T) {
 func TestSaveStartKilledWriting(t *testing.T) {
 	resetStartLog()
 	dir := t.TempDir()
-	rt := NewRuntime(Options{Crash: func(_ string, p Point) bool { return p == CrashCheckpointWritten }})
+	// The first checkpoint written is the new lineage's, the second the
+	// start's.
+	var written atomic.Int32
+	rt := NewRuntime(Options{Crash: func(_ string, p Point) bool { return p == CrashCheckpointWritten && written.Add(1) == 2 }})
 	_, sn := memStore(t)
 	if err := rt.Apply(syncConfig(t, dir, startPipeline(sn, `{"records": 5}`, ""))); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the kill", func() bool { return state(rt, "p").State == "killed" })
 	rt.Close(context.Background())
-	if _, err := os.Stat(filepath.Join(dir, "p.json")); !os.IsNotExist(err) {
-		t.Fatalf("the checkpoint file: %v", err)
-	}
+	noPosition(t, dir)
 	startLog.Lock()
 	defer startLog.Unlock()
 	if len(startLog.errs) != 1 || startLog.errs[0] != errStopped {
@@ -209,9 +227,7 @@ func TestSaveStartAfterKill(t *testing.T) {
 	}
 	waitFor(t, "the kill", func() bool { return state(rt, "p").State == "killed" })
 	rt.Close(context.Background())
-	if _, err := os.Stat(filepath.Join(dir, "p.json")); !os.IsNotExist(err) {
-		t.Fatalf("the checkpoint file: %v", err)
-	}
+	noPosition(t, dir)
 	startLog.Lock()
 	defer startLog.Unlock()
 	if len(startLog.errs) != 1 || startLog.errs[0] != errStopped {
@@ -223,7 +239,14 @@ func TestSaveStartAfterKill(t *testing.T) {
 func TestSaveStartFails(t *testing.T) {
 	resetStartLog()
 	dir := filepath.Join(t.TempDir(), "state")
-	if err := os.Mkdir(dir, 0o500); err != nil {
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A checkpoint of a lineage and no position, as a start makes.
+	if err := os.WriteFile(filepath.Join(dir, "p.json"), []byte(`{"version": 1, "pipeline": "p", "lineage": "l"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
 	defer os.Chmod(dir, 0o700)

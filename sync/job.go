@@ -55,10 +55,12 @@ var errJobDone = errors.New("sync: the job has finished")
 // snapshot starts from its start; one of any other source from where the
 // last ended, so a file or a cursor copies what is new.
 func (p *pipe) start(again bool) (Position, error) {
-	from, prog, err := p.store.load()
+	l, err := p.store.loadFile()
+	from, prog := l.pos, l.job
 	if err != nil {
 		return from, err
 	}
+	p.store.lineage, p.store.wrote = l.lineage, l.wrote
 	if !p.cfg.Once() {
 		return p.sinkCheckpoint(from)
 	}
@@ -104,7 +106,7 @@ func (p *pipe) start(again bool) (Position, error) {
 		// interrupted before its first checkpoint is known to be. One
 		// from the source's start is of a lineage of its own.
 		if from == nil {
-			p.store.lineage = newLineage()
+			p.store.lineage, p.store.wrote = newLineage(), nil
 		}
 		if err := p.store.save(from, prog); err != nil {
 			return nil, err

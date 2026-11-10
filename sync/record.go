@@ -115,6 +115,14 @@ type Record struct {
 	// records of equal origins (one topic name on two Kafka clusters
 	// feeding one stream) have IDs of their own.
 	pipeline string
+	// lineage is the line of positions of the pipeline's checkpoint the
+	// run reading r is of, which the pipeline sets with pipeline: a reset,
+	// a position set by hand and a new job start another.
+	lineage string
+	// posOnly says r is a position-only record (Run.EmitPosition): it
+	// carries only its Position, which the checkpoint moves to once the
+	// records before it are acknowledged, and no transform or sink sees it.
+	posOnly bool
 	// made says a transform made r, with Clone, so that the transforms
 	// after it may change it in place.
 	made bool
@@ -125,6 +133,16 @@ type Record struct {
 	// chunk read rather than keys from across the table.
 	lane int
 }
+
+// Lineage returns the lineage of the pipeline's checkpoint r was read in,
+// which a reset of the checkpoint, a position set by hand and a new job
+// change, and which restarts keep: sinks whose servers drop a load, a
+// request or an object they had by a name made from positions or origins
+// (a Doris label, an Idempotency-Key) put it in the name, so that the
+// records a reset reads again are written again. It is empty for a record
+// that has not reached a sink of a pipeline, and for a pipeline whose
+// checkpoint predates lineages, until it is reset.
+func (r *Record) Lineage() string { return r.lineage }
 
 // boundary reports whether the source can resume after r: r ends a
 // transaction, or has none.

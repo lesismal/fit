@@ -383,3 +383,64 @@ func TestLabel(t *testing.T) {
 		t.Fatal("labels of origins")
 	}
 }
+
+// TestLabelsAfterReset: a pipeline's loads carry its checkpoint's
+// lineage, so that the records a reset reads again are loaded again,
+// rather than refused as already loaded, as a table made afresh needs.
+func TestLabelsAfterReset(t *testing.T) {
+	f := newFake(t)
+	dir := t.TempDir()
+	cfg := func(records int) *config.Sync {
+		src := fmt.Sprintf(`{"sync": {"state_dir": %q, "pipelines": [{"name": "p", "checkpoint_interval": "1ms",
+			"source": {"module": "generate", "params": {"records": %d, "namespace": "d.t"}},
+			"sinks": [{"name": "d", "sink": {"module": "doris", "params": {"urls": [%q], "username": "root"}}, "batch": {"max_records": 2, "max_wait": "1ms"}}]}]}}`, dir, records, f.fe.URL)
+		c, err := config.Load([]byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.Sync
+	}
+	rt := fitsync.NewRuntime(fitsync.Options{})
+	defer rt.Close(context.Background())
+	rows := func() int {
+		n := 0
+		for _, l := range f.got() {
+			n += strings.Count(strings.TrimSpace(l.body), "\n") + 1
+		}
+		return n
+	}
+	wait := func(what string, want int) {
+		t.Helper()
+		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(2 * time.Millisecond) {
+			st := rt.Status()
+			if len(st) == 1 && st[0].State == "finished" && rows() >= want {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s: %+v, %d rows", what, st, rows())
+			}
+		}
+	}
+	if err := rt.Apply(cfg(4)); err != nil {
+		t.Fatal(err)
+	}
+	wait("the first run", 4)
+	labels := map[string]bool{}
+	for _, l := range f.got() {
+		labels[l.header.Get("label")] = true
+	}
+	// The fake refuses a label it loaded, as Doris does: the reset's
+	// loads are taken.
+	if _, err := rt.ResetCheckpoint("p", true); err != nil {
+		t.Fatal(err)
+	}
+	wait("the run after the reset", 8)
+	if rows() != 8 {
+		t.Fatalf("%d rows", rows())
+	}
+	for _, l := range f.got()[len(labels):] {
+		if label := l.header.Get("label"); label == "" || labels[label] || !strings.HasPrefix(label, "fit_") {
+			t.Fatalf("label %q again or missing", label)
+		}
+	}
+}

@@ -78,7 +78,9 @@ func (rd *reader) trackOnce(ctx context.Context, v, cur int64) error {
 		return err
 	}
 	if e.held == nil {
-		return nil
+		// Versions of none of the read tables' changes move the
+		// checkpoint all the same (I216 decision 12).
+		return rd.r.EmitPosition(func() fitsync.Position { return position{Version: cur}.marshal() })
 	}
 	rec := e.held
 	if e.n > 1 {

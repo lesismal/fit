@@ -271,6 +271,53 @@ func TestIdempotencyKey(t *testing.T) {
 	}
 }
 
+// TestIdempotencyKeyAfterReset: a pipeline's requests carry its
+// checkpoint's lineage in their keys, so that the records a reset reads
+// again are sent with new keys, which a receiver does not drop.
+func TestIdempotencyKeyAfterReset(t *testing.T) {
+	rv := newReceiver(t)
+	src := fmt.Sprintf(`{"sync": {"state_dir": %q, "pipelines": [{"name": "p", "checkpoint_interval": "1ms",
+		"source": {"module": "generate", "params": {"records": 3}},
+		"sinks": [{"name": "h", "sink": {"module": "http", "params": {"url": %q}}, "batch": {"max_records": 1, "max_wait": "1ms"}}]}]}}`, t.TempDir(), rv.srv.URL)
+	c, err := config.Load([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := fitsync.NewRuntime(fitsync.Options{})
+	defer rt.Close(context.Background())
+	wait := func(n int) {
+		t.Helper()
+		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(2 * time.Millisecond) {
+			st := rt.Status()
+			if len(st) == 1 && st[0].State == "finished" && len(rv.requests()) >= n {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out: %+v, %d requests", st, len(rv.requests()))
+			}
+		}
+	}
+	if err := rt.Apply(c.Sync); err != nil {
+		t.Fatal(err)
+	}
+	wait(3)
+	if _, err := rt.ResetCheckpoint("p", true); err != nil {
+		t.Fatal(err)
+	}
+	wait(6)
+	reqs := rv.requests()
+	keys := map[string]bool{}
+	for _, r := range reqs {
+		if r.key == "" || keys[r.key] {
+			t.Fatalf("key %q again or missing", r.key)
+		}
+		keys[r.key] = true
+	}
+	if len(reqs) != 6 || string(reqs[0].body) != string(reqs[3].body) {
+		t.Fatalf("%d requests", len(reqs))
+	}
+}
+
 // TestSinkBasicAuthAndCodec checks basic authentication and a codec's body.
 func TestSinkBasicAuthAndCodec(t *testing.T) {
 	rv := newReceiver(t)
