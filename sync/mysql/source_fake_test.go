@@ -393,7 +393,22 @@ func (r *runSrc) take(t *testing.T, n int) []*fitsync.Record {
 		case rec := <-r.recs:
 			out = append(out, rec)
 		case err := <-r.done:
-			t.Fatalf("the source stopped after %d of %d records: %v", len(out), n, err)
+			// A source that emits its last records and returns has them
+			// buffered: select picks either ready case, so read them first,
+			// and keep the result for wait.
+			for len(out) < n {
+				select {
+				case rec := <-r.recs:
+					out = append(out, rec)
+					continue
+				default:
+				}
+				break
+			}
+			if len(out) < n {
+				t.Fatalf("the source stopped after %d of %d records: %v", len(out), n, err)
+			}
+			r.done <- err
 		case <-guard:
 			t.Fatalf("%d of %d records", len(out), n)
 		}
