@@ -128,6 +128,46 @@ func TestMSSQLSinkBadRow(t *testing.T) {
 	})
 }
 
+// TestMSSQLSinkTypeRefusals: a value of a type the column cannot take
+// (text into varbinary, 257; a time into int, 206) fails its record alone,
+// for good, rather than the batch being written again forever; a column
+// whose type changed while the sink was connected takes a NULL once the
+// types are read again.
+func TestMSSQLSinkTypeRefusals(t *testing.T) {
+	eachMSSQL(t, func(t *testing.T, s mssqlServer) {
+		c := s.dial(t, mssqlwire.EncryptOn)
+		table := fmt.Sprintf("dbo.sink_types_%d", time.Now().UnixNano())
+		mssqlExec(t, c, "CREATE TABLE "+table+" (id bigint NOT NULL PRIMARY KEY, b nvarchar(10) NULL, n int NULL)")
+		t.Cleanup(func() { c.Exec(context.Background(), "DROP TABLE "+table) })
+		row := func(id int64, b, n fitsync.Value) *fitsync.Record {
+			return &fitsync.Record{Namespace: table, Op: fitsync.OpInsert, Key: fitsync.Map(fitsync.Field{Name: "id", Value: fitsync.Int(id)}),
+				After: fitsync.Map(fitsync.Field{Name: "id", Value: fitsync.Int(id)}, fitsync.Field{Name: "b", Value: b}, fitsync.Field{Name: "n", Value: n})}
+		}
+		sink := mssqlSink(t, s, nil)
+		if err := sink.Write(hangGuard(t), []*fitsync.Record{row(1, fitsync.Null(), fitsync.Int(1))}); err != nil {
+			t.Fatal(err)
+		}
+		// b becomes varbinary while the sink is connected: its NULL, typed
+		// nvarchar as read before, is refused, then sent as varbinary.
+		mssqlExec(t, c, "ALTER TABLE "+table+" DROP COLUMN b")
+		mssqlExec(t, c, "ALTER TABLE "+table+" ADD b varbinary(8) NULL")
+		if err := sink.Write(hangGuard(t), []*fitsync.Record{row(2, fitsync.Null(), fitsync.Int(2)), row(3, fitsync.Null(), fitsync.Int(3))}); err != nil {
+			t.Fatal(err)
+		}
+		for _, bad := range []*fitsync.Record{row(5, fitsync.String("text"), fitsync.Int(5)), row(5, fitsync.Null(), fitsync.Time(time.Now()))} {
+			err := sink.Write(hangGuard(t), []*fitsync.Record{row(4, fitsync.Null(), fitsync.Int(4)), bad, row(6, fitsync.Null(), fitsync.Int(6))})
+			var be *fitsync.BatchError
+			if !errors.As(err, &be) || be.Index != 1 || !fitsync.IsPermanent(err) {
+				t.Fatalf("%v", err)
+			}
+		}
+		_, rows, err := c.QueryAll(context.Background(), "SELECT COUNT(*) FROM "+table)
+		if err != nil || len(rows) != 1 || rows[0][0] != int64(4) {
+			t.Fatal(rows, err)
+		}
+	})
+}
+
 // TestMSSQLSinkTypes copies generate's records, of every value type, with
 // updates and deletes, through a pipeline killed at random points and
 // started again from its checkpoint, IDENTITY values written as they are:

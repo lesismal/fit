@@ -302,7 +302,8 @@ type Request struct {
 	Retry func(*Response) bool
 	// Redirects is how many redirects (301, 302, 303, 307, 308) to follow,
 	// at most MaxRedirects, each sent again whole, with the client's
-	// headers and credentials, to wherever the Location names; 0 returns
+	// headers and credentials, to wherever the Location names, but never
+	// from https to http, which would send them in the clear; 0 returns
 	// the redirect.
 	Redirects int
 }
@@ -386,6 +387,9 @@ func (c *Client) follow(ctx context.Context, cl *fibhttp.Client, u *url.URL, r *
 		next, err := u.Parse(loc)
 		if err != nil || (next.Scheme != "http" && next.Scheme != "https") || next.Host == "" {
 			return nil, fmt.Errorf("a redirect to %q, not an http or https URL", loc)
+		}
+		if u.Scheme == "https" && next.Scheme == "http" {
+			return nil, fmt.Errorf("a redirect from https to %q, which would send the credentials and the body in the clear: name that server's own URL in urls to send to it over http", loc)
 		}
 		u = next
 	}

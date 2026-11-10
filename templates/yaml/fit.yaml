@@ -9721,8 +9721,8 @@ upstreams:
               # # The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends'
               # # (http://be1:8040) to load into directly: the one that answered last is used, and the next in
               # # turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). A frontend's
-              # # redirect to a backend is followed, with the credentials; the backend's address must be one
-              # # fit reaches.
+              # # redirect to a backend is followed, with the credentials, but not from https to http; the
+              # # backend's address must be one fit reaches.
               # # list of string; required.
               # urls: []
 
@@ -13243,8 +13243,8 @@ upstreams:
             # # The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends'
             # # (http://be1:8040) to load into directly: the one that answered last is used, and the next in
             # # turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). A frontend's
-            # # redirect to a backend is followed, with the credentials; the backend's address must be one
-            # # fit reaches.
+            # # redirect to a backend is followed, with the credentials, but not from https to http; the
+            # # backend's address must be one fit reaches.
             # # list of string; required.
             # urls: []
 

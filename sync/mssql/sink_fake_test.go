@@ -36,11 +36,14 @@ type sinkFake struct {
 	// for good when left is negative.
 	fail map[string]failure
 	// broken breaks the connection when a statement holds it.
-	broken  string
-	types   map[string][]mssqlwire.Column
-	log     []string
-	dials   int
-	dialErr error
+	broken string
+	// nullRefused is a type a NULL parameter sent as is refused for (error
+	// 257), as a column's whose type changed refuses the old type's.
+	nullRefused string
+	types       map[string][]mssqlwire.Column
+	log         []string
+	dials       int
+	dialErr     error
 }
 
 type failure struct {
@@ -239,6 +242,12 @@ func (c *sinkFakeConn) Exec(_ context.Context, sql string, args ...any) (int64, 
 	if err := c.failing(sql); err != nil {
 		f.abort()
 		return 0, err
+	}
+	for _, a := range args {
+		if p, ok := a.(mssqlwire.Param); ok && p.Value == nil && f.nullRefused != "" && p.Type == f.nullRefused {
+			f.abort()
+			return 0, &mssqlwire.Error{Number: 257, Class: 16, Message: "Implicit conversion from data type " + p.Type + " is not allowed"}
+		}
 	}
 	saved := copyTables(f.tables)
 	err := c.exec(sql, args)

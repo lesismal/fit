@@ -93,6 +93,12 @@ func TestLokiPush(t *testing.T) {
 			job := fmt.Sprintf("fit-%s-%d", enc, time.Now().UnixNano())
 			s := loadSinkModule(t, "loki", map[string]any{"urls": []string{base}, "encoding": enc,
 				"labels": map[string]any{"job": job, "level": "{level}"}, "structured_metadata": map[string]any{"user": "{user}"}})
+			// The connection test pushes a stream without entries, which
+			// Loki takes (a push of no streams it refuses) and stores
+			// nothing of.
+			if err := s.(fitsync.Tester).Test(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 			var recs []*fitsync.Record
 			now := time.Now().Add(-time.Minute)
 			for i := range 300 {

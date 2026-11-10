@@ -133,21 +133,13 @@ func loadCodec(ctx *module.Context, ref *config.ModuleRef) (fitsync.Codec, error
 	return c, nil
 }
 
-// Test asks Loki for its labels, as the tenant, with the sink's
-// credentials: it answers, and takes them. It pushes nothing.
+// Test pushes a stream without entries, as the tenant, with the sink's
+// credentials: Loki (or a gateway before it) answers, takes them and the
+// encoding, and stores nothing. Credentials that may push but not query,
+// as a hosted Loki's write-only tokens, pass. (A push without streams is
+// refused, 422.)
 func (s *Sink) Test(ctx context.Context) error {
-	h := stdhttp.Header{}
-	if s.Tenant != "" {
-		h.Set("X-Scope-OrgID", s.Tenant)
-	}
-	resp, err := s.client.Do(ctx, fibrest.Request{Method: stdhttp.MethodGet, Path: "/loki/api/v1/labels", Header: h})
-	if err != nil {
-		return err
-	}
-	if resp.Status != stdhttp.StatusOK {
-		return fibrest.StatusError("the labels", resp)
-	}
-	return nil
+	return s.send(ctx, s.Tenant, []*stream{{labels: `{job="fit"}`, pairs: []string{"job", "fit"}}})
 }
 
 // Cleanup closes the client and lets the codec go.
@@ -331,17 +323,22 @@ func streams(es []entry) []*stream {
 
 // push sends one request of es, all of one tenant.
 func (s *Sink) push(ctx context.Context, es []entry) error {
+	return s.send(ctx, es[0].tenant, streams(es))
+}
+
+// send pushes sts as tenant.
+func (s *Sink) send(ctx context.Context, tenant string, sts []*stream) error {
 	h := stdhttp.Header{}
-	if es[0].tenant != "" {
-		h.Set("X-Scope-OrgID", es[0].tenant)
+	if tenant != "" {
+		h.Set("X-Scope-OrgID", tenant)
 	}
 	var body []byte
 	if s.Encoding == "json" {
 		h.Set("Content-Type", "application/json")
-		body = appendJSON(nil, streams(es))
+		body = appendJSON(nil, sts)
 	} else {
 		h.Set("Content-Type", "application/x-protobuf")
-		body = s2.EncodeSnappy(nil, appendProto(nil, streams(es)))
+		body = s2.EncodeSnappy(nil, appendProto(nil, sts))
 	}
 	resp, err := s.client.DoRetry(ctx, fibrest.Request{Method: stdhttp.MethodPost, Path: pushPath, Header: h, Body: body}, 0)
 	if err != nil {

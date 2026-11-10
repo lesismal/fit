@@ -1,6 +1,7 @@
 Loads records into Apache Doris or StarRocks with Stream Load (`PUT /api/<db>/<table>/_stream_load`),
 through fib's asynchronous HTTP client, with `Expect: 100-continue`; a frontend's redirect to a
-backend is followed with the credentials. Each run of a batch's records for one table is one load,
+backend is followed with the credentials, but not one from https to http, which would send them and
+the rows in the clear. Each run of a batch's records for one table is one load,
 its rows JSON (a row a line on Doris, an array on StarRocks) or CSV, and its `columns` header the union
 of the run's columns. The load's `label` is `label_prefix`, `_` and a hash of the database, the table,
 the run's first and last records' origins (a Kafka partition and offset, a Pulsar message ID, a CDC

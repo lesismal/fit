@@ -381,8 +381,9 @@ is refused as already loaded, so a batch is stored once even in a duplicate key 
 deletes need a table of the unique key model with merge on write (Doris) or the primary key model
 (StarRocks): a delete is the row, or its key, with `__DORIS_DELETE_SIGN__` (or `__op`) set to 1.
 `partial_columns` updates only the columns the records have. A frontend's redirect to a backend is
-followed with the credentials, so the backend's address must be one fit reaches; `urls` may name the
-backends' HTTP ports directly. A load refused for its rows is split until the record it cannot take
+followed with the credentials, so the backend's address must be one fit reaches, but never from https
+to http, which would send them and the rows in the clear; `urls` may name the backends' HTTP ports
+directly. A load refused for its rows is split until the record it cannot take
 is found: that one goes to `on_error`, the records before it are loaded.
 
 Labels outlive tables: Doris keeps them `label_keep_max_second` (three days by default), so after a
@@ -448,7 +449,8 @@ commit time, else the time of the write. `tenant` (or `tenant_field`) is sent as
 Each stream's entries go in time order; a request Loki refuses (an entry too old, a line too long)
 is split until the record it refuses is found, which goes to `on_error`. Loki keeps one copy of an
 entry with the same stream, time and line, so a batch written again after a crash is stored once
-when its records have times.
+when its records have times. The connection test pushes a stream without entries, which Loki stores
+nothing of, so credentials that may push but not query pass it.
 
 ### OpenTelemetry logs
 
@@ -746,9 +748,11 @@ Each source transaction is one of the server's (`transactions source`), or a bat
 the records before it committed. With `checkpoint sink` the position is written to
 `_fit_sync_checkpoints` in the same transaction, for exactly once. `identity_insert` writes the
 source's values into `IDENTITY` columns. Tables are named `schema.table` (or `db.schema.table`) from
-the namespace: a MySQL source's `shop.orders` is the schema `shop`'s `orders`, so give a `table` such
-as `dbo.{namespace}` or one table by name. The tables are yours, with a primary key or unique index
-on the key's columns.
+the namespace: a MySQL source's `shop.orders` is the schema `shop`'s `orders`, so rename it with a
+`route` transform (`rules { match shop.*; to dbo.{rest} }`) or give one table by name (`dbo.{namespace}`
+serves only namespaces without a dot, such as a topic's). The tables are yours, with a primary key or
+unique index on the key's columns. A NULL is sent as its column's type, read once a connection; a
+statement refused (a column's type changed meanwhile) reads the types again before its record fails.
 
 ```fit
 sync {

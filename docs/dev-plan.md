@@ -7194,6 +7194,19 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
     S8 6, S9 7 as now, or other weights; and whether the time series and vector sinks get a scenario (MQTT to
     InfluxDB against Telegraf has a mover; the vector sinks have none). Recommendation: keep the weights, and
     add MQTT to InfluxDB as S10 only with the next plan run.
+- I217–I219:
+  - **Doris labels outlive a reset** (I218 decision 1): records reloaded within
+    `label_keep_max_second` (three days) after a pipeline reset or a table made again are refused as
+    already loaded, silently, unless `label_prefix` is changed by hand. Choice: keep that, or put the
+    pipeline's lineage in the label (every sink told the lineage, not only a `CheckpointSink`).
+    Recommended: the lineage, so a reset changes the labels by itself; `label_prefix` stays.
+  - **The Loki benchmark's competitor** (I219 decision 9): Promtail, deprecated and at its end of
+    life, or Grafana Alloy, its successor. Recommended: Alloy beside Promtail when I222 puts
+    `files-loki` in `plan.sh`.
+  - **Two template syntaxes** (I219 decision 11): name templates (SQL sinks' and doris's `table`,
+    influxdb, tdengine, qdrant) write the namespace `{namespace}`; record templates (loki, otlp_logs,
+    the file sink) write it `{$namespace}`, where `{namespace}` is a field. Choice: keep both, or one.
+    Recommended: keep both and accept `{$namespace}` in name templates too, which breaks no config.
 
 ### I211 RabbitMQ as a source and a sink
 
@@ -7752,31 +7765,55 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; in force until the user rules):
 
-1. **One writer, not a `ParallelSink`**: a job writes through one connection. Alternative: the MySQL
+1. **[kept]** (2026-11-10: one connection keeps each source transaction, and the checkpoint, in one
+   of the server's; spare writers would split them, for a speed nothing has asked for yet.)
+   **One writer, not a `ParallelSink`**: a job writes through one connection. Alternative: the MySQL
    sink's spare writers, each its own connection and transaction.
-2. **No `max_transaction_bytes`**: a source transaction is one of SQL Server's however large (its log
+2. **[kept]** (2026-11-10: committing a source transaction in parts is what the sink promises never
+   to do, and SQL Server takes large ones. In passing, the ops an open transaction holds are no
+   longer copied whole at each batch, which cost a long one its square (commit `fix(sync/mssql)`).)
+   **No `max_transaction_bytes`**: a source transaction is one of SQL Server's however large (its log
    grows); MySQL's bound was for TiDB. Alternative: commit large ones in parts, as the MySQL sink can.
-3. **`SET XACT_ABORT ON`, then `XACT_STATE()` after a refused statement**: a refused statement's
+3. **[kept]** (2026-11-10: statement-level rollback does not hold for conversion errors;
+   `XACT_STATE()` and the transaction written again are what make a refused record fail alone, as
+   interop's bad rows show.)
+   **`SET XACT_ABORT ON`, then `XACT_STATE()` after a refused statement**: a refused statement's
    transaction is rolled back whole (or left as it was, for a compile error), and the sink begins it
    again and writes what it held again before looking for the record. Alternative: `XACT_ABORT OFF`,
    trusting statement-level rollback, which some errors (conversions) do not keep to.
-4. **Bulk loads through a temporary table merged into the table** (`SELECT TOP 0 ... INTO #fit_stage
+4. **[kept]** (2026-11-10: a bulk load straight into the table fails on a replayed snapshot's rows;
+   the stage table converges, as interop's replays with bulk loads show.)
+   **Bulk loads through a temporary table merged into the table** (`SELECT TOP 0 ... INTO #fit_stage
    ... UNION ALL`, which leaves out the `IDENTITY` property), so that a snapshot replayed converges;
    the bulk load straight into the table would fail on the rows already there. Only inserts without a
    source transaction, in runs of `bulk_rows`; a load that fails for a value is written again as
    statements, which find the record.
-5. **NULL parameters typed as their columns**, read with `SELECT TOP 0 *` once a table and
+5. **[changed]** (2026-11-10: the types were read once a connection, and a permanent error never
+   reconnects, so a column altered while connected refused its NULLs (typed as before, 257) until a
+   restart. A statement refused for good now drops the table's types and writes its ops again one at
+   a time before its record fails (`TestSinkTypesChanged`; interop `TestMSSQLSinkTypeRefusals`, SQL
+   Server 2022).)
+   **NULL parameters typed as their columns**, read with `SELECT TOP 0 *` once a table and
    connection: a NULL of the client's default `nvarchar` does not convert to `varbinary` (error 257).
    A DDL that changes a column's type is seen on the next connection.
-6. **Tables named by the namespace split at dots** into `schema.table` or `db.schema.table`, so a MySQL
+6. **[kept]** (2026-11-10: the dotted namespace is every SQL sink's convention, and the `route`
+   transform maps it. The guide's advice, `dbo.{namespace}`, made `db.schema.table` of a dotted
+   namespace; it now says `route` (`rules { match shop.*; to dbo.{rest} }`).)
+   **Tables named by the namespace split at dots** into `schema.table` or `db.schema.table`, so a MySQL
    source's `shop.orders` is the schema `shop`'s table: a `table` such as `dbo.{namespace}` or a name
    maps it otherwise. Alternative: a default schema param.
-7. **Errors refused for good** are a list of numbers (conversions 245, 8114, 8115, truncation 8152 and
+7. **[changed]** (2026-11-10: type clashes were missing, 206 (a time into an int) and 257 (text into
+   varbinary), and bulk loads' 4815 and 4864 and 8102 (an `IDENTITY` column updated): such a record
+   was retried by the pipeline forever instead of going to `on_error`. Added, with interop.)
+   **Errors refused for good** are a list of numbers (conversions 245, 8114, 8115, truncation 8152 and
    2628, NULL into NOT NULL 515, constraints 547, 2601, 2627, objects and columns 207, 208, syntax
    102, 156, ...); the rest, deadlocks (1205), lock and snapshot conflicts, timeouts, are retried.
-8. **`MERGE` by default**, with `WITH (HOLDLOCK)` against concurrent inserts of a key; `update_insert`
+8. **[kept]** (2026-11-10: `MERGE ... WITH (HOLDLOCK)` is the one-statement upsert that holds under
+   concurrent writers; `update_insert` serves those who keep `MERGE` out.)
+   **`MERGE` by default**, with `WITH (HOLDLOCK)` against concurrent inserts of a key; `update_insert`
    for those who keep `MERGE` out.
-9. **Interop ran on SQL Server 2022 only here** (2019 is in `mssql.sh`'s default set, for CI's
+9. **[kept]** (2026-11-10: 2022 runs every path of the sink; 2019 runs in CI's `mssql` family.)
+   **Interop ran on SQL Server 2022 only here** (2019 is in `mssql.sh`'s default set, for CI's
    `mssql` family), and the MySQL pipeline on MySQL 8.4 with `mysql.sh`'s env; it skips without it.
 
 ### I218 Doris and StarRocks as a sink and a source
@@ -7808,39 +7845,62 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; in force until the user rules):
 
-1. **A load's label is the prefix and a hash of the database, the table, the run's first and last
+1. **[needs the user]** (2026-11-10: a reset or a table made again within `label_keep_max_second`
+   has its records refused as already loaded, silently, unless the user changes `label_prefix`: see
+   the list at the top of this section.)
+   **A load's label is the prefix and a hash of the database, the table, the run's first and last
    positions and its count**, as ClickHouse's token is made. Labels outlive a table dropped and made
    again (Doris keeps them `label_keep_max_second`, three days), so after a reset or new tables the
    user changes `label_prefix`, or the records are refused as already loaded. Alternatives: the
    pipeline's lineage in the label (only a `CheckpointSink` is told it today); Stream Load's
    two-phase commit with the checkpoint, for exactly once.
-2. **Every load names its columns**, the union of the run's rows', so a row without one of them
+2. **[kept]** (2026-11-10: CDC sources' rows are whole, so the union is every column; a table's
+   defaults for a column one row lacks would differ between rows of a load, and `partial_columns`
+   serves sparse rows.)
+   **Every load names its columns**, the union of the run's rows', so a row without one of them
    loads it null (with `partial_columns`, keeps it). Alternatives: no `columns` header for whole rows
    (missing columns take the table's defaults); runs cut by column set.
-3. **The delete column is sent only in a run that has a delete**, a delete being the row before, or
+3. **[kept]** (2026-11-10: the delete column sent always would fail every load into a duplicate key
+   table; a `merge_type: DELETE` load for deletes would double the loads of a mixed run.)
+   **The delete column is sent only in a run that has a delete**, a delete being the row before, or
    the key; so inserts load into any model, and `deletes ignore` serves a duplicate key table.
    Alternatives: always send it; deletes as separate `merge_type: DELETE` loads.
-4. **JSON is a row a line on Doris (`read_json_by_line`) and an array on StarRocks
+4. **[kept]** (2026-11-10: each system's documented form, both run in interop; StarRocks's CSV `\N`
+   limit is documented, and JSON is the default.)
+   **JSON is a row a line on Doris (`read_json_by_line`) and an array on StarRocks
    (`strip_outer_array`)**, each system's usual form. **CSV quotes with `enclose` and `escape`**,
    with `trim_double_quotes` on Doris (which otherwise keeps the quotes), and null as `\N` on Doris
    but `\\N` on StarRocks, which unescapes first: a string `\N` cannot go to StarRocks as CSV (JSON
    is the default).
-5. **A load refused for its rows is split in halves**, each loaded with a label of its own, until
+5. **[kept]** (2026-11-10: halving finds the record in log n loads, each half's label made the same
+   way again, so a replay meets the same labels; a load a record would be n loads.)
+   **A load refused for its rows is split in halves**, each loaded with a label of its own, until
    the one record is found, which fails for good; the rest are loaded. Alternatives: the whole run
    to `on_error`; a record a load.
-6. **`Label Already Exists` counts as loaded when the earlier load is `FINISHED`, `VISIBLE` or
+6. **[kept]** (2026-11-10: Stream Load's own states; a running label is asked again rather than sent
+   to `on_error`.)
+   **`Label Already Exists` counts as loaded when the earlier load is `FINISHED`, `VISIBLE` or
    `COMMITTED`**, and is asked again (not an error for `on_error`) while it runs; `Publish Timeout`
    counts as loaded (committed, visible later).
-7. **Times are written as `DATETIME` text in `time_zone`, UTC by default; bytes in base64**, as the
+7. **[kept]** (2026-11-10: as the other JSON sinks write them.)
+   **Times are written as `DATETIME` text in `time_zone`, UTC by default; bytes in base64**, as the
    other JSON sinks write them.
-8. **The sink's connection test asks `/api/health`**, which checks no credentials; a dummy load
+8. **[kept]** (2026-11-10: a check of the credentials needs a table, which the sink knows only from
+   a record, and the first load's error names the cause. The source's chunked job reads can come
+   when a job needs them.)
+   **The sink's connection test asks `/api/health`**, which checks no credentials; a dummy load
    would, at the cost of a table. **The source has no chunked job reads** (the clickhouse source's
    `chunk_rows`): a job reads by the cursor. Its position holds SQL literals, checked when read back.
-9. **The tuple comparison is spelled out** (`(a > x) OR (a = x AND b > y)`), since neither system
+9. **[kept]** (2026-11-10: neither system documents row value comparisons; the spelled-out form is
+   the same condition.)
+   **The tuple comparison is spelled out** (`(a > x) OR (a = x AND b > y)`), since neither system
    compares row values.
-10. **One HTTP client package for the second round's HTTP sinks** (`sync/internal/fibrest`, see
+10. **[kept]** (2026-11-10: done, as I219's decision 11 says.)
+    **One HTTP client package for the second round's HTTP sinks** (`sync/internal/fibrest`, see
     I219's decision 11), not a copy per package as `clickhouse` and `elasticsearch` have.
-11. **Interop on Doris 2.1 and StarRocks 3.4**: StarRocks's frontend redirects to `127.0.0.1:8040`,
+11. **[kept]** (2026-11-10: "Done when" asks for Doris 2.1 or 3.0; StarRocks's loads to its backend
+    run the same code as Doris's after the redirect.)
+    **Interop on Doris 2.1 and StarRocks 3.4**: StarRocks's frontend redirects to `127.0.0.1:8040`,
     its backend's own address, which a test on the host cannot reach beside Doris's, so its loads go
     to the backend directly; Doris's redirect is tested. Doris 3.0 is not in the run.
 
@@ -7869,31 +7929,59 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; in force until the user rules):
 
-1. **A stream's labels come from `labels` templates only**, `{"job": "fit", "namespace":
+1. **[kept]** (2026-11-10: only fields the config names become labels, which is the bound; Loki's
+   own stream limits refuse beyond it (429, retried), where a cap of fit's would have to drop
+   records.)
+   **A stream's labels come from `labels` templates only**, `{"job": "fit", "namespace":
    "{$namespace}"}` by default, a label whose value comes out empty left out; no bound on streams a
    batch beyond that. Alternatives: a cap on streams; every field a label, with a deny list.
-2. **A record without a time gets the time of the write, a nanosecond apart in a batch**, so lines
+2. **[kept]** (2026-11-10: no source's position is a time today, so there is nothing better to
+   stamp; at least once is what the guide says.)
+   **A record without a time gets the time of the write, a nanosecond apart in a batch**, so lines
    are never merged by Loki's deduplication, but a replay of them is stored again (at least once).
    Alternative: a time from the source's position (none is a time for the file source today).
-3. **Each stream's entries are sorted by time in a push**; a 400 or 413 is split until the record is
+3. **[kept]** (2026-11-10: Loki takes what it can of a refused push and keeps one copy of what is
+   sent again; interop's replay is stored once.)
+   **Each stream's entries are sorted by time in a push**; a 400 or 413 is split until the record is
    found, Loki's deduplication absorbing the entries it took before refusing the rest.
-4. **Snappy through `klauspost/compress/s2`**, already fit's dependency for Kafka, not a new one.
-5. **Requests are retried in the sink** on 408, 429 and 5xx, five attempts (fibrest's), `Retry-After`
+4. **[kept]** (2026-11-10: no new dependency.)
+   **Snappy through `klauspost/compress/s2`**, already fit's dependency for Kafka, not a new one.
+5. **[kept]** (2026-11-10: the pipeline's retry follows, so a long 429 still waits, and five
+   attempts keep one request from holding the sink.)
+   **Requests are retried in the sink** on 408, 429 and 5xx, five attempts (fibrest's), `Retry-After`
    honoured up to 30s, then the pipeline's own retry; not for as long as a 429 lasts, as the
    elasticsearch sink does.
-6. **What otlp_logs reuses of fit's tracing export**: the resource (`service.name`, `service.version`
+6. **[kept]** (2026-11-10: fit's telemetry resource as it is; the sink must be on fib's client and
+   send protobuf.)
+   **What otlp_logs reuses of fit's tracing export**: the resource (`service.name`, `service.version`
    from `observe.Version`), the scope `fit`, `headers_file` read by `config.ParseHeaders`; not its
    `net/http` exporter (the sink is on fib's client) nor its JSON-only encoding (protobuf is encoded
    by hand, JSON too, as an option).
-7. **otlp_logs's defaults**: the body is the codec's line, attributes `fit.namespace` and `fit.op`,
+7. **[kept]** (2026-11-10: a partial success names no records, so `on_error` has nothing to take; a
+   warning is what can be said.)
+   **otlp_logs's defaults**: the body is the codec's line, attributes `fit.namespace` and `fit.op`,
    gzip on; with `body row`, a uint past int64 and decimals, times and JSON are strings. A partial
    success is a warning, since the receiver does not say which records it dropped.
-8. **Connection tests**: loki asks `/loki/api/v1/labels` as the tenant; otlp_logs exports an empty
+8. **[changed]** (2026-11-10: loki's test asked `/loki/api/v1/labels`, which needs read rights:
+   credentials that may only push (a hosted Loki's write-only tokens, a gateway routing only the
+   push API) failed it. It now pushes a stream without entries, as the tenant, in the sink's
+   encoding, which Loki 3.5.5 answers 204 storing nothing (a push of no streams it refuses, 422);
+   interop `TestLokiPush` runs it. otlp_logs's empty export is kept.)
+   **Connection tests**: loki asks `/loki/api/v1/labels` as the tenant; otlp_logs exports an empty
    request.
-9. **The benchmark compares Promtail, not Filebeat** (Filebeat has no Loki output), though Promtail
+9. **[needs the user]** (2026-11-10: Promtail is deprecated and at its end of life, so the
+   comparison may read as one against a dead tool: see the list at the top of this section.)
+   **The benchmark compares Promtail, not Filebeat** (Filebeat has no Loki output), though Promtail
    is deprecated for Alloy; `files-loki` is not in `plan.sh` yet, which I222 adds with its weight.
-10. **Interop runs Loki without authentication**, so tenants are checked by the unit tests only.
-11. **One HTTP client package and one template package for the seven HTTP sinks** (made when merging
+10. **[kept]** (2026-11-10: Loki without authentication files every push under one tenant, so
+    tenants cannot be told apart there; the unit tests check the header per request.)
+    **Interop runs Loki without authentication**, so tenants are checked by the unit tests only.
+11. **[changed]** (2026-11-10: one client package holds (five connectors and `embed` on it). Its
+    redirects, followed with the credentials and the body, went from https to http in the clear;
+    such a redirect is now an error that names the way out, the backend's own http URL in `urls`
+    (`TestTLS`, commit `fix(sync/fibrest)`). The two template syntaxes are for the user: see the
+    list at the top of this section.)
+    **One HTTP client package and one template package for the seven HTTP sinks** (made when merging
     with I220 and I221, 2026-11-10): I218/I219's `sync/internal/httpconn` and I220/I221's
     `sync/internal/fibrest` did the same; `fibrest` stays, since five connectors (and `embed`'s pinned
     certificate) were on it, and gains what `httpconn` had: several `urls` tried in turn (502, 503, 504

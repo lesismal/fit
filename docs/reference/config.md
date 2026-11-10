@@ -8627,7 +8627,8 @@ Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as f
 
 Loads records into Apache Doris or StarRocks with Stream Load (`PUT /api/<db>/<table>/_stream_load`),
 through fib's asynchronous HTTP client, with `Expect: 100-continue`; a frontend's redirect to a
-backend is followed with the credentials. Each run of a batch's records for one table is one load,
+backend is followed with the credentials, but not one from https to http, which would send them and
+the rows in the clear. Each run of a batch's records for one table is one load,
 its rows JSON (a row a line on Doris, an array on StarRocks) or CSV, and its `columns` header the union
 of the run's columns. The load's `label` is `label_prefix`, `_` and a hash of the database, the table,
 the run's first and last records' origins (a Kafka partition and offset, a Pulsar message ID, a CDC
@@ -8659,7 +8660,7 @@ PROPERTIES ("enable_unique_key_merge_on_write" = "true");
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `urls` | list of string |  | Required. The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends' (http://be1:8040) to load into directly: the one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). A frontend's redirect to a backend is followed, with the credentials; the backend's address must be one fit reaches. |
+| `urls` | list of string |  | Required. The frontends' HTTP addresses (their http_port), as http://fe1:8030, or backends' (http://be1:8040) to load into directly: the one that answered last is used, and the next in turn when one fails to (a connection's error, a timeout, a 502, 503 or 504). A frontend's redirect to a backend is followed, with the credentials, but not from https to http; the backend's address must be one fit reaches. |
 | `username` | string |  | Required. The user to load as, which needs LOAD on the tables (INSERT on StarRocks), sent with basic authentication. |
 | `password_env` | string |  | The environment variable holding username's password, read when the pipeline loads; none when left out. |
 | `ca_file` | string |  | A PEM file of the certificates the server's is checked against over https, in place of the system's roots, for a CA of its own. The check cannot be turned off. |
