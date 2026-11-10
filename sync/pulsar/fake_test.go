@@ -31,7 +31,9 @@ type fake struct {
 	sendErr func(part string, now bool) error
 	// subscribed counts subscriptions; onSubscribe runs before each.
 	onSubscribe func(topic string, o pulsarwire.SubscribeOptions) error
-	produced    [][]pulsarwire.ProducerMessage
+	// onLast runs after each LastMessageID has read its partition's end.
+	onLast   func(part string)
+	produced [][]pulsarwire.ProducerMessage
 }
 
 func newFake() *fake {
@@ -232,6 +234,14 @@ func (c *fakeConsumer) AckCumulative(id pulsarwire.MessageID) error {
 }
 
 func (c *fakeConsumer) LastMessageID(context.Context) (pulsarwire.MessageID, error) {
+	id, err := c.lastMessageID()
+	if c.f.onLast != nil && err == nil {
+		c.f.onLast(c.part)
+	}
+	return id, err
+}
+
+func (c *fakeConsumer) lastMessageID() (pulsarwire.MessageID, error) {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
 	if c.f.lastErr != nil {

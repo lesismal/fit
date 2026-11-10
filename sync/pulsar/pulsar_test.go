@@ -191,11 +191,13 @@ func TestSourceOnce(t *testing.T) {
 	f.add(part0, "x", pm("a", "1"), pm("b", "2"))
 	f.add(part0, "x", pm("c", "3"))
 	s := source(t, f, map[string]any{"topics": []string{"p"}})
-	f.onSubscribe = func(string, pulsarwire.SubscribeOptions) error {
-		// Added after the job's end is read: not read.
-		go f.add(part0, "x", pm("late", "4"))
-		f.onSubscribe = nil
-		return nil
+	f.onLast = func(part string) {
+		// Added once the job's end of part0 is read: not read. (Added
+		// from onSubscribe, it raced the end's read, and was read when
+		// it won.)
+		if part == part0 {
+			f.add(part0, "x", pm("late", "4"))
+		}
 	}
 	recs, err := collect(t, s, nil, true, 0)
 	if err != nil {
