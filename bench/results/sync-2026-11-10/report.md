@@ -48,9 +48,13 @@ The new items' movers:
     a time; see 11-09).
   - S9's lag: Debezium's p99 is 1,518 ms to fit's 1,597 (fit 95% of it). Both poll CDC tables by LSN, so their
     lag is mostly the capture job's interval.
-  - S9's copies: in round 3 fit wrote 10 rows twice (500,010 at the sink, none missing), with no kill. Kafka is an
-    at-least-once sink and the source's snapshot hand-over replays the rows written during it (as I175 does);
-    whether that is the cause was not checked. Rounds 1 and 2 were exact.
+  - S9's copies: in round 3 fit's count at the sink was 500,010 (none missing), with no kill; Debezium's was too, in
+    round 2. Checked on 11-10 (I216): they were not copies but the harness's. S9 runs with `snapshot never`, so no
+    snapshot hand-over replays anything. The warm-up wrote a second transaction of 10 rows when the first had not
+    reached the sink in 2s; the first then raised the count, which stayed put for the 1s settle before the second
+    arrived (the capture job polls every second), so the count taken before the measured rows missed those 10, and
+    the drain counted them as extra. Fixed in syncbench (`52644ae9`: with more than one warm-up transaction, the count
+    must stay put 2s more); these results were not run again.
   - S7's rounds spread 19% for fit (29% for Kafka Connect); the cause was not looked into.
 
 ## The ranking
@@ -80,7 +84,7 @@ to S5 alone), so 11-09's 98.1 and today's 98.8 are not over the same items.
 | S6 files to Loki | 1st | 1.39× lines/s, 0.34× p99 lag | |
 | S7 RabbitMQ to Kafka | 1st | 2.8× messages/s, 3% of the memory | rounds spread 19% |
 | S8 MQTT to Kafka | 1st | the only mover to deliver every message | |
-| S9 SQL Server to Kafka | 1st | 3.2× rows/s, 5% of the memory | p99 lag 5% behind; 10 copies in one round |
+| S9 SQL Server to Kafka | 1st | 3.2× rows/s, 5% of the memory | p99 lag 5% behind (the 10 extra rows of one round were the harness's) |
 
 ## S1 to S5 against 11-09
 
@@ -111,6 +115,6 @@ to 5 anonymous volumes per mover per run. benchreport now counts missing records
 
 ## Open
 
-- S9's 10 copies without a kill.
+- ~~S9's 10 copies without a kill.~~ The harness's warm-up count, not copies (I216, `52644ae9`).
 - S5's CPU against DataX, and S3's lag against Canal, as on 11-09.
 - S6, S7 and S8 against more movers (Vector, Fluent Bit; Benthos/Redpanda Connect), if wanted.

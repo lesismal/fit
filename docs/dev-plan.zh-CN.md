@@ -5146,6 +5146,24 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 的 goroutine 上，基于 HTTP 的系统用 fib 的异步客户端，至少一次写入幂等的目标，用 `fitsync.Tester` 做连接测试，用针对假
 服务端的单元测试满足 98% 的覆盖率门槛，在 Docker 中做互通并归入 `sync-interop` 自己的一组，每一节记录待审查的决策。
 
+- **待用户裁定**（2026-11-10 对待审查决定的审查）：
+  - I214–I216（40 项决定中 34 项保留，2 项修改，4 项待用户；修改的是 I216 的决定 5 与 12；下列为这 4 项及审查发现的三项未决问题）：
+    - **从配置中去掉的 MQTT 过滤器**（I214 决定 8，以及未实现的 UNSUBSCRIBE）：其消息仍在会话中到来并被交出。建议：对之前
+      订阅过、现在不再列出的过滤器发 UNSUBSCRIBE，旧过滤器记在检查点中；不要对每条消息检查主题，EMQX 的主题重写会让它丢掉
+      需要的消息。
+    - **MQTT 遗嘱消息与增强认证**（I214 的未解决项）。建议：两者都先不做，直到所用的 broker 需要 AUTH（SCRAM、Kerberos）；
+      同步客户端的遗嘱没有读者。
+    - **TDS 8 `strict` 从未对真实服务器运行过**（I215 决定 2）。建议：给 `mssql.sh` 配上 TDS 8 要求的证书，并在 CI 中运行其
+      互通；在此之前在指南中注明 `strict` 未经测试。
+    - **代码页不是 1252 与 UTF-8 的 varchar**（I215 决定 5）：非 ASCII 值以字节到达目标。建议：源在查询中把这类列转为
+      nvarchar（无依赖）；只有目标也要写入它们时才引入 `x/text`。
+    - **Entra ID 与 Windows 认证**（I215 决定 12）。建议：若需要 Azure SQL，先做 Entra ID（服务主体的令牌）；Kerberos 其后。
+    - **冷表的检查点**（I216 决定 12）：它只随所读表的记录前进，因此在 CDC 清理的保留期之后重启会要求快照，尽管什么也没丢。
+      建议：在 `sync` 中加入只带位置的记录，源在一个窗口中没有其表的记录时发出（MySQL 与 PostgreSQL 的过滤表也会用到）。
+    - **精确的快照衔接**（I216 决定 3，可选）：快照期间变更的行会再来一次，与 I175 一样。要精确，需把每批的 LSN 与键范围
+      存入检查点，并对文本键使用服务器的排序规则顺序。建议：保持至少一次（幂等目标会吸收）；若仅追加的 Kafka 消费者需要
+      精确，只对整数键这样做。
+
 ### I211 RabbitMQ 作为源与目标
 
 - **做**：AMQP 0-9-1 客户端（`sync/rabbitmq/wire`）：连接与信道协商、TLS、PLAIN 与 EXTERNAL 认证、心跳、流控、
@@ -5350,29 +5368,29 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **不设编解码器时用源自己的形式**，而非 Kafka 的 `raw`：after 含 `topic`、`payload`（字节）、`qos`、`retain` 以及消息带有的
+1. **[kept]**（2026-11-10：经两端复制的主题逐字节不变，且不必引入 sync/kafka；把 `Raw` 移入 `sync` 是重构，对用户没有收益） **不设编解码器时用源自己的形式**，而非 Kafka 的 `raw`：after 含 `topic`、`payload`（字节）、`qos`、`retain` 以及消息带有的
    版本 5 属性；目标不设编解码器时发布 after 的 `payload`，因此经两者复制的主题逐字节不变。原因：为 `Raw` 引入 sync/kafka
    会带入其客户端，而 MQTT 的元数据在记录中没有别的位置。备选：把 `Raw` 移入 `sync` 并作为默认。
-2. **记录的键是其主题**，除非编解码器设了键：保留的主题类似压缩主题的键，同键的记录在目标的通道中保持顺序。备选：无键。
-3. **用户属性**为 map；同名多次出现时值为数组。备选：键值对数组。
-4. **QoS 2 在 PUBLISH 时交出，PUBREC 留到目标拿到后**，收到 PUBREL 时发送 PUBCOMP，已持有 ID 的重复 PUBLISH 被丢弃：每个
+2. **[kept]**（2026-11-10：同一主题的消息在目标的通道中保持顺序，正如保留主题只有一个值；编解码器仍可设置自己的键） **记录的键是其主题**，除非编解码器设了键：保留的主题类似压缩主题的键，同键的记录在目标的通道中保持顺序。备选：无键。
+3. **[kept]**（2026-11-10：map 在各目标与编解码器中都自然易读，同名多次出现时保留每个值；只丢失不同名之间的顺序） **用户属性**为 map；同名多次出现时值为数组。备选：键值对数组。
+4. **[kept]**（2026-11-10：留住 PUBREC 是崩溃时不丢 QoS 2 消息的唯一办法；互通显示 QoS 2 消息每条只到一次，优雅停止时也是） **QoS 2 在 PUBLISH 时交出，PUBREC 留到目标拿到后**，收到 PUBREL 时发送 PUBCOMP，已持有 ID 的重复 PUBLISH 被丢弃：每个
    连接一次，PUBREC 前崩溃则重投。备选：立即 PUBREC，崩溃时会丢消息。
-5. **连接比 `Run` 的 context 活得久**，直到 `Cleanup` 或下一次 `Run`，流水线排空时目标写入的记录的确认在 DISCONNECT 前发出，
+5. **[kept]**（2026-11-10：免去重载时的重投；`Cleanup` 与下一次 `Run` 会关闭它） **连接比 `Run` 的 context 活得久**，直到 `Cleanup` 或下一次 `Run`，流水线排空时目标写入的记录的确认在 DISCONNECT 前发出，
    以免多余的重投。
-6. **`Acknowledged` 只入队**；每个连接一个 goroutine 按顺序写确认；编解码器没有产生记录的消息随相邻消息一起释放。
-7. **作业中**源在订阅后读到 `idle`（5s）内没有消息，等每条消息都确认后结束；之后的消息留给下一次运行。备选：拒绝 once 模式。
-8. **每次 `Run` 都重新订阅**（主题可能已变），版本 5 中 retain handling 为 1，使保留消息不在每次重启时重发；3.1.1 的 broker
+6. **[kept]**（2026-11-10：MQTT 要求按 PUBLISH 到达的顺序确认（4.6），每个连接一个写者正好做到） **`Acknowledged` 只入队**；每个连接一个 goroutine 按顺序写确认；编解码器没有产生记录的消息随相邻消息一起释放。
+7. **[kept]**（2026-11-10：作业需要结束点，其他队列源的作业也这样结束） **作业中**源在订阅后读到 `idle`（5s）内没有消息，等每条消息都确认后结束；之后的消息留给下一次运行。备选：拒绝 once 模式。
+8. **[needs the user]**（2026-11-10：从配置中去掉的过滤器仍留在持久会话中：broker 继续发送其消息，源也照样交出，因为它既不取消订阅，也不按过滤器检查消息的主题；见本节开头的清单） **每次 `Run` 都重新订阅**（主题可能已变），版本 5 中 retain handling 为 1，使保留消息不在每次重启时重发；3.1.1 的 broker
    会重发，由幂等目标吸收。配置中去掉的过滤器不会被取消订阅。
-9. **目标的会话是 clean 的，client ID 随机**（`fit-sync-<random>`），除非另行设置：投递反正是至少一次。备选：持久会话，以
+9. **[kept]**（2026-11-10：两种方式的投递都是至少一次；持久会话需要每个目标一个稳定的 client ID 并处理 DUP，换不来更强的保证） **目标的会话是 clean 的，client ID 随机**（`fit-sync-<random>`），除非另行设置：投递反正是至少一次。备选：持久会话，以
    DUP 重发 QoS 2。
-10. **`retain` 时的删除是一条空的保留消息**，它清除该主题；否则为编解码器的编码。备选：`deletes` 参数。
-11. **重试无法解决的拒绝立即交给 `on_error`**：版本 5 的原因码 0x87、0x90、0x95、0x99、0x9A 与 0x9B，超过 broker 上限的包，
+10. **[kept]**（2026-11-10：空的保留消息是 MQTT 清除主题的方式；有人需要别的做法时再加 `deletes` 参数） **`retain` 时的删除是一条空的保留消息**，它清除该主题；否则为编解码器的编码。备选：`deletes` 参数。
+11. **[kept]**（2026-11-10：已对照版本 5 的 PUBACK 与 DISCONNECT 原因码：列出的这些重试也无法通过，0x80 以下的（0x10，无匹配订阅者）表示成功） **重试无法解决的拒绝立即交给 `on_error`**：版本 5 的原因码 0x87、0x90、0x95、0x99、0x9A 与 0x9B，超过 broker 上限的包，
     它不具备的功能，无效主题，编解码器的错误；超出配额（0x97）及其余的都会重试。
-12. **`Test` 用自己的 client ID 连接**（`<client_id>-test-<hex>`，clean 会话），因此不会接管运行中流水线的会话；源的还会订阅
+12. **[kept]**（2026-11-10：测试绝不能接管运行中流水线的会话；ACL 的注意事项已写入指南） **`Test` 用自己的 client ID 连接**（`<client_id>-test-<hex>`，clean 会话），因此不会接管运行中流水线的会话；源的还会订阅
     并检查授予的 QoS。按 client ID 绑定 ACL 的 broker 可能拒绝测试的 ID。
-13. **上限**：双向包大小 1 MiB，源的 `receive_maximum` 128（最多约持有 128 个包），目标的 `max_inflight` 64，keep-alive 60s。
-14. **`servers` 是依次尝试的列表**，集群的各节点共享会话。
-15. **版本 3.1.1 在 provision 时拒绝没有用户名的密码**，与其协议一致。
+13. **[kept]**（2026-11-10：与其他队列源一样约束内存，且每项都是参数） **上限**：双向包大小 1 MiB，源的 `receive_maximum` 128（最多约持有 128 个包），目标的 `max_inflight` 64，keep-alive 60s。
+14. **[kept]**（2026-11-10：集群各节点共享会话，依次尝试即可恢复它） **`servers` 是依次尝试的列表**，集群的各节点共享会话。
+15. **[kept]**（2026-11-10：3.1.1 禁止这样做（MQTT-3.1.2-22）；在 provision 时拒绝，比 broker 拒绝更早说明原因） **版本 3.1.1 在 provision 时拒绝没有用户名的密码**，与其协议一致。
 
 由此留下的问题：增强认证（AUTH 包会结束连接）、遗嘱消息与 UNSUBSCRIBE 尚未实现；I222 加入家族之后 `test/sync/run.sh` 才会运行
 `mqtt.sh`。
@@ -5400,41 +5418,41 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **包及其形态**：`sync/mssql/wire`，包名 `mssqlwire`，一个供单个 goroutine 使用的阻塞式 `Conn`，与 MySQL 和 PostgreSQL
+1. **[kept]**（2026-11-10：源与目标一次只发一个请求，与 MySQL 和 PostgreSQL 客户端一样；MARS 会增加无人使用的状态） **包及其形态**：`sync/mssql/wire`，包名 `mssqlwire`，一个供单个 goroutine 使用的阻塞式 `Conn`，与 MySQL 和 PostgreSQL
    客户端一致（决定 036）：无连接池、无 MARS、一次一个请求。备选：在一个连接上用 MARS 会话，源与目标都不需要。
-2. **加密方式 `on`（默认）、`strict` 与 `off`**：`on` 为整个连接使用 TLS，在 prelogin 中协商、握手放在 TDS 包内，证书
+2. **[needs the user]**（2026-11-10：`strict`（TDS 8）通过了单元测试，但从未连上过真实服务器；见本节开头的清单） **加密方式 `on`（默认）、`strict` 与 `off`**：`on` 为整个连接使用 TLS，在 prelogin 中协商、握手放在 TDS 包内，证书
    必须验证（没有"信任服务器证书"）；`strict` 为 TDS 8（先 TLS，ALPN `tds/8.0`）；`off` 完全不用 TLS，服务器要求加密时
    拒绝连接。不提供 TDS 的仅登录加密（密码加密、数据不加密）：看似加密实则不然。`strict` 通过单元测试但未通过互通：镜像
    在证书未按 TDS 8 的要求配置前拒绝它（`mssql.sh` 的证书尚未如此），因此其互通测试只在 `FIT_SYNC_MSSQL_STRICT=1` 时运行。
    备选：把仅登录加密作为第四种方式。
-3. **TDS 7.4 内的 TLS 为 1.2，每个包一个 record**：互通发现 SQL Server 会断开包被 Go 的动态 record 大小拆到多个 record 的
+3. **[kept]**（2026-11-10：两种失败都由互通发现；上限保留调用方给出的 `TLS.MaxVersion`） **TDS 7.4 内的 TLS 为 1.2，每个包一个 record**：互通发现 SQL Server 会断开包被 Go 的动态 record 大小拆到多个 record 的
    连接，且 TLS 1.3 的大 ClientHello 放进 prelogin 包时握手偶尔失败；客户端关闭动态 record 大小，并在 prelogin 内把版本
    上限设为 1.2（若给了 `TLS.MaxVersion` 则保留），prelogin 包为 4096 字节。
-4. **值的 Go 类型**：所有整数为 `int64`；`real` 为 `float32`，`float` 为 `float64`；`bit` 为 `bool`；`decimal`、`numeric`、
+4. **[kept]**（2026-11-10：每个值都精确保留，源可直接映射到记录；`*big.Rat` 会为原样往返的文本分配内存） **值的 Go 类型**：所有整数为 `int64`；`real` 为 `float32`，`float` 为 `float64`；`bit` 为 `bool`；`decimal`、`numeric`、
    `money` 与 `smallmoney` 为 `Decimal`（其精确文本）；`date`、`datetime`、`smalldatetime` 与 `datetime2` 为 UTC 的
    `time.Time`（其钟面时间，无时区）；`datetimeoffset` 为带其偏移固定时区的 `time.Time`；`time` 为自午夜起的
    `time.Duration`；`uniqueidentifier` 为按文本字节序的 `UUID`；char、nchar、text、ntext 与 xml 为 `string`（去掉 xml 的
    字节序标记）；binary、image、rowversion 与 CLR 类型为 `[]byte`；`sql_variant` 为其基础类型的值。备选：`time` 作为
    第一天的 `time.Time`，decimal 作为 `*big.Rat`。
-5. **不加依赖的代码页**：UTF-8 排序规则或代码页 1252（拉丁排序规则，SQL Server 的默认）的 varchar 会被解码；其他代码页中
+5. **[needs the user]**（2026-11-10：代码页不是 1252 或 UTF-8 的 varchar（Chinese_PRC_CI_AS 的 936、Japanese_CI_AS 的 932）中含非 ASCII 字节的值以字节而非文本到达目标；见本节开头的清单） **不加依赖的代码页**：UTF-8 排序规则或代码页 1252（拉丁排序规则，SQL Server 的默认）的 varchar 会被解码；其他代码页中
    含非 ASCII 字节的值以 `[]byte` 返回，varchar 参数拒绝其代码页没有的字符。原因：fit 没有 `golang.org/x/text`，而多数
    模式对非拉丁文本使用 UTF-16 的 nvarchar。备选：用 `x/text` 支持所有代码页；或由源在查询中把这类列转为 nvarchar。
-6. **由 Go 类型决定参数类型**（`Param.Type` 未指定时）：整数 `bigint`，`float32` `real`，`float64` `float`，`string`
+6. **[kept]**（2026-11-10：`datetimeoffset` 列保留时刻；`datetime2` 或 `datetime` 列取值自身的钟面时间（SQL Server 丢弃偏移），而目标发送的是 UTC（`AsTime().UTC()`），因此这类列得到 UTC 的钟面时间，决定 4 读回的正是同一时刻。`datetime2(7)` 会无谓地丢掉 `datetimeoffset` 列的偏移） **由 Go 类型决定参数类型**（`Param.Type` 未指定时）：整数 `bigint`，`float32` `real`，`float64` `float`，`string`
    `nvarchar(4000)` 或 `nvarchar(max)`，`[]byte` `varbinary(8000)` 或 `varbinary(max)`，`time.Time` `datetimeoffset(7)`
    （无论列类型都保留时刻），`time.Duration` `time(7)`，`Decimal` `decimal(38, 其小数位)`，`UUID` `uniqueidentifier`，nil
    `nvarchar(4000)`。备选：`time.Time` 作为其 UTC 钟面时间的 `datetime2(7)`。
-7. **PLP 值以未知长度发送**，单个 chunk：互通发现批量导入拒绝已知长度的 PLP（错误 4804），而参数可以接受。
-8. **批量导入读取表的列类型**（`SELECT TOP 0`，以及从 `sys.columns` 读排序规则，在 `INSERT BULK` 中写为 `COLLATE`），并把
+7. **[kept]**（2026-11-10：互通发现服务器拒绝另一种做法（错误 4804）） **PLP 值以未知长度发送**，单个 chunk：互通发现批量导入拒绝已知长度的 PLP（错误 4804），而参数可以接受。
+8. **[kept]**（2026-11-10：互通发现服务器拒绝这些类型自身的行格式；拒绝 `sql_variant` 胜过静默转换） **批量导入读取表的列类型**（`SELECT TOP 0`，以及从 `sys.columns` 读排序规则，在 `INSERT BULK` 中写为 `COLLATE`），并把
    text、ntext、image 与 xml 列作为 `varchar(max)`、`nvarchar(max)`、`varbinary(max)` 与 `nvarchar(max)` 发送，由服务器转换：
    互通发现服务器拒绝这些类型自身的行格式。拒绝 `sql_variant` 列；列无法接受的值返回错误，导入继续、该行不写入。不提供
    `KEEP_IDENTITY` 提示（标识值由服务器生成，除非调用方设置 `IDENTITY_INSERT`）。
-9. **取消**：调用的 context 结束时发送 attention；其应答最多等待 10 秒，之后关闭连接。请求仍在发送时 context 结束则关闭
+9. **[kept]**（2026-11-10：TDS 消息不能截断，10 秒上限让失去响应的服务器无法卡住调用） **取消**：调用的 context 结束时发送 attention；其应答最多等待 10 秒，之后关闭连接。请求仍在发送时 context 结束则关闭
    连接，因为 TDS 消息不能截断。与应答交错的 attention 在下一次调用前读完。`Rows.Close` 在结尾前以同样方式取消其余部分。
-10. **超时**：`Config.Timeout`（60 秒）约束连接与登录、每次等待服务器下一个包以及每次写入；调用的总时长由其 context 决定，
+10. **[kept]**（2026-11-10：调用方按自己的节奏读取长结果时，只要服务器还在发送就不能超时） **超时**：`Config.Timeout`（60 秒）约束连接与登录、每次等待服务器下一个包以及每次写入；调用的总时长由其 context 决定，
     因此调用方按自己的节奏读取长结果时，只要服务器还在发送就不会超时。
-11. **事务经 SQL 完成**（`BEGIN TRANSACTION`、`COMMIT`、`ROLLBACK`，先设置隔离级别），ENVCHANGE 给出的描述符放进每个请求的
+11. **[kept]**（2026-11-10：两种做法都需要 ENVCHANGE 给出的描述符；SQL 语句让隔离级别与错误由服务器在其位置报告） **事务经 SQL 完成**（`BEGIN TRANSACTION`、`COMMIT`、`ROLLBACK`，先设置隔离级别），ENVCHANGE 给出的描述符放进每个请求的
     ALL_HEADERS，不使用 TDS 的事务管理器请求。备选：TM_BEGIN_XACT 等。
-12. **未包括**：Windows、Kerberos 与 Entra ID 认证，Azure 的 routing ENVCHANGE（忽略），MARS，Always Encrypted，UTF-8 功能
+12. **[needs the user]**（2026-11-10：MARS、Always Encrypted、UTF-8 功能扩展与表值参数仍不包括（无调用方需要）；Entra ID（Azure SQL）与 Windows 或 Kerberos 认证是产品选择：见本节开头的清单） **未包括**：Windows、Kerberos 与 Entra ID 认证，Azure 的 routing ENVCHANGE（忽略），MARS，Always Encrypted，UTF-8 功能
     扩展，表值参数。
 
 ### I216 SQL Server 作为源
@@ -5454,38 +5472,47 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
   被 300 个含插入、更新、删除与改键的事务写入，在随机点被 kill，结束时按键相等，CDC 与 change tracking 皆然；流水线运行中
   才被捕获、已有行的第二张表先整表读取再跟随；新增的列成为 DDL 记录；被点名却未捕获的表让连接测试失败，并给出
   `sp_cdc_enable_table` 调用。
+- **S9 的重复**（2026-11-10 审查）：基准中多出的 10 行（fit 第 3 轮、Debezium 连接器第 2 轮，Kafka 目标处 500,010 条）
+  既不是重复，也不是快照的重放：S9 以 `snapshot never` 运行，没有重启，fit 的日志里也没有错误。是测试工具的预热：第一个
+  10 行的事务 2s 内没到目标时它会再写一个；随后第一个让计数上升，而计数在 1s 的稳定期内保持不变之后第二个才到（CDC 的捕获
+  作业每秒轮询一次，两个搬运工具的 p99 延迟为 1.5 到 1.6s），于是测量前的目标计数漏掉了它，排空时把这 10 行算作多出。恰好
+  多出 `TX_ROWS` 行、且两个搬运工具都出现，与此相符。已在 syncbench 中修复（`52644ae9`）：预热写过不止一个事务时，计数须再
+  保持 2s 不变（启动时间仍止于它首次稳定之时）；单元测试 `TestWarmLateTransaction`。源中没有原因：窗口只在交出任何记录之前
+  重读（减半），失败的批会让流水线重启（会记日志，而没有），清理检查只会失败，窗口的边界是提交 LSN，每个只读一次。
+  本地冒烟运行（`SIZE=smoke`，fit，3 轮，跑了两次）结果精确，启动时间不变（4.2s）；第一次中有一轮超时，原因是工具的
+  prepare 重启 CDC 捕获作业太快、使其停着，也已修复（`33e2ceb3`）。
 
 **待审查的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **命名空间为 `schema.table`**，数据库是参数，与 PostgreSQL 源的写法一致；键为主键，否则为启用 CDC 时指定的唯一索引，否则
+1. **[kept]**（2026-11-10：与 PostgreSQL 源的写法一致；一个源读一个数据库，数据库是参数） **命名空间为 `schema.table`**，数据库是参数，与 PostgreSQL 源的写法一致；键为主键，否则为启用 CDC 时指定的唯一索引，否则
    为 `keys`。备选：`database.schema.table`。
-2. **按 `cdc.lsn_time_mapping` 的事务分窗口**：最多 `window_transactions`（1000）个事务，读取其中所有表的变更并按 LSN、
+2. **[kept]**（2026-11-10：内存有界，窗口内保持服务器的顺序；流式归并需要每个捕获实例一个连接（没有 MARS）） **按 `cdc.lsn_time_mapping` 的事务分窗口**：最多 `window_transactions`（1000）个事务，读取其中所有表的变更并按 LSN、
    `__$seqval`、操作排序，内存中最多持有 `window_rows`（10000）行；超过时窗口减半，超过它的单个事务按表依次以 `window_rows`
    分页读取（对序列值用 `TOP ... WITH TIES`，更新的两行不会被拆开）：这样的事务的记录按表依次到来，而不是服务器跨表的
    顺序。备选：每个捕获实例一个连接并流式归并（一个连接上没有 MARS）。
-3. **快照的每一批在数据库允许时于快照隔离事务中读取，否则用读已提交**（短暂的共享锁，从不用读取未提交行的 `NOLOCK`）；
+3. **[kept]**（2026-11-10：读已提交的批只取短暂的共享锁，并由从之前读到的 LSN 起的重放补全；拒绝会把无法允许快照隔离的数据库挡在门外。11-10 S9 的重复并非这种重放（S9 以 `snapshot never` 运行；见“已完成”中的说明）。重放可以做到精确，但有代价：未做，见本节开头的清单） **快照的每一批在数据库允许时于快照隔离事务中读取，否则用读已提交**（短暂的共享锁，从不用读取未提交行的 `NOLOCK`）；
    它在发现表之前读到的 CDC 最高 LSN 处衔接，并在第一条记录前保存为起点（I175）。备选：没有快照隔离时拒绝做快照。
-4. **CDC 新开始捕获的表在源追上且捕获实例列表变化时被发现**，即所有实例都创建于位置的 `Since`（上次发现表时服务器的
+4. **[kept]**（2026-11-10：每次追上只多一个查询；永远追不上的源本就无限落后，追上时即会发现该表） **CDC 新开始捕获的表在源追上且捕获实例列表变化时被发现**，即所有实例都创建于位置的 `Since`（上次发现表时服务器的
    时钟，保存在检查点中）之后的表：每张先整表读取，再从其实例的起点跟随。这类表在捕获开始与被发现之间的变更由其快照
    覆盖。备选：固定的重新发现间隔。
-5. **表的多个捕获实例依次读取**，每个从其起点读到下一个的起点，因此模式变化产生的新实例无需快照即可跟随；在其变更被读取
+5. **[changed]**（2026-11-10：源运行期间，旧实例在其到新实例起点为止的变更读完之前被删除，现在会让源失败并要求新的快照（在追上时捕获实例变化、或读取失败时发现）；完全不再被捕获的表记一条日志。源停止期间的删除不在 CDC 的表中留下痕迹，仍然发现不了。提交 `ae364b6a`，互通 `TestMSSQLSourceDroppedInstance`） **表的多个捕获实例依次读取**，每个从其起点读到下一个的起点，因此模式变化产生的新实例无需快照即可跟随；在其变更被读取
    之前删掉的旧实例会无声地丢失这些变更（未解决）。
-6. **以 `cdc.lsn_time_mapping` 最旧的 LSN 越过检查点的 LSN 判定清理**：流水线失败并要求新的快照，偏保守（所读的表即使没有
+6. **[kept]**（2026-11-10：保守且每个窗口一个查询；每个实例的最小 LSN 也会随新实例移动，无法区分清理与模式变化） **以 `cdc.lsn_time_mapping` 最旧的 LSN 越过检查点的 LSN 判定清理**：流水线失败并要求新的快照，偏保守（所读的表即使没有
    被删除的内容也可能失败）。备选：比较每个捕获实例的最小 LSN，但新实例也会移动它。
-7. **`tables` 中完整写出名称的表必须被捕获**（错误中给出 `sp_cdc_enable_table` 调用）；通配模式只匹配已捕获的表，以便之后
+7. **[kept]**（2026-11-10：完整的名称意味着承诺读取该表，通配模式则描述现在与将来要读的表） **`tables` 中完整写出名称的表必须被捕获**（错误中给出 `sp_cdc_enable_table` 调用）；通配模式只匹配已捕获的表，以便之后
    加入的表被接上；一张表也没有则报错。备选：通配匹配到的每张表都必须被捕获。
-8. **提交时间**取 `lsn_time_mapping` 的 `tran_end_time`，为服务器时钟，用连接时读到的服务器 UTC 偏移（`SYSDATETIMEOFFSET`）
+8. **[kept]**（2026-11-10：提交时间是元数据，服务器通常运行在 UTC；每次轮询读取偏移，也仍会把窗口中切换前的事务算错） **提交时间**取 `lsn_time_mapping` 的 `tran_end_time`，为服务器时钟，用连接时读到的服务器 UTC 偏移（`SYSDATETIMEOFFSET`）
    转为 UTC：流水线运行期间的夏令时切换会让它们偏移，直到重新连接。
-9. **DDL 记录**来自 `cdc.ddl_history`，命名空间为该表的，语句放在 after 的 `statement` 中，不带位置；CDC 本身只在新的捕获
+9. **[kept]**（2026-11-10：这是 CDC 对 DDL 的唯一记录；语句正是目标可以记录或应用的内容） **DDL 记录**来自 `cdc.ddl_history`，命名空间为该表的，语句放在 after 的 `statement` 中，不带位置；CDC 本身只在新的捕获
    实例中捕获新列（决定 5）。
-10. **Change tracking**（`mode change_tracking`）：每次轮询读取所有表在检查点版本之后、当前版本及以前变更的键，按键分页，
+10. **[kept]**（2026-11-10：这是更轻量模式写明的取舍（无变更前的行、变更合并）；只在启动时发现表，符合它用于固定模式的场景） **Change tracking**（`mode change_tracking`）：每次轮询读取所有表在检查点版本之后、当前版本及以前变更的键，按键分页，
     允许时全部在一个快照隔离事务中，并连接回行；一次轮询的记录是一个事务（`ct-<version>`），不存在的行为删除，更新没有
     变更前的行；需要主键；表只在每次启动时发现（运行中不会接上新表）。
-11. **值**：`time` 为文本（按其精度的 `hh:mm:ss.fffffff`），`uniqueidentifier` 为其文本，`datetimeoffset` 为时刻，`datetime2`
+11. **[kept]**（2026-11-10：与其他源对这些类型给出的形式相同） **值**：`time` 为文本（按其精度的 `hh:mm:ss.fffffff`），`uniqueidentifier` 为其文本，`datetimeoffset` 为时刻，`datetime2`
     与 `datetime` 为 UTC 时间（其钟面），`date` 为日期，`money` 为十进制数，`xml` 为字符串，`sql_variant` 为其基础值。
-12. **未包括**：作业逐表读取快照，不分块（没有 `Chunker`）；不报告延迟；检查点只随所读表的记录前进，因此其他被捕获表的事务
+12. **[changed]**（2026-11-10：现在报告延迟：位置之后 `cdc.lsn_time_mapping` 中的事务数（取窗口的数目，窗口满时最多每秒一次 `COUNT_BIG`），change tracking 时为版本数，作为 `fit_sync_source_lag`（提交 `ae364b6a`）。作业不提供 `Chunker`：保留，与其他 CDC 源一致。检查点只随所读表的记录前进：被捕获的忙表之间的一张冷表会保留旧检查点，清理的保留期越过它之后重启会要求新的快照，尽管它什么也没丢；解决办法在 `sync` 中，见本节开头的清单） **未包括**：作业逐表读取快照，不分块（没有 `Chunker`）；不报告延迟；检查点只随所读表的记录前进，因此其他被捕获表的事务
     在重启后会被再次读取。
-13. **`ConnParams` 与 `WireConfig` 从 `sync/mssql` 导出**，供 I217 的目标共用连接参数及其检查。
+13. **[kept]**（2026-11-10：目标无需第三个包即可共用参数及其检查） **`ConnParams` 与 `WireConfig` 从 `sync/mssql` 导出**，供 I217 的目标共用连接参数及其检查。
 
 ### I217 SQL Server 作为目标
 

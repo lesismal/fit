@@ -7180,6 +7180,31 @@ systems on fib's asynchronous client, at least once into idempotent sinks, `fits
 connection tests, unit tests against fakes for the 98% coverage floor, interop in Docker in its own
 `sync-interop` family, and decisions pending review in each section.
 
+- **For the user to rule on** (the reviews of the decisions pending, 2026-11-10):
+  - I214–I216 (of 40 decisions 34 kept, 2 changed, 4 for the user; the changes in I216 decisions 5 and 12; below, those 4 and three open items the review found):
+    - **MQTT filters dropped from the config** (I214 decision 8, and the open UNSUBSCRIBE): their
+      messages keep coming in the session and are emitted. Recommended: UNSUBSCRIBE the filters
+      subscribed before and no longer named, remembered in the checkpoint; not a topic check on each
+      message, which EMQX's topic rewrite would make drop wanted messages.
+    - **MQTT will messages and enhanced authentication** (I214's open list). Recommended: leave both
+      out until a broker in use needs AUTH (SCRAM, Kerberos); a sync client's will has no reader.
+    - **TDS 8 `strict`, never run against a server** (I215 decision 2). Recommended: give
+      `mssql.sh` the certificate TDS 8 wants and run its interop in CI; until then call `strict`
+      untested in the guide.
+    - **varchar of code pages other than 1252 and UTF-8** (I215 decision 5): non-ASCII values reach
+      the sinks as bytes. Recommended: the source casts such columns to nvarchar in its queries
+      (no dependency); `x/text` only if the sink must write them too.
+    - **Entra ID and Windows authentication** (I215 decision 12). Recommended: Entra ID (a service
+      principal's token) first if Azure SQL is wanted; Kerberos after.
+    - **A quiet table's checkpoint** (I216 decision 12): it moves only on the read tables' records,
+      so a restart after CDC's cleanup retention fails asking for a snapshot though nothing was lost.
+      Recommended: a position-only record in `sync` that a source emits after a window with none of
+      its tables' records (MySQL's and PostgreSQL's filtered tables would use it too).
+    - **An exact snapshot hand-over** (I216 decision 3, optional): rows changed during a snapshot
+      come again, as I175's. Exact needs each batch's LSN and key range kept in the checkpoint and
+      the server's collation order for text keys. Recommended: keep at least once (idempotent sinks
+      absorb it); if an append-only Kafka consumer needs exact, do it for integer keys only.
+
 ### I211 RabbitMQ as a source and a sink
 
 - **Do**: an AMQP 0-9-1 client (`sync/rabbitmq/wire`): connection and channel negotiation, TLS,
@@ -7506,43 +7531,43 @@ Decisions of the `RecordIDs` fix (decision 1's, 2026-11-10, branch `fix-recordid
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
-1. **No codec is the source's own form**, not Kafka's `raw`: after holds `topic`, `payload` (bytes),
+1. **[kept]** (2026-11-10: a topic copied through both ends stays byte for byte without importing sync/kafka; moving `Raw` into `sync` is a refactor with nothing for the user) **No codec is the source's own form**, not Kafka's `raw`: after holds `topic`, `payload` (bytes),
    `qos`, `retain` and the version 5 properties the message has; the sink without a codec publishes
    after's `payload`, so a topic copied through both stays byte for byte. Why: importing sync/kafka
    for `Raw` drags its client in, and MQTT's metadata has no other place in a record. Alternative:
    move `Raw` into `sync` and default to it.
-2. **A record's key is its topic** unless the codec sets one: a retained topic is like a compacted
+2. **[kept]** (2026-11-10: a topic's messages keep their order in the sinks' lanes, as a retained topic is one value; a codec still sets its own key) **A record's key is its topic** unless the codec sets one: a retained topic is like a compacted
    key, and a key's records keep their order in the sinks' lanes. Alternative: no key.
-3. **User properties** are a map; a name sent more than once holds an array of its values.
+3. **[kept]** (2026-11-10: a map reads naturally in every sink and codec and keeps every value of a repeated name; only the order across different names is lost) **User properties** are a map; a name sent more than once holds an array of its values.
    Alternative: an array of pairs.
-4. **QoS 2 is handed on at PUBLISH and its PUBREC held until the sinks have it**, PUBCOMP sent when
+4. **[kept]** (2026-11-10: holding PUBREC is the only way a crash does not lose a QoS 2 message; interop showed each QoS 2 message once, across a graceful stop too) **QoS 2 is handed on at PUBLISH and its PUBREC held until the sinks have it**, PUBCOMP sent when
    PUBREL comes, a PUBLISH again of an ID held dropped: once per connection, and redelivered after a
    crash before PUBREC. Alternative: PUBREC at once, which loses a message on a crash.
-5. **The connection outlives `Run`'s context** until `Cleanup` or the next `Run`, and acks of
+5. **[kept]** (2026-11-10: it spares a reload's redeliveries; `Cleanup` and the next `Run` close it) **The connection outlives `Run`'s context** until `Cleanup` or the next `Run`, and acks of
    records the sinks write while the pipeline drains are flushed before DISCONNECT, to spare
    redeliveries.
-6. **`Acknowledged` only queues**; a goroutine per connection writes the acks, in order; a message
+6. **[kept]** (2026-11-10: MQTT wants acknowledgements in the order the PUBLISHes came (4.6), which one writer per connection gives) **`Acknowledged` only queues**; a goroutine per connection writes the acks, in order; a message
    whose codec made no record is released with its neighbours.
-7. **In a job** the source reads until no message comes for `idle` (5s) after it subscribed, waits
+7. **[kept]** (2026-11-10: a job needs an end, and the other queue sources' jobs end the same way) **In a job** the source reads until no message comes for `idle` (5s) after it subscribed, waits
    for every message's acknowledgement, and ends; later messages stay for the next run. Alternative:
    refuse mode once.
-8. **Every `Run` subscribes again** (topics may have changed), with retain handling 1 in version 5 so
+8. **[needs the user]** (2026-11-10: a filter dropped from the config stays in the persistent session: the broker keeps sending its messages, and the source emits them, since it neither unsubscribes nor checks a message's topic against its filters; see the list at the top of the section) **Every `Run` subscribes again** (topics may have changed), with retain handling 1 in version 5 so
    that retained messages are not sent again at each restart; 3.1.1 brokers do send them again, which
    idempotent sinks absorb. Filters dropped from the config are not unsubscribed.
-9. **The sink's session is clean, its client ID random** (`fit-sync-<random>`) unless set: delivery
+9. **[kept]** (2026-11-10: delivery is at least once either way; a persistent session would need a stable client ID per sink and DUP handling, for no stronger guarantee) **The sink's session is clean, its client ID random** (`fit-sync-<random>`) unless set: delivery
    is at least once anyway. Alternative: a persistent session resending QoS 2 with DUP.
-10. **A delete with `retain` is an empty retained message**, which clears the topic; otherwise the
+10. **[kept]** (2026-11-10: an empty retained message is MQTT's way to clear a topic; a `deletes` param can come when someone needs another) **A delete with `retain` is an empty retained message**, which clears the topic; otherwise the
     codec's encoding. Alternative: a `deletes` param.
-11. **Refusals that retrying cannot cure go to `on_error` at once**: version 5 reason codes 0x87,
+11. **[kept]** (2026-11-10: checked against version 5's PUBACK and DISCONNECT codes: those listed cannot pass on a retry, and codes below 0x80 (0x10, no matching subscribers) are successes) **Refusals that retrying cannot cure go to `on_error` at once**: version 5 reason codes 0x87,
     0x90, 0x95, 0x99, 0x9A and 0x9B, a packet past the broker's maximum, a feature it lacks, an invalid
     topic, a codec's error; quota exceeded (0x97) and the rest are retried.
-12. **`Test` connects with a client ID of its own** (`<client_id>-test-<hex>`, clean session), so it
+12. **[kept]** (2026-11-10: a test must never take a running pipeline's session over; the ACL caveat is in the guide) **`Test` connects with a client ID of its own** (`<client_id>-test-<hex>`, clean session), so it
     never takes a running pipeline's session over; the source's also subscribes and checks the grant.
     Brokers whose ACLs bind client IDs may refuse the test's.
-13. **Bounds**: packets 1 MiB both ways, the source's `receive_maximum` 128 (at most about 128
+13. **[kept]** (2026-11-10: they bound memory as the other queue sources do, and each is a param) **Bounds**: packets 1 MiB both ways, the source's `receive_maximum` 128 (at most about 128
     packets held), the sink's `max_inflight` 64, keep-alive 60s.
-14. **`servers` is a list tried in turn**, the nodes of a cluster sharing the session.
-15. **Version 3.1.1 refuses a password without a username** at provision, as its protocol does.
+14. **[kept]** (2026-11-10: a cluster's nodes share the session, so trying them in turn resumes it) **`servers` is a list tried in turn**, the nodes of a cluster sharing the session.
+15. **[kept]** (2026-11-10: 3.1.1 forbids it (MQTT-3.1.2-22); refusing at provision says so before a broker does) **Version 3.1.1 refuses a password without a username** at provision, as its protocol does.
 
 Open from it: enhanced authentication (an AUTH packet ends the connection), will messages and
 UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds the family.
@@ -7577,10 +7602,10 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
-1. **The package and its shape**: `sync/mssql/wire`, named `mssqlwire`, a blocking `Conn` for one
+1. **[kept]** (2026-11-10: the source and the sink send one request at a time, as the MySQL and PostgreSQL clients do; MARS would add state no caller uses) **The package and its shape**: `sync/mssql/wire`, named `mssqlwire`, a blocking `Conn` for one
    goroutine, as the MySQL and PostgreSQL clients are (decision 036): no pool, no MARS, one request
    at a time. Alternative: MARS sessions on one connection, which the source and sink do not need.
-2. **Encryption modes `on` (the default), `strict` and `off`**: `on` is TLS for the whole
+2. **[needs the user]** (2026-11-10: `strict` (TDS 8) passes the unit tests but has never connected to a real server; see the list at the top of the section) **Encryption modes `on` (the default), `strict` and `off`**: `on` is TLS for the whole
    connection, negotiated in the pre-login with the handshake inside TDS packets, the certificate
    verified (no "trust server certificate"); `strict` is TDS 8 (TLS first, ALPN `tds/8.0`); `off` is
    no TLS at all, and a server that requires encryption is refused. TDS's login-only encryption
@@ -7588,48 +7613,48 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
    `strict` passes the unit tests but not interop: the images refuse it until a certificate is set
    up the way TDS 8 wants (`mssql.sh`'s is not), so its interop test runs only with
    `FIT_SYNC_MSSQL_STRICT=1`. Alternative: login-only encryption as a fourth mode.
-3. **TLS inside TDS 7.4 is 1.2, one record per packet**: interop found SQL Server dropping a
+3. **[kept]** (2026-11-10: interop found both failures; the cap keeps a given `TLS.MaxVersion`) **TLS inside TDS 7.4 is 1.2, one record per packet**: interop found SQL Server dropping a
    connection whose packet Go's dynamic record sizing split across records, and handshakes failing
    now and then with TLS 1.3's large ClientHello in pre-login packets; the client turns dynamic
    record sizing off and caps the version at 1.2 inside the pre-login (a `TLS.MaxVersion` given is
    kept), and pre-login packets are 4096 bytes.
-4. **Go types of values**: every integer `int64`; `real` `float32`, `float` `float64`; `bit` `bool`;
+4. **[kept]** (2026-11-10: every value is kept exactly and the source maps them onto its records directly; `*big.Rat` would allocate for text that round-trips as is) **Go types of values**: every integer `int64`; `real` `float32`, `float` `float64`; `bit` `bool`;
    `decimal`, `numeric`, `money` and `smallmoney` `Decimal` (their exact text); `date`, `datetime`,
    `smalldatetime` and `datetime2` `time.Time` in UTC (their clock, no zone); `datetimeoffset` a
    `time.Time` in a fixed zone of its offset; `time` a `time.Duration` from midnight;
    `uniqueidentifier` a `UUID` in its text's byte order; char, nchar, text, ntext and xml `string`
    (xml's byte order mark dropped); binary, image, rowversion and CLR types `[]byte`; `sql_variant`
    its base type's value. Alternative: `time` as a `time.Time` on day one, decimals as `*big.Rat`.
-5. **Code pages without a dependency**: varchar in a UTF-8 collation or code page 1252 (the Latin
+5. **[needs the user]** (2026-11-10: a varchar of a code page other than 1252 or UTF-8 (Chinese_PRC_CI_AS's 936, Japanese_CI_AS's 932) with non-ASCII bytes reaches the sinks as bytes, not text; see the list at the top of the section) **Code pages without a dependency**: varchar in a UTF-8 collation or code page 1252 (the Latin
    collations, SQL Server's default) is decoded; a value of another code page with non-ASCII bytes
    comes as `[]byte`, and a varchar parameter refuses a character its code page lacks. Why: fit has
    no `golang.org/x/text`, and nvarchar, which most schemas use for text that is not Latin, is
    UTF-16. Alternative: `x/text` for every code page; or the source casting such columns to
    nvarchar in its queries.
-6. **Parameter types from Go types**, when `Param.Type` names none: integers `bigint`, `float32`
+6. **[kept]** (2026-11-10: the instant is kept in `datetimeoffset` columns; a `datetime2` or `datetime` column takes the value's own clock (SQL Server drops the offset), and the sink sends UTC (`AsTime().UTC()`), so such a column gets UTC's clock, which decision 4 reads back as the same instant. `datetime2(7)` would drop a `datetimeoffset` column's offset for nothing) **Parameter types from Go types**, when `Param.Type` names none: integers `bigint`, `float32`
    `real`, `float64` `float`, `string` `nvarchar(4000)` or `nvarchar(max)`, `[]byte` `varbinary(8000)`
    or `varbinary(max)`, `time.Time` `datetimeoffset(7)` (the instant kept whatever the column),
    `time.Duration` `time(7)`, `Decimal` `decimal(38, its scale)`, `UUID` `uniqueidentifier`, nil
    `nvarchar(4000)`. Alternative: `time.Time` as `datetime2(7)` of its UTC clock.
-7. **PLP values are sent with an unknown length**, in one chunk: interop found a bulk load refusing a
+7. **[kept]** (2026-11-10: interop found the server refusing the alternative (error 4804)) **PLP values are sent with an unknown length**, in one chunk: interop found a bulk load refusing a
    PLP of a known length (error 4804) that parameters took.
-8. **Bulk load reads the table's column types** (`SELECT TOP 0`, and `sys.columns` for collations,
+8. **[kept]** (2026-11-10: interop found the server refusing those types' own row formats; refusing `sql_variant` beats a silent conversion) **Bulk load reads the table's column types** (`SELECT TOP 0`, and `sys.columns` for collations,
    written as `COLLATE` in `INSERT BULK`), and sends text, ntext, image and xml columns as
    `varchar(max)`, `nvarchar(max)`, `varbinary(max)` and `nvarchar(max)`, which the server converts:
    interop found it refusing those types' own row formats. `sql_variant` columns are refused; a value
    a column cannot take is an error that leaves the load going without the row. No `KEEP_IDENTITY`
    hint (identity values are the server's unless the caller sets `IDENTITY_INSERT`).
-9. **Cancellation**: a call's context ending sends an attention; its answer is read with a 10 s
+9. **[kept]** (2026-11-10: a TDS message cannot be cut short, and the 10 s bound keeps a dead server from holding a call) **Cancellation**: a call's context ending sends an attention; its answer is read with a 10 s
    bound, then the connection is closed. A context ending while a request is still being sent closes
    the connection, since a TDS message cannot be cut short. An attention that crosses the answer is
    read before the next call. `Rows.Close` before the end cancels the rest the same way.
-10. **Timeouts**: `Config.Timeout` (60 s) bounds connecting and logging in, each wait for the
+10. **[kept]** (2026-11-10: a long result read at the caller's pace must not time out while the server keeps sending) **Timeouts**: `Config.Timeout` (60 s) bounds connecting and logging in, each wait for the
     server's next packet and each write; a call's whole length is its context's, so a long result
     read at the caller's pace never times out while the server keeps sending.
-11. **Transactions through SQL** (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`, an isolation level set
+11. **[kept]** (2026-11-10: the descriptor from ENVCHANGE is what TDS needs either way; SQL statements keep the isolation level and errors where the server reports them) **Transactions through SQL** (`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`, an isolation level set
     first), the descriptor from ENVCHANGE carried in every request's ALL_HEADERS, not TDS's
     transaction manager requests. Alternative: TM_BEGIN_XACT and friends.
-12. **Left out**: Windows, Kerberos and Entra ID authentication, Azure's routing ENVCHANGE (ignored),
+12. **[needs the user]** (2026-11-10: MARS, Always Encrypted, the UTF-8 feature extension and table-valued parameters stay out (no caller needs them); Entra ID (Azure SQL) and Windows or Kerberos authentication are a product choice: see the list at the top of the section) **Left out**: Windows, Kerberos and Entra ID authentication, Azure's routing ENVCHANGE (ignored),
     MARS, Always Encrypted, the UTF-8 feature extension, table-valued parameters.
 
 ### I216 SQL Server as a source
@@ -7655,56 +7680,70 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
   equal by key, with CDC and with change tracking; a second table captured while the pipeline runs,
   rows already in it, is read whole and followed; a column added is a DDL record; a table named and
   not captured fails the connection test with the `sp_cdc_enable_table` call.
+- **S9's copies** (2026-11-10 review): the benchmark's 10 extra rows (fit in round 3, Debezium's
+  connector in round 2, 500,010 at the Kafka sink) were not copies and not the snapshot's replay: S9
+  runs with `snapshot never`, nothing restarted, and fit's log has no error. The harness's warm-up
+  wrote a second transaction of 10 rows when the first had not reached the sink in 2s; the first then
+  raised the count, which stayed put for the 1s settle before the second arrived (CDC's capture job
+  polls every second, and the movers' p99 lag was 1.5 to 1.6s), so the sink's count before the
+  measured rows missed it and the drain counted those 10 rows as extra. Exactly `TX_ROWS` extra, for
+  two movers, fits. Fixed in syncbench (`52644ae9`): with more than one warm-up transaction written,
+  the count must stay put for 2s more (the startup still ends where it first settled); unit test
+  `TestWarmLateTransaction`. Nothing in the source: windows are re-read only before emitting anything
+  (halving), a failed batch restarts the pipeline (logged, and none was), the cleanup check only fails,
+  and a window's bounds are commit LSNs, each read once. Local smoke runs (`SIZE=smoke`, fit, 3 rounds
+  twice) were exact, with the startup unchanged (4.2s); one round of the first timed out because the
+  harness's prepare restarted CDC's capture job too fast and left it stopped, fixed too (`33e2ceb3`).
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
-1. **Namespace `schema.table`**, the database a param, as PostgreSQL's source writes it; the key the
+1. **[kept]** (2026-11-10: as PostgreSQL's source writes it; one source reads one database, which is a param) **Namespace `schema.table`**, the database a param, as PostgreSQL's source writes it; the key the
    primary key, else the unique index CDC was enabled with, else `keys`. Alternative:
    `database.schema.table`.
-2. **Windows of transactions from `cdc.lsn_time_mapping`**: up to `window_transactions` (1000)
+2. **[kept]** (2026-11-10: memory stays bounded and the server's order holds within a window; a streaming merge needs a connection per capture instance (no MARS)) **Windows of transactions from `cdc.lsn_time_mapping`**: up to `window_transactions` (1000)
    transactions, every table's changes in them read and ordered by LSN, then `__$seqval`, then
    operation, held in memory up to `window_rows` (10000); a window with more is halved, and a single
    transaction with more is read a table at a time in pages of `window_rows` (`TOP ... WITH TIES` on
    the sequence value, so an update's two rows never split): such a transaction's records come table
    by table, not in the server's order across tables. Alternative: a connection per capture instance
    and a streaming merge (no MARS on one connection).
-3. **The snapshot reads each batch in a snapshot isolation transaction where the database allows
+3. **[kept]** (2026-11-10: read committed batches take short shared locks and are made whole by the replay from the LSN read before; refusing would shut out databases that cannot allow snapshot isolation. S9's copies of 11-10 were not this replay (S9 runs with `snapshot never`; see the Done note). The replay could be made exact, at a cost: not done, see the list at the top of the section) **The snapshot reads each batch in a snapshot isolation transaction where the database allows
    it, read committed otherwise** (short shared locks, never `NOLOCK`, which reads uncommitted
    rows); it is handed over at CDC's highest LSN read before the tables are found, saved as the
    start before the first record (I175). Alternative: refuse to snapshot without snapshot isolation.
-4. **Tables CDC begins to capture are found when the source is caught up and the list of capture
+4. **[kept]** (2026-11-10: it costs one query per catch-up; a source that never catches up is behind without bound anyway, and finds the table once it does) **Tables CDC begins to capture are found when the source is caught up and the list of capture
    instances changed**, and are those whose instances were all created after the position's
    `Since` (the server's clock when the tables were last found, kept in the checkpoint): each is read
    whole, then followed from its instance's start. Changes of such a table between its capture's
    start and its discovery are covered by its snapshot. Alternative: a fixed rediscovery interval.
-5. **A table's capture instances are read in turn**, each from its start to the next one's, so a
+5. **[changed]** (2026-11-10: an older instance dropped while the source runs, before it read that instance's changes up to the newer one's start, now fails the source asking for a new snapshot (found when the capture instances change while caught up, or when a read fails); a table no longer captured at all is logged. A drop while the source is stopped leaves no trace in CDC's tables and is still not seen. Commit `ae364b6a`, interop `TestMSSQLSourceDroppedInstance`) **A table's capture instances are read in turn**, each from its start to the next one's, so a
    schema change's new instance is followed without a snapshot; an older instance dropped before its
    changes were read loses them unnoticed (open).
-6. **Cleanup is detected by `cdc.lsn_time_mapping`'s oldest LSN** being past the checkpoint's: the
+6. **[kept]** (2026-11-10: conservative and one query a window; each instance's minimum LSN moves with a new instance too, so it could not tell cleanup from a schema change) **Cleanup is detected by `cdc.lsn_time_mapping`'s oldest LSN** being past the checkpoint's: the
    pipeline fails asking for a new snapshot, conservatively (it may fail when nothing of the read
    tables was removed). Alternative: compare each capture instance's minimum LSN, which a new instance
    also moves.
-7. **A table named whole in `tables` must be captured** (the error gives the `sp_cdc_enable_table`
+7. **[kept]** (2026-11-10: a name is a promise the table is read, a glob a pattern for what is and will be) **A table named whole in `tables` must be captured** (the error gives the `sp_cdc_enable_table`
    call); a glob matches the captured tables only, so that tables added later are picked up; no table
    at all is an error. Alternative: every glob match must be captured.
-8. **Commit times** are `lsn_time_mapping`'s `tran_end_time`, in the server's clock, turned into UTC
+8. **[kept]** (2026-11-10: commit times are metadata and servers commonly run in UTC; reading the offset at each poll would still mis-time a window's transactions made before the switch) **Commit times** are `lsn_time_mapping`'s `tran_end_time`, in the server's clock, turned into UTC
    with the server's UTC offset read at connect (`SYSDATETIMEOFFSET`): a daylight saving change while
    a pipeline runs shifts them by the change until it reconnects.
-9. **DDL records** come from `cdc.ddl_history`, of the table's namespace, with the statement in
+9. **[kept]** (2026-11-10: CDC's only record of DDL; the statement is what a sink can log or apply) **DDL records** come from `cdc.ddl_history`, of the table's namespace, with the statement in
    after's `statement`, without a position; CDC itself captures new columns only in a new capture
    instance (decision 5).
-10. **Change tracking** (`mode change_tracking`): every poll reads every table's keys changed after
+10. **[kept]** (2026-11-10: the lighter mode's documented trade (no before rows, merged changes); finding tables at each start only matches its use on fixed schemas) **Change tracking** (`mode change_tracking`): every poll reads every table's keys changed after
     the checkpoint's version up to the current one, by key in pages, all in one snapshot isolation
     transaction where allowed, the rows joined back; a poll's records are one transaction
     (`ct-<version>`), a row gone a delete, updates without a row before; a primary key is required;
     tables are found at each start only (no pick-up while running).
-11. **Values**: `time` as text (`hh:mm:ss.fffffff` to its scale), `uniqueidentifier` as its text,
+11. **[kept]** (2026-11-10: the same forms the other sources give these types) **Values**: `time` as text (`hh:mm:ss.fffffff` to its scale), `uniqueidentifier` as its text,
     `datetimeoffset` as the instant, `datetime2` and `datetime` as times in UTC (their clock),
     `date` as a date, `money` as a decimal, `xml` as a string, `sql_variant` as its base value.
-12. **Left out**: jobs read the snapshot table by table, not in chunks (no `Chunker`); no lag is
+12. **[changed]** (2026-11-10: the lag is reported now: the transactions of `cdc.lsn_time_mapping` after the position (a window's count, or `COUNT_BIG` at most once a second when a window is full), with change tracking the versions, as `fit_sync_source_lag` (commit `ae364b6a`). No `Chunker` for jobs: kept, as the other CDC sources'. The checkpoint moving only on the read tables' records: a quiet table among busy captured ones keeps an old checkpoint, and a restart after the cleanup's retention passed it fails asking for a new snapshot though nothing of it was lost; the cure is in `sync`, see the list at the top of the section) **Left out**: jobs read the snapshot table by table, not in chunks (no `Chunker`); no lag is
     reported; the checkpoint moves only on records of the tables read, so transactions of other
     captured tables are read again after a restart.
-13. **`ConnParams` and `WireConfig` are exported** from `sync/mssql`, for I217's sink to share the
+13. **[kept]** (2026-11-10: the sink shares the params and their checks without a third package) **`ConnParams` and `WireConfig` are exported** from `sync/mssql`, for I217's sink to share the
     connection's params and their checks.
 
 ### I217 SQL Server as a sink
