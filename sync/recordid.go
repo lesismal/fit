@@ -73,8 +73,9 @@ func (r *Record) AppendOrigin(dst []byte) []byte {
 	if r.Origin.Stream == "" {
 		return dst
 	}
-	dst = binary.AppendUvarint(dst, uint64(len(r.pipeline)))
-	dst = append(dst, r.pipeline...)
+	pipeline := r.pipeline()
+	dst = binary.AppendUvarint(dst, uint64(len(pipeline)))
+	dst = append(dst, pipeline...)
 	dst = binary.AppendUvarint(dst, uint64(len(r.Source)))
 	dst = append(dst, r.Source...)
 	dst = binary.AppendUvarint(dst, uint64(len(r.Origin.Stream)))

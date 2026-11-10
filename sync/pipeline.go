@@ -41,10 +41,11 @@ type entry struct {
 	boundary bool
 	// failed is set once on_error took one of what it became.
 	failed bool
+	// posOnly says it is a position-only record, which counts as none. It
+	// sits beside boundary and failed, in one word: an entry is 72 bytes.
+	posOnly bool
 	// commit is the record's commit time, for the lag Status shows.
 	commit time.Time
-	// posOnly says it is a position-only record, which counts as none.
-	posOnly bool
 }
 
 type item struct {
@@ -94,15 +95,18 @@ type run struct {
 	finishing                                           bool
 	// acked is the mark not yet told to an Acknowledger source.
 	acked Position
-	// lineage is the checkpoint's, which records reaching a sink carry.
-	lineage string
+	// ident is the pipeline's name and the checkpoint's lineage, which
+	// every record reaching a sink points to.
+	ident *recordRun
 	// wrote is the Checkpoint's Wrote of the mark (of from, until it
 	// moves): the position of the last record the sinks were handed when
 	// the mark is a position-only record's, nil when it is not.
 	wrote Position
-	// lastEmit is when a record was last emitted, in Unix nanoseconds,
-	// which a position-only record waits checkpoint_interval past.
-	lastEmit atomic.Int64
+	// quietSeen is next as emitPosition last saw it, and quietSince when
+	// it first saw it so: a position-only record waits checkpoint_interval
+	// past quietSince. emit does not read the clock for each record.
+	quietSeen  uint64
+	quietSince time.Time
 }
 
 type sinkRun struct {
@@ -125,8 +129,9 @@ func notify(c chan struct{}) {
 }
 
 func newRun(p *pipe) *run {
-	r := &run{p: p, wake: make(chan struct{}, 1), space: make(chan struct{}, 1), started: time.Now(), lineage: p.store.lineage, wrote: p.store.wrote}
-	r.lastEmit.Store(r.started.UnixNano())
+	r := &run{p: p, wake: make(chan struct{}, 1), space: make(chan struct{}, 1), started: time.Now(), wrote: p.store.wrote}
+	r.ident = &recordRun{pipeline: p.cfg.Name, lineage: p.store.lineage}
+	r.quietSince = r.started
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.srcCtx, r.cancelSrc = context.WithCancel(r.ctx)
 	// A job reading a snapshot in chunks, which has no transactions and
@@ -215,7 +220,6 @@ func (r *run) emit(rec *Record) error {
 		r.p.meter.readBytes.Add(int64(size))
 		r.read++
 	}
-	r.lastEmit.Store(time.Now().UnixNano())
 	r.inRecords++
 	r.inBytes += int64(size)
 	r.queue = append(r.queue, rec)
@@ -229,9 +233,18 @@ func (r *run) emit(rec *Record) error {
 
 // emitPosition is Run.Positions: a position-only record of pos(), queued
 // as emit queues a record, when no record was emitted for the checkpoint
-// interval.
+// interval. That is counted from the first call that saw no record
+// emitted since the call before, so that emit need not read the clock for
+// every record: a source calls it often in a quiet stretch.
 func (r *run) emitPosition(pos func() Position) error {
-	if time.Since(time.Unix(0, r.lastEmit.Load())) < r.p.cfg.Interval() {
+	r.mu.Lock()
+	now := time.Now()
+	if r.next != r.quietSeen {
+		r.quietSeen, r.quietSince = r.next, now
+	}
+	quiet := now.Sub(r.quietSince)
+	r.mu.Unlock()
+	if quiet < r.p.cfg.Interval() {
 		return nil
 	}
 	return r.emit(&Record{Position: pos(), posOnly: true})
@@ -387,7 +400,7 @@ func (r *run) dispatch() {
 			for j, o := range outs {
 				// The records of one source record share its Origin; the
 				// pipeline's name keeps two pipelines' origins apart.
-				o.rec.pipeline, o.rec.lineage = cfg.Name, r.lineage
+				o.rec.run = r.ident
 				if len(outs) > 1 {
 					o.rec.sub = uint32(j)
 				}
@@ -454,7 +467,7 @@ func (r *run) deadLetter(rec *Record, cause error, where string, attempts int) b
 			Field{"error", String(cause.Error())},
 			Field{"at", String(where)},
 			Field{"attempts", Int(int64(attempts))},
-			Field{"record", JSON(doc)}), lineage: r.lineage}
+			Field{"record", JSON(doc)}), run: r.ident}
 	r.deadLetters.Lock()
 	defer r.deadLetters.Unlock()
 	for n := 1; ; n++ {

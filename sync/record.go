@@ -86,6 +86,22 @@ type Record struct {
 	// file, a topic.
 	Namespace string
 	Op        Op
+	// posOnly says r is a position-only record (Run.EmitPosition): it
+	// carries only its Position, which the checkpoint moves to once the
+	// records before it are acknowledged, and no transform or sink sees it.
+	posOnly bool
+	// made says a transform made r, with Clone, so that the transforms
+	// after it may change it in place.
+	made bool
+	// sub is r's place among the records the transforms made of its
+	// source record, which the pipeline sets before r reaches a sink, so
+	// that records sharing an Origin have IDs of their own.
+	//
+	// posOnly, made and sub fill the padding after Op, so that Record
+	// stays at most 512 bytes (TestRecordSize): the largest object the GC
+	// allocates without a malloc header and marks by its span. One larger
+	// costs every record more to allocate and to mark.
+	sub uint32
 	// Key identifies the row or document across records, as a map of the
 	// key's columns or a single value; null when there is none, as for a
 	// log line.
@@ -106,26 +122,10 @@ type Record struct {
 	// seq is the number of the source's record this one comes from, which
 	// acknowledgements count by; a transform's records keep it.
 	seq uint64
-	// sub is r's place among the records the transforms made of its
-	// source record, which the pipeline sets before r reaches a sink, so
-	// that records sharing an Origin have IDs of their own.
-	sub uint32
-	// pipeline is the name of the pipeline r goes through, which the
-	// pipeline sets before r reaches a sink, so that two pipelines'
-	// records of equal origins (one topic name on two Kafka clusters
-	// feeding one stream) have IDs of their own.
-	pipeline string
-	// lineage is the line of positions of the pipeline's checkpoint the
-	// run reading r is of, which the pipeline sets with pipeline: a reset,
-	// a position set by hand and a new job start another.
-	lineage string
-	// posOnly says r is a position-only record (Run.EmitPosition): it
-	// carries only its Position, which the checkpoint moves to once the
-	// records before it are acknowledged, and no transform or sink sees it.
-	posOnly bool
-	// made says a transform made r, with Clone, so that the transforms
-	// after it may change it in place.
-	made bool
+	// run is what the pipeline run reading r sets before r reaches a
+	// sink: one pointer to the run's constants, shared by its records, in
+	// place of a copy of each in every record. nil before then.
+	run *recordRun
 	// lane, when not 0, is the reader of a job's chunks that read r, plus
 	// one: its records, and the records transforms make of them, go to
 	// the writer of that number of each ParallelSink, in place of their
@@ -142,7 +142,33 @@ type Record struct {
 // records a reset reads again are written again. It is empty for a record
 // that has not reached a sink of a pipeline, and for a pipeline whose
 // checkpoint predates lineages, until it is reset.
-func (r *Record) Lineage() string { return r.lineage }
+func (r *Record) Lineage() string {
+	if r.run == nil {
+		return ""
+	}
+	return r.run.lineage
+}
+
+// pipeline returns the name of the pipeline r goes through; empty before r
+// reaches a sink.
+func (r *Record) pipeline() string {
+	if r.run == nil {
+		return ""
+	}
+	return r.run.pipeline
+}
+
+// recordRun is what every record a pipeline run hands its sinks shares.
+type recordRun struct {
+	// pipeline is the pipeline's name, so that two pipelines' records of
+	// equal origins (one topic name on two Kafka clusters feeding one
+	// stream) have IDs of their own.
+	pipeline string
+	// lineage is the line of positions of the pipeline's checkpoint the
+	// run is of: a reset, a position set by hand and a new job start
+	// another.
+	lineage string
+}
 
 // boundary reports whether the source can resume after r: r ends a
 // transaction, or has none.

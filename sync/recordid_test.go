@@ -196,7 +196,7 @@ func TestRecordIDsOrigin(t *testing.T) {
 	// Another pipeline's record of the same origin has an ID of its own:
 	// two Kafka clusters' topics of one name feeding one stream.
 	piped := same.Clone()
-	piped.pipeline = "other"
+	piped.run = &recordRun{pipeline: "other"}
 	if again := RecordIDs([]*Record{piped}); again[0] == got[0] {
 		t.Errorf("two pipelines share an origin's ID %s", got[0])
 	}
