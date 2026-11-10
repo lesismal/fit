@@ -354,6 +354,9 @@ func (s *Server) publish(subject, reply string, hdr, data []byte) {
 		return
 	case strings.HasPrefix(subject, "$JS.ACK."):
 		s.ack(subject)
+		if reply != "" { // an acknowledgement that asks for an answer, once taken
+			s.Deliver(reply, "", nil, nil)
+		}
 		return
 	}
 	st := s.streamOf(subject)
