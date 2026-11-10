@@ -27,6 +27,7 @@ type logsBody struct {
 type logOutputBody struct {
 	Path        string         `json:"path"`
 	Loggers     []string       `json:"loggers"`
+	AccessLog   bool           `json:"access_log,omitempty"` // the access log's file, not one of log's
 	Format      string         `json:"format"`
 	TimeZone    string         `json:"time_zone"`
 	Rotate      *logRotateBody `json:"rotate"`
@@ -115,6 +116,7 @@ func (cs *Configs) logsInfo(cfg *config.Config) logsBody {
 	}
 	if a := cfg.AccessLog; a != nil && config.IsFileOutput(a.Output) {
 		add(a.Output, []string{config.LoggerAccessLog}, a.Format, a.TimeZoneName(), a.Rotate)
+		body.Outputs[len(body.Outputs)-1].AccessLog = true
 	}
 	return body
 }

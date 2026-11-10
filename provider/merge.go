@@ -178,7 +178,7 @@ type Source struct {
 	// Path is a JSON pointer to it in the merged config.
 	Path string `json:"path"`
 	// Source is the provider it came from, or the source of the base
-	// config: file, admin or rollback.
+	// config: file, store, admin, console or cluster.
 	Source string `json:"source"`
 	// From is a JSON pointer to it in what its provider provided; empty
 	// for the base config.

@@ -476,6 +476,17 @@ func TestWarnings(t *testing.T) {
 		t.Fatalf("warnings: %q", r.Warnings)
 	}
 
+	// A limit the engine takes at start warns; one applied on a reload,
+	// such as the header limit, does not.
+	r, err = f.configs.Apply([]byte(`{"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "admin": {"address": "127.0.0.1:1"}, "access_log": {},
+"limits": {"max_conns": 12345, "max_header_bytes": 65536}}`), SourceAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.Warnings, "\n"); !strings.Contains(got, "limits.max_conns changed") || strings.Contains(got, "max_header_bytes") {
+		t.Fatalf("limits warnings: %q", r.Warnings)
+	}
+
 	// A renamed field is reported at its position, and in the response
 	// to a load.
 	renamed := `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "admin": {"address": "127.0.0.1:1"}, "access_log": {},

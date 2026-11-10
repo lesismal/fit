@@ -3035,7 +3035,8 @@
 
     // // Outside RTMP or SRT servers, as a CDN's ingest, that streams of the hub are relayed to, each
     // // reconnected with backoff when it drops; a channel's own push lists its own. A reload keeps a
-    // // target whose stream and url are unchanged connected. At most 256 in all. None when left out.
+    // // target whose stream, url and connect_timeout are unchanged connected. At most 256 in all.
+    // // None when left out.
     // // list of object.
     // "push": [
       // {

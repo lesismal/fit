@@ -53,7 +53,7 @@ type Streaming struct {
 	Access *Access       `json:"access,omitempty" doc:"The client addresses the rtmp, rtsp, srt and webrtc listeners serve, deciding before the global access: a connection it refuses is closed as soon as it is accepted, and the datagrams of an srt caller or webrtc peer it refuses are dropped. A change applies to the next connection and peer, without starting a listener again; those connected are kept."`
 
 	Channels []StreamChannel `json:"channels,omitempty" doc:"Channels: items of a media_library played into the hub as live streams, in order, shuffled, looped or on a schedule, paced by their timestamps, which run on from one item to the next; every egress plays them under its auth. A reload changes a channel in place, from its next item. At most 256. None when left out."`
-	Push     []StreamPush    `json:"push,omitempty" doc:"Outside RTMP or SRT servers, as a CDN's ingest, that streams of the hub are relayed to, each reconnected with backoff when it drops; a channel's own push lists its own. A reload keeps a target whose stream and url are unchanged connected. At most 256 in all. None when left out."`
+	Push     []StreamPush    `json:"push,omitempty" doc:"Outside RTMP or SRT servers, as a CDN's ingest, that streams of the hub are relayed to, each reconnected with backoff when it drops; a channel's own push lists its own. A reload keeps a target whose stream, url and connect_timeout are unchanged connected. At most 256 in all. None when left out."`
 
 	At Value `json:"-" fit:"self"`
 }

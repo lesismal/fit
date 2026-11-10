@@ -94,7 +94,7 @@
   // servesHTTP tells whether a port has routes, which only an HTTP listener does. / 只有 HTTP 监听才有路由。
   function servesHTTP(protocols) {
     return !protocols || !protocols.length ||
-      protocols.some(function (p) { return p === 'http/1.1' || p === 'h2' || p === 'h2c'; });
+      protocols.some(function (p) { return p === 'http/1.1' || p === 'h2' || p === 'h2c' || p === 'h3'; });
   }
   function servesPort(r, name) {
     return !r || !r.listeners || !r.listeners.length || r.listeners.indexOf(name) >= 0;
@@ -354,7 +354,9 @@
     if (tls && Object.keys(tls).length) {
       add(t('e.certs'), '#/gw.tls/certs', 'shield', (tls.certificates || []).length || 1);
       if ((tls.acme || []).length) add(t('e.acme'), '#/gw.tls/acme', 'key', tls.acme.length);
-    } else if (autoHTTPS(draft) && servesHTTP(port.protocols) && port.name !== 'http') {
+    } else if (autoHTTPS(draft) && servesHTTP(port.protocols) && (port.generated ? port.name !== 'http' : !!tls)) {
+      // HTTPS by default fills in a written listener's tls only when it is there and empty, as tls {}; one
+      // without tls stays plain HTTP. / 自动 HTTPS 只补全写了但为空的 tls（如 tls {}）；没写 tls 的监听仍是明文 HTTP。
       add(t('e.autohttps'), '#/gw.tls/auto_https', 'lock');
     }
     if (port.generated && port.name === 'http') add(t('e.redirect'), '#/gw.tls/auto_https', 'forward');

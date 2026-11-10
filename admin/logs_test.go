@@ -74,6 +74,11 @@ func TestLogsAPI(t *testing.T) {
 	if logOut == nil || logOut.Rotate == nil || logOut.Rotate.MaxBytes != 200 || logOut.TimeZone != "local" {
 		t.Fatalf("the log's output %+v", body.Outputs)
 	}
+	for _, out := range body.Outputs {
+		if out.AccessLog != (out.Path == accessPath) {
+			t.Errorf("%s: access_log %v", out.Path, out.AccessLog)
+		}
+	}
 	if len(logOut.Loggers) == 0 || logOut.Format != "line" {
 		t.Errorf("loggers %v, format %q", logOut.Loggers, logOut.Format)
 	}

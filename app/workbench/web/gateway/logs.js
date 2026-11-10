@@ -132,7 +132,7 @@
         ];
         body.appendChild(UI.table(cols, files, { empty: t('l.nofiles') }));
         body.appendChild(h('div.muted.small', t('l.files', { n: files.length, size: bytes(out.total_bytes || 0) })));
-        var title = out.loggers && out.loggers.length === 1 && out.loggers[0] === 'access_log' ? t('l.access') : t('l.log');
+        var title = out.access_log ? t('l.access') : t('l.log');
         return UI.card(title, body, h('div.lg-tools', tools), true);
       }
 

@@ -453,6 +453,21 @@ func (cs *Configs) restartWarnings(c *config.Config) []string {
 	if !sameProviders(cs.first.Providers, c.Providers) {
 		warnings = append(warnings, "providers changed; the change takes effect when fit restarts")
 	}
+	// The listeners' engine takes these limits when it starts; the others
+	// apply on a reload.
+	was, now := &cs.first.Limits, &c.Limits
+	for _, l := range []struct {
+		field    string
+		was, now any
+	}{
+		{"max_conns", was.Conns(), now.Conns()},
+		{"max_pending_bytes", was.PendingBytes(), now.PendingBytes()},
+		{"max_write_queue_bytes", was.QueueBytes(), now.QueueBytes()},
+	} {
+		if l.was != l.now {
+			warnings = append(warnings, "limits."+l.field+" changed; the change takes effect when fit restarts")
+		}
+	}
 	return warnings
 }
 

@@ -59,7 +59,7 @@
     ['nw.title', 'New pipeline', '新建管道'], ['nw.name', 'Name', '名称'], ['nw.source', 'Source', '源'], ['nw.sink', 'Sink', '目标（sink）'],
     ['nw.dir', 'State directory (sync.state_dir)', '状态目录（sync.state_dir）'],
     ['nw.dirHint', 'Each pipeline\'s checkpoint is kept here. Set once, for every pipeline.', '各管道的检查点保存在此目录。只需设置一次，所有管道共用。'],
-    ['nw.bad', 'A name is letters, digits, \'_\', \'.\' and \'-\', unique.', '名称由字母、数字、“_”、“.”与“-”组成，且不能重复。'],
+    ['nw.bad', 'A name is letters, digits, \'_\', \'.\' and \'-\', starting with a letter or digit, unique.', '名称由字母、数字、“_”、“.”与“-”组成，以字母或数字开头，且不能重复。'],
     ['nw.make', 'Make it', '创建'],
     ['nw.made', 'Pipeline {name} is in the draft: fill in its fields, test it, then save and apply.', '管道 {name} 已加入草稿：请填写字段并测试，然后保存并应用。'],
     // overview / 概览
@@ -137,7 +137,7 @@
     return n + ' B';
   }
   function unix(s) { var v = Date.parse(s || ''); return isNaN(v) || v <= 0 ? 0 : v / 1000; }
-  var NAME = /^[A-Za-z0-9_.-]+$/;
+  var NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
   function stateKind(st) {
     if (!st) return '';
     if (st.paused) return 'warn';

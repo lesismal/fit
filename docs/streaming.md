@@ -176,7 +176,7 @@ play are checked against the policy as it is now. A change of any other field of
 that listener again, closing its connections. A change of `max_streams`, `max_players` or
 `gop_cache_bytes` starts the hub again, ending every stream and connection. Channels and push
 targets change in place: a channel's new list or schedule from its next item, a push target whose
-stream and URL are the same staying connected ([Reloads](channels.md#reloads)). `hls` keeps its
+stream, URL and `connect_timeout` are the same staying connected ([Reloads](channels.md#reloads)). `hls` keeps its
 segments across a reload that keeps its params. Leaving `streaming` out stops the role, and its
 handlers answer `503`.
 
