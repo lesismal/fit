@@ -9,7 +9,7 @@
 #   bench/sync/run.sh [-n ROUNDS] [-movers LIST] [-o DIR] [-name NAME] SCENARIO
 #
 # SCENARIO is files, files-loki, mysql-es, mysql-kafka, pg-kafka,
-# mysql-batch, rabbitmq-kafka, mqtt-kafka or mssql-kafka. The
+# mysql-batch, rabbitmq-kafka, mqtt-kafka, mssql-kafka or mqtt-influxdb. The
 # results go in DIR (bench/results/sync) as NAME.json (NAME is the scenario
 # and its variant), with NAME/: each round's result, fit's profiles, and the
 # movers' logs. The environment sets the rest (defaults in brackets):
@@ -60,8 +60,9 @@ pg-kafka) all=fit,debezium ;;
 mysql-batch) all=fit,datax ;;
 rabbitmq-kafka | mqtt-kafka) all=fit,kafka-connect ;;
 mssql-kafka) all=fit,debezium ;;
+mqtt-influxdb) all=fit,telegraf ;;
 *)
-	echo "run.sh: unknown scenario $sc: files, files-loki, mysql-es, mysql-kafka, pg-kafka, mysql-batch, rabbitmq-kafka, mqtt-kafka or mssql-kafka" >&2
+	echo "run.sh: unknown scenario $sc: files, files-loki, mysql-es, mysql-kafka, pg-kafka, mysql-batch, rabbitmq-kafka, mqtt-kafka, mssql-kafka or mqtt-influxdb" >&2
 	exit 2
 	;;
 esac
@@ -82,6 +83,8 @@ JRE_IMAGE=${JRE_IMAGE:-eclipse-temurin:8u452-b09-jre-jammy}
 RABBITMQ_IMAGE=${RABBITMQ_IMAGE:-rabbitmq:4.1.4}
 MOSQUITTO_IMAGE=${MOSQUITTO_IMAGE:-eclipse-mosquitto:2.0.22}
 MSSQL_IMAGE=${MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04}
+INFLUXDB_IMAGE=${INFLUXDB_IMAGE:-influxdb:2.7.12}
+TELEGRAF_IMAGE=${TELEGRAF_IMAGE:-telegraf:1.40.3}
 # Built here from the pinned images and the pinned downloads below.
 ADAPTER_IMAGE=fit-syncbench/canal-adapter:1.1.8-2
 DATAX_IMAGE=fit-syncbench/datax:202309
@@ -313,7 +316,7 @@ servers_up() {
 	rabbitmq-kafka)
 		run_d rabbitmq --cpuset-cpus "$SERVER_CPUS" -e RABBITMQ_DEFAULT_USER=bench -e RABBITMQ_DEFAULT_PASS=$PW "$RABBITMQ_IMAGE"
 		;;
-	mqtt-kafka)
+	mqtt-kafka | mqtt-influxdb)
 		run_d mosquitto --cpuset-cpus "$SERVER_CPUS" -v "$here/configs/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" "$MOSQUITTO_IMAGE"
 		;;
 	mssql-kafka)
@@ -328,6 +331,14 @@ servers_up() {
 		;;
 	esac
 	[ "$sc" = mysql-batch ] && mysql_up mysql2
+	if [ "$sc" = mqtt-influxdb ]; then
+		# Its setup makes the org and bucket bench, kept for good, and
+		# the token (the password, a throwaway) the movers write with.
+		run_d influxdb --cpuset-cpus "$SERVER_CPUS" -e DOCKER_INFLUXDB_INIT_MODE=setup \
+			-e DOCKER_INFLUXDB_INIT_USERNAME=bench -e DOCKER_INFLUXDB_INIT_PASSWORD=$PW \
+			-e DOCKER_INFLUXDB_INIT_ORG=bench -e DOCKER_INFLUXDB_INIT_BUCKET=bench \
+			-e DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=$PW "$INFLUXDB_IMAGE"
+	fi
 	if [ "$sc" = mysql-es ]; then
 		# shellcheck disable=SC2086
 		run_d es --cpuset-cpus "$SERVER_CPUS" $ES_JAVA -e discovery.type=single-node -e xpack.security.enabled=false -e ingest.geoip.downloader.enabled=false \
@@ -352,11 +363,16 @@ servers_up() {
 		# has made its Erlang cookie, makes it root's, and the server dies.
 		wait_for rabbitmq 180 docker exec -u rabbitmq "$PREFIX-rabbitmq" rabbitmqctl await_startup || return 1
 		;;
-	mqtt-kafka) wait_for mosquitto 60 sh -c "docker logs '$PREFIX-mosquitto' 2>&1 | grep -q running" || return 1 ;;
+	mqtt-kafka | mqtt-influxdb) wait_for mosquitto 60 sh -c "docker logs '$PREFIX-mosquitto' 2>&1 | grep -q running" || return 1 ;;
 	mssql-kafka)
 		wait_for mssql 300 docker exec "$PREFIX-mssql" /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$PW" -Q 'SELECT 1' || return 1
 		;;
 	esac
+	if [ "$sc" = mqtt-influxdb ]; then
+		# The bucket is listed once the setup is done and the server
+		# started again on its port.
+		wait_for influxdb 120 docker exec "$PREFIX-influxdb" influx bucket list --host http://localhost:8086 -t "$PW" -o bench -n bench || return 1
+	fi
 	if [ "$sc" = mysql-es ]; then
 		wait_for es 180 docker exec "$PREFIX-es" curl -fs 'localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s' || return 1
 	fi
@@ -402,7 +418,7 @@ mover_up() {
 		# shellcheck disable=SC2086
 		run_d fit --cpuset-cpus "$MOVER_CPUS" $vol -v "$PREFIX-run:/run/fit" \
 			-v "$bindir/fit:/usr/local/bin/fit:ro" -v "$here/configs/fit/$sc.conf:/etc/fit/fit.conf:ro" \
-			-e MYSQL_PASSWORD=$PW -e PG_PASSWORD=$PW -e RABBITMQ_PASSWORD=$PW -e MSSQL_PASSWORD=$PW \
+			-e MYSQL_PASSWORD=$PW -e PG_PASSWORD=$PW -e RABBITMQ_PASSWORD=$PW -e MSSQL_PASSWORD=$PW -e INFLUX_TOKEN=$PW \
 			"$BASE_IMAGE" fit run -c /etc/fit/fit.conf
 		containers=$PREFIX-fit pprof=unix:///run/fit/admin.sock
 		;;
@@ -417,6 +433,11 @@ mover_up() {
 			-v "$here/configs/promtail/promtail.yml:/etc/promtail/config.yml:ro" \
 			"$PROMTAIL_IMAGE" -config.file=/etc/promtail/config.yml
 		containers=$PREFIX-promtail
+		;;
+	telegraf)
+		run_d telegraf --cpuset-cpus "$MOVER_CPUS" -e INFLUX_TOKEN=$PW \
+			-v "$here/configs/telegraf/$sc.conf:/etc/telegraf/telegraf.conf:ro" "$TELEGRAF_IMAGE"
+		containers=$PREFIX-telegraf
 		;;
 	canal)
 		mode=tcp
@@ -485,7 +506,7 @@ run_one() {
 		return 1
 	fi
 	common="-scenario $sc -records $RECORDS -files $FILES -line-bytes $LINE_BYTES -tx-rows $TX_ROWS
-		-mysql-password $PW -pg-password $PW -rabbitmq-password $PW -mssql-password $PW"
+		-mysql-password $PW -pg-password $PW -rabbitmq-password $PW -mssql-password $PW -influxdb-token $PW"
 	# shellcheck disable=SC2086
 	agent -v "$PREFIX-data:/data" -- prepare $common || {
 		log "$name round $r: $m: prepare failed"
@@ -561,6 +582,7 @@ mysql-batch) pull "$MYSQL_IMAGE" "$JRE_IMAGE" ;;
 rabbitmq-kafka) pull "$RABBITMQ_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
 mqtt-kafka) pull "$MOSQUITTO_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
 mssql-kafka) pull "$MSSQL_IMAGE" "$KAFKA_IMAGE" "$DEBEZIUM_IMAGE" ;;
+mqtt-influxdb) pull "$MOSQUITTO_IMAGE" "$INFLUXDB_IMAGE" "$TELEGRAF_IMAGE" ;;
 esac
 build_images
 
@@ -590,6 +612,7 @@ mysql-batch) images="$images -image mysql=$MYSQL_IMAGE -image datax=$DATAX_IMAGE
 rabbitmq-kafka) images="$images -image rabbitmq=$RABBITMQ_IMAGE -image kafka=$KAFKA_IMAGE -image kafka-connect=$CONNECT_CAMEL_IMAGE" ;;
 mqtt-kafka) images="$images -image mosquitto=$MOSQUITTO_IMAGE -image kafka=$KAFKA_IMAGE -image kafka-connect=$CONNECT_CAMEL_IMAGE" ;;
 mssql-kafka) images="$images -image mssql=$MSSQL_IMAGE -image kafka=$KAFKA_IMAGE -image debezium=$DEBEZIUM_IMAGE" ;;
+mqtt-influxdb) images="$images -image mosquitto=$MOSQUITTO_IMAGE -image influxdb=$INFLUXDB_IMAGE -image telegraf=$TELEGRAF_IMAGE" ;;
 esac
 cpu=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^ //' || true)
 fit_rev=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo "${FIT_REV:-unknown}")

@@ -31,10 +31,12 @@ var scenarios = map[string]scenario{
 	"rabbitmq-kafka": {source: "rabbitmq", sink: "kafka", stream: true},
 	"mqtt-kafka":     {source: "mqtt", sink: "kafka", stream: true},
 	"mssql-kafka":    {source: "mssql", sink: "kafka", stream: true},
+	// MQTT's readings into InfluxDB (S10), the IoT pipeline.
+	"mqtt-influxdb": {source: "mqtt", sink: "influxdb", stream: true},
 }
 
 // scenarioNames lists the scenarios, for the usage.
-const scenarioNames = "files, files-loki, mysql-es, mysql-kafka, pg-kafka, mysql-batch, rabbitmq-kafka, mqtt-kafka or mssql-kafka"
+const scenarioNames = "files, files-loki, mysql-es, mysql-kafka, pg-kafka, mysql-batch, rabbitmq-kafka, mqtt-kafka, mssql-kafka or mqtt-influxdb"
 
 // options are prepare's and measure's flags.
 type options struct {
@@ -56,6 +58,7 @@ type options struct {
 
 	// The sink.
 	outDir, es, esIndex, kafka, kafkaTopic, kafkaFormat, target, loki string
+	influxdb, influxdbToken, influxdbBucket                           string
 
 	// The measurement.
 	containers    []string
@@ -110,6 +113,9 @@ func parseOptions(cmd string, args []string, stderr io.Writer) (*options, error)
 	fs.StringVar(&o.kafkaFormat, "kafka-format", "", "canal for a topic of Canal's flat messages, its rows counted; a message a record otherwise")
 	fs.StringVar(&o.target, "target", "mysql2:3306", "the batch job's target MySQL")
 	fs.StringVar(&o.loki, "loki", "http://loki:3100", "Loki's URL, whose metrics count the lines it took")
+	fs.StringVar(&o.influxdb, "influxdb", "http://influxdb:8086", "InfluxDB 2's URL, whose v1 query API counts the points")
+	fs.StringVar(&o.influxdbToken, "influxdb-token", "", "InfluxDB's token")
+	fs.StringVar(&o.influxdbBucket, "influxdb-bucket", "bench", "the bucket the movers write to, queried as the database of that name")
 
 	containers := fs.String("containers", "", "the mover's containers, comma-separated, measured and paused together")
 	fs.StringVar(&o.docker, "docker", "unix:///var/run/docker.sock", "the Docker API: unix://path or http://host:port")

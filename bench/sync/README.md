@@ -5,7 +5,7 @@
 The sync benchmark (dev-plan I193) measures fit's [sync](../../docs/sync.md) against the tools it
 stands in for: Filebeat for files, Promtail for files to Loki, Canal and Debezium for MySQL's,
 PostgreSQL's and SQL Server's changes, Kafka Connect for RabbitMQ and MQTT into Kafka, DataX for a
-batch copy. Every mover runs in Docker against fresh servers of the same pinned images and
+batch copy, Telegraf for MQTT into InfluxDB. Every mover runs in Docker against fresh servers of the same pinned images and
 settings, pinned to the same CPUs, and is measured the same way: the records it moves are counted
 where it writes them.
 
@@ -20,12 +20,16 @@ where it writes them.
 | `rabbitmq-kafka` | messages of a RabbitMQ 4.1 queue → Kafka 3.9 | fit (`rabbitmq` → `kafka`, the codec `raw`), Kafka Connect (Debezium's 3.0.8 image) with Apache Camel's `spring-rabbitmq-source` connector 4.14.5 |
 | `mqtt-kafka` | messages of a Mosquitto 2.0 topic at QoS 1 → Kafka 3.9 | fit (`mqtt` → `kafka`, the codec `raw`), Kafka Connect with Apache Camel's `mqtt5-source` connector 4.14.5 |
 | `mssql-kafka` | SQL Server 2022's CDC tables → Kafka 3.9 | fit (`mssql` → `kafka`, Debezium's envelope), Debezium 3.0.8 (SQL Server connector, JSON without schemas) |
+| `mqtt-influxdb` | JSON readings on a Mosquitto 2.0 topic at QoS 1 → InfluxDB 2.7 | fit (`mqtt` → `influxdb`, the codec `json`), Telegraf 1.40.3 (`inputs.mqtt_consumer` → `outputs.influxdb_v2`) |
 
 The rows are sysbench's (`id`, `k`, `c CHAR(120)`, `pad CHAR(60)`, about 200 bytes), written as
 transactions of `TX_ROWS` single-row INSERTs; the lines are a log line's head and filler; the
 messages are the rows as JSON, published by syncbench, persistent and confirmed (RabbitMQ) or at QoS 1
 (MQTT), while the mover is paused as for the streams. SQL Server's CDC capture job polls every second
-and takes up to 5,000 transactions a scan, so that it bounds neither mover.
+and takes up to 5,000 transactions a scan, so that it bounds neither mover. `mqtt-influxdb`'s messages
+are IoT readings instead (about 110 bytes): a `sensor` of a hundred, a time `ts` of its own (the
+reading's number of milliseconds after 2026-01-01), and three numbers, `id`, `temp` and `hum`; a point
+is its series and its time, so no two readings are one point.
 
 ## Running it
 
@@ -127,7 +131,9 @@ with the Docker socket mounted:
 Where the sink is counted: the files sink's lines; the lines Loki's distributor took
 (`loki_distributor_lines_received_total`, from its `/metrics`); Elasticsearch's `_count`; Kafka's offsets (a
 message a row for fit and Debezium), or, for Canal's flat messages, which hold a transaction's rows
-each, the rows in their `data`; the target table's `COUNT(*)`.
+each, the rows in their `data`; the target table's `COUNT(*)`; InfluxDB's points, `SELECT count(id)
+FROM reading` over the readings' times through its v1 query API (the bucket `bench` as a database). A
+reading written twice is the same point, so InfluxDB shows no extras.
 
 ### Settings that are aligned
 
@@ -143,6 +149,14 @@ Each mover runs with its defaults but where the comparison needs the same:
   messages; every topic one partition, made on first write.
 - The batch: four readers and writers each (DataX's `channel`, fit's `job.max_parallel`), batches of
   1,000 rows (DataX's `batchSize`, fit's sink `batch.max_records`), plain inserts.
+- MQTT to InfluxDB: batches of 500 points written after at most 1s (fit's defaults, its sink's
+  `batch`; Telegraf's `metric_batch_size` and `flush_interval`, whose defaults are 1,000 and 10s, with
+  no `flush_jitter`), at most 1,000 messages unacknowledged (fit's `receive_maximum`, Telegraf's
+  `max_undelivered_messages`, Mosquitto's `max_inflight_messages`): two batches in flight, each mover
+  acknowledging a message once its point is written; requests gzipped (both defaults). The same points:
+  the measurement `reading`, the tag `sensor`, the fields `id`, `temp` and `hum` (Telegraf's `json`
+  format makes them floats), the time `ts`; Telegraf without its `host` and `topic` tags. Telegraf's
+  plugin speaks MQTT 3.1.1, fit 5; both in a persistent session.
 - No TLS anywhere; the servers' durability relaxed alike (`innodb_flush_log_at_trx_commit=2`,
   `sync_binlog=0`, PostgreSQL's `synchronous_commit=off`) so that the writer is not the bound.
 - The JVMs keep their images' heaps (Canal 2-3 GiB, its adapter the same, Kafka Connect up to 2 GiB,
@@ -166,7 +180,7 @@ go run ./bench/cmd/benchreport -scores bench/results/sync-DATE
 
 | Workload | Weight | Items | Throughput | CPU | Memory | Lag |
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
-| S1, files | 20% | 128 B and 1 KiB lines, 1 and 16 files | 50% | 25% | 15% | 10% |
+| S1, files | 15% | 128 B and 1 KiB lines, 1 and 16 files | 50% | 25% | 15% | 10% |
 | S2, MySQL to Elasticsearch | 15% | | 50% | 25% | 15% | 10% |
 | S3, MySQL to Kafka | 15% | | 50% | 25% | 15% | 10% |
 | S4, PostgreSQL to Kafka | 10% | | 50% | 25% | 15% | 10% |
@@ -175,6 +189,7 @@ go run ./bench/cmd/benchreport -scores bench/results/sync-DATE
 | S7, RabbitMQ to Kafka | 7% | | 50% | 25% | 15% | 10% |
 | S8, MQTT to Kafka | 6% | | 50% | 25% | 15% | 10% |
 | S9, SQL Server to Kafka | 7% | | 50% | 25% | 15% | 10% |
+| S10, MQTT to InfluxDB | 5% | | 50% | 25% | 15% | 10% |
 
 A mover's score for an item is 100 times the weighted sum of its shares of the item's best; one whose
 records did not all reach the sink in time scores 0.

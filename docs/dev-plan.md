@@ -7193,7 +7193,8 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
   - **Ruled 2026-11-10, as recommended.** **The sync plan's weights** (I222 decision 8). Choice: S1 20, S2 15, S3 15, S4 10, S5 15, S6 5, S7 7,
     S8 6, S9 7 as now, or other weights; and whether the time series and vector sinks get a scenario (MQTT to
     InfluxDB against Telegraf has a mover; the vector sinks have none). Recommendation: keep the weights, and
-    add MQTT to InfluxDB as S10 only with the next plan run.
+    add MQTT to InfluxDB as S10 only with the next plan run. **Ruled** 2026-11-10: weights kept, MQTT to
+    InfluxDB added as S10 at 5%, taken from S1 (now 15%); see decision 8.
 - I217–I219:
   - **Doris labels outlive a reset** (I218 decision 1): records reloaded within
     `label_keep_max_second` (three days) after a pipeline reset or a table made again are refused as
@@ -8252,7 +8253,11 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 7. **[kept]** (2026-11-10: both movers read the same change tables, so the capture job bounds neither.)
    **SQL Server's capture job is tuned for the benchmark** (every second, 5,000 transactions a scan,
    100 scans), so that CDC's capture does not bound either mover; both read the same change tables.
-8. **[needs the user]** (2026-11-10: the plan's weights are the user's; see the list above.)
+8. **[changed]** (2026-11-10: the user ruled to keep the weights and to add MQTT to InfluxDB as S10,
+   against Telegraf 1.40.3 (`bench/sync/run.sh mqtt-influxdb`, `plan.sh`'s `s10-mqtt-influxdb`). S10's
+   weight was found by the smallest change to the kept weights: 5%, the plan's smallest workload weight
+   (S6's), taken whole from S1, the largest, so S1 goes from 20% to 15% and S2 to S9 keep theirs; the
+   sum stays 100%. Now S1 15%, S2 15%, S3 15%, S4 10%, S5 15%, S6 5%, S7 7%, S8 6%, S9 7%, S10 5%.)
    **The plan's weights**: S1 20%, S2 15%, S3 15%, S4 10%, S5 15%, S6 5%, S7 7%, S8 6%, S9 7%: the
    first round's keep three quarters, in their old proportions roughly.
 9. **[kept]** (2026-11-10: done: fit-examples' main (9659d7e) has the nine examples with `go.mod` at

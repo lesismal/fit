@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	mssqlwire "github.com/lesismal/fit/sync/mssql/wire"
 	amqpwire "github.com/lesismal/fit/sync/rabbitmq/wire"
@@ -52,7 +53,7 @@ func (f *fakePub) close() { f.closed.Add(1) }
 
 func TestPubSource(t *testing.T) {
 	a, b := &fakePub{}, &fakePub{}
-	s := &pubSource{pubs: []publisher{a, b}, batch: 7}
+	s := &pubSource{pubs: []publisher{a, b}, batch: 7, body: message}
 	if err := s.write(context.Background(), 10, 100); err != nil || a.n+b.n != 100 {
 		t.Fatal(err, a.n, b.n)
 	}
@@ -63,6 +64,26 @@ func TestPubSource(t *testing.T) {
 	s.close()
 	if a.closed.Load() != 1 || b.closed.Load() != 1 {
 		t.Fatal("not closed")
+	}
+}
+
+// TestReading checks a reading: JSON, its time i milliseconds after the
+// epoch, a sensor of a hundred.
+func TestReading(t *testing.T) {
+	var r struct {
+		Sensor, TS string
+		ID         int
+		Temp, Hum  float64
+	}
+	if err := json.Unmarshal(reading(1234567), &r); err != nil {
+		t.Fatal(err)
+	}
+	at, err := time.Parse(time.RFC3339Nano, r.TS)
+	if err != nil || at.Sub(readingsEpoch) != 1234567*time.Millisecond || r.Sensor != "s67" || r.ID != 1234567 || r.Temp == 0 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if string(reading(1)) == string(reading(2)) {
+		t.Fatal("two readings alike")
 	}
 }
 
@@ -90,6 +111,12 @@ func TestOpenPubSource(t *testing.T) {
 		if err != nil || len(src.(*pubSource).pubs) != 3 || src.(*pubSource).batch != 30 {
 			t.Fatal(sc, err)
 		}
+	}
+	// Into InfluxDB, readings.
+	opened = nil
+	src, err := openSource(context.Background(), &options{sc: scenarios["mqtt-influxdb"], txRows: 3}, 1)
+	if err != nil || string(src.(*pubSource).body(7)) != string(reading(7)) {
+		t.Fatal(err)
 	}
 	opened, fails = nil, 2
 	if _, err := openSource(context.Background(), &options{sc: scenarios["mqtt-kafka"]}, 3); err == nil || opened[0].closed.Load() != 1 {

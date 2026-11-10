@@ -353,6 +353,55 @@ func TestESCounter(t *testing.T) {
 	}
 }
 
+// TestInfluxCounter counts InfluxDB's points through its v1 query API, as
+// the token and the bucket say.
+func TestInfluxCounter(t *testing.T) {
+	ctx := context.Background()
+	var answer atomic.Value
+	answer.Store(`200 {"results":[{"statement_id":0,"series":[{"name":"reading","columns":["time","count"],"values":[["2026-01-01T00:00:00Z",12]]}]}]}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/query" || r.URL.Query().Get("db") != "b" || r.URL.Query().Get("q") != influxCount ||
+			r.Header.Get("Authorization") != "Token tok" {
+			w.WriteHeader(401)
+			return
+		}
+		code, body, _ := strings.Cut(answer.Load().(string), " ")
+		var n int
+		fmt.Sscan(code, &n)
+		w.WriteHeader(n)
+		io.WriteString(w, body)
+	}))
+	defer srv.Close()
+	c, err := openCounter(ctx, opts(t, "prepare", "-scenario", "mqtt-influxdb", "-influxdb", srv.URL+"/",
+		"-influxdb-token", "tok", "-influxdb-bucket", "b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.close()
+	if n, err := c.count(ctx); n != 12 || err != nil {
+		t.Errorf("count: %d, %v", n, err)
+	}
+	answer.Store(`200 {"results":[{"statement_id":0}]}`)
+	if n, err := c.count(ctx); n != 0 || err != nil {
+		t.Errorf("none: %d, %v", n, err)
+	}
+	for _, a := range []string{"500 broken", "200 nope", `200 {"results":[]}`, `200 {"results":[{"error":"no db"}]}`,
+		`200 {"results":[{"series":[{"values":[]}]}]}`, `200 {"results":[{"series":[{"values":[["t",1.5]]}]}]}`, `200 {"results":[{"series":[{"values":[["t","x"]]}]}]}`} {
+		answer.Store(a)
+		if _, err := c.count(ctx); err == nil {
+			t.Errorf("%s: no error", a)
+		}
+	}
+	bad := &influxCounter{client: http.DefaultClient, url: "http://127.0.0.1:1/query"}
+	if _, err := bad.count(ctx); err == nil {
+		t.Error("refused: no error")
+	}
+	bad.url = ":"
+	if _, err := bad.count(ctx); err == nil {
+		t.Error("a bad URL: no error")
+	}
+}
+
 func TestLokiCounter(t *testing.T) {
 	ctx := context.Background()
 	var answer atomic.Value

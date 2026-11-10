@@ -62,13 +62,15 @@ var workloads = []workload{
 }
 
 // syncWorkloads are the sync benchmark's plan (bench/sync/plan.sh), whose
-// results files are named s1-... to s9-...: the files and the two MySQL
+// results files are named s1-... to s10-...: the files and the two MySQL
 // streams count most, being what Filebeat and Canal are most used for; a
 // batch copy is scored without a lag, which it has none of. The second
 // round's (I222), files to Loki, RabbitMQ, MQTT and SQL Server to Kafka,
-// count a quarter between them.
+// count a quarter between them; MQTT to InfluxDB, against Telegraf, came
+// last (the user's ruling of 2026-11-10 on I222 decision 8), its 5% taken
+// from the files'.
 var syncWorkloads = []workload{
-	{"s1", "S1, files to a file", 0.20, defaultMetrics},
+	{"s1", "S1, files to a file", 0.15, defaultMetrics},
 	{"s2", "S2, MySQL to Elasticsearch", 0.15, defaultMetrics},
 	{"s3", "S3, MySQL to Kafka", 0.15, defaultMetrics},
 	{"s4", "S4, PostgreSQL to Kafka", 0.10, defaultMetrics},
@@ -77,6 +79,7 @@ var syncWorkloads = []workload{
 	{"s7", "S7, RabbitMQ to Kafka", 0.07, defaultMetrics},
 	{"s8", "S8, MQTT to Kafka", 0.06, defaultMetrics},
 	{"s9", "S9, SQL Server to Kafka", 0.07, defaultMetrics},
+	{"s10", "S10, MQTT to InfluxDB", 0.05, defaultMetrics},
 }
 
 // batchMetrics is a batch copy's: no lag, so throughput and what it costs.
@@ -99,6 +102,18 @@ func familyOf(name string) (workload, []workload, bool) {
 		}
 	}
 	return workload{}, nil, false
+}
+
+// sortKey is name with its workload's prefix as its place in its plan,
+// three digits after the prefix's letter (s10-x is s009-x), so that the
+// names sort in the plan's order; other names are as they are.
+func sortKey(name string) string {
+	w, family, ok := familyOf(name)
+	if !ok {
+		return name
+	}
+	i := slices.IndexFunc(family, func(x workload) bool { return x.prefix == w.prefix })
+	return fmt.Sprintf("%s%03d%s", w.prefix[:1], i, name[len(w.prefix):])
 }
 
 // item is one table of the plan.
@@ -151,10 +166,11 @@ func loadPlan(dir string) (*plan, error) {
 	return p, nil
 }
 
-// compareNames orders results files by workload, then by their level, as a
-// number: w0-fixed-500 before w0-fixed-2000.
+// compareNames orders results files by workload, in its plan's order
+// (s9-... before s10-...), then by their level, as a number: w0-fixed-500
+// before w0-fixed-2000.
 func compareNames(a, b string) int {
-	a, b = strings.TrimSuffix(a, ".json"), strings.TrimSuffix(b, ".json")
+	a, b = sortKey(strings.TrimSuffix(a, ".json")), sortKey(strings.TrimSuffix(b, ".json"))
 	ai, bi := strings.LastIndex(a, "-"), strings.LastIndex(b, "-")
 	if ai < 0 || bi < 0 || a[:ai] != b[:bi] {
 		return strings.Compare(a, b)

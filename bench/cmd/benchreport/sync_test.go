@@ -33,6 +33,13 @@ func syncPlanDir(t *testing.T) string {
 		 "records_per_sec": 500, "cpu_cores": 1, "rss_peak_bytes": 1048576, "rounds": 1},
 		{"mover": "datax", "scenario": "mysql-batch", "variant": "s5-mysql-batch", "records": 100, "counted": 40,
 		 "error": "the sink had 40 of 100 records", "rounds": 1}`)
+	syncFile(t, dir, "s10-mqtt-influxdb", "mqtt-influxdb", `
+		{"mover": "fit", "scenario": "mqtt-influxdb", "variant": "s10-mqtt-influxdb", "records": 100, "counted": 100,
+		 "records_per_sec": 900, "cpu_cores": 1, "rss_peak_bytes": 1048576,
+		 "lag_ms": {"rate": 10, "p50": 5, "p99": 10, "max": 12}, "rounds": 1},
+		{"mover": "telegraf", "scenario": "mqtt-influxdb", "variant": "s10-mqtt-influxdb", "records": 100, "counted": 100,
+		 "records_per_sec": 1000, "cpu_cores": 1, "rss_peak_bytes": 2097152,
+		 "lag_ms": {"rate": 10, "p50": 4, "p99": 9, "max": 11}, "rounds": 1}`)
 	// Files of the load test plan, and of no plan, are left out of a sync
 	// plan's scores.
 	writeRun(t, dir, "w0-fixed-100.json", &run{Results: []result{{Server: "nginx", Scenario: "fixed", Protocol: "h2c", RequestsPerSec: 1}}})
@@ -68,15 +75,22 @@ func TestSyncScores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.runs) != 2 || &p.family[0] != &syncWorkloads[0] {
+	if len(p.runs) != 3 || &p.family[0] != &syncWorkloads[0] {
 		t.Fatalf("%d runs, family %v", len(p.runs), p.family)
 	}
-	if w := p.weights[item{"s1-files-128b-1f", "files", "s1-files-128b-1f"}]; math.Abs(w-0.20) > 1e-12 {
+	if w := p.weights[item{"s1-files-128b-1f", "files", "s1-files-128b-1f"}]; math.Abs(w-0.15) > 1e-12 {
 		t.Errorf("S1 weight %v", w)
+	}
+	if w := p.weights[item{"s10-mqtt-influxdb", "mqtt-influxdb", "s10-mqtt-influxdb"}]; math.Abs(w-0.05) > 1e-12 {
+		t.Errorf("S10 weight %v", w)
+	}
+	// The runs in the plan's order: S10 after S5, not after S1.
+	if p.runs[len(p.runs)-1].name != "s10-mqtt-influxdb" {
+		t.Errorf("the last run %s", p.runs[len(p.runs)-1].name)
 	}
 	text := runMain(t, "-scores", dir)
 	for _, want := range []string{"### Overall ranking", "| 1    | fit ", "|    S1 |", "S5, a MySQL batch copy",
-		"records a second", "| filebeat |"} {
+		"records a second", "| filebeat |", "S10, MQTT to InfluxDB", "| telegraf |"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)
 		}
@@ -90,5 +104,18 @@ func TestSyncScores(t *testing.T) {
 	}
 	if _, err := load(filepath.Join(bad, "s1-x.json")); err == nil {
 		t.Error("a sync file whose results are not a list read")
+	}
+}
+
+// TestWeightsAddUp checks that each plan's workloads' weights add up to 1.
+func TestWeightsAddUp(t *testing.T) {
+	for _, family := range [][]workload{workloads, syncWorkloads} {
+		sum := 0.0
+		for _, w := range family {
+			sum += w.weight
+		}
+		if math.Abs(sum-1) > 1e-9 {
+			t.Errorf("%s...: the weights add up to %v", family[0].prefix, sum)
+		}
 	}
 }

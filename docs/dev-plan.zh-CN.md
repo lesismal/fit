@@ -5156,7 +5156,8 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     保持不创建；索引与 schema 是 fit 无法从记录推断的选择。
   - **2026-11-10 已裁定，按建议。** **同步计划的权重**（I222 决策 8）。选择：保持 S1 20、S2 15、S3 15、S4 10、S5 15、S6 5、S7 7、S8 6、S9 7，或其他权重；以及
     时序与向量目标是否加场景（MQTT 到 InfluxDB 有 Telegraf 作为对手，向量目标没有）。建议：保持权重，在下一次计划运行时再把 MQTT
-    到 InfluxDB 作为 S10 加入。
+    到 InfluxDB 作为 S10 加入。**已裁定** 2026-11-10：保持权重，MQTT 到 InfluxDB 作为 S10 加入，占 5%，从 S1 拿出
+    （现为 15%）；见决策 8。
 - I217–I219：
   - **Doris 的 label 比重置活得久**（I218 决定 1）：流水线重置或表重建后，在 `label_keep_max_second`（三天）之内重新导入的
     记录会被静默地以“已导入”拒绝，除非手动修改 `label_prefix`。选择：保持现状，或把流水线的 lineage 放进 label（告知每个
@@ -5870,7 +5871,10 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 7. **[kept]**（2026-11-10：两个对手读同样的变更表，捕获作业不限制任何一方。）
    **为基准调整 SQL Server 的捕获作业**（每秒一次，每次扫描 5000 个事务，100 次扫描），使 CDC 的捕获不成为任何一方的瓶颈；
    两者读同样的变更表。
-8. **[needs the user]**（2026-11-10：计划的权重由用户决定；见上方列表。）
+8. **[changed]**（2026-11-10：用户裁定保持权重，并把 MQTT 到 InfluxDB 作为 S10 加入，对比 Telegraf 1.40.3
+   （`bench/sync/run.sh mqtt-influxdb`，`plan.sh` 的 `s10-mqtt-influxdb`）。S10 的权重按对保持的权重改动最小的方式得出：
+   5%，即计划中最小的工作负载权重（S6 的），整个从最大的 S1 中拿出，于是 S1 由 20% 变为 15%，S2 到 S9 不变；总和仍为
+   100%。现为 S1 15%、S2 15%、S3 15%、S4 10%、S5 15%、S6 5%、S7 7%、S8 6%、S9 7%、S10 5%。）
    **计划的权重**：S1 20%、S2 15%、S3 15%、S4 10%、S5 15%、S6 5%、S7 7%、S8 6%、S9 7%：第一批保留四分之三，大致维持原有比例。
 9. **[kept]**（2026-11-10：已完成：fit-examples 的
    main（9659d7e）含这九个示例，`go.mod` 指向 fit 1fdb2407。）

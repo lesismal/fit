@@ -7,7 +7,7 @@
 #   bench/sync/plan.sh [-n ROUNDS] DATE
 #
 # The results go in bench/results/sync-DATE: a results file for each item
-# (s1-files-128b-1f.json ... s9-mssql-kafka.json) with its folder of
+# (s1-files-128b-1f.json ... s10-mqtt-influxdb.json) with its folder of
 # rounds, profiles and logs; tables.md, every item's table with its weight
 # and scores (benchreport -plan); scores.md, the ranking (benchreport
 # -scores). Progress is in plan.log there, each item's output in
@@ -60,6 +60,8 @@ item s6-files-loki files-loki
 item s7-rabbitmq-kafka rabbitmq-kafka
 item s8-mqtt-kafka mqtt-kafka
 item s9-mssql-kafka mssql-kafka
+# S10, MQTT's readings into InfluxDB, against Telegraf.
+item s10-mqtt-influxdb mqtt-influxdb
 
 report() {
 	if [ -n "${BENCHREPORT:-}" ]; then
@@ -69,8 +71,9 @@ report() {
 	fi
 }
 : >"$results/tables.md"
-for f in "$results"/s*.json; do
-	report -in "$f" -plan "$results" >>"$results/tables.md" || true
+# In the plan's order: s10 after s9, not after s1.
+for f in $(cd "$results" && ls s*.json | sort -V); do
+	report -in "$results/$f" -plan "$results" >>"$results/tables.md" || true
 done
 report -scores "$results" >"$results/scores.md" || true
 echo "end $(date -u +%FT%TZ)" >>"$results/plan.log"
