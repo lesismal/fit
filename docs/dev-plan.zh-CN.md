@@ -5149,12 +5149,12 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 **待用户裁定**（来自 2026-11-10 的审查）：
 
 - I220–I222 与规划：
-  - **时序目标中的删除**（I220 决策 1）。选择：保持默认 `deletes skip`，或默认 `fail`，或真正删除（TDengine `mode sql` 用
+  - **2026-11-10 已裁定，按建议。** **时序目标中的删除**（I220 决策 1）。选择：保持默认 `deletes skip`，或默认 `fail`，或真正删除（TDengine `mode sql` 用
     `DELETE ... WHERE ts =`，只有设置了 `time_field` 才能找到该行；InfluxDB 2 的删除 API 逐点调用）。建议：保持 `skip`，时序是
     历史；只在有需求时再加 TDengine `mode sql` 的删除。
-  - **向量目标是否创建集合**（I221 决策 3）。选择：从不创建（现状），或加一个可选的 `create`，带维数、距离与主键类型。建议：
+  - **2026-11-10 已裁定，按建议。** **向量目标是否创建集合**（I221 决策 3）。选择：从不创建（现状），或加一个可选的 `create`，带维数、距离与主键类型。建议：
     保持不创建；索引与 schema 是 fit 无法从记录推断的选择。
-  - **同步计划的权重**（I222 决策 8）。选择：保持 S1 20、S2 15、S3 15、S4 10、S5 15、S6 5、S7 7、S8 6、S9 7，或其他权重；以及
+  - **2026-11-10 已裁定，按建议。** **同步计划的权重**（I222 决策 8）。选择：保持 S1 20、S2 15、S3 15、S4 10、S5 15、S6 5、S7 7、S8 6、S9 7，或其他权重；以及
     时序与向量目标是否加场景（MQTT 到 InfluxDB 有 Telegraf 作为对手，向量目标没有）。建议：保持权重，在下一次计划运行时再把 MQTT
     到 InfluxDB 作为 S10 加入。
 - I217–I219：
@@ -5729,7 +5729,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **[needs the user]**（2026-11-10：产品选择：时序库是历史，还是源表行的副本；见上方列表。）
+1. **[已裁定 2026-11-10：按建议保留]**（2026-11-10：产品选择：时序库是历史，还是源表行的副本；见上方列表。）
    **删除不写**（`deletes skip`，计为已写入），或交给 `on_error`（`deletes fail`）：line protocol 没有删除，InfluxDB 3 不能删除
    单点，InfluxDB 2 的 `/api/v2/delete`（谓词加时间范围）开销大。备选：逐点调用 v2 的删除 API；TDengine `mode sql` 中用
    `DELETE FROM sub WHERE ts = ...`。
@@ -5791,7 +5791,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 2. **[kept]**（2026-11-10：互通表明从中间和从头重放在两者中都收敛。）
    **一批记录缩减为每个键的最后一条**，删除与 upsert 分别成请求，因为 Qdrant 和 Milvus 都不保证同一请求中同一 ID 两次写入的
    顺序。这样批内不同键之间的顺序无关紧要。
-3. **[needs the user]**（2026-11-10：产品选择；见上方列表。）
+3. **[已裁定 2026-11-10：按建议保留]**（2026-11-10：产品选择；见上方列表。）
    **集合由用户创建**，目标从不创建：维数、距离、索引与 schema 是 fit 无法从记录推断的选择。备选：按第一个向量的维数创建。
 4. **[changed]**（2026-11-10：对 Milvus 2.5.17 的探测表明 upsert
    的键会被转换为主键类型，但删除 filter 中另一类型的字面量会被拒绝（1100），所以整数键配

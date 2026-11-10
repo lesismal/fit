@@ -7183,14 +7183,14 @@ connection tests, unit tests against fakes for the 98% coverage floor, interop i
 **For the user to rule on** (from the reviews of 2026-11-10):
 
 - I220–I222 and planning:
-  - **Deletes in the time series sinks** (I220 decision 1). Choice: keep `deletes skip` as the default, or
+  - **Ruled 2026-11-10, as recommended.** **Deletes in the time series sinks** (I220 decision 1). Choice: keep `deletes skip` as the default, or
     make `fail` the default, or delete for real (TDengine `mode sql` by `DELETE ... WHERE ts =`, which finds
     the row only with `time_field`; InfluxDB 2's delete API per point). Recommendation: keep `skip`, a time
     series being history, and add the TDengine `mode sql` delete only if asked for.
-  - **Collections made by the vector sinks** (I221 decision 3). Choice: never (now), or an opt-in
+  - **Ruled 2026-11-10, as recommended.** **Collections made by the vector sinks** (I221 decision 3). Choice: never (now), or an opt-in
     `create` with a size, distance and primary key type. Recommendation: keep never; index and schema are
     choices fit cannot make from a record.
-  - **The sync plan's weights** (I222 decision 8). Choice: S1 20, S2 15, S3 15, S4 10, S5 15, S6 5, S7 7,
+  - **Ruled 2026-11-10, as recommended.** **The sync plan's weights** (I222 decision 8). Choice: S1 20, S2 15, S3 15, S4 10, S5 15, S6 5, S7 7,
     S8 6, S9 7 as now, or other weights; and whether the time series and vector sinks get a scenario (MQTT to
     InfluxDB against Telegraf has a mover; the vector sinks have none). Recommendation: keep the weights, and
     add MQTT to InfluxDB as S10 only with the next plan run.
@@ -8067,7 +8067,7 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
-1. **[needs the user]** (2026-11-10: a product choice: a time series as history or as a copy of the
+1. **[ruled 2026-11-10: kept, as recommended]** (2026-11-10: a product choice: a time series as history or as a copy of the
    source's rows; see the list above.)
    **Deletes are left out** (`deletes skip`, counted as written), or fail to `on_error` (`deletes
    fail`): the line protocol has none, InfluxDB 3 deletes no point, and InfluxDB 2's
@@ -8148,7 +8148,7 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
    **A batch is cut to each key's last record**, deletes and upserts in requests of their own, since
    neither Qdrant nor Milvus orders two writes of one ID in a request. The batch's order across keys
    does not matter then.
-3. **[needs the user]** (2026-11-10: a product choice; see the list above.)
+3. **[ruled 2026-11-10: kept, as recommended]** (2026-11-10: a product choice; see the list above.)
    **Collections are made by the user**, never by the sink: size, distance, index and schema are
    choices fit cannot make from a record. Alternative: make one from the first vector's size.
 4. **[changed]** (2026-11-10: a probe of Milvus 2.5.17 found an upsert's key converted to the primary
