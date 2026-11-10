@@ -5,12 +5,17 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"hash"
 	"math/big"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,6 +49,20 @@ type fakeBroker struct {
 	got     []*Message
 	gotFlow []string // the client's packets, by name
 	connect chan *fakeConn
+	// denyUnsub are the filters UNSUBACK refuses; noUnsuback holds it.
+	denyUnsub  map[string]bool
+	noUnsuback bool
+	// unsubAs is the packet type UNSUBSCRIBE is answered with, when not 0;
+	// unsubCodes, when not nil, the UNSUBACK's codes.
+	unsubAs    byte
+	unsubCodes []byte
+	// scram are the users and passwords of enhanced authentication, by
+	// SCRAM; nil refuses it. badSig sends a wrong server signature;
+	// noFinal none; holdReauth leaves a re-authentication unanswered.
+	scram      map[string]string
+	badSig     bool
+	noFinal    bool
+	holdReauth bool
 }
 
 type fakeSession struct {
@@ -77,6 +96,8 @@ type fakeConn struct {
 	sent      map[string]uint16 // ours
 	closed    chan struct{}
 	disc      chan byte // the DISCONNECT's reason code
+	will      *Will     // published unless DISCONNECT, normal, ends it
+	auth      *scramServer
 }
 
 func newFakeBroker(t *testing.T, tc *tls.Config) *fakeBroker {
@@ -89,7 +110,7 @@ func newFakeBroker(t *testing.T, tc *tls.Config) *fakeBroker {
 		ln = tls.NewListener(ln, tc)
 	}
 	b := &fakeBroker{t: t, ln: ln, sessions: map[string]*fakeSession{}, codes: map[string]byte{}, deny: map[string]bool{},
-		connect: make(chan *fakeConn, 16)}
+		connect: make(chan *fakeConn, 16), denyUnsub: map[string]bool{}}
 	go func() {
 		for {
 			nc, err := ln.Accept()
@@ -169,7 +190,11 @@ func (b *fakeBroker) serve(nc net.Conn) {
 				delete(b.sessions, c.sess.id)
 			}
 		}
+		will := c.will
 		b.mu.Unlock()
+		if will != nil {
+			b.take(&will.Message)
+		}
 		close(c.closed)
 	}()
 	br := bufio.NewReader(nc)
@@ -177,7 +202,7 @@ func (b *fakeBroker) serve(nc net.Conn) {
 	if err != nil || first != typeConnect<<4 {
 		return
 	}
-	if !c.connect(body) {
+	if !c.connect(br, body) {
 		return
 	}
 	select {
@@ -196,7 +221,7 @@ func (b *fakeBroker) serve(nc net.Conn) {
 }
 
 // connect reads CONNECT and answers it.
-func (c *fakeConn) connect(body []byte) bool {
+func (c *fakeConn) connect(br *bufio.Reader, body []byte) bool {
 	b := c.b
 	r := &reader{b: body}
 	if r.string() != "MQTT" {
@@ -209,6 +234,19 @@ func (c *fakeConn) connect(body []byte) bool {
 		c.props = r.props()
 	}
 	id := r.string()
+	var will *Will
+	if flags&0x04 != 0 {
+		will = &Will{Message: Message{QoS: flags >> 3 & 3, Retain: flags&0x20 != 0}}
+		if c.version == Version5 {
+			p := r.props()
+			will.PayloadUTF8, will.ContentType, will.ResponseTopic, will.CorrelationData, will.UserProperties =
+				p.payloadUTF8, p.contentType, p.responseTopic, p.correlation, p.user
+			will.MessageExpiry = time.Duration(p.expiry) * time.Second
+			will.Delay = time.Duration(p.willDelay) * time.Second
+		}
+		will.Topic = r.string()
+		will.Payload = r.binary()
+	}
 	var user, pass string
 	if flags&0x80 != 0 {
 		user = r.string()
@@ -221,9 +259,16 @@ func (c *fakeConn) connect(body []byte) bool {
 		return false
 	}
 	c.clean, c.user = flags&2 != 0, user
+	var final []byte
+	if c.props.authMethod != "" {
+		var ok bool
+		if final, ok = c.authenticate(br, c.props.authMethod, c.props.authData); !ok {
+			return false
+		}
+	}
 	b.mu.Lock()
 	code := b.refuse
-	if code == 0 && b.users != nil && (b.users[user] != pass || user == "") {
+	if code == 0 && b.users != nil && final == nil && (b.users[user] != pass || user == "") {
 		code = 4
 		if c.version == Version5 {
 			code = 0x86
@@ -232,6 +277,10 @@ func (c *fakeConn) connect(body []byte) bool {
 	var w propsWriter
 	if b.connack != nil {
 		b.connack(&w)
+	}
+	if final != nil {
+		w.str(propAuthMethod, c.props.authMethod)
+		w.bin(propAuthData, final)
 	}
 	if code != 0 {
 		b.mu.Unlock()
@@ -253,7 +302,7 @@ func (c *fakeConn) connect(body []byte) bool {
 	if old := s.conn; old != nil {
 		old.nc.Close()
 	}
-	s.conn, c.sess = c, s
+	s.conn, c.sess, c.will = c, s, will
 	resend := append([]*fakeOut(nil), s.inflight...)
 	b.mu.Unlock()
 	c.writeConnack(present, 0, &w)
@@ -492,15 +541,188 @@ func (c *fakeConn) handle(first byte, body []byte) bool {
 		if !no {
 			c.write([]byte{typePingresp << 4, 0})
 		}
+	case typeUnsub:
+		id := r.u16()
+		if c.version == Version5 {
+			r.props()
+		}
+		var codes []byte
+		b.mu.Lock()
+		for r.left() > 0 && r.err == nil {
+			f := r.string()
+			_, had := c.sess.subs[f]
+			switch {
+			case b.denyUnsub[f]:
+				codes = append(codes, 0x87)
+			case had:
+				delete(c.sess.subs, f)
+				codes = append(codes, 0)
+			default:
+				codes = append(codes, 0x11)
+			}
+		}
+		no, as := b.noUnsuback, b.unsubAs
+		if b.unsubCodes != nil {
+			codes = b.unsubCodes
+		}
+		b.mu.Unlock()
+		if no {
+			return true
+		}
+		if as == 0 {
+			as = typeUnsuback
+		}
+		body := appendUint16(nil, id)
+		if c.version == Version5 {
+			body = append((&propsWriter{}).appendTo(body), codes...)
+		} else if as != typeUnsuback {
+			body = append(body, 0)
+		}
+		c.write(packet(as<<4, body))
+	case typeAuth:
+		code, p, err := authOf(body)
+		if err != nil {
+			b.t.Errorf("a malformed AUTH")
+			return false
+		}
+		b.mu.Lock()
+		hold := b.holdReauth
+		b.mu.Unlock()
+		if hold {
+			return true
+		}
+		if code == 0x19 {
+			s, first, ok := c.b.scramStart(p.authMethod, p.authData)
+			if !ok {
+				c.write([]byte{typeDisconnect << 4, 1, 0x8C})
+				return false
+			}
+			c.auth = s
+			c.write(authPacket(0x18, p.authMethod, first))
+			return true
+		}
+		final, ok := c.auth.finish(p.authData)
+		if !ok {
+			c.write([]byte{typeDisconnect << 4, 1, 0x87})
+			return false
+		}
+		var w propsWriter
+		w.str(propAuthMethod, p.authMethod)
+		w.bin(propAuthData, final)
+		c.write(packet(typeAuth<<4, w.appendTo([]byte{0})))
 	case typeDisconnect:
 		code := byte(0)
 		if len(body) > 0 {
 			code = body[0]
 		}
+		if code == 0 {
+			b.mu.Lock()
+			c.will = nil
+			b.mu.Unlock()
+		}
 		c.disc <- code
 		return false
 	}
 	return true
+}
+
+// authenticate runs CONNECT's SCRAM exchange, and returns the server's
+// final message for the CONNACK; false when it answered with a refusal.
+func (c *fakeConn) authenticate(br *bufio.Reader, method string, data []byte) ([]byte, bool) {
+	s, first, ok := c.b.scramStart(method, data)
+	if !ok {
+		c.writeConnack(false, 0x8C, &propsWriter{})
+		return nil, false
+	}
+	c.write(authPacket(0x18, method, first))
+	pf, body, err := readPacket(br, 1<<20)
+	if err != nil || pf != typeAuth<<4 {
+		return nil, false
+	}
+	_, p, _ := authOf(body)
+	final, ok := s.finish(p.authData)
+	if !ok {
+		c.writeConnack(false, 0x87, &propsWriter{})
+		return nil, false
+	}
+	return final, true
+}
+
+// scramServer is the server's side of a SCRAM exchange.
+type scramServer struct {
+	b              *fakeBroker
+	h              func() hash.Hash
+	password       string
+	bare, srvFirst string
+	salt           []byte
+}
+
+func (b *fakeBroker) scramStart(method string, data []byte) (*scramServer, []byte, bool) {
+	a, err := NewSCRAM(method, "x", "")
+	b.mu.Lock()
+	users := b.scram
+	b.mu.Unlock()
+	msg, ok := strings.CutPrefix(string(data), "n,,")
+	if err != nil || users == nil || !ok {
+		return nil, nil, false
+	}
+	var user, nonce string
+	for _, f := range strings.Split(msg, ",") {
+		if v, ok := strings.CutPrefix(f, "n="); ok {
+			user = v
+		}
+		if v, ok := strings.CutPrefix(f, "r="); ok {
+			nonce = v
+		}
+	}
+	pw, known := users[user]
+	if !known {
+		pw = "\x00unknown"
+	}
+	s := &scramServer{b: b, h: a.(*scram).hash, password: pw, bare: msg, salt: []byte("fake-salt")}
+	s.srvFirst = "r=" + nonce + "srv,s=" + base64.StdEncoding.EncodeToString(s.salt) + ",i=64"
+	return s, []byte(s.srvFirst), true
+}
+
+// finish checks the client's final message, and makes the server's.
+func (s *scramServer) finish(data []byte) ([]byte, bool) {
+	msg := string(data)
+	without, proof64, ok := strings.Cut(msg, ",p=")
+	if !ok {
+		return nil, false
+	}
+	salted, _ := pbkdf2.Key(s.h, s.password, s.salt, 64, s.h().Size())
+	mac := func(key []byte, m string) []byte {
+		h := hmac.New(s.h, key)
+		h.Write([]byte(m))
+		return h.Sum(nil)
+	}
+	auth := s.bare + "," + s.srvFirst + "," + without
+	clientKey := mac(salted, "Client Key")
+	h := s.h()
+	h.Write(clientKey)
+	sig := mac(h.Sum(nil), auth)
+	proof, _ := base64.StdEncoding.DecodeString(proof64)
+	if len(proof) != len(sig) {
+		return nil, false
+	}
+	for i := range proof {
+		proof[i] ^= sig[i]
+	}
+	if !hmac.Equal(proof, clientKey) {
+		return nil, false
+	}
+	s.b.mu.Lock()
+	bad, none := s.b.badSig, s.b.noFinal
+	s.b.mu.Unlock()
+	if none {
+		return []byte{}, true
+	}
+	ss := mac(mac(salted, "Server Key"), auth)
+	if bad {
+		ss[0] ^= 1
+	}
+	return []byte("v=" + base64.StdEncoding.EncodeToString(ss)), true
 }
 
 func (c *fakeConn) writeAck(typ byte, id uint16, code byte) {

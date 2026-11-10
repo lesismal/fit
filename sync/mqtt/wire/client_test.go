@@ -889,7 +889,7 @@ func TestProps(t *testing.T) {
 	want := props{payloadUTF8: true, expiry: 5, hasExpiry: true, contentType: "c", responseTopic: "r", correlation: []byte{9},
 		subIDs: []int{268435455}, sessionExpiry: 6, assignedID: "id", serverKeepAlive: 7, hasKeepAlive: true, reason: "why",
 		receiveMax: 8, aliasMax: 9, alias: 10, maxQoS: 1, hasMaxQoS: true, hasRetain: true, maxPacket: 11,
-		user: []UserProperty{{"k", "v"}}}
+		user: []UserProperty{{"k", "v"}}, authMethod: "m", authData: []byte{1}, willDelay: 1}
 	if !reflect.DeepEqual(p, want) {
 		t.Fatalf("%+v", p)
 	}

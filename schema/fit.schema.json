@@ -9541,6 +9541,15 @@
     "sync.sinks.mqtt": {
       "additionalProperties": false,
       "properties": {
+        "auth_method": {
+          "description": "In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of username and password_env's password, rather than with the password in CONNECT: the password does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out.",
+          "enum": [
+            "SCRAM-SHA-1",
+            "SCRAM-SHA-256",
+            "SCRAM-SHA-512"
+          ],
+          "type": "string"
+        },
         "ca_file": {
           "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls.",
           "type": "string"
@@ -9650,6 +9659,10 @@
             "5"
           ],
           "type": "string"
+        },
+        "will": {
+          "$ref": "#/$defs/syncmqtt.Will",
+          "description": "A will message the broker publishes once the sink's connection ends other than by fit closing it: lost, or kept alive in vain. None when left out."
         }
       },
       "required": [
@@ -11920,6 +11933,15 @@
     "sync.sources.mqtt": {
       "additionalProperties": false,
       "properties": {
+        "auth_method": {
+          "description": "In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of username and password_env's password, rather than with the password in CONNECT: the password does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out.",
+          "enum": [
+            "SCRAM-SHA-1",
+            "SCRAM-SHA-256",
+            "SCRAM-SHA-512"
+          ],
+          "type": "string"
+        },
         "ca_file": {
           "description": "A PEM file of the certificates the brokers' are checked against, in place of the system's roots; needs tls.",
           "type": "string"
@@ -12027,6 +12049,10 @@
             "5"
           ],
           "type": "string"
+        },
+        "will": {
+          "$ref": "#/$defs/syncmqtt.Will",
+          "description": "A will message the broker publishes once the source's connection ends other than by fit closing it: lost, or kept alive in vain. None when left out."
         }
       },
       "required": [
@@ -13856,6 +13882,54 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "syncmqtt.Will": {
+      "additionalProperties": false,
+      "properties": {
+        "content_type": {
+          "description": "In version 5, the will's content type, as text/plain.",
+          "type": "string"
+        },
+        "delay": {
+          "description": "In version 5, how long the broker waits, once the connection is lost, before it publishes the will, rounded up to seconds: nothing is published if fit is back within it. The broker publishes it sooner when the session ends first: at once for the sink, whose session ends with its connection. At once when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "message_expiry": {
+          "description": "In version 5, how long the broker keeps the will for a subscriber not connected, rounded up to seconds. None when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "payload": {
+          "description": "The will's payload, as text. Empty when left out.",
+          "type": "string"
+        },
+        "qos": {
+          "description": "The will's QoS: 0, 1 or 2. 0 when left out.",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retain": {
+          "description": "Publish the will retained: the broker keeps it for clients that subscribe later, until a message to the topic replaces it.",
+          "type": "boolean"
+        },
+        "topic": {
+          "description": "The will's topic: a topic name, without + or #.",
+          "type": "string"
+        },
+        "user_properties": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "In version 5, user properties the will carries, in the order of their names.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "topic"
+      ],
       "type": "object"
     },
     "wasm.Property": {

@@ -18,6 +18,8 @@ const (
 	typePubcomp    byte = 7
 	typeSubscribe  byte = 8
 	typeSuback     byte = 9
+	typeUnsub      byte = 10
+	typeUnsuback   byte = 11
 	typePingreq    byte = 12
 	typePingresp   byte = 13
 	typeDisconnect byte = 14
@@ -94,6 +96,9 @@ type props struct {
 	hasRetain       bool
 	maxPacket       uint32
 	user            []UserProperty
+	authMethod      string
+	authData        []byte
+	willDelay       uint32
 }
 
 // appendVarint appends n as a variable byte integer.
@@ -295,12 +300,14 @@ func (r *reader) props() props {
 		case propUserProperty:
 			k := r.string()
 			p.user = append(p.user, UserProperty{k, r.string()})
-		case propAuthMethod, propResponseInfo, propServerReference:
-			r.string()
+		case propAuthMethod:
+			p.authMethod = r.string()
 		case propAuthData:
-			r.binary()
+			p.authData = r.binary()
+		case propResponseInfo, propServerReference:
+			r.string()
 		case propWillDelay:
-			r.u32()
+			p.willDelay = r.u32()
 		case propRequestProblemInfo, propRequestRespInfo, propWildcardAvailable, propSubIDAvailable, propSharedAvailable:
 			r.byte()
 		default:
@@ -317,7 +324,7 @@ func (r *reader) props() props {
 // with, or a CONNACK's refusal in either version.
 type ReasonError struct {
 	// Packet is the packet that carried it: CONNACK, PUBACK, PUBREC,
-	// SUBACK, DISCONNECT.
+	// SUBACK, UNSUBACK, AUTH, DISCONNECT.
 	Packet string
 	Code   byte
 	// Reason is the server's reason string, when it sent one.
@@ -334,7 +341,8 @@ func (e *ReasonError) Error() string {
 
 // reasonNames name MQTT 5's reason codes of failure.
 var reasonNames = map[byte]string{
-	0x04: "disconnect with will message",
+	0x04: "disconnect with will message", 0x11: "no subscription existed",
+	0x18: "continue authentication", 0x19: "re-authenticate",
 	0x80: "unspecified error", 0x81: "malformed packet", 0x82: "protocol error", 0x83: "implementation specific error",
 	0x84: "unsupported protocol version", 0x85: "client identifier not valid", 0x86: "bad user name or password",
 	0x87: "not authorized", 0x88: "server unavailable", 0x89: "server busy", 0x8A: "banned",

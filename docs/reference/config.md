@@ -7565,7 +7565,7 @@ In JSON:
 
 ### `mqtt`
 
-Subscribes to MQTT topic filters, of version 3.1.1 or 5, in a persistent session of its client ID, which the broker keeps while fit is away, with the messages of QoS 1 and 2 sent to it. A message of QoS 1 or 2 is acknowledged (PUBACK, PUBREC) only once every sink has its records, in the order the messages came, so the broker sends again, after a restart, those a pipeline stopped or killed had not written: at least once into the sinks, and a QoS 2 message is taken once in a connection. Each message is a record whose namespace is its topic, unless namespace sets one, and whose key is the topic, unless the codec sets one: its after holds the topic, payload, QoS, retain and MQTT 5 properties when no codec is named. The checkpoint holds nothing to resume from: the session is the position. In a job (mode once) it reads until no message comes for idle, then ends once the sinks have what it read.
+Subscribes to MQTT topic filters, of version 3.1.1 or 5, in a persistent session of its client ID, which the broker keeps while fit is away, with the messages of QoS 1 and 2 sent to it. A message of QoS 1 or 2 is acknowledged (PUBACK, PUBREC) only once every sink has its records, in the order the messages came, so the broker sends again, after a restart, those a pipeline stopped or killed had not written: at least once into the sinks, and a QoS 2 message is taken once in a connection. Each message is a record whose namespace is its topic, unless namespace sets one, and whose key is the topic, unless the codec sets one: its after holds the topic, payload, QoS, retain and MQTT 5 properties when no codec is named. The checkpoint holds nothing to resume from, the session being the position, but the topic filters subscribed: a filter dropped from topics is unsubscribed at the next run. In a job (mode once) it reads until no message comes for idle, then ends once the sinks have what it read.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -7589,6 +7589,25 @@ Subscribes to MQTT topic filters, of version 3.1.1 or 5, in a persistent session
 | `codec` | [codec](#sync codecs) |  | What makes records of a message's payload, as json for a JSON object. When left out, a message record whose after holds topic, payload (bytes), qos, retain, and those of the MQTT 5 properties the message has: content_type, response_topic, correlation_data and user_properties (a map, a name sent more than once an array of its values). |
 | `namespace` | string |  | The records' namespace. The codec's, or the topic, when left out. |
 | `idle` | duration | `"5s"` | In a job (mode once), how long without a message ends the reading: the source ends once the sinks have every message it read. 5s when left out or 0. |
+| `will` | [object](#syncmqtt-will) |  | A will message the broker publishes once the source's connection ends other than by fit closing it: lost, or kept alive in vain. None when left out. |
+| `auth_method` | string: `SCRAM-SHA-1`, `SCRAM-SHA-256`, `SCRAM-SHA-512` |  | In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of username and password_env's password, rather than with the password in CONNECT: the password does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out. |
+
+<a id="syncmqtt-will"></a>
+
+### `will` in `mqtt`
+
+Also at `will`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `topic` | string |  | Required. The will's topic: a topic name, without + or #. |
+| `payload` | string |  | The will's payload, as text. Empty when left out. |
+| `qos` | integer, 0 to 2 |  | The will's QoS: 0, 1 or 2. 0 when left out. |
+| `retain` | boolean |  | Publish the will retained: the broker keeps it for clients that subscribe later, until a message to the topic replaces it. |
+| `delay` | duration |  | In version 5, how long the broker waits, once the connection is lost, before it publishes the will, rounded up to seconds: nothing is published if fit is back within it. The broker publishes it sooner when the session ends first: at once for the sink, whose session ends with its connection. At once when left out. |
+| `message_expiry` | duration |  | In version 5, how long the broker keeps the will for a subscriber not connected, rounded up to seconds. None when left out. |
+| `content_type` | string |  | In version 5, the will's content type, as text/plain. |
+| `user_properties` | object of string |  | In version 5, user properties the will carries, in the order of their names. |
 
 <a id="sync-sources-mssql"></a>
 
@@ -9360,6 +9379,8 @@ Publishes each record to an MQTT broker, of version 3.1.1 or 5, as a message of 
 | `content_type` | string |  | In version 5, the messages' content type, as application/json. |
 | `user_properties` | object of string |  | In version 5, user properties every message carries, in the order of their names. |
 | `max_inflight` | integer, 0 to 65535 | `64` | The most messages of QoS 1 and 2 published and not yet acknowledged; lowered to the broker's receive maximum in version 5. 64 when left out or 0. |
+| `will` | [object](#syncmqtt-will) |  | A will message the broker publishes once the sink's connection ends other than by fit closing it: lost, or kept alive in vain. None when left out. |
+| `auth_method` | string: `SCRAM-SHA-1`, `SCRAM-SHA-256`, `SCRAM-SHA-512` |  | In version 5, authenticate by enhanced authentication (AUTH) with this SCRAM method, of username and password_env's password, rather than with the password in CONNECT: the password does not cross the wire, and fit checks the broker knows it. EMQX 5's SCRAM authenticator takes SCRAM-SHA-256 and SCRAM-SHA-512. The password in CONNECT when left out. |
 
 <a id="sync-sinks-mssql"></a>
 

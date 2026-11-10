@@ -754,7 +754,10 @@ sync {
 `mqtt` 源以持久会话订阅 MQTT broker（3.1.1 或 5：EMQX、Mosquitto、HiveMQ、VerneMQ）上的主题过滤器，会话由 `client_id`
 命名，fit 不在时 broker 保留该会话以及发给它的 QoS 1 与 2 消息（版本 5 中为 `session_expiry`，24h）。QoS 1 或 2 的消息只在
 所有目标都拿到其记录后才按到达顺序确认（`PUBACK`，或 `PUBREC` 后 `PUBCOMP`），因此在目标写入之前停止或被 kill 的流水线会
-从 broker 再次收到它：对幂等目标至少一次，QoS 2 的消息在一个连接内只取一次。检查点不保存可续读的位置：会话就是位置。
+从 broker 再次收到它：对幂等目标至少一次，QoS 2 的消息在一个连接内只取一次。检查点不保存可续读的位置（会话就是位置），
+但保存已订阅的主题过滤器：从 `topics` 删去的过滤器会在下次运行恢复会话时被取消订阅（`UNSUBSCRIBE`），broker 此前为它排队、
+可能仍会到来的消息被确认而不写入，除非某个仍在配置中的过滤器也匹配其主题。一次运行订阅的过滤器在该运行有一条消息被确认后
+才被记住（流水线的首次运行则立即记住）；在此之前加上又删去的过滤器会留在会话中（换一个 `client_id` 即开始干净的会话）。
 一条消息是一条记录，命名空间为主题（或 `namespace`），键为主题，除非编解码器设了键；没有 `codec` 时其 after 含 `topic`、
 `payload`（字节）、`qos`、`retain`，在版本 5 中还有消息带有的属性（`content_type`、`response_topic`、`correlation_data`、
 `user_properties`）。作业中，源一直读到 `idle`（5s）内没有消息到来。
@@ -763,6 +766,13 @@ sync {
 未确认的最多 `max_inflight`（64）条，broker 确认了每一条后这批才算写入。负载为编解码器的编码，没有编解码器时为 after 的
 `payload`，因此经源与目标复制的主题逐字节不变，版本 5 的属性也保留。`retain` 时的删除是一条空的保留消息，它清除该主题。
 版本 5 的 broker 永久拒绝的发布（主题名无效、未授权、包过大）立即交给 `on_error`。
+
+两者都可以设置 `will`：一条遗嘱消息（`topic`、`payload`、`qos`、`retain`，版本 5 中还有 `delay`、`message_expiry`、
+`content_type`、`user_properties`），fit 的连接不是由 fit 关闭而结束（连接丢失或保活超时）时由 broker 发布，让其他客户端得知
+流水线已不在；重载或停止会关闭连接，不发布遗嘱。在版本 5 中两者都可以用 SCRAM 做增强认证（`AUTH`）：`auth_method`
+设为 `SCRAM-SHA-256`（或 `SCRAM-SHA-1`、`SCRAM-SHA-512`），配合 `username` 和 `password_env`，不发送密码即可证明密码，
+并校验 broker 知道该密码的证明。EMQX 5 的 SCRAM 认证器支持 `SCRAM-SHA-256` 和 `SCRAM-SHA-512`；Mosquitto 自身没有增强
+认证。不提供基于 `AUTH` 的 Kerberos（GSSAPI）。
 
 ```fit
 sync {

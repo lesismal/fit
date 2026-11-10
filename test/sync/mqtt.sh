@@ -7,17 +7,22 @@
 #     third over TLS (a CA of the script's own). Not per_listener_settings:
 #     with it, Mosquitto 2 drops the messages of a persistent session while
 #     its client is away;
-#   - EMQX 5, one node, anonymous.
+#   - EMQX 5, one node, anonymous;
+#   - EMQX 5 again, with SCRAM-SHA-256 enhanced authentication (MQTT 5's
+#     AUTH) as its only authenticator, the user fit added by its REST API:
+#     an authenticator refuses the clients it cannot judge, anonymous ones
+#     too, so it has a node of its own.
 #
 #   eval "$(test/sync/mqtt.sh up)"     start (or reuse) them, print the env
 #   test/sync/mqtt.sh down             remove them
 #
 # PREFIX names the containers (fit-sync-); MQTT_PORT is the first of the
-# host ports (29450: Mosquitto's three, then EMQX's at 29455). The tests
-# read FIT_SYNC_MQTT_MOSQUITTO, FIT_SYNC_MQTT_MOSQUITTO_AUTH,
-# FIT_SYNC_MQTT_MOSQUITTO_TLS, FIT_SYNC_MQTT_CA, FIT_SYNC_MQTT_USER,
-# FIT_SYNC_MQTT_PASSWORD and FIT_SYNC_MQTT_EMQX. EMQX=0 leaves EMQX out, and
-# its variable.
+# host ports (29450: Mosquitto's three, then EMQX's at 29455, the SCRAM
+# node's at 29456). The tests read FIT_SYNC_MQTT_MOSQUITTO,
+# FIT_SYNC_MQTT_MOSQUITTO_AUTH, FIT_SYNC_MQTT_MOSQUITTO_TLS,
+# FIT_SYNC_MQTT_CA, FIT_SYNC_MQTT_USER, FIT_SYNC_MQTT_PASSWORD,
+# FIT_SYNC_MQTT_EMQX and FIT_SYNC_MQTT_EMQX_SCRAM. EMQX=0 leaves both EMQX
+# nodes out, and their variables.
 set -eu
 cd "$(dirname "$0")/../.."
 
@@ -29,7 +34,7 @@ PASSWORD='Fit-sync-1nterop!'
 STATE=${TMPDIR:-/tmp}/${PREFIX}mqtt
 
 if [ "${1:-}" = down ]; then
-	docker rm -f "${PREFIX}mosquitto" "${PREFIX}emqx" >/dev/null 2>&1 || true
+	docker rm -f -v "${PREFIX}mosquitto" "${PREFIX}emqx" "${PREFIX}emqx-scram" >/dev/null 2>&1 || true
 	rm -rf "$STATE"
 	exit 0
 fi
@@ -85,6 +90,12 @@ if [ "$EMQX" = 1 ] && ! docker inspect "$E" >/dev/null 2>&1; then
 		-e EMQX_MQTT__MAX_INFLIGHT=1000 -e EMQX_MQTT__MAX_MQUEUE_LEN=100000 \
 		"$EMQX_IMAGE" >/dev/null
 fi
+S=${PREFIX}emqx-scram
+if [ "$EMQX" = 1 ] && ! docker inspect "$S" >/dev/null 2>&1; then
+	docker run -d --name "$S" -p "127.0.0.1:$((MQTT_PORT + 6)):1883" \
+		-e 'EMQX_AUTHENTICATION=[{mechanism = scram, backend = built_in_database, algorithm = sha256, iteration_count = 4096}]' \
+		"$EMQX_IMAGE" >/dev/null
+fi
 
 i=0
 until docker logs "$M" 2>&1 | grep -q 'running'; do
@@ -110,3 +121,23 @@ until docker exec "$E" emqx ctl status 2>/dev/null | grep -q 'is started'; do
 	sleep 1
 done
 echo "export FIT_SYNC_MQTT_EMQX='localhost:$((MQTT_PORT + 5))'"
+
+# The SCRAM node's user, added once its REST API answers (as the
+# dashboard's default admin), and found there on a node reused.
+i=0
+until docker exec "$S" sh -c '
+	t=$(curl -sf -X POST localhost:18083/api/v5/login -H "Content-Type: application/json" \
+		-d "{\"username\":\"admin\",\"password\":\"public\"}" | sed "s/.*\"token\":\"\([^\"]*\)\".*/\1/") &&
+	out=$(curl -s -X POST localhost:18083/api/v5/authentication/scram%3Abuilt_in_database/users \
+		-H "Authorization: Bearer $t" -H "Content-Type: application/json" \
+		-d "{\"user_id\":\"fit\",\"password\":\"$1\"}") &&
+	case $out in *user_id*|*ALREADY_EXISTS*) ;; *) exit 1 ;; esac' sh "$PASSWORD" >/dev/null 2>&1; do
+	i=$((i + 1))
+	if [ $i -gt 120 ]; then
+		echo "EMQX's SCRAM node did not take its user:" >&2
+		docker logs --tail 50 "$S" >&2
+		exit 1
+	fi
+	sleep 1
+done
+echo "export FIT_SYNC_MQTT_EMQX_SCRAM='localhost:$((MQTT_PORT + 6))'"

@@ -872,7 +872,13 @@ VerneMQ) in a persistent session named by its `client_id`, which the broker keep
 acknowledged (`PUBACK`, or `PUBREC` then `PUBCOMP`) only once every sink has its records, in the order
 the messages came, so a pipeline stopped or killed before its sinks wrote a message gets it again from
 the broker: at least once into idempotent sinks, a QoS 2 message taken once within a connection. The
-checkpoint holds nothing to resume from: the session is the position. A message is a record of the
+checkpoint holds nothing to resume from, the session being the position, but the topic filters
+subscribed: a filter dropped from `topics` is unsubscribed (`UNSUBSCRIBE`) when the session resumes
+at the next run, and the messages the broker had queued for it before, which may still come, are
+acknowledged and not written, unless a filter still named matches their topic too. A filter is
+remembered once a message of a run that subscribed to it is acknowledged, or at once in a pipeline's
+first run; a filter added and dropped again before then stays in the session (a new `client_id`
+starts a clean one). A message is a record of the
 topic's namespace (or `namespace`), keyed by the topic unless the codec sets a key; without a `codec`
 its after holds `topic`, `payload` (bytes), `qos`, `retain` and, in version 5, the properties it has
 (`content_type`, `response_topic`, `correlation_data`, `user_properties`). In a job the source reads
@@ -885,6 +891,16 @@ encoding, or, without one, after's `payload`, so a topic copied through the sour
 byte for byte, with its version 5 properties. A delete with `retain` is an empty retained message,
 which clears the topic. A publish a version 5 broker refuses for good (topic name invalid, not
 authorized, packet too large) goes to `on_error` at once.
+
+Both may set a `will`: a message (`topic`, `payload`, `qos`, `retain`, and in version 5 `delay`,
+`message_expiry`, `content_type`, `user_properties`) the broker publishes once fit's connection ends
+other than by fit closing it, lost or kept alive in vain, so that another client learns the pipeline
+is gone; a reload or a stop closes the connection, and publishes none. In version 5 both may
+authenticate by enhanced authentication (`AUTH`) with SCRAM: `auth_method` `SCRAM-SHA-256` (or
+`SCRAM-SHA-1`, `SCRAM-SHA-512`), with `username` and `password_env`, proves the password without
+sending it, and checks the broker's proof that it knows it. EMQX 5's SCRAM authenticator takes
+`SCRAM-SHA-256` and `SCRAM-SHA-512`; Mosquitto has no enhanced authentication of its own. Kerberos
+(GSSAPI) over `AUTH` is not offered.
 
 ```fit
 sync {

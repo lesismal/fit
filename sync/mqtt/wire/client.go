@@ -2,7 +2,9 @@
 // fit's sync connectors: TLS, a user and password, keep-alive, persistent
 // sessions, QoS 0, 1 and 2 in both directions, topic filters, and MQTT 5's
 // properties (user properties, message expiry, topic aliases both ways,
-// content types, reason codes and strings). A Client is one connection,
+// content types, reason codes and strings), UNSUBSCRIBE, will messages,
+// and MQTT 5's enhanced authentication (AUTH, re-authentication too), with
+// SCRAM (SHA-1, SHA-256, SHA-512) as its methods. A Client is one connection,
 // on goroutines of its own: one reads the server's packets, one keeps the
 // connection alive. Messages the server sends are handed out on a bounded
 // channel, and acknowledged only when the caller says so, with Ack, in the
@@ -98,6 +100,24 @@ type Config struct {
 	// acknowledged, lowered to a version 5 server's receive maximum.
 	// DefaultMaxInflight when 0.
 	MaxInflight int
+	// Will, when not nil, is the message the server publishes once the
+	// connection ends other than by Close: lost, or kept alive in vain.
+	Will *Will
+	// Auth, when not nil, authenticates by MQTT 5's enhanced
+	// authentication, its method named in CONNECT; Username and Password
+	// are sent too when set. Version 5 only.
+	Auth Authenticator
+}
+
+// Will is a will message: its topic, payload, QoS, retain flag, and, in
+// version 5, its properties (PayloadUTF8, MessageExpiry, ContentType,
+// ResponseTopic, CorrelationData, UserProperties) and Delay.
+type Will struct {
+	Message
+	// Delay is how long a version 5 server waits, once the connection
+	// ends, before it publishes the will: none if the session resumes
+	// meanwhile. At once when 0.
+	Delay time.Duration
 }
 
 // Message is an application message: one the server sends the client, or
@@ -161,9 +181,13 @@ type Client struct {
 	wmu     sync.Mutex
 	aliases map[string]uint16
 
+	// authX is CONNECT's authentication exchange, while it goes on.
+	authX AuthExchange
+
 	mu        sync.Mutex
 	err       error
-	closing   bool // Close began: the connection ends as ErrClosed
+	reauth    *reauth // a re-authentication under way
+	closing   bool    // Close began: the connection ends as ErrClosed
 	nextID    uint16
 	pending   map[uint16]*Delivery
 	subs      map[uint16]chan subResult
@@ -175,9 +199,16 @@ type Client struct {
 }
 
 type subResult struct {
+	typ    byte // SUBACK or UNSUBACK
 	codes  []byte
 	reason string
 	err    error
+}
+
+// reauth is a re-authentication under way, and its outcome's channel.
+type reauth struct {
+	x  AuthExchange
+	ch chan error
 }
 
 // Delivery is a publish under way.
@@ -226,7 +257,7 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.MaxInflight <= 0 {
 		cfg.MaxInflight = DefaultMaxInflight
 	}
-	connect, err := connectPacket(&cfg)
+	connect, x, err := connectPacket(&cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +275,7 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 	deadline, _ := dctx.Deadline()
 	nc.SetDeadline(deadline)
 	stop := context.AfterFunc(dctx, func() { nc.SetDeadline(time.Unix(1, 0)) })
-	c, err := handshake(dctx, nc, cfg, connect)
+	c, err := handshake(dctx, nc, cfg, connect, x)
 	stop()
 	if err != nil {
 		nc.Close()
@@ -262,7 +293,7 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 }
 
 // handshake does TLS's, when asked, sends CONNECT and reads the CONNACK.
-func handshake(ctx context.Context, nc net.Conn, cfg Config, connect []byte) (*Client, error) {
+func handshake(ctx context.Context, nc net.Conn, cfg Config, connect []byte, x AuthExchange) (*Client, error) {
 	if cfg.TLS != nil {
 		tc := cfg.TLS.Clone()
 		if tc.ServerName == "" {
@@ -280,8 +311,19 @@ func handshake(ctx context.Context, nc net.Conn, cfg Config, connect []byte) (*C
 	c := &Client{cfg: cfg, version: cfg.Version, nc: nc, br: bufio.NewReaderSize(nc, 16<<10),
 		msgs: make(chan *Message, cfg.ReceiveMaximum), done: make(chan struct{}), maxQoS: 2, retainOK: true,
 		aliases: map[string]uint16{}, pending: map[uint16]*Delivery{}, subs: map[uint16]chan subResult{},
-		inQoS2: map[uint16]bool{}, inAliases: map[uint16]string{}}
+		inQoS2: map[uint16]bool{}, inAliases: map[uint16]string{}, authX: x}
 	first, body, err := readPacket(c.br, cfg.MaxPacketSize)
+	for err == nil && first == typeAuth<<4 && x != nil {
+		// The exchange goes on until the CONNACK.
+		var data []byte
+		if data, err = c.authStep(body, x); err == nil {
+			if _, err = nc.Write(authPacket(0x18, cfg.Auth.Method(), data)); err == nil {
+				first, body, err = readPacket(c.br, cfg.MaxPacketSize)
+				continue
+			}
+		}
+		return nil, fmt.Errorf("mqtt: authenticate with %s: %w", cfg.Address, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("mqtt: read CONNACK from %s: %w", cfg.Address, err)
 	}
@@ -295,25 +337,87 @@ func handshake(ctx context.Context, nc net.Conn, cfg Config, connect []byte) (*C
 	return c, nil
 }
 
-// connectPacket makes CONNECT of cfg.
-func connectPacket(cfg *Config) ([]byte, error) {
+// authStep answers an AUTH of the server, continue authentication, of
+// exchange x.
+func (c *Client) authStep(body []byte, x AuthExchange) ([]byte, error) {
+	code, p, err := authOf(body)
+	switch {
+	case err != nil:
+		return nil, err
+	case code != 0x18 || p.authMethod != c.cfg.Auth.Method():
+		return nil, fmt.Errorf("mqtt: AUTH 0x%02X of the method %q, not continue authentication of %s", code, p.authMethod, c.cfg.Auth.Method())
+	}
+	return x.Next(p.authData)
+}
+
+// authPacket makes an AUTH of a reason code, the method and its data.
+func authPacket(code byte, method string, data []byte) []byte {
+	var w propsWriter
+	w.str(propAuthMethod, method)
+	if data != nil {
+		w.bin(propAuthData, data)
+	}
+	return packet(typeAuth<<4, w.appendTo([]byte{code}))
+}
+
+// authOf reads an AUTH's body: its reason code and properties, none of
+// either meaning success.
+func authOf(body []byte) (byte, props, error) {
+	r := &reader{b: body}
+	var p props
+	code := byte(0)
+	if r.left() > 0 {
+		code = r.byte()
+	}
+	if r.left() > 0 {
+		p = r.props()
+	}
+	if r.err != nil {
+		return 0, p, fmt.Errorf("mqtt: AUTH: %w", errMalformed)
+	}
+	return code, p, nil
+}
+
+// connectPacket makes CONNECT of cfg, and begins its authentication
+// exchange when cfg.Auth is set.
+func connectPacket(cfg *Config) ([]byte, AuthExchange, error) {
 	if cfg.Version != Version311 && cfg.Version != Version5 {
-		return nil, fmt.Errorf("mqtt: version %d is not 4 (3.1.1) or 5", cfg.Version)
+		return nil, nil, fmt.Errorf("mqtt: version %d is not 4 (3.1.1) or 5", cfg.Version)
 	}
 	if cfg.ClientID == "" && cfg.Version == Version311 && !cfg.CleanStart {
-		return nil, errors.New("mqtt: a session kept in MQTT 3.1.1 needs a client ID")
+		return nil, nil, errors.New("mqtt: a session kept in MQTT 3.1.1 needs a client ID")
 	}
 	if cfg.Password != "" && cfg.Username == "" && cfg.Version == Version311 {
-		return nil, errors.New("mqtt: a password needs a user name in MQTT 3.1.1")
+		return nil, nil, errors.New("mqtt: a password needs a user name in MQTT 3.1.1")
+	}
+	if cfg.Auth != nil && cfg.Version != Version5 {
+		return nil, nil, errors.New("mqtt: enhanced authentication needs MQTT 5")
 	}
 	for _, s := range []string{cfg.ClientID, cfg.Username, cfg.Password} {
 		if !validString(s) {
-			return nil, errors.New("mqtt: a client ID, user name or password of more than 65535 bytes, not UTF-8, or with a null character")
+			return nil, nil, errors.New("mqtt: a client ID, user name or password of more than 65535 bytes, not UTF-8, or with a null character")
 		}
 	}
 	ka := (cfg.KeepAlive + time.Second - 1) / time.Second
 	if ka > math.MaxUint16 {
-		return nil, fmt.Errorf("mqtt: a keep-alive of %v is past 65535s", cfg.KeepAlive)
+		return nil, nil, fmt.Errorf("mqtt: a keep-alive of %v is past 65535s", cfg.KeepAlive)
+	}
+	will := cfg.Will
+	if will != nil {
+		if err := ValidTopicName(will.Topic); err != nil {
+			return nil, nil, fmt.Errorf("mqtt: the will's topic: %w", err)
+		}
+		if will.QoS > 2 || len(will.Payload) > math.MaxUint16 {
+			return nil, nil, fmt.Errorf("mqtt: a will of QoS %d or of more than 65535 bytes", will.QoS)
+		}
+	}
+	var x AuthExchange
+	var authData []byte
+	if cfg.Auth != nil {
+		var err error
+		if x, authData, err = cfg.Auth.Start(); err != nil {
+			return nil, nil, err
+		}
 	}
 	cfg.KeepAlive = ka * time.Second
 	var flags byte
@@ -325,6 +429,12 @@ func connectPacket(cfg *Config) ([]byte, error) {
 	}
 	if cfg.CleanStart {
 		flags |= 0x02
+	}
+	if will != nil {
+		flags |= 0x04 | will.QoS<<3
+		if will.Retain {
+			flags |= 0x20
+		}
 	}
 	b := appendString(nil, "MQTT")
 	b = append(b, cfg.Version, flags)
@@ -339,16 +449,33 @@ func connectPacket(cfg *Config) ([]byte, error) {
 		if cfg.TopicAliasMaximum > 0 {
 			w.u16(propTopicAliasMaximum, uint16(cfg.TopicAliasMaximum))
 		}
+		if cfg.Auth != nil {
+			w.str(propAuthMethod, cfg.Auth.Method())
+			if authData != nil {
+				w.bin(propAuthData, authData)
+			}
+		}
 		b = w.appendTo(b)
 	}
 	b = appendString(b, cfg.ClientID)
+	if will != nil {
+		if cfg.Version == Version5 {
+			var w propsWriter
+			if will.Delay > 0 {
+				w.u32(propWillDelay, uint32(min((will.Delay+time.Second-1)/time.Second, math.MaxUint32)))
+			}
+			messageProps(&w, &will.Message, 0)
+			b = w.appendTo(b)
+		}
+		b = appendBinary(appendString(b, will.Topic), will.Payload)
+	}
 	if cfg.Username != "" {
 		b = appendString(b, cfg.Username)
 	}
 	if cfg.Password != "" {
 		b = appendString(b, cfg.Password)
 	}
-	return packet(typeConnect<<4, b), nil
+	return packet(typeConnect<<4, b), x, nil
 }
 
 // connack reads the CONNACK's body.
@@ -365,6 +492,12 @@ func (c *Client) connack(body []byte) error {
 	}
 	if code != 0 {
 		return &ConnectError{Version: c.version, Code: code, Reason: p.reason}
+	}
+	if c.authX != nil {
+		if err := c.authX.Done(p.authData); err != nil {
+			return fmt.Errorf("mqtt: authenticate with %s: %w", c.cfg.Address, err)
+		}
+		c.authX = nil
 	}
 	c.sessionPresent = flags&1 == 1
 	if c.version == Version5 {
@@ -450,11 +583,14 @@ func (c *Client) fail(err error) {
 		err = ErrClosed
 	}
 	c.err = err
-	pending, subs := c.pending, c.subs
-	c.pending, c.subs = nil, nil
+	pending, subs, ra := c.pending, c.subs, c.reauth
+	c.pending, c.subs, c.reauth = nil, nil, nil
 	c.mu.Unlock()
 	close(c.done)
 	c.nc.Close()
+	if ra != nil {
+		ra.ch <- err
+	}
 	for _, d := range pending {
 		d.finish(err)
 	}
@@ -569,23 +705,28 @@ func (c *Client) handle(first byte, body []byte) (byte, error) {
 		delete(c.inQoS2, id)
 		c.mu.Unlock()
 		c.write([]byte{typePubcomp << 4, 2, byte(id >> 8), byte(id)})
-	case typeSuback:
+	case typeSuback, typeUnsuback:
 		id := r.u16()
 		var p props
 		if c.version == Version5 {
 			p = r.props()
 		}
 		codes := r.take(r.left())
-		if r.err != nil || len(codes) == 0 {
-			return 0x81, fmt.Errorf("mqtt: SUBACK: %w", errMalformed)
+		if r.err != nil || len(codes) == 0 && (typ == typeSuback || c.version == Version5) {
+			return 0x81, fmt.Errorf("mqtt: %s: %w", typeNames[typ], errMalformed)
 		}
 		c.mu.Lock()
 		ch := c.subs[id]
 		delete(c.subs, id)
 		c.mu.Unlock()
 		if ch != nil {
-			ch <- subResult{codes: codes, reason: p.reason}
+			ch <- subResult{typ: typ, codes: codes, reason: p.reason}
 		}
+	case typeAuth:
+		if c.version == Version311 {
+			return 0x82, errors.New("mqtt: the server sent AUTH, which MQTT 3.1.1 servers do not")
+		}
+		return c.reauthStep(body)
 	case typePingresp:
 	case typeDisconnect:
 		if c.version == Version311 {
@@ -788,17 +929,78 @@ func (c *Client) Subscribe(ctx context.Context, subs ...Subscription) ([]byte, e
 			return nil, fmt.Errorf("mqtt: subscription %s: QoS %d or retain handling %d past 2", s.Filter, s.QoS, s.RetainHandling)
 		}
 	}
+	res, err := c.request(ctx, typeSubscribe, len(subs), func(b []byte) []byte {
+		for _, s := range subs {
+			o := s.QoS
+			if c.version == Version5 {
+				if s.NoLocal {
+					o |= 4
+				}
+				if s.RetainAsPublished {
+					o |= 8
+				}
+				o |= s.RetainHandling << 4
+			}
+			b = append(appendString(b, s.Filter), o)
+		}
+		return b
+	})
+	if err != nil {
+		return res.codes, err
+	}
+	for i, code := range res.codes {
+		if code >= 0x80 {
+			return res.codes, fmt.Errorf("mqtt: subscribe to %s: %w", subs[i].Filter, &ReasonError{Packet: "SUBACK", Code: code, Reason: res.reason})
+		}
+	}
+	return res.codes, nil
+}
+
+// Unsubscribe unsubscribes from filters, and returns the server's reason
+// code for each: in version 5, 0 or 0x11 (no subscription existed), a
+// code of 0x80 or more a *ReasonError; in 3.1.1, which has none, zeros.
+// Messages the server had queued for a filter may still come after it.
+func (c *Client) Unsubscribe(ctx context.Context, filters ...string) ([]byte, error) {
+	if len(filters) == 0 {
+		return nil, errors.New("mqtt: no topic filters")
+	}
+	for _, f := range filters {
+		if err := ValidTopicFilter(f); err != nil {
+			return nil, err
+		}
+	}
+	res, err := c.request(ctx, typeUnsub, len(filters), func(b []byte) []byte {
+		for _, f := range filters {
+			b = appendString(b, f)
+		}
+		return b
+	})
+	if err != nil {
+		return res.codes, err
+	}
+	for i, code := range res.codes {
+		if code >= 0x80 {
+			return res.codes, fmt.Errorf("mqtt: unsubscribe from %s: %w", filters[i], &ReasonError{Packet: "UNSUBACK", Code: code, Reason: res.reason})
+		}
+	}
+	return res.codes, nil
+}
+
+// request sends a SUBSCRIBE or UNSUBSCRIBE of n entries, which add
+// appends, and waits for its acknowledgement, of n codes (zeros for an
+// UNSUBACK of 3.1.1, which has none).
+func (c *Client) request(ctx context.Context, typ byte, n int, add func([]byte) []byte) (subResult, error) {
 	ch := make(chan subResult, 1)
 	c.mu.Lock()
 	if c.err != nil {
 		err := c.err
 		c.mu.Unlock()
-		return nil, err
+		return subResult{}, err
 	}
 	id, err := c.allocID()
 	if err != nil {
 		c.mu.Unlock()
-		return nil, err
+		return subResult{}, err
 	}
 	c.subs[id] = ch
 	c.mu.Unlock()
@@ -806,21 +1008,8 @@ func (c *Client) Subscribe(ctx context.Context, subs ...Subscription) ([]byte, e
 	if c.version == Version5 {
 		b = append(b, 0)
 	}
-	for _, s := range subs {
-		o := s.QoS
-		if c.version == Version5 {
-			if s.NoLocal {
-				o |= 4
-			}
-			if s.RetainAsPublished {
-				o |= 8
-			}
-			o |= s.RetainHandling << 4
-		}
-		b = append(appendString(b, s.Filter), o)
-	}
-	if err := c.write(packet(typeSubscribe<<4|2, b)); err != nil {
-		return nil, err
+	if err := c.write(packet(typ<<4|2, add(b))); err != nil {
+		return subResult{}, err
 	}
 	var res subResult
 	select {
@@ -829,20 +1018,92 @@ func (c *Client) Subscribe(ctx context.Context, subs ...Subscription) ([]byte, e
 		c.mu.Lock()
 		delete(c.subs, id)
 		c.mu.Unlock()
-		return nil, ctx.Err()
+		return subResult{}, ctx.Err()
 	}
 	if res.err != nil {
-		return nil, res.err
+		return subResult{}, res.err
 	}
-	if len(res.codes) != len(subs) {
-		return res.codes, fmt.Errorf("mqtt: SUBACK of %d codes for %d subscriptions", len(res.codes), len(subs))
+	if res.typ != typ+1 {
+		return subResult{}, fmt.Errorf("mqtt: %s answered with %s", typeNames[typ], typeNames[res.typ])
 	}
-	for i, code := range res.codes {
-		if code >= 0x80 {
-			return res.codes, fmt.Errorf("mqtt: subscribe to %s: %w", subs[i].Filter, &ReasonError{Packet: "SUBACK", Code: code, Reason: res.reason})
+	if res.typ == typeUnsuback && c.version == Version311 {
+		res.codes = make([]byte, n)
+	}
+	if len(res.codes) != n {
+		return res, fmt.Errorf("mqtt: %s of %d codes for %d entries", typeNames[res.typ], len(res.codes), n)
+	}
+	return res, nil
+}
+
+// Reauthenticate authenticates again on the connection, by Config.Auth's
+// method, as MQTT 5 lets a client do while connected. The server's
+// refusal ends the connection, as does a server that fails the method's
+// checks. One at a time.
+func (c *Client) Reauthenticate(ctx context.Context) error {
+	if c.cfg.Auth == nil {
+		return errors.New("mqtt: re-authentication needs Config.Auth")
+	}
+	x, data, err := c.cfg.Auth.Start()
+	if err != nil {
+		return err
+	}
+	ra := &reauth{x: x, ch: make(chan error, 1)}
+	c.mu.Lock()
+	switch {
+	case c.err != nil:
+		err = c.err
+	case c.reauth != nil:
+		err = errors.New("mqtt: a re-authentication is under way")
+	}
+	if err != nil {
+		c.mu.Unlock()
+		return err
+	}
+	c.reauth = ra
+	c.mu.Unlock()
+	if err := c.write(authPacket(0x19, c.cfg.Auth.Method(), data)); err != nil {
+		return err
+	}
+	select {
+	case err := <-ra.ch:
+		return err
+	case <-ctx.Done():
+		// The exchange goes on, and ends, without its caller.
+		return ctx.Err()
+	}
+}
+
+// reauthStep takes the server's AUTH of a re-authentication: continue, or
+// success.
+func (c *Client) reauthStep(body []byte) (byte, error) {
+	c.mu.Lock()
+	ra := c.reauth
+	c.mu.Unlock()
+	if ra == nil {
+		return 0x82, errors.New("mqtt: the server sent AUTH, and no re-authentication is under way")
+	}
+	code, p, err := authOf(body)
+	switch {
+	case err != nil:
+		return 0x81, err
+	case code == 0x18:
+		data, err := c.authStep(body, ra.x)
+		if err != nil {
+			return 0x80, fmt.Errorf("mqtt: re-authenticate: %w", err)
 		}
+		c.write(authPacket(0x18, c.cfg.Auth.Method(), data))
+		return 0, nil
+	case code != 0:
+		return 0x82, fmt.Errorf("mqtt: the server sent AUTH 0x%02X", code)
 	}
-	return res.codes, nil
+	if err := ra.x.Done(p.authData); err != nil {
+		return 0x80, fmt.Errorf("mqtt: re-authenticate: %w", err)
+	}
+	c.mu.Lock()
+	c.reauth = nil
+	c.mu.Unlock()
+	ra.ch <- nil
+	return 0, nil
 }
 
 // Publish publishes m and waits for its acknowledgement: Send, then Wait.
@@ -948,28 +1209,34 @@ func (c *Client) encodePublish(m *Message, topic string, alias uint16) []byte {
 	}
 	if c.version == Version5 {
 		var w propsWriter
-		if m.PayloadUTF8 {
-			w.byte(propPayloadFormat, 1)
-		}
-		if m.MessageExpiry > 0 {
-			w.u32(propMessageExpiry, uint32(min((m.MessageExpiry+time.Second-1)/time.Second, math.MaxUint32)))
-		}
-		if alias != 0 {
-			w.u16(propTopicAlias, alias)
-		}
-		if m.ResponseTopic != "" {
-			w.str(propResponseTopic, m.ResponseTopic)
-		}
-		if m.CorrelationData != nil {
-			w.bin(propCorrelationData, m.CorrelationData)
-		}
-		w.user(m.UserProperties)
-		if m.ContentType != "" {
-			w.str(propContentType, m.ContentType)
-		}
+		messageProps(&w, m, alias)
 		b = w.appendTo(b)
 	}
 	return packet(first, append(b, m.Payload...))
+}
+
+// messageProps writes m's properties, of a PUBLISH or a will, with a topic
+// alias when not 0.
+func messageProps(w *propsWriter, m *Message, alias uint16) {
+	if m.PayloadUTF8 {
+		w.byte(propPayloadFormat, 1)
+	}
+	if m.MessageExpiry > 0 {
+		w.u32(propMessageExpiry, uint32(min((m.MessageExpiry+time.Second-1)/time.Second, math.MaxUint32)))
+	}
+	if alias != 0 {
+		w.u16(propTopicAlias, alias)
+	}
+	if m.ResponseTopic != "" {
+		w.str(propResponseTopic, m.ResponseTopic)
+	}
+	if m.CorrelationData != nil {
+		w.bin(propCorrelationData, m.CorrelationData)
+	}
+	w.user(m.UserProperties)
+	if m.ContentType != "" {
+		w.str(propContentType, m.ContentType)
+	}
 }
 
 // keepAlive pings the server every half of the keep-alive, and ends the

@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/lesismal/fit/config"
@@ -46,6 +47,37 @@ type connParams struct {
 	CAFile, CertFile, KeyFile, ServerName string
 	Timeout, KeepAlive                    config.Duration
 	MaxPacketSize                         int
+	Will                                  *Will
+	AuthMethod                            string
+}
+
+// Will is a connection's will message, which the broker publishes once
+// fit's connection ends other than by fit closing it: lost, or kept alive
+// in vain.
+type Will struct {
+	Topic          string            `json:"topic" fit:"required" doc:"The will's topic: a topic name, without + or #."`
+	Payload        string            `json:"payload,omitempty" doc:"The will's payload, as text. Empty when left out."`
+	QoS            int               `json:"qos,omitempty" min:"0" max:"2" doc:"The will's QoS: 0, 1 or 2. 0 when left out."`
+	Retain         bool              `json:"retain,omitempty" doc:"Publish the will retained: the broker keeps it for clients that subscribe later, until a message to the topic replaces it."`
+	Delay          config.Duration   `json:"delay,omitempty" doc:"In version 5, how long the broker waits, once the connection is lost, before it publishes the will, rounded up to seconds: nothing is published if fit is back within it. The broker publishes it sooner when the session ends first: at once for the sink, whose session ends with its connection. At once when left out."`
+	MessageExpiry  config.Duration   `json:"message_expiry,omitempty" doc:"In version 5, how long the broker keeps the will for a subscriber not connected, rounded up to seconds. None when left out."`
+	ContentType    string            `json:"content_type,omitempty" doc:"In version 5, the will's content type, as text/plain."`
+	UserProperties map[string]string `json:"user_properties,omitempty" doc:"In version 5, user properties the will carries, in the order of their names."`
+}
+
+// userProperties are props as MQTT 5's user properties, in the order of
+// their names.
+func userProperties(props map[string]string) []mqttwire.UserProperty {
+	names := make([]string, 0, len(props))
+	for k := range props {
+		names = append(names, k)
+	}
+	slices.Sort(names)
+	var ups []mqttwire.UserProperty
+	for _, k := range names {
+		ups = append(ups, mqttwire.UserProperty{Key: k, Value: props[k]})
+	}
+	return ups
 }
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -88,6 +120,41 @@ func wireConfig(ctx *module.Context, p connParams) (mqttwire.Config, config.Erro
 			add("password_env", "MQTT 3.1.1 sends a password only with a username")
 		}
 	}
+	if p.AuthMethod != "" {
+		a, err := mqttwire.NewSCRAM(p.AuthMethod, p.Username, c.Password)
+		switch {
+		case c.Version != mqttwire.Version5:
+			add("auth_method", "enhanced authentication needs version 5")
+		case err != nil || c.Password == "":
+			add("auth_method", "%s needs a username and password_env", p.AuthMethod)
+		default:
+			// The password proves itself in the exchange: CONNECT does not
+			// carry it.
+			c.Auth, c.Password = a, ""
+		}
+	}
+	if w := p.Will; w != nil {
+		c.Will = &mqttwire.Will{Message: mqttwire.Message{Topic: w.Topic, Payload: []byte(w.Payload), QoS: byte(w.QoS), Retain: w.Retain,
+			MessageExpiry: w.MessageExpiry.Std(), ContentType: w.ContentType, UserProperties: userProperties(w.UserProperties)},
+			Delay: w.Delay.Std()}
+		at := ctx.Params.Field("will")
+		if err := mqttwire.ValidTopicName(w.Topic); err != nil {
+			errs = append(errs, at.Field("topic").Errorf("%v", err))
+		}
+		if len(w.Payload) > 65535 {
+			errs = append(errs, at.Field("payload").Errorf("%d bytes, past 65535", len(w.Payload)))
+		}
+		if c.Version == mqttwire.Version311 {
+			for _, f := range []struct {
+				name string
+				set  bool
+			}{{"delay", w.Delay > 0}, {"message_expiry", w.MessageExpiry > 0}, {"content_type", w.ContentType != ""}, {"user_properties", len(w.UserProperties) > 0}} {
+				if f.set {
+					errs = append(errs, at.Field(f.name).Errorf("%s needs version 5", f.name))
+				}
+			}
+		}
+	}
 	if !p.TLS {
 		for _, f := range []struct{ name, value string }{{"ca_file", p.CAFile}, {"cert_file", p.CertFile}, {"key_file", p.KeyFile}, {"server_name", p.ServerName}} {
 			if f.value != "" {
@@ -123,6 +190,8 @@ func wireConfig(ctx *module.Context, p connParams) (mqttwire.Config, config.Erro
 // fake in the tests.
 type client interface {
 	Subscribe(ctx context.Context, subs ...mqttwire.Subscription) ([]byte, error)
+	Unsubscribe(ctx context.Context, filters ...string) ([]byte, error)
+	SessionPresent() bool
 	Messages() <-chan *mqttwire.Message
 	Ack(m *mqttwire.Message) error
 	Send(ctx context.Context, m *mqttwire.Message) (waiter, error)

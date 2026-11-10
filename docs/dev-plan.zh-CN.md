@@ -5398,6 +5398,20 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
   kill 时以及停止期间发布的 QoS 1 消息在重启后全部到达（在 `written` 处 kill 后有重复）；QoS 2 消息每条只到一次，优雅停止时
   也是；目标的消息由订阅者读回，源以作业运行；经 TLS 的用户名与密码，错误密码被拒绝。互通发现 3.1.1 的 broker 会在 SUBACK
   之前发送会话中排队的消息，多于客户端 channel 的容量（已修复：源在自己的 goroutine 上订阅，同时接收消息）。
+- **已完成** 2026-11-10，在对决定 8 与遗嘱、AUTH 未解决项的裁定之后：`mqttwire` 新增 `Unsubscribe`（两个版本的
+  UNSUBSCRIBE 与 UNSUBACK，版本 5 的原因码，0x11 视为成功，0x80 及以上为 `ReasonError`）、`Config.Will`（主题、负载、QoS、
+  retain，版本 5 中还有遗嘱延迟与消息属性），以及 `Config.Auth`，即 MQTT 5 的增强认证：CONNECT 中给出其方法名的
+  `Authenticator`，交换 AUTH 包直到 CONNACK，由该方法校验其数据，连接期间可用 `Reauthenticate`（AUTH 0x19）重新认证；
+  `NewSCRAM` 实现 SCRAM-SHA-1、SCRAM-SHA-256 与 SCRAM-SHA-512（RFC 5802、7677；`crypto/pbkdf2`），并校验服务器签名。连接器
+  新增 `will` 与 `auth_method`；源的位置带有已订阅的主题过滤器（首次运行立即以 `SaveStart` 保存），会话恢复的运行在订阅之前
+  先对检查点中有而 `topics` 中已没有的过滤器取消订阅。单元测试：`sync/mqtt` 语句覆盖率 100%，`sync/mqtt/wire` 99.9%（剩下的
+  一行是 `pbkdf2.Key` 的错误，只有仅 FIPS 模式会返回），含 RFC 5802 与 RFC 7677 的向量，race 检查无误。互通
+  （`TestMQTTWill`、`TestMQTTUnsubscribe`、`TestMQTTSCRAM`；`mqtt.sh` 另起一个带 SCRAM-SHA-256 认证器和用户 fit 的 EMQX
+  节点）在 Mosquitto 2.0.22 与 EMQX 5.8.6 上、3.1.1 与 5 下通过，原有的 `TestMQTT*` 仍然通过：目标的连接被切断后，遗嘱带着
+  版本 5 的属性到达订阅者，正常关闭后则没有；两次运行之间去掉的过滤器不再投递任何消息，无论是 fit 不在时为它排队的还是之后
+  发布的，第三次运行表明会话中已没有它；SCRAM-SHA-256 能连接，源经由它读取，错误密码和 SCRAM-SHA-512 被拒绝（0x87），
+  匿名客户端也被拒绝。EMQX 5.8.6 接受重新认证的完整交换后不发送成功的 AUTH：其 channel 卡在踢掉自己的会话上，5s 后断开连接
+  （日志：`session_stepdown_request_timeout`）；客户端的重新认证在假 broker 上验证。
 
 **待审查的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
@@ -5412,8 +5426,8 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
    以免多余的重投。
 6. **[kept]**（2026-11-10：MQTT 要求按 PUBLISH 到达的顺序确认（4.6），每个连接一个写者正好做到） **`Acknowledged` 只入队**；每个连接一个 goroutine 按顺序写确认；编解码器没有产生记录的消息随相邻消息一起释放。
 7. **[kept]**（2026-11-10：作业需要结束点，其他队列源的作业也这样结束） **作业中**源在订阅后读到 `idle`（5s）内没有消息，等每条消息都确认后结束；之后的消息留给下一次运行。备选：拒绝 once 模式。
-8. **[needs the user]**（2026-11-10：从配置中去掉的过滤器仍留在持久会话中：broker 继续发送其消息，源也照样交出，因为它既不取消订阅，也不按过滤器检查消息的主题；见本节开头的清单） **每次 `Run` 都重新订阅**（主题可能已变），版本 5 中 retain handling 为 1，使保留消息不在每次重启时重发；3.1.1 的 broker
-   会重发，由幂等目标吸收。配置中去掉的过滤器不会被取消订阅。
+8. **[ruled 2026-11-10: done]**（2026-11-10：按建议裁定并已实现：位置带有已订阅的过滤器，会话恢复的运行对检查点中有而 `topics` 中已没有的过滤器取消订阅；见决定 16 至 18。此前：去掉的过滤器留在持久会话中，其消息照样交出。） **每次 `Run` 都重新订阅**（主题可能已变），版本 5 中 retain handling 为 1，使保留消息不在每次重启时重发；3.1.1 的 broker
+   会重发，由幂等目标吸收。配置中去掉的过滤器在下次运行时被取消订阅。
 9. **[kept]**（2026-11-10：两种方式的投递都是至少一次；持久会话需要每个目标一个稳定的 client ID 并处理 DUP，换不来更强的保证） **目标的会话是 clean 的，client ID 随机**（`fit-sync-<random>`），除非另行设置：投递反正是至少一次。备选：持久会话，以
    DUP 重发 QoS 2。
 10. **[kept]**（2026-11-10：空的保留消息是 MQTT 清除主题的方式；有人需要别的做法时再加 `deletes` 参数） **`retain` 时的删除是一条空的保留消息**，它清除该主题；否则为编解码器的编码。备选：`deletes` 参数。
@@ -5425,8 +5439,35 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 14. **[kept]**（2026-11-10：集群各节点共享会话，依次尝试即可恢复它） **`servers` 是依次尝试的列表**，集群的各节点共享会话。
 15. **[kept]**（2026-11-10：3.1.1 禁止这样做（MQTT-3.1.2-22）；在 provision 时拒绝，比 broker 拒绝更早说明原因） **版本 3.1.1 在 provision 时拒绝没有用户名的密码**，与其协议一致。
 
-由此留下的问题：增强认证（AUTH 包会结束连接）、遗嘱消息与 UNSUBSCRIBE 尚未实现；I222 加入家族之后 `test/sync/run.sh` 才会运行
-`mqtt.sh`。
+裁定之后做出的决定（2026-11-10），待审查：
+
+16. **已订阅的过滤器保存在每个位置中**，检查点即最后确认的那个位置，流水线首次运行时立即保存（`SaveStart`）；去掉的过滤器在
+    收到 UNSUBACK 之前也留在位置中，使先结束的运行下次再试。在订阅它的运行有消息被确认之前就加上又去掉的过滤器从未进入
+    检查点，会留在会话中：运行时只从记录、或在首次运行时保存检查点。备选：在 `state_dir` 中、检查点之外另存一个源自己的文件。
+17. **去掉的过滤器的消息**：broker 可能在 UNSUBACK 之前、也可能（MQTT 允许，已排队的消息）在之后发送；在该次运行中，主题
+    匹配某个去掉的过滤器且不匹配 `topics` 中任何过滤器的消息被确认而不交出；也匹配 `topics` 中某个过滤器的照样交出。除此之外
+    从不检查主题：EMQX 的重写规则可能以过滤器不匹配的主题投递它所要的消息。备选：版本 5 的订阅标识符，可说明消息属于哪个
+    订阅，代价是每个过滤器一个标识符。
+18. **被拒绝的 UNSUBSCRIBE 使运行失败**，与被拒绝的 SUBSCRIBE 一样（版本 5 的 0x80 及以上）；0x11（订阅不存在）视为成功。
+    未恢复的会话（`SessionPresent` 为 false）不取消任何订阅。
+19. **`will` 是源与目标共用的一个对象**，负载为文本；fit 关闭连接（停止、重载、Cleanup）发送正常的 DISCONNECT，遗嘱随之作废，
+    因此只有连接丢失或保活超时才发布遗嘱。遗嘱延迟向上取整到秒；会话先结束时更早发布，目标的会话是 clean 的，因此立即发布。
+    备选：字节负载（base64）；停止时发送 DISCONNECT 0x04（带遗嘱）。
+20. **增强认证只做 SCRAM**：`auth_method` 为 `SCRAM-SHA-1`、`SCRAM-SHA-256` 或 `SCRAM-SHA-512`，需要版本 5、`username` 与
+    `password_env`；此时 CONNECT 带用户名但不带密码。不做通道绑定（`n,,`），不做 SASLprep（密码原样使用，对 ASCII 无差别），
+    服务器给出的迭代次数最多 2^20，服务器签名错误则结束连接。EMQX 5 只提供 SHA-256 与 SHA-512；SHA-1 留给其他 broker，由
+    RFC 5802 的向量和假 broker 验证。
+21. **重新认证只在线协议客户端中提供**（`Reauthenticate`）；连接器不按定时器重新认证：目前没有需求，且 EMQX 5.8.6 在重新认证
+    的交换之后会断开连接（见上）。备选：`reauth_interval` 参数。
+22. **不做基于 MQTT AUTH 的 Kerberos（GSSAPI）**：broker 很少提供，且需要一个 krb5 实现；正在为 SQL Server 编写的实现以后可以
+    承载它。备选：现在就做。
+23. **SCRAM 互通在单独的 EMQX 节点上运行**（`${PREFIX}emqx-scram`，端口 29456）：EMQX 的认证器会拒绝它无法判断的客户端，
+    包括匿名客户端，共用节点会让其他测试失败。EMQX 每个认证器只有一种 SCRAM 算法，因此互通覆盖 SCRAM-SHA-256；SHA-512 在
+    那里验证为被拒绝。
+
+由此留下的问题：**[ruled 2026-11-10: done]**（已实现：遗嘱消息、UNSUBSCRIBE，以及以 SCRAM 进行的增强认证与重新认证；Kerberos
+不做，见决定 22）增强认证（AUTH 包曾会结束连接）、遗嘱消息与 UNSUBSCRIBE 当时尚未实现；I222 加入家族之后
+`test/sync/run.sh` 才会运行 `mqtt.sh`。
 
 ### I215 SQL Server 客户端：TDS、认证与查询
 

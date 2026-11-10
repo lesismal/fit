@@ -7559,6 +7559,29 @@ Decisions of the `RecordIDs` fix (decision 1's, 2026-11-10, branch `fix-recordid
   subscriber, the source in a job; user and password over TLS, a wrong password refused. Interop found
   a 3.1.1 broker sending a session's queued messages before the SUBACK, more than the client's channel
   held (fixed: the source subscribes on a goroutine of its own while it takes messages).
+- **Done** 2026-11-10, after the rulings on decision 8 and the open will and AUTH items: `mqttwire`
+  gained `Unsubscribe` (UNSUBSCRIBE and UNSUBACK in both versions, version 5's reason codes, 0x11
+  taken as success, 0x80 and up a `ReasonError`), `Config.Will` (topic, payload, QoS, retain, and in
+  version 5 the will delay and the message properties), and `Config.Auth`, MQTT 5's enhanced
+  authentication: an `Authenticator` whose method CONNECT names, the AUTH packets traded until the
+  CONNACK, whose data the method checks, and `Reauthenticate` (AUTH 0x19) while connected; `NewSCRAM`
+  is SCRAM-SHA-1, SCRAM-SHA-256 and SCRAM-SHA-512 (RFC 5802, 7677; `crypto/pbkdf2`), the server's
+  signature checked. The connectors gained `will` and `auth_method`; the source's positions carry the
+  topic filters subscribed (the first run saves them at once, with `SaveStart`), and a run whose
+  session resumed unsubscribes from those its checkpoint names and `topics` no longer does, before it
+  subscribes. Unit tests: 100 % of statements in `sync/mqtt`, 99.9 % in `sync/mqtt/wire` (the one
+  line left is `pbkdf2.Key`'s error, which only FIPS-only mode returns), RFC 5802's and RFC 7677's
+  vectors, race-clean. Interop (`TestMQTTWill`, `TestMQTTUnsubscribe`, `TestMQTTSCRAM`; `mqtt.sh`
+  starts a second EMQX node with a SCRAM-SHA-256 authenticator and the user fit) passed on Mosquitto
+  2.0.22 and EMQX 5.8.6, in 3.1.1 and 5, with the earlier `TestMQTT*` still passing: the sink's
+  will reaches a subscriber once its connection is cut, with its version 5 properties, and none
+  after a close; a filter dropped between runs delivers nothing, neither the messages queued for it
+  while fit was away nor those published after, and a third run shows the session no longer holds
+  it; SCRAM-SHA-256 connects and the source reads through it, a wrong password and SCRAM-SHA-512 are
+  refused (0x87), an anonymous client too. EMQX 5.8.6 takes a re-authentication's whole exchange and
+  then sends no AUTH of success: its channel waits on kicking its own session, and drops the
+  connection 5s later (its log: `session_stepdown_request_timeout`); the client's re-authentication
+  is checked on the fake broker.
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
@@ -7582,9 +7605,9 @@ Decisions of the `RecordIDs` fix (decision 1's, 2026-11-10, branch `fix-recordid
 7. **[kept]** (2026-11-10: a job needs an end, and the other queue sources' jobs end the same way) **In a job** the source reads until no message comes for `idle` (5s) after it subscribed, waits
    for every message's acknowledgement, and ends; later messages stay for the next run. Alternative:
    refuse mode once.
-8. **[needs the user]** (2026-11-10: a filter dropped from the config stays in the persistent session: the broker keeps sending its messages, and the source emits them, since it neither unsubscribes nor checks a message's topic against its filters; see the list at the top of the section) **Every `Run` subscribes again** (topics may have changed), with retain handling 1 in version 5 so
+8. **[ruled 2026-11-10: done]** (2026-11-10: ruled as recommended, and built: the positions carry the filters subscribed, and a run whose session resumed unsubscribes from those its checkpoint names and `topics` no longer does; decisions 16 to 18. Before: a filter dropped stayed in the persistent session, and its messages were emitted.) **Every `Run` subscribes again** (topics may have changed), with retain handling 1 in version 5 so
    that retained messages are not sent again at each restart; 3.1.1 brokers do send them again, which
-   idempotent sinks absorb. Filters dropped from the config are not unsubscribed.
+   idempotent sinks absorb. Filters dropped from the config are unsubscribed at the next run.
 9. **[kept]** (2026-11-10: delivery is at least once either way; a persistent session would need a stable client ID per sink and DUP handling, for no stronger guarantee) **The sink's session is clean, its client ID random** (`fit-sync-<random>`) unless set: delivery
    is at least once anyway. Alternative: a persistent session resending QoS 2 with DUP.
 10. **[kept]** (2026-11-10: an empty retained message is MQTT's way to clear a topic; a `deletes` param can come when someone needs another) **A delete with `retain` is an empty retained message**, which clears the topic; otherwise the
@@ -7600,8 +7623,49 @@ Decisions of the `RecordIDs` fix (decision 1's, 2026-11-10, branch `fix-recordid
 14. **[kept]** (2026-11-10: a cluster's nodes share the session, so trying them in turn resumes it) **`servers` is a list tried in turn**, the nodes of a cluster sharing the session.
 15. **[kept]** (2026-11-10: 3.1.1 forbids it (MQTT-3.1.2-22); refusing at provision says so before a broker does) **Version 3.1.1 refuses a password without a username** at provision, as its protocol does.
 
-Open from it: enhanced authentication (an AUTH packet ends the connection), will messages and
-UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds the family.
+Made after the rulings (2026-11-10), pending review:
+
+16. **The filters subscribed are kept in every position**, the checkpoint the last acknowledged one's,
+    and saved at once (`SaveStart`) in a pipeline's first run; until a dropped filter's UNSUBACK the
+    positions carry it too, so that a run ended first tries again. A filter added and dropped again
+    before any message of the run that subscribed to it is acknowledged is never in a checkpoint, and
+    stays in the session: the runtime saves a checkpoint only from a record, or at a first run.
+    Alternative: a file of the source's own in `state_dir`, outside the checkpoint.
+17. **Messages of a filter dropped**, which the broker may send before the UNSUBACK and, as MQTT lets
+    it, after (messages it had queued), are acknowledged and not emitted throughout that run when their
+    topic matches a dropped filter and no filter of `topics`; a topic that matches one of `topics` too
+    is emitted. Topics are never checked otherwise: EMQX's rewrite rules may deliver what a filter asks
+    under a topic it does not match. Alternative: version 5's subscription identifiers, which would
+    say which subscription a message is for, at the cost of an identifier per filter.
+18. **A refused UNSUBSCRIBE fails the run**, as a refused SUBSCRIBE does (version 5 codes 0x80 and
+    up); 0x11, no subscription existed, is success. A session not resumed (`SessionPresent` false)
+    unsubscribes from nothing.
+19. **`will` is one object for the source and the sink**, its payload text; a close by fit (a stop, a
+    reload, Cleanup) is a normal DISCONNECT, which discards the will, so only a lost connection or a
+    keep-alive in vain publishes it. The will delay is rounded up to seconds; a session that ends
+    first publishes it sooner, at once for the sink, whose session is clean. Alternatives: a payload
+    of bytes (base64); DISCONNECT 0x04 (with will) on a stop.
+20. **Enhanced authentication is SCRAM only**, `auth_method` `SCRAM-SHA-1`, `SCRAM-SHA-256` or
+    `SCRAM-SHA-512`, version 5 with `username` and `password_env`; CONNECT then carries the user name
+    but not the password. No channel binding (`n,,`), no SASLprep (the password is used as it is,
+    the same for ASCII), at most 2^20 iterations from a server, and a wrong server signature ends the
+    connection. EMQX 5 offers SHA-256 and SHA-512 only; SHA-1 is for other brokers, checked by RFC
+    5802's vector and the fake broker.
+21. **Re-authentication is in the wire client only** (`Reauthenticate`); the connectors do not
+    re-authenticate on a timer: nothing asks for it yet, and EMQX 5.8.6 drops a connection after a
+    re-authentication's exchange (above). Alternative: a `reauth_interval` param.
+22. **Kerberos (GSSAPI) over MQTT's AUTH is not done**: brokers rarely offer it, and it needs a krb5
+    implementation; the one being written for SQL Server could carry it later. Alternative: build
+    it now.
+23. **The SCRAM interop runs on an EMQX node of its own** (`${PREFIX}emqx-scram`, port 29456): an
+    EMQX authenticator refuses the clients it cannot judge, anonymous ones too, which would fail the
+    other tests on a shared node. EMQX holds one SCRAM algorithm per authenticator, so the interop
+    covers SCRAM-SHA-256; SHA-512 is shown refused there.
+
+Open from it: **[ruled 2026-11-10: done]** (built: will messages, UNSUBSCRIBE, and enhanced authentication
+by SCRAM, with re-authentication; Kerberos left out, decision 22) enhanced authentication (an AUTH
+packet ended the connection), will messages and UNSUBSCRIBE were not done; `test/sync/run.sh` runs
+`mqtt.sh` only once I222 adds the family.
 
 ### I215 A SQL Server client: TDS, authentication and queries
 
