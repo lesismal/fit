@@ -17,6 +17,7 @@ const (
 	pktAttention = 0x06
 	pktBulk      = 0x07
 	pktLogin7    = 0x10
+	pktSSPI      = 0x11
 	pktPrelogin  = 0x12
 )
 

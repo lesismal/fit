@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 )
 
@@ -58,6 +59,8 @@ type response struct {
 	begun     bool
 
 	onLoginAck func()
+	// onSSPI takes the login answer's SSPI token, valid until it returns.
+	onSSPI func([]byte)
 }
 
 // step reads the next token and does what it says, returning it.
@@ -142,6 +145,20 @@ func (r *response) step() (byte, error) {
 			err = m.skip(int(n))
 		}
 		return tok, err
+	case tokSSPI:
+		n, err := m.u16()
+		if err != nil {
+			return 0, err
+		}
+		b, err := m.next(int(n))
+		if err != nil {
+			return 0, err
+		}
+		if r.onSSPI == nil {
+			return 0, r.c.fail(errors.New("mssql: an SSPI token outside the login"))
+		}
+		r.onSSPI(b)
+		return tok, nil
 	case tokFeatureExtAck:
 		for {
 			id, err := m.u8()
@@ -315,6 +332,7 @@ const (
 	envCommitTx   = 9
 	envRollbackTx = 10
 	envTxEnded    = 17
+	envRouting    = 20
 )
 
 func (r *response) envChange() error {
@@ -358,6 +376,18 @@ func (r *response) envChange() error {
 		}
 	case envCommitTx, envRollbackTx, envTxEnded:
 		c.tx = [8]byte{}
+	case envRouting:
+		// RoutingDataValueLength, then the protocol (0, TCP), the port
+		// and the server, a US_VARCHAR.
+		if len(b) < 7 || b[2] != 0 {
+			return c.fail(errors.New("mssql: a malformed routing ENVCHANGE"))
+		}
+		port := binary.LittleEndian.Uint16(b[3:])
+		k := int(binary.LittleEndian.Uint16(b[5:]))
+		if k == 0 || len(b) < 7+2*k {
+			return c.fail(errors.New("mssql: a malformed routing ENVCHANGE"))
+		}
+		c.route = net.JoinHostPort(ucs2String(b[7:7+2*k]), strconv.Itoa(int(port)))
 	}
 	return nil
 }
