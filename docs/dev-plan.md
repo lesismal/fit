@@ -7180,6 +7180,21 @@ systems on fib's asynchronous client, at least once into idempotent sinks, `fits
 connection tests, unit tests against fakes for the 98% coverage floor, interop in Docker in its own
 `sync-interop` family, and decisions pending review in each section.
 
+**For the user to rule on** (from the reviews of 2026-11-10):
+
+- I220–I222 and planning:
+  - **Deletes in the time series sinks** (I220 decision 1). Choice: keep `deletes skip` as the default, or
+    make `fail` the default, or delete for real (TDengine `mode sql` by `DELETE ... WHERE ts =`, which finds
+    the row only with `time_field`; InfluxDB 2's delete API per point). Recommendation: keep `skip`, a time
+    series being history, and add the TDengine `mode sql` delete only if asked for.
+  - **Collections made by the vector sinks** (I221 decision 3). Choice: never (now), or an opt-in
+    `create` with a size, distance and primary key type. Recommendation: keep never; index and schema are
+    choices fit cannot make from a record.
+  - **The sync plan's weights** (I222 decision 8). Choice: S1 20, S2 15, S3 15, S4 10, S5 15, S6 5, S7 7,
+    S8 6, S9 7 as now, or other weights; and whether the time series and vector sinks get a scenario (MQTT to
+    InfluxDB against Telegraf has a mover; the vector sinks have none). Recommendation: keep the weights, and
+    add MQTT to InfluxDB as S10 only with the next plan run.
+
 ### I211 RabbitMQ as a source and a sink
 
 - **Do**: an AMQP 0-9-1 client (`sync/rabbitmq/wire`): connection and channel negotiation, TLS,
@@ -7923,30 +7938,49 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
-1. **Deletes are left out** (`deletes skip`, counted as written), or fail to `on_error` (`deletes
+1. **[needs the user]** (2026-11-10: a product choice: a time series as history or as a copy of the
+   source's rows; see the list above.)
+   **Deletes are left out** (`deletes skip`, counted as written), or fail to `on_error` (`deletes
    fail`): the line protocol has none, InfluxDB 3 deletes no point, and InfluxDB 2's
    `/api/v2/delete` (a predicate and a time range) is a heavy call. Alternatives: v2's delete API per
    point; `DELETE FROM sub WHERE ts = ...` in TDengine's `mode sql`.
-2. **A record with neither `time_field` nor a commit time takes the time it is written**, which a
+2. **[kept]** (2026-11-10: `time_field` is the documented way to get points a replay repeats, and the
+   param says the fallback is not; failing would stop file and generate pipelines that have no time,
+   and MQTT's commit time is its receipt time anyway.)
+   **A record with neither `time_field` nor a commit time takes the time it is written**, which a
    replay does not repeat (a file's lines). Alternatives: fail such records; let the server stamp them.
-3. **A refused request is written again record by record** to find the record refused (InfluxDB's
+3. **[kept]** (2026-11-10: a probe of TDengine 3.3.6 found the refusals where the code puts them (a
+   value of the wrong type 0x216, an unknown column 0x2602, a schemaless type clash 0x3002);
+   InfluxDB 3's line number would save requests only for the one server that gives it.)
+   **A refused request is written again record by record** to find the record refused (InfluxDB's
    400, 413 and 422 with `accept_partial=false` on v3; TDengine's codes 0x216, 0x2600-0x26ff but a
    table or database missing, 0x3000-0x3fff), safe because points are idempotent; InfluxDB 2's partial
    writes are written again whole. Alternative: read the line number InfluxDB 3 reports (the others
    give none).
-4. **TDengine's schemaless errors come as HTTP 500 with `[0xNNNN]`**: the code decides between a
+4. **[kept]** (2026-11-10: the same probe: a missing database (0x388) and super table (0x2603) are
+   tried again, not refused, which is right while the user creates them; /rest/sql answers 200 with
+   `code` as written.)
+   **TDengine's schemaless errors come as HTTP 500 with `[0xNNNN]`**: the code decides between a
    refusal (above) and an error tried again; `/rest/sql` answers 200 with `code`. Busy codes are not
    singled out: any other error goes to the backoff, then the pipeline's retry.
-5. **One client package for the HTTP sinks** (`sync/internal/fibrest`), used by these, I221's and the
+5. **[kept]** (2026-11-10: four sinks and a transform on one tested client; moving Doris and Loki onto
+   it is cleanup, not a gap.)
+   **One client package for the HTTP sinks** (`sync/internal/fibrest`), used by these, I221's and the
    `embed` transform, rather than a fifth copy of the elasticsearch and http sinks' clients; Doris
    (I218) and Loki (I219) could take it. Alternative: a client per package, as the first round has.
-6. **Types**: ints `i`, uints `u` (v2, v3; v1 `i`, failing past int64), TDengine `i64`, `u64`, `f64`;
+6. **[kept]** (2026-11-10: the types interop wrote and read back in InfluxDB 2, 3 and TDengine;
+   decimals as floats is what both servers store.)
+   **Types**: ints `i`, uints `u` (v2, v3; v1 `i`, failing past int64), TDengine `i64`, `u64`, `f64`;
    decimals as floats; every other kind a string (bytes in base64, maps and arrays plain JSON); gzip on;
    precision `ns` (InfluxDB) and `ms` (TDengine, its default). Tags are text; a field named in
    `measurement` stays a field.
-7. **TDengine `mode sql`'s default subtable** is `t_` and the MD5 of the super table and the tags, one
+7. **[kept]** (2026-11-10: the same naming TDengine's own schemaless writes use (t_ and a hash), stable
+   per series, well inside 192 characters.)
+   **TDengine `mode sql`'s default subtable** is `t_` and the MD5 of the super table and the tags, one
    INSERT a request with a clause a record; the super table is the user's.
-8. **The interop servers have their own script, `test/sync/obs.sh`** (and `FIT_SYNC_OBS` gates
+8. **[kept]** (2026-11-10: done: I222 made `obs` a family of `run.sh` and a CI job, which still sets
+   `FIT_SYNC_OBS`.)
+   **The interop servers have their own script, `test/sync/obs.sh`** (and `FIT_SYNC_OBS` gates
    `FIT_SYNC_INTEROP=required`), until I222 makes them run.sh's `obs` family; InfluxDB 3 Core waits
    about a second on each write for its WAL, which the test's time shows.
 
@@ -7976,32 +8010,49 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
-1. **Qdrant's point ID**: a single unsigned integer, or a UUID string, as it is; any other key a UUID
+1. **[kept]** (2026-11-10: stable, and the same text as the elasticsearch sink's `_id`; UUIDv5 would be
+   SHA-1 under a namespace, no better.)
+   **Qdrant's point ID**: a single unsigned integer, or a UUID string, as it is; any other key a UUID
    of the first 16 bytes of the SHA-256 of its text (the elasticsearch sink's `_id` text), version 8.
    Alternatives: UUIDv5 under a namespace of fit's; the key's text kept in the payload too.
-2. **A batch is cut to each key's last record**, deletes and upserts in requests of their own, since
+2. **[kept]** (2026-11-10: interop showed replays from the middle and the start converge in both.)
+   **A batch is cut to each key's last record**, deletes and upserts in requests of their own, since
    neither Qdrant nor Milvus orders two writes of one ID in a request. The batch's order across keys
    does not matter then.
-3. **Collections are made by the user**, never by the sink: size, distance, index and schema are
+3. **[needs the user]** (2026-11-10: a product choice; see the list above.)
+   **Collections are made by the user**, never by the sink: size, distance, index and schema are
    choices fit cannot make from a record. Alternative: make one from the first vector's size.
-4. **Milvus's codes**: 1 to 9 (not ready, rate and quota limits) tried again, 1100 and 1800-1899
+4. **[changed]** (2026-11-10: a probe of Milvus 2.5.17 found an upsert's key converted to the primary
+   key's type but a delete's filter of the other type refused (1100), so an int key with a `VarChar`
+   primary key failed every delete into `on_error`. The sink now describes the collection at its
+   first delete and writes the key as its type (f8f9f26f, `TestMilvusDeleteKeyTypes` against Milvus
+   2.5). The codes held: 1804 for a vector of the wrong size, a missing vector or a bad Int64, 1100
+   for a VarChar too long, 100 for a missing collection (tried again).)
+   **Milvus's codes**: 1 to 9 (not ready, rate and quota limits) tried again, 1100 and 1800-1899
    refused (found record by record), others errors for the pipeline's retry; the primary key an
    `Int64` from a single integer key, a `VarChar` of the key's text otherwise; deletes by `pk in
    [...]`; `username` and `password_env` sent as the token `user:password`.
-5. **`embed` runs on the pipeline's dispatcher goroutine** as a `BatchTransform`, its requests on
+5. **[kept]** (2026-11-10: rule 1 holds (plain goroutines wait on fib's asynchronous client, never a
+   worker), and failures reach `on_error` per record.)
+   **`embed` runs on the pipeline's dispatcher goroutine** as a `BatchTransform`, its requests on
    fib's asynchronous client, waited there (never a fib worker, rule 1), `max_parallel` at once, each
    bounded by `timeout` and `attempts`; a request that fails fails its records (`on_error`), one
    refused (400, 413, 422) is asked again text by text; a text over `max_text_bytes` fails its record
    rather than being cut; a record without the fields passes without a vector.
-6. **The cache is bounded by bytes** (`cache_bytes`, 32 MiB), least used dropped first, keyed by a
+6. **[kept]** (2026-11-10: bytes are what the memory bound is about; float32 is what the sinks store.)
+   **The cache is bounded by bytes** (`cache_bytes`, 32 MiB), least used dropped first, keyed by a
    SHA-256 of the model, the dimensions and the text, its vectors float32 (what models make, half the
    memory; a cached vector and a fresh one are the same). Alternative: a bound on entries.
-7. **llm.proxy as the default**: `module.Env` gained `LLMProxy`; the sync role's member is now
+7. **[kept]** (2026-11-10: a lookup per batch buys nothing while llm.proxy's API address rarely
+   changes; a pipeline reload picks it up.)
+   **llm.proxy as the default**: `module.Env` gained `LLMProxy`; the sync role's member is now
    `*fitsync.Member{Sync, LLMProxy}`, written as the sync alone; the API is called on loopback with its
    certificate pinned, as the assistant's `llm_proxy` provider does. A change of `llm.proxy` reaches a
    pipeline when it is loaded again (a change of its own), not those running. Alternatives: a lookup at
    each batch; a pipeline restart on any llm.proxy change.
-8. **The end-to-end interop uses `generate`** as the source, killed at random points, rather than
+8. **[kept]** (2026-11-10: done: `TestEmbedPostgresAcrossKills` (I222) runs PostgreSQL through `embed`
+   into both across kills.)
+   **The end-to-end interop uses `generate`** as the source, killed at random points, rather than
    PostgreSQL, which the `obs` servers do not have yet; PostgreSQL across kills is I222's (open above).
 
 ### I222 The second round in the matrix, the benchmarks and the docs
@@ -8036,55 +8087,75 @@ UNSUBSCRIBE are not done; `test/sync/run.sh` runs `mqtt.sh` only once I222 adds 
 
 **Decisions pending review** (made while building it, 2026-11-10; each stands until the user rules on it):
 
-1. **The queues in the matrix carry Debezium's events**, as Kafka's run does, the key built from the
+1. **[kept]** (2026-11-10: the only way the queues carry deletes and keys the matrix checks.)
+   **The queues in the matrix carry Debezium's events**, as Kafka's run does, the key built from the
    id by a `key` transform (their messages have no key the codec reads); each source's load on one
    queue, stream, topic or MQTT topic, so a key's changes keep their order. Alternative: plain JSON
    rows and an `envelope`-free path (no deletes then).
-2. **Doris in the matrix soft-deletes**: deletes set a `deleted` flag (the source's `deleted_column`)
+2. **[kept]** (2026-11-10: Doris's transactions are insert-only, so a soft delete is how a polled
+   source sees a delete.)
+   **Doris in the matrix soft-deletes**: deletes set a `deleted` flag (the source's `deleted_column`)
    and bump `ver`, the cursor; a key change is a delete and an insert; the flag is dropped by a
    `fields` transform before the sinks; no multi-statement transactions (Doris's are insert-only).
-3. **CI runs the second round's matrix as two more jobs** (`matrix-mq`, `matrix-db`), each with the
+3. **[kept]** (2026-11-10: the runner's memory decides it; one job with SQL Server, Doris and Pulsar
+   beside the six sinks would not fit.)
+   **CI runs the second round's matrix as two more jobs** (`matrix-mq`, `matrix-db`), each with the
    six sinks' servers and one server of each source, rather than in the first round's job, which would
    not fit a runner with SQL Server, Doris and Pulsar beside the rest. A second round's family named in
    `MATRIX_SERVERS` runs its sources alone; the first round's stay in `matrix`.
-4. **Ports moved apart**: NATS 29440, MQTT 29450, Pulsar 29540 (they all took 29420 or 29500), and
+4. **[kept]** (2026-11-10: families must run together; the knobs start one server of each.)
+   **Ports moved apart**: NATS 29440, MQTT 29450, Pulsar 29540 (they all took 29420 or 29500), and
    `NATS_VERSIONS`, `PULSAR_VERSIONS`, `RABBITMQ_IMAGES`, `EMQX`, `MSSQL_VERSIONS`, `OLAP` let the
    matrix start one of each; `natsClusters` and `pulsarServers` now require one server at least, not
    both, under `FIT_SYNC_INTEROP=required`.
-5. **The `obs` family starts PostgreSQL 17 and Mosquitto** for its two pipelines' tests rather than
+5. **[kept]** (2026-11-10: two tests' worth of servers do not earn a family.)
+   **The `obs` family starts PostgreSQL 17 and Mosquitto** for its two pipelines' tests rather than
    making them a family of their own.
-6. **The movers for RabbitMQ and MQTT are Apache Camel's Kafka connectors** (Apache 2.0) in Debezium's
+6. **[kept]** (2026-11-10: the licences decide it; the benchmark host's smoke run found the
+   configuration right.)
+   **The movers for RabbitMQ and MQTT are Apache Camel's Kafka connectors** (Apache 2.0) in Debezium's
    Kafka Connect image, the packages pinned by sha256; Confluent's RabbitMQ and MQTT connectors are
    under a commercial licence, and Lenses's need a licence key for some. The benchmark host's smoke
    run (2026-11-10) found the kamelets' property names right; the RabbitMQ connector declares nothing
    (`autoDeclare` false) and reads syncbench's durable queue `bench`, since its own declaration of the
    queue is not durable and RabbitMQ refuses it. Mosquitto keeps an unbounded queue
    (`max_queued_messages 0`), so that a paused mover's messages wait for it.
-7. **SQL Server's capture job is tuned for the benchmark** (every second, 5,000 transactions a scan,
+7. **[kept]** (2026-11-10: both movers read the same change tables, so the capture job bounds neither.)
+   **SQL Server's capture job is tuned for the benchmark** (every second, 5,000 transactions a scan,
    100 scans), so that CDC's capture does not bound either mover; both read the same change tables.
-8. **The plan's weights**: S1 20%, S2 15%, S3 15%, S4 10%, S5 15%, S6 5%, S7 7%, S8 6%, S9 7%: the
+8. **[needs the user]** (2026-11-10: the plan's weights are the user's; see the list above.)
+   **The plan's weights**: S1 20%, S2 15%, S3 15%, S4 10%, S5 15%, S6 5%, S7 7%, S8 6%, S9 7%: the
    first round's keep three quarters, in their old proportions roughly.
-9. **fit-examples' nine examples need fit with the second round** (`go.mod` moves to that commit
+9. **[kept]** (2026-11-10: done: fit-examples' main (9659d7e) has the nine examples with `go.mod` at
+   fit 1fdb2407.)
+   **fit-examples' nine examples need fit with the second round** (`go.mod` moves to that commit
    when fit is pushed); they were validated here through a `go.work` naming this worktree.
 
 **Decisions pending review** (made while planning, 2026-11-10; each stands until the user rules on it):
 
-1. **Every protocol written in fit, as in the first round**: AMQP 0-9-1, NATS, Pulsar's binary
+1. **[kept]** (2026-11-10: decision 036 item 1; every protocol shipped and passed interop without a
+   driver.)
+   **Every protocol written in fit, as in the first round**: AMQP 0-9-1, NATS, Pulsar's binary
    protocol (protobuf by hand), MQTT, TDS. Alternative: drivers (amqp091-go, nats.go, pulsar-client-go,
    paho, go-mssqldb) — less work, against decision 036 item 1 and with large dependency trees
    (pulsar-client-go especially).
-2. **Brokers whose position is their own (RabbitMQ queues, NATS consumers, Pulsar subscriptions,
+2. **[kept]** (2026-11-10: built so in I211-I214; the matrix's queues lost nothing across kills.)
+   **Brokers whose position is their own (RabbitMQ queues, NATS consumers, Pulsar subscriptions,
    MQTT sessions) acknowledge only after the sinks**, and keep nothing in fit's checkpoint; where the
    broker has an offset (RabbitMQ stream queues, JetStream sequences, Pulsar message IDs) it is in the
    checkpoint too, so a lost consumer does not lose the place.
-3. **SQL Server through its CDC tables, not by reading its transaction log**; the log's format is
+3. **[kept]** (2026-11-10: built so in I216, change tracking too.)
+   **SQL Server through its CDC tables, not by reading its transaction log**; the log's format is
    undocumented. Change tracking as the lighter option.
-4. **Doris and StarRocks share one connector** with a `flavor` param, since Stream Load and the
+4. **[kept]** (2026-11-10: built so in I218; one sink and source with `flavor`.)
+   **Doris and StarRocks share one connector** with a `flavor` param, since Stream Load and the
    unique model's delete sign differ only in names.
-5. **The vector sinks get an `embed` transform** that calls an embeddings API, so a pipeline from a
+5. **[kept]** (2026-11-10: built so in I221; the end-to-end tests use it.)
+   **The vector sinks get an `embed` transform** that calls an embeddings API, so a pipeline from a
    database to a vector store needs nothing else; fit's own `llm` proxy is the default endpoint when
    configured.
-6. **Order**: I211–I214 (the queues, each independent), I215 then I216 and I217 (SQL Server), I218
+6. **[kept]** (2026-11-10: followed, and the parallel build worked.)
+   **Order**: I211–I214 (the queues, each independent), I215 then I216 and I217 (SQL Server), I218
    to I221 (the HTTP-based sinks, independent and cheap), then I222. The queues and the HTTP sinks can
    be built in parallel, as the first round's were.
 

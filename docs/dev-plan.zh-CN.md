@@ -5146,6 +5146,18 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 的 goroutine 上，基于 HTTP 的系统用 fib 的异步客户端，至少一次写入幂等的目标，用 `fitsync.Tester` 做连接测试，用针对假
 服务端的单元测试满足 98% 的覆盖率门槛，在 Docker 中做互通并归入 `sync-interop` 自己的一组，每一节记录待审查的决策。
 
+**待用户裁定**（来自 2026-11-10 的审查）：
+
+- I220–I222 与规划：
+  - **时序目标中的删除**（I220 决策 1）。选择：保持默认 `deletes skip`，或默认 `fail`，或真正删除（TDengine `mode sql` 用
+    `DELETE ... WHERE ts =`，只有设置了 `time_field` 才能找到该行；InfluxDB 2 的删除 API 逐点调用）。建议：保持 `skip`，时序是
+    历史；只在有需求时再加 TDengine `mode sql` 的删除。
+  - **向量目标是否创建集合**（I221 决策 3）。选择：从不创建（现状），或加一个可选的 `create`，带维数、距离与主键类型。建议：
+    保持不创建；索引与 schema 是 fit 无法从记录推断的选择。
+  - **同步计划的权重**（I222 决策 8）。选择：保持 S1 20、S2 15、S3 15、S4 10、S5 15、S6 5、S7 7、S8 6、S9 7，或其他权重；以及
+    时序与向量目标是否加场景（MQTT 到 InfluxDB 有 Telegraf 作为对手，向量目标没有）。建议：保持权重，在下一次计划运行时再把 MQTT
+    到 InfluxDB 作为 S10 加入。
+
 ### I211 RabbitMQ 作为源与目标
 
 - **做**：AMQP 0-9-1 客户端（`sync/rabbitmq/wire`）：连接与信道协商、TLS、PLAIN 与 EXTERNAL 认证、心跳、流控、
@@ -5639,22 +5651,39 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **删除不写**（`deletes skip`，计为已写入），或交给 `on_error`（`deletes fail`）：line protocol 没有删除，InfluxDB 3 不能删除
+1. **[needs the user]**（2026-11-10：产品选择：时序库是历史，还是源表行的副本；见上方列表。）
+   **删除不写**（`deletes skip`，计为已写入），或交给 `on_error`（`deletes fail`）：line protocol 没有删除，InfluxDB 3 不能删除
    单点，InfluxDB 2 的 `/api/v2/delete`（谓词加时间范围）开销大。备选：逐点调用 v2 的删除 API；TDengine `mode sql` 中用
    `DELETE FROM sub WHERE ts = ...`。
-2. **既无 `time_field` 也无提交时间的记录用写入时间**，重放时不会重复（如文件的行）。备选：让这类记录失败；由服务器打时间戳。
-3. **被拒的请求逐条重写**以找出被拒的记录（InfluxDB 的 400、413、422，v3 用 `accept_partial=false`；TDengine 的 0x216、
+2. **[kept]**（2026-11-10：`time_field`
+   是文档给出的让重放写出相同数据点的方法，参数说明也写明了回退值不会重复；让记录失败会让没有时间的文件和
+   generate 流水线停下，而 MQTT 的提交时间本来就是接收时间。）
+   **既无 `time_field` 也无提交时间的记录用写入时间**，重放时不会重复（如文件的行）。备选：让这类记录失败；由服务器打时间戳。
+3. **[kept]**（2026-11-10：对 TDengine 3.3.6
+   的探测表明拒绝码都在代码所列范围内（值类型不对 0x216、未知列 0x2602、schemaless 类型冲突
+   0x3002）；读 InfluxDB 3 的行号只对给出行号的那一种服务器省请求。）
+   **被拒的请求逐条重写**以找出被拒的记录（InfluxDB 的 400、413、422，v3 用 `accept_partial=false`；TDengine 的 0x216、
    0x2600-0x26ff（表或库不存在除外）、0x3000-0x3fff），因为数据点幂等所以安全；InfluxDB 2 的部分写入会整批重写。备选：读取
    InfluxDB 3 报告的行号（其他不提供）。
-4. **TDengine 的 schemaless 错误是 HTTP 500 加 `[0xNNNN]`**：由错误码区分拒绝（见上）与可重试的错误；`/rest/sql` 返回 200 加
+4. **[kept]**（2026-11-10：同一次探测：缺数据库（0x388）和缺超级表（0x2603）会重试而不是拒绝，在用户创建它们之前这是对的；`/rest/sql`
+   如所写返回 200 加 `code`。）
+   **TDengine 的 schemaless 错误是 HTTP 500 加 `[0xNNNN]`**：由错误码区分拒绝（见上）与可重试的错误；`/rest/sql` 返回 200 加
    `code`。不单列表示繁忙的错误码：其他错误都先退避重试，再由流水线重试。
-5. **HTTP 目标共用一个客户端包**（`sync/internal/fibrest`），供这两个目标、I221 的目标和 `embed` 变换使用，而不是把
+5. **[kept]**（2026-11-10：四个目标和一个变换共用一个经过测试的客户端；把 Doris 和 Loki
+   迁过来是整理，不是缺口。）
+   **HTTP 目标共用一个客户端包**（`sync/internal/fibrest`），供这两个目标、I221 的目标和 `embed` 变换使用，而不是把
    elasticsearch 与 http 目标的客户端复制第五份；Doris（I218）与 Loki（I219）也可使用。备选：像第一批那样每个包一个客户端。
-6. **类型**：int 为 `i`，uint 为 `u`（v2、v3；v1 为 `i`，超出 int64 则失败），TDengine 为 `i64`、`u64`、`f64`；decimal 写为浮点数；
+6. **[kept]**（2026-11-10：互通在 InfluxDB 2、3 与 TDengine
+   中写入并读回了这些类型；decimal 写为浮点数正是两种服务器保存的方式。）
+   **类型**：int 为 `i`，uint 为 `u`（v2、v3；v1 为 `i`，超出 int64 则失败），TDengine 为 `i64`、`u64`、`f64`；decimal 写为浮点数；
    其他类型写为字符串（bytes 为 base64，map 与数组为普通 JSON）；默认开启 gzip；精度默认 `ns`（InfluxDB）和 `ms`（TDengine 的
    默认值）。标签为文本；`measurement` 中引用的字段仍保留为字段。
-7. **TDengine `mode sql` 的默认子表名**为 `t_` 加超级表与标签的 MD5，每个请求一条 INSERT、每条记录一个子句；超级表由用户创建。
-8. **互通所用的服务器有单独的脚本 `test/sync/obs.sh`**（`FIT_SYNC_OBS` 控制 `FIT_SYNC_INTEROP=required` 是否生效），直到 I222
+7. **[kept]**（2026-11-10：与 TDengine 自己的 schemaless 写入命名方式相同（t_
+   加哈希），每个序列稳定，远小于 192 个字符。）
+   **TDengine `mode sql` 的默认子表名**为 `t_` 加超级表与标签的 MD5，每个请求一条 INSERT、每条记录一个子句；超级表由用户创建。
+8. **[kept]**（2026-11-10：已完成：I222 把 `obs` 做成了 `run.sh` 的一族和 CI
+   任务，仍会设置 `FIT_SYNC_OBS`。）
+   **互通所用的服务器有单独的脚本 `test/sync/obs.sh`**（`FIT_SYNC_OBS` 控制 `FIT_SYNC_INTEROP=required` 是否生效），直到 I222
    把它们并入 run.sh 的 `obs` 分组；InfluxDB 3 Core 每次写入要等约一秒落 WAL，测试耗时因此偏长。
 
 ### I221 向量数据库作为目标：Milvus 与 Qdrant
@@ -5677,23 +5706,40 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **Qdrant 的点 ID**：单个无符号整数或 UUID 字符串原样使用；其他键用其文本（与 elasticsearch 目标的 `_id` 文本相同）的
+1. **[kept]**（2026-11-10：稳定，且与 elasticsearch 目标的 `_id`
+   文本相同；UUIDv5 是命名空间下的 SHA-1，并不更好。）
+   **Qdrant 的点 ID**：单个无符号整数或 UUID 字符串原样使用；其他键用其文本（与 elasticsearch 目标的 `_id` 文本相同）的
    SHA-256 前 16 字节构成 UUID，版本 8。备选：fit 自己的命名空间下的 UUIDv5；同时把键的文本存进 payload。
-2. **一批记录缩减为每个键的最后一条**，删除与 upsert 分别成请求，因为 Qdrant 和 Milvus 都不保证同一请求中同一 ID 两次写入的
+2. **[kept]**（2026-11-10：互通表明从中间和从头重放在两者中都收敛。）
+   **一批记录缩减为每个键的最后一条**，删除与 upsert 分别成请求，因为 Qdrant 和 Milvus 都不保证同一请求中同一 ID 两次写入的
    顺序。这样批内不同键之间的顺序无关紧要。
-3. **集合由用户创建**，目标从不创建：维数、距离、索引与 schema 是 fit 无法从记录推断的选择。备选：按第一个向量的维数创建。
-4. **Milvus 的错误码**：1 到 9（未就绪、限速与配额）重试，1100 与 1800-1899 视为拒绝（逐条找出），其他错误交给流水线重试；
+3. **[needs the user]**（2026-11-10：产品选择；见上方列表。）
+   **集合由用户创建**，目标从不创建：维数、距离、索引与 schema 是 fit 无法从记录推断的选择。备选：按第一个向量的维数创建。
+4. **[changed]**（2026-11-10：对 Milvus 2.5.17 的探测表明 upsert
+   的键会被转换为主键类型，但删除 filter 中另一类型的字面量会被拒绝（1100），所以整数键配
+   `VarChar` 主键时每次删除都失败并交给
+   `on_error`。现在该目标在第一次删除时读取集合描述，按主键类型写键（f8f9f26f，`TestMilvusDeleteKeyTypes`
+   针对 Milvus 2.5）。错误码成立：向量维数不对、缺向量、Int64 无效为 1804，VarChar
+   过长为 1100，缺集合为 100（重试）。）
+   **Milvus 的错误码**：1 到 9（未就绪、限速与配额）重试，1100 与 1800-1899 视为拒绝（逐条找出），其他错误交给流水线重试；
    主键对单个整数键为 `Int64`，否则为键文本的 `VarChar`；删除用 `pk in [...]`；`username` 与 `password_env` 作为令牌
    `user:password` 发送。
-5. **`embed` 作为 `BatchTransform` 运行在流水线的分发 goroutine 上**，请求走 fib 的异步客户端并在此等待（从不占用 fib worker，
+5. **[kept]**（2026-11-10：符合规则 1（普通 goroutine 等待 fib 的异步客户端，从不占用
+   worker），失败按记录交给 `on_error`。）
+   **`embed` 作为 `BatchTransform` 运行在流水线的分发 goroutine 上**，请求走 fib 的异步客户端并在此等待（从不占用 fib worker，
    规则 1），同时最多 `max_parallel` 个，各自受 `timeout` 与 `attempts` 限制；失败的请求让其记录失败（`on_error`），被拒的请求
    （400、413、422）逐个文本重新请求；超过 `max_text_bytes` 的文本让记录失败而不截断；没有这些字段的记录不加向量直接通过。
-6. **缓存按字节限制**（`cache_bytes`，32 MiB），最少使用的先淘汰，键为模型、维数与文本的 SHA-256，向量存为 float32（模型本身的
+6. **[kept]**（2026-11-10：内存上限关心的是字节；float32 就是目标保存的精度。）
+   **缓存按字节限制**（`cache_bytes`，32 MiB），最少使用的先淘汰，键为模型、维数与文本的 SHA-256，向量存为 float32（模型本身的
    精度，内存减半；缓存的向量与新取的相同）。备选：按条数限制。
-7. **默认使用 llm.proxy**：`module.Env` 新增 `LLMProxy`；sync 角色的成员改为 `*fitsync.Member{Sync, LLMProxy}`，序列化时只写
+7. **[kept]**（2026-11-10：llm.proxy 的 API
+   地址很少变化，每批查一次没有收益；流水线重新加载时会取到。）
+   **默认使用 llm.proxy**：`module.Env` 新增 `LLMProxy`；sync 角色的成员改为 `*fitsync.Member{Sync, LLMProxy}`，序列化时只写
    sync；经回环地址调用其 API 并固定其证书，与助手的 `llm_proxy` 提供方相同。`llm.proxy` 的变更在流水线重新加载（其自身变更）
    时生效，不影响正在运行的流水线。备选：每批查一次；任何 llm.proxy 变更都重启流水线。
-8. **端到端互通以 `generate` 为源**并在随机时刻 kill，而不是 PostgreSQL（`obs` 的服务器中还没有）；PostgreSQL 跨 kill 属于
+8. **[kept]**（2026-11-10：已完成：`TestEmbedPostgresAcrossKills`（I222）让
+   PostgreSQL 经 `embed` 跨 kill 写入两者。）
+   **端到端互通以 `generate` 为源**并在随机时刻 kill，而不是 PostgreSQL（`obs` 的服务器中还没有）；PostgreSQL 跨 kill 属于
    I222（见上方未完成）。
 
 ### I222 第二批进入矩阵、基准测试与文档
@@ -5721,38 +5767,55 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待审查的决策**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **矩阵中的队列携带 Debezium 事件**，与 Kafka 的运行相同，键由 `key` 变换从 id 构造（它们的消息没有编解码器能读的键）；
+1. **[kept]**（2026-11-10：只有这样队列才携带矩阵要检查的删除与键。）
+   **矩阵中的队列携带 Debezium 事件**，与 Kafka 的运行相同，键由 `key` 变换从 id 构造（它们的消息没有编解码器能读的键）；
    每个源的负载写在一个队列、流、主题或 MQTT 主题上，所以同一键的变更保持顺序。备选：普通 JSON 行、不经信封（那样就没有删除）。
-2. **矩阵中的 Doris 软删除**：删除设置 `deleted` 标记（源的 `deleted_column`）并增加游标 `ver`；改键为一次删除加一次插入；
+2. **[kept]**（2026-11-10：Doris 的事务只能插入，软删除是轮询源看到删除的方式。）
+   **矩阵中的 Doris 软删除**：删除设置 `deleted` 标记（源的 `deleted_column`）并增加游标 `ver`；改键为一次删除加一次插入；
    该标记在写入目标前由 `fields` 变换去掉；不用多语句事务（Doris 的事务只支持插入）。
-3. **CI 把第二批的矩阵作为另外两个任务运行**（`matrix-mq`、`matrix-db`），各自带六个目标的服务器与每种源一台，而不是放进第一批的
+3. **[kept]**（2026-11-10：由 runner 的内存决定；SQL Server、Doris、Pulsar
+   与六个目标放在一个任务里装不下。）
+   **CI 把第二批的矩阵作为另外两个任务运行**（`matrix-mq`、`matrix-db`），各自带六个目标的服务器与每种源一台，而不是放进第一批的
    任务——那样带上 SQL Server、Doris 与 Pulsar 会超出一台 runner 的容量。`MATRIX_SERVERS` 中写上第二批的族时只运行其源；
    第一批的源留在 `matrix` 中。
-4. **端口错开**：NATS 29440、MQTT 29450、Pulsar 29540（原先都占 29420 或 29500），并以 `NATS_VERSIONS`、`PULSAR_VERSIONS`、
+4. **[kept]**（2026-11-10：各族必须能一起运行；这些开关让每种只启动一台。）
+   **端口错开**：NATS 29440、MQTT 29450、Pulsar 29540（原先都占 29420 或 29500），并以 `NATS_VERSIONS`、`PULSAR_VERSIONS`、
    `RABBITMQ_IMAGES`、`EMQX`、`MSSQL_VERSIONS`、`OLAP` 让矩阵各启动一台；`FIT_SYNC_INTEROP=required` 下 `natsClusters` 与
    `pulsarServers` 现在至少需要一台，而不是两台都要。
-5. **`obs` 族为其两条流水线的测试启动 PostgreSQL 17 与 Mosquitto**，而不是让它们自成一族。
-6. **RabbitMQ 与 MQTT 的对手用 Apache Camel 的 Kafka 连接器**（Apache 2.0），装在 Debezium 的 Kafka Connect 镜像中，安装包以
+5. **[kept]**（2026-11-10：两个测试用到的服务器不值得自成一族。）
+   **`obs` 族为其两条流水线的测试启动 PostgreSQL 17 与 Mosquitto**，而不是让它们自成一族。
+6. **[kept]**（2026-11-10：由许可证决定；基准主机的冒烟运行确认了配置正确。）
+   **RabbitMQ 与 MQTT 的对手用 Apache Camel 的 Kafka 连接器**（Apache 2.0），装在 Debezium 的 Kafka Connect 镜像中，安装包以
    sha256 固定；Confluent 的 RabbitMQ 与 MQTT 连接器是商业许可，Lenses 的部分需要许可证密钥。基准主机的冒烟运行（2026-11-10）
    确认 kamelet 的属性名无误；RabbitMQ 连接器不声明任何东西（`autoDeclare` 为 false），读 syncbench 建的持久队列 `bench`，因为它自己
    声明的队列不是持久的，RabbitMQ 会拒绝。Mosquitto 的队列不设上限（`max_queued_messages 0`），让暂停的对手的消息等着它。
-7. **为基准调整 SQL Server 的捕获作业**（每秒一次，每次扫描 5000 个事务，100 次扫描），使 CDC 的捕获不成为任何一方的瓶颈；
+7. **[kept]**（2026-11-10：两个对手读同样的变更表，捕获作业不限制任何一方。）
+   **为基准调整 SQL Server 的捕获作业**（每秒一次，每次扫描 5000 个事务，100 次扫描），使 CDC 的捕获不成为任何一方的瓶颈；
    两者读同样的变更表。
-8. **计划的权重**：S1 20%、S2 15%、S3 15%、S4 10%、S5 15%、S6 5%、S7 7%、S8 6%、S9 7%：第一批保留四分之三，大致维持原有比例。
-9. **fit-examples 的九个示例需要带第二批的 fit**（fit 推送后 `go.mod` 移到那个提交）；本机经指向本工作树的 `go.work` 验证。
+8. **[needs the user]**（2026-11-10：计划的权重由用户决定；见上方列表。）
+   **计划的权重**：S1 20%、S2 15%、S3 15%、S4 10%、S5 15%、S6 5%、S7 7%、S8 6%、S9 7%：第一批保留四分之三，大致维持原有比例。
+9. **[kept]**（2026-11-10：已完成：fit-examples 的
+   main（9659d7e）含这九个示例，`go.mod` 指向 fit 1fdb2407。）
+   **fit-examples 的九个示例需要带第二批的 fit**（fit 推送后 `go.mod` 移到那个提交）；本机经指向本工作树的 `go.work` 验证。
 
 **待审查的决策**（规划时做出，2026-11-10；在用户裁定前有效）：
 
-1. **每种协议都在 fit 中实现，与第一批相同**：AMQP 0-9-1、NATS、Pulsar 的二进制协议（手工编码 protobuf）、MQTT、TDS。
+1. **[kept]**（2026-11-10：决策 036 第 1 条；每种协议都已不用驱动实现并通过互通。）
+   **每种协议都在 fit 中实现，与第一批相同**：AMQP 0-9-1、NATS、Pulsar 的二进制协议（手工编码 protobuf）、MQTT、TDS。
    备选：用驱动（amqp091-go、nats.go、pulsar-client-go、paho、go-mssqldb）——工作量更小，但违反决策 036 第 1 条，且依赖树
    很大（尤其是 pulsar-client-go）。
-2. **位置由代理自己保存的（RabbitMQ 队列、NATS consumer、Pulsar 订阅、MQTT 会话）只在目标拿到后才确认**，fit 的检查点中
+2. **[kept]**（2026-11-10：I211-I214 按此实现；矩阵中的队列跨 kill 没有丢失。）
+   **位置由代理自己保存的（RabbitMQ 队列、NATS consumer、Pulsar 订阅、MQTT 会话）只在目标拿到后才确认**，fit 的检查点中
    不存；代理有偏移的（RabbitMQ stream 队列、JetStream 序号、Pulsar 消息 ID）也存入检查点，使丢失的 consumer 不会丢失位置。
-3. **SQL Server 经其 CDC 变更表，而不是读取事务日志**；日志格式没有文档。可选更轻量的 change tracking。
-4. **Doris 与 StarRocks 共用一个连接器**，用 `flavor` 参数区分，因为 Stream Load 与 unique 模型的删除标记只是名字不同。
-5. **向量目标配一个 `embed` 变换**调用 embeddings API，使从数据库到向量库的流水线无需别的组件；配置了 fit 自己的 `llm` 代理时
+3. **[kept]**（2026-11-10：I216 按此实现，change tracking 也有。）
+   **SQL Server 经其 CDC 变更表，而不是读取事务日志**；日志格式没有文档。可选更轻量的 change tracking。
+4. **[kept]**（2026-11-10：I218 按此实现；一个目标和一个源，用 `flavor` 区分。）
+   **Doris 与 StarRocks 共用一个连接器**，用 `flavor` 参数区分，因为 Stream Load 与 unique 模型的删除标记只是名字不同。
+5. **[kept]**（2026-11-10：I221 按此实现；端到端测试使用它。）
+   **向量目标配一个 `embed` 变换**调用 embeddings API，使从数据库到向量库的流水线无需别的组件；配置了 fit 自己的 `llm` 代理时
    默认使用它。
-6. **顺序**：I211–I214（各队列，彼此独立），I215 之后是 I216 与 I217（SQL Server），I218 到 I221（基于 HTTP 的目标，独立且
+6. **[kept]**（2026-11-10：已遵循，并行实现可行。）
+   **顺序**：I211–I214（各队列，彼此独立），I215 之后是 I216 与 I217（SQL Server），I218 到 I221（基于 HTTP 的目标，独立且
    成本低），然后 I222。队列与 HTTP 目标可以像第一批一样并行开发。
 
 ## BitTorrent：下载与做种、tracker、发布
