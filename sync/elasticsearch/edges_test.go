@@ -191,7 +191,9 @@ func TestSinkFailsAtRefused(t *testing.T) {
 	}
 	err = s.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpInsert, 1, "a"), rec(fitsync.OpInsert, 2, "b")})
 	if !errors.As(err, &be) || be.Index != 0 || fitsync.IsPermanent(err) || strings.Contains(err.Error(), "503") {
-		t.Fatalf("sent again: %v", err)
+		// Failed once in ~300 runs under load with "record 0 of the batch:
+		// ...: unexpected EOF"; each condition said, for the next time.
+		t.Fatalf("sent again: %v (batch error %v, permanent %v)", err, errors.As(err, &be), fitsync.IsPermanent(err))
 	}
 }
 
