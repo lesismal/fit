@@ -34,8 +34,17 @@ func init() {
 	module.Register(module.Info{ID: module.Middlewares + ".cache", New: func() any { return new(Cache) }, Doc: "Keeps responses by RFC 9111's rules, in memory and on disk, shared by the routes of a zone, and answers from them."})
 }
 
+// clockAt, when set, is the time tests hold the clock at: atomic, as a
+// request still being answered may read it while a test moves it.
+var clockAt atomic.Pointer[time.Time]
+
 // clock is the time, which tests move.
-var clock = time.Now
+func clock() time.Time {
+	if t := clockAt.Load(); t != nil {
+		return *t
+	}
+	return time.Now()
+}
 
 // Defaults of Cache's params.
 const (

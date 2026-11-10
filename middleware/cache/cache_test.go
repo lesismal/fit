@@ -192,8 +192,9 @@ func (origin) ServeHTTP(c *fibhttp.Context) {
 
 // at moves the cache's clock to start plus d for the rest of the test.
 func at(t *testing.T, start time.Time, d time.Duration) {
-	clock = func() time.Time { return start.Add(d) }
-	t.Cleanup(func() { clock = time.Now })
+	now := start.Add(d)
+	clockAt.Store(&now)
+	t.Cleanup(func() { clockAt.Store(nil) })
 }
 
 // serve runs fit with middleware in front of the origin, and returns its
