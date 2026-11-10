@@ -304,7 +304,7 @@ func TestSourceStream(t *testing.T) {
 	if v, _ := r.After.Get("sequence"); v.AsUint() != 1 {
 		t.Fatal(r.After)
 	}
-	if len(lags) != 3 || lags[2].Unit != fitsync.LagOffsets {
+	if len(lags) != 3 || lags[2].Unit != fitsync.LagMessages {
 		t.Fatal(lags)
 	}
 	// Nothing acknowledged: a run again reads them again, the server

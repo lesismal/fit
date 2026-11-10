@@ -110,6 +110,11 @@ type Record struct {
 	// source record, which the pipeline sets before r reaches a sink, so
 	// that records sharing an Origin have IDs of their own.
 	sub uint32
+	// pipeline is the name of the pipeline r goes through, which the
+	// pipeline sets before r reaches a sink, so that two pipelines'
+	// records of equal origins (one topic name on two Kafka clusters
+	// feeding one stream) have IDs of their own.
+	pipeline string
 	// made says a transform made r, with Clone, so that the transforms
 	// after it may change it in place.
 	made bool

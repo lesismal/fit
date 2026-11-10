@@ -87,7 +87,8 @@ func (r *Run) SaveStart(p Position) error {
 }
 
 // SourceLag is how far behind its server's head a source is: a PostgreSQL
-// slot's or a binlog's bytes, a Kafka partition's offsets. It is the
+// slot's or a binlog's bytes, a Kafka partition's offsets, a queue's
+// messages. It is the
 // source's own count, in its own Unit, as of At.
 type SourceLag struct {
 	Behind int64     `json:"behind"`
@@ -99,10 +100,14 @@ type SourceLag struct {
 const (
 	LagBytes   = "bytes"
 	LagOffsets = "offsets"
+	// LagMessages counts messages a broker holds for the source and has
+	// not sent it yet: a RabbitMQ queue's ready ones, a JetStream
+	// consumer's pending ones.
+	LagMessages = "messages"
 )
 
 // ReportLag tells the pipeline the source is behind its server's head by
-// behind, in unit (LagBytes, LagOffsets), as it learns it: from a
+// behind, in unit (LagBytes, LagOffsets, LagMessages), as it learns it: from a
 // keepalive, a fetch's high watermark. It must not block, and does nothing
 // in a dry run.
 func (r *Run) ReportLag(behind int64, unit string) {

@@ -321,9 +321,11 @@ func (r *run) dispatch() {
 				}
 				outs = nil
 			}
-			if len(outs) > 1 {
-				// The records of one source record share its Origin.
-				for j, o := range outs {
+			for j, o := range outs {
+				// The records of one source record share its Origin; the
+				// pipeline's name keeps two pipelines' origins apart.
+				o.rec.pipeline = cfg.Name
+				if len(outs) > 1 {
 					o.rec.sub = uint32(j)
 				}
 			}
