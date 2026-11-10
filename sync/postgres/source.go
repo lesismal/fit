@@ -577,8 +577,16 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	}()
 
 	var reached pgwire.LSN
+	// The ends of transactions of other tables, and the keepalives'
+	// positions between transactions, move the checkpoint as
+	// position-only records, so that a quiet table's follows the WAL; the
+	// slot is told them as it is told any checkpoint (and, through idle,
+	// sooner).
+	quiet := func(l pgwire.LSN) error {
+		return r.EmitPosition(func() fitsync.Position { return lsnPosition(l) })
+	}
 	d := &decoder{rels: map[uint32]*relation{}, pk: st.pk, from: from, emit: r.Emit,
-		spools: map[uint32]*spool{}, spoolDir: s.SpoolDir}
+		spools: map[uint32]*spool{}, spoolDir: s.SpoolDir, quiet: quiet}
 	defer d.close()
 	d.onCommit = func(end pgwire.LSN, emitted bool) {
 		reached = max(reached, end)
@@ -616,6 +624,11 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 				s.mu.Lock()
 				s.st.idle = max(s.st.idle, m.ServerEnd)
 				s.mu.Unlock()
+				if len(d.spools) == 0 && m.ServerEnd > from {
+					if err := quiet(m.ServerEnd); err != nil {
+						return err
+					}
+				}
 			}
 			if m.ReplyRequested {
 				s.sendStatus(ctx, c, false)

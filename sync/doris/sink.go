@@ -33,7 +33,7 @@ import (
 
 func init() {
 	module.Register(module.Info{ID: fitsync.Sinks + ".doris", New: func() any { return new(Sink) },
-		Doc: "Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says, with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON (or CSV) rows whose label is made from the run's first and last records' origins (Kafka offsets, Pulsar message IDs, a CDC transaction and place) or positions, so a run loaded again after a crash is refused as already loaded. Inserts and updates are rows, upserts on a table of the unique or primary key model; a delete is the row (or its key) with Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is followed. A load refused for its data is split until the record it cannot take is found, which fails, on_error taking it, those before it loaded."})
+		Doc: "Loads records into Apache Doris (2.1 and later) or StarRocks (3 and later), as flavor says, with Stream Load over HTTP: each run of a batch's records for one table is a load of JSON (or CSV) rows whose label is made from the run's first and last records' origins (Kafka offsets, Pulsar message IDs, a CDC transaction and place) or positions, and the lineage of the pipeline's checkpoint, so a run loaded again after a crash is refused as already loaded, and one a reset of the checkpoint reads again is loaded again. Inserts and updates are rows, upserts on a table of the unique or primary key model; a delete is the row (or its key) with Doris's __DORIS_DELETE_SIGN__ or StarRocks's __op set to 1. The frontend's redirect to a backend is followed. A load refused for its data is split until the record it cannot take is found, which fails, on_error taking it, those before it loaded."})
 }
 
 // The defaults of the sink's params.
@@ -64,7 +64,7 @@ type Sink struct {
 	Format          string            `json:"format,omitempty" enum:"json,csv" default:"\"json\"" doc:"How rows are sent: json, a JSON object of each row's columns; csv, comma-separated values, quoted with escapes, null as \\N (Doris 2.0 and StarRocks 3.0 or later). Either way the load names its columns, the union of the run's rows', so a row without a column of the union loads it null. json when left out."`
 	Deletes         string            `json:"deletes,omitempty" enum:"sign,ignore" default:"\"sign\"" doc:"How deletes are written: sign, as the row before (or the key, when the source has no row before) with the flavor's delete column set to 1, which a table of the unique or primary key model takes as deleting the key; ignore, not at all, for a table of another model. A run without deletes sends no delete column. sign when left out."`
 	PartialColumns  bool              `json:"partial_columns,omitempty" doc:"Update only the columns a run's rows have, keeping the others as they are, rather than replacing the row: Doris's partial_columns, StarRocks's partial_update. Needs a unique key table with merge on write, or a primary key table. false when left out."`
-	LabelPrefix     string            `json:"label_prefix,omitempty" default:"\"fit\"" doc:"The start of each load's label, letters, digits, _ and -, before a hash of the table and the run's positions; pipelines loading the same database need prefixes of their own only when their sources' positions could match. fit when left out."`
+	LabelPrefix     string            `json:"label_prefix,omitempty" default:"\"fit\"" doc:"The start of each load's label, letters, digits, _ and -, before a hash of the table, the run's positions and the lineage of the pipeline's checkpoint, which a reset changes, so that records a reset reads again are loaded again; pipelines loading the same database need prefixes of their own only when their sources' positions could match. fit when left out."`
 	TimeZone        string            `json:"time_zone,omitempty" doc:"The zone times are written in, as DATETIME text: UTC when left out, local, or an IANA name such as Asia/Shanghai."`
 	Properties      map[string]string `json:"properties,omitempty" doc:"Stream Load's other headers, sent with every load, as {\"max_filter_ratio\": \"0.1\", \"strict_mode\": \"true\", \"timeout\": \"600\"}; they cannot be the ones the sink sets: label, format, columns, the JSON and CSV ones, partial_columns, partial_update, hidden_columns, merge_type, delete, jsonpaths, Expect."`
 	MaxRequestBytes int64             `json:"max_request_bytes,omitempty" min:"0" default:"16777216" doc:"The most bytes of one load's rows; a batch larger is loaded in several, in order, each with a label of its own, and a row larger fails its record. 16 MiB when left out or 0."`
@@ -468,11 +468,13 @@ func (e *LoadError) DataError() bool {
 
 // Label returns the label of a load of recs into db.table: the prefix, and
 // a hash of the table, the flavor, the first and the last record's
-// origins (Record.AppendOrigin) or positions and the count, so that the
-// same records loaded again, after a crash or a retry, have the same label
-// and the server refuses them as already loaded. A record without an
-// origin or a position is placed by the nearest one with a position. None
-// when no record has either.
+// origins (Record.AppendOrigin) or positions, the count and the lineage of
+// the pipeline's checkpoint (Record.Lineage), so that the same records
+// loaded again, after a crash or a retry, have the same label and the
+// server refuses them as already loaded, while those a reset of the
+// checkpoint reads again, within label_keep_max_second, are loaded again.
+// A record without an origin or a position is placed by the nearest one
+// with a position. None when no record has either.
 func Label(prefix, db, table string, recs []*fitsync.Record) string {
 	first, last := anchor(recs, 0), anchor(recs, len(recs)-1)
 	if first == "" || last == "" {
@@ -480,6 +482,11 @@ func Label(prefix, db, table string, recs []*fitsync.Record) string {
 	}
 	h := sha256.New()
 	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%d", db, table, first, last, len(recs))
+	// A checkpoint saved before lineages has none, and its labels stay
+	// as they were.
+	if l := recs[0].Lineage(); l != "" {
+		fmt.Fprintf(h, "\x00%s", l)
+	}
 	return prefix + "_" + hex.EncodeToString(h.Sum(nil)[:20])
 }
 

@@ -43,6 +43,8 @@ type entry struct {
 	failed bool
 	// commit is the record's commit time, for the lag Status shows.
 	commit time.Time
+	// posOnly says it is a position-only record, which counts as none.
+	posOnly bool
 }
 
 type item struct {
@@ -92,6 +94,15 @@ type run struct {
 	finishing                                           bool
 	// acked is the mark not yet told to an Acknowledger source.
 	acked Position
+	// lineage is the checkpoint's, which records reaching a sink carry.
+	lineage string
+	// wrote is the Checkpoint's Wrote of the mark (of from, until it
+	// moves): the position of the last record the sinks were handed when
+	// the mark is a position-only record's, nil when it is not.
+	wrote Position
+	// lastEmit is when a record was last emitted, in Unix nanoseconds,
+	// which a position-only record waits checkpoint_interval past.
+	lastEmit atomic.Int64
 }
 
 type sinkRun struct {
@@ -114,7 +125,8 @@ func notify(c chan struct{}) {
 }
 
 func newRun(p *pipe) *run {
-	r := &run{p: p, wake: make(chan struct{}, 1), space: make(chan struct{}, 1), started: time.Now()}
+	r := &run{p: p, wake: make(chan struct{}, 1), space: make(chan struct{}, 1), started: time.Now(), lineage: p.store.lineage, wrote: p.store.wrote}
+	r.lastEmit.Store(r.started.UnixNano())
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.srcCtx, r.cancelSrc = context.WithCancel(r.ctx)
 	// A job reading a snapshot in chunks, which has no transactions and
@@ -197,10 +209,13 @@ func (r *run) emit(rec *Record) error {
 	}
 	rec.seq, rec.made = r.next, false
 	r.next++
-	r.pending = append(r.pending, entry{left: -1, size: size, pos: rec.Position, boundary: rec.boundary(), commit: rec.CommitTime})
-	r.p.meter.read.Add(1)
-	r.p.meter.readBytes.Add(int64(size))
-	r.read++
+	r.pending = append(r.pending, entry{left: -1, size: size, pos: rec.Position, boundary: rec.boundary(), commit: rec.CommitTime, posOnly: rec.posOnly})
+	if !rec.posOnly {
+		r.p.meter.read.Add(1)
+		r.p.meter.readBytes.Add(int64(size))
+		r.read++
+	}
+	r.lastEmit.Store(time.Now().UnixNano())
 	r.inRecords++
 	r.inBytes += int64(size)
 	r.queue = append(r.queue, rec)
@@ -210,6 +225,16 @@ func (r *run) emit(rec *Record) error {
 		return errStopped
 	}
 	return nil
+}
+
+// emitPosition is Run.Positions: a position-only record of pos(), queued
+// as emit queues a record, when no record was emitted for the checkpoint
+// interval.
+func (r *run) emitPosition(pos func() Position) error {
+	if time.Since(time.Unix(0, r.lastEmit.Load())) < r.p.cfg.Interval() {
+		return nil
+	}
+	return r.emit(&Record{Position: pos(), posOnly: true})
 }
 
 // advance drops the acknowledged records at the head of the queue, freeing
@@ -225,6 +250,22 @@ func (r *run) advance() {
 		r.base++
 		r.inRecords--
 		r.inBytes -= int64(e.size)
+		freed = true
+		if e.posOnly {
+			if e.pos == nil {
+				continue
+			}
+			// The sinks hold the position of the last record they were
+			// handed, which the mark passes now.
+			if r.wrote == nil {
+				r.wrote = r.mark
+				if r.wrote == nil {
+					r.wrote = r.from
+				}
+			}
+			r.mark, r.dirty, r.acked = e.pos, true, e.pos
+			continue
+		}
 		r.done++
 		n++
 		if e.failed {
@@ -235,11 +276,10 @@ func (r *run) advance() {
 			commit = e.commit
 		}
 		if e.boundary && e.pos != nil {
-			r.mark, r.dirty = e.pos, true
+			r.mark, r.dirty, r.wrote = e.pos, true, nil
 			r.markDone, r.markFailed = r.done, r.failed
 			r.acked = e.pos
 		}
-		freed = true
 	}
 	if freed {
 		r.p.meter.passed(n, nFailed, commit)
@@ -303,9 +343,32 @@ func (r *run) dispatch() {
 			return
 		}
 		r.mu.Unlock()
-		c.run(batch)
-		k := 0
+		// Position-only records skip the transforms and the sinks: each is
+		// acknowledged in its place among the others.
+		data := batch
 		for i, rec := range batch {
+			if rec.posOnly {
+				data = make([]*Record, i, len(batch))
+				copy(data, batch[:i])
+				for _, rec := range batch[i:] {
+					if !rec.posOnly {
+						data = append(data, rec)
+					}
+				}
+				break
+			}
+		}
+		c.run(data)
+		k, i := 0, -1
+		for _, rec := range batch {
+			if rec.posOnly {
+				r.mu.Lock()
+				r.pending[rec.seq-r.base].left = 0
+				r.advance()
+				r.mu.Unlock()
+				continue
+			}
+			i++
 			start := k
 			for k < len(c.outs) && c.outs[k].src == i {
 				k++
@@ -324,7 +387,7 @@ func (r *run) dispatch() {
 			for j, o := range outs {
 				// The records of one source record share its Origin; the
 				// pipeline's name keeps two pipelines' origins apart.
-				o.rec.pipeline = cfg.Name
+				o.rec.pipeline, o.rec.lineage = cfg.Name, r.lineage
 				if len(outs) > 1 {
 					o.rec.sub = uint32(j)
 				}
@@ -391,7 +454,7 @@ func (r *run) deadLetter(rec *Record, cause error, where string, attempts int) b
 			Field{"error", String(cause.Error())},
 			Field{"at", String(where)},
 			Field{"attempts", Int(int64(attempts))},
-			Field{"record", JSON(doc)})}
+			Field{"record", JSON(doc)}), lineage: r.lineage}
 	r.deadLetters.Lock()
 	defer r.deadLetters.Unlock()
 	for n := 1; ; n++ {
@@ -556,7 +619,7 @@ func (r *run) checkpoint() {
 		r.mu.Unlock()
 		return
 	}
-	pos, finishing := r.mark, r.finishing
+	pos, finishing, wrote := r.mark, r.finishing, r.wrote
 	at := &markState{pos, r.markDone, r.markFailed}
 	r.dirty, r.finishing = false, false
 	r.mu.Unlock()
@@ -564,6 +627,7 @@ func (r *run) checkpoint() {
 		pos = r.from
 	}
 	prog := r.p.progress(r, at, finishing)
+	r.p.store.wrote = wrote
 	err := r.p.store.save(pos, prog)
 	if errors.Is(err, errCrashed) {
 		r.kill()
@@ -611,6 +675,7 @@ func (r *run) saveStart(pos Position) error {
 	if has {
 		return nil
 	}
+	r.p.store.wrote = nil
 	err := r.p.store.save(pos, nil)
 	if errors.Is(err, errCrashed) {
 		r.kill()
@@ -654,7 +719,7 @@ func (r *run) do(from Position) (outcome, error) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		run := &Run{From: from, Once: p.cfg.Once(), Emit: r.emit, Pipeline: p.cfg.Name, Lag: p.meter.setLag}
+		run := &Run{From: from, Once: p.cfg.Once(), Emit: r.emit, Pipeline: p.cfg.Name, Lag: p.meter.setLag, Positions: r.emitPosition}
 		if !p.cfg.Once() {
 			run.Start = r.saveStart
 		}

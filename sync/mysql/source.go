@@ -884,10 +884,18 @@ func (st *streamer) endTx(ctx context.Context, outer binlog.Header) error {
 		if err := st.r.Emit(h); err != nil {
 			return err
 		}
+	} else if err := st.r.EmitPosition(st.position); err != nil {
+		// A transaction of none of the read tables moves the checkpoint
+		// all the same, so that a quiet table's does not stay behind the
+		// binlogs the server purges.
+		return err
 	}
 	st.lag(ctx)
 	return nil
 }
+
+// position is the stream's position, for a position-only record.
+func (st *streamer) position() fitsync.Position { return st.at.marshal() }
 
 // lag tells the pipeline, every lagInterval, how many bytes of binlog the
 // server has past the stream's position, from SHOW BINARY LOGS on the

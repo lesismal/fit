@@ -5,7 +5,8 @@ the rows in the clear. Each run of a batch's records for one table is one load,
 its rows JSON (a row a line on Doris, an array on StarRocks) or CSV, and its `columns` header the union
 of the run's columns. The load's `label` is `label_prefix`, `_` and a hash of the database, the table,
 the run's first and last records' origins (a Kafka partition and offset, a Pulsar message ID, a CDC
-transaction and the record's place in it), or positions for a source without them, and its count: written again after a crash, the same records make
+transaction and the record's place in it), or positions for a source without them, its count and
+the lineage of the pipeline's checkpoint: written again after a crash, the same records make
 the same label and the server answers `Label Already Exists`, which counts as loaded once the earlier
 load has finished (and is asked again while it runs).
 
@@ -21,9 +22,12 @@ A load refused for its rows (`too many filtered rows`, a JSON it cannot parse) i
 half loaded, until the record it cannot take is found: that record fails for good (`on_error` takes
 it), the records before it are loaded, and the error names the load's `ErrorURL`. Any other failure
 is retried by the pipeline; a 429 or a 5xx is sent again with a backoff first. Labels outlive a
-table dropped and made again (Doris keeps them `label_keep_max_second`, three days by default): after
-a pipeline is reset, or its tables made afresh, change `label_prefix`, or the records loaded before
-are refused as already loaded.
+table dropped and made again (Doris keeps them `label_keep_max_second`, three days by default), which
+is why the lineage is in them: a reset of the pipeline's checkpoint (or a position set by hand, or a
+new job) starts another lineage, so the records it reads again into tables made afresh are loaded,
+not refused as already loaded, with no change to `label_prefix`. Tables made afresh without a reset
+are not the pipeline's to know: reset it, or change `label_prefix`. A checkpoint saved by a fit
+before lineages keeps the labels it had until it is reset.
 
 ```sql
 CREATE TABLE shop.orders (id BIGINT NOT NULL, status VARCHAR(20), total DECIMAL(12, 2))

@@ -65,6 +65,32 @@ type Run struct {
 	// Start, when not nil, is what SaveStart calls: the pipeline's, in a
 	// run that has no checkpoint yet.
 	Start func(Position) error
+	// Positions, when not nil, is what EmitPosition calls: the pipeline's,
+	// which calls pos only when it takes a position-only record now.
+	Positions func(pos func() Position) error
+}
+
+// EmitPosition hands on a position-only record: a position the source can
+// resume from, past records it read and did not emit, as a binlog's or a
+// change table's transactions of tables the source does not read. It
+// flows through the queue in order, and the checkpoint moves to it once
+// every record emitted before it is acknowledged; no transform or sink
+// sees it, and it counts as no record read or written. Without it, a
+// source reading a quiet table behind a busy log keeps an old checkpoint,
+// which a restart after the server dropped that part of the log cannot
+// resume from, though nothing was lost.
+//
+// A source calls it at a transaction's boundary, after a stretch that
+// held none of its records, as often as it likes: the pipeline calls pos,
+// and queues the record, only when no record, of either kind, was emitted
+// for its checkpoint_interval, so that a busy source's records move the
+// checkpoint themselves. It returns Emit's error; nil when the pipeline
+// takes none now, and in a dry run.
+func (r *Run) EmitPosition(pos func() Position) error {
+	if r.Positions == nil {
+		return nil
+	}
+	return r.Positions(pos)
 }
 
 // SaveStart gives the pipeline, when it has no checkpoint (From is nil),

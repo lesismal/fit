@@ -126,6 +126,9 @@ type decoder struct {
 	// onCommit is told the end of each transaction read and whether it had
 	// records.
 	onCommit func(end pgwire.LSN, emitted bool)
+	// quiet, when not nil, is given the end of a transaction of no records
+	// after from: a position-only record's (I216 decision 12).
+	quiet func(end pgwire.LSN) error
 }
 
 // handle takes one XLogData's message.
@@ -217,6 +220,9 @@ func (d *decoder) commit(end pgwire.LSN) error {
 		}
 	}
 	d.onCommit(end, p != nil)
+	if p == nil && end > d.from && d.quiet != nil {
+		return d.quiet(end)
+	}
 	return nil
 }
 

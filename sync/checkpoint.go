@@ -26,6 +26,11 @@ type Checkpoint struct {
 	// sinks that keep the checkpoint too (CheckpointSink): a reset, a
 	// position set by hand and a new job start another.
 	Lineage string `json:"lineage,omitempty"`
+	// Wrote, when Position is a position-only record's (Run.EmitPosition),
+	// is the Position of the last record the sinks were handed before it,
+	// which a sink keeping the checkpoint (CheckpointSink) holds: the
+	// sinks agreeing on it start the run from Position, not from it.
+	Wrote json.RawMessage `json:"wrote,omitempty"`
 }
 
 // store keeps one pipeline's checkpoint.
@@ -33,8 +38,10 @@ type store struct {
 	dir, name string
 	// crash, when not nil, is asked at CrashCheckpointWritten.
 	crash func(Point) bool
-	// lineage is what save writes as the checkpoint's Lineage.
+	// lineage and wrote are what save writes as the checkpoint's Lineage
+	// and Wrote.
 	lineage string
+	wrote   Position
 }
 
 func (s *store) path() string { return filepath.Join(s.dir, s.name+".json") }
@@ -44,6 +51,20 @@ func (s *store) tempPattern() string { return "." + s.name + ".json.tmp-*" }
 // load reads the checkpoint and the job's progress, nil when there is none
 // yet, and removes the temporary files a crash left.
 func (s *store) load() (Position, *Progress, error) {
+	l, err := s.loadFile()
+	return l.pos, l.job, err
+}
+
+// loaded is what loadFile reads of the checkpoint file.
+type loaded struct {
+	pos     Position
+	job     *Progress
+	lineage string
+	wrote   Position
+}
+
+// loadFile is load, with the file's lineage and Wrote.
+func (s *store) loadFile() (loaded, error) {
 	if olds, _ := filepath.Glob(filepath.Join(s.dir, s.tempPattern())); len(olds) > 0 {
 		for _, o := range olds {
 			_ = os.Remove(o)
@@ -51,23 +72,28 @@ func (s *store) load() (Position, *Progress, error) {
 	}
 	data, err := os.ReadFile(s.path())
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, nil
+		return loaded{}, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return loaded{}, err
 	}
 	var c Checkpoint
 	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, nil, fmt.Errorf("the checkpoint %s: %w", s.path(), err)
+		return loaded{}, fmt.Errorf("the checkpoint %s: %w", s.path(), err)
 	}
 	if c.Version < 1 || c.Version > CheckpointVersion {
-		return nil, nil, fmt.Errorf("the checkpoint %s is of version %d, which this fit does not read", s.path(), c.Version)
+		return loaded{}, fmt.Errorf("the checkpoint %s is of version %d, which this fit does not read", s.path(), c.Version)
+	}
+	l := loaded{job: c.Job, lineage: c.Lineage}
+	if len(c.Wrote) > 0 && string(c.Wrote) != "null" {
+		l.wrote, _ = appendCompact(nil, c.Wrote) // Unmarshal checked it
 	}
 	if len(c.Position) == 0 || string(c.Position) == "null" {
-		return nil, c.Job, nil
+		return l, nil
 	}
 	pos, err := appendCompact(nil, c.Position)
-	return Position(pos), c.Job, err
+	l.pos = pos
+	return l, err
 }
 
 // errCrashed is a save a crash hook stopped.
@@ -77,7 +103,7 @@ var errCrashed = errors.New("sync: crashed")
 // temporary file, synced, then renamed over the last, so that a crash
 // leaves the old one or the new one whole.
 func (s *store) save(pos Position, job *Progress) error {
-	data, err := json.MarshalIndent(Checkpoint{Version: CheckpointVersion, Pipeline: s.name, Position: json.RawMessage(pos), Saved: time.Now().UTC(), Job: job, Lineage: s.lineage}, "", "  ")
+	data, err := json.MarshalIndent(Checkpoint{Version: CheckpointVersion, Pipeline: s.name, Position: json.RawMessage(pos), Saved: time.Now().UTC(), Job: job, Lineage: s.lineage, Wrote: json.RawMessage(s.wrote)}, "", "  ")
 	if err != nil {
 		return err
 	}

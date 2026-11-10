@@ -5584,9 +5584,23 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     变更前的行；需要主键；表只在每次启动时发现（运行中不会接上新表）。
 11. **[kept]**（2026-11-10：与其他源对这些类型给出的形式相同） **值**：`time` 为文本（按其精度的 `hh:mm:ss.fffffff`），`uniqueidentifier` 为其文本，`datetimeoffset` 为时刻，`datetime2`
     与 `datetime` 为 UTC 时间（其钟面），`date` 为日期，`money` 为十进制数，`xml` 为字符串，`sql_variant` 为其基础值。
-12. **[changed]**（2026-11-10：现在报告延迟：位置之后 `cdc.lsn_time_mapping` 中的事务数（取窗口的数目，窗口满时最多每秒一次 `COUNT_BIG`），change tracking 时为版本数，作为 `fit_sync_source_lag`（提交 `ae364b6a`）。作业不提供 `Chunker`：保留，与其他 CDC 源一致。检查点只随所读表的记录前进：被捕获的忙表之间的一张冷表会保留旧检查点，清理的保留期越过它之后重启会要求新的快照，尽管它什么也没丢；解决办法在 `sync` 中，见本节开头的清单） **未包括**：作业逐表读取快照，不分块（没有 `Chunker`）；不报告延迟；检查点只随所读表的记录前进，因此其他被捕获表的事务
+12. **[ruled 2026-11-10: done as recommended]**（2026-11-10：现在报告延迟：位置之后 `cdc.lsn_time_mapping` 中的事务数（取窗口的数目，窗口满时最多每秒一次 `COUNT_BIG`），change tracking 时为版本数，作为 `fit_sync_source_lag`（提交 `ae364b6a`）。作业不提供 `Chunker`：保留，与其他 CDC 源一致。检查点曾只随所读表的记录前进：被捕获的忙表之间的一张冷表会保留旧检查点，清理的保留期越过它之后重启会要求新的快照，尽管它什么也没丢。已实现：`sync` 中只含位置的记录（`Run.EmitPosition`），按顺序经过队列，跳过转换和目标，不计为记录，在它之前的记录都确认后移动检查点；`mssql` 在每个 CDC 窗口和 change tracking 版本区间之后交出一条，`mysql` 在其他表的 binlog 事务结束时，`postgres` 在空事务结束和事务之间的 keepalive 时。见决定 14 至 16。） **未包括**：作业逐表读取快照，不分块（没有 `Chunker`）；不报告延迟；检查点只随所读表的记录前进，因此其他被捕获表的事务
     在重启后会被再次读取。
 13. **[kept]**（2026-11-10：目标无需第三个包即可共用参数及其检查） **`ConnParams` 与 `WireConfig` 从 `sync/mssql` 导出**，供 I217 的目标共用连接参数及其检查。
+14. **[pending review]**（2026-11-10，随决定 12 的裁定）**只含位置的记录由流水线而不是源限流**：源在每段没有自己记录的读取之后
+    调用 `Run.EmitPosition(func() Position)`，流水线只在 `checkpoint_interval`（5s）内没有任何一种记录时才调用该函数并入队，所以
+    忙表靠自己的记录移动检查点，冷表每个检查点间隔至多移动一次；用函数可让 binlog 源不必为每个跳过的事务序列化 GTID 集合。
+    试运行和分块读取不取它。这种记录不导出（`Record.posOnly`）：转换、目标和死信都看不到，状态中的读取、确认和目标计数不含
+    它，记录 ID 和转换的编号不受影响。备选：新的 `Op`（每个转换和目标都得跳过它）；每个源自己限流。
+15. **[pending review]**（2026-11-10）**保存检查点的目标与只含位置的记录**：这样的目标保存它写过的最后位置，只含位置的记录越过
+    它而不写入。与其为每条记录写目标的表，检查点文件在其 `position` 是只含位置的记录的位置时记下那个位置（`wrote`），各目标都
+    停在 `wrote` 的运行从文件中更靠后的位置开始（不重放）；目标停在其他位置时照旧采用。备选：把每条只含位置的记录告诉
+    `CheckpointSink`，冷表每个检查点间隔要在其服务器上做一次事务。
+16. **[pending review]**（2026-11-10）**各个源在何处交出**：`mssql` 在读完每个 CDC 窗口之后（其末尾 LSN，含未读或未被捕获的表
+    的事务），以及每个不含所读表变更的 change tracking 版本区间之后；`mysql` 在每个不含所读表记录的事务结束时（包括其他数据库的
+    DDL），心跳时不交（空闲服务器的 binlog 不动）；`postgres` 在没有记录的事务结束时（其他表的，15 之前的服务器会发送）以及没有
+    暂存流式事务时事务之间的 keepalive（15 及以后跳过空事务），只在运行起点之后。`postgres` 的复制槽本来就在事务之间被告知位置
+    （`idle`），服务器不为其他表保留 WAL；只含位置的记录让检查点也跟上。
 
 ### I217 SQL Server 作为目标
 
@@ -5657,7 +5671,7 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 
 **待评审的决定**（实现时做出，2026-11-10；在用户裁定前有效）：
 
-1. **[needs the user]**（2026-11-10：在 `label_keep_max_second` 之内重置流水线或重建表，记录会被静默地以“已导入”拒绝，除非用户改 `label_prefix`：见本节开头的列表。）
+1. **[ruled 2026-11-10: done as recommended]**（2026-11-10：在 `label_keep_max_second` 之内重置流水线或重建表，记录曾会被静默地以“已导入”拒绝，除非用户改 `label_prefix`。已实现：检查点文件总带有谱系，在流水线首次启动、重置、手动设置位置和新的作业时生成，重启保留；到达目标的每条记录都带着它（`Record.Lineage`），label 对它做哈希，所以重置会自行改变 label；`label_prefix` 保留。见决定 12 和 13。）
    **一次导入的 label 是前缀加上数据库、表、这段记录首末位置和条数的哈希**，与 ClickHouse 的令牌相同。label 比删除重建的
    表活得久（Doris 保留 `label_keep_max_second`，三天），所以重置或新建表之后用户要改 `label_prefix`，否则记录会以“已导入”
    被拒绝。备选：label 中带上流水线的谱系（目前只有 `CheckpointSink` 能拿到）；用 Stream Load 的两阶段提交配合检查点做到
@@ -5691,6 +5705,18 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
 11. **[kept]**（2026-11-10：“完成标准”要求 Doris 2.1 或 3.0；StarRocks 直接导入后端，与 Doris 重定向之后走的是同一段代码。）
     **互操作用 Doris 2.1 与 StarRocks 3.4**：StarRocks 的前端重定向到其后端自己的地址 `127.0.0.1:8040`，在宿主机上与 Doris
     的后端冲突，所以它的导入直接发往后端；Doris 的重定向经过测试。Doris 3.0 不在其中。
+12. **[pending review]**（2026-11-10，随决定 1 的裁定）**每条流水线都有谱系**：检查点文件中的一个随机 ID（`lineage`，此前只有
+    `CheckpointSink` 的流水线才有），在流没有谱系也没有位置而启动时生成，并在源运行前立即保存（流的启动现在会写一个没有位置的
+    检查点，所以第一次检查点之前的崩溃不会改变 label），重置、手动设置位置和新的作业（按块从头再跑的作业；从位置再跑的不分块
+    作业保留它）也会生成；重启和恢复的作业保留它。目标以 `Record.Lineage()` 读取，在记录到达目标前与流水线名一起设置；死信也带
+    着它。旧版 fit 保存的、有位置的检查点在重置前没有谱系，其目标生成的名字逐字节不变，所以升级不会用新 label 重放；目标保存
+    检查点的流水线本来就有谱系。备选：代数编号（ID 无需比较）；给旧检查点也生成谱系（升级会改变 label，检查点之后的记录会
+    在 Duplicate Key 表中导入两次）。
+13. **[pending review]**（2026-11-10）**哪些名字带谱系**：`doris` 的 label 和 `http` 的 `Idempotency-Key`，它们的服务器在目标
+    重建后仍保留已接收的内容，所以重置后的记录会再次写入。记录 ID（`nats` 的 `Nats-Msg-Id`、`pulsar` 的 `fit-id`、`rabbitmq`
+    的 `message_id`）不带：重置后再次读到的消息仍是同一条消息，消费者丢弃它是对的，而且 JetStream 的窗口只有几分钟。`s3` 的
+    对象名不带：再次写入的对象覆盖自身，这正是重置想要的。`clickhouse` 的去重令牌不带：ClickHouse 把它保存在表中，随重建的
+    表一起消失。
 
 ### I219 Loki 与 OpenTelemetry 日志作为目标
 

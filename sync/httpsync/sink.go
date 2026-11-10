@@ -51,7 +51,7 @@ type Sink struct {
 	Username          string            `json:"username,omitempty" doc:"The user for basic authentication, with password_env."`
 	PasswordEnv       string            `json:"password_env,omitempty" doc:"The environment variable holding username's password, read when the pipeline loads."`
 	BearerTokenEnv    string            `json:"bearer_token_env,omitempty" doc:"The environment variable holding a token sent as Authorization: Bearer, read when the pipeline loads. Not with username."`
-	IdempotencyHeader string            `json:"idempotency_header,omitempty" default:"\"Idempotency-Key\"" doc:"The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' origins (or positions, for a source without them) and its body, the same each time the request is sent again, so a receiver can drop a request it already took. Idempotency-Key when left out."`
+	IdempotencyHeader string            `json:"idempotency_header,omitempty" default:"\"Idempotency-Key\"" doc:"The header field the idempotency key goes in: 32 hex digits of a SHA-256 of the request's records' origins (or positions, for a source without them), its body and the lineage of the pipeline's checkpoint, the same each time the request is sent again, so a receiver can drop a request it already took, and new for the records a reset of the checkpoint reads again. Idempotency-Key when left out."`
 	CAFile            string            `json:"ca_file,omitempty" doc:"A PEM file of the certificates the endpoint's is checked against, in place of the system's roots. The check cannot be turned off."`
 	CertFile          string            `json:"cert_file,omitempty" doc:"A PEM file of a client certificate, and the chain after it, presented to an endpoint that asks for one; needs key_file."`
 	KeyFile           string            `json:"key_file,omitempty" doc:"The PEM file of cert_file's private key."`
@@ -343,9 +343,11 @@ func (s *Sink) Write(ctx context.Context, batch []*fitsync.Record) error {
 
 // IdempotencyKey is the key a request of recs with body carries: 32 hex
 // digits of a SHA-256 of each record's origin (Record.AppendOrigin), or its
-// position when it has none, length first, and the body, so a request sent
-// again carries the same, and two of the same body at different positions
-// differ. An origin keeps the key when a source's position does not, as a
+// position when it has none, length first, the body, and the lineage of
+// the pipeline's checkpoint (Record.Lineage), so a request sent again
+// carries the same, two of the same body at different positions differ,
+// and the records a reset of the checkpoint reads again are sent with new
+// keys. An origin keeps the key when a source's position does not, as a
 // Kafka or Pulsar source's, which holds every partition's progress in the
 // order a run read them.
 func IdempotencyKey(recs []*fitsync.Record, body []byte) string {
@@ -366,6 +368,11 @@ func IdempotencyKey(recs []*fitsync.Record, body []byte) string {
 	binary.BigEndian.PutUint64(n[:], uint64(len(body)))
 	h.Write(n[:])
 	h.Write(body)
+	// A checkpoint saved before lineages has none, and its keys stay as
+	// they were.
+	if len(recs) > 0 && recs[0].Lineage() != "" {
+		h.Write([]byte(recs[0].Lineage()))
+	}
 	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 

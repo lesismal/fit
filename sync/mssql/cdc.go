@@ -82,6 +82,11 @@ func (rd *reader) follow(ctx context.Context, from position) error {
 				// query: say so when its changes are lost.
 				return rd.whyFailed(ctx, err, at, known)
 			}
+			// A window of none of the read tables' changes moves the
+			// checkpoint all the same (I216 decision 12).
+			if err := rd.r.EmitPosition(func() fitsync.Position { return position{LSN: at, Since: since}.marshal() }); err != nil {
+				return err
+			}
 			continue
 		}
 		if rd.r.Once {

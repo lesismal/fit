@@ -346,6 +346,7 @@ func (rt *Runtime) dropCheckpoint(name string, confirm, force bool) (Status, err
 			}
 			// Sinks that keep the checkpoint keep it of the lineage
 			// dropped: a file of none says it was dropped, not lost.
+			p.store.lineage, p.store.wrote = "", nil // the next start makes a lineage
 			if p.keepsCheckpoint() {
 				p.store.lineage = newLineage()
 				if err := p.store.save(nil, nil); err != nil {
@@ -434,7 +435,7 @@ func (rt *Runtime) SetCheckpoint(name string, pos json.RawMessage, confirm bool)
 			if prog != nil {
 				prog.Finished = nil
 			}
-			p.store.lineage = newLineage() // a position set by hand starts a lineage
+			p.store.lineage, p.store.wrote = newLineage(), nil // a position set by hand starts a lineage
 			if err := p.store.save(Position(compact), prog); err != nil {
 				return err
 			}
