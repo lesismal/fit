@@ -21,39 +21,45 @@ slowdowns, CSRF and the response headers, and the `admin` log. Changing password
 
 ### The login page
 
-Opening the console's address while not logged in shows the login page: a user name, a password and
-**Log in**. While not logged in it is the only page: every other request gets `401` (`log in first`). It
-sends a JSON body to `POST /api/login` (`{"username", "password"}`, 4 KiB at most, and it
-must be `application/json`), and on success gets `{"user", "csrf"}` and the session cookie; the page keeps
-both, and from then every request but a GET or a HEAD carries the CSRF token in `X-Fit-Csrf`. After logging
-in, `GET /api/workbench` lists the modules this fit serves, and only then can the menu draw a page.
+Opening the console's address while not logged in shows the login page: a **Username**, a **Password**
+and **Log in**. It is the only page drawn: every `/api/` request but the login gets `401`
+(`log in first`). It sends a JSON body to `POST /api/login` (`{"username", "password"}`, 4 KiB at
+most, and it must be `application/json`; anything else gets `415` or `400`), and on success gets
+`{"user", "csrf"}` — and, while a temporary password must be changed,
+`{"must_change_password": true, "password_expires": ...}` — and the session cookie. The page keeps
+the user and the token, and from then every request but a GET or a HEAD carries the token in
+`X-Fit-Csrf`. After logging in, `GET /api/workbench` lists the modules this fit serves, and only
+then can the menu draw a page.
 
-A failed login shows "Login failed": a `401` says the name or password is wrong, and a `429` says the
-address or the user is still waiting, with `{"error", "retry_after"}`, the seconds to wait. Scripts use the
-same endpoint: a program keeps the cookie itself and sends `csrf` in `X-Fit-Csrf` with every request but a
-read; `GET /api/session` answers `{"user", "csrf"}` for the same session, or `401` when not logged in; and
-`POST /api/logout` ends the session.
+A failed login shows "Login failed": a `401` says the name or password is wrong, and a `429` says
+the address or the user is still waiting, with `{"error", "retry_after"}`, the seconds to wait, and
+the same in `Retry-After`. Scripts use the same endpoint: a program keeps the cookie itself and
+sends `csrf` in `X-Fit-Csrf` with every request but a read; `GET /api/session` answers
+`{"user", "csrf"}` for the same session, or `401` when not logged in; and `POST /api/logout` ends
+the session (with `204`, and the cookie cleared).
 
 ### Change the default password
 
 A session that logged in with the default password of `fit run -admin` is temporary: it can open only the
 **Change the default password** page, and every other endpoint answers `403` with
-`"must_change_password": true`, while the Admin API answers every request `403`. That page looks like the
-login page and shows the current (default) password, a new one and its confirmation, plus the time left
-before the default password stops working; the new password must differ from the current one and is at most
-72 bytes. Only after it is changed does the workbench become usable. After `-timeout` the password no
-longer logs in (`401`, `"password_expired": true`), and fit must be restarted with `-admin` to get a new
-one and change it in time.
+`"must_change_password": true`, while the Admin API answers every request `403`. That page is the login
+page's layout with fields for the current (default) password, **New password** and **Confirm the new
+password** — at most 72 bytes, bcrypt's limit — and the time left before the default password stops
+working, counted down; **Change password and continue** submits it. The new password must differ from the
+current one. Only after it is changed does the workbench become usable. After `-timeout` the password no
+longer logs in (`401`, `"password_expired": true`), the page replaces the form with the note that only a
+restart with `-admin` helps, and fit must be restarted with `-admin` to get a new one and change it in time.
 
 ### Sessions
 
 A login gives a session: 32 random bytes in the cookie `fit_console_<port>` (the console's port, so that
-consoles of several fits on one host keep their logins apart), `HttpOnly`, `SameSite=Strict`, and `Secure`
-over TLS. The console keeps only its SHA-256, and ends it when there is no request for `session_timeout`,
-when it has lasted `session_lifetime` in all, at logout, or when `max_sessions` is passed and it is the
-oldest. Sessions are in memory: a restart logs everyone out. Before a connection sends a request with a
-valid session (a successful login counts too), it is closed 5s after it is accepted, and is then idle for 2m
-until a logout or a request finds its session ended.
+consoles of several fits on one host keep their logins apart), `HttpOnly`, `SameSite=Strict`, `Secure`
+over TLS, and cleared at logout. The console keeps only its SHA-256, and ends the session when there is no
+request for `session_timeout`, when it has lasted `session_lifetime` in all, at logout, or when
+`max_sessions` is passed and it is the oldest. Sessions are in memory: a restart logs everyone out. A
+connection is closed 5s after it opens, whatever it sends, until it sends a request with a valid session (a
+login that succeeds counts); from then it is kept 2m idle, until a logout or a request finds its session
+ended, when it is closed 5s later unless a valid session comes first.
 
 Changing a password ends that user's other sessions, the caller's own kept (see
 [Account](13-account.md)).
@@ -80,10 +86,11 @@ Changing a password ends that user's other sessions, the caller's own kept (see
 
 Every request but a read must carry the session's CSRF token in `X-Fit-Csrf`, or gets `403`; a request whose
 `Origin` is not the console's own also gets `403`. Pages are sent with a Content-Security-Policy that allows
-their own files only and `frame-ancestors 'none'`, with `X-Frame-Options: DENY`,
-`Referrer-Policy: no-referrer`, and over TLS `Strict-Transport-Security`; API answers carry
-`Cache-Control: no-store`. The console's Content-Security-Policy allows its pages to reach only the
-listeners that serve the `vod` and `hls` routes.
+their own files only (`script-src`, `style-src` and `connect-src` are `'self'`, `frame-ancestors 'none'`),
+with `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, and over
+TLS `Strict-Transport-Security`; API answers carry `Cache-Control: no-store`. The policy adds the origins
+of the listeners that serve the `vod` and `hls` routes to `img-src` and `connect-src`, and adds `media-src`,
+so that a media preview can play from them.
 
 ### The admin log
 
@@ -103,14 +110,14 @@ chapter of [the config reference](../reference/config.md)):
 | `session_timeout` | `30m` | How long a login lasts without a request. |
 | `session_lifetime` | `12h` | How long a login lasts at most, however busy. |
 | `max_sessions` | 64 | The most logins kept at once; one more ends the oldest. |
-| `max_conns` | 32 | The most connections open at once, a quarter of them kept for those with a login. |
+| `max_conns` | 32 | The most connections open at once, a quarter of them kept for those with a login. When they are taken, a new connection closes the oldest one without a login, of the client holding the most (the host's own clients count as one), rather than being refused; one is refused only when every connection has a login, or the client already holds its share (but for loopback). |
 | `access` | | The client addresses the console serves, deciding before the global `access`, and following every config applied, without a restart. |
 
 Beside these, the console has a few fixed limits: request headers 16 KiB, read within 10s; a request body of
 `admin.max_config_bytes` plus 64 KiB, read within 30s; writing an answer 30s; a connection closed 5s after it
-is accepted before it sends a request with a valid login (a successful login counts too), and then idle for
-2m; at most 2 password checks at once; and 4 running and 64 waiting Admin API calls and role methods, each
-waiting at most 30s, with `503` past that. See [limits and timeouts](../console.md#limits-and-timeouts).
+opens, whatever it sends, until it sends a request with a valid session (a login that succeeds counts), then
+kept 2m idle; at most 2 password checks at once; and 4 running and 64 waiting Admin API calls and role
+methods, each waiting at most 30s, with `503` past that. See [limits and timeouts](../console.md#limits-and-timeouts).
 
 ## In .conf
 

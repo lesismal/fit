@@ -4,10 +4,13 @@
 
 ## What it does
 
-The Overview is a read-only page of the running state, from the Admin API's GET endpoints
-(`/status`, `/config/effective`, `/versions`). It refreshes every 5 seconds (the top bar can turn
-auto refresh off, or refresh by hand), and links to the pages that edit each part. The page edits
-no config.
+The Overview is the menu's first module and a read-only page of the running state, at
+`#/gw.overview/overview`. Its data comes from the Admin API's GET endpoints (`/status`,
+`/config/effective`, `/versions`): what fit runs now, where each part came from, and what has been
+going wrong. Most parts link to the page that edits them. The page edits no config.
+
+It refreshes every 5 seconds; the top bar's **Auto refresh** checkbox stops that, and its
+**Refresh** button reads again, saying `Updated <time>`. A visit compares its own refreshes only.
 
 ## Pages
 
@@ -18,37 +21,42 @@ no config.
 | Tile | Shows |
 | --- | --- |
 | Config version | The running config's version, its source and how long ago it was applied |
-| Reloads | The succeeded reloads, the failed ones (warned when any failed) |
-| Open connections | The open connections, the refused ones |
-| Routes | The route count, the layer 4 service count |
-| Backends up | Up / all backends, the upstream count (warned when any is down) |
-| Certificates | The certificate count, how many expire within 14 days (warned when any) |
+| Reloads | The succeeded reloads; `{n} failed` beside them, warned when any failed |
+| Open connections | The open connections; `{n} refused` beside them |
+| Routes | The route count; `{n} layer 4 services` beside them |
+| Backends up | `{up} / {all} up` over every upstream's backends, and the upstream count; warned when any is down |
+| Certificates | The certificate count; how many expire within 14 days, warned when any |
 
-**Cards** (each with a link to the page that edits it):
+**Cards**:
 
-- **Listeners**: name, address, protocols.
-- **Sources**: the listeners, routes, upstreams and services each source (a file, a provider)
-  contributed, in the precedence order.
-- **Shadowed**: elements a provider provided but the config left out, because a source before
-  them took their names.
-- **Upstream health**: one block per upstream — its name, up / all backends, the requests in
-  flight, the load-balancing strategy, its source; below it each backend's address, state (up,
-  down (health check), down (failures)), in flight, succeeded, failed.
-- **Routes**: name and priority, listeners, match, middleware, handler (and its upstream), source.
-- **Layer 4 services**: name, listeners, upstream, server names, PROXY protocol, source.
-- **Certificates**: the same certificate table as the [TLS](18-tls.md) page.
-- **Recent versions**: the last 5 versions, with a link to the [Versions](09-versions.md) page for
-  all of them.
+- **Listeners** (with **Edit**): name, address, protocols.
+- **Sources**: one row per source in precedence order — the source, and the listeners, routes,
+  upstreams and layer 4 services it contributed.
+- **Shadowed**, only when a provider provided an element the config leaves out: its source, the
+  element's path in the provider's part, its name, and the source that kept it.
+- **Upstream health** (with a filter and **Edit**): one block per upstream — its name, `{up} / {all}
+  up`, the requests in flight, its load-balancing strategy and its source, and an **Ask AI** button
+  when a backend is down; below it each backend's address, state (up, down (health check), down
+  (failures)), in flight, succeeded, failed.
+- **Routes** (with a filter and **Edit**): name and priority, listeners, match, middleware, handler
+  (and its upstream), source.
+- **Layer 4 services** (with **Edit**): name, listeners, upstream, server names, PROXY protocol,
+  source.
+- **Certificates** (with **Certificates**): the same table as the [TLS](18-tls.md) page — the
+  listener, the names, the issuer, the validity and the serial, with the days left or expired.
+- **Recent versions** (with **All versions**): the last 5 versions, newest first, each with its
+  number (the running one badged), the time it applied and its source.
 
-The routes and upstreams cards each have a filter; the **Edit** buttons go to the
-[Reverse proxy](15-reverse-proxy.md) and [L4 proxy](17-l4-proxy.md) pages.
-
-**Spikes**: the error counters that rose between two refreshes — requests failed on an upstream,
-connections refused, reloads failed — show as warning rows and stay listed for a minute. An
-upstream with backends down and each spike have an **Ask AI** button that asks the skill
-`diagnose` about it. See [Assistant](14-assistant.md).
+**Spikes**: an error counter that rose between two refreshes — requests failed on an upstream,
+connections refused, failed reloads — shows as a warning row saying how much rose in how many
+seconds, and stays for a minute. Each row, and an upstream with backends down, has an **Ask AI**
+button that asks the skill `diagnose` about it; for an upstream, the routes that proxy to it are the
+skill's input `route`. See [Assistant](14-assistant.md).
 
 ## See also
 
 - [The console and the store](../console.md#the-pages) — where the Overview sits in the menu
 - [The config reference: The config](../reference/config.md#the-config) — the fields of each part
+- [Versions](09-versions.md), [TLS](18-tls.md), [Reverse proxy](15-reverse-proxy.md) and
+  [L4 proxy](17-l4-proxy.md) — the pages its cards and buttons lead to
+- [Consistency check](10-consistency-check.md) — what fit runs against what the effective config says

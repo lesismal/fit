@@ -37,8 +37,8 @@ HTTP 一侧不在这一页：`whip`、`whep` 与 `webrtc_proxy` 是路由上的�
   以及凭据：`users` 各带 `password` 或 `key`（coturn `turnadmin -k` 打印的值），或 `secret`。
 - 写 `turn` 的配额与带宽：`max_allocations`、`max_allocations_per_user`、`max_permissions`、`max_channels`、
   `user_bandwidth`、生存期，以及 `allowed_peers` 与 `denied_peers`。
-- 写 `media` 的端口、`public_ips`、`ice_servers` 与 `turn_urls`（answer 的 `Link` 头把它们告知对端），以及
-  PeerConnection、流、观看者、码率的上限和超时。
+- 写 `media` 的端口、`public_ips`、`ice_servers` 与 `turn_urls`（answer 的 `Link` 头把它们告知对端）、它的 `access`，
+  以及 PeerConnection、流、观看者、码率的上限和超时。
 - 写 `proxy` 的端口、`public_ips`、会话与中继的上限、空闲超时，以及通往媒体服务器的源地址 `relay_ip` 与端口范围。
 
 重载时 `turn` 的 `users`、`secret`、对端列表、配额、生存期和证书在原处生效，已有的 allocation 保留；修改地址会
@@ -59,6 +59,7 @@ HTTP 一侧不在这一页：`whip`、`whep` 与 `webrtc_proxy` 是路由上的�
 | --- | --- | --- |
 | `listen` | — | 必填。客户端到达的 UDP 地址，如 `:3478`（`turn:` URI 的默认端口）；同一地址也可作为 `stun:` 服务器，它不需凭据地应答 STUN Binding |
 | `listen_tcp`、`listen_tls` | 无 | 经 TCP 与 TLS 提供 TURN（`turn:host:port?transport=tcp`、`turns:`）；TLS 的证书取自 `tls.certificates` 中的文件，并被监视。TCP 与 TLS 地址不能相同；UDP 与 TCP 可以 |
+| `mptcp` | 关闭 | 内核支持时（Linux 5.6+）以多路径 TCP 承载 `listen_tcp` 与 `listen_tls`；`listen` 的 UDP socket 没有 |
 | `realm` | — | 必填。凭据的 realm，写在每个质询里 |
 | `users` | 无 | 静态用户，各带 `password` 或它导出的 `key`；与 `secret` 同时设置时先在 `users` 中查找 |
 | `secret` | 无 | coturn `use-auth-secret` 的共享密钥：用户名 `<过期时间>:<任意内容>`，密码是 `base64(HMAC-SHA1(secret, username))`，过期前有效 |
@@ -71,6 +72,7 @@ HTTP 一侧不在这一页：`whip`、`whep` 与 `webrtc_proxy` 是路由上的�
 | `max_channels` | 64 | 一个 allocation 绑定的 channel 数；再多一个以 `508` 拒绝 |
 | `user_bandwidth` | 2 MiB | 一个用户名每个方向每秒中继的字节数，允许一秒的突发；超出的数据报被丢弃 |
 | `default_lifetime`、`max_lifetime` | 10m、1h | allocation 的生存期，由客户端刷新 |
+| `nonce_lifetime`、`nonce_secret` | 10m、随机 | nonce 的有效时间（更旧的应答 `438`），以及生成 nonce 用的密钥——同一个负载均衡器后的各服务器共享它，因为客户端的请求可能落到任何一台 |
 | `max_stream_message` | 8 KiB | TCP 或 TLS 客户端最大的消息；声称更大的连接立即关闭 |
 | `stream_idle_timeout` | 30s | 没有 allocation 的 TCP 或 TLS 连接 |
 | `allowed_peers`、`denied_peers` | 无 | 环回、私有、链路本地、组播等内部地址默认被拒绝；`allowed_peers` 可放行其中一部分。两者都接受带端口的地址，如 `10.0.0.5:8189` |
@@ -85,6 +87,7 @@ HTTP 一侧不在这一页：`whip`、`whep` 与 `webrtc_proxy` 是路由上的�
 | --- | --- | --- |
 | `listen` | — | 必填。所有 PeerConnection 共用的 UDP 端口，如 `:8189`；通配 host 告知每个在用接口的地址，除非设了 `public_ips` |
 | `public_ips` | 无 | 告知对端到达该端口的地址（1:1 NAT 之后，或原样转发该端口的负载均衡器） |
+| `access` | 跟随全局 `access` | 该端口服务的对端地址，先于全局 `access` 决定；被拒绝地址的数据报被丢弃，其 ICE 检查得不到应答 |
 | `ice_servers` | 无 | 在 `Link` 头中告知对端的 STUN 与 TURN 服务器；fit 自己不需要，它是 ICE lite agent |
 | `turn_urls` | 无 | fit 自己的 `webrtc.turn`，作为 `turn_urls` 告知对端；此时必须设置其 `secret` |
 | `turn_credential_ttl` | 1h | answer 携带的 TURN 凭据的有效时间 |

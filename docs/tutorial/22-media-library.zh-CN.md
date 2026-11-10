@@ -15,6 +15,10 @@ API，后四个编辑配置的共享草稿。
 默认关闭：没有 `media_library` 时不扫描也不提供任何文件，页面会说明这一点并链接到配置页。页面从不保存任何 URL、令牌或
 签名：预览的 URL 只存在于它的播放器里，测试 URL 只留在表单中，离开页面即消失；密钥从不到达浏览器。
 
+媒体库也面向观众：路由上的 `media_pages` 处理器提供 fit 自带的页面——经 WHIP 与 WHEP 的多人房间通话（带聊天）、推流页与
+播放页；设置本模块的 `libraries`（以及 `channels`）后，还多出媒体库页与播放器页：登录的观众从那里用 HLS 播放条目，所用的
+播放 URL 由页面为该观众签发。该处理器见下文与 [WebRTC](../webrtc.zh-CN.md#媒体页面)。
+
 ## 页面与操作
 
 ### 媒体库（Libraries）
@@ -115,6 +119,23 @@ API，后四个编辑配置的共享草稿。
 各 `media_auth` 策略的 `url_signing`；原始文本标签页为整个 `media_auth` 成员，其密钥按草稿中的样子保留。没有策略时链接到
 [媒体认证](21-media-auth.zh-CN.md)页。
 
+### 媒体页面（Media pages）
+
+不是菜单页：路由上的 `media_pages` 处理器向观众提供 fit 自带的页面，它们嵌在二进制里。页面包括带登录的索引、带文字消息
+与小文件聊天的多人房间通话、推流页与播放页，全部走 `whip`、`whep`（或流媒体角色的 `stream_whip`、`stream_whep`）的
+WHIP 与 WHEP 端点，可在本服务器或另一台服务器上。设置 `libraries` 后，它们多出媒体库页（`<prefix>/library`，列出本模块
+中观众有权播放的条目）与播放器页（`<prefix>/watch`，用随二进制提供的 hls.js 播放其中一个）；设置 `channels` 时，流媒体
+角色的频道也列在那里。
+
+设置 `login` 后，策略的用户在页面上登录一次：策略为其 `token_ttl` 签发的令牌以 `HttpOnly`、`SameSite=Strict` 的 cookie
+`fit_media_token` 返回，WHIP 与 WHEP 请求带着它；粘贴 `fit media-token` 打印的令牌同样有效。播放器向 `api/play` 请求 URL：
+策略有 `url_signing` 且播放不是公开的，就得到为该观众、其地址与一个独立播放会话签发的播放 URL，其播放列表把授权交给播放器；
+否则得到普通 URL，由登录的 cookie 放行。URL 被拒时播放器停止。
+
+房间通话是另一半：每个成员发布 `<room>-<name>` 并播放其他人；麦克风、摄像头与屏幕的开关从不重新协商 PeerConnection，房间
+API 会公布这些开关，于是其他人显示“麦克风已关”或该成员的头像，而不是等待不会到来的媒体。聊天经同一 API 传送文字与小文件。
+相关字段与上限见下文，页面本身见 [WebRTC](../webrtc.zh-CN.md#媒体页面)。
+
 ## 参数
 
 `media_library` 的关键字段（完整字段表见[配置参考](../reference/config.md#media-library)）：
@@ -148,6 +169,28 @@ API，后四个编辑配置的共享草稿。
 频道的字段（`streaming.channels[]`、其 `schedule[]` 与 `push[]`）见[配置参考](../reference/config.md#config-channelslot)与
 [频道](../channels.zh-CN.md#频道播放什么)；`url_signing` 的字段见[配置参考](../reference/config.md#config-mediaauth)。
 
+`media_pages` 处理器的关键字段（完整字段表见[配置参考](../reference/config.md#http-handlers-media_pages)）：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `prefix` | `/media` | 页面所在的路径前缀；路由必须匹配它及其下一层 |
+| `auth` | 无 | 房间 API 校验的策略，也是页面登录与令牌所属的策略 |
+| `login` | 关闭 | 为策略的用户显示登录表单；按 `token_ttl` 签发的令牌以 cookie `fit_media_token` 返回 |
+| `pages` | 开启 | 提供索引、通话、推流与播放页；关闭时一个页面都不提供，供自带页面的部署使用 |
+| `title` | fit media | 页面标题 |
+| `whip`、`whep` | `/whip/{stream}`、`/whep/{stream}` | 页面推流与播放所用的端点，`{stream}` 会被替换 |
+| `hls` | 无 | 一路流的 HLS 播放列表 URL，供浏览器自身能播放 HLS 时的播放页使用 |
+| `links` | 无 | 推流页与播放页为浏览器之外的工具显示的更多 URL；`{stream}`、`{token}` 与 `{host}` 会被替换 |
+| `ice_servers` | 无 | 页面的 PeerConnection 所用的 STUN 与 TURN 服务器，即浏览器的 `iceServers` |
+| `libraries` | 无 | 媒体库页列出其条目的媒体库，最多 16 个；只列观众有权 `play` 的条目 |
+| `vod` | `/vod/{library}/{id}/index.m3u8` | 条目的多码率播放列表 URL，`{library}` 与 `{id}` 会被替换 |
+| `channels` | 关闭 | 媒体库页也列出流媒体角色的频道；需要 `hls` |
+| `chat` | 开启 | 房间通话的文字与小文件聊天 |
+| `max_file_bytes` | 5 MiB | 一条聊天消息可携带的最大文件 |
+| `max_rooms`、`max_members` | 64、16 | 同时在线的房间数，与一个房间的成员数（旁观者为两倍） |
+| `mic_default`、`cam_default` | 关闭 | 成员加入时麦克风或摄像头是否已开；URL 中的 `mic=0\|1` 与 `cam=0\|1` 优先 |
+| `member_ttl`、`stall_timeout` | 30s、30s | 成员多久没有心跳就不再算在房间内，以及事件流等待其浏览器多久 |
+
 ## .conf 配置
 
 ```fit
@@ -166,18 +209,43 @@ media_library films {
 	upload_dir /srv/media/films/incoming
 }
 
+media_auth staff {
+	secret a-secret-of-at-least-16-bytes
+	users operator {
+		password_hash $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+		play *
+	}
+	url_signing {
+		ttl 2m
+		play_grace 30m
+		max_sessions 2
+	}
+}
+
 route films {
 	match { path /vod/films/* }
 	handler vod {
 		library films
+		auth staff
 		segment_duration 4s
 		cache_control "public, max-age=86400"
 	}
 }
+
+route media {
+	match { path /media /media/* }
+	handler media_pages {
+		auth staff
+		login true
+		libraries films
+	}
+}
 ```
 
-于是 `http://host:8080/vod/films/films/bbb/index.m3u8` 播放条目 `films/bbb`。条目页的预览经这条路由的监听器加载媒体，所以
-路由上最好设置 `cors`，否则浏览器可能拒绝从控制台的源播放。
+于是 `http://host:8080/vod/films/films/bbb/index.m3u8` 为策略放行的观众播放条目 `films/bbb`：控制台的预览为控制台用户签发
+短期 URL，页面播放器的用户则以 `operator` 登录。条目页的预览经这条路由的监听器加载媒体，所以路由上最好设置 `cors`，否则
+浏览器可能拒绝从控制台的源播放。工作人员打开 `http://host:8080/media/`，以 `operator` 登录，即可在页面自带的播放器里播放
+媒体库——播放 URL 由页面为他们签发，两分钟有效。
 
 ## 相关文档
 
@@ -185,5 +253,7 @@ route films {
 - [频道](../channels.zh-CN.md)：频道播放什么、排期、时间戳、读取文件、推流目标、Admin API 与指标。
 - [媒体认证](21-media-auth.zh-CN.md)：`media_auth` 策略与 `url_signing`。
 - [流媒体](20-streaming.zh-CN.md)：`streaming` 角色与 `hls`、`httpflv` 处理器。
-- [配置参考：Media library](../reference/config.md#media-library)与[控制台与 store](../console.zh-CN.md#媒体库)。
+- [配置参考：Media library](../reference/config.md#media-library)、[Handlers](../reference/config.md#handlers)与
+  [控制台与 store](../console.zh-CN.md#媒体库)。
+- [WebRTC](../webrtc.zh-CN.md#媒体页面)：媒体页面、多人房间通话与其聊天，以及它们所用的 WHIP 与 WHEP 端点。
 - 页面代码：[app/workbench/web/gateway/media.js](../../app/workbench/web/gateway/media.js)。

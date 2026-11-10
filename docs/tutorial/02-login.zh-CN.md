@@ -18,32 +18,36 @@ CSRF 令牌；页面只允许自身的文件。检查密码要花 bcrypt 的几�
 
 ### 登录页
 
-打开控制台的地址，未登录时看到的就是登录页：用户名、密码与**登录**。未登录时它是唯一的页面：其他请求
-得到 `401`（`log in first`）。它把 JSON 请求体发到
-`POST /api/login`（`{"username", "password"}`，最多 4 KiB，必须是 `application/json`），成功时得到
-`{"user", "csrf"}` 和会话 cookie；页面保存这两者，此后除 GET 与 HEAD 外的每个请求都在 `X-Fit-Csrf` 中
-带上令牌。登录之后，`GET /api/workbench` 列出这台 fit 提供的模块，菜单才画得出页面。
+打开控制台的地址，未登录时看到的就是登录页：**用户名**、**密码**与**登录**。未登录时它是唯一绘制的
+页面：除登录外的每个 `/api/` 请求都得到 `401`（`log in first`）。它把 JSON 请求体发到
+`POST /api/login`（`{"username", "password"}`，最多 4 KiB，必须是 `application/json`，否则得到 `415`
+或 `400`），成功时得到 `{"user", "csrf"}`——需要修改临时密码时还带
+`{"must_change_password": true, "password_expires": ...}`——以及会话 cookie；页面保存用户名与令牌，此后
+除 GET 与 HEAD 外的每个请求都在 `X-Fit-Csrf` 中带上令牌。登录之后，`GET /api/workbench` 列出这台 fit
+提供的模块，菜单才画得出页面。
 
 失败的登录显示“登录失败”：`401` 说明用户名或密码不对，`429` 说明该地址或该用户还在等待，应答带
-`{"error", "retry_after"}`，即需等待的秒数。给脚本用的也是同一个端点：程序自己保存 cookie，并在每个非
-读取的请求的 `X-Fit-Csrf` 中发送 `csrf`；`GET /api/session` 以同一个会话应答 `{"user", "csrf"}`，未登录
-时 `401`；`POST /api/logout` 结束会话。
+`{"error", "retry_after"}`，即需等待的秒数，`Retry-After` 里也是同一个值。给脚本用的也是同一个端点：
+程序自己保存 cookie，并在每个非读取的请求的 `X-Fit-Csrf` 中发送 `csrf`；`GET /api/session` 以同一个会话
+应答 `{"user", "csrf"}`，未登录时 `401`；`POST /api/logout` 结束会话（应答 `204`，并清除 cookie）。
 
 ### 修改默认密码页
 
 以 `fit run -admin` 的默认密码登录时，会话是临时的：它只能打开**修改默认密码**这一页，其他接口一律 `403`
-及 `"must_change_password": true`，Admin API 对所有请求 `403`。这一页外观同登录页，显示当前（默认）密码、
-新密码与确认，以及默认密码失效前的剩余时间；新密码不能与当前密码相同，最多 72 字节。改过之后工作台才
-开始可用。超过 `-timeout` 后该密码无法再登录（`401`，`"password_expired": true`），只能以 `-admin` 重启
-fit 再及时修改。
+及 `"must_change_password": true`，Admin API 对所有请求 `403`。这一页外观同登录页，有当前（默认）密码、
+**新密码**与**确认新密码**三个输入框（最多 72 字节，即 bcrypt 的限制），以及默认密码失效前的剩余时间倒
+计时；**修改密码并继续**提交。新密码不能与当前密码相同。改过之后工作台才开始可用。超过 `-timeout` 后该
+密码无法再登录（`401`，`"password_expired": true`），页面用只有以 `-admin` 重启才有用的提示替换表单，这时
+只能以 `-admin` 重启 fit 再及时修改。
 
 ### 会话
 
 登录得到一个会话：cookie `fit_console_<端口>` 中的 32 个随机字节（带上控制台的端口，同一主机上几个 fit
-的控制台登录互不影响），`HttpOnly`、`SameSite=Strict`，TLS 下还有 `Secure`。控制台只保存它的 SHA-256，
-并在下列情况下结束它：`session_timeout` 内没有请求；总时长超过 `session_lifetime`；登出；或超过
-`max_sessions` 且它是最早的会话。会话在内存中：重启后所有人都需重新登录。发出带有效会话的请求之前（登录
-成功也算），连接在打开 5s 后关闭；之后空闲 2m，直到登出，或某个请求发现会话已结束。
+的控制台登录互不影响），`HttpOnly`、`SameSite=Strict`，TLS 下还有 `Secure`，登出时清除。控制台只保存它的
+SHA-256，并在下列情况下结束它：`session_timeout` 内没有请求；总时长超过 `session_lifetime`；登出；或超过
+`max_sessions` 且它是最早的会话。会话在内存中：重启后所有人都需重新登录。连接打开 5s 后就关闭，不论它发了
+什么，直到它发出带有效会话的请求（登录成功也算）；此后连接空闲保持 2m，直到登出，或某个请求发现会话已结束
+——那时它在 5s 后关闭，除非先来了一个有效会话。
 
 改密码会结束该用户的其他会话，调用者自己的保留（见[账户](13-account.zh-CN.md)）。
 
@@ -64,10 +68,11 @@ fit 再及时修改。
 ### CSRF、Origin 与响应头
 
 除读取外的每个请求都要在 `X-Fit-Csrf` 中携带会话的 CSRF 令牌，否则 `403`；`Origin` 不是控制台自身的请求
-也返回 `403`。页面带有只允许自身文件、`frame-ancestors 'none'` 的 Content-Security-Policy，以及
-`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`，TLS 下还有 `Strict-Transport-Security`；API 的
-响应带 `Cache-Control: no-store`。控制台的 Content-Security-Policy 只允许它的页面访问提供 `vod` 与 `hls`
-路由的监听。
+也返回 `403`。页面带有只允许自身文件的 Content-Security-Policy（`script-src`、`style-src` 与
+`connect-src` 为 `'self'`，`frame-ancestors 'none'`），以及 `X-Frame-Options: DENY`、
+`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`，TLS 下还有
+`Strict-Transport-Security`；API 的响应带 `Cache-Control: no-store`。策略会把提供 `vod` 与 `hls` 路由的
+监听的来源加进 `img-src` 与 `connect-src`，并加上 `media-src`，使媒体预览可以从它们播放。
 
 ### admin 日志
 
@@ -87,13 +92,13 @@ fit 再及时修改。
 | `session_timeout` | `30m` | 没有请求时登录保持多久。 |
 | `session_lifetime` | `12h` | 无论多活跃，登录最长保持多久。 |
 | `max_sessions` | 64 | 同时保留的登录数上限；再多一个时结束最早的。 |
-| `max_conns` | 32 | 同时打开的连接数上限，其中四分之一留给已登录的连接。 |
+| `max_conns` | 32 | 同时打开的连接数上限，其中四分之一留给已登录的连接。用满时，新连接关闭客户端持有最多且没有登录的那个最旧连接（本机客户端算一个），而不是被拒绝；只有在所有连接都已登录，或该客户端已占满自己那份（环回客户端除外）时才拒绝。 |
 | `access` | | 控制台服务的客户端地址，先于全局 `access` 决定，随每次应用的配置生效，无需重启。 |
 
 登录之外，控制台还有几项固定的上限：请求头 16 KiB、10s 内读完；请求体 `admin.max_config_bytes` 加
-64 KiB、30s 内读完；写响应 30s；发出带有效会话的请求之前（登录成功也算），连接打开 5s 后关闭，之后空闲
-2m；同时进行的密码检查 2 次；Admin API 调用与角色方法 4 个运行、64 个等待，每个最多等待 30s，超出时
-`503`。见[上限与超时](../console.zh-CN.md#上限与超时)。
+64 KiB、30s 内读完；写响应 30s；连接打开 5s 后就关闭，不论它发了什么，直到它发出带有效会话的请求（登录
+成功也算），之后空闲保持 2m；同时进行的密码检查 2 次；Admin API 调用与角色方法 4 个运行、64 个等待，
+每个最多等待 30s，超出时 `503`。见[上限与超时](../console.zh-CN.md#上限与超时)。
 
 ## .conf 配置
 

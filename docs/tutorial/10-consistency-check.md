@@ -20,16 +20,17 @@ then applied as one new config version and written to the store.
 
 ### Consistency check
 
-The tools show the running config's version, when this check ran, and **Check again**. Below them is a summary
-line: how many drift, how many info; when there is no drift the page says "The running service and its config
-agree".
+The tools show the running config's version, when this check ran, and **Check again**. Below them, when there
+is drift, two badges: how many drift and how many info; when there is no drift the page says "The running
+service and its config agree".
 
 The differences are grouped by category, in this order: Settings, Listeners, Routes, Upstreams, Layer 4
 services, TLS certificates, Roles, Cache, Config sources; each group's heading carries its number of items, and
-within a category the rows are ordered by name and ID. The two sides compared are the runtime — the bound
-listeners, the running roles, the certificates being served, the cache zones, the limits the engine actually
-uses, and what the providers provided — and the effective config, which is the base config with the providers
-merged into it.
+within a category the rows are ordered by name and ID. An element a provider provided is listed under its own
+member's category (a provided listener under Listeners), while a provided element that was left out because its
+name is already used is info, under Config sources. The two sides compared are the runtime — the bound listeners,
+the running roles, the certificates being served, the cache zones, the limits the engine actually uses, and what
+the providers provided — and the effective config, which is the base config with the providers merged into it.
 Each difference is one row: its kind badge, its name and its detail, then its two sides — the **Config** value
 and the **Running** value, each formatted as JSON. Under a drift row there is the **Fix**: a select that picks
 one fix, and a checkbox that decides whether to apply it.
@@ -43,7 +44,7 @@ A fix's action is one of four:
 | `replace` | Change the config to the running value | changes the config to what actually runs |
 | `reapply` | Apply the config again | changes nothing and applies it again, to retry or to stop it |
 
-The select shows the action and, when the fix has one, the patch it writes (`Write it into the config ·
+The select shows the action and, when the fix has one, the patch it writes (`Write it into the config · add
 /listeners/1`, like that). Where no fix is offered, the page says so: edit the config on its page, or apply the
 config again.
 
@@ -77,10 +78,10 @@ What a drift row looks like:
 
 ```text
 drift · Settings · log
-  the config says level=warn, the running service still uses the level from start, info.
+  the config sets log differently from the value fit started with, which is in force until fit restarts.
   Config:   {"level": "warn"}
   Running:  {"level": "info"}
-  Fix:      [Change the config to the running value · /log/level]   ☐ Apply this fix
+  Fix:      [Change the config to the running value · replace /log]   ☐ Apply this fix
 ```
 
 The endpoints this page uses (the Admin API's endpoints sit under `/api/m/admin/` on the console):
@@ -103,17 +104,17 @@ The fields of a difference (each item of `GET /config/check`):
 | `detail` | One line saying what it is |
 | `config` | The config's value, when it has one |
 | `running` | The running value, when it has one |
-| `fixes` | The fixes offered: each an `action` and the `patch` it writes (`op`, `path`, `value`) |
+| `fixes` | The fixes offered: each a `label` (the server's own wording), an `action`, and, for `add`, `delete` and `replace`, the `patch` it writes (`op`, `path`, `value`) |
 
 ## Kinds of differences
 
 | Kind | What it can find |
 | --- | --- |
 | Settings read only at start | `log`, `access_log`, `telemetry`, `engine`, `acme` or `providers` changed after fit started: the config says one thing and the running service still uses the values from start. The fix is to write the running values back into the config (or keep the config and wait for a restart). `limits.max_conns`, `max_pending_bytes` and `max_write_queue_bytes` are the same, taken from the running engine. `admin` is only info: it comes from the bootstrap file |
-| Roles | A role the config sets but that is not running (it failed to start), and a role still running that the config no longer sets: it can be removed from the config, or the config applied again to retry or stop it |
-| The providers' parts | Elements a provider (`docker`, `consul`, `consul_kv`, `etcd`, `kubernetes`) added to the effective config but that are not in the base config: write them into the config (`listeners`, `routes`, `upstreams`, `services`), or leave them to the provider. Shadowed provider elements are info |
-| Listeners | A listener in the config that is not bound, or a bound listener the config no longer has, is drift; a listener whose address is port `0` can have its actual port written back, which is info |
-| TLS | A certificate a listener serves that does not cover a name in `tls.acme` is drift (remove the name, or keep it and wait for ACME); names added by HTTPS by default and certificates obtained on demand are info |
+| Roles | A role the config sets but that is not running (it failed to start): remove it from the config, or apply the config again to retry starting it. A role still running that the config no longer sets: apply the config again to stop it |
+| The providers' parts | Elements a provider (`docker`, `consul`, `consul_kv`, `etcd`, `kubernetes`) added to the effective config but that are not in the base config: write them into the config (`listeners`, `routes`, `upstreams`, `services`), or leave them to the provider; they are listed under the member they belong to. Shadowed provider elements are info, under Config sources |
+| Listeners | A listener in the config that is not bound, or a bound listener the config no longer has, is drift; a listener whose address is port `0` reports the port the kernel chose, which is info (a dynamic port is deliberate) |
+| TLS | A name the base config writes in a listener's `tls.acme` that no certificate served covers is drift, and the fix removes the name from the config; names HTTPS by default added while their certificate is obtained, and certificates served that no name asked for (on-demand TLS, or a certificate from a file), are info |
 | Upstreams | An upstream in the config with no pool for it, or a pool whose upstream the config no longer has, is drift; an upstream with all its backends down is info |
 | Cache | A cache zone the config uses that does not exist at runtime is drift; a zone kept from an earlier config is info |
 
@@ -128,7 +129,7 @@ the page's summary and its tools show, and the running version and ETag, the one
 - **An element a provider provided should become part of the config**: use `add` to write it into
   `listeners`, `routes`, `upstreams` or `services`; if it should stay the provider's, tick nothing and leave it.
 - **A role failed to start**: use `reapply` to apply the config again and retry it; a role still running that
-  the config no longer sets is stopped with `reapply`, or removed from the config with `delete`.
+  the config no longer sets is stopped with `reapply` — the page offers no other fix there.
 - **Looking without changing**: tick nothing and this page applies nothing; the confirmation window is the last
   gate.
 - **After applying, the check runs again**: the fixes go through the same path as saving, so one that cannot
@@ -152,11 +153,14 @@ fit check -c /etc/fit/fit.json -json    # prints the check as JSON
 fit check -c /etc/fit/fit.json -fix     # picks a fix per difference, then applies them together
 ```
 
+`-timeout` (30s by default) bounds how long `fit check` waits for the Admin API. `-json` and `-fix` are given
+one at a time.
+
 `admin.address` (and `token_file`) in the bootstrap file says where the Admin API is. With `admin.cert_file`
 set, `fit check` uses https and verifies the API's certificate: when it can read `cert_file` (as on the host
-fit runs on) it verifies with the certificate it holds and the system CAs, otherwise with the CAs in `-ca`; the
-name verified is the host in the address, or localhost when the address names none, and `-server-name` can name
-it; with `admin.client_ca_file` set it presents the certificate given by `-cert` and `-key`.
+fit runs on) it verifies with that certificate and the system CAs, otherwise with the CAs in `-ca`; the name
+verified is the host in the address, or localhost when the address names none, and `-server-name` can name it.
+With `admin.client_ca_file` set, `-cert` and `-key` must give the client certificate it presents.
 
 Exit codes: `0` when there is no drift; `1` when drift remains (including after `-fix`); `2` for a usage,
 config loading, connection or decoding error.

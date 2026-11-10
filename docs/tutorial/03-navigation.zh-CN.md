@@ -35,7 +35,7 @@
 | [版本](09-versions.zh-CN.md) | 配置版本 |
 | [一致性检查](10-consistency-check.zh-CN.md) | 一致性检查 |
 | [日志](11-logs.zh-CN.md) | 日志 |
-| [集群](12-cluster.zh-CN.md) | 概览、节点、分组、模板、发布、漂移与告警、用户与审计、指标、日志、证书 |
+| [集群](12-cluster.zh-CN.md) | 概览、节点、分组、模板、发布、漂移与告警、用户与审计、指标、日志、证书、BitTorrent |
 | [账户](13-account.zh-CN.md) | 我的密码、用户、本节点 |
 | [助手](14-assistant.zh-CN.md) | 功能、技能、提案、审计日志、MCP、设置 |
 | [反向代理](15-reverse-proxy.zh-CN.md)（HTTP） | 路由、上游 |
@@ -49,18 +49,25 @@
 | [WebRTC](23-webrtc.zh-CN.md)（WebRTC） | WebRTC |
 | [隧道角色](24-tunnel.zh-CN.md)（隧道） | 隧道角色 |
 | [LLM 角色](25-llm.zh-CN.md)（LLM） | LLM 角色 |
+| [数据同步](26-sync.zh-CN.md)（管道） | 管道、同步配置 |
+| [BitTorrent](27-bittorrent.zh-CN.md)（客户端 / tracker） | 种子、Tracker、RSS、发布、BitTorrent 配置 |
 
-角色运行后，其模块出现在清单最后：隧道为 **Hub**、**节点**、**proxy**（tunnel.hub、tunnel.node、
-tunnel.proxy），LLM 为 **Hub**、**节点**、**proxy**（llm.hub、llm.node、llm.proxy），各带该角色的
-页面。见[隧道角色](24-tunnel.zh-CN.md)与 [LLM 角色](25-llm.zh-CN.md)。
+最后两个模块属于控制台本身，因此只要控制台运行就出现在清单里，即使其角色尚未配置；此时页面会说明
+应如何设置，配置应用后管道与客户端或 tracker 即启动。见[数据同步](26-sync.zh-CN.md)与
+[BitTorrent](27-bittorrent.zh-CN.md)。
+
+角色运行后，它自己的模块也会出现在清单最后：隧道为 **Hub**、**节点**、**proxy**（tunnel.hub、
+tunnel.node、tunnel.proxy），LLM 为 **Hub**、**节点**、**proxy**（llm.hub、llm.node、llm.proxy），
+各带该角色的页面。见[隧道角色](24-tunnel.zh-CN.md)与 [LLM 角色](25-llm.zh-CN.md)。
 
 ## 引擎菜单
 
 引擎菜单把同一份视图放进导航栏：每个监听端口一个子菜单，按配置与默认 HTTPS 生成的顺序排列。
-端口展开后是其处理器（静态文件、直接应答、FastCGI、媒体令牌、媒体页面）、反向与正向代理路由、
-缓存（缓存区与缓存的路由）、其他中间件、流媒体与 WebRTC 处理器、四层服务、SOCKS、TLS 证书、
-ACME、自动 HTTPS 与到它的重定向，最后是监听表单。协议、PROXY 协议、HTTP/3、按需证书、客户端
-证书、MPTCP、点播以小标签显示在端口行下。详见[引擎](06-engine.zh-CN.md)。
+端口展开后是其处理器（静态文件、直接应答、FastCGI、媒体令牌、媒体页面，以及其路由上按模块 id
+列出的其他处理器：`vod`、`sync_ingest`、`bt_stream`、`bt_publish`、`bt_tracker`）、反向与正向
+代理路由、缓存（缓存区与缓存的路由）、其他中间件、流媒体与 WebRTC 处理器、四层服务、SOCKS、
+TLS 证书、ACME、自动 HTTPS 与到它的重定向，最后是监听表单。协议、PROXY 协议、HTTP/3、按需证书、
+客户端证书、MPTCP、点播以小标签显示在端口行下。详见[引擎](06-engine.zh-CN.md)。
 
 ## 问 AI
 

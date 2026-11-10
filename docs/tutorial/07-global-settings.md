@@ -6,16 +6,18 @@
 
 **Global** is the module that edits the config's top-level members that belong to no route, no listener
 and no role: fit's own log, the access log, telemetry, metrics, profiling, limits, the engine and the
-providers. It is the first module of the navigation bar's system group, its pages come in that order,
-each page edits one member and is named for it, and the last two pages are **Other** and
-**Import / Export**.
+providers. It is the first module of the navigation bar's system group, its pages come in that order
+(**Log**, **Access log**, **Telemetry**, **Metrics**, **Profiling**, **Limits**, **Engine**,
+**Providers**, and the last two, **Other** and **Import / Export**), each page edits one member, and most
+are named for it (the `pprof` page is **Profiling**).
 
-These pages work like every other page that edits the config ([the function navigation bar](03-navigation.zh-CN.md)):
+These pages work like every other page that edits the config ([the function navigation bar](03-navigation.md)):
 the forms are made from the embedded fit JSON Schema, each field carries its description, an optional
 member has a checkbox, and each page has `.conf`, `.yaml` and `.json` tabs that edit the same draft.
-**Save and apply** sends the whole draft with `If-Match`, checks it and then applies it, so it goes
-through the same checks as `fit validate`; **Check** beside it is the same request with `?dry_run=1`,
-which checks without applying.
+**Save and apply** sends the draft with `If-Match` (the whole draft from **UI**, or this page's members as
+text from a format tab), checks it and then applies it, so it goes through the same checks as
+`fit validate`; **Check** beside it is the same request with `?dry_run=1`, which checks without
+applying.
 
 What this chapter turns on is which changes take effect at once and which need a restart: `log`'s
 `level`, `levels`, `time_zone` and `rotate` take effect on reload, `output` and `format` take a restart;
@@ -28,12 +30,14 @@ follows every config applied, with no restart.
 ### Log (`log`)
 
 One form, editing `log`: `level` and the per-logger `levels`, `output`, `format`, `time_zone` and
-`rotate`, plus `loggers` (some loggers' own level, output, format and rotation). fit's own log says what
-it thinks about starting, loading and reloading configs, certificates, providers and the engine, and
-writes nothing for each request; which logger is which, and what each says, is in
-[the config reference's Log chapter](../reference/config.md#log). After Save and apply the level, the
-zone and the rotation take effect at once; the output and the format change at the next restart. The
-files on disk and "N lines dropped" are on the [Logs](11-logs.zh-CN.md) page.
+`rotate`, plus `loggers` (some loggers' own level, output, format and rotation); a logger may not have its
+level both in `levels` and in `loggers`. fit's own log says what it thinks about starting, loading and
+reloading configs, certificates, providers and the engine, and writes nothing for each request; the
+loggers are `server`, `admin`, `tls`, `provider`, `telemetry`, `access_log`, `plugin`, `fastcgi`,
+`engine` and the roles' own (`llm`, `tunnel`, `webrtc`, `sync`, `bittorrent`), and which is which, and
+what each says, is in [the config reference's Log chapter](../reference/config.md#log). After Save and
+apply the level, the zone and the rotation take effect at once; the output and the format change at the
+next restart. The files on disk and "N lines dropped" are on the [Logs](11-logs.md) page.
 
 ### Access log (`access_log`)
 
@@ -70,8 +74,17 @@ default), behind its token; without `pprof` those paths answer 404. For example:
 go tool pprof http://127.0.0.1:2019/debug/pprof/profile?seconds=30
 ```
 
-`seconds` may ask for at most `max_duration` (1m by default). Leave `pprof` out when done: the blocking
-and mutex rates are worth setting only while looking, since sampling costs every such event.
+`seconds` may ask for at most `max_duration` (1m by default). With `admin.token_file`, send the token
+first, then open the file with `go tool pprof`:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" -o cpu.pprof \
+  "http://127.0.0.1:2019/debug/pprof/profile?seconds=30"
+go tool pprof cpu.pprof
+```
+
+Leave `pprof` out when done: the blocking and mutex rates are worth setting only while looking, since
+sampling costs every such event.
 
 ### Limits (`limits`)
 
@@ -91,34 +104,53 @@ serves clients, and upstream connections are dialed through the other, so that a
 slow client does not hold up the workers that read upstreams. What is left out keeps fib's own default,
 so most configs write no `engine` at all; it is for tuning a busy server on the host it runs on. The
 engines are made when fit starts, so a change needs a restart (saving warns that it waits for one). The
-running engine per port, and what each port serves, is in the [Engine](06-engine.zh-CN.md) chapter.
+running engine per port, and what each port serves, is in the [Engine](06-engine.md) chapter.
 
 ### Providers (`providers`)
 
 Edits `providers`: a list, one source each, named by `name` (its kind when left out): `docker`,
-`consul`, `consul_kv`, `etcd` and `kubernetes`. The merge rules: what the config writes wins over every
-provider, and a provider over those listed after it; a provider's element named as one before it is left
-out (the shadowed ones are info). The effective config and where each part came from are on the
-[JSON](08-json.zh-CN.md) chapter's Effective tab. This page's settings are read when fit starts.
+`consul`, `consul_kv`, `etcd` and `kubernetes`. A provider provides only listeners, routes, upstreams and
+services — the elements of those four arrays — never other members such as `log` or `limits`. The merge
+rules: what the config writes wins over every provider, and a provider over those listed after it; a
+provider's element named as one before it is left out (the shadowed ones are info). The effective config
+and where each part came from are on the [JSON](08-json.md) chapter's Effective tab. This page's
+settings are read when fit starts.
 
 ### Other (`other`)
 
-The members the schema has no page of their own yet are on this page: `access`, `media_library`,
-`schema_version` and `sync`. Each member is one section, with the same raw text tabs as the other pages.
-`access` is the global allow and deny lists: every listener, route, service, role, the Admin API and the
-console go by it, and a more specific `access` decides first
-([who may connect](../configuration.md#who-may-connect)). `media_library` also has its own page in
-the Media library module ([the media library](22-media-library.zh-CN.md) chapter). Once every member has
-a page, this page says "Every member of the config has its own page."
+The members no other page edits are on this page: `access`, `media_library` and `schema_version`. Each
+member is one section of the form, and the page has one set of **UI**, `.conf`, `.yaml` and `.json` tabs
+for all of them.
+
+- `access` is the global allow and deny lists: every listener, route, service, role, the Admin API and
+  the console go by it, and a more specific `access` decides first
+  ([who may connect](../configuration.md#who-may-connect)).
+- `media_library` is the list of named libraries; it also has its own **Library config** page in the
+  Media library module ([the media library](22-media-library.md) chapter).
+- `schema_version` is the version of the config the file is written for, `1`; a config that leaves it out
+  is read as version 1, so it is rarely edited.
+
+`sync` and `bittorrent` have their own config pages, **Sync config** and **BitTorrent config**, so they are
+not on this page: see [Sync](26-sync.md) and [BitTorrent](27-bittorrent.md). When every member has a page of
+its own, this page says "Every member of the config has its own page."
 
 ### Import / Export (`transfer`)
 
-The last page takes the whole config: export it as `.conf`, `.yaml`, `.json` or `.store` (the encrypted
-fitstore), or import a file that replaces the whole config. The export is the config as it is saved and
-running; changes not saved yet are not in the file. An import applies at once, through the same path as
-saving, and writes to the store; an import with page members takes only those members from the file.
-`admin` is never exported or imported. Each page's own **Export** and **Import** buttons handle only that
-page's members. See [importing and exporting the config](../console.md#importing-and-exporting-the-config).
+The last page moves the whole config in and out, as two cards: **Export the whole config** and **Import
+the whole config**. **Export** opens a dialog with the format — `.conf`, `.yaml`, `.json` or `.store`
+(fit's encrypted fitstore) — and, for `.store`, a password: given, the file is sealed with it; left
+empty, it is sealed with the running store's key and opens elsewhere with that store's key file or
+`$FIT_STORE_PASSWORD`. The export is the config as it is saved and running, so changes not saved yet are
+not in the file, and the dialog says so. A whole-config `.store` export also holds the console users
+whose passwords changed, so that `fit run -c backup.store -admin` elsewhere restores both.
+
+**Import** opens a dialog with the file, its format (taken from the extension) and, for `.store`, the
+password it was sealed with; **Import and apply** replaces the whole config (but `admin`) and applies it
+at once, through the save path, as a new config version written to the store. A page that edits part of
+the config has **Export** and **Import** buttons beside its format tabs for that part only: such an
+import takes those members from the file, ignores the rest of it, and removes from the config a member
+the file lacks. `admin` is never exported or imported. See
+[importing and exporting the config](../console.md#importing-and-exporting-the-config).
 
 ## Key parameters
 
@@ -198,12 +230,14 @@ Full table: [limits](../reference/config.md#limits).
 
 | field | default | description |
 | --- | --- | --- |
-| `event_loops` | fib's default | How many event loops each engine waits on; Windows has one whatever this says |
+| `event_loops` | fib's: 1 on up to 4 CPUs, 2 on up to 16, the CPUs divided by 8 above that | How many event loops each engine waits on; Windows has one whatever this says |
 | `workers` | 100 per CPU | The most workers each engine's pool runs on at once |
 | `min_workers` | 0 | How many workers an idle pool keeps |
 | `task_queue` | fib's default | How many tasks each pool holds waiting for a worker |
+| `poll_batch` | 1024 | The most events one wait of an event loop collects |
 | `read_buffer_size` | 64 KiB | The bytes a connection reads its socket into at a time, also the most a proxied body is passed on in one write |
 | `write_watermark` | fib sizes it from the read buffer and the machine | The backpressure on one connection |
+| `loop_wait` | `park` | How an event loop waits with no event ready: `park` (Go's poller) or `block` (epoll_wait), Linux only; `block` shortens the latency tail near saturation over HTTP/1.1 at the cost of the median |
 | `backlog` | the system's | The length of each listening socket's queue of connections not yet accepted |
 
 Full table: [engine](../reference/config.md#engine).
@@ -238,6 +272,11 @@ log {
 	output /var/log/fit/fit.log
 	format line
 	time_zone Asia/Shanghai
+	rotate {
+		max_bytes 100MiB
+		interval 24h
+		max_age 720h
+	}
 }
 
 access_log {
@@ -280,10 +319,14 @@ route { handler respond { body "hello from fit" } }
   [Providers](../reference/config.md#providers), [Access](../reference/config.md#access).
 - [The console and the store](../console.md):
   [importing and exporting the config](../console.md#importing-and-exporting-the-config).
-- [The config](../configuration.md) and [the .conf format](../reference/fit.md).
+- [The config](../configuration.md): [who may connect](../configuration.md#who-may-connect); and the
+  [.conf format](../reference/fit.md).
 - The [templates](../../templates/README.md):
   [`00-runtime.conf`](../../templates/conf/conf.d/00-runtime.conf),
   [`30-observability.conf`](../../templates/conf/conf.d/30-observability.conf),
   [`50-providers.conf`](../../templates/conf/conf.d/50-providers.conf).
+- The members with config pages of their own: [Sync](26-sync.md), [BitTorrent](27-bittorrent.md),
+  [Media library](22-media-library.md), [Media auth](21-media-auth.md), [Streaming](20-streaming.md),
+  [WebRTC](23-webrtc.md), [Tunnel roles](24-tunnel.md) and [LLM roles](25-llm.md).
 - Neighbouring chapters: [the function navigation bar](03-navigation.md), [Overview](04-overview.md),
   [Engine](06-engine.md), [JSON](08-json.md), [Logs](11-logs.md).

@@ -10,9 +10,10 @@ Admin API's `GET /versions` (`GET /api/m/admin/versions` on the console), so it 
 not a draft.
 
 The list is something this process of fit remembers: after a restart it begins again with the config fit
-started from, so the first rows are of this run. The version number is the one the runtime gave the config's
-graph, the applied time is the moment it was applied, and the size is the config's bytes as written — not the
-size of the effective config.
+started from, so the first rows are of this run. With a store, every apply also writes the config there; this
+list is what the process holds in memory, not the store's history. The version number is the one the runtime
+gave the config's graph, the applied time is the moment it was applied, and the size is the config's bytes as
+written — not the size of the effective config.
 
 The page does two things: it **views** a version's text and it **rolls back** to one. Rolling back does not
 erase history: it applies an old config again as a new version, so the rollback itself is in the list and can
@@ -31,7 +32,7 @@ is a table, one row per version:
 | --- | --- |
 | Version | The version number; the running one carries a **running** badge |
 | Applied | When the config was applied, with how long ago beside it |
-| Source | Where this config came from: `file`, `admin` (changed through the console or the Admin API), `rollback`, or a provider's name |
+| Source | Where this config came from: `file`, `store`, `admin`, `console`, `rollback`, `certificates`, `cluster`, or a provider's name (each is described below) |
 | Size | The config's bytes as written |
 | ETag | Its strong entity tag, a hash of the config's content, the one `If-Match` compares |
 
@@ -39,7 +40,7 @@ For example:
 
 | Version | Applied | Source | Size | ETag |
 | --- | --- | --- | --- | --- |
-| 12 · running | 2026-11-08 14:02:11 (3 minutes ago) | `admin` | 1.2 KiB | `"9f2c1a7b3e0d4c65a1b8e2f0"` |
+| 12 · running | 2026-11-08 14:02:11 (3 minutes ago) | `console` | 1.2 KiB | `"9f2c1a7b3e0d4c65a1b8e2f0"` |
 | 11 | 2026-11-08 13:47:02 (18 minutes ago) | `docker` | 1.1 KiB | `"3b7e5c2a9d1046f8c3e5a2b1"` |
 | 10 | 2026-11-08 11:20:44 (2 hours ago) | `rollback` | 1.0 KiB | `"7a1d4e8b2c3059f6a4d8e1b7"` |
 
@@ -60,13 +61,13 @@ while this page lists every version kept.
 **Roll back** asks twice: when the draft has unsaved changes it first asks "Rolling back discards the changes
 not saved. Go on?", then "Apply version N again, as a new version?". After the confirmations it goes through
 the same path as saving: the config is checked, then applied as a new version and written to the store, and the
-page says "Version N applied again as version V" and the table refreshes. A rollback takes the config as that
-version wrote it, not the effective config it ran then: what the providers provide is merged again as it is
-now. When a version is no longer kept (past `admin.history`), `GET /versions/{n}` answers 404 and the page has
-no row for it.
+page says "Version N applied again as version V" and the table refreshes. The new version's source is
+`rollback`, and what it wrote is that old config itself. A rollback takes the config as that version wrote it,
+not the effective config it ran then: what the providers provide is merged again as it is now. When a version is
+no longer kept (past `admin.history`), `GET /versions/{n}` answers 404 and the page has no row for it.
 
-The page does not say who did it: the `admin` logger records which user, from which login, applied which
-version.
+The page does not say who did it: the `admin` logger records it — each change a console user makes is logged
+with the version it applied, and each login with its address (see [Login](02-login.md)).
 
 The endpoints this page uses (the Admin API's endpoints sit under `/api/m/admin/` on the console):
 
@@ -96,9 +97,22 @@ What a version records (each item of `GET /versions`):
 | --- | --- |
 | `version` | The version number the runtime gave the config's graph |
 | `applied` | When it was applied |
-| `source` | Where it came from: `file`, `admin`, `rollback` or a provider's name |
+| `source` | Where it came from: `file`, `store`, `admin`, `console`, `rollback`, `certificates`, `cluster` or a provider's name |
 | `bytes` | The config's bytes as written |
 | `etag` | A hash of its content (the first 12 bytes, hexadecimal, quoted), as a strong entity tag |
+
+The source names are the paths a config can take in:
+
+| source | what applied it |
+| --- | --- |
+| `file` | the config file, at start, on a reload of it (`SIGHUP`) or with `-watch` |
+| `store` | the store the config is kept in, at start, or read again on `SIGHUP` |
+| `admin` | a change through the Admin API |
+| `console` | a save on a console page |
+| `rollback` | a rollback on this page |
+| `certificates` | the running config applied again because a certificate file it loaded changed |
+| `cluster` | a config a manager applied to this member through its link |
+| a provider's name | what that provider provided changed |
 
 ## Versions and the store
 
@@ -125,9 +139,9 @@ the next restart, and that kind of difference shows on the
 
 ## Common cases
 
-- **Something went wrong, go back to the last one**: find the previous version whose source is `admin`,
-  **View** it to read its text, then **Roll back**. Rolling back discards the changes not saved in the draft,
-  so copy them from the [JSON](08-json.md) page first, or save them.
+- **Something went wrong, go back to the last one**: find the previous version whose source is `console` or
+  `admin`, **View** it to read its text, then **Roll back**. Rolling back discards the changes not saved in the
+  draft, so copy them from the [JSON](08-json.md) page first, or save them.
 - **See what an apply actually wrote**: a version's text is that config itself, without what the providers
   provided; to see both together, look at the effective config.
 - **After a restart the list changes**: only the versions this run applied are on the page; after a restart it

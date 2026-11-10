@@ -11,7 +11,7 @@ subtitles and its poster. Items are served as video on demand by the `vod` route
 [channels](../channels.md). fit never transcodes: files are served as they are stored.
 
 In the menu, the **Media library** module (`gw.medialib`, tagged **VOD / channels**) sits beside
-Streaming and Media auth with eight pages: **Library**, **Channels**, **Playback URLs** and
+Streaming and Media auth with eight pages: **Libraries**, **Channels**, **Playback URLs** and
 **Metrics**, and the four config pages **Library config**, **VOD routes**, **Channels config** and
 **URL signing**. The first four pages read the Admin API; the last four edit the config's shared
 draft.
@@ -20,9 +20,15 @@ Off by default: without a `media_library` nothing is scanned or served, and the 
 links to the config page. No page keeps a URL, a token or a signature: a preview's URL lives only in
 its player, a test URL only in its form until the page changes, and secrets never reach the browser.
 
+The library also reaches the audience: the `media_pages` handler on a route serves fit's own pages —
+a room call with a chat over WHIP and WHEP, publish and play pages, and, with this module's
+`libraries` (and `channels`), a library page and a player page through which a logged-in viewer plays
+the items with HLS, on a playback URL the pages sign for that viewer. The handler is described below,
+and in [WebRTC](../webrtc.md#the-media-pages).
+
 ## Pages
 
-### Library
+### Libraries
 
 One card per running library: its items and how many of them have errors, its problems, the last scan
 and the number of scans, the catalog memory, and its roots; under them the scan state — a progress bar
@@ -150,6 +156,29 @@ and a note when it sets no `cors`. The raw tabs hold the `routes` member: every 
 Each `media_auth` policy's `url_signing`; the raw tabs hold the whole `media_auth` member, its secrets left
 as the draft holds them. With no policy the page links to the [Media auth](21-media-auth.md) page.
 
+### Media pages
+
+Not a menu page: the `media_pages` handler, on a route, serves fit's own pages to the audience, embedded in
+the binary. They are an index with a login, a room call with a chat of text messages and small files, a
+publish page and a play page, all over the WHIP and WHEP endpoints of `whip` and `whep`, or of the
+streaming role's `stream_whip` and `stream_whep`, on this server or another. With `libraries` they gain a
+library page (`<prefix>/library`), listing this module's items the viewer may play, and a player page
+(`<prefix>/watch`) that plays one with hls.js, vendored in the binary; with `channels` the streaming role's
+channels are listed there too.
+
+With `login`, a policy's user logs in once on the pages: the token the policy signs for its `token_ttl`
+comes back as the `HttpOnly`, `SameSite=Strict` cookie `fit_media_token`, which the WHIP and WHEP requests
+carry; a token pasted in, as `fit media-token` prints, works too. The player asks `api/play` for its URL:
+with the policy's `url_signing`, and playing not public, a playback URL signed for that viewer, its address
+and a playback session of its own, whose playlists hand the player the grant it plays on; otherwise the
+plain URL, which the login's cookie lets in. A refused URL stops the player.
+
+The room call is the other half: each member publishes `<room>-<name>` and plays the others, and the
+microphone, camera and screen switches never renegotiate the PeerConnection; the room API announces them,
+so the others show "microphone off" or the member's avatar rather than wait on media. The chat carries text
+and files through the same API. The page fields and their bounds are below, and the pages themselves are in
+[WebRTC](../webrtc.md#the-media-pages).
+
 ## Key parameters
 
 The key fields of `media_library` (the full table is in
@@ -187,6 +216,29 @@ The channel's fields (`streaming.channels[]`, its `schedule[]` and its `push[]`)
 [What a channel plays](../channels.md#what-a-channel-plays); the fields of `url_signing` are in
 [the config reference](../reference/config.md#config-mediaauth).
 
+The key fields of the `media_pages` handler (the full table is in
+[the config reference](../reference/config.md#http-handlers-media_pages)):
+
+| field | default | description |
+| --- | --- | --- |
+| `prefix` | `/media` | The path the pages are served under; the route must match it and what is below it |
+| `auth` | none | The policy the room API checks, and the policy whose users log in and whose tokens the pages use |
+| `login` | off | A login form for the policy's users; a token signed for `token_ttl` comes back as the cookie `fit_media_token` |
+| `pages` | on | Serves the index, call, publish and play pages; off serves none of them, for a deployment whose page is its own |
+| `title` | fit media | The pages' title |
+| `whip`, `whep` | `/whip/{stream}`, `/whep/{stream}` | The endpoints the pages publish to and play from, with `{stream}` filled in |
+| `hls` | none | A stream's HLS playlist URL, for the play page where the browser plays HLS itself |
+| `links` | none | Further URLs the publish and play pages show for tools outside the browser; `{stream}`, `{token}` and `{host}` are filled in |
+| `ice_servers` | none | STUN and TURN servers the pages' PeerConnections use, as a browser's `iceServers` |
+| `libraries` | none | The libraries whose items the library page lists, at most 16; the items the viewer may `play` |
+| `vod` | `/vod/{library}/{id}/index.m3u8` | The URL of an item's multivariant playlist, with `{library}` and `{id}` filled in |
+| `channels` | off | Lists the streaming role's channels on the library page too; needs `hls` |
+| `chat` | on | The room call's chat of text messages and small files |
+| `max_file_bytes` | 5 MiB | The largest file a chat message may carry |
+| `max_rooms`, `max_members` | 64, 16 | The rooms at once, and the members of one room, with twice as many watchers |
+| `mic_default`, `cam_default` | off | Whether a member joins with the microphone or the camera on; `mic=0\|1` and `cam=0\|1` in the URL override it |
+| `member_ttl`, `stall_timeout` | 30s, 30s | How long a member stays without a heartbeat, and how long an event stream may wait for its browser |
+
 ## In .conf
 
 ```fit
@@ -205,19 +257,45 @@ media_library films {
 	upload_dir /srv/media/films/incoming
 }
 
+media_auth staff {
+	secret a-secret-of-at-least-16-bytes
+	users operator {
+		password_hash $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+		play *
+	}
+	url_signing {
+		ttl 2m
+		play_grace 30m
+		max_sessions 2
+	}
+}
+
 route films {
 	match { path /vod/films/* }
 	handler vod {
 		library films
+		auth staff
 		segment_duration 4s
 		cache_control "public, max-age=86400"
 	}
 }
+
+route media {
+	match { path /media /media/* }
+	handler media_pages {
+		auth staff
+		login true
+		libraries films
+	}
+}
 ```
 
-So `http://host:8080/vod/films/films/bbb/index.m3u8` plays the item `films/bbb`. The item page's preview
-loads its media through this route's listener, so the route should set `cors`; otherwise the browser may
-refuse the preview from the console's origin.
+So `http://host:8080/vod/films/films/bbb/index.m3u8` plays the item `films/bbb` for a viewer the policy
+lets in: the console's preview signs a short-lived URL for the console user, and a player of the pages' logs
+in as `operator`. The item page's preview loads its media through this route's listener, so the route should
+set `cors`; otherwise the browser may refuse the preview from the console's origin. The staff open
+`http://host:8080/media/`, log in as `operator`, and play the library from the pages' own player, on a
+playback URL the pages sign for them, good for two minutes.
 
 ## See also
 
@@ -227,6 +305,8 @@ refuse the preview from the console's origin.
   targets, the Admin API and the metrics.
 - [Media auth](21-media-auth.md): the `media_auth` policies and their `url_signing`.
 - [Streaming](20-streaming.md): the `streaming` role and the `hls` and `httpflv` handlers.
-- [The config reference: Media library](../reference/config.md#media-library) and
-  [the assistant's media library](../console.md#the-media-library).
+- [The config reference: Media library](../reference/config.md#media-library),
+  [Handlers](../reference/config.md#handlers) and [the assistant's media library](../console.md#the-media-library).
+- [WebRTC](../webrtc.md#the-media-pages): the media pages, the room call and its chat, and the WHIP and WHEP
+  endpoints they use.
 - The page code: [app/workbench/web/gateway/media.js](../../app/workbench/web/gateway/media.js).

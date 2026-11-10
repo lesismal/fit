@@ -11,12 +11,13 @@ A listener says three things: the address it listens on (`address`), the protoco
 (`protocols`: `http/1.1`, `h2c`, `h2`, `h3`, `tcp`, `udp`, `socks`), and TLS (`tls`: certificates
 from files, names to obtain them for with ACME, or certificates obtained during the handshake).
 `client_auth` asks for and verifies client certificates (mTLS); `proxy_protocol` reads the PROXY
-protocol header from the proxies it trusts; `socks` makes the `socks` protocol a SOCKS5 forward
-proxy; `mptcp` listens with Multipath TCP where the kernel offers it.
+protocol header from the proxies it trusts; `socks` makes the `socks` protocol a SOCKS5 and SOCKS4
+forward proxy; `mptcp` listens with Multipath TCP where the kernel offers it.
 
 A config that writes no listener at all is served by [HTTPS by default](../reference/config.md#https-by-default),
-which makes a 443 and a redirecting 80 from the host names its routes match; a listener whose `tls`
-is empty (`{}`) gets certificates for the host names of the routes it serves.
+which makes a 443 and a redirecting 80 from the host names its routes match (the redirect can be
+turned off); a listener whose `tls` is empty (`{}`) gets certificates for the host names of the
+routes it serves.
 
 The listeners divide the work with the rest of the config: a route names the listeners it serves with
 `listeners`, and a route that names none serves every one; a layer 4 service lists the `tcp` or `udp`
@@ -42,9 +43,10 @@ this page edits the listeners themselves.
 - The form's fields are `name`, `address`, `protocols`, `mptcp`, `tls` (with `certificates`, `acme`,
   `on_demand` and `client_auth`), `socks`, `access` and `proxy_protocol`.
 - Like every page that edits the config, this page shares one draft: the top bar's **Save and apply**
-  saves it whole (`PUT /config`), and **Check** runs the whole apply path without applying, saying
-  which listeners would be added or removed; besides **UI** there are `.conf`, `.yaml` and `.json`
-  tabs, editing this page's `listeners` member as text in that format.
+  saves the draft (the whole draft from **UI**, this page's `listeners` as text from a format tab), and
+  **Check** runs the whole apply path without applying, saying which listeners would be added or removed;
+  besides **UI** there are `.conf`, `.yaml` and `.json` tabs, editing this page's `listeners` member as
+  text in that format, with **Export** and **Import** buttons beside them for that member only.
 - The address written is the one in the config; the address the kernel actually bound, and the
   features each port serves, are listed on the port's row in the [Engine](06-engine.md) menu.
 
@@ -64,13 +66,13 @@ Only the key parameters are listed; the full field tables are in
 | --- | --- | --- |
 | `name` | required | A name unique among the listeners, by which routes and layer 4 services refer to this one. |
 | `address` | required | The host and port to listen on, as in `:8080` or `127.0.0.1:8080`. |
-| `protocols` | `http/1.1`, or `http/1.1` and `h2` with `tls` | The protocols served: `http/1.1`, `h2c` (HTTP/2 in the clear), and with `tls` `h2` (chosen through ALPN) and `h3` (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); `tcp`, raw TCP, whose connections the [layer 4 services](17-l4-proxy.md) that list the listener proxy to their upstreams; `udp`, datagrams; `socks`, a SOCKS5 and SOCKS4 forward proxy. A listener serving more than one of HTTP, `tcp` and `socks` tells them apart by what a client sends first: a TLS ClientHello goes to the service whose `server_names` hold its name, or else, with `tls`, is served HTTPS; a SOCKS greeting to `socks`; an HTTP request in the clear to HTTP; and whatever else to the service without `server_names`, or it is closed. A client that waits for the server to speak first is closed after 10s. |
-| `mptcp` | off | Listen the listener's TCP connections with Multipath TCP where the kernel offers it (Linux 5.6+, `net.mptcp.enabled`), falling back to plain TCP where it does not; a client without Multipath TCP falls back too. `udp` listeners and HTTP/3 take none. |
+| `protocols` | `http/1.1`, or `http/1.1` and `h2` with `tls` | The protocols served: `http/1.1`, `h2c` (HTTP/2 in the clear), and with `tls` `h2` (chosen through ALPN) and `h3` (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); `tcp`, raw TCP, whose connections the [layer 4 services](17-l4-proxy.md) that list the listener proxy to their upstreams; `udp`, datagrams; `socks`, a SOCKS5 and SOCKS4 forward proxy. A listener serving more than one of HTTP, `tcp` and `socks` tells them apart by what a client sends first: a TLS ClientHello goes to the service whose `server_names` hold its name, or else, with `tls`, is served HTTPS, or else goes to the service without `server_names`; a SOCKS greeting to `socks`; an HTTP request in the clear to HTTP; and whatever else to the service without `server_names`, or it is closed. A client that waits for the server to speak first is closed after 10s. |
+| `mptcp` | off | Listen the listener's TCP connections with Multipath TCP where the kernel offers it (Linux 5.6+, `net.mptcp.enabled`), falling back to plain TCP where it does not; a client without Multipath TCP falls back too. Off, a listener is plain TCP, which is also what the hardening after CVE-2026-98432's published exploit left: exploiting that kernel use-after-free needs an MPTCP listener on its target, so set it only on a kernel with the fix. `udp` listeners and HTTP/3 take none. |
 | `tls` | none | With `tls` the listener's HTTP is HTTPS: `certificates` are certificate files, `acme` the names to obtain certificates for, `on_demand` the certificates obtained during the handshake (which needs the top-level `acme.on_demand`); an empty `tls` (`{}`) gets certificates for the routes' host names. |
-| `tls.client_auth` | `mode` is `require` | Ask clients for certificates and verify them (mTLS): `ca_files` are the CA files a client's certificate must chain to, watched as certificate files are. `verify_if_given` lets a client send none, but one it sends must be valid. A listener that requires certificates cannot answer ACME's TLS-ALPN-01 challenge. |
-| `socks` | none (required with `socks`) | Who may use the SOCKS proxy (`clients`) and where it connects them (`allow`, `deny`, `ports`): it serves CONNECT, without authentication, and refuses BIND and UDP ASSOCIATE. |
-| `access` | every address | The client addresses the listener serves (`allow`/`deny`, or `allow_files`/`deny_files`), deciding before the global `access`; a connection it refuses is closed as soon as it is accepted. With `proxy_protocol` the address is the one the header names. |
-| `proxy_protocol` | none | Take a PROXY protocol header, version 1 or 2, from a `trusted` address and serve the connection as from the client it names: a connection from one of them must begin with a header within 10s, or it is closed. For `tcp` listeners and HTTP over TCP; with `tls` the header comes before TLS. HTTP/3 takes none. |
+| `tls.client_auth` | `mode` is `require` | Ask clients for certificates and verify them (mTLS): `ca_files` are the CA files a client's certificate must chain to, watched as certificate files are. `verify_if_given` lets a client send none, but one it sends must be valid, and a route that needs one says so with the `client_cert` middleware. A listener that requires certificates cannot answer ACME's TLS-ALPN-01 challenge. |
+| `socks` | none (required with `socks`) | Who may use the SOCKS proxy (`clients`) and where it connects them (`allow`, `deny`, `ports`, `connect_timeout` 10s, `idle_timeout` 5m): it serves CONNECT, without authentication, and refuses BIND and UDP ASSOCIATE. A destination left out of `allow` is refused when it is loopback, link-local (the metadata service among them), unspecified or multicast, or the host's own. |
+| `access` | every address | The client addresses the listener serves (`allow`/`deny`, or `allow_files`/`deny_files`), deciding before the global `access`; a connection it refuses is closed as soon as it is accepted, or, for HTTP/3 and `udp`, its datagrams dropped — unless a route or service of the listener sets an `access` of its own, which then decides first. With `proxy_protocol` the address is the one the header names. |
+| `proxy_protocol` | none | Take a PROXY protocol header, version 1 or 2, from a `trusted` address and serve the connection as from the client it names: a connection from one of them must begin with a header within 10s, or it is closed, and one from elsewhere is served as it is, with no header. For `tcp` listeners and HTTP over TCP; with `tls` the header comes before TLS. HTTP/3 takes none. |
 
 The defaults in the table are what fit fills in when a field is left out. The certificate files and
 `client_auth`'s `ca_files` are watched: a change loads the config again; `access`'s `allow_files` and

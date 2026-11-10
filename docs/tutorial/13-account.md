@@ -27,10 +27,10 @@ saving, so the changed password applies to logins.
 Account is only in the console's own menu: the roles' pages (`llm.*` and `tunnel.*` with their `console`) have
 their own users, and a member's menu opened through the node switcher has no account pages.
 
-A new password cannot be empty and is at most 72 bytes (bcrypt's limit). All three pages read
+A new password cannot be empty and is at most 72 bytes (bcrypt's limit). The first two pages read
 `GET /api/users` first: it says who the session belongs to and whether a store keeps the users
-(`store: true`). Without one there is nowhere to save: the page says so and disables its forms and buttons,
-and the endpoints return `409`.
+(`store: true`); **This node** reads `GET /api/node`. Without a store there is nowhere to save: the page says so
+and disables its forms and buttons, and the endpoints return `409`.
 
 ## Pages
 
@@ -55,9 +55,9 @@ A password check is admitted as a login's is: one at a time from an address, eve
 address and the user, at most 2 checks at once; a user name that does not exist is checked against a dummy
 hash, so the time cannot tell the names apart. Every change is logged by `admin`.
 
-The sessions themselves are in memory (the console keeps only their SHA-256), so everyone must log in again
-after fit restarts; changing a password only ends sessions, it does not touch the hash already saved in the
-store.
+The sessions themselves are in memory, keyed by a hash of their token, so everyone must log in again after fit
+restarts. Changing a password writes the new hash to the store and ends that account's sessions; a restart
+changes neither.
 
 ### Users
 
@@ -77,10 +77,10 @@ Reads `GET /api/node`, four cards that say who this fit is:
 
 | card | what it shows |
 | --- | --- |
-| **Node** | the **node ID** (click to copy) and where it is **kept** — the config (`admin.node_id`), the store (`admin.store`), a file beside the config (`fit.node-id`), or memory only (a new ID after each restart, shown as a warning badge); the host name, the start time and the uptime |
+| **Node** | the **node ID**, with a button that copies it, and where it is **kept** — the config (`admin.node_id`), the store (`admin.store`), a file beside the config (`fit.node-id`), or memory only (a new ID after each restart, shown as a warning badge); the host name, the start time and the uptime |
 | **Versions** | the fit, fib and Go versions, and the platform (`os/arch`) |
-| **For a manager** | the config schema's version and its digest (`schema_digest`), and the **capabilities** |
 | **Running config** | its version, its ETag, when it was applied, its source, and the **roles running** |
+| **For a manager** | the config schema's version and its digest (`schema_digest`), and the **capabilities** |
 
 The node ID is made once (a random UUID) and kept in the store or in a file beside the config, and a manager
 knows this node by it: a new ID makes the manager take it for another node.

@@ -15,7 +15,7 @@ tutorial does not repeat full field tables; it links to the
 ## Structure
 
 The first three chapters are preparation: deployment, login, and the navigation bar. The
-following 22 chapters correspond one-to-one with the modules of the navigation bar, in menu order.
+following 24 chapters correspond one-to-one with the modules of the navigation bar, in menu order.
 
 | Ch. | File | Menu module | What it covers |
 | --- | --- | --- | --- |
@@ -30,7 +30,7 @@ following 22 chapters correspond one-to-one with the modules of the navigation b
 | 09 | [Versions](09-versions.md) | Versions | The applied config versions: viewing and rolling back. |
 | 10 | [Consistency check](10-consistency-check.md) | Consistency check | The differences between the running fit and the effective config: drift and info, per-item fixes, `fit check`. |
 | 11 | [Logs](11-logs.md) | Logs | The files of fit's own log and the access log, rotation, retention, rotate now and clean now. |
-| 12 | [Cluster](12-cluster.md) | Cluster | The `admin.cluster` manager: members, groups, templates, rollouts, alerts, users, cross-member metrics/logs/certificates, members behind NAT. |
+| 12 | [Cluster](12-cluster.md) | Cluster | The `admin.cluster` manager: members, groups, templates, rollouts, alerts, users, cross-member metrics/logs/certificates, the members' BitTorrent roles and distributions, members behind NAT. |
 | 13 | [Account](13-account.md) | Account | Changing your own password, setting another user's password, the node's information. |
 | 14 | [Assistant](14-assistant.md) | Assistant | `admin.assistant`: providers and keys, levels, the chat panel, proposals, skills, the MCP server, the audit log. |
 | 15 | [Reverse proxy](15-reverse-proxy.md) | Reverse proxy | Routes: matching, handlers, middleware; upstreams: load balancing and health checks; the handler and middleware modules. |
@@ -44,6 +44,8 @@ following 22 chapters correspond one-to-one with the modules of the navigation b
 | 23 | [WebRTC](23-webrtc.md) | WebRTC | `webrtc`: the TURN server, the WHIP/WHEP media server, the media proxy. |
 | 24 | [Tunnel roles](24-tunnel.md) | Tunnel roles, tunnel.hub, tunnel.node, tunnel.proxy | The `tunnel` config; the pages of the hub, node and proxy roles. |
 | 25 | [LLM roles](25-llm.md) | LLM roles, llm.hub, llm.node, llm.proxy | The `llm` config; the pages of the hub, node and proxy roles. |
+| 26 | [Sync](26-sync.md) | Sync | `sync`: pipelines from sources to sinks, records, checkpoints, dead letters, batch jobs; the pipelines' pages and the module config. |
+| 27 | [BitTorrent](27-bittorrent.md) | BitTorrent | `bittorrent`: the client (torrents, categories, the queue, rates, RSS, publishing) and the tracker; the pages of both roles and the module config. |
 
 ## Chapter details
 
@@ -90,14 +92,14 @@ The pages, the config members each chapter edits, and the main sources:
 
 ### 06 Engine
 
-- The running listeners per port: each port expands to the features it serves — the handlers, the reverse and forward proxy routes, the cache, the streaming and WebRTC handlers, the layer 4 services, SOCKS, TLS/ACME/HTTPS by default — each linking to the page that edits it.
+- The running listeners per port: each port expands to the features it serves — the handlers (static, respond, FastCGI, media tokens and media pages, then any other handler by its module id, e.g. `vod`, `sync_ingest`, `bt_stream`, `bt_publish`, `bt_tracker`), the reverse and forward proxy routes, the cache, the streaming and WebRTC handlers, the layer 4 services, SOCKS, TLS/ACME/HTTPS by default — each linking to the page that edits it.
 - Beside the written address, the address the kernel actually bound; the tags of the port row (the PROXY protocol, HTTP/3, on-demand certificates, client certificates, VOD).
 - Sources: `app/workbench/web/gateway/engine.js`, [the console and the store](../console.md#the-pages).
 
 ### 07 Global settings
 
 - Each page edits one top-level member: `log` (per-logger level, output, format, `time_zone`, `rotate`), `access_log`, `telemetry` (OTLP), `metrics`, `pprof` (toggled at once, served by the Admin API at `/debug/pprof/`), `limits` (connections, headers, request bodies, the write queue), `engine` (event loops, workers, queues, buffers, backlog), `providers` (Docker, Consul, etcd, Kubernetes).
-- The "Other" page: the members that have no page of their own yet.
+- The "Other" page: the members that have no page of their own yet — `access` (the global allow and deny lists), `media_library` and `schema_version`; `sync` and `bittorrent` are edited on their own modules' pages.
 - The "Import / Export" page: the whole config, in `.conf`, `.yaml`, `.json` and `.store`.
 - Sources: `templates/conf/conf.d/00-runtime.conf`, `30-observability.conf`, `50-providers.conf`, the chapters of [the config reference](../reference/config.zh-CN.md), [the console and the store](../console.md#importing-and-exporting-the-config).
 
@@ -126,7 +128,7 @@ The pages, the config members each chapter edits, and the main sources:
 
 ### 12 Cluster
 
-- `admin.cluster` makes this fit the manager of the others: the members' addresses and credentials in the store; the overview, the nodes, the groups, the templates, the rollouts, the alerts, the users, the cross-member metrics/logs/certificates.
+- `admin.cluster` makes this fit the manager of the others: the members' addresses and credentials in the store; the overview, the nodes, the groups, the templates, the rollouts, the alerts, the users, the cross-member metrics/logs/certificates, and the members' BitTorrent roles, their distributions of a private torrent, and the card on the overview.
 - Adding, testing and trusting members; a member behind NAT connects to the manager with `admin.cluster_member`.
 - Sources: [cluster management](../cluster.md), `app/workbench/web/cluster/`, [the config reference: Admin API](../reference/config.md#admin-api).
 
@@ -139,14 +141,14 @@ The pages, the config members each chapter edits, and the main sources:
 ### 14 Assistant
 
 - `admin.assistant`: the providers (Anthropic, OpenAI, Gemini, Azure OpenAI, Ollama, OpenAI-compatible, `llm.proxy`), the keys (write-only), the default model, the limits.
-- The user levels: `off`, `read`, `edit`, `propose`, `apply`; the chat panel (the current page as context); the proposals (review and apply); the skills (18 built-in plus custom); the MCP server (`/mcp` and its tokens); the audit log.
+- The user levels: `off`, `read`, `edit`, `propose`, `apply`; the chat panel (the current page as context); the proposals (review and apply); the skills (22 built-in plus custom); the MCP server (`/mcp` and its tokens); the audit log; the Sync and BitTorrent tool groups, and the setting that sends their records as they are.
 - Sources: [the console and the store](../console.md#the-assistant), `app/workbench/web/ai/`.
 
 ### 15 Reverse proxy
 
 - The routes page: tabs by handler module (all, `proxy`, `static`, `respond`, `fastcgi`, …); each route's `match` (host, path, method, header, query, remote_ip, expr), `handler` and `middleware`.
 - The upstreams page: `addresses`, `load_balancing` (nine strategies), `sticky_cookie`, the connection and queue limits, the timeouts, the active and passive health checks, `deny_internal`; each row shows the up backends.
-- The list of the handler and middleware modules (`proxy`, `static`, `respond`, `fastcgi`, `media_pages`, `media_tokens`, the streaming and WebRTC handlers; `basic_auth`, `body_limit`, `cache`, `circuit_breaker`, `client_cert`, `compress`, `concurrency_limit`, `forward_auth`, `headers`, `jwt`, `rate_limit`, `redirect`, `rewrite`, `wasm`), each linked to the reference.
+- The list of the handler and middleware modules (`proxy`, `static`, `respond`, `fastcgi`, `media_pages`, `media_tokens`, `vod`, `sync_ingest`, `bt_stream`, `bt_publish`, `bt_tracker`, the streaming and WebRTC handlers; `basic_auth`, `body_limit`, `cache`, `circuit_breaker`, `client_cert`, `compress`, `concurrency_limit`, `forward_auth`, `headers`, `jwt`, `rate_limit`, `redirect`, `rewrite`, `wasm`), each linked to the reference.
 - Sources: `templates/conf/conf.d/60-apps.conf`, [the config reference: Routes](../reference/config.md#routes), [the config reference: Upstreams](../reference/config.md#upstreams), [the config reference: Handlers](../reference/config.md#handlers), [the config reference: Middleware](../reference/config.md#middleware), the per-module docs in [schema/doc](../../schema/doc/).
 
 ### 16 Forward proxy
@@ -188,8 +190,9 @@ The pages, the config members each chapter edits, and the main sources:
 
 ### 22 Media library
 
-- The pages: **Library** (the items, the search, the filters, the paging, the scan state, rescan), **Channels** (the playlists, the schedules, the loop and the shuffle, the push targets), **Playback URLs** (the test URLs of `url_signing`, the key rotation, the sessions), **Metrics**, **Library config** (`media_library`), **VOD routes** (the `vod` routes), **Channel config** (`streaming.channels` and `streaming.push`), **URL signing** (the `url_signing` of each policy).
-- The parameters of `media_library`: `roots`, `files`, `exclude`, `follow_symlinks`, the sidecars, the limits.
+- The pages, in menu order: **Libraries** (the items, the search, the filters, the paging, the scan state, rescan), **Channels** (the playlists, the schedules, the loop and the shuffle, the push targets), **Playback URLs** (the test URLs of `url_signing`, the key rotation, the sessions), **Metrics**, **Library config** (`media_library`), **VOD routes** (the `vod` routes), **Channels config** (`streaming.channels` and `streaming.push`), **URL signing** (the `url_signing` of each policy).
+- The parameters of `media_library`: `roots`, `files`, `exclude`, `follow_symlinks`, the sidecars, the limits; the `media_pages` handler's pages (the library page, a room's call and chat, publishing and playing, the player) and its fields.
+- The `media_pages` handler: the viewer pages of a library (the index, a room's call and chat, WHIP publish and WHEP play, the player), its `libraries`/`pages`/`auth`/`rooms`/`chat` fields.
 - Sources: [the media library](../media-library.md), [the channels](../channels.md), [the config reference: Media library](../reference/config.md#media-library), `app/workbench/web/gateway/media.js`.
 
 ### 23 WebRTC
@@ -211,6 +214,20 @@ The pages, the config members each chapter edits, and the main sources:
 - The roles' pages: llm.hub (overview, nodes, models, proxies, traffic, peers, settings), llm.node (overview, models, GPUs, actions, jobs, traffic, peers, settings), llm.proxy (overview, models, nodes, traffic, keys, peers, settings).
 - Sources: [llm](../llm.md), [the config reference: LLM](../reference/config.md#llm), `app/workbench/web/llm/`.
 
+### 26 Sync
+
+- The `sync` member and the role: pipelines of a source, transforms and a codec, and one or more sinks; records and their typed values, checkpoints saved only once every sink acknowledges, positions and delivery guarantees, retries, `on_error` and dead letters, batch jobs (`mode: "once"`, `job`, schedules), exactly once into transactional sinks, WASM plugins; the connectors (files, databases and their changes, topics, indices, buckets, object stores, observability stores and vector stores) with the recent ones (MQTT, RabbitMQ, NATS JetStream, Pulsar, SQL Server, Doris and StarRocks, Loki, OpenTelemetry logs, InfluxDB, TDengine, Qdrant and Milvus).
+- The pages: **Pipelines** (state, throughput and lag, records read and acknowledged, errors, queue, dead letters; New pipeline), a pipeline's **Overview** (pause, resume, new snapshot, test connection, dry run, counters, sinks, job), **Edit**, **Checkpoint** (set or reset) and **Dead letters** (replay or drop), and **Sync config**.
+- `fit sync` and the Admin API; the assistant's `sync_*` tools and the `sync-pipeline` skill.
+- Sources: [Sync](../sync.md), [the config reference: Sync](../reference/config.md#sync), [the console and the store](../console.md#sync), [decision 036](../decisions/036-sync.md), `app/workbench/web/sync/`.
+
+### 27 BitTorrent
+
+- The `bittorrent` member: the client role (torrents and their state in `data_dir`, `listen`, limits and rates, the queue, disk checks, categories, `alt_speed`, `watch_dir`, per-torrent limits, blocklists, `publish` entries seeding a directory's files as hybrid torrents with fit's static files as web seeds, RSS auto-download) and the tracker role (HTTP announces through a `bt_tracker` route and UDP on its own `listen`, public or private passkeys from a `media_auth` policy, an allow-list of info hashes, bounded swarms).
+- The pages: **Torrents** (filters, bulk pause/resume/remove, Add torrent, alternative rates, recent events), a torrent's **Overview / Files / Peers / Trackers**, **Tracker**, **RSS**, **Publishing**, **BitTorrent config**.
+- The handlers `bt_stream`, `bt_publish` and `bt_tracker` on routes; the Admin API, the console's event stream, `fit bt`, and the assistant's `bt_*` tools; the cluster's BitTorrent page and distributions.
+- Sources: [BitTorrent](../bittorrent.md), [the config reference: BitTorrent](../reference/config.md#bittorrent), [the console and the store](../console.md#bittorrent), [decision 037](../decisions/037-bittorrent.md), `app/workbench/web/bittorrent/`.
+
 ## Authoring conventions (maintainers and chapter tasks)
 
 1. **Files**: two files per chapter, `NN-<slug>.zh-CN.md` (Chinese) and `NN-<slug>.md` (English),
@@ -229,8 +246,9 @@ The pages, the config members each chapter edits, and the main sources:
 3. **Every .conf example must pass validation**: save the example (with its comment lines) to a
    temporary file and run `./bin/fit validate -c <temp file>`; only a passing example goes into the
    chapter. The examples are self-contained complete configs: an `upstream` without a listener is
-   rejected, so add a minimal `listener` when needed. `admin` may appear in examples only in
-   chapter 01 (the bootstrap file) and 02 (the users); the console pages never edit `admin`.
+   rejected, so add a minimal `listener` when needed. `admin` appears only in the chapters whose
+   subject is `admin` itself: 01 (the bootstrap file), 02 (the users), 12 (`admin.cluster`) and 14
+   (`admin.assistant`); the console pages never edit `admin`, so no other chapter's config has it.
 4. **Links**: relative paths only. Links between chapters use the file names in this directory;
    links to the other docs use `../<file>`. Heading anchors follow GitHub's rules (lower case,
    spaces to `-`, punctuation dropped, CJK kept). Every relative link is checked by
@@ -239,8 +257,8 @@ The pages, the config members each chapter edits, and the main sources:
    `app/workbench/web` (the Chinese files use the Chinese words, the English files the English
    ones); the config field names are always the English originals from the code.
 6. **Length**: 150–400 lines per chapter in Chinese is the norm (the reverse proxy, the media
-   library, the assistant, the cluster, the tunnel and the llm may be longer); the English file is
-   the same length as the Chinese one.
+   library, the assistant, the cluster, the tunnel, the llm, the sync and the BitTorrent may be
+   longer); the English file is the same length as the Chinese one.
 7. **Do not** run load tests or benchmarks (a rule of this repository); `./bin/fit validate` and
    `go test ./docs` are fine.
 8. The files listed as sources are **authoritative**: the pages' behavior follows the code in
@@ -265,5 +283,7 @@ The pages, the config members each chapter edits, and the main sources:
 | WebRTC | [../webrtc.md](../webrtc.md) |
 | tunnel | [../tunnel.md](../tunnel.md) |
 | llm | [../llm.md](../llm.md) |
+| Sync | [../sync.md](../sync.md) |
+| BitTorrent | [../bittorrent.md](../bittorrent.md) |
 | The module docs (handlers, middleware, ACME, …) | [../../schema/doc/](../../schema/doc/) |
 | The workbench front end (the menu and the pages) | [../../app/workbench/web/](../../app/workbench/web/) |

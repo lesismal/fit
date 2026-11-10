@@ -6,12 +6,14 @@
 
 **全局配置**（菜单中的 Global）编辑配置里不属于某条路由、某个监听或某个角色的那些顶层成员：fit 自己的
 日志、访问日志、遥测、指标、性能剖析、限制、引擎与配置来源。它是功能导航栏系统组的第一个模块，页面按这个
-顺序排列，每个页面编辑一个成员，页面名就是成员名；最后两页是**其他**与**导入 / 导出**。
+顺序排列（**日志**、**访问日志**、**遥测**、**指标**、**性能剖析**、**限制**、**引擎**、**配置来源**，
+最后两页是**其他**与**导入 / 导出**），每个页面编辑一个成员，多数页面名就是成员名（`pprof` 那页叫**性能
+剖析**）。
 
 这些页面与其他编辑配置的页面一样（[功能导航栏](03-navigation.zh-CN.md)）：表单由嵌入的 fit JSON Schema
 生成，每个字段带说明，可省略的成员带一个复选框，页面还有 `.conf`、`.yaml`、`.json` 三个标签页编辑同一份
-草稿。**保存并应用** 带 `If-Match` 发送整份草稿，先校验再应用，所以与 `fit validate` 走同一组检查；旁边的
-**检查** 是同一请求带 `?dry_run=1`，只检查不应用。
+草稿。**保存并应用** 带 `If-Match` 发送草稿（**界面**标签发整份草稿，格式标签发本页成员的文本），先校验再
+应用，所以与 `fit validate` 走同一组检查；旁边的 **检查** 是同一请求带 `?dry_run=1`，只检查不应用。
 
 这一章的要点是哪些改动立刻生效、哪些要重启：`log` 的 `level`、`levels`、`time_zone` 与 `rotate` 随重载
 生效，`output` 与 `format` 要重启；`access_log` 的 `level`、`time_zone` 与 `rotate` 随重载生效，其余要
@@ -22,8 +24,10 @@
 ### 日志（log）
 
 一个表单，编辑 `log`：`level` 与按 logger 的 `levels`、`output`、`format`、`time_zone`、`rotate`，以及
-按 logger 的 `loggers`（某些 logger 自己的级别、输出、格式与切割）。fit 自己的日志说的是启动、加载与重载
-配置、证书、provider 与引擎，不为每个请求写一行；各 logger 是谁、说什么，见
+按 logger 的 `loggers`（某些 logger 自己的级别、输出、格式与切割）；同一个 logger 的级别不能既写在
+`levels` 又写在 `loggers`。fit 自己的日志说的是启动、加载与重载配置、证书、provider 与引擎，不为每个请求
+写一行；logger 有 `server`、`admin`、`tls`、`provider`、`telemetry`、`access_log`、`plugin`、`fastcgi`、
+`engine`，以及各角色自己的（`llm`、`tunnel`、`webrtc`、`sync`、`bittorrent`），各是谁、说什么，见
 [配置参考的 Log 章](../reference/config.md#log)。保存并应用后级别、时区与切割立即生效，输出与格式要到下次
 重启才变。磁盘上的文件与"已丢弃 N 行"在[日志](11-logs.zh-CN.md)页看。
 
@@ -57,8 +61,16 @@
 go tool pprof http://127.0.0.1:2019/debug/pprof/profile?seconds=30
 ```
 
-`seconds` 不能超过 `max_duration`（默认 1m）。用完后把 `pprof` 从配置中移除：阻塞与互斥锁的采样率只在查看
-时设置，因为采样对每个这样的事件都有代价。
+`seconds` 不能超过 `max_duration`（默认 1m）。设置 `admin.token_file` 时先带上令牌取回，再用
+`go tool pprof` 打开该文件：
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" -o cpu.pprof \
+  "http://127.0.0.1:2019/debug/pprof/profile?seconds=30"
+go tool pprof cpu.pprof
+```
+
+用完后把 `pprof` 从配置中移除：阻塞与互斥锁的采样率只在查看时设置，因为采样对每个这样的事件都有代价。
 
 ### 限制（limits）
 
@@ -79,24 +91,39 @@ go tool pprof http://127.0.0.1:2019/debug/pprof/profile?seconds=30
 ### 配置来源（providers）
 
 编辑 `providers`：一个列表，每项一个来源，用 `name` 命名（不写时就是它的 kind）：`docker`、`consul`、
-`consul_kv`、`etcd`、`kubernetes`。合并规则：配置写的胜过每个 provider，一个 provider 胜过排在它后面的
-那些；一个 provider 的元素若与前面的同名，就被前面的取走（被遮蔽的属于 info）。生效配置与每部分来自哪里，在
-[JSON](08-json.zh-CN.md)章的生效配置标签看。这一页的设置只在启动时读取。
+`consul_kv`、`etcd`、`kubernetes`。provider 只提供监听、路由、上游与服务——这四个数组的元素——不提供
+`log`、`limits` 之类的其他成员。合并规则：配置写的胜过每个 provider，一个 provider 胜过排在它后面的
+那些；一个 provider 的元素若与前面的同名，就被前面的取走（被遮蔽的属于 info）。生效配置与每部分来自哪里，
+在 [JSON](08-json.zh-CN.md) 章的生效配置标签看。这一页的设置只在启动时读取。
 
 ### 其他（other）
 
-schema 里还没有专门页面的成员在这一页：`access`、`media_library`、`schema_version`、`sync`。每个成员一个
-小节，与别的页面一样有原始文本标签页。`access` 是全局的允许与拒绝列表，每个监听、路由、服务、角色、Admin
-API 与控制台都按它走，各自更具体的 `access` 先决定（[谁可以连接](../configuration.zh-CN.md#谁可以连接)）。
-`media_library` 在媒体库模块也有自己的页面（[媒体库](22-media-library.zh-CN.md)章）。当每个成员都有了页面，
-这一页会说"配置的每个成员都有自己的页面。"
+没有其他页面编辑的成员在这一页：`access`、`media_library`、`schema_version`。每个成员是表单的一个小节，
+整页共用一套 **界面**、`.conf`、`.yaml`、`.json` 标签页。
+
+- `access` 是全局的允许与拒绝列表：每个监听、路由、服务、角色、Admin API 与控制台都按它走，各自更具体的
+  `access` 先决定（[谁可以连接](../configuration.zh-CN.md#谁可以连接)）。
+- `media_library` 是具名媒体库的列表；媒体库模块里另有它自己的**媒体库配置**页（[媒体库](22-media-library.zh-CN.md)
+  章）。
+- `schema_version` 是这份配置所写的版本号 `1`；不写时按版本 1 读取，所以很少改它。
+
+`sync` 与 `bittorrent` 各有自己的配置页（**同步配置**与 **BitTorrent 配置**），所以不在这一页：见
+[数据同步](26-sync.zh-CN.md) 与 [BitTorrent](27-bittorrent.zh-CN.md)。当每个成员都有自己的页面时，这一页会说
+"配置的每个成员都有自己的页面。"
 
 ### 导入 / 导出（transfer）
 
-最后一页管整个配置：导出为 `.conf`、`.yaml`、`.json` 或 `.store`（加密的 fitstore），或导入一个文件替换
-整个配置。导出的是已保存并在运行的配置；未保存的修改不在文件里。导入立即生效，走与保存相同的路径并写入
-store；带页面成员的导入只取文件中的这些成员。`admin` 从不导出或导入。各页自己的**导出**与**导入**按钮只
-处理该页的成员。详见[配置的导入与导出](../console.zh-CN.md#配置的导入与导出)。
+最后一页用两张卡片把整个配置导出与导入：**导出整个配置**与**导入整个配置**。**导出**打开一个对话框选格式
+——`.conf`、`.yaml`、`.json` 或 `.store`（fit 的加密 fitstore）——选 `.store` 时还可填密码：填了就用它
+加密文件；留空则用运行中 store 的密钥加密，在别处打开需要该 store 的密钥文件或 `$FIT_STORE_PASSWORD`。
+导出的是已保存并在运行的配置，所以未保存的修改不在文件里，对话框会提示这一点。整份配置的 `.store` 导出还
+包含从页面改过密码的控制台用户，因此在别处 `fit run -c backup.store -admin` 能一并恢复。
+
+**导入**打开一个对话框，选文件、格式（按扩展名推断）与 `.store` 的密码；**导入并应用**替换整个配置
+（`admin` 除外），立即走保存的路径应用为新的配置版本并写入 store。编辑部分配置的页面在格式标签旁另有
+**导出**与**导入**按钮，只针对该部分：这样的导入只取文件中的这些成员、忽略文件中的其他成员，并会把配置中
+文件里没有的成员移除。`admin` 从不导出或导入。详见
+[配置的导入与导出](../console.zh-CN.md#配置的导入与导出)。
 
 ## 参数
 
@@ -176,12 +203,14 @@ store；带页面成员的导入只取文件中的这些成员。`admin` 从不�
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `event_loops` | fib 的默认 | 每个引擎等事件用的 event loop 数；Windows 上总是 1 |
+| `event_loops` | fib 的：4 CPU 及以下 1、16 及以下 2、更多时为 CPU 数除以 8 | 每个引擎等事件用的 event loop 数；Windows 上总是 1 |
 | `workers` | 每个 CPU 100 | 每个引擎的 worker 池同时最多跑多少 |
 | `min_workers` | 0 | 空闲时保留的 worker 数 |
 | `task_queue` | fib 的默认 | 每个池等 worker 的任务数 |
+| `poll_batch` | 1024 | 一次 event loop 等待最多收集的事件数 |
 | `read_buffer_size` | 64 KiB | 一次从 socket 读进缓冲的字节，也是转发体一次写出的最多 |
 | `write_watermark` | fib 按读缓冲与机器算 | 单连接的背压水位 |
+| `loop_wait` | `park` | 没有就绪事件时 event loop 的等待方式：`park`（Go 的 poller）或 `block`（epoll_wait），仅 Linux；`block` 在接近饱和时缩短 HTTP/1.1 的延迟尾部，代价是中位数 |
 | `backlog` | 系统的 | 每个监听 socket 未接受连接的队列长度 |
 
 完整表：[engine](../reference/config.md#engine)。
@@ -216,6 +245,11 @@ log {
 	output /var/log/fit/fit.log
 	format line
 	time_zone Asia/Shanghai
+	rotate {
+		max_bytes 100MiB
+		interval 24h
+		max_age 720h
+	}
 }
 
 access_log {
@@ -257,10 +291,14 @@ route { handler respond { body "hello from fit" } }
   [Limits](../reference/config.md#limits)、[Engine](../reference/config.md#engine)、
   [Providers](../reference/config.md#providers)、[Access](../reference/config.md#access)。
 - [控制台与 store](../console.zh-CN.md)：[配置的导入与导出](../console.zh-CN.md#配置的导入与导出)。
-- [配置](../configuration.zh-CN.md)与[.conf 格式](../reference/fit.zh-CN.md)。
+- [配置](../configuration.zh-CN.md)：[谁可以连接](../configuration.zh-CN.md#谁可以连接)；以及
+  [.conf 格式](../reference/fit.zh-CN.md)。
 - [模板](../../templates/README.zh-CN.md)：
   [`00-runtime.conf`](../../templates/conf/conf.d/00-runtime.conf)、
   [`30-observability.conf`](../../templates/conf/conf.d/30-observability.conf)、
   [`50-providers.conf`](../../templates/conf/conf.d/50-providers.conf)。
+- 各有自己配置页的成员：[数据同步](26-sync.zh-CN.md)、[BitTorrent](27-bittorrent.zh-CN.md)、
+  [媒体库](22-media-library.zh-CN.md)、[媒体认证](21-media-auth.zh-CN.md)、[流媒体](20-streaming.zh-CN.md)、
+  [WebRTC](23-webrtc.zh-CN.md)、[隧道角色](24-tunnel.zh-CN.md)、[LLM 角色](25-llm.zh-CN.md)。
 - 相邻章：[功能导航栏](03-navigation.zh-CN.md)、[概览](04-overview.zh-CN.md)、
   [引擎](06-engine.zh-CN.md)、[JSON](08-json.zh-CN.md)、[日志](11-logs.zh-CN.md)。

@@ -42,7 +42,7 @@ in parentheses.
 | [Versions](09-versions.md) | Config versions |
 | [Consistency check](10-consistency-check.md) | Consistency check |
 | [Logs](11-logs.md) | Logs |
-| [Cluster](12-cluster.md) | Overview, Nodes, Groups, Templates, Rollouts, Drift and alerts, Users and audit, Metrics, Logs, Certificates |
+| [Cluster](12-cluster.md) | Overview, Nodes, Groups, Templates, Rollouts, Drift and alerts, Users and audit, Metrics, Logs, Certificates, BitTorrent |
 | [Account](13-account.md) | My password, Users, This node |
 | [Assistant](14-assistant.md) | Functions, Skills, Proposals, Audit log, MCP, Settings |
 | [Reverse proxy](15-reverse-proxy.md) (HTTP) | Routes, Upstreams |
@@ -56,9 +56,16 @@ in parentheses.
 | [WebRTC](23-webrtc.md) (WebRTC) | WebRTC |
 | [Tunnel roles](24-tunnel.md) (Tunnel) | Tunnel roles |
 | [LLM roles](25-llm.md) (LLM) | LLM roles |
+| [Sync](26-sync.md) (pipelines) | Pipelines, Sync config |
+| [BitTorrent](27-bittorrent.md) (client / tracker) | Torrents, Tracker, RSS, Publishing, BitTorrent config |
 
-Once a role runs, its modules appear at the end of the list: the tunnel's **Hub**, **Node** and
-**proxy** (tunnel.hub, tunnel.node, tunnel.proxy), and the LLM's **Hub**, **Node** and **proxy**
+The last two modules are part of the console itself, so they are listed whenever the console runs,
+even before their roles are configured; their pages then say what to set, and start the pipelines and
+the client or tracker when the config is applied. See [Sync](26-sync.md) and
+[BitTorrent](27-bittorrent.md).
+
+Once a role runs, its own modules appear at the end of the list too: the tunnel's **Hub**, **Node**
+and **proxy** (tunnel.hub, tunnel.node, tunnel.proxy), and the LLM's **Hub**, **Node** and **proxy**
 (llm.hub, llm.node, llm.proxy), each with that role's pages. See [Tunnel roles](24-tunnel.md)
 and [LLM roles](25-llm.md).
 
@@ -66,10 +73,11 @@ and [LLM roles](25-llm.md).
 
 The Engine menu puts the same view into the bar: one submenu per listener port, in the order the
 config and HTTPS by default give them. A port expands to the features it serves — the handlers
-(static files, respond, FastCGI, media tokens, media pages), the reverse and forward proxy
-routes, the cache (the zones and the cached routes), the other middleware, the streaming and
-WebRTC handlers, the layer 4 services, SOCKS, the TLS certificates, ACME, automatic HTTPS and
-its redirect — and the listener form last. The protocols, the PROXY protocol, HTTP/3, the
+(static files, respond, FastCGI, media tokens, media pages, then any other handler of its routes by
+its module id: `vod`, `sync_ingest`, `bt_stream`, `bt_publish`, `bt_tracker`), the reverse and
+forward proxy routes, the cache (the zones and the cached routes), the other middleware, the
+streaming and WebRTC handlers, the layer 4 services, SOCKS, the TLS certificates, ACME, automatic
+HTTPS and its redirect — and the listener form last. The protocols, the PROXY protocol, HTTP/3, the
 on-demand certificates, the client certificates, MPTCP and VOD are small tags under the port's
 row. See [Engine](06-engine.md).
 

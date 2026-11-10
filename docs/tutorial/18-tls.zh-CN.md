@@ -22,13 +22,13 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 
 ### 证书（`#/gw.tls/certs`）
 
-只读的证书表，每 30 秒刷新一次。列：监听、名字、签发者、生效时间、过期时间与剩余天数（14 天内标黄、已
+只读的证书表，每 30 秒刷新一次。列：监听、域名、签发者、生效时间、过期时间与剩余天数（14 天内标黄、已
 过期标红）、序列号。页顶的提示说：监听的 `tls` 在监听页设置，ACME 与自动 HTTPS 各有自己的页面。没有监听
 提供证书时，页上说"没有监听在提供证书"。
 
 这一页不编辑配置：它读的是运行中的状态（Admin API 的 `GET /status`）。证书来自监听的 `tls.certificates`、
-`tls.acme` 与 `tls.on_demand`，或来自自动 HTTPS。同一张表也在[概览](04-overview.zh-CN.md)页上，那里只列
-14 天内要到期的。
+`tls.acme` 与 `tls.on_demand`，或来自自动 HTTPS。同一张表也在[概览](04-overview.zh-CN.md)页上，那里的证书
+指标数的是 14 天内要过期的。
 
 页上能做的只有看：没有表单，没有"保存并应用"。要改变一个监听提供什么证书，去监听页改它的 `tls`；要让
 证书由 ACME 来，去 ACME 页改 `acme`，或在监听页把 `tls` 写成空的。
@@ -37,7 +37,9 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 
 编辑 `auto_https` 成员：表单加 `.conf`、`.yaml`、`.json` 标签，"保存并应用"校验并应用。四个字段——
 `disable`、`disable_redirects`、`http_port`、`https_port`——都在[参数](#参数)里。这一页不生成监听：它改的是
-规则，监听由 fit 按规则生成，在引擎页上以"自动 HTTPS"列出，链回本页。
+规则，监听由 fit 按规则生成。[引擎](06-engine.zh-CN.md)页链着每个端口的 TLS 设置：监听自己的 `tls` 是
+"TLS 证书"与"ACME 证书"，用上自动 HTTPS 的是"自动 HTTPS"，生成的 80 端口上是"重定向到 HTTPS"，点开都是
+设置它的那一页。
 
 ### ACME（`#/gw.tls/acme`）
 
@@ -51,7 +53,7 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `disable` | 开 | 关闭默认 HTTPS：不为无监听的配置生成监听，空的 `tls` 也不得证书。 |
+| `disable` | 关 | 关闭默认 HTTPS：不为无监听的配置生成监听，空的 `tls` 也不得证书。 |
 | `disable_redirects` | 关 | 不建明文的重定向监听；HTTP-01 无人应答，证书走 TLS-ALPN-01。 |
 | `http_port` | `80` | 重定向监听（及 HTTP-01）的端口。 |
 | `https_port` | `443` | HTTPS 监听的端口，也是重定向所写的端口。 |
@@ -63,7 +65,7 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 | `directory` | Let's Encrypt | CA 的 ACME 目录 URL；`acme-staging-v02` 是测试用的 staging CA。 |
 | `email` | 无 | CA 可写信通知证书的账户邮箱。 |
 | `ca_file` | 系统根 | 校验 CA 目录证书用的 PEM 文件，用于自建的 CA。 |
-| `storage` | `~/.local/share/fit` | 账户、密钥与证书的存放目录，多个 fit 实例可共享。 |
+| `storage` | `$XDG_DATA_HOME/fit`，或 `~/.local/share/fit` | 账户、密钥与证书的存放目录，多个 fit 实例可共享。 |
 | `shared_storage` | 无 | 改用 Redis、etcd 或 Consul 存放（与 `storage` 互斥）：一个实例持锁申请，其余从那里取；每个挑战的应答也存那里，谁被 CA 访问到谁应答。 |
 | `challenges` | `http-01`, `tls-alpn-01` | 应答的挑战与尝试顺序：HTTP-01 由任何明文监听在 80 上答，TLS-ALPN-01 由列出这个名字的 TLS 监听在 443 上答。 |
 | `on_demand` | 无 | 为 `tls.on_demand` 的监听在握手中申请证书：先问 `ask` 指定的 URL 这个名字可不可以（2xx 才算可以）。 |
@@ -77,12 +79,12 @@ Consul 的 `shared_storage`，供多台机器共享）、应答的挑战（`http
 ### 挑战与端口
 
 `challenges` 按写的顺序试：`http-01` 由任何明文监听在 80 上答——所以 `disable_redirects` 关掉重定向后
-HTTP-01 没人答，证书只能走 TLS-ALPN-01；`tls-alpn-01` 由列出这个名字的 TLS 监听在 443 上答。要求客户端
-证书（`client_auth` 的 `mode: require`）的监听答不了 TLS-ALPN-01，因为 CA 不发证书。
+HTTP-01 没人答，证书只能走 TLS-ALPN-01；`tls-alpn-01` 由列出这个名字的 TLS 监听在 443 上答。一次失败会换
+下一个再试。要求客户端证书（`client_auth` 的 `mode: require`）的监听答不了 TLS-ALPN-01，因为 CA 不发证书。
 
 ### 存储与共享
 
-`storage` 是一个目录，同一台机器上的多个实例可以共享它。跨机器改用 `shared_storage`，三选一（`redis`、
+`storage` 是一个目录，多个 fit 实例可以共享它。跨机器改用 `shared_storage`，三选一（`redis`、
 `etcd`、`consul`），与 `storage` 互斥：一个实例持锁申请证书，其余从那里取；每个挑战的应答也存那里，所以
 CA 访问到哪台，哪台就能答。`prefix`（默认 `fit/`）、`lock_ttl`（默认 `30s`，至少 `10s`）与
 `request_timeout`（默认 `10s`）是共享存储的公共字段。

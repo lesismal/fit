@@ -9,14 +9,16 @@
 被重新找到。缓存本身由路由上的 `cache` 中间件启用：这一页显示正在使用的区及其规模，并按 URL、标签或全部
 清除。
 
-一个键是一条响应的 scheme + host + target，也就是请求的 URL；`Vary` 点名的每个变体各有一个键。所以清除
-卡片里的 URL 要写成绝对 URL，与请求写它的方式一致。响应按它自己的生命周期算新鲜（`s-maxage`、`max-age`、
-`Expires`），没有生命周期时才用 `default_ttl`；写了 `must-revalidate`、`proxy-revalidate` 或 `s-maxage` 的
-响应从不以过期状态应答。条件请求（`If-Modified-Since`、`If-None-Match`）从缓存直接应答。
+一个键是一条响应的 scheme + host + target，也就是请求的 URL，主机名按小写算；`Vary` 点名的每个变体各有一个
+键。所以清除卡片里的 URL 要写成绝对 URL，与请求写它的方式一致。响应按它自己的生命周期算新鲜（`s-maxage`、
+`max-age`、`Expires`），没有生命周期时才用 `default_ttl`；写了 `must-revalidate`、`proxy-revalidate` 或
+`s-maxage` 的响应从不以过期状态应答。条件请求（`If-Modified-Since`、`If-None-Match`）从缓存直接应答，带
+`Range` 的请求则继续交给处理器。
 
-标签来自 `Cache-Tag` 或 `Surrogate-Key` 头，写在响应上，清除时按标签整批移除。一个会改变目标的请求（不是
-GET、HEAD、OPTIONS、TRACE、CONNECT）成功时，会让它目标的缓存失效。响应在全部送出之后才被保存：它经过一个
-fib 的 body filter 复制，所以响应不会被为了存储而扣下。磁盘的读写在自己的有界协程池上，从不占用 fib worker。
+标签来自 `Cache-Tag` 或 `Surrogate-Key` 头，写在响应上，清除时按标签整批移除。方法不是 GET、HEAD、OPTIONS、
+TRACE（CONNECT 也在会改动内容的那些里）的请求成功时，会清掉它目标的缓存，以及它应答的 `Location` 与
+`Content-Location` 在同一主机上的缓存。响应在全部送出之后才被保存：它经过一个 fib 的 body filter 复制，所以
+响应不会被为了存储而扣下。磁盘的读写在自己的有界协程池上，从不占用 fib worker。
 
 ## 页面与操作
 
@@ -63,12 +65,12 @@ fib 的 body filter 复制，所以响应不会被为了存储而扣下。磁盘
 ### 什么会被保存
 
 只有共享缓存可以保存的 GET 响应被保存：状态它认得，没有 `no-store`、`private` 或 `no-cache`，不是
-`Vary: *`，没设 cookie，没有 trailers，且不超过 `max_entry_bytes`。带 `Authorization` 的请求——或被认证
-中间件放行的请求，它可能已把 `Authorization` 去掉或读了 cookie——它的响应只在写了 `public`、`s-maxage`
-或 `must-revalidate` 时才保存。
+`Vary: *`，没设 cookie（`Set-Cookie`），没有 `Trailer` 也没有 `Content-Range`（所以按 range 取到的响应不
+保存），且不超过 `max_entry_bytes`。带 `Authorization` 的请求——或被认证中间件放行的请求，它可能已把
+`Authorization` 去掉或读了 cookie——它的响应只在写了 `public`、`s-maxage` 或 `must-revalidate` 时才保存。
 
 新鲜的响应答 GET 与 HEAD，对 `If-None-Match` 或 `If-Modified-Since` 对得上的请求答 304，并带着正确的
-`Age`。响应经过一个 fib 的 body filter 复制，所以不会被为了存储而扣下：存储发生在全部送出之后。
+`Age`；对 GET 与 HEAD 的每个应答都用 `Cache-Status`（RFC 9211）说明缓存做了什么。响应在全部送出之后才被保存。
 
 ## .conf 配置
 

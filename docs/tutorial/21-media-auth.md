@@ -72,7 +72,7 @@ Only the key parameters are listed here; the full field tables are in
 | `name` | — | Required. The policy's name: letters, digits, `_`, `.` and `-`; the handlers and roles refer to it by this |
 | `tokens` | none | Static bearer tokens, each with the streams it may publish and play |
 | `users` | none | Users with a password, each with the streams they may publish and play |
-| `secret` | none | The key, at least 16 bytes, that fit's tokens are signed with (HMAC-SHA256): `fit media-token`'s and the media pages' logins |
+| `secret` | none | The key, at least 16 bytes, that fit's tokens are signed with (HMAC-SHA256): `fit media-token`'s and the media pages' logins; left out, a random key of the process signs the logins, which a restart forgets |
 | `secret_file` | none | A file holding the key, read each time the config is applied: rewriting it and applying the config refuses every token signed before |
 | `keys` | none | The keyring: each key a name with its own `secret` or `secret_file`; a token carries no key id and is checked against every key |
 | `public` | none | The actions anyone may take without credentials (`publish`, `play`); without it every request needs credentials |
@@ -126,8 +126,37 @@ the same, rotating one would leave the other still good. The ring holds at most 
 | `max_sessions` | none | The playback sessions one subject may have at once; no cap when left out |
 | `on_limit` | `refuse` | Past it: `refuse` answers `403`, or `end_oldest` ends the subject's session that started first |
 | `session_idle` | 2m | How long a session may go without a request and still count as playing |
+| `max_tracked_sessions` | 100000 | The sessions the policy keeps of all its subjects; a new one past it is answered `503` |
 | `referers`, `origins` | none | The origins of the pages and scripts that may play; a request with another Referer or Origin is `403`, one without any let through |
 | `trusted_proxies` | none | The proxies in front of fit whose `X-Forwarded-For` is believed when a URL bound to an address is checked |
+
+### media_tokens
+
+The handler `media_tokens` is how a business backend issues tokens, and playback URLs, in batches over a
+route of its own: it checks no caller credential itself — the route's `jwt`, `basic_auth`, `forward_auth`
+or `client_cert` without `optional` does — and it needs a policy with a `secret_file`, or a keyring whose
+every key has one, so that a revoke can rewrite a file and outlive a restart. Its full fields are in
+[the config reference: Handlers](../reference/config.md#http-handlers-media_tokens).
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `prefix` | `/media-tokens` | The path the route serves under; the route must match it and what is below it |
+| `auth` | — | Required. The policy the tokens belong to: a single `secret_file`, or a keyring of them |
+| `prefixes` | none | The stream-name prefixes a token may be signed for: every `publish` and `play` pattern must start with one |
+| `max_ttl` | 24h | The longest a request may ask a token or URL to be good for; longer is `400` |
+| `max_tokens` | 100 | The most tokens or URLs one request may ask for |
+| `max_body_bytes` | 64 KiB | The largest request body the route takes |
+| `revoke_timeout` | 10s | How long a revoke may wait for its secret files' writes before `504` |
+| `url_base` | none | What the URLs `/urls` answers start with, before their paths |
+| `url_prefixes` | none | The path prefixes `/urls` may sign URLs for |
+
+`POST <prefix>` takes `{"key", "tokens": [{"subject", "publish", "play", "ttl"}]}` and answers
+`{"tokens": [{"token", "subject", "expires", "key"}]}`; `key` names the key of the ring to sign with, the
+first when left out. `POST <prefix>/revoke` rotates the named key's secret file, `{"key": "k2"}` or
+`{"all": true}`, so that the tokens it signed are refused at once while the other keys' stay good until
+their expiry. `POST <prefix>/urls` signs playback URLs when the policy has `url_signing`:
+`{"subject", "address", "session", "ttl", "key", "paths"}`, at most `max_tokens` paths, each starting with
+one of `url_prefixes`.
 
 ## In .conf
 
@@ -167,10 +196,13 @@ route hls { match { path /hls/* }; handler hls { prefix /hls/; auth site } }
 
 So `fit media-token -policy site -publish 'live/*' -ttl 1h` prints a time-limited token that OBS publishes
 with, and the site's API signs the expiring playback URLs for its viewers, which `hls` and `httpflv` check on
-every request. To issue tokens in batches for many subjects — one key per meeting, group or region — use the
-`media_tokens` handler: it needs the policy's `secret_file` or a keyring of `secret_file`s, and must sit behind
-`jwt`, `basic_auth`, `forward_auth` or a `client_cert` without `optional`, because it checks no caller
-credential itself. See [issuing tokens from a route](../webrtc.md#issuing-tokens-from-a-route).
+every request. The CLI takes `-policy`, one or more `-publish` and `-play` patterns (repeated, or separated
+by commas), `-ttl`, `-subject` and, for a keyring, `-key`; it needs the policy's `secret`, `secret_file` or
+`keys`, because a token signed with a random key of the process could not be checked by a running fit. To
+issue tokens in batches for many subjects — one key per meeting, group or region — use the `media_tokens`
+handler: it needs the policy's `secret_file` or a keyring of `secret_file`s, and must sit behind `jwt`,
+`basic_auth`, `forward_auth` or a `client_cert` without `optional`, because it checks no caller credential
+itself. See [issuing tokens from a route](../webrtc.md#issuing-tokens-from-a-route).
 
 ## See also
 

@@ -59,7 +59,7 @@
 | `name` | — | 必填。策略的名称，字母、数字、`_`、`.` 和 `-`；各处理器与角色按它引用 |
 | `tokens` | 无 | 静态 bearer token，各带它可以推送与播放的流 |
 | `users` | 无 | 带密码的用户，各带他们可以推送与播放的流 |
-| `secret` | 无 | 签发令牌用的密钥，至少 16 字节（HMAC-SHA256）；`fit media-token` 与媒体页面的登录令牌都由它签发 |
+| `secret` | 无 | 签发令牌用的密钥，至少 16 字节（HMAC-SHA256）；`fit media-token` 与媒体页面的登录令牌都由它签发；不写时由进程的随机密钥签发登录令牌，重启后失效 |
 | `secret_file` | 无 | 保存密钥的文件，每次应用配置时读取：重写它再应用即拒绝此前签发的每个 token |
 | `keys` | 无 | 密钥环：每个密钥一个名字与它自己的 `secret` 或 `secret_file`；token 不带密钥 id，对环中每个密钥都校验 |
 | `public` | 无 | 任何人都无需凭据就能做的动作（`publish`、`play`）；不写时每个请求都需要凭据 |
@@ -112,8 +112,35 @@
 | `max_sessions` | 无 | 一个主体的播放会话数；不写时不限 |
 | `on_limit` | `refuse` | 超过时：`refuse` 应答 `403`，或 `end_oldest` 结束最早开始的会话 |
 | `session_idle` | 2m | 一个会话多久没有请求就不再算在播放 |
+| `max_tracked_sessions` | 100000 | 策略跟踪的全部主体的会话数上限；再多一个新会话应答 `503` |
 | `referers`、`origins` | 无 | 允许播放的页面与脚本的来源；发了别的 Referer 或 Origin 的请求应答 `403`，没发的放行 |
 | `trusted_proxies` | 无 | fit 之前的代理，绑定地址的 URL 校验时相信它的 `X-Forwarded-For` |
+
+### media_tokens
+
+处理器 `media_tokens` 是业务后端经自己的路由批量签发令牌与播放 URL 的方式：它本身不校验调用方凭据——由路由上的
+`jwt`、`basic_auth`、`forward_auth` 或不带 `optional` 的 `client_cert` 校验——并且需要一条带 `secret_file` 的策略，
+或每个密钥都带 `secret_file` 的密钥环，这样吊销才能改写文件并在重启后仍然有效。完整字段见
+[配置参考：Handlers](../reference/config.md#http-handlers-media_tokens)。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `prefix` | `/media-tokens` | 路由提供服务的路径；路由必须匹配它及其下一层 |
+| `auth` | — | 必填。令牌所属的策略：单个 `secret_file`，或由它们组成的密钥环 |
+| `prefixes` | 无 | 可以为哪些流名前缀签发令牌：每个 `publish` 与 `play` 模式都必须以其中之一开头 |
+| `max_ttl` | 24h | 请求可以为令牌或 URL 要求的最长有效期；更长应答 `400` |
+| `max_tokens` | 100 | 一次请求最多要求的令牌或 URL 数 |
+| `max_body_bytes` | 64 KiB | 路由接受的最大请求体 |
+| `revoke_timeout` | 10s | 吊销等待其密钥文件写入多久后应答 `504` |
+| `url_base` | 无 | `/urls` 应答中的 URL 在其路径之前的前缀 |
+| `url_prefixes` | 无 | `/urls` 可以为其签发 URL 的路径前缀 |
+
+`POST <prefix>` 接收 `{"key", "tokens": [{"subject", "publish", "play", "ttl"}]}`，应答
+`{"tokens": [{"token", "subject", "expires", "key"}]}`；`key` 指定用密钥环中的哪个密钥签发，不写时用第一个。
+`POST <prefix>/revoke` 轮换指定密钥的 secret 文件，`{"key": "k2"}` 或 `{"all": true}`，使它签发的令牌立即被拒绝，
+而其他密钥的令牌在过期前仍然有效。策略有 `url_signing` 时，`POST <prefix>/urls` 签发会过期的播放 URL：
+`{"subject", "address", "session", "ttl", "key", "paths"}`，路径最多 `max_tokens` 个，每个都以 `url_prefixes`
+之一开头。
 
 ## .conf 配置
 
@@ -152,9 +179,11 @@ route hls { match { path /hls/* }; handler hls { prefix /hls/; auth site } }
 ```
 
 于是 `fit media-token -policy site -publish 'live/*' -ttl 1h` 打印一个带过期时间的令牌，OBS 用它推流；网站的 API
-为观众签发会过期的播放地址，`hls` 与 `httpflv` 在每个请求上校验它。要经路由签发大量 token（一个会议、一个分组、
-一个区域一个密钥），用 `media_tokens` 处理器：它需要策略的 `secret_file` 或密钥环的 `secret_file`，并且必须放在
-`jwt`、`basic_auth`、`forward_auth` 或不带 `optional` 的 `client_cert` 之后——它不检查任何调用方凭据。见
+为观众签发会过期的播放地址，`hls` 与 `httpflv` 在每个请求上校验它。命令行还接受 `-play`（与 `-publish` 一样可重复，
+或用逗号分隔）、`-subject`，以及密钥环上的 `-key`；它需要策略的 `secret`、`secret_file` 或 `keys`，因为用进程随机密钥
+签发的令牌无法被运行中的 fit 校验。要经路由签发大量 token（一个会议、一个分组、一个区域一个密钥），用 `media_tokens`
+处理器：它需要策略的 `secret_file` 或密钥环的 `secret_file`，并且必须放在 `jwt`、`basic_auth`、`forward_auth` 或不带
+`optional` 的 `client_cert` 之后——它不检查任何调用方凭据。见
 [从一个路由签发 token](../webrtc.zh-CN.md#从一个路由签发-token)。
 
 ## 相关文档

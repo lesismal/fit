@@ -30,17 +30,18 @@
 
 ### 功能
 
-注册表中的每个工具，按组列出（配置、运行时、角色、媒体、集群、日志、页面、变更、转换、代理）：它所需的级别、
-当前设置下本用户能否调用及原因、它做什么，以及参数的 JSON Schema。页首显示本用户的级别与正在使用的模型
-（是否调用工具）。没有任何工具会写入配置、版本或 store：页面工具只在打开的页面上起草，提案工具只向提案加入
-步骤。
+注册表中的每个工具，按组列出（配置、运行时、角色、媒体、数据同步、BitTorrent、集群、日志、页面、变更、
+转换、代理）：它所需的级别、当前设置下本用户能否调用及原因、它做什么，以及参数的 JSON Schema。页首显示本
+用户的级别与正在使用的模型（是否调用工具）。没有任何工具会写入配置、版本或 store：页面工具只在打开的页面上
+起草，提案工具只向提案加入步骤。较新模块加入的两个组见下文[工具分组](#工具分组)。
 
 ### 技能
 
-所有技能：18 个内置的与用户添加的。每个技能以工作台的语言显示标题与用途、它所列的工具（本用户不可调用的置灰）
-以及是否启用。级别为 `apply` 的用户才能添加（从模板或导入 `.md` 文件）、编辑与删除已添加的技能，并启用或停用
-任何技能；内置技能不能修改或删除，但可以导出、改名后作为自己的技能添加。所有用户都能查看，并在面板中用
-`/name` 或**技能**按钮运行它。添加的技能最多 64 个，保存在 store 中；没有 store 时只保留到 fit 重启。
+所有技能：22 个内置的（最后四个是 `fleet-health`、`rollout-planner`、`cluster-drift` 与 `sync-pipeline`）
+与用户添加的。每个技能以工作台的语言显示标题与用途、它所列的工具（本用户不可调用的置灰）以及是否启用。级别为
+`apply` 的用户才能添加（从模板或导入 `.md` 文件）、编辑与删除已添加的技能，并启用或停用任何技能；内置技能不能
+修改或删除，但可以导出、改名后作为自己的技能添加。所有用户都能查看，并在面板中用 `/name` 或**技能**按钮运行
+它。添加的技能最多 64 个，保存在 store 中；没有 store 时只保留到 fit 重启。
 
 ### 提案
 
@@ -68,13 +69,13 @@
 
 ### 设置
 
-**提供方**：名称、类型、基础 URL、密钥（只写）、模型；每个提供方在**超时与重试**下有自己的
-`connect_timeout`、`first_byte_timeout`、`idle_timeout`、`timeout` 与 `retries`。**测试**按编辑器中的提供方
-调用（无论是否已保存）：先取模型列表，再对某个模型做一次简短调用，各自给出用时；**读取提供方的模型列表**会把
-它列出的模型添加进来。下方是**模型与参数**（默认模型、最多输出 token、温度、思考）、**限制**、**发送给模型
-的数据**（是否发送 fit 自身日志与访问日志的行、播放会话的主体，以及额外脱敏的正则），以及**用户**的级别。
-**保存设置**把它们与输入的密钥一起保存到 store，此后取代配置文件中的 `admin.assistant`；没有 store 时无法在
-此保存，密钥来自 `api_key_env`。
+**提供方**：名称、类型、基础 URL、API 版本（`azure_openai`）、密钥（只写）、模型；每个提供方在**超时与重试**
+下有自己的 `connect_timeout`、`first_byte_timeout`、`idle_timeout`、`timeout` 与 `retries`。**测试**按编辑器
+中的提供方调用（无论是否已保存）：先取模型列表，再对某个模型做一次简短调用，各自给出用时；**读取提供方的模型
+列表**会把它列出的模型添加进来。下方是**模型与参数**（默认模型、最多输出 token、温度、思考）、**限制**、
+**发送给模型的数据**（是否发送 fit 自身日志与访问日志的行、播放会话的主体、同步试运行与死信中的记录，以及
+额外脱敏的正则），以及**用户**的级别。**保存设置**把它们与输入的密钥一起保存到 store，此后取代配置文件中的
+`admin.assistant`；没有 store 时无法在此保存，密钥来自 `api_key_env`。
 
 ### 对话面板
 
@@ -84,6 +85,51 @@
 **停止**结束回答并保留已生成的部分；**重试**重新回答最后一条消息；面板头部可选择、新建或删除对话。待处理的
 提案显示在输入框上方，带**应用**与**丢弃**。页面上有**问 AI** 按钮：它选好技能、填好输入，把所问的对象作为
 选中项发送，并以用户的语言写好问题、立即发送。
+
+## 工具分组
+
+注册表的组按功能页的顺序为：配置、运行时、角色、媒体、数据同步、BitTorrent、集群、日志、页面、变更、转换、
+代理。各组工具读什么见[控制台文档的助手一节](../console.zh-CN.md#助手)；较新模块加入的两个组是下面这些。
+
+### 数据同步
+
+同步角色的四个只读工具，都不修改管道：暂停、继续、新建快照、检查点与死信仍由人在[数据同步页面](26-sync.zh-CN.md)
+上操作。
+
+| 工具 | 级别 | 做什么 |
+| --- | --- | --- |
+| `sync_pipelines` | `read` | 各管道的状态、最近的错误、计数、吞吐、延迟与保留的死信；或单个管道的完整状态及其运行中的配置 |
+| `sync_test` | `read` | 测试运行中管道的源与 sink 连接，不写入任何记录 |
+| `sync_dry_run` | `read` | 读取运行中管道的前几条记录（5 条，最多 20 条）经过其各转换，从检查点或从头开始，不写入任何内容 |
+| `sync_dead_letters` | `read` | 管道的死信（20 条，最多 100 条，可在某个 ID 之后）：错误、失败位置、尝试次数与记录 |
+
+试运行与死信的记录是用户自己的数据：除非设置了 `admin.assistant.data.send_records`（设置页的**原样发送
+同步试运行与死信中的记录（而不只是类型）**），每条记录键与行里的值只以类型（`(string)`、`(int)`、map 的
+字段名）到达模型；命名空间、操作、位置与错误始终发送。在管理端上，`sync_pipelines` 与 `sync_dead_letters`
+接受 `member`。技能 `sync-pipeline` 从一句话搭出一条管道，并找出管道停滞、延迟、停止或不断产生死信的原因；
+管道的最近错误与死信带运行它的**问 AI** 按钮。
+
+### BitTorrent
+
+[BitTorrent 页面](27-bittorrent.zh-CN.md)的工具：四个只读工具与三个提案工具，它们经 Admin API 读取
+`bittorrent.client` 与 `bittorrent.tracker` 角色，并像媒体工具那样向对话的提案加入步骤。
+
+| 工具 | 级别 | 做什么 |
+| --- | --- | --- |
+| `bt_torrents` | `read` | 种子的简况（状态、被保持的原因、错误、进度、大小、速率、对端、分享率、剩余时间），按状态、分类与名称筛选（50 个，最多 200 个），以及备选速率 |
+| `bt_torrent` | `read` | 单个种子的状态、前 100 个文件及优先级、前 50 个对端，以及它的 tracker 与 Web 种子 |
+| `bt_tracker_stats` | `read` | tracker 的总计与按原因统计的拒绝，以及前 50 个 swarm（白名单中的，或按 info hash 查的公共 tracker） |
+| `bt_rss` | `read` | RSS 自动下载的订阅源（上次轮询、结果、计数）与规则，以及最近见过的条目；订阅源 URL 只给 scheme、host 与最后一段路径 |
+| `bt_add_propose` | `propose` | 按磁力链接或 `.torrent` URL 添加种子，可指定分类、暂停或顺序下载 |
+| `bt_pause_propose` | `propose` | 暂停种子，按 ID（最多 100 个） |
+| `bt_resume_propose` | `propose` | 恢复种子，按 ID（最多 100 个） |
+
+没有任何 passkey 到达模型：种子的磁力链接被略去，tracker 的 URL 只保留 scheme、host 与最后一段路径
+（`https://tracker.example/[redacted]/announce`），Web 种子去掉用户名与查询串，对端去掉 ID；没有工具读取
+用户的 passkey——那由 Tracker 页展示给人看。BitTorrent 的步骤与提案的媒体步骤合在一起，随提案在任何配置
+变更之后按顺序经 `/bittorrent/torrents` 以应用提案的人的身份执行；其中提到一个已被删除的种子时，提案不再
+通过检查。在管理端上，只读工具接受 `member`，`cluster_bittorrent` 读取集群自己的视图
+（[第 12 章](12-cluster.zh-CN.md#bittorrent)）。BitTorrent 页面没有**问 AI** 按钮：这些工具从面板中使用。
 
 ## 参数
 
@@ -95,7 +141,7 @@
 | `default_model` | 第一个提供方的第一个模型 | 对话用的提供方与模型 |
 | `params` | 默认值 | `max_output_tokens`（4096）、`temperature`、`thinking`（`off`） |
 | `limits` | 默认值 | 见下表 |
-| `data` | 默认值 | `send_logs`、`send_access_log`、`send_subjects`（都默认关闭）与 `redact` |
+| `data` | 默认值 | `send_logs`、`send_access_log`、`send_subjects` 与 `send_records`（都默认关闭）以及 `redact` |
 | `users` | 无 | 每个控制台用户的级别 |
 | `default_level` | `read` | 未列出用户的级别 |
 | `mcp` | 关闭 | 控制台地址上 `/mcp` 处的 MCP 服务器 |
@@ -120,6 +166,7 @@
 | `name` | 必填 | 名称，`default_model` 与设置页按它称呼 |
 | `kind` | 必填 | `anthropic`、`openai`、`openai_responses`、`gemini`、`azure_openai`、`ollama`、`openai_compatible` 或 `llm_proxy` |
 | `base_url` | 厂商的默认值 | `openai_compatible` 与 `azure_openai` 必填；`llm_proxy` 没有它 |
+| `api_version` | 无 | `azure_openai` 提供方调用的 api-version，如 `2024-10-21`；只有它需要 |
 | `api_key_env` | 无 | 持有密钥的环境变量，每次调用时读取；store 中的密钥优先 |
 | `connect_timeout` | `10s` | 连接（含 TLS）最长耗时 |
 | `first_byte_timeout` | `2m` | 等待回答开始最长多久 |
@@ -183,7 +230,9 @@ admin {
   “问 AI”，以及[MCP 服务器](../console.zh-CN.md#mcp-服务器)。
 - [配置参考：Admin API](../reference/config.md#admin-api)：`admin.assistant` 的全部字段。
 - [登录](02-login.zh-CN.md)与[账户](13-account.zh-CN.md)：助手用的正是控制台的登录与用户。
-- [集群](12-cluster.zh-CN.md)：管理端上的助手与其集群工具。
+- [集群](12-cluster.zh-CN.md)：管理端上的助手与其集群工具（含 `cluster_bittorrent`）。
+- [数据同步](26-sync.zh-CN.md)与 [BitTorrent](27-bittorrent.zh-CN.md)：较新工具组读取的模块；
+  功能本身见 [sync](../sync.md) 与 [BitTorrent](../bittorrent.md)。
 - [LLM 角色](25-llm.zh-CN.md)：`llm_proxy` 提供方。
 - [决定 031](../decisions/031-assistant.zh-CN.md)。
 - 前端代码：[app/workbench/web/ai/](../../app/workbench/web/ai/)。

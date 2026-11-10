@@ -10,19 +10,21 @@ across reloads while a cache uses it, and what is on disk is found again when fi
 itself is enabled by the `cache` middleware on a route; this page shows the zones in use and their
 size, and purges by URL, by tag or everything.
 
-A key is a response's scheme + host + target, which is the URL the request named; each variant `Vary`
-names has a key of its own. So the URLs in the purge card must be absolute, written as the requests
-name them. A response is fresh for the lifetime it gives itself (`s-maxage`, `max-age`, `Expires`), and
-only when it gives none is `default_ttl` used; a response that says `must-revalidate`,
-`proxy-revalidate` or `s-maxage` is never answered stale. Conditional requests
-(`If-Modified-Since`, `If-None-Match`) are answered from the cache itself.
+A key is a response's scheme + host + target, which is the URL the request named, the host in lower
+case; each variant `Vary` names has a key of its own. So the URLs in the purge card must be absolute,
+written as the requests name them. A response is fresh for the lifetime it gives itself (`s-maxage`,
+`max-age`, `Expires`), and only when it gives none is `default_ttl` used; a response that says
+`must-revalidate`, `proxy-revalidate` or `s-maxage` is never answered stale. Conditional requests
+(`If-Modified-Since`, `If-None-Match`) are answered from the cache itself, and a request with `Range`
+goes on to the handler.
 
 The tags come from the `Cache-Tag` or `Surrogate-Key` headers, written on the response, and purging by
-tag removes the whole batch. A request that can change what its target holds — not GET, HEAD, OPTIONS,
-TRACE or CONNECT — makes the stored responses for its target out of date when it succeeds. A response is
-kept only after all of it has gone: it passes through a fib body filter that copies what passes, so a
-response is never held back to be stored. The disk is read and written on a pool of bounded goroutines
-of its own, never by a fib worker.
+tag removes the whole batch. A request whose method is not GET, HEAD, OPTIONS or TRACE (CONNECT among
+those that can change something) that succeeds drops what the cache keeps for its target, and for its
+response's `Location` and `Content-Location` on the same host. A response is kept only after all of it
+has gone: it passes through a fib body filter that copies what passes, so a response is never held
+back to be stored. The disk is read and written on a pool of bounded goroutines of its own, never by a
+fib worker.
 
 ## Pages
 
@@ -77,14 +79,15 @@ takes, a few hundred bytes each).
 ### What gets kept
 
 Only the responses to GET requests that a shared cache may keep are kept: ones whose status the cache
-understands, that say no `no-store`, `private` or `no-cache`, do not vary on everything (`Vary: *`), set
-no cookie, carry no trailers and are no larger than `max_entry_bytes`. A request with `Authorization`, or
-one an auth middleware or check let in (which may have removed `Authorization`, or read a cookie), has its
-response kept only when it says `public`, `s-maxage` or `must-revalidate`.
+understands, that say no `no-store`, `private` or `no-cache`, do not vary on everything (`Vary: *`),
+set no cookie (`Set-Cookie`), carry no `Trailer` and no `Content-Range` (so a ranged response is not
+kept), and are no larger than `max_entry_bytes`. A request with `Authorization`, or one an auth
+middleware or check let in (which may have removed `Authorization`, or read a cookie), has its response
+kept only when it says `public`, `s-maxage` or `must-revalidate`.
 
 A fresh response answers GET and HEAD, as a 304 for a request whose `If-None-Match` or
-`If-Modified-Since` it meets, with the right `Age`. A response is kept only after all of it has gone: it
-passes through a fib body filter that copies what passes, so it is never held back to be stored.
+`If-Modified-Since` it meets, with the right `Age`; every answer to GET and HEAD says what the cache
+did in `Cache-Status` (RFC 9211). A response is kept only after all of it has gone.
 
 ## In .conf
 
