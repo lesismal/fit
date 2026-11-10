@@ -4590,8 +4590,9 @@
             // "address": "127.0.0.1:1433",
 
             // // The SQL login, which needs SELECT on the tables, and on the cdc schema (db_owner, or the
-            // // role CDC was enabled with) or VIEW CHANGE TRACKING on them.
-            // // string; required.
+            // // role CDC was enabled with) or VIEW CHANGE TRACKING on them; with auth, the Windows account
+            // // (kerberos, ntlm). Needed but with auth's entra.
+            // // string.
             // "username": "fit",
 
             // // The environment variable holding username's password, read when the pipeline loads; none
@@ -4604,9 +4605,9 @@
             // "database": "",
 
             // // How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server
-            // // that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows
-            // // in clear. The server's certificate is checked against the system's roots or ca_file's; the
-            // // check cannot be turned off. on when left out.
+            // // that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and
+            // // later); off, none, the password and rows in clear. The server's certificate is checked
+            // // against the system's roots or ca_file's; the check cannot be turned off. on when left out.
             // // one of: on, strict, off; default "on".
             // "encrypt": "on",
 
@@ -4622,6 +4623,87 @@
             // // How long connecting, and each wait for the server, may take. 60s when left out or 0.
             // // duration, as "1.5s" or "2m"; default "60s".
             // "timeout": "60s",
+
+            // // A login other than SQL authentication's username and password: Microsoft Entra ID (Azure
+            // // SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out.
+            // // object.
+            // "auth": {
+              // // How the login is made: entra, Microsoft Entra ID (Azure SQL Database and Managed Instance),
+              // // an access token (a service principal's, a managed identity's, or one given) sent in TDS's
+              // // FEDAUTH, username and password_env unused; kerberos, Windows authentication with a Kerberos
+              // // ticket, username the principal (user, or user@REALM), its key from password_env or
+              // // keytab_file; ntlm, Windows authentication with NTLMv2, username DOMAIN\user and password_env
+              // // its password, for a server outside a domain (weaker than Kerberos: the server is not
+              // // authenticated).
+              // // one of: entra, kerberos, ntlm; required.
+              // "method": "entra",
+
+              // // With entra, the service principal's directory (tenant) ID or domain.
+              // // string.
+              // "tenant_id": "",
+
+              // // With entra, the service principal's application (client) ID; with managed_identity, a
+              // // user-assigned identity's client ID (the system-assigned identity when left out).
+              // // string.
+              // "client_id": "",
+
+              // // With entra, the environment variable holding the service principal's client secret, read
+              // // when the pipeline loads.
+              // // string.
+              // "client_secret_env": "",
+
+              // // With entra, a PEM file of the service principal's certificate and its RSA private key, which
+              // // signs the client assertion in place of a secret.
+              // // string.
+              // "client_certificate_file": "",
+
+              // // With entra, the token is the host's managed identity's, from Azure's instance metadata
+              // // service (or App Service's identity endpoint, when IDENTITY_ENDPOINT is set). false when left
+              // // out.
+              // // boolean.
+              // "managed_identity": true,
+
+              // // With entra, the environment variable holding an access token for
+              // // https://database.windows.net/, read at each connection, for a token got elsewhere.
+              // // string.
+              // "token_env": "",
+
+              // // With entra, a file holding an access token for https://database.windows.net/, read at each
+              // // connection, so that whatever renews it may replace it.
+              // // string.
+              // "token_file": "/etc/fit/token",
+
+              // // With entra and a service principal, the token endpoint's origin: another cloud's
+              // // (https://login.microsoftonline.us, https://login.chinacloudapi.cn).
+              // // https://login.microsoftonline.com when left out.
+              // // string; default "https://login.microsoftonline.com".
+              // "authority": "https://login.microsoftonline.com",
+
+              // // With kerberos, the principal's realm; username's @REALM, or krb5_conf's default_realm, when
+              // // left out.
+              // // string.
+              // "realm": "fit",
+
+              // // With kerberos, the realm's KDCs, as host or host:port (88), tried in turn over TCP;
+              // // krb5_conf's when left out.
+              // // list of string.
+              // "kdc": [],
+
+              // // With kerberos, the krb5.conf whose default_realm and realms' kdc lines are read when realm
+              // // or kdc is left out. /etc/krb5.conf when left out.
+              // // string; default "/etc/krb5.conf".
+              // "krb5_conf": "/etc/krb5.conf",
+
+              // // With kerberos, a keytab file holding the principal's keys (AES), in place of password_env.
+              // // string.
+              // "keytab_file": "",
+
+              // // With kerberos, the server's service principal name, as MSSQLSvc/host.example.com:1433;
+              // // MSSQLSvc/ with address's host and port when left out (the host must then be the name the SPN
+              // // was registered with, not an IP address).
+              // // string.
+              // "spn": "",
+            // },
 
             // // The tables read, as schema.table globs (* and ? within a name, [ranges]): dbo.orders,
             // // sales.*. A table named whole must have CDC (or change tracking) on, or the pipeline fails
@@ -8494,8 +8576,9 @@
                 // "address": "127.0.0.1:1433",
 
                 // // The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and
-                // // ALTER, with identity_insert).
-                // // string; required.
+                // // ALTER, with identity_insert); with auth, the Windows account (kerberos, ntlm). Needed but
+                // // with auth's entra.
+                // // string.
                 // "username": "fit",
 
                 // // The environment variable holding username's password, read when the pipeline loads; none
@@ -8508,9 +8591,9 @@
                 // "database": "",
 
                 // // How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server
-                // // that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows
-                // // in clear. The server's certificate is checked against the system's roots or ca_file's; the
-                // // check cannot be turned off. on when left out.
+                // // that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and
+                // // later); off, none, the password and rows in clear. The server's certificate is checked
+                // // against the system's roots or ca_file's; the check cannot be turned off. on when left out.
                 // // one of: on, strict, off; default "on".
                 // "encrypt": "on",
 
@@ -8526,6 +8609,87 @@
                 // // How long connecting, and each wait for the server, may take. 60s when left out or 0.
                 // // duration, as "1.5s" or "2m"; default "60s".
                 // "timeout": "60s",
+
+                // // A login other than SQL authentication's username and password: Microsoft Entra ID (Azure
+                // // SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out.
+                // // object.
+                // "auth": {
+                  // // How the login is made: entra, Microsoft Entra ID (Azure SQL Database and Managed Instance),
+                  // // an access token (a service principal's, a managed identity's, or one given) sent in TDS's
+                  // // FEDAUTH, username and password_env unused; kerberos, Windows authentication with a Kerberos
+                  // // ticket, username the principal (user, or user@REALM), its key from password_env or
+                  // // keytab_file; ntlm, Windows authentication with NTLMv2, username DOMAIN\user and password_env
+                  // // its password, for a server outside a domain (weaker than Kerberos: the server is not
+                  // // authenticated).
+                  // // one of: entra, kerberos, ntlm; required.
+                  // "method": "entra",
+
+                  // // With entra, the service principal's directory (tenant) ID or domain.
+                  // // string.
+                  // "tenant_id": "",
+
+                  // // With entra, the service principal's application (client) ID; with managed_identity, a
+                  // // user-assigned identity's client ID (the system-assigned identity when left out).
+                  // // string.
+                  // "client_id": "",
+
+                  // // With entra, the environment variable holding the service principal's client secret, read
+                  // // when the pipeline loads.
+                  // // string.
+                  // "client_secret_env": "",
+
+                  // // With entra, a PEM file of the service principal's certificate and its RSA private key, which
+                  // // signs the client assertion in place of a secret.
+                  // // string.
+                  // "client_certificate_file": "",
+
+                  // // With entra, the token is the host's managed identity's, from Azure's instance metadata
+                  // // service (or App Service's identity endpoint, when IDENTITY_ENDPOINT is set). false when left
+                  // // out.
+                  // // boolean.
+                  // "managed_identity": true,
+
+                  // // With entra, the environment variable holding an access token for
+                  // // https://database.windows.net/, read at each connection, for a token got elsewhere.
+                  // // string.
+                  // "token_env": "",
+
+                  // // With entra, a file holding an access token for https://database.windows.net/, read at each
+                  // // connection, so that whatever renews it may replace it.
+                  // // string.
+                  // "token_file": "/etc/fit/token",
+
+                  // // With entra and a service principal, the token endpoint's origin: another cloud's
+                  // // (https://login.microsoftonline.us, https://login.chinacloudapi.cn).
+                  // // https://login.microsoftonline.com when left out.
+                  // // string; default "https://login.microsoftonline.com".
+                  // "authority": "https://login.microsoftonline.com",
+
+                  // // With kerberos, the principal's realm; username's @REALM, or krb5_conf's default_realm, when
+                  // // left out.
+                  // // string.
+                  // "realm": "fit",
+
+                  // // With kerberos, the realm's KDCs, as host or host:port (88), tried in turn over TCP;
+                  // // krb5_conf's when left out.
+                  // // list of string.
+                  // "kdc": [],
+
+                  // // With kerberos, the krb5.conf whose default_realm and realms' kdc lines are read when realm
+                  // // or kdc is left out. /etc/krb5.conf when left out.
+                  // // string; default "/etc/krb5.conf".
+                  // "krb5_conf": "/etc/krb5.conf",
+
+                  // // With kerberos, a keytab file holding the principal's keys (AES), in place of password_env.
+                  // // string.
+                  // "keytab_file": "",
+
+                  // // With kerberos, the server's service principal name, as MSSQLSvc/host.example.com:1433;
+                  // // MSSQLSvc/ with address's host and port when left out (the host must then be the name the SPN
+                  // // was registered with, not an IP address).
+                  // // string.
+                  // "spn": "",
+                // },
 
                 // // The table a record goes to: text with {namespace}, the record's namespace; its parts, split
                 // // at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema
@@ -12138,8 +12302,9 @@
               // "address": "127.0.0.1:1433",
 
               // // The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and
-              // // ALTER, with identity_insert).
-              // // string; required.
+              // // ALTER, with identity_insert); with auth, the Windows account (kerberos, ntlm). Needed but
+              // // with auth's entra.
+              // // string.
               // "username": "fit",
 
               // // The environment variable holding username's password, read when the pipeline loads; none
@@ -12152,9 +12317,9 @@
               // "database": "",
 
               // // How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server
-              // // that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows
-              // // in clear. The server's certificate is checked against the system's roots or ca_file's; the
-              // // check cannot be turned off. on when left out.
+              // // that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and
+              // // later); off, none, the password and rows in clear. The server's certificate is checked
+              // // against the system's roots or ca_file's; the check cannot be turned off. on when left out.
               // // one of: on, strict, off; default "on".
               // "encrypt": "on",
 
@@ -12170,6 +12335,87 @@
               // // How long connecting, and each wait for the server, may take. 60s when left out or 0.
               // // duration, as "1.5s" or "2m"; default "60s".
               // "timeout": "60s",
+
+              // // A login other than SQL authentication's username and password: Microsoft Entra ID (Azure
+              // // SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out.
+              // // object.
+              // "auth": {
+                // // How the login is made: entra, Microsoft Entra ID (Azure SQL Database and Managed Instance),
+                // // an access token (a service principal's, a managed identity's, or one given) sent in TDS's
+                // // FEDAUTH, username and password_env unused; kerberos, Windows authentication with a Kerberos
+                // // ticket, username the principal (user, or user@REALM), its key from password_env or
+                // // keytab_file; ntlm, Windows authentication with NTLMv2, username DOMAIN\user and password_env
+                // // its password, for a server outside a domain (weaker than Kerberos: the server is not
+                // // authenticated).
+                // // one of: entra, kerberos, ntlm; required.
+                // "method": "entra",
+
+                // // With entra, the service principal's directory (tenant) ID or domain.
+                // // string.
+                // "tenant_id": "",
+
+                // // With entra, the service principal's application (client) ID; with managed_identity, a
+                // // user-assigned identity's client ID (the system-assigned identity when left out).
+                // // string.
+                // "client_id": "",
+
+                // // With entra, the environment variable holding the service principal's client secret, read
+                // // when the pipeline loads.
+                // // string.
+                // "client_secret_env": "",
+
+                // // With entra, a PEM file of the service principal's certificate and its RSA private key, which
+                // // signs the client assertion in place of a secret.
+                // // string.
+                // "client_certificate_file": "",
+
+                // // With entra, the token is the host's managed identity's, from Azure's instance metadata
+                // // service (or App Service's identity endpoint, when IDENTITY_ENDPOINT is set). false when left
+                // // out.
+                // // boolean.
+                // "managed_identity": true,
+
+                // // With entra, the environment variable holding an access token for
+                // // https://database.windows.net/, read at each connection, for a token got elsewhere.
+                // // string.
+                // "token_env": "",
+
+                // // With entra, a file holding an access token for https://database.windows.net/, read at each
+                // // connection, so that whatever renews it may replace it.
+                // // string.
+                // "token_file": "/etc/fit/token",
+
+                // // With entra and a service principal, the token endpoint's origin: another cloud's
+                // // (https://login.microsoftonline.us, https://login.chinacloudapi.cn).
+                // // https://login.microsoftonline.com when left out.
+                // // string; default "https://login.microsoftonline.com".
+                // "authority": "https://login.microsoftonline.com",
+
+                // // With kerberos, the principal's realm; username's @REALM, or krb5_conf's default_realm, when
+                // // left out.
+                // // string.
+                // "realm": "fit",
+
+                // // With kerberos, the realm's KDCs, as host or host:port (88), tried in turn over TCP;
+                // // krb5_conf's when left out.
+                // // list of string.
+                // "kdc": [],
+
+                // // With kerberos, the krb5.conf whose default_realm and realms' kdc lines are read when realm
+                // // or kdc is left out. /etc/krb5.conf when left out.
+                // // string; default "/etc/krb5.conf".
+                // "krb5_conf": "/etc/krb5.conf",
+
+                // // With kerberos, a keytab file holding the principal's keys (AES), in place of password_env.
+                // // string.
+                // "keytab_file": "",
+
+                // // With kerberos, the server's service principal name, as MSSQLSvc/host.example.com:1433;
+                // // MSSQLSvc/ with address's host and port when left out (the host must then be the name the SPN
+                // // was registered with, not an IP address).
+                // // string.
+                // "spn": "",
+              // },
 
               // // The table a record goes to: text with {namespace}, the record's namespace; its parts, split
               // // at dots, are schema.table or db.schema.table (a MySQL source's shop.orders is the schema

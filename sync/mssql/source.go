@@ -34,13 +34,14 @@ const (
 // Source is the source mssql.
 type Source struct {
 	Address            string              `json:"address,omitempty" default:"\"127.0.0.1:1433\"" doc:"The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out."`
-	Username           string              `json:"username" fit:"required" doc:"The SQL login, which needs SELECT on the tables, and on the cdc schema (db_owner, or the role CDC was enabled with) or VIEW CHANGE TRACKING on them."`
+	Username           string              `json:"username,omitempty" doc:"The SQL login, which needs SELECT on the tables, and on the cdc schema (db_owner, or the role CDC was enabled with) or VIEW CHANGE TRACKING on them; with auth, the Windows account (kerberos, ntlm). Needed but with auth's entra."`
 	PasswordEnv        string              `json:"password_env,omitempty" doc:"The environment variable holding username's password, read when the pipeline loads; none when left out."`
 	Database           string              `json:"database" fit:"required" doc:"The database whose tables are read."`
-	Encrypt            string              `json:"encrypt,omitempty" enum:"on,strict,off" default:"\"on\"" doc:"How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out."`
+	Encrypt            string              `json:"encrypt,omitempty" enum:"on,strict,off" default:"\"on\"" doc:"How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and later); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out."`
 	CAFile             string              `json:"ca_file,omitempty" doc:"A PEM file of the certificates the server's is checked against, in place of the system's roots."`
 	ServerName         string              `json:"server_name,omitempty" doc:"The name the server's certificate must have; address's host when left out."`
 	Timeout            config.Duration     `json:"timeout,omitempty" default:"\"60s\"" doc:"How long connecting, and each wait for the server, may take. 60s when left out or 0."`
+	Auth               *Auth               `json:"auth,omitempty" doc:"A login other than SQL authentication's username and password: Microsoft Entra ID (Azure SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out."`
 	Tables             []string            `json:"tables,omitempty" doc:"The tables read, as schema.table globs (* and ? within a name, [ranges]): dbo.orders, sales.*. A table named whole must have CDC (or change tracking) on, or the pipeline fails saying how to turn it on; a glob matches the tables that have it, and picks up a table CDC begins to capture later. Every table CDC (or change tracking) follows when left out."`
 	Exclude            []string            `json:"exclude,omitempty" doc:"Tables left out of those tables names, as schema.table globs."`
 	Keys               map[string][]string `json:"keys,omitempty" doc:"The key's columns of tables, by schema.table, in place of the primary key (or the unique index CDC was enabled with): for a table without one. A table with neither has records without a key, and its snapshot is read in one query."`
@@ -62,7 +63,7 @@ type Source struct {
 // is sent until the source runs.
 func (s *Source) Provision(ctx *module.Context) error {
 	cfg, errs := WireConfig(ctx, ConnParams{Address: s.Address, Username: s.Username, PasswordEnv: s.PasswordEnv, Database: s.Database,
-		Encrypt: s.Encrypt, CAFile: s.CAFile, ServerName: s.ServerName, Timeout: s.Timeout})
+		Encrypt: s.Encrypt, CAFile: s.CAFile, ServerName: s.ServerName, Timeout: s.Timeout, Auth: s.Auth})
 	s.cfg = cfg
 	if s.dial == nil {
 		s.dial = dialWire

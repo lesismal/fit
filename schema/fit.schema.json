@@ -9665,6 +9665,10 @@
           "description": "The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out.",
           "type": "string"
         },
+        "auth": {
+          "$ref": "#/$defs/syncmssql.Auth",
+          "description": "A login other than SQL authentication's username and password: Microsoft Entra ID (Azure SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out."
+        },
         "bulk_rows": {
           "default": 1000,
           "description": "A run of at least this many inserts without a source transaction (a snapshot's, a job's) is bulk loaded (INSERT BULK) into a temporary table and merged from it into the table, rather than written as statements of parameters. A number larger than any batch turns it off. 1000 when left out or 0.",
@@ -9704,7 +9708,7 @@
         },
         "encrypt": {
           "default": "on",
-          "description": "How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out.",
+          "description": "How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and later); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out.",
           "enum": [
             "on",
             "strict",
@@ -9754,13 +9758,10 @@
           "type": "string"
         },
         "username": {
-          "description": "The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and ALTER, with identity_insert).",
+          "description": "The SQL login, which needs SELECT, INSERT, UPDATE and DELETE on the tables written (and ALTER, with identity_insert); with auth, the Windows account (kerberos, ntlm). Needed but with auth's entra.",
           "type": "string"
         }
       },
-      "required": [
-        "username"
-      ],
       "type": "object"
     },
     "sync.sinks.mysql": {
@@ -12044,6 +12045,10 @@
           "description": "The server's host and port: SQL Server 2016 or later. 127.0.0.1:1433 when left out.",
           "type": "string"
         },
+        "auth": {
+          "$ref": "#/$defs/syncmssql.Auth",
+          "description": "A login other than SQL authentication's username and password: Microsoft Entra ID (Azure SQL), or Windows authentication by Kerberos or NTLM. SQL authentication when left out."
+        },
         "batch_size": {
           "default": 1000,
           "description": "The rows a snapshot's query reads, by key, each in a transaction of its own. 1000 when left out or 0.",
@@ -12061,7 +12066,7 @@
         },
         "encrypt": {
           "default": "on",
-          "description": "How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out.",
+          "description": "How the connection is encrypted: on, TLS negotiated in TDS's pre-login, refused by a server that cannot; strict, TDS 8's TLS first (SQL Server 2022 and later; on Linux, 2025 and later); off, none, the password and rows in clear. The server's certificate is checked against the system's roots or ca_file's; the check cannot be turned off. on when left out.",
           "enum": [
             "on",
             "strict",
@@ -12133,7 +12138,7 @@
           "type": "string"
         },
         "username": {
-          "description": "The SQL login, which needs SELECT on the tables, and on the cdc schema (db_owner, or the role CDC was enabled with) or VIEW CHANGE TRACKING on them.",
+          "description": "The SQL login, which needs SELECT on the tables, and on the cdc schema (db_owner, or the role CDC was enabled with) or VIEW CHANGE TRACKING on them; with auth, the Windows account (kerberos, ntlm). Needed but with auth's entra.",
           "type": "string"
         },
         "window_rows": {
@@ -12152,7 +12157,6 @@
         }
       },
       "required": [
-        "username",
         "database"
       ],
       "type": "object"
@@ -13856,6 +13860,81 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "syncmssql.Auth": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "default": "https://login.microsoftonline.com",
+          "description": "With entra and a service principal, the token endpoint's origin: another cloud's (https://login.microsoftonline.us, https://login.chinacloudapi.cn). https://login.microsoftonline.com when left out.",
+          "type": "string"
+        },
+        "client_certificate_file": {
+          "description": "With entra, a PEM file of the service principal's certificate and its RSA private key, which signs the client assertion in place of a secret.",
+          "type": "string"
+        },
+        "client_id": {
+          "description": "With entra, the service principal's application (client) ID; with managed_identity, a user-assigned identity's client ID (the system-assigned identity when left out).",
+          "type": "string"
+        },
+        "client_secret_env": {
+          "description": "With entra, the environment variable holding the service principal's client secret, read when the pipeline loads.",
+          "type": "string"
+        },
+        "kdc": {
+          "description": "With kerberos, the realm's KDCs, as host or host:port (88), tried in turn over TCP; krb5_conf's when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "keytab_file": {
+          "description": "With kerberos, a keytab file holding the principal's keys (AES), in place of password_env.",
+          "type": "string"
+        },
+        "krb5_conf": {
+          "default": "/etc/krb5.conf",
+          "description": "With kerberos, the krb5.conf whose default_realm and realms' kdc lines are read when realm or kdc is left out. /etc/krb5.conf when left out.",
+          "type": "string"
+        },
+        "managed_identity": {
+          "description": "With entra, the token is the host's managed identity's, from Azure's instance metadata service (or App Service's identity endpoint, when IDENTITY_ENDPOINT is set). false when left out.",
+          "type": "boolean"
+        },
+        "method": {
+          "description": "How the login is made: entra, Microsoft Entra ID (Azure SQL Database and Managed Instance), an access token (a service principal's, a managed identity's, or one given) sent in TDS's FEDAUTH, username and password_env unused; kerberos, Windows authentication with a Kerberos ticket, username the principal (user, or user@REALM), its key from password_env or keytab_file; ntlm, Windows authentication with NTLMv2, username DOMAIN\\user and password_env its password, for a server outside a domain (weaker than Kerberos: the server is not authenticated).",
+          "enum": [
+            "entra",
+            "kerberos",
+            "ntlm"
+          ],
+          "type": "string"
+        },
+        "realm": {
+          "description": "With kerberos, the principal's realm; username's @REALM, or krb5_conf's default_realm, when left out.",
+          "type": "string"
+        },
+        "spn": {
+          "description": "With kerberos, the server's service principal name, as MSSQLSvc/host.example.com:1433; MSSQLSvc/ with address's host and port when left out (the host must then be the name the SPN was registered with, not an IP address).",
+          "type": "string"
+        },
+        "tenant_id": {
+          "description": "With entra, the service principal's directory (tenant) ID or domain.",
+          "type": "string"
+        },
+        "token_env": {
+          "description": "With entra, the environment variable holding an access token for https://database.windows.net/, read at each connection, for a token got elsewhere.",
+          "type": "string"
+        },
+        "token_file": {
+          "description": "With entra, a file holding an access token for https://database.windows.net/, read at each connection, so that whatever renews it may replace it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method"
+      ],
       "type": "object"
     },
     "wasm.Property": {
