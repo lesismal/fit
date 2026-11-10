@@ -903,10 +903,11 @@ the broker: at least once into idempotent sinks, a QoS 2 message taken once with
 checkpoint holds nothing to resume from, the session being the position, but the topic filters
 subscribed: a filter dropped from `topics` is unsubscribed (`UNSUBSCRIBE`) when the session resumes
 at the next run, and the messages the broker had queued for it before, which may still come, are
-acknowledged and not written, unless a filter still named matches their topic too. A filter is
-remembered once a message of a run that subscribed to it is acknowledged, or at once in a pipeline's
-first run; a filter added and dropped again before then stays in the session (a new `client_id`
-starts a clean one). A message is a record of the
+acknowledged and not written, unless a filter still named matches their topic too. A run whose
+filters differ from the checkpoint's hands them on in a position-only record once it has subscribed,
+so they are saved within about `checkpoint_interval` though no message comes (a pipeline's first run
+saves them at once), and a filter added in one run and dropped in the next is unsubscribed too. A
+message is a record of the
 topic's namespace (or `namespace`), keyed by the topic unless the codec sets a key; without a `codec`
 its after holds `topic`, `payload` (bytes), `qos`, `retain` and, in version 5, the properties it has
 (`content_type`, `response_topic`, `correlation_data`, `user_properties`). In a job the source reads

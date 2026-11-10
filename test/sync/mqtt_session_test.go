@@ -164,12 +164,28 @@ func TestMQTTUnsubscribe(t *testing.T) {
 		rt.Close(context.Background())
 
 		rt = run(name + "/a/#")
-		defer rt.Close(context.Background())
 		send("b/3", "b-third")
 		send("a/3", "a-third")
 		wait("a-third")
+		rt.Close(context.Background())
+
+		// A filter added in a run that gets no message, then dropped: the
+		// position-only records of the two runs save each filter set, so
+		// the last run's session no longer holds it.
+		quiet := func(topics ...string) {
+			rt := run(topics...)
+			time.Sleep(time.Second)
+			rt.Close(context.Background())
+		}
+		quiet(name+"/a/#", name+"/c/#")
+		quiet(name + "/a/#")
+		rt = run(name + "/a/#")
+		defer rt.Close(context.Background())
+		send("c/1", "c-last")
+		send("a/4", "a-last")
+		wait("a-last")
 		time.Sleep(500 * time.Millisecond)
-		for _, p := range []string{"b-away", "b-after", "b-third"} {
+		for _, p := range []string{"b-away", "b-after", "b-third", "c-last"} {
 			if n := payloads(store)[p]; n != 0 {
 				t.Fatalf("%s written %d times", p, n)
 			}

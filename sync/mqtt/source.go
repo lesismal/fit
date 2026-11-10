@@ -26,6 +26,9 @@ const (
 	DefaultSessionExpiry  = 24 * time.Hour
 	DefaultReceiveMaximum = 128
 	DefaultIdle           = 5 * time.Second
+	// positionRetry is how often a run whose filter set changed offers
+	// the pipeline a position-only record of it, until one is taken.
+	positionRetry = 200 * time.Millisecond
 )
 
 // Source is the source mqtt.
@@ -218,13 +221,23 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 	if s.Idle > 0 {
 		idle = s.Idle.Std()
 	}
-	var idleC <-chan time.Time
+	var idleC, posC <-chan time.Time
 	var timer *time.Timer
+	var posTicker *time.Ticker
 	defer func() {
 		if timer != nil {
 			timer.Stop()
 		}
+		if posTicker != nil {
+			posTicker.Stop()
+		}
 	}()
+	stopPos := func() {
+		if posTicker != nil {
+			posTicker.Stop()
+			posC = nil
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -241,12 +254,34 @@ func (s *Source) Run(ctx context.Context, r *fitsync.Run) error {
 				timer = time.NewTimer(idle)
 				idleC = timer.C
 			}
+			// A filter set the checkpoint does not hold yet is handed on in
+			// a position-only record, which the pipeline takes once nothing
+			// was emitted for checkpoint_interval: saved though no message
+			// comes. A message's record carries the filters too.
+			if !slices.Equal(from.Filters, s.Topics) {
+				posTicker = time.NewTicker(positionRetry)
+				posC = posTicker.C
+			}
 		case m := <-c.Messages():
 			if err := s.emit(st, r, m); err != nil {
 				return err
 			}
+			stopPos()
 			if timer != nil {
 				timer.Reset(idle)
+			}
+		case <-posC:
+			taken := false
+			if err := r.EmitPosition(func() fitsync.Position {
+				taken = true
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				return s.position(st, st.seq)
+			}); err != nil {
+				return err
+			}
+			if taken {
+				stopPos()
 			}
 		case <-idleC:
 			return s.finish(ctx, st)

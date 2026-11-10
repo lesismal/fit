@@ -7627,9 +7627,13 @@ Made after the rulings (2026-11-10), pending review:
 
 16. **The filters subscribed are kept in every position**, the checkpoint the last acknowledged one's,
     and saved at once (`SaveStart`) in a pipeline's first run; until a dropped filter's UNSUBACK the
-    positions carry it too, so that a run ended first tries again. A filter added and dropped again
-    before any message of the run that subscribed to it is acknowledged is never in a checkpoint, and
-    stays in the session: the runtime saves a checkpoint only from a record, or at a first run.
+    positions carry it too, so that a run ended first tries again. A run whose filters differ from its
+    checkpoint's offers, once subscribed, a position-only record of them (`Run.EmitPosition`, I216
+    decisions 14–16) every 200ms until the pipeline takes one (it does after `checkpoint_interval`
+    without a record) or a message's record carries them: a filter added and dropped again in runs
+    that got no message is saved and unsubscribed too. (2026-11-10, after merging the position-only
+    records; before, such a filter never reached a checkpoint and stayed in the session.) The
+    position's run and seq are the last message's, so acknowledging it releases nothing new.
     Alternative: a file of the source's own in `state_dir`, outside the checkpoint.
 17. **Messages of a filter dropped**, which the broker may send before the UNSUBACK and, as MQTT lets
     it, after (messages it had queued), are acknowledged and not emitted throughout that run when their

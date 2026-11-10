@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -169,5 +170,47 @@ func TestWillAndAuthParams(t *testing.T) {
 	}
 	if _, err := load(t, fitsync.Sinks, "mqtt", map[string]any{"servers": []string{"b:1883"}, "auth_method": "SCRAM-SHA-1"}); err == nil {
 		t.Fatal("SCRAM without a user loaded")
+	}
+}
+
+// TestSourcePositionOnly: a run whose filter set the checkpoint does not
+// hold offers the pipeline a position-only record of it until one is
+// taken, though no message comes; the pipeline's error ends the run.
+func TestSourcePositionOnly(t *testing.T) {
+	n := newFakeNet()
+	n.present = true
+	src := source(t, n, map[string]any{"topics": []string{"a"}})
+	from, _ := json.Marshal(position{Run: "old", Seq: 3, Filters: []string{"a", "gone"}})
+	r := newCollect().run(false)
+	r.From = from
+	var calls atomic.Int32
+	got := make(chan fitsync.Position, 4)
+	r.Positions = func(pos func() fitsync.Position) error {
+		if calls.Add(1) == 1 {
+			return nil // not taken yet: offered again
+		}
+		got <- pos()
+		return nil
+	}
+	cancel, done := started(src, r)
+	select {
+	case p := <-got:
+		if fs := filtersOf(t, p); !reflect.DeepEqual(fs, []string{"a"}) {
+			t.Fatal(fs)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no position-only record")
+	}
+	time.Sleep(3 * positionRetry)
+	if len(got) != 0 || calls.Load() != 2 {
+		t.Fatal("offered after it was taken")
+	}
+	cancel()
+	waitErr(t, done)
+
+	r.Positions = func(func() fitsync.Position) error { return errors.New("stopping") }
+	_, done = started(src, r)
+	if err := waitErr(t, done); err == nil || err.Error() != "stopping" {
+		t.Fatal(err)
 	}
 }
