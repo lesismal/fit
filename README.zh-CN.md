@@ -14,6 +14,13 @@ TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或�
 以及 llm，用于在多台机器间共享 AI 模型并提供给 agent 调用。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要求的外部安全审计尚待进行；已完成的内容见 [开发进度](docs/progress.zh-CN.md)，与 nginx、Caddy、Traefik 的
 对比测量方法见 [bench](bench/README.zh-CN.md)。
 
+## 视频介绍
+
+[![fit：nginx / Caddy / Traefik 的替代品——功能、性能与开销，8 分钟讲清楚](https://img.youtube.com/vi/bx3kXgjSDeI/maxresdefault.jpg)](https://youtu.be/bx3kXgjSDeI)
+
+8 分钟的介绍：fit 与 nginx、Caddy、Traefik 在它们主场上的功能对比，[2026-11-06 压测](bench/results/plan-2026-11-06/report.zh-CN.md)中领先与落后的地方，
+以及三者都没有的功能。[English version](https://youtu.be/dr6PMvPvf4E)。视频的源文件在 [fit-video](https://github.com/lesismal/fit-video) 中。
+
 ## 文档
 
 - [快速上手](docs/getting-started.zh-CN.md)：从零开始搭起一个 HTTPS 站点。

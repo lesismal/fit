@@ -19,6 +19,14 @@ iterations are done, 1.0's included, and 1.0's external security review is still
 [progress](docs/progress.md) for what works, and
 [bench](bench/README.md) for how it is measured against nginx, Caddy and Traefik.
 
+## Video
+
+[![fit: An Alternative to nginx / Caddy / Traefik — Features, Performance and Overhead in 8 Minutes](https://img.youtube.com/vi/dr6PMvPvf4E/maxresdefault.jpg)](https://youtu.be/dr6PMvPvf4E)
+
+An 8-minute introduction: fit against nginx, Caddy and Traefik on their home ground, where it leads and where it
+trails in the [2026-11-06 load test](bench/results/plan-2026-11-06/report.md), and what none of the three has.
+[中文版](https://youtu.be/bx3kXgjSDeI). The video's sources are in [fit-video](https://github.com/lesismal/fit-video).
+
 ## Docs
 
 - [Getting started](docs/getting-started.md): from nothing to a site over HTTPS.
