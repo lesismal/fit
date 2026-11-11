@@ -1,6 +1,7 @@
 package quic
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -405,6 +406,12 @@ func longHeader(version uint32, typ byte, dcid []byte, size int) []byte {
 // The listener answers datagrams of no connection as QUIC says: a version
 // it does not speak with a version negotiation, a packet of a connection it
 // does not have with a stateless reset, and nothing else.
+//
+// No answer is told by waiting, which a slow runner (-race on macOS) can
+// outlast: a datagram that must go unanswered is followed by a marker, of
+// an unknown version to a connection ID of its own, and the next datagram
+// back must be the marker's version negotiation, which echoes that ID;
+// any other before it answers the datagram.
 func TestListenerStrayDatagrams(t *testing.T) {
 	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{}, false)
 	pc, err := net.Dial("udp", s.hostport(t))
@@ -412,33 +419,49 @@ func TestListenerStrayDatagrams(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pc.Close()
-	answer := func(d []byte) []byte {
+	send := func(d []byte) {
 		t.Helper()
 		if _, err := pc.Write(d); err != nil {
 			t.Fatal(err)
 		}
-		_ = pc.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	}
+	next := func() []byte {
+		t.Helper()
+		_ = pc.SetReadDeadline(time.Now().Add(5 * time.Second))
 		b := make([]byte, 2048)
 		n, err := pc.Read(b)
 		if err != nil {
-			return nil
+			t.Fatalf("no answer: %v", err)
 		}
 		return b[:n]
 	}
+	// versionNegotiation reports whether a answers a long header packet
+	// to cid with no source connection ID: its destination ID is empty,
+	// its source ID cid.
+	versionNegotiation := func(a, cid []byte) bool {
+		return len(a) >= 7+len(cid) && a[0]&0x80 != 0 && a[1]|a[2]|a[3]|a[4] == 0 &&
+			a[5] == 0 && int(a[6]) == len(cid) && bytes.Equal(a[7:7+len(cid)], cid)
+	}
 	cid := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	if a := answer(longHeader(0x0a0a0a0a, 0, cid, 1200)); len(a) < 7 || a[0]&0x80 == 0 || a[1]|a[2]|a[3]|a[4] != 0 {
+	send(longHeader(0x0a0a0a0a, 0, cid, 1200))
+	if a := next(); !versionNegotiation(a, cid) {
 		t.Errorf("answer to an unknown version: %x", a)
 	}
 	short := append([]byte{0x40}, make([]byte, 40)...)
-	if a := answer(short); len(a) == 0 || a[0]&0x80 != 0 {
+	send(short)
+	if a := next(); len(a) == 0 || a[0]&0x80 != 0 {
 		t.Errorf("answer to a packet of no connection: %x", a)
 	}
-	for _, d := range [][]byte{
+	for i, d := range [][]byte{
 		short[:10],                                // too short to be answered
 		longHeader(fq.Version1, 2, cid, 100),      // a handshake packet
 		longHeader(fq.Version1, 0, cid[:4], 1200), // an Initial to a short connection ID
 	} {
-		if a := answer(d); a != nil {
+		marker := []byte{0xee, byte(i), 3, 4, 5, 6, 7, 8}
+		send(d)
+		send(longHeader(0x0a0a0a0a, 0, marker, 1200))
+		// Whatever comes before the marker's answer answers d.
+		for a := next(); !versionNegotiation(a, marker); a = next() {
 			t.Errorf("answer to %x...: %x", d[:6], a)
 		}
 	}
