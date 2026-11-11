@@ -221,6 +221,11 @@ type node struct {
 	loginProblem *Problem
 	backoff      time.Duration
 	state        State
+	// logins is the callers waiting on the login under way, nil when none
+	// is: a read and a poll arriving together share one login, so that a
+	// refusal's backoff is not passed by a second login sent before the
+	// first one's answer.
+	logins []func(*Problem)
 
 	// ins is what the polls read for the series and the certificates'
 	// inventory (I150, insight.go), under a lock of its own.
@@ -577,11 +582,31 @@ func (n *node) login(then func(*Problem)) {
 		then(&prob)
 		return
 	}
+	if n.logins != nil {
+		n.logins = append(n.logins, then)
+		n.mu.Unlock()
+		return
+	}
+	n.logins = []func(*Problem){then}
 	n.mu.Unlock()
+	done := func(prob *Problem) {
+		n.mu.Lock()
+		waiting := n.logins
+		n.logins = nil
+		n.mu.Unlock()
+		for _, f := range waiting {
+			if prob == nil {
+				f(nil)
+				continue
+			}
+			cp := *prob // each caller's own, which it may change
+			f(&cp)
+		}
+	}
 	body, _ := json.Marshal(map[string]string{"username": n.spec.Username, "password": n.spec.Password})
 	n.t.do("POST", n.p.login, nil, body, func(r *reply, err error) {
 		if err != nil {
-			then(n.t.failure(err, now))
+			done(n.t.failure(err, now))
 			return
 		}
 		prob, s := n.loginResult(r)
@@ -590,7 +615,7 @@ func (n *node) login(then func(*Problem)) {
 			// nothing but change it, which the manager does not.
 			n.logout(s, nil)
 		}
-		then(prob)
+		done(prob)
 	})
 }
 

@@ -213,3 +213,49 @@ func TestTestAbandoned(t *testing.T) {
 		t.Errorf("%d %s", code, body)
 	}
 }
+
+// TestLoginShared: logins asked for together, while one is under way, wait
+// for its answer rather than sending their own, so that a refusal's backoff
+// holds for all of them (a read and a poll meeting on a member).
+func TestLoginShared(t *testing.T) {
+	f := newFixture(t, config.Cluster{})
+	m := newFakeMember(t, false)
+	m.set(func(f *fakeMember) { f.expired, f.delay = true, 200 * time.Millisecond })
+	n := newNode(f.m, Member{Name: "x", URL: m.srv.URL, Access: AccessConsole, Username: fakeUser, Password: fakePassword})
+	defer n.t.close()
+	const callers = 4
+	got := make(chan *Problem, callers)
+	for range callers {
+		n.login(func(p *Problem) { got <- p })
+	}
+	var probs []*Problem
+	for range callers {
+		select {
+		case p := <-got:
+			probs = append(probs, p)
+		case <-time.After(10 * time.Second):
+			t.Fatal("a login was never answered")
+		}
+	}
+	for i, p := range probs {
+		if p == nil || p.Kind != KindAuth {
+			t.Fatalf("%d: %+v", i, p)
+		}
+		for _, q := range probs[:i] {
+			if p == q {
+				t.Fatal("two callers were given one Problem to change")
+			}
+		}
+	}
+	if logins, _, _ := m.counts(); logins != 1 {
+		t.Errorf("%d logins for %d callers", logins, callers)
+	}
+	// The refusal's backoff holds: another asks nothing.
+	n.login(func(p *Problem) { got <- p })
+	if p := <-got; p == nil || p.Kind != KindAuth {
+		t.Errorf("%+v", p)
+	}
+	if logins, _, _ := m.counts(); logins != 1 {
+		t.Errorf("%d logins after the backoff", logins)
+	}
+}
