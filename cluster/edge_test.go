@@ -220,7 +220,7 @@ func TestTestAbandoned(t *testing.T) {
 func TestLoginShared(t *testing.T) {
 	f := newFixture(t, config.Cluster{})
 	m := newFakeMember(t, false)
-	m.set(func(f *fakeMember) { f.expired, f.delay = true, 200 * time.Millisecond })
+	m.set(func(f *fakeMember) { f.expired, f.delay = true, 200*time.Millisecond })
 	n := newNode(f.m, Member{Name: "x", URL: m.srv.URL, Access: AccessConsole, Username: fakeUser, Password: fakePassword})
 	defer n.t.close()
 	const callers = 4
