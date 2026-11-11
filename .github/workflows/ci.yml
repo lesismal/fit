@@ -508,15 +508,31 @@ jobs:
             go.sum
             test/btinterop/go.sum
       - name: Install libtorrent
-        # A runner's DNS has failed for a minute or so mid-install; try again
-        # rather than fail the job on it.
+        # Runners' DNS has failed to resolve Ubuntu's mirrors for half an
+        # hour at a time (2026-11-11), and each lookup apt makes then waits
+        # 20s, so retrying alone ran past the job's timeout and the job was
+        # cancelled. When the mirror does not resolve, a public resolver is
+        # tried; each attempt is bounded, so the job fails within ~14 minutes
+        # with a clear error instead.
+        timeout-minutes: 15
         run: |
-          for i in 1 2 3 4; do
-            sudo apt-get -o Acquire::Retries=3 update &&
-              sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends python3-libtorrent && break
-            [ "$i" = 4 ] && exit 1
-            sleep 30
+          if ! getent hosts archive.ubuntu.com >/dev/null; then
+            echo "::warning::the runner's DNS does not resolve archive.ubuntu.com; trying 1.1.1.1 and 8.8.8.8"
+            printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf >/dev/null
+          fi
+          ok=
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update &&
+              timeout 120 sudo apt-get install -y --no-install-recommends python3-libtorrent; then
+              ok=1
+              break
+            fi
+            sleep 20
           done
+          if [ -z "$ok" ]; then
+            echo "::error::python3-libtorrent could not be installed from Ubuntu's mirrors (see apt's errors above)"
+            exit 1
+          fi
           python3 -c 'import libtorrent; print("libtorrent", libtorrent.__version__)'
       - name: go vet, go mod tidy -diff
         working-directory: test/btinterop
