@@ -7,7 +7,7 @@ API 网关。本路线图把 [nginx、Caddy、Traefik 对比](comparison.zh-CN.m
 每个里程碑交付什么、怎样算完成、建立在 fib 的哪些能力之上。
 
 fit 已完成所有里程碑（包括 1.0）的迭代，已完成的内容见 [开发进度](progress.zh-CN.md)。1.0 之后又加入了边缘代理之外的
-几条路线（[1.0 之后](#10-之后)）：控制台与加密的 store、llm 与 tunnel、WebRTC 已完成；P2P 和 VPN 正在进行。[开发计划](dev-plan.zh-CN.md) 把这些里程碑拆成了小迭代，
+几条路线（[1.0 之后](#10-之后)）：控制台与加密的 store、llm 与 tunnel、WebRTC、媒体、AI 助手、媒体库、集群管理、日志文件、地址的允许与拒绝名单、数据同步（两批连接器）和 BitTorrent 已完成；P2P 和 VPN 正在进行。[开发计划](dev-plan.zh-CN.md) 把这些里程碑拆成了小迭代，
 每个迭代的大小适合一次工作会话。里程碑的先后顺序是确定的，具体内容会随开发中的认识调整。
 文中刻意不写日期：里程碑在满足退出标准时结束，而不是按日历结束。
 
@@ -279,11 +279,15 @@ fit 可以作为反向代理和静态文件服务器使用。
 | [Agent 与 tunnel](dev-plan.zh-CN.md#agent-与-tunnel) | 配置中的角色：tunnel 的 hub、node 和 proxy，用于访问 NAT 后的服务；llm 的 hub、node 和 proxy（最初名为 agent），在多台机器间共享 AI 模型（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)） | 已完成（I105–I107） | `websocket`、QUIC、异步 HTTP 客户端 |
 | [WebRTC](dev-plan.zh-CN.md#webrtc) | `webrtc.turn`，基于 UDP、TCP 和 TLS 的 TURN 服务器；`whip` 和 `whep` 处理器，fit 作为 SFU；`webrtc_proxy` 处理器，把 WHIP 和 WHEP 代理到媒体服务器，UDP 按 ICE ufrag 路由（[决定 029](decisions/029-webrtc.zh-CN.md)、[WebRTC](webrtc.zh-CN.md)） | 已完成（I87、I108–I111） | `webrtc`、`webrtc/turn/turnserver` |
 | [媒体](dev-plan.zh-CN.md#媒体认证流媒体与页面) | 所有接收媒体的协议共用的 `media_auth` 策略，`whip`、`whep` 和 `webrtc_proxy` 的 `auth`；流媒体角色（RTMP、RTSP、SRT、HTTP-FLV、HLS）；可开关麦克风和摄像头的媒体页面（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)） | 已完成（I115–I117） | `media/hub`、`media/rtc`、`webrtc` |
-| [AI 助手](dev-plan.zh-CN.md#workbench-中的-ai-助手) | workbench 中基于用户所设模型 API（Anthropic、OpenAI 及兼容、Gemini、Azure OpenAI、Ollama，或 fit 自身的 `llm.proxy`）的对话面板：覆盖配置、运行时、指标与日志的只读工具；把修改起草进 workbench 页面自己的编辑器与表单，或作为校验过的 diff 提出、由人应用——助手从不提交或保存，**保存并应用** 仍由人完成；内置与用户添加的 skill，按用户的级别与审计日志；基于同一套工具、向外部 agent 提供的 MCP 服务器，应用仍只在 workbench 中；媒体库与跨集群的工具和 skill（决定 031） | 已规划（I124–I130、I152–I154） | fib 的异步 HTTP 客户端 |
-| [媒体库](dev-plan.zh-CN.md#媒体库点播与频道) | 面向影视站：`media_library`，为目录中的媒体文件编目；`vod` 处理器，不转码、按关键帧切分的 HLS 点播；频道，把文件按排期作为直播流推入流媒体 hub，并转推到外部 RTMP 和 SRT 服务器；会过期的播放 URL，由影视站的 API 经 `media_tokens` 为某个观众、某部片子签发，传递到每个分片，带会话数上限和加密分片；以上全部功能的 workbench 页面：带预览的媒体库浏览、时间线上的频道、推流目标、测试 URL、密钥、当前会话与指标，以及文件上传与管理（决定 032） | 已规划（I131–I139） | `media/hub`、`media/hls`、`media/fmp4`、MP4 读取器（A64） |
-| [集群管理](dev-plan.zh-CN.md#集群管理) | 一个 fit 管理其他 fit：用管理员密码（或 Admin API token）添加成员，凭据加密保存在管理节点的 store 中；workbench 的 **集群** 菜单：所有成员的概览、从管理节点打开成员自己的页面、资源组与批量操作、组内共享并带变量的配置模板、逐成员预览、试运行校验后分批发布并带健康门槛和回滚、漂移与告警、按组的角色和审计日志、NAT 后成员主动连出；管理节点不在数据路径上（决定 033） | 已规划（I140–I150） | fib 的异步 HTTP 客户端、`websocket` |
+| [AI 助手](dev-plan.zh-CN.md#workbench-中的-ai-助手) | workbench 中基于用户所设模型 API（Anthropic、OpenAI 及兼容、Gemini、Azure OpenAI、Ollama，或 fit 自身的 `llm.proxy`）的对话面板：覆盖配置、运行时、指标与日志的只读工具；把修改起草进 workbench 页面自己的编辑器与表单，或作为校验过的 diff 提出、由人应用——助手从不提交或保存，**保存并应用** 仍由人完成；内置与用户添加的 skill，按用户的级别与审计日志；基于同一套工具、向外部 agent 提供的 MCP 服务器，应用仍只在 workbench 中；媒体库与跨集群的工具和 skill（决定 031） | 已完成（I124–I130、I152–I154） | fib 的异步 HTTP 客户端 |
+| [媒体库](dev-plan.zh-CN.md#媒体库点播与频道) | 面向影视站：`media_library`，为目录中的媒体文件编目；`vod` 处理器，不转码、按关键帧切分的 HLS 点播；频道，把文件按排期作为直播流推入流媒体 hub，并转推到外部 RTMP 和 SRT 服务器；会过期的播放 URL，由影视站的 API 经 `media_tokens` 为某个观众、某部片子签发，传递到每个分片，带会话数上限和加密分片；以上全部功能的 workbench 页面：带预览的媒体库浏览、时间线上的频道、推流目标、测试 URL、密钥、当前会话与指标，以及文件上传与管理（决定 032） | 已完成（I131–I139） | `media/hub`、`media/hls`、`media/fmp4`、MP4 读取器（A64） |
+| [集群管理](dev-plan.zh-CN.md#集群管理) | 一个 fit 管理其他 fit：用管理员密码（或 Admin API token）添加成员，凭据加密保存在管理节点的 store 中；workbench 的 **集群** 菜单：所有成员的概览、从管理节点打开成员自己的页面、资源组与批量操作、组内共享并带变量的配置模板、逐成员预览、试运行校验后分批发布并带健康门槛和回滚、漂移与告警、按组的角色和审计日志、NAT 后成员主动连出；管理节点不在数据路径上（决定 033） | 已完成（I140–I150、I153） | fib 的异步 HTTP 客户端、`websocket` |
 | [日志](dev-plan.zh-CN.md#日志文件切割与保留) | fit 自身日志与访问日志的文件输出：行的时间按各日志的 `time_zone` 写出（默认本地，可按配置设为 UTC 或 IANA 时区）；按大小或按时间（按该时区的边界，以先到者为准）切割并压缩，保留策略按最大时间、最大数量和最大总大小删除旧文件；每个路径一个受上限约束的写入器，不占用 fib 的 worker；workbench 的日志页面列出文件及其大小与时间、修改时区、切割与保留设置，并可立即切割或清理（决定 034） | 已完成（I155–I157） | — |
-| [数据同步](dev-plan.zh-CN.md#数据同步从生产者到消费者) | `sync`：从生产者（源）到消费者（目标）的流水线，如同 Filebeat、DataX、Canal 和 Debezium；每种基础设施既可作源也可作目标：文件行、MySQL、MariaDB 与 TiDB（binlog、TiCDC）、PostgreSQL（逻辑复制）、ClickHouse、Elasticsearch 与 OpenSearch、MongoDB（change stream）、Kafka、Redis、HTTP 和 S3；流式与批处理作业；源的位置（GTID、LSN、resume token、offset）只在每个目标都确认了此前的记录后才保存，重启从那里继续，且绝不落在事务中间；对幂等目标至少一次，对事务型目标恰好一次；内置变换，以及用于变换、编解码器和连接器的 WASM 插件；线协议在 fit 中自行实现，不用驱动；Admin API、`fit sync`、指标、死信和 workbench 的 Sync 页面（决定 036） | 已规划（I163–I194） | fib 的异步 HTTP 客户端 |
+| [数据同步](dev-plan.zh-CN.md#数据同步从生产者到消费者) | `sync`：从生产者（源）到消费者（目标）的管道，类似 Filebeat、DataX、Canal 和 Debezium。第一批（I163–I194）：文件行、MySQL、MariaDB 与 TiDB（binlog、TiCDC）、PostgreSQL（逻辑复制）、ClickHouse、Elasticsearch 与 OpenSearch、MongoDB（change streams）、Kafka、Redis、HTTP 与 S3。第二批（I211–I222）：RabbitMQ、NATS JetStream、Pulsar 与 MQTT；SQL Server（fit 自己实现的 TDS 客户端，CDC 与 change tracking，`MERGE` 目标，Entra ID、Kerberos 与 NTLM 登录）；Doris 与 StarRocks；Loki 与 OpenTelemetry 日志；InfluxDB 与 TDengine；Qdrant 与 Milvus，以及 `embed` 变换。流式与批处理作业；源的位置只在所有目标确认之前的记录后才保存，每条记录有稳定标识供去重的目标使用，冷表有只含位置的记录；幂等目标至少一次，事务目标精确一次；内置变换与 WASM 插件；线协议在 fit 中实现，不用驱动；Admin API、`fit sync`、指标、死信、workbench 的同步页面、CI 中的恢复矩阵，以及与常用工具对比的基准计划（[决定 036](decisions/036-sync.zh-CN.md)、[数据同步](sync.zh-CN.md)、[最新报告](../bench/results/sync-2026-11-11b/report.zh-CN.md)） | 已完成（I163–I194、I211–I222） | fib 的异步 HTTP 客户端 |
+| [Agent 与隧道（续）](dev-plan.zh-CN.md#agent-与隧道续) | 由 listener 签发、列出、过期与吊销的令牌，供 tunnel 和 LLM 网格代替共享密码（[决定 035](decisions/035-link-tokens.zh-CN.md)）；链路的 TLS 选项与地址分开；Admin API 与控制台的未认证连接有界；一个地址只对应一个服务器：配置中两部分使用同一地址与传输时拒绝 | 已完成（I159–I162） | — |
+| [性能](dev-plan.zh-CN.md#性能) | 不属于任何功能路线的吞吐与延迟工作：把 fib v1.7.1 的 HTTP/2 请求检查做到尽量便宜 | 已完成（I158） | fib 的 HTTP/2 服务器 |
+| [访问控制](dev-plan.zh-CN.md#访问控制) | 客户端地址的允许与拒绝名单（白名单与黑名单）：全局的 `access`，以及每个 listener、路由、service 和角色自己的、优先判断的名单；能在 accept 时拒绝的就在 accept 时拒绝，名单文件被监视；`.p2p` 与 `.dat` 屏蔽列表（[配置](configuration.zh-CN.md)） | 已完成（I195） | `Binding.Filter`（A73、A74） |
+| [BitTorrent](dev-plan.zh-CN.md#bittorrent下载与做种tracker发布) | `bittorrent.client`：在 fit 的引擎上下载与做种，恢复时不重新哈希，分类、队列、`alt_speed` 时间表、`watch_dir`、单任务限速；`bt_stream`，种子中的文件边下边经 HTTP Range 播放；`bittorrent.tracker`，基于 HTTP 与 UDP，私有 passkey、允许列表，集群可经 Redis 共享的存储；目录发布为带 web seed 的 hybrid 种子；RSS 自动下载；Admin API、事件流、`fit bt`、指标与 workbench 的 BitTorrent 页面；集群汇总成员的种子并经 BitTorrent 分发大文件（[决定 037](decisions/037-bittorrent.zh-CN.md)、[BitTorrent](bittorrent.zh-CN.md)） | 已完成（I196–I210） | `bittorrent`（客户端、tracker、uTP、DHT） |
 | [P2P 与 NAT 穿透](dev-plan.zh-CN.md#p2p-与-nat-穿透) | NAT 后的两台主机通过 ICE 直接相连，或经 TURN 中继相连，承载 TCP 和 UDP 服务（[决定 025](decisions/025-p2p.zh-CN.md)） | 进行中：STUN 消息和 STUN 服务器（`p2p/stun`，I84，尚未进入配置的库）和 fib 中的 A49（I85）已完成；STUN 和 TURN 客户端、ICE、隧道和配置待做（I86、I88–I93） | `webrtc/stun`、`webrtc/turn`、`webrtc/ice` |
 | [VPN](dev-plan.zh-CN.md#vpnfit-节点组成的网络) | 节点组成一个覆盖网络，各有一个 TUN 接口，IP 包直接或经中继发送（[决定 026](decisions/026-vpn.zh-CN.md)） | 进行中：IP 包和覆盖网络路由表（`vpn/packet`，I94，尚未进入配置的库）已完成；TUN 设备、中继、协调器和节点待做（I95–I103） | — |
 
@@ -337,6 +341,17 @@ fit 可以作为反向代理和静态文件服务器使用。
 | fit 日志与访问日志的文件：按大小和时间切割，按时间、数量和总大小清理 | 日志，I155–I156 | — |
 | 日志时间默认本地，可在配置中设为 UTC 或 IANA 时区 | 日志，I155–I156 | — |
 | workbench 的日志页面：文件、切割与保留设置、立即切割与立即清理 | 日志，I157 | — |
+| workbench 中的 AI 助手：只读工具，提议或起草修改但从不自行保存；技能；MCP 服务器 | AI 助手，I124–I130、I152–I154 | 异步 HTTP 客户端 |
+| 客户端地址的允许与拒绝名单，全局以及按 listener、路由、service 和角色 | 访问控制，I195 | `Binding.Filter` |
+| 从数据库的变更流（MySQL、PostgreSQL、MongoDB、SQL Server CDC）以及日志、队列和文件同步到数据库、搜索、队列、对象存储和 HTTP | 数据同步，I163–I194、I211–I222 | 异步 HTTP 客户端 |
+| 消息队列作为源与目标：Kafka、RabbitMQ、NATS JetStream、Pulsar、MQTT | 数据同步，I184–I185、I211–I214 | — |
+| 分析、日志、时序与向量存储作为目标：ClickHouse、Doris 与 StarRocks、Loki、OpenTelemetry 日志、InfluxDB、TDengine、Qdrant、Milvus | 数据同步，I170、I218–I221 | 异步 HTTP 客户端 |
+| 事务目标精确一次；其他目标借助稳定的记录 ID 至少一次 | 数据同步，I191、I213 | — |
+| 在 workbench 中创建、测试、试运行与监视同步管道 | 数据同步，I190 | — |
+| BitTorrent 客户端：下载与做种、分类、排队、时间表、RSS | BitTorrent，I197–I199、I208 | `bittorrent` |
+| 种子中的文件边下载边经 HTTP 播放 | BitTorrent，I200 | `bittorrent` |
+| 基于 HTTP 与 UDP 的 BitTorrent tracker，私有，存储可在集群中共享 | BitTorrent，I201、I207 | `bittorrent/tracker` |
+| 把目录发布为带 web seed 的种子 | BitTorrent，I202 | `bittorrent` |
 | STUN 服务器 | P2P，I84（库，尚未进入配置） | — |
 | VPN：IP 包和覆盖网络路由表 | VPN，I94（库，尚未进入配置） | — |
 
@@ -375,4 +390,4 @@ fit 可以作为反向代理和静态文件服务器使用。
   Proxy-Wasm ABI。已在 M5 定下：wazero，加上 fit 自己的 ABI 和 Proxy-Wasm 的一个子集
   （[决定 017](decisions/017-wasm-runtime.zh-CN.md)、[决定 018](decisions/018-proxy-wasm-subset.zh-CN.md)）。
 - **分布式状态。** 本路线图中限流和缓存都是单实例本地的。跨集群共享（Redis 或 gossip 协议）放到 1.0 之后，
-  除非用户更早需要。
+  除非用户更早需要。 BitTorrent tracker 的存储是第一个跨集群共享的：由集群成员经 Redis 共享（I207）。
