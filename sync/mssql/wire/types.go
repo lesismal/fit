@@ -1217,7 +1217,7 @@ func toInt(v any) (int64, bool) {
 	case int64:
 		return x, true
 	case uint:
-		return int64(x), x <= math.MaxInt64
+		return int64(x), uint64(x) <= math.MaxInt64
 	case uint8:
 		return int64(x), true
 	case uint16:

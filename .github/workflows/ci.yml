@@ -42,6 +42,15 @@ jobs:
             GOOS=$goos go vet ./...
             echo "::endgroup::"
           done
+      # The release builds these targets (scripts/dist.sh); 32-bit ones catch
+      # constants that overflow int or uint.
+      - name: Build every release target
+        run: |
+          for t in linux/amd64 linux/arm64 linux/arm linux/386 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64 freebsd/arm64; do
+            echo "::group::$t"
+            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} GOARM=7 go build ./...
+            echo "::endgroup::"
+          done
       - name: staticcheck
         run: |
           for goos in linux darwin windows; do
