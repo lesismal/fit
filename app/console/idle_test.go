@@ -232,3 +232,64 @@ func TestConsoleUnauthBoundFromOpen(t *testing.T) {
 		}
 	})
 }
+
+// TestConsoleUnauthBoundServing: an unauthenticated connection whose time
+// runs out while a request is being served (a login whose check is slow)
+// is not cut under it: the response comes, saying Connection: close, and
+// the connection closes after it. One whose request goes on past the grace
+// is closed anyway.
+func TestConsoleUnauthBoundServing(t *testing.T) {
+	const unauth, idle = 300 * time.Millisecond, 5 * time.Second
+	defer func(i, u time.Duration) { idleTimeout, unauthIdleTimeout = i, u }(idleTimeout, unauthIdleTimeout)
+	idleTimeout, unauthIdleTimeout = idle, unauth
+	stuck := make(chan struct{})
+	t.Cleanup(func() { close(stuck) })
+	o := options(t, discardLog(t), nil)
+	o.Endpoints = map[string]Handler{
+		// Answered unauth after it arrives, so past the connection's time.
+		"/slow": func(r *Request) {
+			r.Go(func() {
+				time.Sleep(unauth)
+				_ = r.JSON(200, "done")
+			})
+		},
+		// Not answered until the test ends.
+		"/stuck": func(r *Request) {
+			r.Go(func() {
+				<-stuck
+				_ = r.JSON(200, "done")
+			})
+		},
+	}
+	c, err := Start(newEngine(t), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Stop(t.Context()) })
+
+	t.Run("answered", func(t *testing.T) {
+		ic := dialIdle(t, c)
+		time.Sleep(unauth / 2)
+		resp := ic.do("GET", "/slow", "")
+		if resp.StatusCode != 200 || !resp.Close {
+			t.Fatalf("GET /slow: %d, Connection: close %v", resp.StatusCode, resp.Close)
+		}
+		ic.closesWithin(idle / 2)
+	})
+	t.Run("past the grace", func(t *testing.T) {
+		start := time.Now()
+		ic := dialIdle(t, c)
+		_ = ic.conn.SetDeadline(start.Add(idle))
+		if _, err := io.WriteString(ic.conn, "GET /stuck HTTP/1.1\r\nHost: test\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ic.r.ReadByte(); err == nil {
+			t.Fatal("an answer from /stuck")
+		} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			t.Fatalf("the connection is still open after %v", idle)
+		}
+		if held := time.Since(start); held < 2*unauth-50*time.Millisecond || held > idle/2 {
+			t.Errorf("closed after %v, not about %v", held, 2*unauth)
+		}
+	})
+}

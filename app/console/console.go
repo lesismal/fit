@@ -537,6 +537,7 @@ func (r *Request) JSON(status int, v any) error { return WriteJSON(r.Context, st
 
 // serve answers every request.
 func (c *Console) serve(ctx *fibhttp.Context) {
+	c.limit.begin(ctx)
 	h := ctx.Header()
 	h.Set("Content-Security-Policy", c.policy(ctx.Request))
 	h.Set("X-Content-Type-Options", "nosniff")
@@ -933,6 +934,7 @@ type limitHandler struct {
 
 // consoleConn is what a limitHandler keeps of one of its connections.
 type consoleConn struct {
+	conn *fib.Connection
 	// slot is the connection's count; it is authenticated while the
 	// connection's last request with a session, or its login, had a valid
 	// one (Console.authenticated).
@@ -940,14 +942,92 @@ type consoleConn struct {
 	// timer closes the connection unless it is authenticated by then; nil
 	// when the limitHandler's unauth is 0.
 	timer *time.Timer
+	// grace is how long the connection is kept past its time for the
+	// requests it is serving then: the limitHandler's unauth.
+	grace time.Duration
+
+	mu sync.Mutex
+	// busy counts the requests being served: begun, their response not
+	// yet sent.
+	busy int
+	// expired is set when the time ran out while the connection was busy:
+	// it closes as its last request is answered, or when the grace runs
+	// out, whichever is first.
+	expired bool
 }
 
 // expire closes the connection d from now unless it is authenticated by
 // then.
 func (cc *consoleConn) expire(d time.Duration) {
 	if cc.timer != nil {
+		cc.mu.Lock()
+		cc.expired = false
+		cc.mu.Unlock()
 		cc.timer.Reset(d)
 	}
+}
+
+// timeUp is the timer's: an unauthenticated connection is closed, but not
+// under a request being served, which would see its connection go with no
+// answer. Such a connection is closed as its requests are answered, and
+// the timer is set once more, for the grace, after which it closes anyway,
+// so that a client cannot keep it open by keeping a request going.
+func (cc *consoleConn) timeUp() {
+	if cc.slot.Authenticated() {
+		return
+	}
+	cc.mu.Lock()
+	if cc.busy > 0 && !cc.expired {
+		cc.expired = true
+		cc.timer.Reset(cc.grace)
+		cc.mu.Unlock()
+		return
+	}
+	cc.mu.Unlock()
+	_ = cc.conn.Close()
+}
+
+// closing reports whether the connection is to close once the response
+// being sent is: its time ran out while it was serving, and it has not
+// authenticated since.
+func (cc *consoleConn) closing() bool {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return cc.expired && !cc.slot.Authenticated()
+}
+
+// end is a request's, once its response has been sent: the last one on a
+// connection whose time ran out closes it.
+func (cc *consoleConn) end() {
+	cc.mu.Lock()
+	cc.busy--
+	last := cc.busy == 0 && cc.expired && !cc.slot.Authenticated()
+	cc.mu.Unlock()
+	if last {
+		cc.conn.CloseAfterSend()
+	}
+}
+
+// begin counts ctx's request as being served on its connection until its
+// response is sent. A response sent after the connection's time ran out
+// says Connection: close on HTTP/1, so that the client sends its next
+// request on another connection rather than on one about to close.
+func (l *limitHandler) begin(ctx *fibhttp.Context) {
+	cc := l.conn(ctx.Conn)
+	if cc == nil || cc.timer == nil {
+		return
+	}
+	cc.mu.Lock()
+	cc.busy++
+	cc.mu.Unlock()
+	if ctx.Request.ProtoMajor == 1 {
+		ctx.OnHeader(func(_ int, h stdhttp.Header) {
+			if cc.closing() {
+				h.Set("Connection", "close")
+			}
+		})
+	}
+	ctx.OnFinish(func(int, stdhttp.Header, int64) { cc.end() })
 }
 
 func newLimitHandler(h fib.Handler, max int, unauth time.Duration) *limitHandler {
@@ -988,13 +1068,12 @@ func (l *limitHandler) OnOpen(c *fib.Connection) {
 		_ = c.Close()
 		return
 	}
-	cc := &consoleConn{slot: slot}
+	cc := &consoleConn{conn: c, slot: slot, grace: l.unauth}
 	if l.unauth > 0 {
-		cc.timer = time.AfterFunc(l.unauth, func() {
-			if !slot.Authenticated() {
-				_ = c.Close()
-			}
-		})
+		// Under cc.mu, which timeUp takes before it reads the timer.
+		cc.mu.Lock()
+		cc.timer = time.AfterFunc(l.unauth, cc.timeUp)
+		cc.mu.Unlock()
 	}
 	l.conns[c] = cc
 	l.mu.Unlock()
