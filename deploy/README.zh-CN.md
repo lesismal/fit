@@ -34,7 +34,7 @@ docker run --rm -p 8080:8080 -v "$PWD/hello.conf:/etc/fit/fit.conf:ro" fit run -
 - **Docker provider** 读取属于 root 的 `/var/run/docker.sock`：以只读方式挂载并以 root 运行 fit（Compose
   示例的做法），或把 provider 的 `endpoint` 指向一个 socket 代理。
 - **多平台**：`docker buildx build --platform linux/amd64,linux/arm64 .` 在构建机自己的平台上交叉编译每个目标，
-  不需要模拟。`--build-arg VERSION=v1.0.0` 设置 `fit version` 打印的版本。
+  不需要模拟。`--build-arg VERSION=v1.1.0` 设置 `fit version` 打印的版本。
 
 打 `v<semver>` 标签会把 linux/amd64 和 linux/arm64 的镜像发布为 `ghcr.io/lesismal/fit:<version>` 和
 `:<major>.<minor>`（[release.yml](../.github/workflows/release.yml)）。

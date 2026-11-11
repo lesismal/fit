@@ -63,10 +63,10 @@ go install github.com/lesismal/fit/cmd/fit@latest
 ```
 
 ```bash
-go install github.com/lesismal/fit/cmd/fit@v1.0.0
+go install github.com/lesismal/fit/cmd/fit@v1.1.0
 ```
 
-`go get github.com/lesismal/fit@latest`（或 `@v1.0.0`）把 fit 加入你自己的模块，用作库，或者构建带插件的
+`go get github.com/lesismal/fit@latest`（或 `@v1.1.0`）把 fit 加入你自己的模块，用作库，或者构建带插件的
 fit（`fit build`）；它不安装命令。
 
 没有 Go 时，从 [GitHub Releases](https://github.com/lesismal/fit/releases) 下载预编译的二进制：

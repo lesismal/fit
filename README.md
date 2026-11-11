@@ -75,10 +75,10 @@ go install github.com/lesismal/fit/cmd/fit@latest
 ```
 
 ```bash
-go install github.com/lesismal/fit/cmd/fit@v1.0.0
+go install github.com/lesismal/fit/cmd/fit@v1.1.0
 ```
 
-`go get github.com/lesismal/fit@latest` (or `@v1.0.0`) adds fit to a module of your own, to use
+`go get github.com/lesismal/fit@latest` (or `@v1.1.0`) adds fit to a module of your own, to use
 it as a library or to build fit with plugins (`fit build`); it installs no command.
 
 Without Go, download a prebuilt binary from
