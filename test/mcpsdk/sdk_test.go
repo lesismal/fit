@@ -49,15 +49,40 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// freePort returns a loopback address no one listens on now.
+// handedOut is every address freePort returned: the probe listener is
+// closed before the address is used, so the kernel may give the same port
+// to the next probe.
+var handedOut struct {
+	sync.Mutex
+	addrs map[string]bool
+}
+
+// freePort returns a loopback address no one listens on now and that no
+// earlier call returned.
 func freePort(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 50 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := l.Addr().String()
+		_ = l.Close()
+		handedOut.Lock()
+		taken := handedOut.addrs[addr]
+		if !taken {
+			if handedOut.addrs == nil {
+				handedOut.addrs = make(map[string]bool)
+			}
+			handedOut.addrs[addr] = true
+		}
+		handedOut.Unlock()
+		if !taken {
+			return addr
+		}
 	}
-	defer l.Close()
-	return l.Addr().String()
+	t.Fatal("no free port")
+	return ""
 }
 
 // console is a fit with a console, logged in as ada.

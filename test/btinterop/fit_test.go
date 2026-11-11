@@ -52,8 +52,16 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// handedOut is every port freePort returned: the probe listener is closed
+// before the port is used, so the kernel may give the same port to the
+// next probe, and one fit would then be configured with two servers on it.
+var handedOut struct {
+	sync.Mutex
+	ports map[int]bool
+}
+
 // freePort returns a loopback port that TCP and UDP are both free on, as
-// far as can be told.
+// far as can be told, and that no earlier call returned.
 func freePort(t *testing.T) int {
 	t.Helper()
 	for range 50 {
@@ -64,8 +72,20 @@ func freePort(t *testing.T) int {
 		port := l.Addr().(*net.TCPAddr).Port
 		u, err := net.ListenPacket("udp4", "127.0.0.1:"+strconv.Itoa(port))
 		_ = l.Close()
-		if err == nil {
-			_ = u.Close()
+		if err != nil {
+			continue
+		}
+		_ = u.Close()
+		handedOut.Lock()
+		taken := handedOut.ports[port]
+		if !taken {
+			if handedOut.ports == nil {
+				handedOut.ports = make(map[int]bool)
+			}
+			handedOut.ports[port] = true
+		}
+		handedOut.Unlock()
+		if !taken {
 			return port
 		}
 	}
