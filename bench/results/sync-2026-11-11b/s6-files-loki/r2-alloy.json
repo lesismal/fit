@@ -1,0 +1,20 @@
+{
+  "mover": "alloy",
+  "scenario": "files-loki",
+  "variant": "s6-files-loki",
+  "records": 2000000,
+  "counted": 2000000,
+  "records_per_sec": 431638.37139730237,
+  "drain_seconds": 4.598557801,
+  "cpu_cores": 0.823656929826204,
+  "startup_seconds": 0.105596016,
+  "rss_peak_bytes": 135249920,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 742.772044,
+    "p99": 1343.824828,
+    "max": 1383.354653,
+    "mean": 732.6312535419994
+  }
+}

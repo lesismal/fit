@@ -1,0 +1,21 @@
+{
+  "mover": "telegraf",
+  "scenario": "mqtt-influxdb",
+  "variant": "s10-mqtt-influxdb",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 62530.73123841884,
+  "drain_seconds": 7.908111583,
+  "cpu_cores": 1.7974498527001879,
+  "startup_seconds": 3.222826119,
+  "write_seconds": 27.169805897,
+  "rss_peak_bytes": 55431168,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 268.550868,
+    "p99": 545.829613,
+    "max": 597.886255,
+    "mean": 268.46613378100005
+  }
+}

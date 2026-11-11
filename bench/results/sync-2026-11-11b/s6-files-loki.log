@@ -1,0 +1,20 @@
+22:32:24 s6-files-loki: movers fit,promtail,alloy, 3 rounds, 2000000 records; CPUs: mover 4,12,5,13,6,14,7,15, syncbench 2,10,3,11, servers 0,8,1,9
+22:32:24 s6-files-loki round 1: fit
+ "records_per_sec": 427931.68114547414, "cpu_cores": 0.4885783851401691, "rss_peak_bytes": 41709568, 
+22:33:10 s6-files-loki round 1: promtail
+ "records_per_sec": 200355.58734864817, "cpu_cores": 1.043646194602403, "rss_peak_bytes": 41816064, 
+22:34:08 s6-files-loki round 1: alloy
+ "records_per_sec": 431545.8252427178, "cpu_cores": 0.8470822372879003, "rss_peak_bytes": 135925760, 
+22:34:53 s6-files-loki round 2: alloy
+ "records_per_sec": 431638.37139730237, "cpu_cores": 0.823656929826204, "rss_peak_bytes": 135249920, 
+22:35:40 s6-files-loki round 2: promtail
+ "records_per_sec": 198340.91707908933, "cpu_cores": 1.0547092813179104, "rss_peak_bytes": 45654016, 
+22:36:38 s6-files-loki round 2: fit
+ "records_per_sec": 418937.1925687619, "cpu_cores": 0.48189163043199046, "rss_peak_bytes": 40689664, 
+22:37:24 s6-files-loki round 3: fit
+ "records_per_sec": 427864.7983545361, "cpu_cores": 0.4817261806478303, "rss_peak_bytes": 42115072, 
+22:38:10 s6-files-loki round 3: promtail
+ "records_per_sec": 200376.17447389127, "cpu_cores": 1.0581251430132352, "rss_peak_bytes": 45731840, 
+22:39:07 s6-files-loki round 3: alloy
+ "records_per_sec": 431619.04062627803, "cpu_cores": 0.8295048850579627, "rss_peak_bytes": 136925184, 
+22:39:54 s6-files-loki: /root/fitbench/sync4/bench/results/sync-2026-11-11b/s6-files-loki.json (0 runs failed)

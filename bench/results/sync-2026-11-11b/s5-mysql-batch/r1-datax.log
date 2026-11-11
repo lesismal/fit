@@ -1,0 +1,292 @@
+2026-11-10 22:30:13.143 [main] INFO  MessageSource - JVM TimeZone: GMT+08:00, Locale: zh_CN
+2026-11-10 22:30:13.144 [main] INFO  MessageSource - use Locale: zh_CN timeZone: sun.util.calendar.ZoneInfo[id="GMT+08:00",offset=28800000,dstSavings=0,useDaylight=false,transitions=0,lastRule=null]
+2026-11-10 22:30:13.156 [main] INFO  VMInfo - VMInfo# operatingSystem class => sun.management.OperatingSystemImpl
+2026-11-10 22:30:13.158 [main] INFO  Engine - the machine info  => 
+
+	osInfo:	Linux amd64 7.0.0-42-generic
+	jvmInfo:	Temurin 1.8 25.452-b09
+	cpu num:	8
+
+	totalPhysicalMemory:	-0.00G
+	freePhysicalMemory:	-0.00G
+	maxFileDescriptorCount:	-1
+	currentOpenFileDescriptorCount:	-1
+
+	GC Names	[PS MarkSweep, PS Scavenge]
+
+	MEMORY_NAME                    | allocation_size                | init_size                      
+	PS Eden Space                  | 256.00MB                       | 256.00MB                       
+	Code Cache                     | 240.00MB                       | 2.44MB                         
+	Compressed Class Space         | 1,024.00MB                     | 0.00MB                         
+	PS Survivor Space              | 42.50MB                        | 42.50MB                        
+	PS Old Gen                     | 683.00MB                       | 683.00MB                       
+	Metaspace                      | -0.00MB                        | 0.00MB                         
+
+
+2026-11-10 22:30:13.163 [main] INFO  Engine - 
+{
+	"setting":{
+		"speed":{
+			"channel":4
+		},
+		"errorLimit":{
+			"record":0
+		}
+	},
+	"content":[
+		{
+			"reader":{
+				"name":"mysqlreader",
+				"parameter":{
+					"username":"root",
+					"password":"***************",
+					"column":[
+						"id",
+						"k",
+						"c",
+						"pad"
+					],
+					"splitPk":"id",
+					"connection":[
+						{
+							"table":[
+								"items"
+							],
+							"jdbcUrl":[
+								"jdbc:mysql://mysql:3306/shop?useSSL=false"
+							]
+						}
+					]
+				}
+			},
+			"writer":{
+				"name":"mysqlwriter",
+				"parameter":{
+					"writeMode":"insert",
+					"username":"root",
+					"password":"***************",
+					"column":[
+						"id",
+						"k",
+						"c",
+						"pad"
+					],
+					"batchSize":1000,
+					"connection":[
+						{
+							"table":[
+								"items"
+							],
+							"jdbcUrl":"jdbc:mysql://mysql2:3306/shop?useSSL=false"
+						}
+					]
+				}
+			}
+		}
+	]
+}
+
+2026-11-10 22:30:13.170 [main] INFO  PerfTrace - PerfTrace traceId=job_-1, isEnable=false
+2026-11-10 22:30:13.170 [main] INFO  JobContainer - DataX jobContainer starts job.
+2026-11-10 22:30:13.171 [main] INFO  JobContainer - Set jobId = 0
+2026-11-10 22:30:13.306 [job-0] INFO  OriginalConfPretreatmentUtil - Available jdbcUrl:jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true.
+2026-11-10 22:30:13.309 [job-0] INFO  OriginalConfPretreatmentUtil - table:[items] has columns:[id,k,c,pad].
+2026-11-10 22:30:13.411 [job-0] INFO  OriginalConfPretreatmentUtil - table:[items] all columns:[
+id,k,c,pad
+].
+2026-11-10 22:30:13.415 [job-0] INFO  OriginalConfPretreatmentUtil - Write data [
+insert INTO %s (id,k,c,pad) VALUES(?,?,?,?)
+], which jdbcUrl like:[jdbc:mysql://mysql2:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&rewriteBatchedStatements=true&tinyInt1isBit=false]
+2026-11-10 22:30:13.415 [job-0] INFO  JobContainer - jobContainer starts to do prepare ...
+2026-11-10 22:30:13.415 [job-0] INFO  JobContainer - DataX Reader.Job [mysqlreader] do prepare work .
+2026-11-10 22:30:13.415 [job-0] INFO  JobContainer - DataX Writer.Job [mysqlwriter] do prepare work .
+2026-11-10 22:30:13.415 [job-0] INFO  JobContainer - jobContainer starts to do split ...
+2026-11-10 22:30:13.415 [job-0] INFO  JobContainer - Job set Channel-Number to 4 channels.
+2026-11-10 22:30:13.418 [job-0] INFO  SingleTableSplitUtil - split pk [sql=SELECT MIN(id),MAX(id) FROM items] is running... 
+2026-11-10 22:30:13.423 [job-0] INFO  SingleTableSplitUtil - After split(), allQuerySql=[
+select id,k,c,pad from items  where  (1 <= id AND id < 100001) 
+select id,k,c,pad from items  where  (100001 <= id AND id < 200001) 
+select id,k,c,pad from items  where  (200001 <= id AND id < 300001) 
+select id,k,c,pad from items  where  (300001 <= id AND id < 400001) 
+select id,k,c,pad from items  where  (400001 <= id AND id < 500001) 
+select id,k,c,pad from items  where  (500001 <= id AND id < 600001) 
+select id,k,c,pad from items  where  (600001 <= id AND id < 700001) 
+select id,k,c,pad from items  where  (700001 <= id AND id < 800001) 
+select id,k,c,pad from items  where  (800001 <= id AND id < 900001) 
+select id,k,c,pad from items  where  (900001 <= id AND id < 1000001) 
+select id,k,c,pad from items  where  (1000001 <= id AND id < 1100001) 
+select id,k,c,pad from items  where  (1100001 <= id AND id < 1200001) 
+select id,k,c,pad from items  where  (1200001 <= id AND id < 1300001) 
+select id,k,c,pad from items  where  (1300001 <= id AND id < 1400001) 
+select id,k,c,pad from items  where  (1400001 <= id AND id < 1500001) 
+select id,k,c,pad from items  where  (1500001 <= id AND id < 1600001) 
+select id,k,c,pad from items  where  (1600001 <= id AND id < 1700001) 
+select id,k,c,pad from items  where  (1700001 <= id AND id < 1800001) 
+select id,k,c,pad from items  where  (1800001 <= id AND id < 1900001) 
+select id,k,c,pad from items  where  (1900001 <= id AND id <= 2000000) 
+select id,k,c,pad from items  where  id IS NULL
+].
+2026-11-10 22:30:13.423 [job-0] INFO  JobContainer - DataX Reader.Job [mysqlreader] splits to [21] tasks.
+2026-11-10 22:30:13.424 [job-0] INFO  JobContainer - DataX Writer.Job [mysqlwriter] splits to [21] tasks.
+2026-11-10 22:30:13.437 [job-0] INFO  JobContainer - jobContainer starts to do schedule ...
+2026-11-10 22:30:13.441 [job-0] INFO  JobContainer - Scheduler starts [1] taskGroups.
+2026-11-10 22:30:13.442 [job-0] INFO  JobContainer - Running by standalone Mode.
+2026-11-10 22:30:13.445 [taskGroup-0] INFO  TaskGroupContainer - taskGroupId=[0] start [4] channels for [21] tasks.
+2026-11-10 22:30:13.446 [taskGroup-0] INFO  Channel - Channel set byte_speed_limit to -1, No bps activated.
+2026-11-10 22:30:13.447 [taskGroup-0] INFO  Channel - Channel set record_speed_limit to -1, No tps activated.
+2026-11-10 22:30:13.449 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[0] attemptCount[1] is started
+2026-11-10 22:30:13.451 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[1] attemptCount[1] is started
+2026-11-10 22:30:13.451 [0-0-0-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1 <= id AND id < 100001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:13.452 [0-0-1-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (100001 <= id AND id < 200001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:13.452 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[2] attemptCount[1] is started
+2026-11-10 22:30:13.452 [0-0-2-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (200001 <= id AND id < 300001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:13.453 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[3] attemptCount[1] is started
+2026-11-10 22:30:13.453 [0-0-3-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (300001 <= id AND id < 400001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:14.754 [0-0-0-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1 <= id AND id < 100001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:14.767 [0-0-2-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (200001 <= id AND id < 300001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:14.777 [0-0-3-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (300001 <= id AND id < 400001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:14.780 [0-0-1-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (100001 <= id AND id < 200001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:14.854 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[0] is successed, used[1405]ms
+2026-11-10 22:30:14.854 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[1] is successed, used[1404]ms
+2026-11-10 22:30:14.855 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[2] is successed, used[1404]ms
+2026-11-10 22:30:14.855 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[3] is successed, used[1402]ms
+2026-11-10 22:30:14.856 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[4] attemptCount[1] is started
+2026-11-10 22:30:14.856 [0-0-4-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (400001 <= id AND id < 500001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:14.856 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[5] attemptCount[1] is started
+2026-11-10 22:30:14.857 [0-0-5-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (500001 <= id AND id < 600001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:14.857 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[6] attemptCount[1] is started
+2026-11-10 22:30:14.858 [0-0-6-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (600001 <= id AND id < 700001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:14.859 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[7] attemptCount[1] is started
+2026-11-10 22:30:14.859 [0-0-7-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (700001 <= id AND id < 800001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:16.448 [0-0-4-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (400001 <= id AND id < 500001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:16.461 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[4] is successed, used[1606]ms
+2026-11-10 22:30:16.461 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[8] attemptCount[1] is started
+2026-11-10 22:30:16.461 [0-0-8-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (800001 <= id AND id < 900001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:16.502 [0-0-7-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (700001 <= id AND id < 800001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:16.526 [0-0-5-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (500001 <= id AND id < 600001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:16.528 [0-0-6-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (600001 <= id AND id < 700001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:16.561 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[5] is successed, used[1705]ms
+2026-11-10 22:30:16.561 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[6] is successed, used[1704]ms
+2026-11-10 22:30:16.561 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[7] is successed, used[1703]ms
+2026-11-10 22:30:16.562 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[9] attemptCount[1] is started
+2026-11-10 22:30:16.562 [0-0-9-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (900001 <= id AND id < 1000001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:16.563 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[10] attemptCount[1] is started
+2026-11-10 22:30:16.563 [0-0-10-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1000001 <= id AND id < 1100001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:16.563 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[11] attemptCount[1] is started
+2026-11-10 22:30:16.563 [0-0-11-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1100001 <= id AND id < 1200001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:18.194 [0-0-8-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (800001 <= id AND id < 900001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:18.254 [0-0-9-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (900001 <= id AND id < 1000001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:18.256 [0-0-10-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1000001 <= id AND id < 1100001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:18.264 [0-0-11-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1100001 <= id AND id < 1200001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:18.265 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[8] is successed, used[1804]ms
+2026-11-10 22:30:18.265 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[9] is successed, used[1703]ms
+2026-11-10 22:30:18.266 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[12] attemptCount[1] is started
+2026-11-10 22:30:18.266 [0-0-12-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1200001 <= id AND id < 1300001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:18.266 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[13] attemptCount[1] is started
+2026-11-10 22:30:18.266 [0-0-13-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1300001 <= id AND id < 1400001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:18.366 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[10] is successed, used[1803]ms
+2026-11-10 22:30:18.367 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[11] is successed, used[1804]ms
+2026-11-10 22:30:18.367 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[14] attemptCount[1] is started
+2026-11-10 22:30:18.367 [0-0-14-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1400001 <= id AND id < 1500001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:18.368 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[15] attemptCount[1] is started
+2026-11-10 22:30:18.368 [0-0-15-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1500001 <= id AND id < 1600001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:19.860 [0-0-12-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1200001 <= id AND id < 1300001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:19.948 [0-0-13-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1300001 <= id AND id < 1400001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:19.968 [0-0-14-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1400001 <= id AND id < 1500001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:19.970 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[12] is successed, used[1704]ms
+2026-11-10 22:30:19.970 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[13] is successed, used[1704]ms
+2026-11-10 22:30:19.971 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[16] attemptCount[1] is started
+2026-11-10 22:30:19.971 [0-0-16-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1600001 <= id AND id < 1700001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:19.971 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[17] attemptCount[1] is started
+2026-11-10 22:30:19.971 [0-0-17-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1700001 <= id AND id < 1800001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:20.007 [0-0-15-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1500001 <= id AND id < 1600001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:20.071 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[14] is successed, used[1704]ms
+2026-11-10 22:30:20.071 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[15] is successed, used[1703]ms
+2026-11-10 22:30:20.072 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[18] attemptCount[1] is started
+2026-11-10 22:30:20.072 [0-0-18-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1800001 <= id AND id < 1900001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:20.073 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[19] attemptCount[1] is started
+2026-11-10 22:30:20.073 [0-0-19-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  (1900001 <= id AND id <= 2000000) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:21.571 [0-0-16-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1600001 <= id AND id < 1700001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:21.583 [0-0-17-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1700001 <= id AND id < 1800001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:21.652 [0-0-18-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1800001 <= id AND id < 1900001) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:21.674 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[16] is successed, used[1703]ms
+2026-11-10 22:30:21.674 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[17] is successed, used[1703]ms
+2026-11-10 22:30:21.674 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[18] is successed, used[1602]ms
+2026-11-10 22:30:21.675 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[20] attemptCount[1] is started
+2026-11-10 22:30:21.675 [0-0-20-reader] INFO  CommonRdbmsReader$Task - Begin to read record by Sql: [select id,k,c,pad from items  where  id IS NULL
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:21.677 [0-0-20-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  id IS NULL
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:21.693 [0-0-19-reader] INFO  CommonRdbmsReader$Task - Finished read record by Sql: [select id,k,c,pad from items  where  (1900001 <= id AND id <= 2000000) 
+] jdbcUrl:[jdbc:mysql://mysql:3306/shop?useSSL=false&yearIsDateType=false&zeroDateTimeBehavior=convertToNull&tinyInt1isBit=false&rewriteBatchedStatements=true].
+2026-11-10 22:30:21.775 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[19] is successed, used[1702]ms
+2026-11-10 22:30:21.776 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] taskId[20] is successed, used[101]ms
+2026-11-10 22:30:21.776 [taskGroup-0] INFO  TaskGroupContainer - taskGroup[0] completed it's tasks.
+2026-11-10 22:30:23.451 [job-0] INFO  StandAloneJobContainerCommunicator - Total 2000000 records, 384666687 bytes | Speed 36.68MB/s, 200000 records/s | Error 0 records, 0 bytes |  All Task WaitWriterTime 29.921s |  All Task WaitReaderTime 0.803s | Percentage 100.00%
+2026-11-10 22:30:23.451 [job-0] INFO  AbstractScheduler - Scheduler accomplished all tasks.
+2026-11-10 22:30:23.451 [job-0] INFO  JobContainer - DataX Writer.Job [mysqlwriter] do post work.
+2026-11-10 22:30:23.451 [job-0] INFO  JobContainer - DataX Reader.Job [mysqlreader] do post work.
+2026-11-10 22:30:23.451 [job-0] INFO  JobContainer - DataX jobId [0] completed successfully.
+2026-11-10 22:30:23.451 [job-0] INFO  HookInvoker - No hook invoked, because base dir not exists or is a file: /opt/datax/hook
+2026-11-10 22:30:23.452 [job-0] INFO  JobContainer - 
+	 [total cpu info] => 
+		averageCpu                     | maxDeltaCpu                    | minDeltaCpu                    
+		-1.00%                         | -1.00%                         | -1.00%
+                        
+
+	 [total gc info] => 
+		 NAME                 | totalGCCount       | maxDeltaGCCount    | minDeltaGCCount    | totalGCTime        | maxDeltaGCTime     | minDeltaGCTime     
+		 PS MarkSweep         | 1                  | 1                  | 1                  | 0.012s             | 0.012s             | 0.012s             
+		 PS Scavenge          | 34                 | 34                 | 34                 | 0.043s             | 0.043s             | 0.043s             
+
+2026-11-10 22:30:23.452 [job-0] INFO  JobContainer - PerfTrace not enable!
+2026-11-10 22:30:23.452 [job-0] INFO  StandAloneJobContainerCommunicator - Total 2000000 records, 384666687 bytes | Speed 36.68MB/s, 200000 records/s | Error 0 records, 0 bytes |  All Task WaitWriterTime 29.921s |  All Task WaitReaderTime 0.803s | Percentage 100.00%
+2026-11-10 22:30:23.452 [job-0] INFO  JobContainer - 
+任务启动时刻                    : 2026-11-11 06:30:13
+任务结束时刻                    : 2026-11-11 06:30:23
+任务总计耗时                    :                 10s
+任务平均流量                    :           36.68MB/s
+记录写入速度                    :         200000rec/s
+读出记录总数                    :             2000000
+读写失败总数                    :                   0
+
+datax exited 0

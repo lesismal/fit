@@ -1,0 +1,21 @@
+{
+  "mover": "canal",
+  "scenario": "mysql-kafka",
+  "variant": "s3-mysql-kafka",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 84816.20700834166,
+  "drain_seconds": 5.894722455,
+  "cpu_cores": 3.3563527631768713,
+  "startup_seconds": 2.463176904,
+  "write_seconds": 10.534817105,
+  "rss_peak_bytes": 1273495552,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 79.796734,
+    "p99": 120.893926,
+    "max": 121.991947,
+    "mean": 77.62028494099997
+  }
+}

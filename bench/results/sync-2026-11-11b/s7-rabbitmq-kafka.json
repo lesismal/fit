@@ -1,0 +1,224 @@
+{
+  "kind": "sync",
+  "name": "s7-rabbitmq-kafka",
+  "finished": "2026-11-10T22:44:16.722796724Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-42-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "28ce0b65",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "500000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "kafka": "apache/kafka:3.9.1",
+    "kafka-connect": "fit-syncbench/connect-camel:3.0.8-4.14.5",
+    "rabbitmq": "rabbitmq:4.1.4"
+  },
+  "results": [
+    {
+      "mover": "fit",
+      "scenario": "rabbitmq-kafka",
+      "variant": "s7-rabbitmq-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 139680.85413947664,
+      "drain_seconds": 3.500837699,
+      "cpu_cores": 1.3400195619865554,
+      "startup_seconds": 2.855975657,
+      "write_seconds": 4.620999483,
+      "rss_peak_bytes": 18677760,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 159.469028,
+        "p99": 299.599316,
+        "max": 300.786271,
+        "mean": 163.16349179099984
+      },
+      "profiles": [
+        "fit-s7-rabbitmq-kafka-cpu.pprof",
+        "fit-s7-rabbitmq-kafka-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.26473571792718303
+    },
+    {
+      "mover": "kafka-connect",
+      "scenario": "rabbitmq-kafka",
+      "variant": "s7-rabbitmq-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 54835.15946613988,
+      "drain_seconds": 9.100000891,
+      "cpu_cores": 2.038054196054254,
+      "startup_seconds": 2.4444356210000002,
+      "write_seconds": 4.584876418,
+      "rss_peak_bytes": 609116160,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 258.97531,
+        "p99": 499.558368,
+        "max": 500.370519,
+        "mean": 259.10388288700017
+      },
+      "rounds": 3,
+      "spread": 0.12138781624298127
+    }
+  ],
+  "runs": [
+    {
+      "mover": "fit",
+      "scenario": "rabbitmq-kafka",
+      "variant": "s7-rabbitmq-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 148477.04862553984,
+      "drain_seconds": 3.300173357,
+      "cpu_cores": 1.4214947193757372,
+      "startup_seconds": 2.853812628,
+      "write_seconds": 4.681972063,
+      "rss_peak_bytes": 17580032,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 159.547198,
+        "p99": 299.690275,
+        "max": 300.524724,
+        "mean": 163.20334021699983
+      },
+      "profiles": [
+        "fit-s7-rabbitmq-kafka-cpu.pprof",
+        "fit-s7-rabbitmq-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "kafka-connect",
+      "scenario": "rabbitmq-kafka",
+      "variant": "s7-rabbitmq-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 58635.24563709386,
+      "drain_seconds": 8.500211683,
+      "cpu_cores": 2.200231088056775,
+      "startup_seconds": 2.44424252,
+      "write_seconds": 4.527882653,
+      "rss_peak_bytes": 532692992,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 259.01222,
+        "p99": 499.463746,
+        "max": 500.606018,
+        "mean": 259.18709795200044
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "rabbitmq-kafka",
+      "variant": "s7-rabbitmq-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 139680.85413947664,
+      "drain_seconds": 3.500837699,
+      "cpu_cores": 1.3400195619865554,
+      "startup_seconds": 2.855975657,
+      "write_seconds": 4.620999483,
+      "rss_peak_bytes": 18677760,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 159.469028,
+        "p99": 299.599316,
+        "max": 300.786271,
+        "mean": 163.16349179099984
+      },
+      "profiles": [
+        "fit-s7-rabbitmq-kafka-cpu.pprof",
+        "fit-s7-rabbitmq-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "kafka-connect",
+      "scenario": "rabbitmq-kafka",
+      "variant": "s7-rabbitmq-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 51978.9253761635,
+      "drain_seconds": 9.600044564,
+      "cpu_cores": 1.9989146792048162,
+      "startup_seconds": 2.445031554,
+      "write_seconds": 4.602611087,
+      "rss_peak_bytes": 641441792,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 259.091138,
+        "p99": 499.392447,
+        "max": 500.159332,
+        "mean": 259.09855328200007
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "rabbitmq-kafka",
+      "variant": "s7-rabbitmq-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 111498.53742424336,
+      "drain_seconds": 4.399160844,
+      "cpu_cores": 1.1233453777304079,
+      "startup_seconds": 2.859023993,
+      "write_seconds": 4.676172172,
+      "rss_peak_bytes": 17473536,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 159.543253,
+        "p99": 299.585782,
+        "max": 300.078893,
+        "mean": 163.19598681499988
+      },
+      "profiles": [
+        "fit-s7-rabbitmq-kafka-cpu.pprof",
+        "fit-s7-rabbitmq-kafka-heap.pprof"
+      ]
+    },
+    {
+      "mover": "kafka-connect",
+      "scenario": "rabbitmq-kafka",
+      "variant": "s7-rabbitmq-kafka",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 54835.15946613988,
+      "drain_seconds": 9.100000891,
+      "cpu_cores": 2.038054196054254,
+      "startup_seconds": 2.4444356210000002,
+      "write_seconds": 4.584876418,
+      "rss_peak_bytes": 609116160,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 258.97531,
+        "p99": 499.558368,
+        "max": 500.370519,
+        "mean": 259.10388288700017
+      }
+    }
+  ]
+}

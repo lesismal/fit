@@ -1,0 +1,224 @@
+{
+  "kind": "sync",
+  "name": "s10-mqtt-influxdb",
+  "finished": "2026-11-11T00:35:14.95130371Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-42-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "28ce0b65",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "500000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "base": "ubuntu:24.04",
+    "influxdb": "influxdb:2.7.12",
+    "mosquitto": "eclipse-mosquitto:2.0.22",
+    "telegraf": "telegraf:1.40.3"
+  },
+  "results": [
+    {
+      "mover": "fit",
+      "scenario": "mqtt-influxdb",
+      "variant": "s10-mqtt-influxdb",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 83076.21518841857,
+      "drain_seconds": 5.9282912549999995,
+      "cpu_cores": 1.7554523811937779,
+      "startup_seconds": 2.095259109,
+      "write_seconds": 27.062219734,
+      "rss_peak_bytes": 18907136,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 273.744719,
+        "p99": 554.656141,
+        "max": 572.699126,
+        "mean": 278.0273897470002
+      },
+      "profiles": [
+        "fit-s10-mqtt-influxdb-cpu.pprof",
+        "fit-s10-mqtt-influxdb-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.016726707004346305
+    },
+    {
+      "mover": "telegraf",
+      "scenario": "mqtt-influxdb",
+      "variant": "s10-mqtt-influxdb",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 62463.075937338195,
+      "drain_seconds": 7.9086723249999995,
+      "cpu_cores": 1.797785066281653,
+      "startup_seconds": 2.103396047,
+      "write_seconds": 26.793543354,
+      "rss_peak_bytes": 55459840,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 281.814876,
+        "p99": 686.991193,
+        "max": 1103.000524,
+        "mean": 284.51453199199983
+      },
+      "rounds": 3,
+      "spread": 0.0013711366158104968
+    }
+  ],
+  "runs": [
+    {
+      "mover": "fit",
+      "scenario": "mqtt-influxdb",
+      "variant": "s10-mqtt-influxdb",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 81933.22123919296,
+      "drain_seconds": 6.010992764,
+      "cpu_cores": 1.7336555556033273,
+      "startup_seconds": 2.095545132,
+      "write_seconds": 26.97329777,
+      "rss_peak_bytes": 18468864,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 277.41752,
+        "p99": 550.525931,
+        "max": 566.470268,
+        "mean": 277.8763613500003
+      },
+      "profiles": [
+        "fit-s10-mqtt-influxdb-cpu.pprof",
+        "fit-s10-mqtt-influxdb-heap.pprof"
+      ]
+    },
+    {
+      "mover": "telegraf",
+      "scenario": "mqtt-influxdb",
+      "variant": "s10-mqtt-influxdb",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 62530.73123841884,
+      "drain_seconds": 7.908111583,
+      "cpu_cores": 1.7974498527001879,
+      "startup_seconds": 3.222826119,
+      "write_seconds": 27.169805897,
+      "rss_peak_bytes": 55431168,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 268.550868,
+        "p99": 545.829613,
+        "max": 597.886255,
+        "mean": 268.46613378100005
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mqtt-influxdb",
+      "variant": "s10-mqtt-influxdb",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 83322.81274967967,
+      "drain_seconds": 5.9107462139999996,
+      "cpu_cores": 1.7641400294436664,
+      "startup_seconds": 2.097403488,
+      "write_seconds": 27.044169107,
+      "rss_peak_bytes": 18055168,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 283.939882,
+        "p99": 551.491767,
+        "max": 572.326399,
+        "mean": 284.30316611500007
+      },
+      "profiles": [
+        "fit-s10-mqtt-influxdb-cpu.pprof",
+        "fit-s10-mqtt-influxdb-heap.pprof"
+      ]
+    },
+    {
+      "mover": "telegraf",
+      "scenario": "mqtt-influxdb",
+      "variant": "s10-mqtt-influxdb",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 62445.085827865005,
+      "drain_seconds": 7.910950773,
+      "cpu_cores": 1.7964249061571047,
+      "startup_seconds": 2.105666037,
+      "write_seconds": 26.873560691,
+      "rss_peak_bytes": 54845440,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 270.932086,
+        "p99": 550.661092,
+        "max": 983.748662,
+        "mean": 268.23600524100004
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "mqtt-influxdb",
+      "variant": "s10-mqtt-influxdb",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 83076.21518841857,
+      "drain_seconds": 5.9282912549999995,
+      "cpu_cores": 1.7554523811937779,
+      "startup_seconds": 2.095259109,
+      "write_seconds": 27.062219734,
+      "rss_peak_bytes": 18907136,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 273.744719,
+        "p99": 554.656141,
+        "max": 572.699126,
+        "mean": 278.0273897470002
+      },
+      "profiles": [
+        "fit-s10-mqtt-influxdb-cpu.pprof",
+        "fit-s10-mqtt-influxdb-heap.pprof"
+      ]
+    },
+    {
+      "mover": "telegraf",
+      "scenario": "mqtt-influxdb",
+      "variant": "s10-mqtt-influxdb",
+      "records": 500000,
+      "counted": 500000,
+      "records_per_sec": 62463.075937338195,
+      "drain_seconds": 7.9086723249999995,
+      "cpu_cores": 1.797785066281653,
+      "startup_seconds": 2.103396047,
+      "write_seconds": 26.793543354,
+      "rss_peak_bytes": 55459840,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 281.814876,
+        "p99": 686.991193,
+        "max": 1103.000524,
+        "mean": 284.51453199199983
+      }
+    }
+  ]
+}

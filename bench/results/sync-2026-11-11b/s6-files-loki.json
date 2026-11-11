@@ -1,0 +1,298 @@
+{
+  "kind": "sync",
+  "name": "s6-files-loki",
+  "finished": "2026-11-10T22:39:54.619478542Z",
+  "host": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": "16",
+    "docker": "29.1.3",
+    "kernel": "Linux 7.0.0-42-generic"
+  },
+  "params": {
+    "agent_cpus": "2,10,3,11",
+    "files": "1",
+    "fit": "28ce0b65",
+    "line_bytes": "128",
+    "mover_cpus": "4,12,5,13,6,14,7,15",
+    "pause": "1",
+    "records": "2000000",
+    "rounds": "3",
+    "server_cpus": "0,8,1,9",
+    "size": "full",
+    "steady_for": "20s",
+    "steady_rate": "2000",
+    "tx_rows": "10"
+  },
+  "images": {
+    "alloy": "grafana/alloy:v1.21.3",
+    "base": "ubuntu:24.04",
+    "loki": "grafana/loki:3.5.5",
+    "promtail": "grafana/promtail:3.5.5"
+  },
+  "results": [
+    {
+      "mover": "alloy",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 431619.04062627803,
+      "drain_seconds": 4.598763755,
+      "cpu_cores": 0.8295048850579627,
+      "startup_seconds": 0.105204469,
+      "rss_peak_bytes": 136925184,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 742.867199,
+        "p99": 1344.08546,
+        "max": 1383.221312,
+        "mean": 733.8711492050003
+      },
+      "rounds": 3,
+      "spread": 0.00021441629278049642
+    },
+    {
+      "mover": "fit",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 427864.7983545361,
+      "drain_seconds": 4.5984152179999995,
+      "cpu_cores": 0.4817261806478303,
+      "startup_seconds": 0.105468211,
+      "rss_peak_bytes": 42115072,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 303.52874,
+        "p99": 545.793274,
+        "max": 565.334012,
+        "mean": 305.6197289090003
+      },
+      "profiles": [
+        "fit-s6-files-loki-cpu.pprof",
+        "fit-s6-files-loki-heap.pprof"
+      ],
+      "rounds": 3,
+      "spread": 0.021021800838262168
+    },
+    {
+      "mover": "promtail",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 200355.58734864817,
+      "drain_seconds": 9.899838713,
+      "cpu_cores": 1.043646194602403,
+      "startup_seconds": 5.104307373,
+      "rss_peak_bytes": 41816064,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 783.322691,
+        "p99": 1384.329632,
+        "max": 1424.348131,
+        "mean": 773.9612248960003
+      },
+      "rounds": 3,
+      "spread": 0.010158226290242132
+    }
+  ],
+  "runs": [
+    {
+      "mover": "alloy",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 431545.8252427178,
+      "drain_seconds": 4.599543974,
+      "cpu_cores": 0.8470822372879003,
+      "startup_seconds": 0.104879405,
+      "rss_peak_bytes": 135925760,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 723.753183,
+        "p99": 1343.794838,
+        "max": 1383.629871,
+        "mean": 725.9470472920001
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 427931.68114547414,
+      "drain_seconds": 4.598864928,
+      "cpu_cores": 0.4885783851401691,
+      "startup_seconds": 0.105640263,
+      "rss_peak_bytes": 41709568,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 303.37054,
+        "p99": 543.740595,
+        "max": 564.217084,
+        "mean": 301.7819695340001
+      },
+      "profiles": [
+        "fit-s6-files-loki-cpu.pprof",
+        "fit-s6-files-loki-heap.pprof"
+      ]
+    },
+    {
+      "mover": "promtail",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 200355.58734864817,
+      "drain_seconds": 9.899838713,
+      "cpu_cores": 1.043646194602403,
+      "startup_seconds": 5.104307373,
+      "rss_peak_bytes": 41816064,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 783.322691,
+        "p99": 1384.329632,
+        "max": 1424.348131,
+        "mean": 773.9612248960003
+      }
+    },
+    {
+      "mover": "alloy",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 431638.37139730237,
+      "drain_seconds": 4.598557801,
+      "cpu_cores": 0.823656929826204,
+      "startup_seconds": 0.105596016,
+      "rss_peak_bytes": 135249920,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 742.772044,
+        "p99": 1343.824828,
+        "max": 1383.354653,
+        "mean": 732.6312535419994
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 418937.1925687619,
+      "drain_seconds": 4.698795034,
+      "cpu_cores": 0.48189163043199046,
+      "startup_seconds": 0.104876795,
+      "rss_peak_bytes": 40689664,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 402.624581,
+        "p99": 563.560154,
+        "max": 565.120304,
+        "mean": 386.9927735760004
+      },
+      "profiles": [
+        "fit-s6-files-loki-cpu.pprof",
+        "fit-s6-files-loki-heap.pprof"
+      ]
+    },
+    {
+      "mover": "promtail",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 198340.91707908933,
+      "drain_seconds": 10.000397443,
+      "cpu_cores": 1.0547092813179104,
+      "startup_seconds": 5.104361921,
+      "rss_peak_bytes": 45654016,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 783.301359,
+        "p99": 1383.892374,
+        "max": 1424.133533,
+        "mean": 772.3240121489995
+      }
+    },
+    {
+      "mover": "alloy",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 431619.04062627803,
+      "drain_seconds": 4.598763755,
+      "cpu_cores": 0.8295048850579627,
+      "startup_seconds": 0.105204469,
+      "rss_peak_bytes": 136925184,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 742.867199,
+        "p99": 1344.08546,
+        "max": 1383.221312,
+        "mean": 733.8711492050003
+      }
+    },
+    {
+      "mover": "fit",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 427864.7983545361,
+      "drain_seconds": 4.5984152179999995,
+      "cpu_cores": 0.4817261806478303,
+      "startup_seconds": 0.105468211,
+      "rss_peak_bytes": 42115072,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 303.52874,
+        "p99": 545.793274,
+        "max": 565.334012,
+        "mean": 305.6197289090003
+      },
+      "profiles": [
+        "fit-s6-files-loki-cpu.pprof",
+        "fit-s6-files-loki-heap.pprof"
+      ]
+    },
+    {
+      "mover": "promtail",
+      "scenario": "files-loki",
+      "variant": "s6-files-loki",
+      "records": 2000000,
+      "counted": 2000000,
+      "records_per_sec": 200376.17447389127,
+      "drain_seconds": 9.89882158,
+      "cpu_cores": 1.0581251430132352,
+      "startup_seconds": 5.104857434,
+      "rss_peak_bytes": 45731840,
+      "lag_ms": {
+        "rate": 2000,
+        "samples": 1000,
+        "p50": 764.549677,
+        "p99": 1383.713756,
+        "max": 1424.07082,
+        "mean": 769.8103101949999
+      }
+    }
+  ]
+}

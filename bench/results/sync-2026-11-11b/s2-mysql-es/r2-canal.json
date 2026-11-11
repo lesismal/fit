@@ -1,0 +1,21 @@
+{
+  "mover": "canal",
+  "scenario": "mysql-es",
+  "variant": "s2-mysql-es",
+  "records": 500000,
+  "counted": 500000,
+  "records_per_sec": 16916.82728707273,
+  "drain_seconds": 29.200570037,
+  "cpu_cores": 0.5255597743658528,
+  "startup_seconds": 3.691583505,
+  "write_seconds": 10.90060933,
+  "rss_peak_bytes": 2502283264,
+  "lag_ms": {
+    "rate": 2000,
+    "samples": 1000,
+    "p50": 820.467957,
+    "p99": 1497.241287,
+    "max": 1580.025478,
+    "mean": 831.3899486129997
+  }
+}

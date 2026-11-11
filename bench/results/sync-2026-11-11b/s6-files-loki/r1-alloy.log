@@ -1,0 +1,25 @@
+ts=2026-11-10T22:34:25.60634954Z level=info msg="Alloy is starting"
+ts=2026-11-10T22:34:25.606424221Z level=info msg="boringcrypto enabled" enabled=false
+ts=2026-11-10T22:34:25.606555693Z level=info msg="memory is not limited, skipping" package=github.com/KimMachineGun/automemlimit/memlimit
+ts=2026-11-10T22:34:25.606578103Z level=info msg="no peer discovery configured: both join and discover peers are empty" service=cluster
+ts=2026-11-10T22:34:25.607178151Z level=info msg="starting complete graph evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da
+ts=2026-11-10T22:34:25.607205571Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=local.file_match.bench duration=23.21µs
+ts=2026-11-10T22:34:25.607209441Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=tracing duration=2.15µs
+ts=2026-11-10T22:34:25.607232332Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=remotecfg duration=21.811µs
+ts=2026-11-10T22:34:25.607237172Z level=info msg="applying non-TLS config to HTTP server" service=http
+ts=2026-11-10T22:34:25.607237842Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=http duration=4.03µs
+ts=2026-11-10T22:34:25.607240702Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=cluster duration=1.54µs
+ts=2026-11-10T22:34:25.607245132Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=otel duration=3.25µs
+ts=2026-11-10T22:34:25.607409254Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=loki.write.loki duration=162.692µs
+ts=2026-11-10T22:34:25.607538126Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=loki.source.file.bench duration=126.372µs
+ts=2026-11-10T22:34:25.607586206Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=logging duration=45.2µs
+ts=2026-11-10T22:34:25.607593056Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=livedebugging duration=3.96µs
+ts=2026-11-10T22:34:25.607599907Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=ui duration=1µs
+ts=2026-11-10T22:34:25.607606887Z level=info msg="finished node evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da node_id=labelstore duration=4.38µs
+ts=2026-11-10T22:34:25.607610207Z level=info msg="finished complete graph evaluation" controller_path=/ controller_id="" trace_id=5849aa9bc4e88ad9cefece9eefd385da duration=482.277µs
+ts=2026-11-10T22:34:25.607626397Z level=info msg="scheduling loaded components and services" controller_id=""
+ts=2026-11-10T22:34:25.607718748Z level=info msg="{^_^} Alloy is running"
+ts=2026-11-10T22:34:25.607716148Z level=info msg="starting cluster node" service=cluster peers_count=0 peers="" advertise_addr=127.0.0.1:12345 minimum_cluster_size=0 minimum_size_wait_timeout=0s
+ts=2026-11-10T22:34:25.607771739Z level=info msg="peers changed" service=cluster peers_count=1 min_cluster_size=0 peers=bf6eb71cd78f
+ts=2026-11-10T22:34:25.607894841Z level=info msg="start tailing file" component_path=/ component_id=loki.source.file.bench component=tailer path=/data/in/in-0.log
+ts=2026-11-10T22:34:25.608023702Z level=info msg="now listening for http traffic" service=http addr=127.0.0.1:12345
