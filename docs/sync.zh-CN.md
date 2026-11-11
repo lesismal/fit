@@ -630,7 +630,7 @@ sync {
 `mssql` 源经 SQL Server 的 CDC 变更表跟随 SQL Server 2016 及以后的版本（测试过 2019 与 2022），变更表由 SQL Server Agent
 的捕获作业从事务日志填充。`snapshot initial`（默认）时，没有检查点的流水线先读取 CDC 的最高 LSN，再按键读取各表的所有行，
 每次 `batch_size`（1000）行，数据库允许时每批在快照隔离的事务中读取（`ALLOW_SNAPSHOT_ISOLATION ON`），否则用读已提交；
-之后变更从那个 LSN 开始，因此快照期间的变更会再来一次，与 MySQL 源一样。追上之后每隔 `poll_interval`（1s）轮询变更表，
+之后变更从那个 LSN 开始，因此快照期间的变更会再来一次，与 MySQL 源一样。追上之后每隔 `poll_interval`（500ms）轮询变更表，
 每次最多 `window_transactions`（1000）个事务，每个事务的变更跨表按服务器产生的顺序一起交出：更新带有变更前后的行（键
 也可能改变），删除带有被删的行，CDC 记在 `cdc.ddl_history` 中的 DDL 作为 `ddl` 记录。检查点是所有目标都拿到的最后一个
 事务的 LSN。变更行超过 `window_rows`（10000）的窗口会缩小后重读，超过它的单个事务分页读取。记录的命名空间为

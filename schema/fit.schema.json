@@ -12131,8 +12131,8 @@
           "type": "string"
         },
         "poll_interval": {
-          "default": "1s",
-          "description": "How long the source waits, once it has read every change, before it looks again. 1s when left out or 0.",
+          "default": "500ms",
+          "description": "How long the source waits, once it has read every change, before it looks again. 500ms when left out or 0.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },

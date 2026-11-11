@@ -8083,10 +8083,10 @@
             // // integer, 0 to 100000; default 1000.
             // "batch_size": 1000,
 
-            // // How long the source waits, once it has read every change, before it looks again. 1s when
+            // // How long the source waits, once it has read every change, before it looks again. 500ms when
             // // left out or 0.
-            // // duration, as "1.5s" or "2m"; default "1s".
-            // "poll_interval": "1s",
+            // // duration, as "1.5s" or "2m"; default "500ms".
+            // "poll_interval": "500ms",
 
             // // With cdc, the most transactions read from the change tables at once. 1000 when left out or
             // // 0.

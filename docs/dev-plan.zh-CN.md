@@ -5653,6 +5653,9 @@ Oracle、Cassandra 与 ScyllaDB、DynamoDB、Iceberg、Snowflake 与 BigQuery、
     DDL），心跳时不交（空闲服务器的 binlog 不动）；`postgres` 在没有记录的事务结束时（其他表的，15 之前的服务器会发送）以及没有
     暂存流式事务时事务之间的 keepalive（15 及以后跳过空事务），只在运行起点之后。`postgres` 的复制槽本来就在事务之间被告知位置
     （`idle`），服务器不为其他表保留 WAL；只含位置的记录让检查点也跟上。
+17. **[2026-11-10 已裁定：500ms]** **`poll_interval` 默认 500ms**（Debezium 的默认值），而不是 1s：追上之后，SQL
+    Server 捕获作业（每秒一次）每运行一次，源就轮询变更表两次，两者的相对时机对延迟的影响变小（1s 时每个构建
+    九轮的 p99 在 1.4 到 2.4 秒之间）。代价：空闲时每秒两次轻量查询，而不是一次。
 
 ### I217 SQL Server 作为目标
 

@@ -26,7 +26,7 @@ func init() {
 const (
 	DefaultBatchSize          = 1000
 	MaxBatchSize              = 100000
-	DefaultPollInterval       = time.Second
+	DefaultPollInterval       = 500 * time.Millisecond
 	DefaultWindowTransactions = 1000
 	DefaultWindowRows         = 10000
 )
@@ -48,7 +48,7 @@ type Source struct {
 	Mode               string              `json:"mode,omitempty" enum:"cdc,change_tracking" default:"\"cdc\"" doc:"Where changes come from: cdc, the change tables, with whole rows before and after each change, every change in order; change_tracking, the keys changed since the last version, each row read back as it is then, an absent row a delete (lighter on the server, but changes between two polls are merged and rows have no before). cdc when left out."`
 	Snapshot           string              `json:"snapshot,omitempty" enum:"initial,always,never" default:"\"initial\"" doc:"Whether the tables' rows are read before the changes: initial, when the pipeline has no checkpoint; always, at every start of the source, unless its checkpoint is inside a snapshot, which it goes on with; never, the changes alone, from the checkpoint or from now. The position is read first and the changes start there, so what changes during the snapshot comes again. initial when left out."`
 	BatchSize          int                 `json:"batch_size,omitempty" min:"0" max:"100000" default:"1000" doc:"The rows a snapshot's query reads, by key, each in a transaction of its own. 1000 when left out or 0."`
-	PollInterval       config.Duration     `json:"poll_interval,omitempty" default:"\"1s\"" doc:"How long the source waits, once it has read every change, before it looks again. 1s when left out or 0."`
+	PollInterval       config.Duration     `json:"poll_interval,omitempty" default:"\"500ms\"" doc:"How long the source waits, once it has read every change, before it looks again. 500ms when left out or 0."`
 	WindowTransactions int                 `json:"window_transactions,omitempty" min:"0" max:"100000" default:"1000" doc:"With cdc, the most transactions read from the change tables at once. 1000 when left out or 0."`
 	WindowRows         int                 `json:"window_rows,omitempty" min:"0" max:"1000000" default:"10000" doc:"With cdc, the most changed rows held at once to put the change tables' rows in order: a window of transactions with more is read again smaller, and a single transaction with more is read in pages of this many. 10000 when left out or 0."`
 

@@ -7947,6 +7947,10 @@ packet ended the connection), will messages and UNSUBSCRIBE were not done; `test
     streamed transaction is spooled (15 and later skip empty transactions), only past the run's
     start. The `postgres` slot was already told the position between transactions (`idle`), so the
     server keeps no WAL for other tables; the position-only record makes the checkpoint follow.
+17. **[ruled 2026-11-10: 500ms]** **`poll_interval` defaults to 500ms**, Debezium's default, not 1s: once
+    caught up the source polls the change tables twice for each run of SQL Server's capture job (every
+    second), so where the two fall against each other moves the lag less (nine rounds a build ran a p99 of
+    1.4 to 2.4 s at 1s). The cost: two light queries a second while idle, not one.
 
 ### I217 SQL Server as a sink
 

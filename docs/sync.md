@@ -736,7 +736,7 @@ tables, which SQL Server Agent's capture job fills from the transaction log. Wit
 tables by key, `batch_size` (1000) at a time, each batch in a transaction of snapshot isolation when
 the database allows it (`ALLOW_SNAPSHOT_ISOLATION ON`), read committed otherwise; the changes then
 start at that LSN, so what changed during the snapshot comes again, as the MySQL source's does. The
-change tables are polled every `poll_interval` (1s) once caught up, up to `window_transactions`
+change tables are polled every `poll_interval` (500ms) once caught up, up to `window_transactions`
 (1000) transactions at a time, and the changes of each transaction are handed on together, in the
 order the server made them, across the tables: an update with its row before and after (a key
 changed too), a delete with the row it removed, a DDL that CDC recorded in `cdc.ddl_history` as a
