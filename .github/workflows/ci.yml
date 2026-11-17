@@ -1,11 +1,26 @@
 name: CI
 
+# CI runs only when asked, not on every push to main:
+#   - a tag v* (a release or a pre-release, v1.9.0-rc.1 too) runs every job;
+#   - a tag ci-* runs every job on the commit it names, which may be on any
+#     branch, with that commit's own workflow; ci-quick-* runs the quick set.
+#     scripts/ci.sh makes one, and keeps only the last ten;
+#   - by hand: gh workflow run ci.yml --ref main [-f scope=quick];
+#   - a pull request runs the quick set: lint, the build and the Linux tests.
+# The README's badges show the last run that was not a pull request's (the
+# badges job at the end).
 on:
   push:
-    branches: [main]
+    tags: ['v*', 'ci-*']
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      scope:
+        description: full runs every job; quick runs lint, the build and the Linux tests
+        type: choice
+        options: [full, quick]
+        default: full
 
 permissions:
   contents: read
@@ -64,7 +79,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -94,6 +109,9 @@ jobs:
   # `badges` branch, which the README badge reads.
   coverage:
     name: Coverage
+    outputs:
+      total: ${{ steps.cover.outputs.total }}
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -137,21 +155,6 @@ jobs:
             ${{ runner.temp }}/cover.out
             ${{ runner.temp }}/cover.txt
             ${{ runner.temp }}/coverage.html
-      - name: Publish the badge
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          TOTAL: ${{ steps.cover.outputs.total }}
-        run: |
-          color=$(awk -v t="$TOTAL" 'BEGIN{ if (t>=97) print "brightgreen"; else if (t>=95) print "green"; else if (t>=90) print "yellowgreen"; else if (t>=85) print "yellow"; else if (t>=80) print "orange"; else print "red" }')
-          mkdir "$RUNNER_TEMP/badges"
-          cd "$RUNNER_TEMP/badges"
-          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' "$TOTAL" "$color" > coverage.json
-          git init -q -b badges
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add coverage.json
-          git commit -q -m "coverage: ${TOTAL}%"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" badges
       # The floor the total may not fall below. Raise it as coverage rises;
       # never lower it to let a change in: add the tests instead.
       - name: Check the floor
@@ -169,6 +172,7 @@ jobs:
   # to be required, a missing binary fails the job rather than skipping it.
   m2-exit:
     name: M2 exit tests
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -192,6 +196,7 @@ jobs:
   # M3's exit criteria, a check of their own as M2's are.
   m3-exit:
     name: M3 exit tests
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -210,6 +215,7 @@ jobs:
   # the pods through a route to the node, as fit outside the cluster needs.
   kubernetes:
     name: Kubernetes e2e (kind)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -240,6 +246,7 @@ jobs:
   # 80 and 443, which fit may bind with CAP_NET_BIND_SERVICE.
   conformance:
     name: Gateway API conformance (kind)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -282,6 +289,7 @@ jobs:
   # built into it.
   examples:
     name: Examples (fit-examples)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -308,6 +316,7 @@ jobs:
   # dependencies: it builds this checkout's fit and runs it.
   mcp-sdk:
     name: MCP (official Go SDK)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -326,6 +335,7 @@ jobs:
   # FIT_WASM_GUESTS makes a missing one fail. The toolchains are pinned.
   wasm-guests:
     name: WASM guests (TinyGo, Rust)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     env:
       TINYGO_VERSION: 0.44.0
@@ -366,9 +376,10 @@ jobs:
   # on Kafka, with PostgreSQL 17;
   # matrix is I192's interoperability and recovery matrix, each source into
   # every sink through pipelines killed at random points, on one server of
-  # each kind (sync-matrix.yml runs it whole, nightly).
+  # each kind (sync-matrix.yml runs it whole, weekly).
   sync-interop:
     name: Sync interop (${{ matrix.label || matrix.family }})
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.minutes }}
     strategy:
@@ -408,6 +419,7 @@ jobs:
   # units, each run as deploy/README.md and the examples' READMEs say (I66).
   packaging:
     name: Packaging (image, Compose, systemd)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -429,6 +441,7 @@ jobs:
   # image built here, serving the Kubernetes example's Gateway and Ingress.
   helm:
     name: Helm chart and Kubernetes example (kind)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -453,6 +466,7 @@ jobs:
 
   fuzz:
     name: Fuzz (short)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -497,6 +511,7 @@ jobs:
   # tests is the benchmark host's (bench/bt.sh), only built here.
   bittorrent-interop:
     name: BitTorrent interop (anacrolix, libtorrent)
+    if: ${{ !(github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -545,3 +560,49 @@ jobs:
           CGO_ENABLED: '1'
           FIT_LIBTORRENT: '1'
         run: go test -race -count=1 -timeout 20m -v ./...
+
+  # The README's CI and coverage badges, shields.io endpoints read from the
+  # badges branch: they show the last run that was not a pull request's,
+  # whatever started it (a v* or ci-* tag, or a run by hand), on whatever
+  # commit. A quick run says so on the CI badge and leaves the coverage
+  # badge as it was, as the coverage job does not run in it. A cancelled
+  # run publishes nothing.
+  badges:
+    name: Badges
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    needs: [lint, test, coverage, m2-exit, m3-exit, kubernetes, conformance, examples, mcp-sdk, wasm-guests, sync-interop, packaging, helm, fuzz, bittorrent-interop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: badges
+      cancel-in-progress: false
+    steps:
+      - name: Publish
+        env:
+          FAILED: ${{ contains(needs.*.result, 'failure') }}
+          QUICK: ${{ (github.event_name == 'pull_request' || inputs.scope == 'quick' || startsWith(github.ref_name, 'ci-quick-')) }}
+          COVERAGE: ${{ needs.coverage.outputs.total }}
+          REF: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          url="https://x-access-token:${TOKEN}@github.com/${REPO}.git"
+          mkdir "$RUNNER_TEMP/badges"
+          cd "$RUNNER_TEMP/badges"
+          git init -q -b badges
+          if git fetch -q --depth 1 "$url" badges; then git checkout -q FETCH_HEAD -- .; fi
+          if [ "$FAILED" = true ]; then msg=failing color=red; else msg=passing color=brightgreen; fi
+          if [ "$QUICK" = true ]; then msg="$msg (quick)"; fi
+          printf '{"schemaVersion":1,"label":"CI","message":"%s","color":"%s"}\n' "$msg" "$color" > ci.json
+          if [ -n "$COVERAGE" ]; then
+            color=$(awk -v t="$COVERAGE" 'BEGIN{ if (t>=97) print "brightgreen"; else if (t>=95) print "green"; else if (t>=90) print "yellowgreen"; else if (t>=85) print "yellow"; else if (t>=80) print "orange"; else print "red" }')
+            printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' "$COVERAGE" "$color" > coverage.json
+          fi
+          git add -A
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "CI $msg${COVERAGE:+, coverage $COVERAGE%} at $REF ($GITHUB_SHA)"
+          git push -f "$url" HEAD:badges

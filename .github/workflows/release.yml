@@ -6,6 +6,8 @@ name: Release
 # It also builds fit's binaries for Linux, macOS, Windows and FreeBSD
 # (scripts/dist.sh) and attaches them to the tag's GitHub Release. Run by
 # hand, the workflow only builds the binaries, kept as a workflow artifact.
+# A tag with a pre-release part (v1.2.0-rc.1) makes a pre-release, and its
+# image is tagged with its version only, not <major>.<minor>.
 on:
   push:
     tags: ['v*']
@@ -55,7 +57,8 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
           else
-            gh release create "$TAG" dist/* --verify-tag --generate-notes
+            pre=; case "$TAG" in *-*) pre=--prerelease;; esac
+            gh release create "$TAG" dist/* --verify-tag --generate-notes $pre
           fi
 
   image:

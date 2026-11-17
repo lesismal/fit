@@ -1,6 +1,6 @@
 # fit
 
-[![CI](https://github.com/lesismal/fit/actions/workflows/ci.yml/badge.svg)](https://github.com/lesismal/fit/actions/workflows/ci.yml) [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Flesismal%2Ffit%2Fbadges%2Fcoverage.json)](https://github.com/lesismal/fit/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Flesismal%2Ffit%2Fbadges%2Fci.json)](https://github.com/lesismal/fit/actions/workflows/ci.yml) [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Flesismal%2Ffit%2Fbadges%2Fcoverage.json)](https://github.com/lesismal/fit/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 

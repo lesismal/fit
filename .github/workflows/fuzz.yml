@@ -1,12 +1,15 @@
-# Fuzzing on a schedule: each target for ten minutes a day, its corpus
-# carried from one run to the next in the Actions cache, beside the seed
-# corpus committed under each package's testdata/fuzz. A failing input is
-# kept as an artifact; add it to testdata/fuzz with the fix.
+# Fuzzing on a schedule: each target for ten minutes once a week (Sunday)
+# and on each release tag v*, its corpus carried from one run to the next
+# in the Actions cache, beside the seed corpus committed under each
+# package's testdata/fuzz. A failing input is kept as an artifact; add it
+# to testdata/fuzz with the fix.
 name: Fuzz
 
 on:
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "17 3 * * 0"
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       fuzztime:
