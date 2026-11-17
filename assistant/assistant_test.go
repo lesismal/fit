@@ -400,7 +400,9 @@ func TestProviderTest(t *testing.T) {
 // that leaves cancels its test's call, freeing its place.
 func TestProviderTestCancelled(t *testing.T) {
 	gone := make(chan struct{}, MaxTests+1)
+	arrived := make(chan struct{}, MaxTests+1)
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
 		select {
 		case <-r.Context().Done():
 			gone <- struct{}{}
@@ -416,9 +418,16 @@ func TestProviderTestCancelled(t *testing.T) {
 		wg.Add(1)
 		go func() { defer wg.Done(); f.doCtx(ctx, "POST", "/api/m/ai/providers/test", body) }()
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for len(f.a.tests) < MaxTests && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	// Every call has reached the API before any is cancelled: a test holds
+	// its place before its call goes out, so waiting for the places alone
+	// once cancelled a test whose call had not been made, and the API never
+	// saw it go (macOS CI, "the API did not see call 3 go").
+	for i := 0; i < MaxTests; i++ {
+		select {
+		case <-arrived:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("call %d did not reach the API", i)
+		}
 	}
 	if status, b := f.do("POST", "/api/m/ai/providers/test", body); status != 429 {
 		t.Fatalf("a test past the bound: %d %s", status, b)
@@ -432,7 +441,7 @@ func TestProviderTestCancelled(t *testing.T) {
 			t.Fatalf("the API did not see call %d go", i)
 		}
 	}
-	deadline = time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for len(f.a.tests) > 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
