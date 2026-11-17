@@ -190,9 +190,11 @@ func TestSinkFailsAtRefused(t *testing.T) {
 		return 0
 	}
 	err = s.Write(context.Background(), []*fitsync.Record{rec(fitsync.OpInsert, 1, "a"), rec(fitsync.OpInsert, 2, "b")})
-	if !errors.As(err, &be) || be.Index != 0 || fitsync.IsPermanent(err) || strings.Contains(err.Error(), "503") {
-		// Failed once in ~300 runs under load with "record 0 of the batch:
-		// ...: unexpected EOF"; each condition said, for the next time.
+	// The node's address is left out before looking for the item's 503: the
+	// error names it, and a port such as 34503 has "503" in it, which failed
+	// this test about once in 300 runs.
+	msg := strings.ReplaceAll(err.Error(), strings.TrimPrefix(url, "http://"), "")
+	if !errors.As(err, &be) || be.Index != 0 || fitsync.IsPermanent(err) || strings.Contains(msg, "503") {
 		t.Fatalf("sent again: %v (batch error %v, permanent %v)", err, errors.As(err, &be), fitsync.IsPermanent(err))
 	}
 }
