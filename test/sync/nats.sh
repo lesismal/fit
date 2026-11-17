@@ -79,19 +79,26 @@ EOF
 	eval "SERVERS_$v='$servers' CONTAINERS_$v='$containers'"
 done
 
-# Wait until each cluster's JetStream has a meta leader: the server's
-# healthz says so once JetStream is ready.
+# Wait until every node of each cluster is healthy: the full healthz, not
+# js-enabled-only, which said yes once node 1 had JetStream on, nor a meta
+# leader in node 1's log. A stream of three replicas needs all three nodes
+# in the meta group, and once (CI, 2.10) a cluster that passed the old
+# check refused every stream with "no suitable peers for placement".
 for v in $NATS_VERSIONS; do
 	i=0
-	until docker exec "${PREFIX}nats$v-1" wget -qO- 'http://127.0.0.1:8222/healthz?js-enabled-only=true' >/dev/null 2>&1 ||
-		docker logs "${PREFIX}nats$v-1" 2>&1 | grep -q 'JetStream cluster new metadata leader\|is the new metadata leader\|Self is new JetStream cluster metadata leader'; do
-		i=$((i + 1))
-		if [ $i -gt 60 ]; then
-			echo "NATS $v did not start:" >&2
-			docker logs --tail 50 "${PREFIX}nats$v-1" >&2
-			exit 1
-		fi
-		sleep 1
+	for n in 1 2 3; do
+		until docker exec "${PREFIX}nats$v-$n" wget -qO- 'http://127.0.0.1:8222/healthz' >/dev/null 2>&1; do
+			i=$((i + 1))
+			if [ $i -gt 120 ]; then
+				echo "NATS $v did not start:" >&2
+				for m in 1 2 3; do
+					echo "--- ${PREFIX}nats$v-$m" >&2
+					docker logs --tail 50 "${PREFIX}nats$v-$m" >&2
+				done
+				exit 1
+			fi
+			sleep 1
+		done
 	done
 done
 for v in $NATS_VERSIONS; do
