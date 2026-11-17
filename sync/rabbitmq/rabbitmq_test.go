@@ -408,8 +408,21 @@ func TestJob(t *testing.T) {
 		recs[0].Namespace != "own" || recs[1].Namespace != "q" || recs[2].Tx.ID != "" {
 		t.Fatalf("records %+v", recs)
 	}
+	// The delivery that made no record is acknowledged alone, at once; the
+	// others through the sinks, up to the last tag. The sinks acknowledge
+	// on goroutines of their own, so tag 1's may come before or after
+	// tag 2's: what is fixed is that 2 is acknowledged alone and 3 last.
 	acks := f.last().ackList()
-	if acks[0] != (fakeAck{2, false}) || acks[len(acks)-1] != (fakeAck{3, true}) {
+	alone := false
+	for _, a := range acks {
+		if a == (fakeAck{2, false}) {
+			alone = true
+		} else if !a.multiple {
+			alone = false
+			break
+		}
+	}
+	if !alone || acks[len(acks)-1] != (fakeAck{3, true}) {
 		t.Errorf("acks %v", acks)
 	}
 	// A job whose acknowledgements never come ends with ctx, or with the
