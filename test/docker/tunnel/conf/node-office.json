@@ -46,6 +46,10 @@
           "description": "web hub of dev-office"
         }
       ],
+      "remote_services": {
+        "enabled": true,
+        "allow": ["dev-office:*"]
+      },
       "meta": {
         "site": "office"
       },

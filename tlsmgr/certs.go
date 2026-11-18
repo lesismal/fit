@@ -87,16 +87,21 @@ func (c *Certs) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, er
 		// A CA checking a TLS-ALPN-01 challenge, which gets the challenge's
 		// certificate or nothing.
 		name := normalizeName(hello.ServerName)
-		if !c.names[name] && !c.onDemand {
+		listed := c.names[name]
+		if !listed && !c.onDemand {
 			return nil, errNoChallenge
 		}
 		if cert := c.acme.ALPNChallenge(name); cert != nil {
 			return cert, nil
 		}
-		// Another instance's challenge, from the shared storage; blocks,
-		// on fib's handshake pool, as on-demand TLS does.
-		if cert := c.acme.sharedALPNChallenge(name); cert != nil {
-			return cert, nil
+		// Another instance's challenge, from the shared storage, for a
+		// listed name or one on-demand TLS would take on, never for any
+		// name a client makes up; blocks, on fib's handshake pool, as
+		// on-demand TLS does.
+		if c.acme.Shared() && (listed || c.acme.challengeAllowed(name)) {
+			if cert := c.acme.sharedALPNChallenge(name); cert != nil {
+				return cert, nil
+			}
 		}
 		return nil, errNoChallenge
 	}

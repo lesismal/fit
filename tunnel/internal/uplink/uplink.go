@@ -1,6 +1,10 @@
 // Package uplink is a node's or proxy's connection to a tunnel hub: a
 // pool of links that keep dialing until they connect, register each time
-// they connect, and dial again once they lose the hub. The uplink pings
+// they connect, and dial again once they lose the hub. Each link opens
+// with package auth's handshake, in which the hub proves it knows the
+// password too: the uplink serves nothing of a link before its frames
+// are sealed with the keys the handshake made, and drops a link whose hub
+// does not prove the password. The uplink pings
 // the hub to measure the link, over the registered link the hub
 // numbered lowest. Each tunnel goes over one link of the pool throughout, so
 // its frames keep their order, and closes when that link loses the hub.
@@ -23,7 +27,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
-	"github.com/lesismal/fit/tunnel/internal/bodycrypt"
+	"github.com/lesismal/fit/tunnel/internal/auth"
 	"github.com/lesismal/fit/tunnel/internal/latency"
 	"github.com/lesismal/fit/tunnel/internal/link"
 	"github.com/lesismal/fit/tunnel/internal/proto"
@@ -85,7 +89,8 @@ type Status struct {
 	Tunnels int       `json:"tunnels"`
 	// RTT is the round trip to the hub, as the pings measure it.
 	RTT latency.Stats `json:"rtt"`
-	// BodyEncrypted reports whether frame bodies are encrypted.
+	// BodyEncrypted reports whether frame bodies are encrypted, as they
+	// always are now.
 	BodyEncrypted bool `json:"body_encrypted"`
 	// PoolSize is how many connections the uplink makes, Pool how many of
 	// them are registered now, and Places the places the hub gave those
@@ -135,12 +140,18 @@ type Uplink struct {
 	// OnPong, if set, gets the hub's answer to each ping.
 	OnPong func(*Uplink, *proto.PingRsp)
 
-	engine  *fib.Engine
-	log     *logs.Logger
-	info    func() proto.Info
-	router  *link.Router
-	coder   *bodycrypt.Coder
-	seq     atomic.Uint32
+	engine *fib.Engine
+	log    *logs.Logger
+	info   func() proto.Info
+	router *link.Router
+	seq    atomic.Uint32
+
+	// kmu serializes the derivations of the passwords' keys, and guards
+	// the last ones, under salt, which every link to the same hub takes.
+	kmu     sync.Mutex
+	salt    []byte
+	key     auth.Key
+	bodyKey auth.Key
 	rtt     latency.Meter
 	pinging atomic.Bool
 
@@ -162,15 +173,16 @@ type Uplink struct {
 // hub may call on it.
 func New(engine *fib.Engine, cfg *config.TunnelUplink, limit *tunnel.Limit, log *logs.Logger, info func() proto.Info, setup func(u *Uplink, r *link.Router)) *Uplink {
 	u := &Uplink{Name: cfg.HubName(), Config: cfg, Tunnels: tunnel.NewTable(limit), engine: engine, log: log, info: info, pool: map[*link.Link]string{}, conns: map[*link.Link]proto.RegisterRsp{}, state: StateConnecting, stop: make(chan struct{})}
-	if cfg.BodyPassword != "" {
-		coder, err := bodycrypt.New(cfg.BodyPassword)
-		if err != nil {
-			u.state, u.lastErr = StateFailed, err.Error()
-		}
-		u.coder = coder
-	}
 	r := link.NewRouter()
 	r.Log = log
+	// Nothing is served of a link before its handshake sealed it: what
+	// opens under its keys comes from a hub that knows the password.
+	r.Guard = func(l *link.Link, _ proto.Method) error {
+		if !l.Sealed() {
+			return errUnproven
+		}
+		return nil
+	}
 	u.Tunnels.Register(r)
 	r.HandleNotify(proto.MethodKick, func(_ *link.Link, body []byte) {
 		u.fail("kicked by the hub: "+string(body), true)
@@ -232,7 +244,7 @@ func (u *Uplink) dial() (*link.Link, error) {
 	for _, addr := range dials {
 		var l *link.Link
 		_, err := transport.Dial(u.engine, addr, u.Config.Dial(), func(c transport.Conn) transport.Handler {
-			l = link.New(c, u.router, u.coder)
+			l = link.New(c, u.router)
 			return l
 		})
 		shown, _, _ := strings.Cut(addr, "?")
@@ -263,18 +275,78 @@ func (u *Uplink) dial() (*link.Link, error) {
 // ErrStopped is the error of a dial of an uplink that stopped.
 var ErrStopped = errors.New("tunnel: uplink stopped")
 
+var (
+	errUnproven = errors.New("tunnel: the hub has not proven it knows the password")
+	errNoProof  = errors.New("tunnel: the hub did not prove it knows the password; is it the hub, and are the passwords the same?")
+)
+
+// keys is the keys of the passwords under salt, the hub's.
+func (u *Uplink) keys(salt []byte) (key, body auth.Key, err error) {
+	if len(salt) != auth.SaltLen {
+		return nil, nil, errors.New("tunnel: the hub sent a salt of the wrong size")
+	}
+	u.kmu.Lock()
+	defer u.kmu.Unlock()
+	if u.salt != nil && string(u.salt) == string(salt) {
+		return u.key, u.bodyKey, nil
+	}
+	if key, err = auth.Derive(u.Config.Password, salt); err != nil {
+		return nil, nil, err
+	}
+	if u.Config.BodyPassword != "" {
+		if body, err = auth.Derive(u.Config.BodyPassword, salt); err != nil {
+			return nil, nil, err
+		}
+	}
+	u.salt, u.key, u.bodyKey = append([]byte(nil), salt...), key, body
+	return key, body, nil
+}
+
+// handshake runs the handshake on l, which has just connected, and
+// registers: it returns what the hub answered once it proved it knows the
+// password.
+func (u *Uplink) handshake(l *link.Link) (*proto.RegisterRsp, error) {
+	info := u.info()
+	hello := auth.Hello{Version: auth.Version, Type: info.Type, Name: info.Name, Nonce: auth.Random(auth.NonceLen)}
+	var hrsp auth.HelloRsp
+	if err := l.Call(proto.MethodHello, &hello, &hrsp, u.Config.Call()); err != nil {
+		return nil, err
+	}
+	key, body, err := u.keys(hrsp.Salt)
+	if err != nil {
+		return nil, err
+	}
+	hs, err := auth.NewHandshake(&hello, &hrsp, key, body)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := hs.Session(false)
+	if err != nil {
+		return nil, err
+	}
+	l.Seal(sess)
+	req := proto.RegisterReq{Info: info, MAC: hs.PeerMAC()}
+	var rsp proto.RegisterRsp
+	if err := l.Call(proto.MethodRegister, &req, &rsp, u.Config.Call()); err != nil {
+		return nil, err
+	}
+	if !auth.Equal(rsp.Proof, hs.HubProof()) {
+		return nil, errNoProof
+	}
+	return &rsp, nil
+}
+
 // register authenticates and registers on l, which has just connected,
 // and closes it if that fails.
 func (u *Uplink) register(l *link.Link) {
-	req := proto.RegisterReq{Info: u.info()}
-	proto.Sign(&req, u.Config.Password)
-	var rsp proto.RegisterRsp
-	if err := l.Call(proto.MethodRegister, &req, &rsp, u.Config.Call()); err != nil {
+	r, err := u.handshake(l)
+	if err != nil {
 		u.fail("register: "+err.Error(), false)
 		u.log.Warnf("hub %s: registering failed: %v", u.Name, err)
 		_ = l.Close()
 		return
 	}
+	rsp := *r
 	u.mu.Lock()
 	if _, ok := u.pool[l]; u.stopped || !ok {
 		u.mu.Unlock()
@@ -477,7 +549,7 @@ func (u *Uplink) Status() Status {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	cfg := u.Config
-	st := Status{Name: u.Name, State: u.state, Error: u.lastErr, Hub: u.hub, Since: u.since, Tunnels: u.Tunnels.Len(), RTT: u.rtt.Stats(), BodyEncrypted: cfg.BodyPassword != "", PoolSize: cfg.Pool(), Places: []int{},
+	st := Status{Name: u.Name, State: u.state, Error: u.lastErr, Hub: u.hub, Since: u.since, Tunnels: u.Tunnels.Len(), RTT: u.rtt.Stats(), BodyEncrypted: true, PoolSize: cfg.Pool(), Places: []int{},
 		Links: []LinkStatus{}, Protos: map[string]int{}, Endpoints: []EndpointView{}, QUICPin: cfg.QUICPin, QUICInsecure: cfg.QUICInsecure, HasPassword: cfg.Password != "", HasBodyPassword: cfg.BodyPassword != ""}
 	for _, e := range cfg.Endpoints {
 		st.Endpoints = append(st.Endpoints, EndpointView{Protocol: e.Protocol(), Address: e.Address, Enabled: !e.Disabled})

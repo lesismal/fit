@@ -20,6 +20,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/tunnel/internal/auth"
 	"github.com/lesismal/fit/tunnel/internal/link"
 	"github.com/lesismal/fit/tunnel/internal/proto"
 	"github.com/lesismal/fit/tunnel/internal/transport"
@@ -37,6 +38,7 @@ func (hostRole) Apply(any) error      { return nil }
 func (hostRole) Stop(context.Context) {}
 
 func init() {
+	auth.Iterations = 1000
 	app.Register(app.Info{ID: "test.host", Member: func(*config.Config) any { return struct{}{} },
 		New: func(h *app.Host) (app.Role, error) { hosts <- h; return hostRole{}, nil }})
 }
@@ -175,8 +177,8 @@ func freeAddr(t *testing.T) string {
 	return l.Addr().String()
 }
 
-// hub is a tunnel hub that registers whatever links to it, and
-// hands the tests its links to call the node over.
+// hub is a tunnel hub that registers whatever links to it with its
+// password, and hands the tests its links to call the node over.
 type hub struct {
 	t     *testing.T
 	l     transport.Listener
@@ -189,14 +191,31 @@ type hub struct {
 	conn    uint32
 }
 
-func newHub(t *testing.T, e *fib.Engine) *hub {
+func newHub(t *testing.T, e *fib.Engine) *hub { return newHubWith(t, e, "pw") }
+
+// newHubWith is a hub whose password is password.
+func newHubWith(t *testing.T, e *fib.Engine, password string) *hub {
 	t.Helper()
 	s := &hub{t: t, links: make(chan *link.Link, 16), updates: make(chan proto.Info, 16)}
 	r := link.NewRouter()
+	salt := auth.Random(auth.SaltLen)
+	key, _ := auth.Derive(password, salt)
+	r.HandleCall(proto.MethodHello, func(l *link.Link, body []byte) (any, error) {
+		var h auth.Hello
+		if err := link.Decode(body, &h); err != nil {
+			return nil, err
+		}
+		rsp, hs, sess, err := auth.Answer(&h, salt, key, nil)
+		if err != nil {
+			return nil, err
+		}
+		l.SetValue(hs)
+		return link.Sealing{Reply: rsp, Session: sess}, nil
+	}, true)
 	r.HandleCall(proto.MethodRegister, func(l *link.Link, body []byte) (any, error) {
 		s.mu.Lock()
 		s.conn++
-		rsp := &proto.RegisterRsp{Peer: 1, Conn: s.conn, Hub: "fake"}
+		rsp := &proto.RegisterRsp{Peer: 1, Conn: s.conn, Hub: "fake", Proof: l.Value().(*auth.Handshake).HubProof()}
 		s.mu.Unlock()
 		select {
 		case s.links <- l:
@@ -224,7 +243,7 @@ func newHub(t *testing.T, e *fib.Engine) *hub {
 		r.HandleNotify(m, func(*link.Link, []byte) {}, true)
 	}
 	l, err := transport.Listen(e, "127.0.0.1:0", transport.ListenOptions{}, func(c transport.Conn) transport.Handler {
-		return link.New(c, r, nil)
+		return link.New(c, r)
 	})
 	if err != nil {
 		t.Fatal(err)

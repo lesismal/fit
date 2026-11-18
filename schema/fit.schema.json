@@ -691,11 +691,15 @@
       "additionalProperties": false,
       "properties": {
         "allow": {
-          "description": "The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out.",
+          "description": "The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out, save the local addresses allow_local is about.",
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "allow_local": {
+          "description": "Let the proxy connect to its own host and link: 127.0.0.0/8, 0.0.0.0/8, 169.254.0.0/16 (a cloud's metadata service at 169.254.169.254 among them), ::/96 (::, ::1 and the IPv4-compatible addresses), fe80::/10, and these as IPv4-mapped IPv6 addresses. When left out or false they are refused, as literals and as the address a host name resolves to, whatever allow and deny say, except the addresses an allow range within them holds, as \"127.0.0.1\" or \"169.254.169.254\"; a wider range, as \"0.0.0.0/0\", and host names do not reach them.",
+          "type": "boolean"
         },
         "clients": {
           "description": "The addresses and CIDR ranges of the clients that may use the proxy, as \"10.0.0.0/8\"; others are refused.",
@@ -2731,7 +2735,7 @@
       "additionalProperties": false,
       "properties": {
         "body_password": {
-          "description": "When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes.",
+          "description": "A second secret the links' keys are made from, beside the registration password: nodes and proxies need the same one. Links are encrypted without it too. It applies to the links that open after it changes.",
           "type": "string"
         },
         "call_timeout": {
@@ -2773,6 +2777,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "max_pending_links": {
+          "default": 64,
+          "description": "The most links open at once that have not registered yet, within max_links; one past it is closed as soon as it opens. 64 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "max_tunnels": {
           "default": 16384,
           "description": "The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0.",
@@ -2783,8 +2793,23 @@
           "description": "The name the hub tells the nodes and proxies that register. The host's name when left out.",
           "type": "string"
         },
+        "node_password": {
+          "description": "The password nodes register with, but those node_secrets names. password when left out.",
+          "type": "string"
+        },
+        "node_secrets": {
+          "description": "Nodes that register with passwords of their own: a node of a name listed here registers with its password, and with no other.",
+          "items": {
+            "$ref": "#/$defs/config.TunnelNodeSecret"
+          },
+          "type": "array"
+        },
         "password": {
-          "description": "The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out.",
+          "description": "The password nodes and proxies register with, unless node_password or proxy_password is set for them; the hub and the peer each prove they know it, without sending it. With it alone, any proxy can register as a node: set node_password and proxy_password apart.",
+          "type": "string"
+        },
+        "proxy_password": {
+          "description": "The password proxies register with. password when left out.",
           "type": "string"
         },
         "quic": {
@@ -2792,8 +2817,8 @@
           "description": "The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set."
         },
         "register_timeout": {
-          "default": "10s",
-          "description": "How long a link may take to register once it is open; it is closed past it. 10s when left out.",
+          "default": "5s",
+          "description": "How long a link may take to register once it is open; it is closed past it. 5s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         }
@@ -2909,6 +2934,10 @@
           "description": "The node's name, which proxies name to reach its services. The host's name when left out.",
           "type": "string"
         },
+        "remote_services": {
+          "$ref": "#/$defs/config.TunnelRemoteServices",
+          "description": "Whether a hub's console may set the node's services, and to which addresses. Refused when left out: the services come from this config and the node's own console alone."
+        },
         "services": {
           "description": "The services the node reaches, and the only addresses it opens tunnels to.",
           "items": {
@@ -2917,6 +2946,24 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "config.TunnelNodeSecret": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The node's name.",
+          "type": "string"
+        },
+        "password": {
+          "description": "The password the node registers with, its hubs entry's password.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "password"
+      ],
       "type": "object"
     },
     "config.TunnelProxy": {
@@ -2975,6 +3022,23 @@
             "$ref": "#/$defs/config.TunnelWebProxy"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "config.TunnelRemoteServices": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "description": "The addresses they may set, as host:port patterns: the host an IP address, a CIDR range, a host name, \"*.suffix\" or \"*\", the port a number or \"*\", as in \"10.0.0.0/24:*\", \"[fd00::/8]:443\" or \"*.lab.internal:22\". A range holds only IP addresses, and a name pattern only names. Any address when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "description": "Let the hubs' consoles set the services.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -3824,11 +3888,15 @@
       "additionalProperties": false,
       "properties": {
         "allow": {
-          "description": "The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out; others are answered 403, or 502 for a host name whose address decides.",
+          "description": "The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out, save the local addresses allow_local is about; others are answered 403, or 502 for a host name whose address decides.",
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "allow_local": {
+          "description": "Let the proxy connect to its own host and link: 127.0.0.0/8, 0.0.0.0/8, 169.254.0.0/16 (a cloud's metadata service at 169.254.169.254 among them), ::/96 (::, ::1 and the IPv4-compatible addresses), fe80::/10, and these as IPv4-mapped IPv6 addresses. When left out or false they are refused, as literals and as the address a host name resolves to, whatever allow and deny say, except the addresses an allow range within them holds, as \"127.0.0.1\" or \"169.254.169.254\"; a wider range, as \"0.0.0.0/0\", and host names do not reach them.",
+          "type": "boolean"
         },
         "clients": {
           "description": "The addresses and CIDR ranges of the clients that may use the proxy, as \"10.0.0.0/8\"; others are answered 403.",

@@ -621,14 +621,38 @@
       // // string.
       // "name": "",
 
-      // // The password nodes and proxies register with, which they prove they know without sending it.
-      // // The hub refuses every registration while it is left out.
+      // // The password nodes and proxies register with, unless node_password or proxy_password is set
+      // // for them; the hub and the peer each prove they know it, without sending it. With it alone,
+      // // any proxy can register as a node: set node_password and proxy_password apart.
       // // string.
       // "password": "",
 
-      // // When set, the body of every frame on the links is encrypted with AES-256-GCM under a key
-      // // made from it, and nodes and proxies need the same one. It applies to the links that open
-      // // after it changes.
+      // // The password nodes register with, but those node_secrets names. password when left out.
+      // // string.
+      // "node_password": "",
+
+      // // The password proxies register with. password when left out.
+      // // string.
+      // "proxy_password": "",
+
+      // // Nodes that register with passwords of their own: a node of a name listed here registers with
+      // // its password, and with no other.
+      // // list of object.
+      // "node_secrets": [
+        // {
+          // // The node's name.
+          // // string; required.
+          // "name": "",
+
+          // // The password the node registers with, its hubs entry's password.
+          // // string; required.
+          // "password": "",
+        // },
+      // ],
+
+      // // A second secret the links' keys are made from, beside the registration password: nodes and
+      // // proxies need the same one. Links are encrypted without it too. It applies to the links that
+      // // open after it changes.
       // // string.
       // "body_password": "",
 
@@ -705,10 +729,10 @@
         // "max_handshakes": 64,
       // },
 
-      // // How long a link may take to register once it is open; it is closed past it. 10s when left
+      // // How long a link may take to register once it is open; it is closed past it. 5s when left
       // // out.
-      // // duration, as "1.5s" or "2m"; default "10s".
-      // "register_timeout": "10s",
+      // // duration, as "1.5s" or "2m"; default "5s".
+      // "register_timeout": "5s",
 
       // // How long a node may take to answer the hub: to open a tunnel, or to list or set its
       // // services. 15s when left out.
@@ -719,6 +743,11 @@
       // // as it opens. 1024 when left out or 0.
       // // integer, 0 or more; default 1024.
       // "max_links": 1024,
+
+      // // The most links open at once that have not registered yet, within max_links; one past it is
+      // // closed as soon as it opens. 64 when left out or 0.
+      // // integer, 0 or more; default 64.
+      // "max_pending_links": 64,
 
       // // The most links one node or proxy may register, from however many processes of the same name.
       // // 128 when left out or 0.
@@ -884,6 +913,22 @@
           // "description": "",
         // },
       // ],
+
+      // // Whether a hub's console may set the node's services, and to which addresses. Refused when
+      // // left out: the services come from this config and the node's own console alone.
+      // // object.
+      // "remote_services": {
+        // // Let the hubs' consoles set the services.
+        // // boolean.
+        // "enabled": true,
+
+        // // The addresses they may set, as host:port patterns: the host an IP address, a CIDR range, a
+        // // host name, "*.suffix" or "*", the port a number or "*", as in "10.0.0.0/24:*",
+        // // "[fd00::/8]:443" or "*.lab.internal:22". A range holds only IP addresses, and a name pattern
+        // // only names. Any address when left out.
+        // // list of string.
+        // "allow": ["*.example.com", "10.1.0.0/16"],
+      // },
 
       // // How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub
       // // hears either way. 5s when left out.

@@ -26,6 +26,7 @@ import (
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
+	"github.com/lesismal/fit/tunnel/internal/auth"
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 
 	_ "github.com/lesismal/fit/tunnel/hub"
@@ -36,6 +37,8 @@ import (
 func TestMain(m *testing.M) {
 	// The store's key derivation, cheap for tests.
 	store.DefaultParams = store.Params{Time: 1, MemoryKiB: 64, Threads: 1}
+	// And the links' passwords'.
+	auth.Iterations = 1000
 	os.Exit(m.Run())
 }
 
@@ -332,7 +335,8 @@ func startHub(t *testing.T, o hubOpts) *hub {
 	}
 	doc := fmt.Sprintf(`{"tunnel": {
  "hub": {"name": "hub", "password": "pw"%s, "listeners": [{"protocol": %q, "address": %q}], "console": %s},
- "node": {"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "banner", "address": %q}, {"name": "stall", "address": %q}], "console": %s},
+ "node": {"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "banner", "address": %q}, {"name": "stall", "address": %q}], "console": %s,
+  "remote_services": {"enabled": true, "allow": ["127.0.0.1:*"]}},
  "proxy": {"name": "me", "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}, {"listen": %q, "node": "lab", "service": "stall"}], "console": %s}
 }}`, body, protocolOf(o.protocol), listen, consoleJSON(h.hubCon),
 		uplinkJSON(h.url, "pw", o.bodyPassword), h.echo, h.banner, h.stall, consoleJSON(h.nodeCon),
@@ -582,6 +586,14 @@ func testTunnel(t *testing.T, o hubOpts) {
 		if m := h.proc.member("tunnel", "node", "services"); !strings.Contains(string(m), `"more"`) {
 			t.Fatalf("the node's services in the config: %s", m)
 		}
+		// An address the node's remote_services does not allow is refused.
+		code, body = h.hub.do("POST", "/api/peers/services", map[string]any{"id": id, "services": []map[string]string{{"name": "meta", "address": "169.254.169.254:80"}}}, nil)
+		if code == 200 || !strings.Contains(body, "remote_services") {
+			t.Fatalf("a service the node does not allow was taken: %d %s", code, body)
+		}
+		if m := h.proc.member("tunnel", "node", "services"); strings.Contains(string(m), "169.254") {
+			t.Fatalf("the node's services in the config: %s", m)
+		}
 	})
 
 	t.Run("the proxy's pages add a forward", func(t *testing.T) {
@@ -810,8 +822,8 @@ func TestWrongPasswords(t *testing.T) {
 	for _, tc := range []struct {
 		name, password, body, want string
 	}{
-		{"password", "nope", "", "authentication failed"},
-		{"body password", "pw", "other", "closed"},
+		{"password", "nope", "", "decrypt"},
+		{"body password", "pw", "other", "decrypt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			con := freeAddr(t)

@@ -141,6 +141,14 @@ func TestTunnelChecks(t *testing.T) {
 		{`{"tunnel": {"proxy": {"forwards": [{"listen": "127.0.0.1:0", "node": "n", "service": ""}]}}}`, "the service is empty"},
 		{`{"tunnel": {"proxy": {"web_proxies": [{"listen": "127.0.0.1:0", "url": "ws://h:1/", "password": ""}]}}}`, "the password is empty"},
 		{`{"tunnel": {"hub": {"console": {"address": "nope", "users": []}}}}`, "nope"},
+		{`{"tunnel": {"hub": {"node_secrets": [{"name": "", "password": "p"}]}}}`, "the name is empty"},
+		{`{"tunnel": {"hub": {"node_secrets": [{"name": "a/b", "password": "p"}]}}}`, "is not a name"},
+		{`{"tunnel": {"hub": {"node_secrets": [{"name": "a", "password": "p"}, {"name": "a", "password": "q"}]}}}`, "listed already"},
+		{`{"tunnel": {"hub": {"node_secrets": [{"name": "a", "password": ""}]}}}`, "the password is empty"},
+		{`{"tunnel": {"node": {"remote_services": {"enabled": true, "allow": ["nope"]}}}}`, "not a host:port pattern"},
+		{`{"tunnel": {"node": {"remote_services": {"allow": ["h:x"]}}}}`, "a number or *"},
+		{`{"tunnel": {"node": {"remote_services": {"allow": ["10.0.0.0/33:22"]}}}}`, "does not parse"},
+		{`{"tunnel": {"node": {"remote_services": {"allow": ["a*b:22"]}}}}`, "an address, a range"},
 	} {
 		_, err := Load([]byte(bad.doc))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {
@@ -184,5 +192,51 @@ func TestMemoryUnread(t *testing.T) {
 	defer func() { sysmem.Total = old }()
 	if got := MemoryPercent(10).Bytes(42); got != 42 {
 		t.Errorf("Bytes = %d, want the fallback 42", got)
+	}
+}
+
+// TestTunnelRolePasswords checks the password each role registers with.
+func TestTunnelRolePasswords(t *testing.T) {
+	h := &TunnelHub{Password: "pw"}
+	if h.RolePassword("node", "lab") != "pw" || h.RolePassword("proxy", "me") != "pw" || h.RolePassword("agent", "x") != "" {
+		t.Error("the shared password")
+	}
+	h = &TunnelHub{Password: "pw", NodePassword: "np", ProxyPassword: "pp", NodeSecrets: []TunnelNodeSecret{{Name: "lab", Password: "ls"}}}
+	if h.RolePassword("node", "lab") != "ls" || h.RolePassword("node", "beta") != "np" || h.RolePassword("proxy", "lab") != "pp" {
+		t.Error("the roles' passwords")
+	}
+	if h.PendingLinks() != DefaultTunnelMaxPendingLinks || (&TunnelHub{MaxLinks: 8}).PendingLinks() != 8 {
+		t.Error("max_pending_links")
+	}
+}
+
+// TestServicePatterns checks what remote_services' patterns hold.
+func TestServicePatterns(t *testing.T) {
+	for _, c := range []struct {
+		pattern string
+		yes     []string
+		no      []string
+	}{
+		{"*:*", []string{"10.0.0.1:22", "h:1", "[::1]:80"}, []string{"nope"}},
+		{"10.0.0.0/24:*", []string{"10.0.0.5:22", "[::ffff:10.0.0.5]:22"}, []string{"10.0.1.5:22", "h:22", "[fe80::1%eth0]:22"}},
+		{"[fd00::/8]:443", []string{"[fd12::1]:443"}, []string{"[fd12::1]:80", "10.0.0.1:443"}},
+		{"10.0.0.7:22", []string{"10.0.0.7:22"}, []string{"10.0.0.8:22", "10.0.0.7:23"}},
+		{"db.lan:5432", []string{"DB.lan.:5432"}, []string{"x.db.lan:5432", "db.lan:5433", "10.0.0.1:5432"}},
+		{"*.lab.internal:*", []string{"a.lab.internal:22", "b.c.lab.internal:80"}, []string{"lab.internal:22", "evil-lab.internal:22", "127.0.0.1:22"}},
+	} {
+		p, err := ParseServicePattern(c.pattern)
+		if err != nil {
+			t.Fatalf("%s: %v", c.pattern, err)
+		}
+		for _, a := range c.yes {
+			if !p.Match(a) {
+				t.Errorf("%s does not hold %s", c.pattern, a)
+			}
+		}
+		for _, a := range c.no {
+			if p.Match(a) {
+				t.Errorf("%s holds %s", c.pattern, a)
+			}
+		}
 	}
 }

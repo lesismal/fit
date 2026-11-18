@@ -40,7 +40,6 @@
     ['tk.add_service', 'Add service', '添加服务'], ['tk.save_node', 'Save to node', '保存到节点'], ['tk.add_hub', 'Add hub', '添加 hub'],
     ['tk.add_a_hub', 'Add a hub', '添加 hub'], ['tk.hub_n', 'Hub {name}', 'hub {name}'], ['tk.save_connect', 'Save and connect', '保存并连接'],
     ['tk.services_of', 'Services of node {name}', '节点 {name} 的服务'],
-    ['tk.services_via', 'Services of node {name} (via {hub})', '节点 {name} 的服务（经由 {hub}）'],
     ['tk.kicked', 'Kicked', '已踢出'], ['tk.tunnel_closed', 'Tunnel closed', '隧道已关闭'], ['tk.hub_saved', 'Hub saved', 'hub 已保存'],
     ['tk.removed', 'Removed', '已移除'], ['tk.services_saved', 'Services saved', '服务已保存'],
     ['tk.services_saved_node', 'Services saved on the node', '服务已保存到节点'], ['tk.disconnect_q', 'Disconnect from {name}?', '断开与 {name} 的连接？'],

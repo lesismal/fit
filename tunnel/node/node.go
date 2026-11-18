@@ -4,8 +4,10 @@
 // that the tunnels the hubs route to it ask for, and to no other
 // address. Its console pages show its hubs and tunnels and change which
 // hubs it links to, over which protocols, and which services it reaches;
-// a hub's pages may set its services too. Every such change is written
-// back into the node's member of the config, and applied from there.
+// a hub's pages may set its services too, but only when the node's
+// remote_services lets them, and only to the addresses it allows. Every
+// such change is written back into the node's member of the config, and
+// applied from there.
 //
 // Everything runs on the listeners' fib engine: the links and tunnels are
 // served on its workers, and what waits, a dial to a service or a call, on
@@ -273,6 +275,10 @@ func (n *Node) setupUplink(u *uplink.Uplink, r *link.Router) {
 		if err := link.Decode(body, &services); err != nil {
 			return nil, err
 		}
+		if err := n.remoteAllowed(services); err != nil {
+			n.log.Warnf("hub %s: refused to set the services: %v", u.Name, err)
+			return nil, err
+		}
 		if err := n.setServices(services, u.Config.Call()); err != nil {
 			return nil, err
 		}
@@ -291,6 +297,37 @@ func (n *Node) setupUplink(u *uplink.Uplink, r *link.Router) {
 		}
 		return rsp, nil
 	}, false)
+}
+
+// ErrRemoteServices is the error of a hub's change of the services, which
+// the node's remote_services does not let it make.
+var ErrRemoteServices = errors.New("tunnel: this node takes its services from its own config and console; its remote_services does not let a hub set them")
+
+// remoteAllowed reports why a hub may not set the node's services to
+// services, or nil when it may: remote_services must be enabled, and its
+// allow list, if any, hold every address.
+func (n *Node) remoteAllowed(services []proto.Service) error {
+	rs := n.Config().RemoteServices
+	if rs == nil || !rs.Enabled {
+		return ErrRemoteServices
+	}
+	if len(rs.Allow) == 0 {
+		return nil
+	}
+	pats := make([]config.ServicePattern, 0, len(rs.Allow))
+	for _, a := range rs.Allow {
+		p, err := config.ParseServicePattern(a)
+		if err != nil {
+			return err
+		}
+		pats = append(pats, p)
+	}
+	for _, s := range services {
+		if !slices.ContainsFunc(pats, func(p config.ServicePattern) bool { return p.Match(s.Addr) }) {
+			return fmt.Errorf("tunnel: this node's remote_services does not allow a hub to set a service at %q", s.Addr)
+		}
+	}
+	return nil
 }
 
 // setServices writes services, which a hub set, into the node's member

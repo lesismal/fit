@@ -1,7 +1,7 @@
 // Package proto is what the tunnel's hub, nodes and proxies say to each
 // other over their links (package link, which documents the wire format):
-// the methods, the messages they carry, the password check of a
-// registration and the frames of a tunnel.
+// the methods, the messages they carry and the frames of a tunnel. The
+// handshake that opens every link is package auth's.
 //
 // A tunnel is a TCP connection a proxy accepted, carried to a node through
 // the hub, and the TCP connection the node opened to a service for it.
@@ -11,18 +11,13 @@
 package proto
 
 import (
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"runtime"
 	"runtime/debug"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/lesismal/fit/tunnel/internal/latency"
@@ -58,22 +53,26 @@ type Method uint8
 // The methods: those a peer calls on the hub, those the hub calls on
 // a node, and the tunnel methods, which go both ways.
 const (
-	// MethodRegister authenticates a node or proxy and registers it:
-	// RegisterReq answered with RegisterRsp. It must be the first call on a
-	// connection; the hub refuses every other one until it succeeds.
-	// Every connection of a peer's pool registers, and the hub takes the
-	// connections of one type and name, from however many processes, for
-	// one peer.
+	// MethodHello opens a link's handshake, unsealed: auth.Hello answered
+	// with auth.HelloRsp, after which the link is sealed both ways. It must
+	// be the first call on a connection.
+	MethodHello Method = 7
+	// MethodRegister ends the handshake and registers the node or proxy:
+	// RegisterReq answered with RegisterRsp, both sealed. The hub refuses
+	// every other call until it succeeds. Every connection of a peer's pool
+	// registers, and the hub takes the connections of one type and name,
+	// from however many processes, for one peer.
 	MethodRegister Method = 1
 	// MethodUpdate replaces what a registered peer told about itself: Info
 	// answered with "ok".
 	MethodUpdate Method = 2
-	// MethodNodes lists the nodes a hub has: an empty request answered
-	// with NodeList. The hub also notifies it, with a NodeList, to every
-	// proxy whenever the list changes.
+	// MethodNodes lists the nodes a hub has to a proxy: an empty request
+	// answered with NodeList. The hub also notifies it, with a NodeList, to
+	// every proxy whenever the list changes.
 	MethodNodes Method = 3
-	// MethodSetNodeServices has the hub set a node's services:
-	// SetServicesReq answered with the node's new Info.
+	// MethodSetNodeServices was a peer's way to have the hub set a node's
+	// services. No hub serves it: only the hub's own console sets them, and
+	// only on a node that takes remote_services.
 	MethodSetNodeServices Method = 4
 	// MethodPing measures a peer's link to the hub: a peer calls it
 	// every few seconds with a PingReq, which tells the hub what the
@@ -87,8 +86,9 @@ const (
 	// MethodNodeInfo asks a node for its Info: an empty request answered
 	// with Info.
 	MethodNodeInfo Method = 16
-	// MethodNodeSetServices sets a node's services: []Service answered with
-	// the node's new Info.
+	// MethodNodeSetServices sets a node's services, from the hub's
+	// console: []Service answered with the node's new Info. A node refuses
+	// it unless its remote_services allows the addresses.
 	MethodNodeSetServices Method = 17
 
 	// MethodTunnelOpen opens a tunnel: a proxy calls it on the hub with
@@ -109,7 +109,7 @@ const (
 )
 
 var methodNames = map[Method]string{
-	MethodRegister: "register", MethodUpdate: "update", MethodNodes: "nodes", MethodSetNodeServices: "node/services",
+	MethodHello: "hello", MethodRegister: "register", MethodUpdate: "update", MethodNodes: "nodes", MethodSetNodeServices: "node/services",
 	MethodPing: "ping", MethodKick: "kick", MethodNodeInfo: "node/info", MethodNodeSetServices: "node/set-services",
 	MethodTunnelOpen: "tunnel/open", MethodTunnelData: "tunnel/data", MethodTunnelAck: "tunnel/ack", MethodTunnelClose: "tunnel/close",
 }
@@ -179,14 +179,12 @@ func (info *Info) FindService(name string) (Service, bool) {
 	return Service{}, false
 }
 
-// RegisterReq authenticates and registers a connection of a peer's pool.
-// MAC is the HMAC-SHA256, keyed with the hub's password, of the peer's
-// type and name, Time and Nonce; see Sign.
+// RegisterReq registers a connection of a peer's pool, once its handshake
+// is sealed: Info's type and name are the Hello's, and MAC the
+// handshake's auth.Handshake.PeerMAC.
 type RegisterReq struct {
-	Info  Info   `json:"info"`
-	Time  int64  `json:"time"`
-	Nonce string `json:"nonce"`
-	MAC   string `json:"mac"`
+	Info Info   `json:"info"`
+	MAC  []byte `json:"mac"`
 }
 
 // RegisterRsp answers a registration.
@@ -203,6 +201,9 @@ type RegisterRsp struct {
 	Index int `json:"index"`
 	// Hub is the hub's name.
 	Hub string `json:"hub"`
+	// Proof is the handshake's auth.Handshake.HubProof, which the peer
+	// checks before it serves anything of the hub.
+	Proof []byte `json:"proof"`
 }
 
 // NodeView is a node as the hub lists it to proxies.
@@ -255,12 +256,6 @@ func (l *NodeList) Older(cur *NodeList) bool {
 	return cur != nil && l.Version != 0 && cur.Version != 0 && l.Epoch == cur.Epoch && l.Version < cur.Version
 }
 
-// SetServicesReq sets the services of the node named Node.
-type SetServicesReq struct {
-	Node     string    `json:"node"`
-	Services []Service `json:"services"`
-}
-
 // TunnelOpenReq opens tunnel ID to service Service of node Node.
 type TunnelOpenReq struct {
 	ID      uint64 `json:"id"`
@@ -306,79 +301,4 @@ func ParseAck(payload []byte) (int64, error) {
 		return 0, fmt.Errorf("tunnel: ack payload of %d bytes", len(payload))
 	}
 	return int64(binary.BigEndian.Uint64(payload)), nil
-}
-
-// MaxClockSkew is how far a registration's Time may be from the hub's
-// clock.
-const MaxClockSkew = 5 * time.Minute
-
-// MaxNonces is how many registration nonces a Verifier remembers; past it,
-// a registration is refused until older ones expire, so that a flood of
-// registrations cannot grow it without bound.
-const MaxNonces = 1 << 16
-
-// Sign fills in req's Time, Nonce and MAC for password.
-func Sign(req *RegisterReq, password string) {
-	var nonce [16]byte
-	_, _ = rand.Read(nonce[:])
-	req.Time = time.Now().Unix()
-	req.Nonce = hex.EncodeToString(nonce[:])
-	req.MAC = mac(req, password)
-}
-
-func mac(req *RegisterReq, password string) string {
-	h := hmac.New(sha256.New, []byte(password))
-	h.Write([]byte(req.Info.Type + "\n" + req.Info.Name + "\n" + strconv.FormatInt(req.Time, 10) + "\n" + req.Nonce))
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-// Verifier checks registrations against a password, and refuses a nonce it
-// has seen within MaxClockSkew, so a registration overheard cannot be
-// replayed.
-type Verifier struct {
-	Password string
-
-	mu    sync.Mutex
-	seen  map[string]time.Time
-	swept time.Time
-}
-
-// Verify checks req.
-func (v *Verifier) Verify(req *RegisterReq) error {
-	if req.Info.Name == "" {
-		return errors.New("tunnel: a peer needs a name")
-	}
-	if req.Info.Type != TypeNode && req.Info.Type != TypeProxy {
-		return fmt.Errorf("tunnel: unknown peer type %q", req.Info.Type)
-	}
-	now := time.Now()
-	if d := now.Sub(time.Unix(req.Time, 0)); d > MaxClockSkew || d < -MaxClockSkew {
-		return errors.New("tunnel: registration time too far from the hub's clock")
-	}
-	want := mac(req, v.Password)
-	if len(req.Nonce) < 16 || len(req.Nonce) > 128 || !hmac.Equal([]byte(want), []byte(req.MAC)) {
-		return errors.New("tunnel: authentication failed")
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.seen == nil {
-		v.seen = map[string]time.Time{}
-	}
-	// A nonce is kept as long as its registration's time could pass.
-	if len(v.seen) >= MaxNonces || now.Sub(v.swept) > time.Minute {
-		v.swept = now
-		for nonce, at := range v.seen {
-			if now.Sub(at) > 2*MaxClockSkew {
-				delete(v.seen, nonce)
-			}
-		}
-	}
-	if _, ok := v.seen[req.Nonce]; ok {
-		return errors.New("tunnel: registration replayed")
-	}
-	if len(v.seen) >= MaxNonces {
-		return errors.New("tunnel: too many registrations; try again later")
-	}
-	v.seen[req.Nonce] = now
-	return nil
 }

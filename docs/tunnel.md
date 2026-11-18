@@ -38,7 +38,8 @@ A role runs while its member is set. A config with roles and no routes needs no 
   "tunnel": {
     "hub": {
       "name": "hub",
-      "password": "a-registration-password",
+      "node_password": "a-node-password",
+      "proxy_password": "a-proxy-password",
       "body_password": "a-body-password",
       "listeners": [
         {"protocol": "tcp", "address": ":7000"},
@@ -66,7 +67,7 @@ A role runs while its member is set. A config with roles and no routes needs no 
           {"address": "ws://hub.example.com:7001/tunnel"},
           {"address": "hub.example.com:7000"}
         ],
-        "password": "a-registration-password",
+        "password": "a-node-password",
         "body_password": "a-body-password",
         "quic_pin": "the fingerprint on the hub's console"
       }],
@@ -86,7 +87,7 @@ A role runs while its member is set. A config with roles and no routes needs no 
       "hubs": [{
         "name": "hub",
         "endpoints": [{"address": "hub.example.com:7000"}],
-        "password": "a-registration-password",
+        "password": "a-proxy-password",
         "body_password": "a-body-password"
       }],
       "forwards": [
@@ -105,14 +106,18 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 | Field | Default | What it is |
 |-------|---------|------------|
 | `name` | the host's name | the name nodes and proxies are told |
-| `password` | none: no registration is taken | what nodes and proxies register with, proven with an HMAC, never sent |
-| `body_password` | none | AES-256-GCM on every frame's body; nodes and proxies need the same |
+| `password` | none | what nodes and proxies register with, unless the two below are set; with it alone any proxy can register as a node, which the hub warns of |
+| `node_password` | `password` | what nodes register with, but those `node_secrets` names |
+| `proxy_password` | `password` | what proxies register with |
+| `node_secrets` | none | `{name, password}`: a node of that name registers with its own password, and with no other |
+| `body_password` | none | a second secret the links' keys are made from; nodes and proxies need the same. Links are encrypted without it too |
 | `listeners` | none: the pages add them | `{protocol: tcp\|ws\|quic, address, path}`; a ws listener's path is `/tunnel` by default, and only a ws listener has one |
 | `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for proxies' `web_proxies`, answering on any path; it needs `console`, its password is the hub's when left out, and `max_conns` is 32 |
 | `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; the hub makes a self-signed certificate and writes it here when a quic listener needs one; `cert` and `key` go together |
-| `register_timeout` | 10s | how long a link may take to register |
+| `register_timeout` | 5s | how long a link may take to register |
 | `call_timeout` | 15s | how long a node may take to answer: to open a tunnel, list or set its services |
 | `max_links`, `max_links_per_peer`, `max_peers`, `max_tunnels` | 1024, 128, 1024, 16384 | the bounds of what the hub keeps |
+| `max_pending_links` | 64 | the links open at once that have not registered, within `max_links`; one past it is closed as it opens |
 | `console` | none | the hub's pages (see [Consoles](#consoles)) |
 
 ### tunnel.node
@@ -123,6 +128,7 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 | `meta` | none | anything else the node tells the hubs |
 | `hubs` | none | the hubs it links to (below) |
 | `services` | none | `{name, address, description}`: what the node reaches, and the only addresses it connects to |
+| `remote_services` | none: refused | `{enabled, allow}`: whether a hub's console may set the services, and to which addresses: `allow` is `host:port` patterns, the host an IP address, a CIDR range, a name, `*.suffix` or `*`, the port a number or `*`, as `10.0.0.0/24:*` or `*.lab.internal:22`; any address when `allow` is left out |
 | `dial_timeout` | 5s | a connect to a service |
 | `idle_timeout` | 2h | a tunnel that carries nothing either way for this long is closed |
 | `max_tunnels` | 4096 | the tunnels open at once, over every hub |
@@ -146,7 +152,7 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 |-------|---------|------------|
 | `name` | the first endpoint's address | what forwards and the pages name it by |
 | `endpoints` | required | `{address, disabled}`, tried in order: `host:port` or `tcp://` for TCP, `ws://host:port/path`, `quic://host:port` |
-| `password` | required | the hub's |
+| `password` | required | the hub's for this role: its `node_password` or `proxy_password`, or the node's own in `node_secrets` |
 | `body_password` | none | the hub's, when it has one |
 | `quic_pin`, `quic_insecure` | | how a quic endpoint checks the hub's certificate: its SHA-256, as the hub's page shows it, or not at all, for tests; the system's roots without either |
 | `pool_size` | 10, at most 100 | how many links to the hub carry tunnels |
@@ -166,14 +172,28 @@ a peer that needs more opens a larger pool.
 
 - **TCP** and **WebSocket** links are connections of the engine. A WebSocket link is for networks
   that let only HTTP through, as through nginx's `proxy_pass` with `Upgrade`; there is no `wss://`,
-  so set `body_password`.
+  and the link's own encryption, below, is what protects it.
 - **QUIC** links run on a UDP binding of the same engine, with fib's QUIC, TLS 1.3 and the ALPN
   `fit-tunnel`. A hub makes a self-signed certificate when a quic listener needs one and keeps it in
   its member, so its fingerprint, which nodes and proxies pin, outlives a restart.
-- **Registration** is an HMAC-SHA256 of the password over the peer's type, name, a time and a
-  nonce; the time must be within 5 minutes of the hub's clock, and a nonce is taken once.
-- **Body encryption**, with `body_password` on every side, seals each frame's body with AES-256-GCM,
-  its header authenticated too; a frame that is not sealed, or does not open, closes the link.
+- **The handshake** proves the password both ways. The peer sends its type, name and 32 random
+  bytes; the hub answers with 32 of its own and its salt, 16 random bytes picked as it starts. Both
+  derive the password's key, PBKDF2-HMAC-SHA256 with 600,000 rounds under that salt (the body
+  password's too, when set), and from it and both sides' random bytes, with HKDF, the link's keys.
+  The peer then registers with an HMAC of the handshake, and the hub answers with its own: a node or
+  proxy serves nothing of a link before it is sealed, and drops a link whose hub does not prove the
+  password, so a fake hub, or one in between, learns nothing it can use and cannot call the node.
+  Whoever overheard a handshake pays the 600,000 rounds for every guess of the password.
+- **Encryption**: from the handshake on, every frame's body is sealed with AES-256-GCM, its header
+  authenticated too, under a key of the link's own for each direction, and numbered: a frame that is
+  not sealed, does not open, is replayed, reordered, sent back to its sender, or taken from another
+  link closes the link. `body_password` only adds a second secret both sides must know.
+- **Roles**: nodes and proxies register with passwords of their own (`node_password`,
+  `proxy_password`), a node with its own in `node_secrets`; a hub that has only `password` takes it
+  for both, and then cannot tell a proxy from a node. A peer of a name already registered must have
+  proven the same password; when a password changes, the hub kicks the peers that registered with
+  the old one. Only proxies list the nodes and open tunnels; no peer sets a node's services, which
+  only the hub's console does, and only on a node whose `remote_services` lets it.
 
 ### Flow, limits and timeouts
 
@@ -187,8 +207,8 @@ while the other side's backlog passes 256 KiB.
 Every dial, registration and call has its timeout; a link's TCP connection is probed after 30s of
 quiet, and closed when its peer stops answering; a QUIC connection pings every `keep_alive` and
 closes after `idle_timeout`; a tunnel idle past `idle_timeout` closes. The hub bounds its links,
-peers and tunnels, a peer's links, the QUIC handshakes under way, and the frames of a link that has
-not registered, to 64 KiB.
+peers and tunnels, a peer's links, the QUIC handshakes under way, the links that have not
+registered (`max_pending_links`, closed past `register_timeout`), and their frames, to 64 KiB.
 
 ## Consoles
 
@@ -203,11 +223,12 @@ session cookie and a CSRF token, and a loopback address unless `cert_file` and `
 - **hub**: the nodes, with their services and latency, and the proxies; the tunnels, with their
   bytes each way and their paths' latency. Query a node, set its services, kick a peer, close a
   tunnel. Add, change and remove listeners; set the passwords and the console socket; copy the
-  QUIC certificate's fingerprint. Services set here are written into the node's own member.
+  QUIC certificate's fingerprint. Services set here are written into the node's own member, when
+  its `remote_services` lets the hub set them; otherwise the node refuses, and says why.
 - **node**: its hubs, with the protocols each link took, and add, edit and remove them; its
   services, and save them, every hub told; its tunnels, and close one.
 - **proxy**: its hubs, edited as a node's, their nodes and services, with each hub's share of
-  a node's tunnels; query a node, and set its services through a hub; add and remove forwards;
+  a node's tunnels; query a node; add and remove forwards;
   its tunnels, and close one; the meta it tells the hubs; and each hub's console through its
   web proxy.
 
@@ -222,6 +243,26 @@ A hub's console can be reached where it cannot be directly, through an encrypted
 the hub's `console_socket`, and a proxy's `web_proxies` entry with its URL and password serves
 the console on a local address. The WebSocket's messages are AES-256-GCM sealed with keys from the
 password; the console's own login still applies.
+
+## Upgrading to the protocol of version 2
+
+fit's tunnel protocol changed incompatibly in this release; hubs, nodes and proxies must run the
+same fit, and one of an older release is refused, with an error that says so.
+
+- **The handshake** replaced the registration's one-way HMAC: the hub proves the password too, and
+  every link is encrypted, `body_password` or not. Registration takes two round trips, and a node
+  or proxy derives the password's key once for each hub start (a fraction of a second).
+- **`register_timeout`** is 5s by default (it was 10s), and **`max_pending_links`** (64) bounds the
+  links that have not registered.
+- **Nodes refuse a hub's change of their services** unless `remote_services` is enabled: set
+  `"remote_services": {"enabled": true, "allow": [...]}` on the nodes whose services the hub's
+  console should set.
+- **Proxies no longer set nodes' services** through a hub (the proxy's page and the
+  `node/services` call are gone), and nodes no longer list the nodes.
+- **Separate the roles' passwords**: set `node_password` and `proxy_password` on the hub, and give
+  each node and proxy its role's in its `hubs` entry, or a node its own with `node_secrets`. A hub
+  with `password` alone still takes both, and warns that any proxy can then register as a node.
+- The console socket's password is derived with the same 600,000 rounds.
 
 ## Reloads and bounds
 

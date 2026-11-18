@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/tunnel/internal/auth"
 	"github.com/lesismal/fit/tunnel/internal/link"
 	"github.com/lesismal/fit/tunnel/internal/proto"
 	"github.com/lesismal/fit/tunnel/internal/transport"
@@ -19,23 +20,52 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 )
 
+func init() { auth.Iterations = 1000 }
+
 // fakeHub registers every link that asks, numbering them, and answers
-// pings, or fails them while failPings is set.
+// pings, or fails them while failPings is set. It takes the password p,
+// and proves it, unless noProof is set.
 type fakeHub struct {
 	addr      string
 	conns     atomic.Uint32
 	failPings atomic.Bool
+	noProof   atomic.Bool
 	links     chan *link.Link
 }
 
-func newFakeHub(t *testing.T) *fakeHub {
+// hubHello is a hub's answer to a hello, for password.
+func hubHello(password string) link.CallFunc {
+	salt := auth.Random(auth.SaltLen)
+	key, _ := auth.Derive(password, salt)
+	return func(l *link.Link, body []byte) (any, error) {
+		var h auth.Hello
+		if err := link.Decode(body, &h); err != nil {
+			return nil, err
+		}
+		rsp, hs, sess, err := auth.Answer(&h, salt, key, nil)
+		if err != nil {
+			return nil, err
+		}
+		l.SetValue(hs)
+		return link.Sealing{Reply: rsp, Session: sess}, nil
+	}
+}
+
+func newFakeHub(t *testing.T) *fakeHub { return newFakeHubWith(t, "p") }
+
+func newFakeHubWith(t *testing.T, password string) *fakeHub {
 	t.Helper()
 	s := &fakeHub{links: make(chan *link.Link, 16)}
 	r := link.NewRouter()
+	r.HandleCall(proto.MethodHello, hubHello(password), true)
 	r.HandleCall(proto.MethodRegister, func(l *link.Link, _ []byte) (any, error) {
 		n := s.conns.Add(1)
 		s.links <- l
-		return &proto.RegisterRsp{Peer: 7, Conn: n, Index: int(n - 1), Hub: "srv"}, nil
+		rsp := &proto.RegisterRsp{Peer: 7, Conn: n, Index: int(n - 1), Hub: "srv"}
+		if hs, _ := l.Value().(*auth.Handshake); hs != nil && !s.noProof.Load() {
+			rsp.Proof = hs.HubProof()
+		}
+		return rsp, nil
 	}, true)
 	r.HandleCall(proto.MethodPing, func(*link.Link, []byte) (any, error) {
 		if s.failPings.Load() {
@@ -45,7 +75,7 @@ func newFakeHub(t *testing.T) *fakeHub {
 	}, true)
 	r.HandleCall(proto.MethodNodes, func(*link.Link, []byte) (any, error) { return []string{"a"}, nil }, true)
 	l, err := transport.Listen(tunneltest.Engine(t), "127.0.0.1:0", transport.ListenOptions{}, func(c transport.Conn) transport.Handler {
-		return link.New(c, r, nil)
+		return link.New(c, r)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +206,7 @@ func TestUplink(t *testing.T) {
 // links that carry as many as they may.
 func TestNextTunnelID(t *testing.T) {
 	s := newFakeHub(t)
-	u := newUplink(t, &config.TunnelUplink{PoolSize: 2, Endpoints: []config.TunnelEndpoint{{Address: s.addr}}})
+	u := newUplink(t, &config.TunnelUplink{Password: "p", PoolSize: 2, Endpoints: []config.TunnelEndpoint{{Address: s.addr}}})
 	var links []*link.Link
 	for range 2 {
 		l, err := u.dial()
@@ -246,11 +276,82 @@ func TestDialFails(t *testing.T) {
 	}
 }
 
-// A body password seals the links' bodies.
+// The links are sealed, a body password or not.
 func TestBodyPassword(t *testing.T) {
 	u := newUplink(t, &config.TunnelUplink{BodyPassword: "b", Endpoints: []config.TunnelEndpoint{{Address: "h:1"}}})
-	if st := u.Status(); !st.BodyEncrypted || !st.HasBodyPassword || u.coder == nil {
+	if st := u.Status(); !st.BodyEncrypted || !st.HasBodyPassword {
 		t.Errorf("status %+v", st)
+	}
+	if _, _, err := u.keys(make([]byte, 3)); err == nil {
+		t.Error("a salt of the wrong size")
+	}
+	salt := auth.Random(auth.SaltLen)
+	u.Config.Password = "p"
+	k1, b1, err := u.keys(salt)
+	if err != nil || b1 == nil {
+		t.Fatal(err)
+	}
+	if k2, _, _ := u.keys(salt); &k2[0] != &k1[0] {
+		t.Error("the keys under the same salt were derived again")
+	}
+}
+
+// A hub that does not know the password, or does not prove it, is not
+// registered with, and nothing of it is served: the node's methods it
+// calls are refused.
+func TestFakeHub(t *testing.T) {
+	served := make(chan struct{}, 4)
+	for _, tc := range []struct {
+		name string
+		hub  func() *fakeHub
+		want string
+	}{
+		{"another password", func() *fakeHub { return newFakeHubWith(t, "guess") }, "decrypt"},
+		{"no proof", func() *fakeHub { s := newFakeHub(t); s.noProof.Store(true); return s }, "did not prove"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := tc.hub()
+			u := New(tunneltest.Engine(t), &config.TunnelUplink{Password: "p", PoolSize: 1, RetryInterval: config.Duration(time.Hour),
+				Endpoints: []config.TunnelEndpoint{{Address: s.addr}}}, nil, nil, info, func(_ *Uplink, r *link.Router) {
+				r.HandleCall(proto.MethodNodeSetServices, func(*link.Link, []byte) (any, error) { served <- struct{}{}; return "ok", nil }, true)
+			})
+			t.Cleanup(u.Stop)
+			u.Start()
+			waitFor(t, "the failure", func() bool { return u.Status().State == StateFailed })
+			if st := u.Status(); st.Pool != 0 || !strings.Contains(st.Error, tc.want) {
+				t.Errorf("status %+v", st)
+			}
+		})
+	}
+	// A hub that skips the handshake: what it calls is refused.
+	r := link.NewRouter()
+	calls := make(chan error, 1)
+	r.HandleCall(proto.MethodHello, func(l *link.Link, _ []byte) (any, error) {
+		calls <- l.Call(proto.MethodNodeSetServices, []proto.Service{{Name: "ssh", Addr: "127.0.0.1:22"}}, nil, 5*time.Second)
+		return nil, errors.New("hold on")
+	}, false)
+	ln, err := transport.Listen(tunneltest.Engine(t), "127.0.0.1:0", transport.ListenOptions{}, func(c transport.Conn) transport.Handler { return link.New(c, r) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	u := New(tunneltest.Engine(t), &config.TunnelUplink{Password: "p", PoolSize: 1, RetryInterval: config.Duration(time.Hour),
+		Endpoints: []config.TunnelEndpoint{{Address: ln.URL()}}}, nil, nil, info, func(_ *Uplink, r *link.Router) {
+		r.HandleCall(proto.MethodNodeSetServices, func(*link.Link, []byte) (any, error) { served <- struct{}{}; return "ok", nil }, true)
+	})
+	t.Cleanup(u.Stop)
+	l, err := u.dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go u.register(l)
+	if err := <-calls; err == nil || !strings.Contains(err.Error(), "not proven") {
+		t.Errorf("a call before the handshake: %v", err)
+	}
+	select {
+	case <-served:
+		t.Fatal("a fake hub's call was served")
+	default:
 	}
 }
 
@@ -315,24 +416,32 @@ func (failConn) RemoteAddr() net.Addr { return nil }
 // A link whose registration fails is closed, and the uplink says why.
 func TestRegisterFails(t *testing.T) {
 	u := newUplink(t, &config.TunnelUplink{Endpoints: []config.TunnelEndpoint{{Address: "h:1"}}})
-	u.register(link.New(&failConn{}, u.router, nil))
+	u.register(link.New(&failConn{}, u.router))
 	if st := u.Status(); st.State != StateFailed || st.Error != "register: down" {
 		t.Errorf("status %+v", st)
 	}
 }
 
-// A link registered after it closed, or after the uplink let it go, is not
-// taken.
+// A link the uplink let go before it registered is not taken; one whose
+// hello is answered by a link that closed fails.
 func TestRegisterLost(t *testing.T) {
-	u := newUplink(t, &config.TunnelUplink{Endpoints: []config.TunnelEndpoint{{Address: "h:1"}}})
-	c := &replyConn{reply: &proto.RegisterRsp{Conn: 1}}
-	c.l = link.New(c, u.router, nil)
-	u.pool[c.l] = "h:1"
-	u.register(c.l)
-	c2 := &replyConn{reply: &proto.RegisterRsp{Conn: 2}}
-	c2.l = link.New(c2, u.router, nil)
-	u.register(c2.l)
+	s := newFakeHub(t)
+	u := newUplink(t, &config.TunnelUplink{Password: "p", Endpoints: []config.TunnelEndpoint{{Address: s.addr}}})
+	l, err := u.dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.mu.Lock()
+	delete(u.pool, l)
+	u.mu.Unlock()
+	u.register(l)
 	if st := u.Status(); st.Pool != 0 || st.State != StateConnecting {
+		t.Errorf("status %+v", st)
+	}
+	c := &replyConn{reply: &auth.HelloRsp{Version: auth.Version}}
+	c.l = link.New(c, u.router)
+	u.register(c.l)
+	if st := u.Status(); st.Pool != 0 || st.State != StateFailed {
 		t.Errorf("status %+v", st)
 	}
 }

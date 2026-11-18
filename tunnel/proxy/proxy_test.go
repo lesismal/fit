@@ -15,6 +15,7 @@ import (
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/tunnel/internal/common"
+	"github.com/lesismal/fit/tunnel/internal/proto"
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 	"github.com/lesismal/fit/tunnel/internal/uplink"
 )
@@ -57,15 +58,17 @@ func TestProxyAPI(t *testing.T) {
 	p.expect("/api/nodes/refresh", map[string]string{"hub": "nope"}, 404, "no such hub")
 	p.expect("/api/nodes/refresh", map[string]string{"hub": "hub"}, 200, `"lab"`)
 
-	// A node's services, set through the hub.
-	extra := tunneltest.Echo(t, "")
-	p.expect("/api/nodes/services", map[string]any{"hub": "nope", "node": "lab"}, 404, "no such hub")
-	p.expect("/api/nodes/services", map[string]any{"hub": "hub", "node": "ghost", "services": []ServiceView{}}, 502, "ghost")
-	p.expect("/api/nodes/services", map[string]any{"hub": "hub", "node": "lab", "services": []ServiceView{
-		{Name: "echo", Address: echo}, {Name: " extra ", Address: " " + extra + " ", Description: "more"}}}, 200, "ok")
-	h.waitNode("hub", "lab", "extra")
-	if _, err := h.c.SetNodeServices(h.c.uplink("hub"), "ghost", nil); err == nil {
-		t.Fatal("the services of a missing node were set")
+	// A proxy cannot set a node's services: its pages do not offer it, and
+	// the hub refuses it the call.
+	if code, _ := p.do("POST", "/api/nodes/services", map[string]any{"hub": "hub", "node": "lab", "services": []ServiceView{}}, nil); code != 404 {
+		t.Fatalf("the pages set a node's services: %d", code)
+	}
+	evil := map[string]any{"node": "lab", "services": []proto.Service{{Name: "ssh", Addr: "127.0.0.1:22"}}}
+	if err := h.c.uplink("hub").Call(proto.MethodSetNodeServices, evil, nil); err == nil || !strings.Contains(err.Error(), "no method") {
+		t.Fatalf("a proxy set a node's services: %v", err)
+	}
+	if list := h.c.Nodes(h.c.uplink("hub")); len(list.Nodes) != 1 || len(list.Nodes[0].Info.Services) != 1 || list.Nodes[0].Info.Services[0].Addr != echo {
+		t.Fatalf("nodes %+v", list)
 	}
 
 	// The meta, told to the hubs the proxy keeps.
@@ -77,7 +80,7 @@ func TestProxyAPI(t *testing.T) {
 	// Forwards: one listened on, one refused, one taken.
 	byHub, toMissing, badService, taken := freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t)
 	p.expect("/api/forwards", map[string]string{"listen": fwd, "node": "lab", "service": "echo"}, 400, "forwarded already")
-	p.expect("/api/forwards", map[string]string{"listen": byHub, "node": "lab", "service": "extra", "hub": " hub "}, 200, "ok")
+	p.expect("/api/forwards", map[string]string{"listen": byHub, "node": "lab", "service": "echo", "hub": " hub "}, 200, "ok")
 	p.expect("/api/forwards", map[string]string{"listen": toMissing, "node": "ghost", "service": "echo"}, 200, "ok")
 	p.expect("/api/forwards", map[string]string{"listen": badService, "node": "lab", "service": "nope", "hub": "hub"}, 200, "ok")
 	echoOnce(t, byHub, "by name")
@@ -129,7 +132,7 @@ func TestProxyAPI(t *testing.T) {
 
 	// Bodies the pages send that do not decode.
 	for _, path := range []string{"/api/hubs", "/api/hubs/update", "/api/hubs/delete", "/api/nodes/refresh",
-		"/api/nodes/services", "/api/meta", "/api/forwards", "/api/forwards/delete", "/api/tunnels/close"} {
+		"/api/meta", "/api/forwards", "/api/forwards/delete", "/api/tunnels/close"} {
 		if code, _ := p.do("POST", path, "not an object", nil); code != 400 {
 			t.Errorf("%s: %d", path, code)
 		}

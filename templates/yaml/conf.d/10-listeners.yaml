@@ -96,7 +96,8 @@ listeners:
 
       # # The destinations the proxy connects to: host names, "*.example.com" for every name below
       # # example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves
-      # # to. Every destination deny does not hold when left out.
+      # # to. Every destination deny does not hold when left out, save the local addresses allow_local
+      # # is about.
       # # list of string.
       # allow: ["*.example.com", "10.1.0.0/16"]
 
@@ -108,6 +109,16 @@ listeners:
       # # The destination ports allowed; any when left out.
       # # list of integer.
       # ports: [443]
+
+      # # Let the proxy connect to its own host and link: 127.0.0.0/8, 0.0.0.0/8, 169.254.0.0/16 (a
+      # # cloud's metadata service at 169.254.169.254 among them), ::/96 (::, ::1 and the
+      # # IPv4-compatible addresses), fe80::/10, and these as IPv4-mapped IPv6 addresses. When left
+      # # out or false they are refused, as literals and as the address a host name resolves to,
+      # # whatever allow and deny say, except the addresses an allow range within them holds, as
+      # # "127.0.0.1" or "169.254.169.254"; a wider range, as "0.0.0.0/0", and host names do not reach
+      # # them.
+      # # boolean.
+      # allow_local: true
 
       # # How long resolving and connecting to a destination may take. 10s when left out.
       # # duration, as "1.5s" or "2m"; default "10s".

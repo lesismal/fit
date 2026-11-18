@@ -33,14 +33,20 @@
 // big-endian, and then the payload; the hub passes such a body on, as it
 // is, to the other end of the tunnel.
 //
-// With a body password (package bodycrypt) set on both sides, every frame's
-// body is sealed with AES-256-GCM and bit 0x80 of its kind is set:
+// A link opens unsealed, for its handshake (package auth), which ends
+// with Seal on one side and a Sealing answer on the other. From then on
+// every frame's body is sealed with AES-256-GCM, under the link's own key
+// for its direction and the frame's number in it as the nonce (package
+// bodycrypt), and bit 0x80 of its kind is set:
 //
-//	body = nonce:12 bytes, sealed body, tag:16 bytes
+//	body = sealed body, tag:16 bytes
 //
-// with the header, flag included, as the additional data. A side with a
-// body password closes the connection of a frame that is not sealed or does
-// not open, and a side without one closes the connection of a sealed frame.
+// with the header, flag included, as the additional data. A side that
+// seals closes the connection of a frame that is not sealed or does not
+// open, answering a call that does not open with an unsealed error first,
+// so that the other side learns why; it takes an unsealed error as the
+// reason the other side gives up. A side that does not seal yet closes the
+// connection of a sealed frame.
 //
 // A frame of an unknown kind, or a length out of bounds, closes the
 // connection too. A call of a method the side does not serve is answered
@@ -102,8 +108,8 @@ var (
 	// ErrBusy is the error of a call a link had no room to run.
 	ErrBusy = errors.New("link: too many calls under way; try again")
 
-	errUnsealed = errors.New("link: received an unencrypted frame; is a body password set on both sides?")
-	errSealed   = errors.New("link: received an encrypted frame without a body password")
+	errUnsealed = errors.New("link: received an unencrypted frame after the handshake")
+	errSealed   = errors.New("link: received an encrypted frame before the handshake")
 )
 
 // RemoteError is a failure the other side answered a call with.
@@ -114,6 +120,14 @@ func (e RemoteError) Error() string { return string(e) }
 // CallFunc serves a call: it gets the call's body and returns the result,
 // encoded as Encode does, or the failure.
 type CallFunc func(l *Link, body []byte) (any, error)
+
+// Sealing is what an inline CallFunc returns to answer with Reply,
+// unsealed, and seal the link from then on: what it sends after the
+// answer, and what it receives after the call.
+type Sealing struct {
+	Reply   any
+	Session *bodycrypt.Session
+}
 
 // NotifyFunc serves a notify.
 type NotifyFunc func(l *Link, body []byte)
@@ -164,7 +178,13 @@ type reply struct {
 type Link struct {
 	conn   transport.Conn
 	router *Router
-	coder  *bodycrypt.Coder
+
+	// sendMu orders what is sent with the numbers its sealing gives it;
+	// send is the sealing, nil until the link seals. recv is the opening,
+	// used where the link is read.
+	sendMu sync.Mutex
+	send   *bodycrypt.Direction
+	recv   atomic.Pointer[bodycrypt.Direction]
 
 	// in is what arrived of a frame not yet whole.
 	in []byte
@@ -183,10 +203,10 @@ type Link struct {
 	done    chan struct{}
 }
 
-// New is the link on conn, serving what router does, with bodies sealed by
-// coder unless it is nil.
-func New(conn transport.Conn, router *Router, coder *bodycrypt.Coder) *Link {
-	l := &Link{conn: conn, router: router, coder: coder, pending: map[uint32]chan reply{}, done: make(chan struct{})}
+// New is the link on conn, serving what router does, unsealed until its
+// handshake seals it.
+func New(conn transport.Conn, router *Router) *Link {
+	l := &Link{conn: conn, router: router, pending: map[uint32]chan reply{}, done: make(chan struct{})}
 	l.maxFrame.Store(MaxFrame)
 	// What waits on a link is bounded by its tunnels' windows, which may
 	// be more than the engine lets a connection queue by default.
@@ -195,6 +215,20 @@ func New(conn transport.Conn, router *Router, coder *bodycrypt.Coder) *Link {
 	}
 	return l
 }
+
+// Seal seals the link with s from now on, both ways: the side that opens
+// the handshake calls it once the other side's answer has come, before it
+// sends again.
+func (l *Link) Seal(s *bodycrypt.Session) {
+	l.sendMu.Lock()
+	l.send = s.Send
+	l.recv.Store(s.Recv)
+	l.sendMu.Unlock()
+}
+
+// Sealed reports whether what the link receives is sealed: whatever it
+// served since came from a side that holds the link's keys.
+func (l *Link) Sealed() bool { return l.recv.Load() != nil }
 
 // SetMaxFrame sets the longest frame the link takes, at most MaxFrame: a
 // hub keeps it short until a link has registered.
@@ -275,43 +309,47 @@ func Decode(body []byte, v any) error {
 	return json.Unmarshal(body, v)
 }
 
-// frame is a frame of kind, m and id whose body is parts, one after
-// another, sealed when the link seals bodies.
-func (l *Link) frame(kind byte, m proto.Method, id uint32, parts ...[]byte) []byte {
+// sendFrame sends the frame of kind, m and id whose body is parts, one
+// after another, sealed once the link seals unless plain.
+func (l *Link) sendFrame(plain bool, kind byte, m proto.Method, id uint32, parts ...[]byte) error {
 	n := 0
 	for _, p := range parts {
 		n += len(p)
 	}
+	if HeaderSize+n+bodycrypt.Overhead > MaxFrame {
+		return fmt.Errorf("link: a frame of %d bytes is longer than %d", HeaderSize+n, MaxFrame)
+	}
+	l.sendMu.Lock()
+	defer l.sendMu.Unlock()
+	seal := l.send
+	if plain {
+		seal = nil
+	}
 	extra := 0
-	if l.coder != nil {
+	if seal != nil {
 		extra = bodycrypt.Overhead
 		kind |= kindSealed
 	}
 	const head = LengthSize + HeaderSize
-	b := make([]byte, head+extra+n)
+	b := make([]byte, head+n, head+n+extra)
 	header := b[LengthSize:head]
 	header[0] = kind
 	header[1] = byte(m)
 	binary.BigEndian.PutUint32(header[2:], id)
 	off := head
-	if l.coder != nil {
-		off += bodycrypt.NonceSize
-	}
 	for _, p := range parts {
 		off += copy(b[off:], p)
 	}
-	if l.coder != nil {
-		body := l.coder.SealInPlace(b[head:head+bodycrypt.NonceSize+n], header)
+	if seal != nil {
+		body, err := seal.SealInPlace(b[head:], header)
+		if err != nil {
+			return err
+		}
 		b = b[:head+len(body)]
 	}
 	binary.BigEndian.PutUint32(b, uint32(len(b)-LengthSize))
-	return b
-}
-
-func (l *Link) send(b []byte) error {
-	if len(b)-LengthSize > MaxFrame {
-		return fmt.Errorf("link: a frame of %d bytes is longer than %d", len(b)-LengthSize, MaxFrame)
-	}
+	// Sent under the lock, so that frames go out in the order of their
+	// numbers.
 	return l.conn.Send(b)
 }
 
@@ -336,7 +374,7 @@ func (l *Link) Call(m proto.Method, req, rsp any, timeout time.Duration) error {
 	id := l.seq
 	l.pending[id] = ch
 	l.mu.Unlock()
-	if err := l.send(l.frame(kindCall, m, id, body)); err != nil {
+	if err := l.sendFrame(false, kindCall, m, id, body); err != nil {
 		l.forget(id)
 		return err
 	}
@@ -373,7 +411,7 @@ func (l *Link) Notify(m proto.Method, body any) error {
 	if err != nil {
 		return err
 	}
-	return l.send(l.frame(kindNotify, m, 0, b))
+	return l.sendFrame(false, kindNotify, m, 0, b)
 }
 
 // SendTunnel notifies m, a tunnel method, with the frame of tunnel id and
@@ -381,18 +419,27 @@ func (l *Link) Notify(m proto.Method, body any) error {
 func (l *Link) SendTunnel(m proto.Method, id uint64, payload []byte) error {
 	var head [8]byte
 	binary.BigEndian.PutUint64(head[:], id)
-	return l.send(l.frame(kindNotify, m, 0, head[:], payload))
+	return l.sendFrame(false, kindNotify, m, 0, head[:], payload)
 }
 
 func (l *Link) answer(m proto.Method, id uint32, rsp any, err error) {
 	if err == nil {
-		var body []byte
-		if body, err = Encode(rsp); err == nil {
-			_ = l.send(l.frame(kindReply, m, id, body))
-			return
+		if s, ok := rsp.(Sealing); ok {
+			var body []byte
+			if body, err = Encode(s.Reply); err == nil {
+				_ = l.sendFrame(false, kindReply, m, id, body)
+				l.Seal(s.Session)
+				return
+			}
+		} else {
+			var body []byte
+			if body, err = Encode(rsp); err == nil {
+				_ = l.sendFrame(false, kindReply, m, id, body)
+				return
+			}
 		}
 	}
-	_ = l.send(l.frame(kindError, m, id, []byte(err.Error())))
+	_ = l.sendFrame(false, kindError, m, id, []byte(err.Error()))
 }
 
 // OnData parses the frames that arrived and serves them.
@@ -441,14 +488,28 @@ func (l *Link) OnData(data []byte) {
 func (l *Link) handle(f []byte) bool {
 	header, body := f[:HeaderSize], f[HeaderSize:]
 	kind := header[0]
+	m := proto.Method(header[1])
+	id := binary.BigEndian.Uint32(header[2:])
+	recv := l.recv.Load()
 	switch {
-	case l.coder != nil && kind&kindSealed == 0:
+	case recv != nil && kind == kindError:
+		// The other side gave up, before it could seal: its reason, at
+		// most a line of it.
+		msg := string(body[:min(len(body), 512)])
+		l.fail(RemoteError(msg))
+		return false
+	case recv != nil && kind&kindSealed == 0:
 		l.fail(errUnsealed)
 		return false
-	case l.coder != nil:
-		plain, err := l.coder.OpenInPlace(body, header)
+	case recv != nil:
+		plain, err := recv.OpenInPlace(body, header)
 		if err != nil {
-			l.fail(err)
+			if kind&^kindSealed == kindCall {
+				// Say why, unsealed: the other side cannot open what it
+				// does not hold the keys of either.
+				_ = l.sendFrame(true, kindError, m, id, []byte(err.Error()))
+			}
+			l.failAfterSend(err)
 			return false
 		}
 		body = plain
@@ -457,8 +518,6 @@ func (l *Link) handle(f []byte) bool {
 		l.fail(errSealed)
 		return false
 	}
-	m := proto.Method(header[1])
-	id := binary.BigEndian.Uint32(header[2:])
 	switch kind {
 	case kindReply, kindError:
 		l.mu.Lock()
@@ -548,16 +607,30 @@ func (l *Link) serveNotify(m proto.Method, body []byte) {
 
 // fail closes the link for err, a breach of the protocol.
 func (l *Link) fail(err error) {
+	if l.failed(err) {
+		_ = l.conn.Close()
+	}
+}
+
+// failAfterSend is fail, closing the link once what was sent has gone
+// out.
+func (l *Link) failAfterSend(err error) {
+	if l.failed(err) {
+		l.conn.CloseAfterSend()
+	}
+}
+
+func (l *Link) failed(err error) bool {
 	l.mu.Lock()
 	if l.failing || l.closed {
 		l.mu.Unlock()
-		return
+		return false
 	}
 	l.failing = true
 	l.err = err
 	l.mu.Unlock()
 	l.router.Log.Warnf("dropped a link from %s: %v", l.RemoteAddr(), err)
-	_ = l.conn.Close()
+	return true
 }
 
 // OnClose ends the calls waiting on the link and tells the router.

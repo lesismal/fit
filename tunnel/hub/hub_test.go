@@ -1,15 +1,19 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/tunnel/internal/auth"
 	"github.com/lesismal/fit/tunnel/internal/link"
 	"github.com/lesismal/fit/tunnel/internal/proto"
 )
@@ -77,7 +81,7 @@ func TestApplyMoves(t *testing.T) {
  "listeners": [{"protocol": "tcp", "address": "127.0.0.1:0"}]}`, con, sock)); err != nil {
 		t.Fatal(err)
 	}
-	if next := v.s.settings(); next.verifier != set.verifier || &next.secret[0] != &set.secret[0] || v.s.socket.h.max.Load() != 3 {
+	if next := v.s.settings(); &next.keys["pw"][0] != &set.keys["pw"][0] || &next.secret[0] != &set.secret[0] || v.s.socket.h.max.Load() != 3 {
 		t.Fatal("the secrets were made anew")
 	}
 	// Without a quic listener the certificate goes; a busy listener is
@@ -139,6 +143,100 @@ func TestUnregisteredLinks(t *testing.T) {
 	p.waitClosed()
 }
 
+// Links that have not registered have a cap of their own, within
+// max_links, so that they cannot crowd out the peers'.
+func TestPendingLinks(t *testing.T) {
+	v := newHub(t, tcpMember(`, "max_pending_links": 1`))
+	addr := v.listen()
+	p := v.dial(addr)
+	waitFor(t, "the first link to count", func() bool { return v.s.Status().Links == 1 })
+	v.dial(addr).waitClosed()
+	p.mustRegister(proto.TypeNode, "lab")
+	q := v.dial(addr).mustRegister(proto.TypeNode, "lab")
+	q.l.Close()
+	waitFor(t, "the link to go", func() bool { return v.s.Status().Links == 1 })
+	// A link that closes before it registers gives its place back.
+	r := v.dial(addr)
+	waitFor(t, "the link to count", func() bool { return v.s.Status().Links == 2 })
+	r.l.Close()
+	waitFor(t, "the link to go", func() bool { return v.s.Status().Links == 1 })
+	v.dial(addr).mustRegister(proto.TypeProxy, "me")
+	v.s.mu.Lock()
+	pending := v.s.pending
+	v.s.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("%d pending", pending)
+	}
+}
+
+// Nodes and proxies register with the passwords of their roles, or a node
+// with its own; a proxy cannot register as a node, nor a node under the
+// name of one with its own password; a password that changes kicks those
+// who registered with it.
+func TestRolePasswords(t *testing.T) {
+	v := newHub(t, `{"name": "hub", "node_password": "np", "proxy_password": "pp", "node_secrets": [{"name": "lab", "password": "ls"}],
+ "listeners": [{"protocol": "tcp", "address": "127.0.0.1:0"}]}`)
+	addr := v.listen()
+	refused := func(typ, name, pw string) {
+		t.Helper()
+		if err := v.dial(addr).register(typ, name, pw); err == nil {
+			t.Fatalf("%s %s registered with %q", typ, name, pw)
+		}
+	}
+	registered := func(typ, name, pw string) *peer {
+		t.Helper()
+		p := v.dial(addr)
+		if err := p.register(typ, name, pw); err != nil {
+			t.Fatalf("%s %s with %q: %v", typ, name, pw, err)
+		}
+		return p
+	}
+	proxy := registered(proto.TypeProxy, "me", "pp")
+	refused(proto.TypeNode, "beta", "pp")
+	refused(proto.TypeProxy, "you", "np")
+	beta := registered(proto.TypeNode, "beta", "np")
+	refused(proto.TypeNode, "lab", "np")
+	refused(proto.TypeNode, "lab", "pp")
+	lab := registered(proto.TypeNode, "lab", "ls")
+	// The proxy the node password does not let in sees the nodes.
+	var list proto.NodeList
+	if err := proxy.call(proto.MethodNodes, nil, &list); err != nil || len(list.Nodes) != 2 {
+		t.Fatalf("nodes %+v, %v", list, err)
+	}
+	// A node does not list the nodes.
+	if err := beta.call(proto.MethodNodes, nil, nil); err == nil || !strings.Contains(err.Error(), "only a proxy") {
+		t.Fatalf("a node listed the nodes: %v", err)
+	}
+	// A peer of the name that proved another password is refused.
+	node := v.s.peerByName(proto.TypeNode, "lab")
+	v.s.mu.Lock()
+	node.cred = auth.Key("another")
+	v.s.mu.Unlock()
+	if err := v.dial(addr).register(proto.TypeNode, "lab", "ls"); err == nil || !strings.Contains(err.Error(), "another password") {
+		t.Fatalf("a second lab: %v", err)
+	}
+	v.s.mu.Lock()
+	node.cred = v.s.settings().key(proto.TypeNode, "lab")
+	v.s.mu.Unlock()
+
+	// lab's password changes: lab is kicked, the rest stay.
+	if err := v.apply(`{"name": "hub", "node_password": "np", "proxy_password": "pp", "node_secrets": [{"name": "lab", "password": "ls2"}],
+ "listeners": [{"protocol": "tcp", "address": "127.0.0.1:0"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if n := lab.wait(proto.MethodKick); !strings.Contains(string(n.body), "password") {
+		t.Fatalf("kick %q", n.body)
+	}
+	lab.waitClosed()
+	select {
+	case <-beta.l.Done():
+		t.Fatal("beta was kicked")
+	case <-proxy.l.Done():
+		t.Fatal("the proxy was kicked")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 // Registrations the hub refuses.
 func TestRegisterRefused(t *testing.T) {
 	v := newHub(t, tcpMember(`, "max_peers": 1, "max_links_per_peer": 1`))
@@ -146,7 +244,7 @@ func TestRegisterRefused(t *testing.T) {
 	if err := p.call(proto.MethodRegister, "not json", nil); err == nil {
 		t.Fatal("a registration that does not decode")
 	}
-	if err := p.register(proto.TypeNode, "lab", "wrong"); err == nil {
+	if err := v.dial(v.listen()).register(proto.TypeNode, "lab", "wrong"); err == nil || !strings.Contains(err.Error(), "decrypt") {
 		t.Fatal("a wrong password registered")
 	}
 	// The numbers wrap past zero.
@@ -157,7 +255,10 @@ func TestRegisterRefused(t *testing.T) {
 	if p.rsp.Peer != 1 || p.rsp.Conn != 1 {
 		t.Fatalf("numbered %+v", p.rsp)
 	}
-	if err := p.register(proto.TypeNode, "lab", "pw"); err == nil || !strings.Contains(err.Error(), "already") {
+	if err := p.register(proto.TypeNode, "lab", "pw"); err == nil || !strings.Contains(err.Error(), "second hello") {
+		t.Fatalf("registered twice: %v", err)
+	}
+	if err := p.call(proto.MethodRegister, &proto.RegisterReq{}, nil); err == nil || !strings.Contains(err.Error(), "already") {
 		t.Fatalf("registered twice: %v", err)
 	}
 	if err := v.dial(v.listen()).register(proto.TypeNode, "lab", "pw"); err == nil || !strings.Contains(err.Error(), "links") {
@@ -172,15 +273,104 @@ func TestRegisterRefused(t *testing.T) {
 	if err := w.dial(w.listen()).register(proto.TypeNode, "lab", "pw"); err == nil || !strings.Contains(err.Error(), "password") {
 		t.Fatalf("registered without a password: %v", err)
 	}
+	// Hellos the hub refuses.
+	for what, h := range map[string]auth.Hello{
+		"another version": {Version: 1, Type: proto.TypeNode, Name: "lab", Nonce: auth.Random(auth.NonceLen)},
+		"no name":         {Version: auth.Version, Type: proto.TypeNode, Nonce: auth.Random(auth.NonceLen)},
+		"a long name":     {Version: auth.Version, Type: proto.TypeNode, Name: strings.Repeat("x", MaxName+1), Nonce: auth.Random(auth.NonceLen)},
+		"another type":    {Version: auth.Version, Type: "agent", Name: "lab", Nonce: auth.Random(auth.NonceLen)},
+		"short nonce":     {Version: auth.Version, Type: proto.TypeNode, Name: "lab", Nonce: []byte("x")},
+	} {
+		if err := v.dial(v.listen()).call(proto.MethodHello, &h, nil); err == nil {
+			t.Errorf("%s: taken", what)
+		}
+	}
+	if err := v.dial(v.listen()).call(proto.MethodHello, "not json", nil); err == nil {
+		t.Error("a hello that does not decode")
+	}
+	// A registration before the hello, or of another name than the
+	// hello's, or with a MAC of another handshake.
+	if err := v.dial(v.listen()).call(proto.MethodRegister, &proto.RegisterReq{}, nil); err == nil || !strings.Contains(err.Error(), "after the hello") {
+		t.Errorf("a registration before the hello: %v", err)
+	}
+	q := v.dial(v.listen())
+	hs, err := hello(q.l, proto.TypeProxy, "me", "pw", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.call(proto.MethodRegister, &proto.RegisterReq{Info: proto.NewInfo("you", proto.TypeProxy), MAC: hs.PeerMAC()}, nil); err == nil || !strings.Contains(err.Error(), "another peer") {
+		t.Errorf("a registration of another name: %v", err)
+	}
+	if err := q.call(proto.MethodRegister, &proto.RegisterReq{Info: proto.NewInfo("me", proto.TypeProxy), MAC: hs.HubProof()}, nil); err == nil || !strings.Contains(err.Error(), "authentication failed") {
+		t.Errorf("a registration with another MAC: %v", err)
+	}
+	if err := q.call(proto.MethodRegister, "not json", nil); err == nil {
+		t.Error("a registration that does not decode")
+	}
 }
+
+// A recorded handshake replayed on a link of its own does not register:
+// the hub's random bytes differ, so the recorded registration does not
+// open, and the link closes.
+func TestRegisterReplayed(t *testing.T) {
+	v := newHub(t, tcpMember(""))
+	addr := v.listen()
+	// Record what a peer sends.
+	rec := &recConn{}
+	l := link.New(rec, link.NewRouter())
+	h := auth.Hello{Version: auth.Version, Type: proto.TypeNode, Name: "lab", Nonce: auth.Random(auth.NonceLen)}
+	p := v.dial(addr)
+	var rsp auth.HelloRsp
+	if err := p.call(proto.MethodHello, &h, &rsp); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := auth.Derive("pw", rsp.Salt)
+	hs, _ := auth.NewHandshake(&h, &rsp, key, nil)
+	sess, _ := hs.Session(false)
+	l.Seal(sess)
+	_ = l.Notify(proto.MethodRegister, &proto.RegisterReq{Info: proto.NewInfo("lab", proto.TypeNode), MAC: hs.PeerMAC()})
+	recorded := bytes.Clone(rec.sent[len(rec.sent)-1])
+
+	// Replay it on a new link, after the same hello.
+	q := v.dial(addr)
+	if err := q.call(proto.MethodHello, &h, nil); err != nil {
+		t.Fatal(err)
+	}
+	q.l.Seal(sess)
+	if err := q.l.Conn().Send(recorded); err != nil {
+		t.Fatal(err)
+	}
+	q.waitClosed()
+	if len(v.s.Peers()) != 0 {
+		t.Fatal("a replayed registration registered")
+	}
+}
+
+// recConn records what a link sends.
+type recConn struct{ sent [][]byte }
+
+func (c *recConn) Send(b []byte) error  { c.sent = append(c.sent, b); return nil }
+func (c *recConn) Close() error         { return nil }
+func (c *recConn) CloseAfterSend()      {}
+func (c *recConn) LocalAddr() net.Addr  { return nil }
+func (c *recConn) RemoteAddr() net.Addr { return nil }
 
 // A link that closes while it registers is not registered.
 func TestRegisterClosed(t *testing.T) {
 	v := newHub(t, tcpMember(""))
-	l := link.New(fakeConn{}, v.s.router, nil)
+	l := link.New(fakeConn{}, v.s.router)
+	h := auth.Hello{Version: auth.Version, Type: proto.TypeNode, Name: "lab", Nonce: auth.Random(auth.NonceLen)}
+	hb, _ := link.Encode(&h)
+	out, err := v.s.hello(l, hb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealing := out.(link.Sealing)
+	l.Seal(sealing.Session)
+	key, _ := auth.Derive("pw", v.s.salt)
+	hs, _ := auth.NewHandshake(&h, sealing.Reply.(*auth.HelloRsp), key, nil)
 	l.OnClose(nil)
-	req := proto.RegisterReq{Info: proto.NewInfo("lab", proto.TypeNode)}
-	proto.Sign(&req, "pw")
+	req := proto.RegisterReq{Info: proto.NewInfo("lab", proto.TypeNode), MAC: hs.PeerMAC()}
 	body, _ := link.Encode(&req)
 	if _, err := v.s.register(l, body); !errors.Is(err, link.ErrClosed) {
 		t.Fatalf("registered a closed link: %v", err)
@@ -205,7 +395,7 @@ func TestUpdatePing(t *testing.T) {
 	}
 }
 
-// A proxy sets and refreshes a node's services through the hub.
+// The hub sets and refreshes a node's services; no peer has it set them.
 func TestNodeServices(t *testing.T) {
 	v := newHub(t, tcpMember(""))
 	n := v.dial(v.listen()).mustRegister(proto.TypeNode, "lab", proto.Service{Name: "a", Addr: "127.0.0.1:1"})
@@ -214,22 +404,35 @@ func TestNodeServices(t *testing.T) {
 	if list := v.s.nodeList(0); len(list.Nodes) != 2 || list.Nodes[0].Info.Name != "beta" {
 		t.Fatalf("nodes %+v", list.Nodes)
 	}
-	if err := c.call(proto.MethodSetNodeServices, "not json", nil); err == nil {
-		t.Fatal("a request that does not decode")
+	// A proxy, or a node, asking the hub to set a node's services is
+	// refused, and the node is not asked.
+	asked := make(chan struct{}, 4)
+	n.mu.Lock()
+	n.services = func([]proto.Service) (any, error) { asked <- struct{}{}; return nil, errors.New("no") }
+	n.mu.Unlock()
+	evil := map[string]any{"node": "lab", "services": []proto.Service{{Name: "ssh", Addr: "127.0.0.1:22"}}}
+	for _, p := range []*peer{c, n2} {
+		if err := p.call(proto.MethodSetNodeServices, evil, nil); err == nil || !strings.Contains(err.Error(), "no method") {
+			t.Fatalf("a peer set a node's services: %v", err)
+		}
 	}
-	if err := c.call(proto.MethodSetNodeServices, &proto.SetServicesReq{Node: "nobody"}, nil); err == nil {
-		t.Fatal("set the services of no node")
+	select {
+	case <-asked:
+		t.Fatal("the node was asked")
+	default:
 	}
+	n.mu.Lock()
+	n.services = nil
+	n.mu.Unlock()
+	node := v.s.peerByName(proto.TypeNode, "lab")
 	// No services are an empty list.
-	var info proto.Info
-	if err := c.call(proto.MethodSetNodeServices, &proto.SetServicesReq{Node: "lab"}, &info); err != nil || len(info.Services) != 0 {
+	if info, err := v.s.setServices(node, nil); err != nil || len(info.Services) != 0 {
 		t.Fatalf("%+v %v", info, err)
 	}
 	want := []proto.Service{{Name: "b", Addr: "127.0.0.1:2"}}
-	if err := c.call(proto.MethodSetNodeServices, &proto.SetServicesReq{Node: "lab", Services: want}, &info); err != nil || len(info.Services) != 1 {
+	if info, err := v.s.setServices(node, want); err != nil || len(info.Services) != 1 {
 		t.Fatalf("%+v %v", info, err)
 	}
-	node := v.s.peerByName(proto.TypeNode, "lab")
 	if info, err := v.s.refreshNode(node); err != nil || info.Services[0].Name != "b" {
 		t.Fatalf("refresh: %+v %v", info, err)
 	}
@@ -239,7 +442,7 @@ func TestNodeServices(t *testing.T) {
 	n.services = func([]proto.Service) (any, error) { return nil, errors.New("no") }
 	n.nodeInfo = func() (any, error) { return nil, errors.New("no") }
 	n.mu.Unlock()
-	if err := c.call(proto.MethodSetNodeServices, &proto.SetServicesReq{Node: "lab", Services: want}, nil); err == nil {
+	if _, err := v.s.setServices(node, want); err == nil {
 		t.Fatal("a node's failure succeeded")
 	}
 	if _, err := v.s.refreshNode(node); err == nil {
@@ -334,7 +537,7 @@ func TestOpenTunnelLinkFull(t *testing.T) {
 	svc := proto.Service{Name: "echo", Addr: "127.0.0.1:1"}
 	v.dial(v.listen()).mustRegister(proto.TypeNode, "lab", svc)
 	c := v.dial(v.listen()).mustRegister(proto.TypeProxy, "me")
-	other := link.New(fakeConn{}, v.s.router, nil)
+	other := link.New(fakeConn{}, v.s.router)
 	fill := func(on func(r *Route)) {
 		v.s.mu.Lock()
 		clear(v.s.routes)

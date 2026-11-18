@@ -133,10 +133,44 @@ func TestConnect(t *testing.T) {
 	}
 }
 
+// TestConnectLocal refuses the proxy's own host and link when the rules
+// leave allow_local out: loopback, 0.0.0.0 and :: in their spellings, the
+// metadata address and link-local IPv6 by address, 403, and a host name
+// that resolves to loopback once it is connected, 502. allow_local lets
+// them through, and an ordinary address still passes.
+func TestConnectLocal(t *testing.T) {
+	target := echo(t)
+	_, port, _ := net.SplitHostPort(target)
+	proxy := serve(t, `{"clients": ["127.0.0.1"]}`)
+	for dest, want := range map[string]int{
+		target: 403, "0.0.0.0:" + port: 403, "[::]:" + port: 403, "[::ffff:0.0.0.0]:" + port: 403,
+		"[::1]:" + port: 403, "169.254.169.254:80": 403, "[fe80::1]:80": 403, "localhost:" + port: 502,
+	} {
+		if _, _, status := connect(t, proxy, dest); status != want {
+			t.Errorf("%s: %d, want %d", dest, status, want)
+		}
+	}
+	// An ordinary address passes the rules: TEST-NET-1 never answers, and
+	// the dial times out rather than being refused.
+	proxy = serve(t, `{"clients": ["127.0.0.1"], "connect_timeout": "100ms"}`)
+	if _, _, status := connect(t, proxy, "192.0.2.1:"+port); status == 403 {
+		t.Errorf("192.0.2.1: refused")
+	}
+
+	proxy = serve(t, `{"clients": ["127.0.0.1"], "allow_local": true}`)
+	for _, dest := range []string{target, "0.0.0.0:" + port, "localhost:" + port} {
+		c, r, status := connect(t, proxy, dest)
+		if status != 200 {
+			t.Fatalf("allow_local: %s: %d", dest, status)
+		}
+		roundTrip(t, c, r, "through "+dest)
+	}
+}
+
 // TestConnectH2C tunnels a CONNECT on an h2c stream.
 func TestConnectH2C(t *testing.T) {
 	target := echo(t)
-	proxy := serve(t, `{"clients": ["127.0.0.1"]}`)
+	proxy := serve(t, `{"clients": ["127.0.0.1"], "allow_local": true}`)
 	tr := &stdhttp.Transport{Protocols: new(stdhttp.Protocols)}
 	tr.Protocols.SetUnencryptedHTTP2(true)
 	t.Cleanup(tr.CloseIdleConnections)
@@ -162,7 +196,7 @@ func TestConnectH2C(t *testing.T) {
 // timeout.
 func TestConnectIdleTimeout(t *testing.T) {
 	target := echo(t)
-	proxy := serve(t, `{"clients": ["127.0.0.1"], "idle_timeout": "300ms"}`)
+	proxy := serve(t, `{"clients": ["127.0.0.1"], "allow_local": true, "idle_timeout": "300ms"}`)
 	c, r, status := connect(t, proxy, target)
 	if status != 200 {
 		t.Fatalf("%d", status)

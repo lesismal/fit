@@ -33,6 +33,10 @@ challenge may reach any instance behind the load balancer, not the one that orde
   on ACME's goroutines, at most 16 at once and each within 5s, never on a fib worker (rule 1); a
   TLS-ALPN-01 handshake looks it up in `GetCertificate`, which fib runs on its handshake pool, as
   on-demand TLS does. Tokens and names that could make other keys are refused before any lookup.
+  A handshake looks up only a name its listener lists, or, on a listener with on-demand TLS, one
+  on-demand TLS would take on: a name ACME manages, or one the ask URL allows. The ask URL's
+  answer, either way, is remembered for a minute, as its refusals are, so that a client naming
+  made-up names gets no storage lookups and no more asks than a handshake for them would cause.
 - **Everything else is ACME's as it was**: the lock around issuance, the second look once it is
   held, renewal times that every instance computes alike from the certificate, and the account's
   key shared under a lock of its own.

@@ -524,9 +524,10 @@ type Listener struct {
 // where it may connect them to.
 type ForwardProxy struct {
 	Clients        []string `json:"clients" fit:"required" doc:"The addresses and CIDR ranges of the clients that may use the proxy, as \"10.0.0.0/8\"; others are refused."`
-	Allow          []string `json:"allow,omitempty" doc:"The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out."`
+	Allow          []string `json:"allow,omitempty" doc:"The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out, save the local addresses allow_local is about."`
 	Deny           []string `json:"deny,omitempty" doc:"Destinations refused, written as in allow, whatever allow holds: a host name that resolves to an address deny holds is refused once it is connected, before anything is sent."`
 	Ports          []int    `json:"ports,omitempty" doc:"The destination ports allowed; any when left out."`
+	AllowLocal     bool     `json:"allow_local,omitempty" doc:"Let the proxy connect to its own host and link: 127.0.0.0/8, 0.0.0.0/8, 169.254.0.0/16 (a cloud's metadata service at 169.254.169.254 among them), ::/96 (::, ::1 and the IPv4-compatible addresses), fe80::/10, and these as IPv4-mapped IPv6 addresses. When left out or false they are refused, as literals and as the address a host name resolves to, whatever allow and deny say, except the addresses an allow range within them holds, as \"127.0.0.1\" or \"169.254.169.254\"; a wider range, as \"0.0.0.0/0\", and host names do not reach them."`
 	ConnectTimeout Duration `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long resolving and connecting to a destination may take. 10s when left out."`
 	IdleTimeout    Duration `json:"idle_timeout,omitempty" default:"\"5m\"" doc:"How long a proxied connection may carry nothing either way before both sides are closed. 5m when left out."`
 

@@ -300,20 +300,6 @@ func (c *Proxy) Nodes(u *uplink.Uplink) *proto.NodeList {
 	return c.nodes[u]
 }
 
-// SetNodeServices has the hub of u set the services of node. It
-// blocks, for at most the hub's call_timeout.
-func (c *Proxy) SetNodeServices(u *uplink.Uplink, node string, services []proto.Service) (proto.Info, error) {
-	var info proto.Info
-	if services == nil {
-		services = []proto.Service{}
-	}
-	err := u.Call(proto.MethodSetNodeServices, &proto.SetServicesReq{Node: node, Services: services}, &info)
-	if err == nil {
-		_, _ = c.RefreshNodes(u)
-	}
-	return info, err
-}
-
 // Uplinks is the proxy's connections to hubs.
 func (c *Proxy) Uplinks() []*uplink.Uplink {
 	c.mu.Lock()

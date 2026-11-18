@@ -1,7 +1,8 @@
 // Package hub is the tunnel's hub role, tunnel.hub in fit's
 // config. Nodes and proxies link to its listeners, over
-// TCP, WebSocket or QUIC, and register with its password, every link of
-// each one's pool; the links of one type and name, from however many
+// TCP, WebSocket or QUIC, and register, every link of each one's pool, with
+// the password of their role (or a node's own), the hub proving it knows
+// it too (package auth); the links of one type and name, from however many
 // processes, are one peer, numbered as Unix file descriptors are. The
 // hub routes each tunnel a proxy opens to the node it names, and passes
 // the tunnel's frames between the two, over one link of each throughout, so
@@ -17,6 +18,7 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -32,7 +34,7 @@ import (
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
-	"github.com/lesismal/fit/tunnel/internal/bodycrypt"
+	"github.com/lesismal/fit/tunnel/internal/auth"
 	"github.com/lesismal/fit/tunnel/internal/common"
 	"github.com/lesismal/fit/tunnel/internal/latency"
 	"github.com/lesismal/fit/tunnel/internal/link"
@@ -67,10 +69,12 @@ const unregisteredFrame = 64 << 10
 
 // settings are what the hub runs with, swapped whole as configs apply.
 type settings struct {
-	cfg      *config.TunnelHub
-	name     string
-	verifier *proto.Verifier
-	coder    *bodycrypt.Coder
+	cfg  *config.TunnelHub
+	name string
+	// keys are the registration passwords' keys under the hub's salt, by
+	// password, and bodyKey the body password's, nil without one.
+	keys    map[string]auth.Key
+	bodyKey auth.Key
 	// secret is the console socket's, nil without one.
 	secret wscrypt.Secret
 }
@@ -95,6 +99,9 @@ type Peer struct {
 	// links is the peer's links, by their places among them; it changes
 	// under the hub's lock.
 	links map[int]*link.Link
+	// cred is the key of the password the peer registered with: every link
+	// of the peer proves the same one.
+	cred auth.Key
 
 	mu   sync.Mutex
 	info proto.Info
@@ -189,8 +196,14 @@ type Hub struct {
 	lmu        sync.Mutex
 	socketAddr string
 
-	mu       sync.Mutex
-	links    map[*link.Link]struct{}
+	// salt is what the passwords' keys are derived under, picked as the hub
+	// starts.
+	salt []byte
+
+	mu    sync.Mutex
+	links map[*link.Link]struct{}
+	// pending counts the links that have not registered.
+	pending  int
 	nextID   uint32
 	nextConn uint32
 	peers    map[*link.Link]*Peer
@@ -209,7 +222,7 @@ type Hub struct {
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Hub {
 	s := &Hub{h: h, log: h.Log, links: map[*link.Link]struct{}{}, peers: map[*link.Link]*Peer{}, byName: map[string]*Peer{},
-		byID: map[uint32]*Peer{}, routes: map[uint64]*Route{}, since: time.Now(), epoch: rand.Uint64() | 1}
+		byID: map[uint32]*Peer{}, routes: map[uint64]*Route{}, since: time.Now(), epoch: rand.Uint64() | 1, salt: auth.Random(auth.SaltLen)}
 	s.router = s.newRouter()
 	s.console = common.NewConsole(h.Engine, "tunnel.hub", h.Log, s.api)
 	return s
@@ -235,20 +248,9 @@ func (s *Hub) Apply(member any) error {
 		return app.ErrStopped
 	}
 	first := !s.started
-	next := &settings{cfg: cfg, name: cfg.HubName()}
-	if cfg.BodyPassword != "" {
-		c, err := bodycrypt.New(cfg.BodyPassword)
-		if err != nil {
-			return err
-		}
-		next.coder = c
-	}
-	if cfg.Password != "" {
-		if old := s.settings(); old != nil && old.verifier != nil && old.verifier.Password == cfg.Password {
-			next.verifier = old.verifier
-		} else {
-			next.verifier = &proto.Verifier{Password: cfg.Password}
-		}
+	next, err := s.newSettings(cfg)
+	if err != nil {
+		return err
 	}
 	if cfg.ConsoleSocket != nil {
 		if old := s.settings(); old != nil && old.secret != nil && old.cfg.SocketPassword() == cfg.SocketPassword() {
@@ -266,6 +268,7 @@ func (s *Hub) Apply(member any) error {
 		return err
 	}
 	s.set.Store(next)
+	s.kickStale(next)
 
 	var errs []error
 	if err := s.console.Apply(cfg.Console); err != nil {
@@ -284,6 +287,71 @@ func (s *Hub) Apply(member any) error {
 		s.writeCert(persist[0], persist[1])
 	}
 	return errors.Join(errs...)
+}
+
+// newSettings is the settings of cfg: the keys of its passwords, those
+// it shares with the settings it follows taken from them, as deriving one
+// takes a while on purpose.
+func (s *Hub) newSettings(cfg *config.TunnelHub) (*settings, error) {
+	next := &settings{cfg: cfg, name: cfg.HubName(), keys: map[string]auth.Key{}}
+	var old map[string]auth.Key
+	if cur := s.settings(); cur != nil {
+		old = cur.keys
+	}
+	derive := func(pw string) (auth.Key, error) {
+		if k, ok := next.keys[pw]; ok {
+			return k, nil
+		}
+		k, ok := old[pw]
+		if !ok {
+			var err error
+			if k, err = auth.Derive(pw, s.salt); err != nil {
+				return nil, err
+			}
+		}
+		next.keys[pw] = k
+		return k, nil
+	}
+	pws := []string{cfg.Password, cfg.NodePassword, cfg.ProxyPassword, cfg.BodyPassword}
+	for _, n := range cfg.NodeSecrets {
+		pws = append(pws, n.Password)
+	}
+	for _, pw := range pws {
+		if pw != "" {
+			if _, err := derive(pw); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if cfg.BodyPassword != "" {
+		next.bodyKey = next.keys[cfg.BodyPassword]
+	}
+	if np, pp := cfg.RolePassword(proto.TypeNode, ""), cfg.RolePassword(proto.TypeProxy, ""); np != "" && np == pp {
+		s.log.Warnf("nodes and proxies register with the same password, so any proxy can register as a node: set node_password and proxy_password apart")
+	}
+	return next, nil
+}
+
+// key is the key a peer of type typ and name registers with, nil when the
+// hub takes none.
+func (set *settings) key(typ, name string) auth.Key {
+	if pw := set.cfg.RolePassword(typ, name); pw != "" {
+		return set.keys[pw]
+	}
+	return nil
+}
+
+// kickStale kicks the peers that registered with a password set no longer
+// takes of them, so that a password changed after a leak shuts out those
+// who had it.
+func (s *Hub) kickStale(set *settings) {
+	for _, p := range s.Peers() {
+		info := p.Info()
+		if !bytes.Equal(set.key(info.Type, info.Name), p.cred) {
+			s.log.Infof("kicking %s %q: the password it registered with changed", info.Type, info.Name)
+			s.kick(p, "the hub's password for it changed")
+		}
+	}
 }
 
 // applyCert sets the certificate of the quic listeners: the config's, or,
@@ -478,17 +546,19 @@ func peerOf(c *link.Link) *Peer {
 var errNotRegistered = errors.New("tunnel: register first")
 
 // accept serves a link a node or proxy opened, which must register within
-// register_timeout; past max_links it is closed at once.
+// register_timeout; past max_links, or max_pending_links of those not
+// registered, it is closed at once.
 func (s *Hub) accept(c transport.Conn) transport.Handler {
 	set := s.settings()
-	l := link.New(c, s.router, set.coder)
+	l := link.New(c, s.router)
 	l.SetMaxFrame(unregisteredFrame)
 	s.mu.Lock()
-	if s.closing || len(s.links) >= set.cfg.Links() {
+	if s.closing || len(s.links) >= set.cfg.Links() || s.pending >= set.cfg.PendingLinks() {
 		s.mu.Unlock()
 		return nil
 	}
 	s.links[l] = struct{}{}
+	s.pending++
 	s.mu.Unlock()
 	time.AfterFunc(set.cfg.Register(), func() {
 		if peerOf(l) == nil {
@@ -502,34 +572,28 @@ func (s *Hub) accept(c transport.Conn) transport.Handler {
 func (s *Hub) newRouter() *link.Router {
 	r := link.NewRouter()
 	r.Log = s.log
-	// Only registration is served before a link has registered.
+	// Only the handshake is served before a link has registered.
 	r.Guard = func(l *link.Link, m proto.Method) error {
-		if m != proto.MethodRegister && peerOf(l) == nil {
+		if m != proto.MethodHello && m != proto.MethodRegister && peerOf(l) == nil {
 			return errNotRegistered
 		}
 		return nil
 	}
 	r.OnClose = func(l *link.Link, _ error) { s.disconnected(l) }
 
+	r.HandleCall(proto.MethodHello, s.hello, true)
 	r.HandleCall(proto.MethodRegister, s.register, false)
 	r.HandleCall(proto.MethodUpdate, s.update, false)
 	r.HandleCall(proto.MethodPing, s.ping, true)
-	r.HandleCall(proto.MethodNodes, func(*link.Link, []byte) (any, error) { return s.nodeList(s.nodesVersion.Load()), nil }, false)
-	r.HandleCall(proto.MethodSetNodeServices, func(_ *link.Link, body []byte) (any, error) {
-		var req proto.SetServicesReq
-		if err := link.Decode(body, &req); err != nil {
-			return nil, err
+	r.HandleCall(proto.MethodNodes, func(l *link.Link, _ []byte) (any, error) {
+		if peerOf(l).Info().Type != proto.TypeProxy {
+			return nil, errors.New("tunnel: only a proxy lists the nodes")
 		}
-		node := s.peerByName(proto.TypeNode, req.Node)
-		if node == nil {
-			return nil, fmt.Errorf("tunnel: no node %q", req.Node)
-		}
-		info, err := s.setServices(node, req.Services)
-		if err != nil {
-			return nil, err
-		}
-		return &info, nil
+		return s.nodeList(s.nodesVersion.Load()), nil
 	}, false)
+	// No peer sets a node's services, proxy or node: proto.
+	// MethodSetNodeServices is not served, and only the hub's console sets
+	// them.
 	r.HandleCall(proto.MethodTunnelOpen, s.openTunnel, false)
 	for _, m := range []proto.Method{proto.MethodTunnelData, proto.MethodTunnelAck, proto.MethodTunnelClose} {
 		r.HandleNotify(m, func(l *link.Link, body []byte) { s.forward(l, m, body) }, true)
@@ -537,35 +601,89 @@ func (s *Hub) newRouter() *link.Router {
 	return r
 }
 
-// register registers a link of a peer's pool: with the peer of the same
-// type and name, or as a new peer, in the lowest place none of the peer's
-// links holds.
+// handshake is a link's handshake, between its hello and its
+// registration.
+type handshake struct {
+	hello auth.Hello
+	hs    *auth.Handshake
+	key   auth.Key
+}
+
+// MaxName is the longest name a peer may have.
+const MaxName = 256
+
+// hello opens a link's handshake: it picks the key of the peer's role, or
+// its own, and seals the link with the keys of the handshake once it has
+// answered. It is handled where the link is read, as what follows must
+// open under those keys; it takes no derivation of a key, which Apply did.
+func (s *Hub) hello(c *link.Link, body []byte) (any, error) {
+	if c.Sealed() || c.Value() != nil {
+		return nil, errors.New("tunnel: a second hello")
+	}
+	var h auth.Hello
+	if err := link.Decode(body, &h); err != nil {
+		return nil, err
+	}
+	switch {
+	case h.Version != auth.Version:
+		return nil, fmt.Errorf("tunnel: the peer speaks version %d of the tunnel's protocol and the hub %d; update both to the same fit", h.Version, auth.Version)
+	case h.Type != proto.TypeNode && h.Type != proto.TypeProxy:
+		return nil, fmt.Errorf("tunnel: unknown peer type %q", h.Type)
+	case h.Name == "" || len(h.Name) > MaxName:
+		return nil, errors.New("tunnel: a peer needs a name, of at most 256 bytes")
+	}
+	set := s.settings()
+	key := set.key(h.Type, h.Name)
+	if key == nil {
+		return nil, fmt.Errorf("tunnel: the hub has no password for a %s to register with", h.Type)
+	}
+	rsp, hs, sess, err := auth.Answer(&h, s.salt, key, set.bodyKey)
+	if err != nil {
+		return nil, err
+	}
+	c.SetValue(&handshake{hello: h, hs: hs, key: key})
+	return link.Sealing{Reply: rsp, Session: sess}, nil
+}
+
+// register registers a link of a peer's pool, once its handshake has
+// proven the password: with the peer of the same type and name, which
+// proved the same password, or as a new peer, in the lowest place none of
+// the peer's links holds.
 func (s *Hub) register(c *link.Link, body []byte) (any, error) {
+	if peerOf(c) != nil {
+		return nil, errors.New("tunnel: already registered")
+	}
+	h, _ := c.Value().(*handshake)
+	if h == nil || !c.Sealed() {
+		return nil, errors.New("tunnel: register after the hello")
+	}
 	var req proto.RegisterReq
 	if err := link.Decode(body, &req); err != nil {
 		return nil, err
 	}
-	if peerOf(c) != nil {
-		return nil, errors.New("tunnel: already registered")
+	if req.Info.Type != h.hello.Type || req.Info.Name != h.hello.Name {
+		return nil, errors.New("tunnel: the registration names another peer than the hello")
+	}
+	if !auth.Equal(req.MAC, h.hs.PeerMAC()) {
+		s.log.Warnf("refused the registration of %s %q from %s: authentication failed", req.Info.Type, req.Info.Name, c.RemoteAddr())
+		return nil, errors.New("tunnel: authentication failed")
 	}
 	set := s.settings()
-	if set.verifier == nil {
-		return nil, errors.New("tunnel: the hub has no registration password set yet")
-	}
-	if err := set.verifier.Verify(&req); err != nil {
-		s.log.Warnf("refused the registration of %s %q from %s: %v", req.Info.Type, req.Info.Name, c.RemoteAddr(), err)
-		return nil, err
-	}
 	key := req.Info.Type + "/" + req.Info.Name
 	s.mu.Lock()
 	peer := s.byName[key]
 	created := peer == nil
+	if !created && !bytes.Equal(peer.cred, h.key) {
+		s.mu.Unlock()
+		s.log.Warnf("refused the registration of %s %q from %s: it is registered already, with another password", req.Info.Type, req.Info.Name, c.RemoteAddr())
+		return nil, fmt.Errorf("tunnel: %s %q is registered already, with another password", req.Info.Type, req.Info.Name)
+	}
 	if created {
 		if len(s.byID) >= set.cfg.Peers() {
 			s.mu.Unlock()
 			return nil, errors.New("tunnel: the hub has as many peers as it takes")
 		}
-		peer = &Peer{Addr: c.RemoteAddr(), Since: time.Now(), links: map[int]*link.Link{}, info: req.Info}
+		peer = &Peer{Addr: c.RemoteAddr(), Since: time.Now(), links: map[int]*link.Link{}, info: req.Info, cred: h.key}
 		s.nextID++
 		if s.nextID == 0 {
 			s.nextID++
@@ -598,6 +716,7 @@ func (s *Hub) register(c *link.Link, body []byte) (any, error) {
 	c.SetValue(conn)
 	peer.links[conn.Index] = c
 	s.peers[c] = peer
+	s.pending--
 	s.mu.Unlock()
 	c.SetMaxFrame(link.MaxFrame)
 	if created {
@@ -606,7 +725,7 @@ func (s *Hub) register(c *link.Link, body []byte) (any, error) {
 	if created && req.Info.Type == proto.TypeNode {
 		defer s.broadcastNodes()
 	}
-	return &proto.RegisterRsp{Peer: peer.ID, Conn: conn.ID, Index: conn.Index, Hub: set.name}, nil
+	return &proto.RegisterRsp{Peer: peer.ID, Conn: conn.ID, Index: conn.Index, Hub: set.name, Proof: h.hs.HubProof()}, nil
 }
 
 func (s *Hub) update(c *link.Link, body []byte) (any, error) {
@@ -652,9 +771,13 @@ func (s *Hub) ping(c *link.Link, body []byte) (any, error) {
 // its peer once that has no link left.
 func (s *Hub) disconnected(c *link.Link) {
 	s.mu.Lock()
+	_, listed := s.links[c]
 	delete(s.links, c)
 	peer := s.peers[c]
 	if peer == nil {
+		if listed {
+			s.pending--
+		}
 		s.mu.Unlock()
 		return
 	}

@@ -2,10 +2,13 @@ package config
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,6 +30,7 @@ const (
 	DefaultTunnelWSPath          = "/tunnel"
 	DefaultTunnelPoolSize        = 10
 	DefaultTunnelMaxLinks        = 1024
+	DefaultTunnelMaxPendingLinks = 64
 	DefaultTunnelMaxLinksPerPeer = 128
 	DefaultTunnelMaxPeers        = 1024
 	DefaultTunnelHubTunnels      = 16384
@@ -37,7 +41,7 @@ const (
 
 // The defaults of the tunnel's durations.
 var (
-	DefaultTunnelRegisterTimeout = Duration(10 * time.Second)
+	DefaultTunnelRegisterTimeout = Duration(5 * time.Second)
 	DefaultTunnelHubCall         = Duration(15 * time.Second)
 	DefaultTunnelCallTimeout     = Duration(10 * time.Second)
 	DefaultTunnelDialTimeout     = Duration(5 * time.Second)
@@ -54,18 +58,30 @@ var (
 // TunnelHub is the tunnel's hub role.
 type TunnelHub struct {
 	Name            string               `json:"name,omitempty" doc:"The name the hub tells the nodes and proxies that register. The host's name when left out."`
-	Password        string               `json:"password,omitempty" doc:"The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out."`
-	BodyPassword    string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes."`
+	Password        string               `json:"password,omitempty" doc:"The password nodes and proxies register with, unless node_password or proxy_password is set for them; the hub and the peer each prove they know it, without sending it. With it alone, any proxy can register as a node: set node_password and proxy_password apart."`
+	NodePassword    string               `json:"node_password,omitempty" doc:"The password nodes register with, but those node_secrets names. password when left out."`
+	ProxyPassword   string               `json:"proxy_password,omitempty" doc:"The password proxies register with. password when left out."`
+	NodeSecrets     []TunnelNodeSecret   `json:"node_secrets,omitempty" doc:"Nodes that register with passwords of their own: a node of a name listed here registers with its password, and with no other."`
+	BodyPassword    string               `json:"body_password,omitempty" doc:"A second secret the links' keys are made from, beside the registration password: nodes and proxies need the same one. Links are encrypted without it too. It applies to the links that open after it changes."`
 	Listeners       []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them."`
 	ConsoleSocket   *TunnelConsoleSocket `json:"console_socket,omitempty" doc:"An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."`
 	QUIC            *TunnelHubQUIC       `json:"quic,omitempty" doc:"The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set."`
-	RegisterTimeout Duration             `json:"register_timeout,omitempty" default:"\"10s\"" doc:"How long a link may take to register once it is open; it is closed past it. 10s when left out."`
+	RegisterTimeout Duration             `json:"register_timeout,omitempty" default:"\"5s\"" doc:"How long a link may take to register once it is open; it is closed past it. 5s when left out."`
 	CallTimeout     Duration             `json:"call_timeout,omitempty" default:"\"15s\"" doc:"How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out."`
 	MaxLinks        int                  `json:"max_links,omitempty" min:"0" default:"1024" doc:"The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0."`
+	MaxPendingLinks int                  `json:"max_pending_links,omitempty" min:"0" default:"64" doc:"The most links open at once that have not registered yet, within max_links; one past it is closed as soon as it opens. 64 when left out or 0."`
 	MaxLinksPerPeer int                  `json:"max_links_per_peer,omitempty" min:"0" default:"128" doc:"The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0."`
 	MaxPeers        int                  `json:"max_peers,omitempty" min:"0" default:"1024" doc:"The most nodes and proxies registered at once. 1024 when left out or 0."`
 	MaxTunnels      int                  `json:"max_tunnels,omitempty" min:"0" default:"16384" doc:"The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0."`
 	Console         *RoleConsole         `json:"console,omitempty" doc:"The hub's web pages; none when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// TunnelNodeSecret is a node that registers with a password of its own.
+type TunnelNodeSecret struct {
+	Name     string `json:"name" fit:"required" doc:"The node's name."`
+	Password string `json:"password" fit:"required" doc:"The password the node registers with, its hubs entry's password."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -103,14 +119,23 @@ type TunnelHubQUIC struct {
 
 // TunnelNode is the tunnel's node role, beside the services it exposes.
 type TunnelNode struct {
-	Name        string            `json:"name,omitempty" doc:"The node's name, which proxies name to reach its services. The host's name when left out."`
-	Meta        map[string]string `json:"meta,omitempty" doc:"Anything else the node tells the hubs, which their pages show."`
-	Hubs        []TunnelUplink    `json:"hubs,omitempty" doc:"The hubs the node links to and registers with. None when left out: the console's pages add them."`
-	Services    []TunnelService   `json:"services,omitempty" doc:"The services the node reaches, and the only addresses it opens tunnels to."`
-	DialTimeout Duration          `json:"dial_timeout,omitempty" default:"\"5s\"" doc:"How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub hears either way. 5s when left out."`
-	IdleTimeout Duration          `json:"idle_timeout,omitempty" default:"\"2h\"" doc:"How long a tunnel may carry nothing either way before it is closed. 2h when left out."`
-	MaxTunnels  int               `json:"max_tunnels,omitempty" min:"0" default:"4096" doc:"The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096 when left out or 0."`
-	Console     *RoleConsole      `json:"console,omitempty" doc:"The node's web pages; none when left out."`
+	Name           string                `json:"name,omitempty" doc:"The node's name, which proxies name to reach its services. The host's name when left out."`
+	Meta           map[string]string     `json:"meta,omitempty" doc:"Anything else the node tells the hubs, which their pages show."`
+	Hubs           []TunnelUplink        `json:"hubs,omitempty" doc:"The hubs the node links to and registers with. None when left out: the console's pages add them."`
+	Services       []TunnelService       `json:"services,omitempty" doc:"The services the node reaches, and the only addresses it opens tunnels to."`
+	RemoteServices *TunnelRemoteServices `json:"remote_services,omitempty" doc:"Whether a hub's console may set the node's services, and to which addresses. Refused when left out: the services come from this config and the node's own console alone."`
+	DialTimeout    Duration              `json:"dial_timeout,omitempty" default:"\"5s\"" doc:"How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub hears either way. 5s when left out."`
+	IdleTimeout    Duration              `json:"idle_timeout,omitempty" default:"\"2h\"" doc:"How long a tunnel may carry nothing either way before it is closed. 2h when left out."`
+	MaxTunnels     int                   `json:"max_tunnels,omitempty" min:"0" default:"4096" doc:"The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096 when left out or 0."`
+	Console        *RoleConsole          `json:"console,omitempty" doc:"The node's web pages; none when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// TunnelRemoteServices is what a hub may set a node's services to.
+type TunnelRemoteServices struct {
+	Enabled bool     `json:"enabled,omitempty" doc:"Let the hubs' consoles set the services."`
+	Allow   []string `json:"allow,omitempty" doc:"The addresses they may set, as host:port patterns: the host an IP address, a CIDR range, a host name, \"*.suffix\" or \"*\", the port a number or \"*\", as in \"10.0.0.0/24:*\", \"[fd00::/8]:443\" or \"*.lab.internal:22\". A range holds only IP addresses, and a name pattern only names. Any address when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -211,6 +236,32 @@ func (s *TunnelHub) Call() time.Duration {
 	return time.Duration(orDefault(int64(s.CallTimeout), int64(DefaultTunnelHubCall)))
 }
 func (s *TunnelHub) Links() int { return int(orDefault(int64(s.MaxLinks), DefaultTunnelMaxLinks)) }
+func (s *TunnelHub) PendingLinks() int {
+	return min(s.Links(), int(orDefault(int64(s.MaxPendingLinks), DefaultTunnelMaxPendingLinks)))
+}
+
+// RolePassword returns the password a peer of type typ ("node" or "proxy")
+// and name registers with, or "" when the hub takes none.
+func (s *TunnelHub) RolePassword(typ, name string) string {
+	switch typ {
+	case "node":
+		for _, n := range s.NodeSecrets {
+			if n.Name == name {
+				return n.Password
+			}
+		}
+		if s.NodePassword != "" {
+			return s.NodePassword
+		}
+	case "proxy":
+		if s.ProxyPassword != "" {
+			return s.ProxyPassword
+		}
+	default:
+		return ""
+	}
+	return s.Password
+}
 func (s *TunnelHub) LinksPerPeer() int {
 	return int(orDefault(int64(s.MaxLinksPerPeer), DefaultTunnelMaxLinksPerPeer))
 }
@@ -413,6 +464,13 @@ func (c *Config) checkTunnel(add func(Value, string, ...any)) {
 			add(n.At.Field("name"), "%s", msg)
 		}
 		checkTunnelUplinks(n.Hubs, n.At.Field("hubs"), add)
+		if rs := n.RemoteServices; rs != nil {
+			for i, a := range rs.Allow {
+				if _, err := ParseServicePattern(a); err != nil {
+					add(rs.At.Field("allow").Index(i), "%v", err)
+				}
+			}
+		}
 		for i, s := range n.Services {
 			at := n.At.Field("services").Index(i)
 			switch msg := checkTunnelName(s.Name); {
@@ -437,6 +495,20 @@ func checkTunnelHub(s *TunnelHub, add func(Value, string, ...any)) {
 	checkRoleConsole(s.Console, add)
 	if msg := checkTunnelName(s.Name); msg != "" {
 		add(s.At.Field("name"), "%s", msg)
+	}
+	for i, n := range s.NodeSecrets {
+		at := s.At.Field("node_secrets").Index(i)
+		switch msg := checkTunnelName(n.Name); {
+		case n.Name == "":
+			add(at.Field("name"), "the name is empty")
+		case msg != "":
+			add(at.Field("name"), "%s", msg)
+		case slices.IndexFunc(s.NodeSecrets, func(o TunnelNodeSecret) bool { return o.Name == n.Name }) < i:
+			add(at.Field("name"), "node %q is listed already", n.Name)
+		}
+		if n.Password == "" {
+			add(at.Field("password"), "the password is empty")
+		}
 	}
 	seen := map[string]int{}
 	for i, l := range s.Listeners {
@@ -562,4 +634,80 @@ func checkTunnelProxy(cl *TunnelProxy, add func(Value, string, ...any)) {
 			add(at.Field("password"), "the password is empty")
 		}
 	}
+}
+
+// ServicePattern is a pattern of a node's remote_services allow list.
+type ServicePattern struct {
+	// One of prefix, name, suffix or any holds the host: a range of
+	// addresses, a host name, the suffix of "*.suffix" with its dot, or any.
+	prefix netip.Prefix
+	name   string
+	suffix string
+	any    bool
+	// port is 0 for any.
+	port uint16
+}
+
+// ParseServicePattern parses a host:port pattern of remote_services.
+func ParseServicePattern(s string) (ServicePattern, error) {
+	var p ServicePattern
+	host, port, err := net.SplitHostPort(s)
+	if err != nil || host == "" || port == "" {
+		return p, fmt.Errorf("%q is not a host:port pattern, as in \"10.0.0.0/24:*\" or \"*.lab.internal:22\"", s)
+	}
+	if port != "*" {
+		n, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || n == 0 {
+			return p, fmt.Errorf("%q has the port %q: a number or *", s, port)
+		}
+		p.port = uint16(n)
+	}
+	switch {
+	case host == "*":
+		p.any = true
+	case strings.HasPrefix(host, "*."):
+		p.suffix = strings.ToLower(host[1:])
+	case strings.Contains(host, "/"):
+		pre, err := netip.ParsePrefix(host)
+		if err != nil {
+			return p, fmt.Errorf("%q has the range %q, which does not parse: %v", s, host, err)
+		}
+		p.prefix = pre.Masked()
+	default:
+		if a, err := netip.ParseAddr(host); err == nil {
+			p.prefix = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
+		} else if strings.ContainsAny(host, "*/ ") {
+			return p, fmt.Errorf("%q has the host %q: an address, a range, a name, *.suffix or *", s, host)
+		} else {
+			p.name = strings.ToLower(strings.TrimSuffix(host, "."))
+		}
+	}
+	return p, nil
+}
+
+// Match reports whether the pattern holds hostport, a service's address.
+func (p ServicePattern) Match(hostport string) bool {
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		return false
+	}
+	if p.port != 0 {
+		if n, err := strconv.ParseUint(port, 10, 16); err != nil || uint16(n) != p.port {
+			return false
+		}
+	}
+	if p.any {
+		return true
+	}
+	if a, err := netip.ParseAddr(host); err == nil {
+		return p.prefix.IsValid() && a.Zone() == "" && p.prefix.Contains(a.Unmap())
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	switch {
+	case p.name != "":
+		return host == p.name
+	case p.suffix != "":
+		return strings.HasSuffix(host, p.suffix)
+	}
+	return false
 }

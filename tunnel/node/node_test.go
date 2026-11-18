@@ -57,7 +57,8 @@ func TestHubCalls(t *testing.T) {
 	v := newEnv(t)
 	s := newHub(t, v.e)
 	echo, dead := tunneltest.Echo(t, ""), freeAddr(t)
-	if err := v.apply(fmt.Sprintf(`{"name": "lab", "max_tunnels": 2, "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "dead", "address": %q}]}`,
+	if err := v.apply(fmt.Sprintf(`{"name": "lab", "max_tunnels": 2, "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "dead", "address": %q}],
+ "remote_services": {"enabled": true, "allow": ["127.0.0.1:*"]}}`,
 		s.uplinkJSON(`, "call_timeout": "1s"`), echo, dead)); err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +116,14 @@ func TestHubCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitUpdate(t, s, echo)
+
+	// An address the allow list does not hold is refused.
+	if err := l.Call(proto.MethodNodeSetServices, []proto.Service{{Name: "meta", Addr: "169.254.169.254:80"}}, &info, 5*time.Second); err == nil || !strings.Contains(err.Error(), "169.254.169.254:80") {
+		t.Fatalf("an address the allow list does not hold: %v", err)
+	}
+	if strings.Contains(v.current(), "169.254") {
+		t.Fatalf("written: %s", v.current())
+	}
 
 	// A config that takes longer than call_timeout to change.
 	v.holdEdits()
@@ -179,5 +188,67 @@ func TestPages(t *testing.T) {
 	pg.expect(200, "/api/hubs/delete", map[string]string{"name": "hub"})
 	if len(v.n.Uplinks()) != 0 || strings.Contains(v.current(), "hub") {
 		t.Fatalf("the hub stayed: %s", v.current())
+	}
+}
+
+// A hub may not set the node's services unless remote_services lets it,
+// and then only to the addresses its allow list holds.
+func TestRemoteServices(t *testing.T) {
+	v := newEnv(t)
+	s := newHub(t, v.e)
+	echo := tunneltest.Echo(t, "")
+	member := func(remote string) string {
+		return fmt.Sprintf(`{"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}]%s}`, s.uplinkJSON(""), echo, remote)
+	}
+	evil := []proto.Service{{Name: "ssh", Addr: "127.0.0.1:22"}, {Name: "meta", Addr: "169.254.169.254:80"}, {Name: "lan", Addr: "192.168.1.1:445"}}
+	for _, remote := range []string{"", `, "remote_services": {}`, `, "remote_services": {"allow": ["*:*"]}`} {
+		if err := v.apply(member(remote)); err != nil {
+			t.Fatal(err)
+		}
+		l := s.link()
+		if err := l.Call(proto.MethodNodeSetServices, evil, nil, 5*time.Second); err == nil || !strings.Contains(err.Error(), "remote_services") {
+			t.Fatalf("%q: a hub set the services: %v", remote, err)
+		}
+		if strings.Contains(v.current(), "169.254") || v.n.Config().Services[0].Address != echo {
+			t.Fatalf("%q: the services changed: %s", remote, v.current())
+		}
+		// Nor does a tunnel go anywhere but to the node's own services.
+		if err := open(l, 1, "ssh"); err == nil || !strings.Contains(err.Error(), "no service") {
+			t.Fatalf("%q: a tunnel to a service the node lacks: %v", remote, err)
+		}
+		// A hub that is gone, and its link.
+		_ = l.Close()
+	}
+	// Enabled without a list: any address.
+	if err := v.apply(member(`, "remote_services": {"enabled": true}`)); err != nil {
+		t.Fatal(err)
+	}
+	var info proto.Info
+	if err := s.link().Call(proto.MethodNodeSetServices, evil[:1], &info, 5*time.Second); err != nil || info.Services[0].Addr != "127.0.0.1:22" {
+		t.Fatalf("%+v, %v", info, err)
+	}
+}
+
+// A hub that does not know the password - a fake one, or one between the
+// node and the hub - is not registered with, and nothing it calls is
+// served: it neither sets the node's services nor opens a tunnel.
+func TestFakeHub(t *testing.T) {
+	v := newEnv(t)
+	fake := newHubWith(t, v.e, "a guess")
+	if err := v.apply(fmt.Sprintf(`{"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}], "remote_services": {"enabled": true}}`,
+		fake.uplinkJSON(""), tunneltest.Echo(t, ""))); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the registration to fail", func() bool {
+		st := v.n.Uplinks()[0].Status()
+		return st.State == "failed" && strings.Contains(st.Error, "decrypt")
+	})
+	select {
+	case <-fake.links:
+		t.Fatal("the node registered with a fake hub")
+	default:
+	}
+	if strings.Contains(v.current(), "127.0.0.1:22") || len(v.n.Tunnels()) != 0 {
+		t.Fatalf("the fake hub changed the node: %s", v.current())
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/tunnel/internal/auth"
 	"github.com/lesismal/fit/tunnel/internal/link"
 	"github.com/lesismal/fit/tunnel/internal/proto"
 	"github.com/lesismal/fit/tunnel/internal/transport"
@@ -37,6 +39,7 @@ func (hostRole) Apply(any) error      { return nil }
 func (hostRole) Stop(context.Context) {}
 
 func init() {
+	auth.Iterations = 1000
 	app.Register(app.Info{ID: "test.host", Member: func(*config.Config) any { return struct{}{} },
 		New: func(h *app.Host) (app.Role, error) { hosts <- h; return hostRole{}, nil }})
 }
@@ -267,7 +270,7 @@ func (v *env) dial(addr string) *peer {
 		}, true)
 	}
 	if _, err := transport.Dial(v.e, addr, 5*time.Second, func(c transport.Conn) transport.Handler {
-		p.l = link.New(c, r, nil)
+		p.l = link.New(c, r)
 		return p.l
 	}); err != nil {
 		v.t.Fatal(err)
@@ -276,16 +279,54 @@ func (v *env) dial(addr string) *peer {
 	return p
 }
 
-// register registers p as typ name with password.
+// register runs the handshake on p's link, as typ name with password,
+// and registers.
 func (p *peer) register(typ, name, password string, services ...proto.Service) error {
 	info := proto.NewInfo(name, typ)
 	info.Services = services
 	p.mu.Lock()
 	p.info = info
 	p.mu.Unlock()
-	req := proto.RegisterReq{Info: info}
-	proto.Sign(&req, password)
-	return p.l.Call(proto.MethodRegister, &req, &p.rsp, 5*time.Second)
+	hs, err := hello(p.l, typ, name, password, "")
+	if err != nil {
+		return err
+	}
+	req := proto.RegisterReq{Info: info, MAC: hs.PeerMAC()}
+	if err := p.l.Call(proto.MethodRegister, &req, &p.rsp, 5*time.Second); err != nil {
+		return err
+	}
+	if !auth.Equal(p.rsp.Proof, hs.HubProof()) {
+		return errors.New("the hub did not prove the password")
+	}
+	return nil
+}
+
+// hello opens the handshake on l, as a peer of typ and name with password
+// and body, and seals l.
+func hello(l *link.Link, typ, name, password, body string) (*auth.Handshake, error) {
+	h := auth.Hello{Version: auth.Version, Type: typ, Name: name, Nonce: auth.Random(auth.NonceLen)}
+	var rsp auth.HelloRsp
+	if err := l.Call(proto.MethodHello, &h, &rsp, 5*time.Second); err != nil {
+		return nil, err
+	}
+	key, err := auth.Derive(password, rsp.Salt)
+	if err != nil {
+		return nil, err
+	}
+	var bk auth.Key
+	if body != "" {
+		bk, _ = auth.Derive(body, rsp.Salt)
+	}
+	hs, err := auth.NewHandshake(&h, &rsp, key, bk)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := hs.Session(false)
+	if err != nil {
+		return nil, err
+	}
+	l.Seal(sess)
+	return hs, nil
 }
 
 // mustRegister registers p, which must succeed.

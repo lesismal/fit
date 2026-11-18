@@ -74,7 +74,7 @@ func rawFrame(kind byte, m proto.Method, id uint32, body []byte) []byte {
 
 func TestLinkAccessors(t *testing.T) {
 	c := &loopConn{}
-	l := New(c, NewRouter(), nil)
+	l := New(c, NewRouter())
 	if l.Conn() != c {
 		t.Error("Conn is not the link's connection")
 	}
@@ -137,7 +137,7 @@ func TestEncodeDecode(t *testing.T) {
 // waiting.
 func TestLinkSendErrors(t *testing.T) {
 	c := &loopConn{err: errors.New("down")}
-	l := New(c, NewRouter(), nil)
+	l := New(c, NewRouter())
 	if err := l.Call(proto.MethodPing, func() {}, nil, time.Second); err == nil {
 		t.Error("a call whose request does not encode went out")
 	}
@@ -163,7 +163,7 @@ func TestLinkSendErrors(t *testing.T) {
 
 // A call on a closed link fails at once, with why it closed.
 func TestLinkCallClosed(t *testing.T) {
-	l := New(&loopConn{}, NewRouter(), nil)
+	l := New(&loopConn{}, NewRouter())
 	l.OnClose(nil)
 	if err := l.Call(proto.MethodPing, nil, nil, time.Second); !errors.Is(err, ErrClosed) || err != ErrClosed {
 		t.Errorf("call on a link closed plainly: %v", err)
@@ -174,7 +174,7 @@ func TestLinkCallClosed(t *testing.T) {
 		t.Errorf("err %v", l.Err())
 	}
 
-	l = New(&loopConn{}, NewRouter(), nil)
+	l = New(&loopConn{}, NewRouter())
 	l.OnClose(errors.New("cut"))
 	if err := l.Call(proto.MethodPing, nil, nil, time.Second); !errors.Is(err, ErrClosed) || !strings.Contains(err.Error(), "cut") {
 		t.Errorf("call on a link closed for an error: %v", err)
@@ -186,7 +186,7 @@ func TestLinkCallIDWraps(t *testing.T) {
 	ca, cb := &loopConn{}, &loopConn{}
 	r := NewRouter()
 	r.HandleCall(proto.MethodPing, func(*Link, []byte) (any, error) { return "pong", nil }, true)
-	a, b := New(ca, NewRouter(), nil), New(cb, r, nil)
+	a, b := New(ca, NewRouter()), New(cb, r)
 	ca.peer, cb.peer = b, a
 	a.seq = math.MaxUint32
 	var s string
@@ -206,7 +206,7 @@ func TestLinkGuard(t *testing.T) {
 	r.HandleCall(proto.MethodPing, func(*Link, []byte) (any, error) { return nil, nil }, true)
 	r.HandleNotify(proto.MethodKick, func(*Link, []byte) { served <- struct{}{} }, true)
 	r.Guard = func(_ *Link, m proto.Method) error { return errors.New("not yet") }
-	a, b := New(ca, NewRouter(), nil), New(cb, r, nil)
+	a, b := New(ca, NewRouter()), New(cb, r)
 	ca.peer, cb.peer = b, a
 	if err := a.Call(proto.MethodPing, nil, nil, 5*time.Second); err == nil || err.Error() != "not yet" {
 		t.Errorf("guarded call: %v", err)
@@ -226,7 +226,7 @@ func TestLinkAsyncNotify(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan []byte, MaxAsync+1)
 	r.HandleNotify(proto.MethodKick, func(_ *Link, body []byte) { started <- body; <-release }, false)
-	l := New(&loopConn{}, r, nil)
+	l := New(&loopConn{}, r)
 	defer close(release)
 	l.OnData(rawFrame(kindNotify, proto.MethodNodes, 0, nil))
 	frame := rawFrame(kindNotify, proto.MethodKick, 0, []byte("k"))
@@ -256,7 +256,7 @@ func TestLinkBadKind(t *testing.T) {
 	served := 0
 	r := NewRouter()
 	r.HandleNotify(proto.MethodKick, func(*Link, []byte) { served++ }, true)
-	l := New(c, r, nil)
+	l := New(c, r)
 	l.OnData(rawFrame(9, proto.MethodKick, 0, nil))
 	if c.closed != 1 || l.Err() == nil || !strings.Contains(l.Err().Error(), "kind 9") {
 		t.Fatalf("closed %d, err %v", c.closed, l.Err())
@@ -280,7 +280,7 @@ func TestLinkLongFrameBuffer(t *testing.T) {
 	got := 0
 	r := NewRouter()
 	r.HandleNotify(proto.MethodTunnelData, func(_ *Link, body []byte) { got = len(body) }, true)
-	l := New(&loopConn{}, r, nil)
+	l := New(&loopConn{}, r)
 	f := rawFrame(kindNotify, proto.MethodTunnelData, 0, make([]byte, 2<<20))
 	l.OnData(f[:1000])
 	l.OnData(f[1000:])
@@ -294,7 +294,7 @@ func TestLinkLongFrameBuffer(t *testing.T) {
 
 // A reply to a call no longer waiting is dropped.
 func TestLinkStrayReply(t *testing.T) {
-	l := New(&loopConn{}, NewRouter(), nil)
+	l := New(&loopConn{}, NewRouter())
 	l.OnData(rawFrame(kindReply, proto.MethodPing, 99, []byte("late")))
 	l.OnData(rawFrame(kindError, proto.MethodPing, 98, []byte("late")))
 	if l.Err() != nil {

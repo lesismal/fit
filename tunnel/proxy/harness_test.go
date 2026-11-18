@@ -25,6 +25,7 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 
 	_ "github.com/lesismal/fit/tunnel/hub"
+	"github.com/lesismal/fit/tunnel/internal/auth"
 	_ "github.com/lesismal/fit/tunnel/node"
 )
 
@@ -35,6 +36,7 @@ import (
 var hosts = make(chan *app.Host, 16)
 
 func init() {
+	auth.Iterations = 1000
 	app.Register(app.Info{ID: "test.host", Member: func(c *config.Config) any { return c },
 		New: func(h *app.Host) (app.Role, error) {
 			hosts <- h

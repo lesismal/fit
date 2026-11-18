@@ -170,33 +170,6 @@ func (c *Proxy) api(api *console.API) {
 			_ = r.JSON(stdhttp.StatusOK, map[string]any{"hub": list.Hub, "nodes": nodes})
 		})
 	})
-	api.Handle("POST", "/api/nodes/services", func(r *console.Request) {
-		var req struct {
-			Hub      string        `json:"hub"`
-			Node     string        `json:"node"`
-			Services []ServiceView `json:"services"`
-		}
-		if !r.Decode(&req) {
-			return
-		}
-		u := c.uplink(req.Hub)
-		if u == nil {
-			common.Fail(r, stdhttp.StatusNotFound, "no such hub")
-			return
-		}
-		services := make([]proto.Service, 0, len(req.Services))
-		for _, v := range req.Services {
-			services = append(services, proto.Service{Name: strings.TrimSpace(v.Name), Addr: strings.TrimSpace(v.Address), Desc: strings.TrimSpace(v.Description)})
-		}
-		r.Logf("sets the services of node %q through hub %q", req.Node, req.Hub)
-		r.Go(func() {
-			if _, err := c.SetNodeServices(u, req.Node, services); err != nil {
-				common.Fail(r, stdhttp.StatusBadGateway, err.Error())
-				return
-			}
-			common.OK(r)
-		})
-	})
 	api.Handle("POST", "/api/meta", func(r *console.Request) {
 		var meta map[string]string
 		if !r.Decode(&meta) {

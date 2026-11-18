@@ -4,7 +4,8 @@
 //
 // The server opens the session with a message of 16 random bytes, and the
 // client answers with 16 of its own. Each direction then has a key of its
-// own, HKDF-SHA256 of the password's PBKDF2 under both sets of bytes, and
+// own, HKDF-SHA256 of the password's PBKDF2 (auth.Iterations rounds, as
+// the links' passwords take) under both sets of bytes, and
 // numbers its messages from zero, the number being the GCM nonce. A message
 // that does not open under the next number - forged, replayed, reordered, or
 // sealed under another password - ends the session.
@@ -20,15 +21,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"sync"
+
+	"github.com/lesismal/fit/tunnel/internal/auth"
 )
 
 // HelloLen is the length of the random bytes each side opens with.
 const HelloLen = 16
 
-const (
-	pbkdf2Salt = "fit-tunnel-ws"
-	pbkdf2Iter = 10000
-)
+const pbkdf2Salt = "fit-tunnel-ws"
 
 // Secret is a password's PBKDF2, derived once for every session: a role
 // derives it when its config is applied, not as a connection opens.
@@ -36,7 +36,7 @@ type Secret []byte
 
 // NewSecret is the secret of password.
 func NewSecret(password string) (Secret, error) {
-	b, err := pbkdf2.Key(sha256.New, password, []byte(pbkdf2Salt), pbkdf2Iter, 32)
+	b, err := pbkdf2.Key(sha256.New, password, []byte(pbkdf2Salt), auth.Iterations, 32)
 	if err != nil {
 		return nil, err
 	}

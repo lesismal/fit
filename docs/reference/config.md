@@ -37,7 +37,7 @@ a config against it and more.
 - [Metrics](#metrics): [`metrics`](#config-metrics)
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
 - [LLM](#llm): [`llm`](#config-llm), [`llm.hub`](#config-llmhub), [`llm.hub.console`](#config-roleconsole), [`llm.hub.listen`](#config-llmlisten), [`llm.hub.peers[]`](#config-llmpeer), [`llm.hub.limits`](#config-llmlimits), [`llm.node`](#config-llmnode), [`llm.node.models[]`](#config-llmmodel), [`llm.node.settings`](#config-llmnodesettings), [`llm.node.proxy`](#config-llmnodeproxy), [`llm.proxy`](#config-llmproxy), [`llm.proxy.api`](#config-llmproxyapi), [`llm.proxy.api_keys[]`](#config-llmproxykey)
-- [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
+- [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.node_secrets[]`](#config-tunnelnodesecret), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.node.remote_services`](#config-tunnelremoteservices), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey)
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc)
@@ -263,9 +263,10 @@ Also at `webrtc.turn.tls.certificates[]`.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `clients` | list of string |  | Required. The addresses and CIDR ranges of the clients that may use the proxy, as "10.0.0.0/8"; others are refused. |
-| `allow` | list of string |  | The destinations the proxy connects to: host names, "*.example.com" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out. |
+| `allow` | list of string |  | The destinations the proxy connects to: host names, "*.example.com" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out, save the local addresses allow_local is about. |
 | `deny` | list of string |  | Destinations refused, written as in allow, whatever allow holds: a host name that resolves to an address deny holds is refused once it is connected, before anything is sent. |
 | `ports` | list of integer |  | The destination ports allowed; any when left out. |
+| `allow_local` | boolean |  | Let the proxy connect to its own host and link: 127.0.0.0/8, 0.0.0.0/8, 169.254.0.0/16 (a cloud's metadata service at 169.254.169.254 among them), ::/96 (::, ::1 and the IPv4-compatible addresses), fe80::/10, and these as IPv4-mapped IPv6 addresses. When left out or false they are refused, as literals and as the address a host name resolves to, whatever allow and deny say, except the addresses an allow range within them holds, as "127.0.0.1" or "169.254.169.254"; a wider range, as "0.0.0.0/0", and host names do not reach them. |
 | `connect_timeout` | duration | `"10s"` | How long resolving and connecting to a destination may take. 10s when left out. |
 | `idle_timeout` | duration | `"5m"` | How long a proxied connection may carry nothing either way before both sides are closed. 5m when left out. |
 
@@ -1883,18 +1884,31 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | string |  | The name the hub tells the nodes and proxies that register. The host's name when left out. |
-| `password` | string |  | The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out. |
-| `body_password` | string |  | When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes. |
+| `password` | string |  | The password nodes and proxies register with, unless node_password or proxy_password is set for them; the hub and the peer each prove they know it, without sending it. With it alone, any proxy can register as a node: set node_password and proxy_password apart. |
+| `node_password` | string |  | The password nodes register with, but those node_secrets names. password when left out. |
+| `proxy_password` | string |  | The password proxies register with. password when left out. |
+| `node_secrets` | list of [object](#config-tunnelnodesecret) |  | Nodes that register with passwords of their own: a node of a name listed here registers with its password, and with no other. |
+| `body_password` | string |  | A second secret the links' keys are made from, beside the registration password: nodes and proxies need the same one. Links are encrypted without it too. It applies to the links that open after it changes. |
 | `listeners` | list of [object](#config-tunnellistener) |  | Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them. |
 | `console_socket` | [object](#config-tunnelconsolesocket) |  | An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out. |
 | `quic` | [object](#config-tunnelhubquic) |  | The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set. |
-| `register_timeout` | duration | `"10s"` | How long a link may take to register once it is open; it is closed past it. 10s when left out. |
+| `register_timeout` | duration | `"5s"` | How long a link may take to register once it is open; it is closed past it. 5s when left out. |
 | `call_timeout` | duration | `"15s"` | How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out. |
 | `max_links` | integer, 0 or more | `1024` | The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0. |
+| `max_pending_links` | integer, 0 or more | `64` | The most links open at once that have not registered yet, within max_links; one past it is closed as soon as it opens. 64 when left out or 0. |
 | `max_links_per_peer` | integer, 0 or more | `128` | The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0. |
 | `max_peers` | integer, 0 or more | `1024` | The most nodes and proxies registered at once. 1024 when left out or 0. |
 | `max_tunnels` | integer, 0 or more | `16384` | The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0. |
 | `console` | [object](#config-roleconsole) |  | The hub's web pages; none when left out. |
+
+<a id="config-tunnelnodesecret"></a>
+
+### `tunnel.hub.node_secrets[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The node's name. |
+| `password` | string |  | Required. The password the node registers with, its hubs entry's password. |
 
 <a id="config-tunnellistener"></a>
 
@@ -1939,6 +1953,7 @@ In JSON:
 | `meta` | object of string |  | Anything else the node tells the hubs, which their pages show. |
 | `hubs` | list of [object](#config-tunneluplink) |  | The hubs the node links to and registers with. None when left out: the console's pages add them. |
 | `services` | list of [object](#config-tunnelservice) |  | The services the node reaches, and the only addresses it opens tunnels to. |
+| `remote_services` | [object](#config-tunnelremoteservices) |  | Whether a hub's console may set the node's services, and to which addresses. Refused when left out: the services come from this config and the node's own console alone. |
 | `dial_timeout` | duration | `"5s"` | How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub hears either way. 5s when left out. |
 | `idle_timeout` | duration | `"2h"` | How long a tunnel may carry nothing either way before it is closed. 2h when left out. |
 | `max_tunnels` | integer, 0 or more | `4096` | The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096 when left out or 0. |
@@ -1983,6 +1998,15 @@ Also at `tunnel.proxy.hubs[]`.
 | `name` | string |  | Required. The service's name among the node's, which proxies' forwards name. |
 | `address` | string |  | Required. The service's TCP address, host and port. |
 | `description` | string |  | What the service is, for the pages. |
+
+<a id="config-tunnelremoteservices"></a>
+
+### `tunnel.node.remote_services`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | boolean |  | Let the hubs' consoles set the services. |
+| `allow` | list of string |  | The addresses they may set, as host:port patterns: the host an IP address, a CIDR range, a host name, "*.suffix" or "*", the port a number or "*", as in "10.0.0.0/24:*", "[fd00::/8]:443" or "*.lab.internal:22". A range holds only IP addresses, and a name pattern only names. Any address when left out. |
 
 <a id="config-tunnelproxy"></a>
 
@@ -3002,9 +3026,10 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `clients` | list of string |  | Required. The addresses and CIDR ranges of the clients that may use the proxy, as "10.0.0.0/8"; others are answered 403. |
-| `allow` | list of string |  | The destinations the proxy connects to: host names, "*.example.com" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out; others are answered 403, or 502 for a host name whose address decides. |
+| `allow` | list of string |  | The destinations the proxy connects to: host names, "*.example.com" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out, save the local addresses allow_local is about; others are answered 403, or 502 for a host name whose address decides. |
 | `deny` | list of string |  | Destinations refused, written as in allow, whatever allow holds. |
 | `ports` | list of integer |  | The destination ports allowed; any when left out. |
+| `allow_local` | boolean |  | Let the proxy connect to its own host and link: 127.0.0.0/8, 0.0.0.0/8, 169.254.0.0/16 (a cloud's metadata service at 169.254.169.254 among them), ::/96 (::, ::1 and the IPv4-compatible addresses), fe80::/10, and these as IPv4-mapped IPv6 addresses. When left out or false they are refused, as literals and as the address a host name resolves to, whatever allow and deny say, except the addresses an allow range within them holds, as "127.0.0.1" or "169.254.169.254"; a wider range, as "0.0.0.0/0", and host names do not reach them. |
 | `connect_timeout` | duration | `"10s"` | How long resolving and connecting to a destination may take; past it the request is answered 504. 10s when left out. |
 | `idle_timeout` | duration | `"5m"` | How long a tunnel may carry nothing either way before it and its connection to the destination are closed. 5m when left out. |
 

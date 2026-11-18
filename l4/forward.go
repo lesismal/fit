@@ -26,10 +26,15 @@ var ErrRefused = &socks.ReplyError{Version: socks.Version5, Code: socks.ReplyNot
 type Rules struct {
 	clients     Trusted
 	allow, deny dests
-	ports       []uint16
-	connect     time.Duration
-	idle        time.Duration
-	key         string
+	// allowLocal turns off the refusal of localNets.
+	allowLocal bool
+	// local are allow's ranges that lie within localNets: the local
+	// addresses allow names, which are reachable all the same.
+	local   []netip.Prefix
+	ports   []uint16
+	connect time.Duration
+	idle    time.Duration
+	key     string
 }
 
 // dests are destinations: host names, the suffixes of wildcards
@@ -72,10 +77,37 @@ func (d *dests) name(host string) bool {
 }
 
 // addr reports whether d holds the address a.
-func (d *dests) addr(a netip.Addr) bool {
-	a = a.Unmap()
-	for _, p := range d.nets {
+func (d *dests) addr(a netip.Addr) bool { return within(d.nets, a.Unmap()) }
+
+// localNets are the addresses a forward proxy refuses whatever allow and
+// deny say, unless its config sets allow_local or allow names them by a
+// range within these: the proxy's own host and its link, which no client
+// should reach through it. 0.0.0.0 and :: connect to the host itself on
+// Linux and macOS, and 169.254.169.254 is a cloud's metadata service.
+// IPv4-mapped IPv6 addresses are decided as the IPv4 addresses they are.
+var localNets = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	// ::, ::1 and the deprecated IPv4-compatible addresses.
+	netip.MustParsePrefix("::/96"),
+	netip.MustParsePrefix("fe80::/10"),
+}
+
+// within reports whether nets hold a, which is unmapped.
+func within(nets []netip.Prefix, a netip.Addr) bool {
+	for _, p := range nets {
 		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// isLocal reports whether p lies within one of localNets.
+func isLocal(p netip.Prefix) bool {
+	for _, l := range localNets {
+		if l.Bits() <= p.Bits() && l.Contains(p.Addr()) {
 			return true
 		}
 	}
@@ -84,7 +116,7 @@ func (d *dests) addr(a netip.Addr) bool {
 
 // NewRules compiles c, which Validate has checked.
 func NewRules(c *config.ForwardProxy) *Rules {
-	r := &Rules{connect: c.Connect(), idle: c.Idle()}
+	r := &Rules{connect: c.Connect(), idle: c.Idle(), allowLocal: c.AllowLocal}
 	for _, s := range c.Clients {
 		p, _ := router.ParsePrefix(s)
 		r.clients = append(r.clients, p)
@@ -94,6 +126,11 @@ func NewRules(c *config.ForwardProxy) *Rules {
 	}
 	for _, s := range c.Deny {
 		r.deny.add(s)
+	}
+	for _, p := range r.allow.nets {
+		if isLocal(p) {
+			r.local = append(r.local, p)
+		}
 	}
 	for _, p := range c.Ports {
 		r.ports = append(r.ports, uint16(p))
@@ -120,6 +157,14 @@ func (r *Rules) IdleTimeout() time.Duration { return r.idle }
 // Client reports whether a client at addr may use the proxy.
 func (r *Rules) Client(addr netip.Addr) bool { return r.clients.Contains(addr) }
 
+// refusesLocal reports whether a is one of localNets the rules refuse:
+// unless allow_local is set, every one allow's ranges within localNets do
+// not hold.
+func (r *Rules) refusesLocal(a netip.Addr) bool {
+	a = a.Unmap()
+	return !r.allowLocal && within(localNets, a) && !within(r.local, a)
+}
+
 // verdict is what the rules say of a destination before it is dialed.
 type verdict uint8
 
@@ -128,11 +173,11 @@ const (
 	// allowed lets the dial go on.
 	allowed
 	// unresolved lets the dial go on, but the address a host name resolves
-	// to still decides: a deny range may hold it, or only an allow range
-	// may allow it.
+	// to still decides: a deny range or localNets may hold it, or only an
+	// allow range may allow it.
 	unresolved
 	// resolvedAllowed is unresolved for a name allow holds, which only
-	// deny's ranges may still refuse.
+	// deny's ranges and localNets may still refuse.
 	resolvedAllowed
 )
 
@@ -154,7 +199,7 @@ func (r *Rules) dest(hostport string) verdict {
 		}
 	}
 	if a, err := netip.ParseAddr(host); err == nil {
-		if a.Zone() != "" || r.deny.addr(a) || !r.allow.empty() && !r.allow.addr(a) {
+		if a.Zone() != "" || r.deny.addr(a) || r.refusesLocal(a) || !r.allow.empty() && !r.allow.addr(a) {
 			return refused
 		}
 		return allowed
@@ -164,7 +209,7 @@ func (r *Rules) dest(hostport string) verdict {
 		return refused
 	}
 	if r.allow.empty() || r.allow.name(host) {
-		if r.deny.nets == nil {
+		if r.deny.nets == nil && r.allowLocal {
 			return allowed
 		}
 		return resolvedAllowed
@@ -175,9 +220,11 @@ func (r *Rules) dest(hostport string) verdict {
 	return unresolved
 }
 
-// resolved decides the address a host name resolved to.
+// resolved decides the address a host name resolved to, as the connection
+// reports its peer: an address it cannot report, an IPv6 one with a zone
+// among them, is refused, as a literal with a zone is.
 func (r *Rules) resolved(v verdict, a netip.Addr) bool {
-	return !r.deny.addr(a) && (v == resolvedAllowed || r.allow.addr(a))
+	return a.IsValid() && !r.deny.addr(a) && !r.refusesLocal(a) && (v == resolvedAllowed || r.allow.addr(a))
 }
 
 // Dial is a socks.DialFunc that dials only what the rules allow: a host name

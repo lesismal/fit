@@ -33,7 +33,8 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
   "tunnel": {
     "hub": {
       "name": "hub",
-      "password": "a-registration-password",
+      "node_password": "a-node-password",
+      "proxy_password": "a-proxy-password",
       "body_password": "a-body-password",
       "listeners": [
         {"protocol": "tcp", "address": ":7000"},
@@ -61,7 +62,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
           {"address": "ws://hub.example.com:7001/tunnel"},
           {"address": "hub.example.com:7000"}
         ],
-        "password": "a-registration-password",
+        "password": "a-node-password",
         "body_password": "a-body-password",
         "quic_pin": "hub 控制台上显示的指纹"
       }],
@@ -81,7 +82,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
       "hubs": [{
         "name": "hub",
         "endpoints": [{"address": "hub.example.com:7000"}],
-        "password": "a-registration-password",
+        "password": "a-proxy-password",
         "body_password": "a-body-password"
       }],
       "forwards": [
@@ -100,14 +101,18 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | 字段 | 默认 | 含义 |
 |------|------|------|
 | `name` | 主机名 | 告知节点和 proxy 的名字 |
-| `password` | 无：不接受任何注册 | 节点和 proxy 注册用的密码，以 HMAC 证明知道它，从不发送 |
-| `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密；节点和 proxy 需要相同的密码 |
+| `password` | 无 | 节点和 proxy 注册用的密码，除非设置了下面两项；只有它时任何 proxy 都能以节点身份注册，hub 会对此发出警告 |
+| `node_password` | `password` | 节点注册用的密码，`node_secrets` 列出的节点除外 |
+| `proxy_password` | `password` | proxy 注册用的密码 |
+| `node_secrets` | 无 | `{name, password}`：该名字的节点用它自己的密码注册，且只能用它 |
+| `body_password` | 无 | 链路密钥额外依据的第二个秘密；节点和 proxy 需要相同的值。不设它链路同样加密 |
 | `listeners` | 无：由页面添加 | `{protocol: tcp\|ws\|quic, address, path}`；ws 监听的路径默认为 `/tunnel`，只有 ws 监听有路径 |
 | `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供 proxy 的 `web_proxies` 使用，任何路径都应答；需要 `console`，不设密码时用 hub 的密码，`max_conns` 默认 32 |
 | `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；有 quic 监听而没有证书时，hub 生成自签名证书并写入这里；`cert` 和 `key` 须同时设置 |
-| `register_timeout` | 10s | 一条链路注册的时限 |
+| `register_timeout` | 5s | 一条链路注册的时限 |
 | `call_timeout` | 15s | 节点应答的时限：打开隧道、列出或设置服务 |
 | `max_links`、`max_links_per_peer`、`max_peers`、`max_tunnels` | 1024、128、1024、16384 | hub 保有资源的上限 |
+| `max_pending_links` | 64 | 同时打开、尚未注册的链路数，计入 `max_links`；超出的链路一打开就关闭 |
 | `console` | 无 | hub 的页面（见[控制台](#控制台)） |
 
 ### tunnel.node
@@ -118,6 +123,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | `meta` | 无 | 告知 hub 的其他信息 |
 | `hubs` | 无 | 要连接的 hub（见下） |
 | `services` | 无 | `{name, address, description}`：节点能访问的服务，也是它唯一会连接的地址 |
+| `remote_services` | 无：拒绝 | `{enabled, allow}`：hub 的控制台能否设置服务，以及能设置成哪些地址。`allow` 是 `host:port` 模式，host 为 IP 地址、CIDR 网段、名字、`*.后缀` 或 `*`，port 为数字或 `*`，如 `10.0.0.0/24:*`、`*.lab.internal:22`；不设 `allow` 时任何地址都可以 |
 | `dial_timeout` | 5s | 连接一个服务的时限 |
 | `idle_timeout` | 2h | 两个方向都没有数据超过这么久的隧道会被关闭 |
 | `max_tunnels` | 4096 | 同时打开的隧道数，跨所有 hub |
@@ -141,7 +147,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 |------|------|------|
 | `name` | 第一个端点的地址 | 转发和页面用来指称它的名字 |
 | `endpoints` | 必填 | `{address, disabled}`，按顺序尝试：`host:port` 或 `tcp://` 为 TCP，`ws://host:port/path`，`quic://host:port` |
-| `password` | 必填 | hub 的密码 |
+| `password` | 必填 | hub 给这个角色的密码：它的 `node_password` 或 `proxy_password`，或 `node_secrets` 中该节点自己的密码 |
 | `body_password` | 无 | hub 的消息体密码（如果有） |
 | `quic_pin`、`quic_insecure` | | quic 端点如何检查 hub 证书：按 hub 页面上显示的 SHA-256 指纹，或不检查（仅用于测试）；两者都不设时用系统根证书 |
 | `pool_size` | 10，最多 100 | 承载隧道的链路数 |
@@ -158,13 +164,21 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 承载 64 条，需要更多隧道的对端用更大的连接池。
 
 - **TCP** 和 **WebSocket** 链路是引擎上的连接。WebSocket 链路用于只放行 HTTP 的网络，例如经 nginx 的
-  `proxy_pass` 加 `Upgrade`；没有 `wss://`，所以请设置 `body_password`。
+  `proxy_pass` 加 `Upgrade`；没有 `wss://`，靠下面链路自身的加密保护。
 - **QUIC** 链路运行在同一个引擎的 UDP 绑定上，使用 fib 的 QUIC、TLS 1.3 和 ALPN `fit-tunnel`。有 quic 监听
   需要证书时，hub 生成自签名证书并保存在它的成员里，所以节点和 proxy 固定的指纹在重启后不变。
-- **注册**是以密码为密钥、对对端类型、名字、时间和随机数做的 HMAC-SHA256；时间与 hub 时钟相差不得超过
-  5 分钟，同一个随机数只接受一次。
-- **消息体加密**：各方都设置 `body_password` 时，每个帧的消息体用 AES-256-GCM 加密，帧头也参与认证；
-  未加密或解不开的帧会关闭链路。
+- **握手**双向证明密码。对端发送类型、名字和 32 个随机字节；hub 回以自己的 32 个随机字节和它的盐（启动时
+  选取的 16 个随机字节）。双方用这个盐以 PBKDF2-HMAC-SHA256、600,000 轮派生密码的密钥（设置了消息体密码时
+  它也一样），再由它和双方的随机字节经 HKDF 得出链路的密钥。随后对端以握手的 HMAC 注册，hub 回以自己的
+  HMAC：节点或 proxy 在链路加密之前不处理它的任何请求，hub 证明不了密码就断开链路，所以假 hub 或中间人
+  得不到可用的东西，也调用不了节点。窃听到握手的人，每猜一次密码都要付出 600,000 轮的代价。
+- **加密**：从握手起，每个帧的消息体都用 AES-256-GCM 加密，帧头也参与认证，每个方向用链路自己的密钥，
+  并按序编号：未加密、解不开、被重放、乱序、被反射回发送方或取自另一条链路的帧都会关闭链路。
+  `body_password` 只是再加一个双方都要知道的秘密。
+- **角色**：节点和 proxy 用各自的密码注册（`node_password`、`proxy_password`），节点也可以用
+  `node_secrets` 中自己的密码；只设 `password` 的 hub 两者都用它，也就分不清 proxy 和节点。已注册名字的
+  对端必须证明同一个密码；密码改变时，hub 踢出用旧密码注册的对端。只有 proxy 能列出节点和打开隧道；没有
+  对端能设置节点的服务，只有 hub 的控制台可以，而且只对 `remote_services` 允许的节点。
 
 ### 流控、上限与超时
 
@@ -175,7 +189,8 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 
 每次拨号、注册和调用都有时限；链路的 TCP 连接空闲 30s 后开始探测，对端不再应答时关闭；QUIC 连接每隔
 `keep_alive` 发送 ping，`idle_timeout` 后关闭；空闲超过 `idle_timeout` 的隧道会被关闭。 hub 限制链路、
-对端和隧道的数量、每个对端的链路数、进行中的 QUIC 握手数，以及未注册链路的帧大小（64 KiB）。
+对端和隧道的数量、每个对端的链路数、进行中的 QUIC 握手数、未注册的链路（`max_pending_links`，超过
+`register_timeout` 即关闭）以及它们的帧大小（64 KiB）。
 
 ## 控制台
 
@@ -188,11 +203,11 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 
 - **hub**：节点（含服务和延迟）与 proxy；隧道（含两个方向的字节数和整条路径的延迟）。查询节点、设置
   它的服务、踢出对端、关闭隧道。增删改监听；设置密码和控制台 WebSocket；复制 QUIC 证书指纹。在这里设置
-  的服务会写入节点自己的成员。
+  的服务会写入节点自己的成员，前提是节点的 `remote_services` 允许 hub 设置；否则节点拒绝并说明原因。
 - **节点**：它的 hub，以及每条链路使用的协议，可增删改；它的服务，保存后通知所有 hub；它的隧道，
   可关闭。
 - **proxy**：它的 hub（编辑方式同节点）、它们的节点和服务，以及每台 hub 分担某个节点隧道的比例；
-  查询节点，经 hub 设置节点的服务；增删转发；它的隧道，可关闭；告知 hub 的 meta；以及经 Web 代理访问
+  查询节点；增删转发；它的隧道，可关闭；告知 hub 的 meta；以及经 Web 代理访问
   每台 hub 的控制台。
 
 页面所做的修改通过 `app.Host.Edit` 写入角色在配置中的成员，再像其他配置一样从那里生效：它进入配置历史；
@@ -202,6 +217,22 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 hub 的控制台在无法直接访问的地方，可以经加密 WebSocket 访问：设置 hub 的 `console_socket`，proxy 的
 `web_proxies` 条目填上它的 URL 和密码，就在本地地址上提供这个控制台。WebSocket 的消息用由密码派生的密钥
 做 AES-256-GCM 加密；控制台自己的登录照样需要。
+
+## 升级到第 2 版协议
+
+fit 的隧道协议在这个版本中不兼容地改变了；hub、节点和 proxy 必须运行同一个 fit，旧版本的会被拒绝，并给出
+说明原因的错误。
+
+- **握手**取代了注册时单向的 HMAC：hub 也要证明密码，而且每条链路都加密，无论是否设置 `body_password`。
+  注册需要两个往返，节点或 proxy 在每次 hub 启动后派生一次密码的密钥（不到一秒）。
+- **`register_timeout`** 默认为 5s（原为 10s），新增的 **`max_pending_links`**（64）限制未注册的链路。
+- **节点拒绝 hub 修改它的服务**，除非启用了 `remote_services`：在需要由 hub 控制台设置服务的节点上设置
+  `"remote_services": {"enabled": true, "allow": [...]}`。
+- **proxy 不再能经 hub 设置节点的服务**（proxy 的页面和 `node/services` 调用都已移除），节点也不再能列出节点。
+- **分开各角色的密码**：在 hub 上设置 `node_password` 和 `proxy_password`，每个节点和 proxy 在它的 `hubs`
+  条目中填所属角色的密码，或用 `node_secrets` 给节点单独的密码。只设 `password` 的 hub 仍然两者都接受，并警告
+  任何 proxy 都能以节点身份注册。
+- 控制台 WebSocket 的密码同样以 600,000 轮派生。
 
 ## 重载与上限
 

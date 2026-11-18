@@ -119,11 +119,36 @@ func TestSOCKS(t *testing.T) {
 	}
 }
 
+// TestSOCKSLocal refuses the proxy's own host and link when socks leaves
+// allow_local out, by address in its spellings and by a host name that
+// resolves to loopback once it is connected; allow_local lets them through.
+func TestSOCKSLocal(t *testing.T) {
+	target := backend(t, echo)
+	_, port, _ := net.SplitHostPort(target)
+	f := startFit(t, socksConfig(`{"clients": ["127.0.0.1"]}`))
+	for _, dest := range []string{
+		target, "0.0.0.0:" + port, "[::]:" + port, "[::ffff:0.0.0.0]:" + port, "[::1]:" + port,
+		"169.254.169.254:80", "[fe80::1]:80", "localhost:" + port,
+	} {
+		if code := socksConnect(t, f.dial(0), dest, 1); code != 2 {
+			t.Errorf("%s: reply %d, want 2", dest, code)
+		}
+	}
+	f = startFit(t, socksConfig(`{"clients": ["127.0.0.1"], "allow_local": true}`))
+	for _, dest := range []string{target, "0.0.0.0:" + port, "localhost:" + port} {
+		c := f.dial(0)
+		if code := socksConnect(t, c, dest, 1); code != 0 {
+			t.Fatalf("allow_local: %s: reply %d", dest, code)
+		}
+		expectEcho(t, c, "through "+dest)
+	}
+}
+
 // TestSOCKSIdleTimeout closes a relay that carries nothing for the idle
 // timeout.
 func TestSOCKSIdleTimeout(t *testing.T) {
 	target := backend(t, echo)
-	f := startFit(t, socksConfig(`{"clients": ["127.0.0.1"], "idle_timeout": "300ms"}`))
+	f := startFit(t, socksConfig(`{"clients": ["127.0.0.1"], "allow_local": true, "idle_timeout": "300ms"}`))
 	c := f.dial(0)
 	if code := socksConnect(t, c, target, 1); code != 0 {
 		t.Fatalf("reply %d", code)
@@ -141,7 +166,7 @@ func TestSniffClear(t *testing.T) {
 	target := backend(t, echo)
 	f := startFit(t, fmt.Sprintf(`{
   "listeners": [{"name": "one", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c", "tcp", "socks"],
-    "socks": {"clients": ["127.0.0.1"]}}],
+    "socks": {"clients": ["127.0.0.1"], "allow_local": true}}],
   "upstreams": [{"name": "a", "addresses": [%q]}, {"name": "f", "addresses": [%q]}],
   "services": [
     {"name": "a", "listeners": ["one"], "upstream": "a", "server_names": ["a.example.com"]},

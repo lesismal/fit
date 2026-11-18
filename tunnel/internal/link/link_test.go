@@ -15,12 +15,15 @@ import (
 )
 
 // pair is two links joined by a TCP connection of a fib engine's.
-func pair(t *testing.T, ra, rb *Router, ca, cb *bodycrypt.Coder) (*Link, *Link) {
+func pair(t *testing.T, ra, rb *Router, sa, sb *bodycrypt.Session) (*Link, *Link) {
 	t.Helper()
 	e := tunneltest.Engine(t)
 	bs := make(chan *Link, 1)
 	l, err := transport.Listen(e, "127.0.0.1:0", transport.ListenOptions{}, func(c transport.Conn) transport.Handler {
-		b := New(c, rb, cb)
+		b := New(c, rb)
+		if sb != nil {
+			b.Seal(sb)
+		}
 		bs <- b
 		return b
 	})
@@ -29,7 +32,13 @@ func pair(t *testing.T, ra, rb *Router, ca, cb *bodycrypt.Coder) (*Link, *Link) 
 	}
 	t.Cleanup(func() { _ = l.Close() })
 	var a *Link
-	if _, err := transport.Dial(e, l.URL(), 5*time.Second, func(c transport.Conn) transport.Handler { a = New(c, ra, ca); return a }); err != nil {
+	if _, err := transport.Dial(e, l.URL(), 5*time.Second, func(c transport.Conn) transport.Handler {
+		a = New(c, ra)
+		if sa != nil {
+			a.Seal(sa)
+		}
+		return a
+	}); err != nil {
 		t.Fatal(err)
 	}
 	b := <-bs
@@ -37,13 +46,15 @@ func pair(t *testing.T, ra, rb *Router, ca, cb *bodycrypt.Coder) (*Link, *Link) 
 	return a, b
 }
 
-func coder(t *testing.T, password string) *bodycrypt.Coder {
+// session is the session that seals under key ka and opens under kb, each
+// key a byte repeated.
+func session(t *testing.T, ka, kb byte) *bodycrypt.Session {
 	t.Helper()
-	c, err := bodycrypt.New(password)
+	s, err := bodycrypt.NewSession(bytes.Repeat([]byte{ka}, bodycrypt.KeySize), bytes.Repeat([]byte{kb}, bodycrypt.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c
+	return s
 }
 
 func echoRouter(got chan<- []byte) *Router {
@@ -63,11 +74,11 @@ func echoRouter(got chan<- []byte) *Router {
 func TestLink(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		ca, cb *bodycrypt.Coder
-	}{{"plain", nil, nil}, {"sealed", coder(t, "k"), coder(t, "k")}} {
+		sa, sb *bodycrypt.Session
+	}{{"plain", nil, nil}, {"sealed", session(t, 1, 2), session(t, 2, 1)}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := make(chan []byte, 4)
-			a, _ := pair(t, NewRouter(), echoRouter(got), tc.ca, tc.cb)
+			a, _ := pair(t, NewRouter(), echoRouter(got), tc.sa, tc.sb)
 			var rsp proto.PingRsp
 			if err := a.Call(proto.MethodPing, &proto.PingReq{}, &rsp, time.Second); err != nil || rsp.Nodes["x"].RTT.Samples != 0 || len(rsp.Nodes) != 1 {
 				t.Fatalf("ping: %+v, %v", rsp, err)
@@ -91,19 +102,91 @@ func TestLink(t *testing.T) {
 	}
 }
 
-// Links whose body passwords differ, or of which one has none, close.
+// Links whose keys differ, or of which one does not seal, close; a call
+// that does not open is answered, unsealed, with why.
 func TestLinkMismatch(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		ca, cb *bodycrypt.Coder
-	}{{"other password", coder(t, "a"), coder(t, "b")}, {"caller has none", nil, coder(t, "b")}, {"callee has none", coder(t, "a"), nil}} {
+		sa, sb *bodycrypt.Session
+		why    string
+	}{
+		{"other keys", session(t, 1, 2), session(t, 3, 1), "failed to decrypt"},
+		{"caller does not seal", nil, session(t, 2, 1), "after the handshake"},
+		{"callee does not seal", session(t, 1, 2), nil, ""},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a, b := pair(t, NewRouter(), echoRouter(make(chan []byte, 1)), tc.ca, tc.cb)
-			if err := a.Call(proto.MethodPing, &proto.PingReq{}, nil, 2*time.Second); !errors.Is(err, ErrClosed) {
+			a, b := pair(t, NewRouter(), echoRouter(make(chan []byte, 1)), tc.sa, tc.sb)
+			err := a.Call(proto.MethodPing, &proto.PingReq{}, nil, 2*time.Second)
+			if !errors.Is(err, ErrClosed) && (tc.why == "" || err == nil || !strings.Contains(err.Error(), tc.why)) {
 				t.Fatalf("call: %v", err)
 			}
 			<-b.Done()
 		})
+	}
+}
+
+// A call answered with Sealing seals the link from then on: the answer
+// goes out unsealed, and what follows both ways is sealed.
+func TestLinkSealing(t *testing.T) {
+	r := echoRouter(make(chan []byte, 1))
+	r.HandleCall(proto.MethodHello, func(*Link, []byte) (any, error) {
+		return Sealing{Reply: "ok", Session: session(t, 2, 1)}, nil
+	}, true)
+	a, b := pair(t, NewRouter(), r, nil, nil)
+	var got string
+	if err := a.Call(proto.MethodHello, nil, &got, 2*time.Second); err != nil || got != "ok" {
+		t.Fatalf("hello: %q, %v", got, err)
+	}
+	if a.Sealed() || !b.Sealed() {
+		t.Fatal("sealed too soon, or not")
+	}
+	a.Seal(session(t, 1, 2))
+	if err := a.Call(proto.MethodPing, &proto.PingReq{}, nil, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	// A frame sealed before the handshake closes the other side.
+	c, d := pair(t, NewRouter(), r, session(t, 1, 2), nil)
+	if err := c.Call(proto.MethodPing, nil, nil, 2*time.Second); !errors.Is(err, ErrClosed) {
+		t.Fatalf("a sealed call before the handshake: %v", err)
+	}
+	<-d.Done()
+	if !strings.Contains(d.Err().Error(), "before the handshake") {
+		t.Fatalf("err %v", d.Err())
+	}
+}
+
+// A sealed frame replayed, or reflected back to the link that sent it,
+// does not open, and closes the link.
+func TestLinkReplayReflect(t *testing.T) {
+	got := make(chan []byte, 8)
+	r := NewRouter()
+	r.HandleNotify(proto.MethodTunnelData, func(_ *Link, body []byte) { got <- append([]byte(nil), body...) }, true)
+	sink := &sinkConn{}
+	sender := New(sink, NewRouter())
+	sender.Seal(session(t, 1, 2))
+	_ = sender.SendTunnel(proto.MethodTunnelData, 1, []byte("open the door"))
+	frame := bytes.Clone(sink.sent[0])
+
+	// Replayed.
+	l := New(&sinkConn{}, r)
+	l.Seal(session(t, 2, 1))
+	l.OnData(bytes.Clone(frame))
+	if id, p, _ := proto.ParseFrame(<-got); id != 1 || string(p) != "open the door" {
+		t.Fatalf("frame %d %q", id, p)
+	}
+	l.OnData(bytes.Clone(frame))
+	if err := l.Err(); err == nil || !strings.Contains(err.Error(), "decrypt") {
+		t.Fatalf("a replayed frame: %v", err)
+	}
+	// Reflected: the sender's own frame back to it.
+	sender.OnData(bytes.Clone(frame))
+	if err := sender.Err(); err == nil || !strings.Contains(err.Error(), "decrypt") {
+		t.Fatalf("a reflected frame: %v", err)
+	}
+	select {
+	case b := <-got:
+		t.Fatalf("served %q", b)
+	default:
 	}
 }
 
@@ -131,8 +214,8 @@ func TestLinkSplitFrames(t *testing.T) {
 	r := NewRouter()
 	r.HandleNotify(proto.MethodTunnelData, func(_ *Link, body []byte) { got <- append([]byte(nil), body...) }, true)
 	sink := &sinkConn{}
-	l := New(sink, r, nil)
-	sender := New(sink, NewRouter(), nil)
+	l := New(sink, r)
+	sender := New(sink, NewRouter())
 	for i := range 3 {
 		_ = sender.SendTunnel(proto.MethodTunnelData, uint64(i), []byte("hello"))
 	}

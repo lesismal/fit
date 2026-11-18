@@ -99,13 +99,6 @@
       }
 
       // ---- Actions / 操作 ----
-      function editServices(hub, node, reload) {
-        var p = nodeVia(hub, node);
-        if (!p) return;
-        K.servicesModal(t('tk.services_via', { name: node, hub: hub }), p.services || [], function (list) {
-          return K.call('/api/nodes/services', { hub: hub, node: node, services: list }, t('tk.services_saved_node')).then(function (ok) { if (ok) setTimeout(reload, 300); return ok; });
-        });
-      }
       // addForward asks for a forward, f filling the form. / 弹窗添加转发，f 预填表单。
       function addForward(f, reload) {
         f = f || {};
@@ -288,8 +281,7 @@
                   n.description ? h('span.muted', ' ' + n.description) : null, rt && rt.samples ? [' · ', K.rtt(rt)] : null),
                   UI.btn(t('forward'), 'forward', function () { addForward({ hub: r.hub.name, node: r.node.name, service: n.name }, null); }, 'ghost sm'));
               }));
-            } },
-            { label: '', cls: 'actions', render: function (r) { return UI.btn(t('tk.edit_services'), 'edit', function () { editServices(r.hub.name, r.node.name, load); }, 'ghost sm'); } }
+            } }
           ], rows, { empty: t('no.nodes') }));
         });
       }

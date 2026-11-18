@@ -28,7 +28,9 @@ var (
 )
 
 // refusedFor is how long a name the ask URL refused is refused without
-// asking again, and maxRefused how many such names are remembered.
+// asking again, and maxRefused how many such names are remembered; the
+// names it allowed for another instance's TLS-ALPN-01 challenge (see
+// challengeAllowed) are remembered as long, and as many.
 // usedEvery is how often a handshake records that it used a name taken on:
 // no more than once a second for each, so that handshakes for one name do not
 // all write to it.
@@ -61,6 +63,9 @@ type onDemand struct {
 	names int
 	// refused holds the names the ask URL refused, until when.
 	refused map[string]time.Time
+	// allowed holds the names the ask URL allowed when challengeAllowed
+	// asked, until when.
+	allowed map[string]time.Time
 	// waits holds, for each name being taken on, what its handshakes wait
 	// for.
 	waits map[string]*onDemandWait
@@ -85,6 +90,7 @@ func newOnDemand(c *config.OnDemand) *onDemand {
 		wait:     c.Wait(),
 		idle:     c.Idle(),
 		refused:  map[string]time.Time{},
+		allowed:  map[string]time.Time{},
 		waits:    map[string]*onDemandWait{},
 	}
 }
@@ -158,17 +164,67 @@ func (a *ACME) allow(name string) error {
 	}
 	if err := od.askFor(name); err != nil {
 		if errors.Is(err, ErrOnDemandRefused) {
-			od.mu.Lock()
-			if len(od.refused) >= maxRefused {
-				clear(od.refused)
-			}
-			od.refused[name] = a.now().Add(refusedFor)
-			od.mu.Unlock()
+			od.remember(od.refused, name, a.now().Add(refusedFor))
 		}
 		a.log.Warnf("acme: %s: on demand: %v", name, err)
 		return err
 	}
 	return od.room(a.now(), true)
+}
+
+// challengeAllowed reports whether a TLS-ALPN-01 challenge for name, which
+// the listener does not list, may be looked up in the shared storage: only
+// if on-demand TLS would take name on, so that a ClientHello cannot have
+// any name it makes up looked up. A name a manages passes; a name the ask
+// URL refused or allowed within the last minute passes or not as it was
+// answered; any other is asked about, as a handshake taking it on would be,
+// and the answer remembered. The rate and max_names are not looked at: the
+// instance with the challenge under way took the name on and counted it.
+// It may block for the ask, up to on_demand's timeout, on fib's handshake
+// pool, as OnDemand does.
+func (a *ACME) challengeAllowed(name string) bool {
+	od := a.onDemand
+	if od == nil || !onDemandName(name) {
+		return false
+	}
+	a.mu.Lock()
+	known := a.names[name] != nil
+	a.mu.Unlock()
+	if known {
+		return true
+	}
+	now := a.now()
+	od.mu.Lock()
+	if until, ok := od.refused[name]; ok && now.Before(until) {
+		od.mu.Unlock()
+		return false
+	}
+	if until, ok := od.allowed[name]; ok && now.Before(until) {
+		od.mu.Unlock()
+		return true
+	}
+	od.mu.Unlock()
+	if err := od.askFor(name); err != nil {
+		if errors.Is(err, ErrOnDemandRefused) {
+			od.remember(od.refused, name, now.Add(refusedFor))
+		} else {
+			a.log.Warnf("acme: %s: on demand, for a challenge: %v", name, err)
+		}
+		return false
+	}
+	od.remember(od.allowed, name, now.Add(refusedFor))
+	return true
+}
+
+// remember keeps name in m, od's refused or allowed, until until; m is
+// emptied first once it holds maxRefused names.
+func (od *onDemand) remember(m map[string]time.Time, name string, until time.Time) {
+	od.mu.Lock()
+	if len(m) >= maxRefused {
+		clear(m)
+	}
+	m[name] = until
+	od.mu.Unlock()
 }
 
 // room reports whether another name may be taken on now, and counts it with

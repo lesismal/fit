@@ -111,7 +111,7 @@ func (s *Hub) Status() Status {
 	set := s.settings()
 	cfg := set.cfg
 	st := Status{Name: set.name, Version: proto.Version, Listen: []string{}, Listeners: []ListenerView{}, Socket: s.SocketAddr(),
-		QUICFingerprint: s.Fingerprint(), BodyEncrypted: cfg.BodyPassword != "", Started: s.since, Peers: []PeerView{}, Tunnels: []RouteView{},
+		QUICFingerprint: s.Fingerprint(), BodyEncrypted: true, Started: s.since, Peers: []PeerView{}, Tunnels: []RouteView{},
 		Settings: SettingsView{HasPassword: cfg.Password != "", HasBodyPassword: cfg.BodyPassword != ""}}
 	if cs := cfg.ConsoleSocket; cs != nil {
 		st.Settings.SocketAddress, st.Settings.HasSocketPassword = cs.Address, cs.Password != ""

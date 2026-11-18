@@ -97,7 +97,8 @@ listeners:
 
       # # The destinations the proxy connects to: host names, "*.example.com" for every name below
       # # example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves
-      # # to. Every destination deny does not hold when left out.
+      # # to. Every destination deny does not hold when left out, save the local addresses allow_local
+      # # is about.
       # # list of string.
       # allow: ["*.example.com", "10.1.0.0/16"]
 
@@ -109,6 +110,16 @@ listeners:
       # # The destination ports allowed; any when left out.
       # # list of integer.
       # ports: [443]
+
+      # # Let the proxy connect to its own host and link: 127.0.0.0/8, 0.0.0.0/8, 169.254.0.0/16 (a
+      # # cloud's metadata service at 169.254.169.254 among them), ::/96 (::, ::1 and the
+      # # IPv4-compatible addresses), fe80::/10, and these as IPv4-mapped IPv6 addresses. When left
+      # # out or false they are refused, as literals and as the address a host name resolves to,
+      # # whatever allow and deny say, except the addresses an allow range within them holds, as
+      # # "127.0.0.1" or "169.254.169.254"; a wider range, as "0.0.0.0/0", and host names do not reach
+      # # them.
+      # # boolean.
+      # allow_local: true
 
       # # How long resolving and connecting to a destination may take. 10s when left out.
       # # duration, as "1.5s" or "2m"; default "10s".
@@ -786,8 +797,8 @@ routes:
 
         # # The destinations the proxy connects to: host names, "*.example.com" for every name below
         # # example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves
-        # # to. Every destination deny does not hold when left out; others are answered 403, or 502 for
-        # # a host name whose address decides.
+        # # to. Every destination deny does not hold when left out, save the local addresses allow_local
+        # # is about; others are answered 403, or 502 for a host name whose address decides.
         # # list of string.
         # allow: ["*.example.com", "10.1.0.0/16"]
 
@@ -798,6 +809,16 @@ routes:
         # # The destination ports allowed; any when left out.
         # # list of integer.
         # ports: [443]
+
+        # # Let the proxy connect to its own host and link: 127.0.0.0/8, 0.0.0.0/8, 169.254.0.0/16 (a
+        # # cloud's metadata service at 169.254.169.254 among them), ::/96 (::, ::1 and the
+        # # IPv4-compatible addresses), fe80::/10, and these as IPv4-mapped IPv6 addresses. When left
+        # # out or false they are refused, as literals and as the address a host name resolves to,
+        # # whatever allow and deny say, except the addresses an allow range within them holds, as
+        # # "127.0.0.1" or "169.254.169.254"; a wider range, as "0.0.0.0/0", and host names do not reach
+        # # them.
+        # # boolean.
+        # allow_local: true
 
         # # How long resolving and connecting to a destination may take; past it the request is answered
         # # 504. 10s when left out.
@@ -2749,14 +2770,36 @@ upstreams:
     # # string.
     # name: ""
 
-    # # The password nodes and proxies register with, which they prove they know without sending it.
-    # # The hub refuses every registration while it is left out.
+    # # The password nodes and proxies register with, unless node_password or proxy_password is set
+    # # for them; the hub and the peer each prove they know it, without sending it. With it alone,
+    # # any proxy can register as a node: set node_password and proxy_password apart.
     # # string.
     # password: ""
 
-    # # When set, the body of every frame on the links is encrypted with AES-256-GCM under a key
-    # # made from it, and nodes and proxies need the same one. It applies to the links that open
-    # # after it changes.
+    # # The password nodes register with, but those node_secrets names. password when left out.
+    # # string.
+    # node_password: ""
+
+    # # The password proxies register with. password when left out.
+    # # string.
+    # proxy_password: ""
+
+    # # Nodes that register with passwords of their own: a node of a name listed here registers with
+    # # its password, and with no other.
+    # # list of object.
+    # node_secrets:
+      # -
+        # # The node's name.
+        # # string; required.
+        # name: ""
+
+        # # The password the node registers with, its hubs entry's password.
+        # # string; required.
+        # password: ""
+
+    # # A second secret the links' keys are made from, beside the registration password: nodes and
+    # # proxies need the same one. Links are encrypted without it too. It applies to the links that
+    # # open after it changes.
     # # string.
     # body_password: ""
 
@@ -2829,10 +2872,10 @@ upstreams:
       # # integer, 0 or more; default 64.
       # max_handshakes: 64
 
-    # # How long a link may take to register once it is open; it is closed past it. 10s when left
+    # # How long a link may take to register once it is open; it is closed past it. 5s when left
     # # out.
-    # # duration, as "1.5s" or "2m"; default "10s".
-    # register_timeout: "10s"
+    # # duration, as "1.5s" or "2m"; default "5s".
+    # register_timeout: "5s"
 
     # # How long a node may take to answer the hub: to open a tunnel, or to list or set its
     # # services. 15s when left out.
@@ -2843,6 +2886,11 @@ upstreams:
     # # as it opens. 1024 when left out or 0.
     # # integer, 0 or more; default 1024.
     # max_links: 1024
+
+    # # The most links open at once that have not registered yet, within max_links; one past it is
+    # # closed as soon as it opens. 64 when left out or 0.
+    # # integer, 0 or more; default 64.
+    # max_pending_links: 64
 
     # # The most links one node or proxy may register, from however many processes of the same name.
     # # 128 when left out or 0.
@@ -2998,6 +3046,21 @@ upstreams:
         # # What the service is, for the pages.
         # # string.
         # description: ""
+
+    # # Whether a hub's console may set the node's services, and to which addresses. Refused when
+    # # left out: the services come from this config and the node's own console alone.
+    # # object.
+    # remote_services:
+      # # Let the hubs' consoles set the services.
+      # # boolean.
+      # enabled: true
+
+      # # The addresses they may set, as host:port patterns: the host an IP address, a CIDR range, a
+      # # host name, "*.suffix" or "*", the port a number or "*", as in "10.0.0.0/24:*",
+      # # "[fd00::/8]:443" or "*.lab.internal:22". A range holds only IP addresses, and a name pattern
+      # # only names. Any address when left out.
+      # # list of string.
+      # allow: ["*.example.com", "10.1.0.0/16"]
 
     # # How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub
     # # hears either way. 5s when left out.

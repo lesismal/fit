@@ -81,6 +81,34 @@ These were renamed for 1.0, so that every size in bytes ends in `_bytes` and eve
 | `jwt` | `jwks_refresh` | `jwks_refresh_interval` |
 | `wasm` | `max_memory` | `max_memory_bytes` |
 
+## Defaults changed for security
+
+These defaults were changed to close a security hole, as a 1.x release may; each has a field that
+brings the old behavior back.
+
+**The forward proxy refuses the proxy's own host and link.** A listener's `socks` and the
+`forward_proxy` handler (HTTP CONNECT) no longer connect a client to these addresses, whatever
+`allow` and `deny` say:
+
+- loopback, `127.0.0.0/8` and `::1`;
+- the unspecified addresses, `0.0.0.0/8` and `::`, which connect to the host itself on Linux and
+  macOS, and the IPv4-compatible `::/96` around them;
+- link-local, `169.254.0.0/16`, a cloud's metadata service at `169.254.169.254` among them, and
+  `fe80::/10`;
+- and each of these written as an IPv4-mapped IPv6 address, as `::ffff:127.0.0.1` or
+  `::ffff:0.0.0.0`.
+
+They are refused both as a destination's address and as the address a host name resolves to:
+`localhost`, or a name whose DNS answers `127.0.0.1` or `0.0.0.0`, is closed as soon as it is
+connected, before anything is sent. SOCKS replies "not allowed" (2); `forward_proxy` answers 403
+for an address and 502 for a host name.
+
+An `allow` entry that is an address or a range within these reaches what it holds, so
+`"allow": ["127.0.0.1"]` lets clients through to `127.0.0.1` alone, and `169.254.169.254` must be
+named for the metadata service to be reached. A wider range, as `0.0.0.0/0` or `::/0`, and host
+names do not reach them, and `deny` still refuses what it holds. Setting `allow_local: true` lets
+the proxy connect to all of them again, as before.
+
 ## The Admin API, v1
 
 | Method and path | What it does |

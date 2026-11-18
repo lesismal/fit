@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -210,5 +212,108 @@ func TestCertsSharedALPN(t *testing.T) {
 	}
 	if err := checkName("a.fit.test/../x"); err == nil {
 		t.Error("a name with a slash was taken")
+	}
+}
+
+// countingStorage is a sharedStorage that counts its loads, by key.
+type countingStorage struct {
+	*sharedStorage
+	loads sync.Map // key -> *atomic.Int64
+}
+
+func (s *countingStorage) Load(ctx context.Context, key string) ([]byte, error) {
+	v, _ := s.loads.LoadOrStore(key, &atomic.Int64{})
+	v.(*atomic.Int64).Add(1)
+	return s.sharedStorage.Load(ctx, key)
+}
+
+func (s *countingStorage) count(key string) int64 {
+	v, ok := s.loads.Load(key)
+	if !ok {
+		return 0
+	}
+	return v.(*atomic.Int64).Load()
+}
+
+// TestCertsSharedALPNOnDemand has a CA's ClientHellos, ACMEALPN alone,
+// reach a listener with on-demand TLS: another instance's challenge is
+// looked up in the shared storage for a listed name, a name the instance
+// manages and a name the ask URL allows, and never for a name it refuses,
+// nor for one that cannot be a host name; each name is asked about once a
+// minute at most.
+func TestCertsSharedALPNOnDemand(t *testing.T) {
+	var l logLines
+	ask := newAsker(t, "ok.fit.test")
+	st := &countingStorage{sharedStorage: &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}}
+	a := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir",
+		OnDemand: &config.OnDemand{Ask: ask.srv.URL}}, st, &l)
+	certs := NewCerts(nil, a, []string{"a.fit.test"}, true)
+	alpn := func(name string) *tls.ClientHelloInfo {
+		h := hello(name)
+		h.SupportedProtos = []string{ACMEALPN}
+		return h
+	}
+	names := []string{"a.fit.test", "ok.fit.test", "m.fit.test", "random-1234.fit.test", "nodot"}
+	challenge := keyCert(t, false, "x.fit.test")
+	data, err := encodeCert(challenge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		if err := st.Store(context.Background(), a.alpnChallengeKey(name), data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.mu.Lock()
+	a.names["m.fit.test"] = &managed{name: "m.fit.test", due: time.Now().Add(time.Hour)}
+	a.mu.Unlock()
+
+	for range 3 {
+		for _, name := range []string{"a.fit.test", "ok.fit.test", "m.fit.test"} {
+			got, err := certs.GetCertificate(alpn(name))
+			if err != nil || !bytes.Equal(got.Certificate[0], challenge.Certificate[0]) {
+				t.Errorf("%s: another instance's challenge: %v", name, err)
+			}
+		}
+		for _, name := range []string{"random-1234.fit.test", "nodot"} {
+			if _, err := certs.GetCertificate(alpn(name)); !errors.Is(err, errNoChallenge) {
+				t.Errorf("%s: %v, want errNoChallenge", name, err)
+			}
+		}
+	}
+	for _, name := range names {
+		want := int64(3)
+		if name == "random-1234.fit.test" || name == "nodot" {
+			want = 0
+		}
+		if n := st.count(a.alpnChallengeKey(name)); n != want {
+			t.Errorf("%s: looked up %d times, want %d", name, n, want)
+		}
+	}
+	for name, want := range map[string]int{"a.fit.test": 0, "m.fit.test": 0, "ok.fit.test": 1, "random-1234.fit.test": 1, "nodot": 0} {
+		if n := ask.count(name); n != want {
+			t.Errorf("%s: asked %d times, want %d", name, n, want)
+		}
+	}
+
+	// Without a shared storage, nothing is asked about.
+	b := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir",
+		OnDemand: &config.OnDemand{Ask: ask.srv.URL}}, &l)
+	if _, err := NewCerts(nil, b, nil, true).GetCertificate(alpn("other.fit.test")); !errors.Is(err, errNoChallenge) {
+		t.Errorf("no shared storage: %v", err)
+	}
+	if n := ask.count("other.fit.test"); n != 0 {
+		t.Errorf("asked %d times with no shared storage", n)
+	}
+
+	// An ask URL that does not answer allows nothing, and is not taken
+	// for a refusal.
+	c := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir",
+		OnDemand: &config.OnDemand{Ask: "http://127.0.0.1:1/ask"}}, st, &l)
+	if _, err := NewCerts(nil, c, nil, true).GetCertificate(alpn("ok.fit.test")); !errors.Is(err, errNoChallenge) {
+		t.Errorf("no answer from the ask URL: %v", err)
+	}
+	if n := len(c.onDemand.refused); n != 0 {
+		t.Errorf("%d names remembered as refused without an answer", n)
 	}
 }

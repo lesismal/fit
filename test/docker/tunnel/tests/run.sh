@@ -430,8 +430,14 @@ t_node_admin() {
 	check "  … hub-2 hears of it" eventually 15 js "$HUB2" hub2 'any(.peers[] | select(.info.name == "office") | .info.services[]; .name == "http2")'
 	check "querying a proxy as a node is refused" refused "$HUB1" hub1 /api/peers/refresh "{\"id\":$(peer_id "$HUB1" hub1 alice proxy)}"
 	check "alice refreshes hub-2's nodes" t "post '$ALICE' alice /api/nodes/refresh '{\"hub\":\"hub-2\"}' | jq -e '[.nodes[].name] | sort == [\"lab\",\"office\"]'"
-	check "alice sets node office's services through hub-2 (removes http2)" post "$ALICE" alice /api/nodes/services \
-		"{\"hub\":\"hub-2\",\"node\":\"office\",\"services\":$(services_json "echo|dev-office:7|echo service of dev-office" "http|dev-office:80|web hub of dev-office")}"
+	check "alice cannot set node office's services through hub-2" refused "$ALICE" alice /api/nodes/services \
+		"{\"hub\":\"hub-2\",\"node\":\"office\",\"services\":$(services_json "ssh|127.0.0.1:22")}"
+	check "hub-1 cannot set an address office's remote_services does not allow" refused "$HUB1" hub1 /api/peers/services \
+		"{\"id\":$id,\"services\":$(services_json "meta|169.254.169.254:80")}"
+	check "hub-1 cannot set the services of node lab, which takes none remotely" refused "$HUB1" hub1 /api/peers/services \
+		"{\"id\":$(peer_id "$HUB1" hub1 lab node),\"services\":$(services_json "echo|dev-lab:7")}"
+	check "hub-1 sets node office's services (removes http2)" post "$HUB1" hub1 /api/peers/services \
+		"{\"id\":$id,\"services\":$(services_json "echo|dev-office:7|echo service of dev-office" "http|dev-office:80|web hub of dev-office")}"
 	check "  … node office no longer has http2" eventually 10 js "$OFFICE" office '[.services[].name] | sort == ["echo","http"]'
 	check "node lab edits its own services (adds tmp)" post "$LAB" lab /api/services "$(services_json "${LAB_SERVICES[@]}" "tmp|dev-lab:7")"
 	check "  … hub-1 hears of it" eventually 15 js "$HUB1" hub1 'any(.peers[] | select(.info.name == "lab") | .info.services[]; .name == "tmp")'
@@ -565,7 +571,7 @@ t_peers() {
 	}
 
 	run_peer intruder "$(up hub-1:7000 wrong-password "$BODY_PASSWORD")"
-	check "a wrong registration password: authentication fails" eventually 20 uplink_error "auth"
+	check "a wrong registration password: authentication fails" eventually 20 uplink_error "decrypt|password"
 	check "  … hub-1 has no such peer" t "! peer '$HUB1' hub1 intruder node"
 	stop_peer
 
