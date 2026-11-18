@@ -145,7 +145,9 @@ func TestHTTPFLVAuth(t *testing.T) {
 			t.Fatalf("%s: %d %q", name, resp.StatusCode, body)
 		}
 	}
-	if resp, _ = get(t, f.base+"/flv/live/../cam.flv", 0, nil); resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusBadRequest {
+	// /flv/cam.flv once the listener resolves it, which needs a token too.
+	if resp, _ = get(t, f.base+"/flv/live/../cam.flv", 0, nil); resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusBadRequest &&
+		resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("a path with ..: %d", resp.StatusCode)
 	}
 	if resp, _ = get(t, f.base+"/flv/live/none.flv?token="+viewToken, 0, nil); resp.StatusCode != http.StatusNotFound {

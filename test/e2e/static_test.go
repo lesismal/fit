@@ -80,10 +80,11 @@ func TestStaticServesFiles(t *testing.T) {
 		} else {
 			resp.Body.Close()
 		}
-		// The client cleans "..", so the request goes out as written.
+		// The client cleans "..", so the request goes out as written; the
+		// listener resolves it to /etc/passwd, which no route serves.
 		req, _ = stdhttp.NewRequest("GET", base+"/x", nil)
 		req.URL.Opaque = "/files/../../etc/passwd"
-		if resp, err := c.Do(req); err != nil || resp.StatusCode != 400 {
+		if resp, err := c.Do(req); err != nil || resp.StatusCode != 404 {
 			t.Errorf("h2c=%v traversal: %v %v", h2c, err, resp)
 		} else {
 			resp.Body.Close()
