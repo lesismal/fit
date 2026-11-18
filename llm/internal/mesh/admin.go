@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/lesismal/fit/llm/internal/model"
@@ -97,7 +98,7 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 		return map[string]int{"closed": n}, nil
 	})
 	Handle(r, model.MethodListen, nil, 0, func(ctx context.Context, _ model.Identity, req *model.ListenReq) (any, error) {
-		cfg := *req
+		cfg := model.ListenConfig{Addr: req.Addr}
 		if cfg.Addr != "" {
 			addr, err := ValidateAddr(cfg.Addr, false)
 			if err != nil {
@@ -105,16 +106,31 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 			}
 			cfg.Addr = addr
 		}
+		for _, r := range req.Clear {
+			if !slices.Contains(model.Roles, r) {
+				return nil, BadRequest("unknown role %q", r)
+			}
+		}
 		err := edit(ctx, func(s *Settings) error {
 			if cfg.Addr == "" {
 				s.Listen = nil
 				return nil
 			}
-			if cfg.Password == "" && s.Listen != nil {
-				cfg.Password = s.Listen.Password
+			// A role's empty password keeps the one it has; Clear removes it.
+			// 某角色的密码为空表示保留现有密码；Clear 删除它。
+			if s.Listen != nil {
+				cfg.Passwords = s.Listen.Passwords
 			}
-			if cfg.Password == "" {
-				return BadRequest("a listener needs a password")
+			for _, r := range model.Roles {
+				if pw := req.Passwords.For(r); pw != "" {
+					cfg.Passwords.Set(r, pw)
+				}
+			}
+			for _, r := range req.Clear {
+				cfg.Passwords.Set(r, "")
+			}
+			if err := m.checkPasswords(cfg.Passwords); err != nil {
+				return err
 			}
 			c := cfg
 			s.Listen = &c

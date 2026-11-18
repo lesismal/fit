@@ -80,7 +80,11 @@ func ctxT(t *testing.T) context.Context {
 }
 
 func TestSharedPortAndAuth(t *testing.T) {
-	ts := startServer(t, wire.ConnConfig{Auth: wire.Password("pw")})
+	la, err := wire.NewListenAuth("hub", wire.NewSalt(), map[string]string{"node": "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := startServer(t, wire.ConnConfig{ListenAuth: la})
 
 	// Plain HTTP on the same port.
 	// 同一端口上的普通 HTTP。
@@ -94,7 +98,7 @@ func TestSharedPortAndAuth(t *testing.T) {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
 
-	_, err = dial(t, "ws://"+ts.addr+"/ws", wire.DialConfig{ConnConfig: wire.ConnConfig{Auth: wire.Password("wrong")}})
+	_, err = dial(t, "ws://"+ts.addr+"/ws", wire.DialConfig{ConnConfig: wire.ConnConfig{DialAuth: &wire.DialAuth{Role: "node", Password: "wrong"}}})
 	if !errors.Is(err, wire.ErrAuth) {
 		t.Fatalf("wrong password: want ErrAuth, got %v", err)
 	}
@@ -104,7 +108,7 @@ func TestSharedPortAndAuth(t *testing.T) {
 	default:
 	}
 
-	c, err := dial(t, "ws://"+ts.addr+"/ws", wire.DialConfig{ConnConfig: wire.ConnConfig{Auth: wire.Password("pw")}})
+	c, err := dial(t, "ws://"+ts.addr+"/ws", wire.DialConfig{ConnConfig: wire.ConnConfig{DialAuth: &wire.DialAuth{Role: "node", Password: "pw"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

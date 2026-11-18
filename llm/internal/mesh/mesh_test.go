@@ -60,7 +60,7 @@ func start(t *testing.T, m *Mesh, listen string, peers ...model.DialReq) {
 	t.Helper()
 	cfg := model.ListenConfig{}
 	if listen != "" {
-		cfg = model.ListenConfig{Addr: listen, Password: "pw"}
+		cfg = model.ListenConfig{Addr: listen, Passwords: pws("pw")}
 	}
 	if err := m.Configure(cfg, peers); err != nil {
 		t.Fatal(err)
@@ -69,6 +69,11 @@ func start(t *testing.T, m *Mesh, listen string, peers ...model.DialReq) {
 		t.Fatal(e)
 	}
 }
+
+// pws gives every role the same password: the config refuses that (CheckPasswords), the mesh alone does not, and
+// tests that are not about the passwords use it.
+// pws 给所有角色同一个密码：配置会拒绝（CheckPasswords），互联本身不会，与密码无关的测试使用它。
+func pws(pw string) model.RolePasswords { return model.RolePasswords{Hub: pw, Node: pw, Proxy: pw} }
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -150,7 +155,8 @@ func TestMeshRefusesRoleAndPassword(t *testing.T) {
 	if client.Online("n1") || node.Online("c1") || bad.Online("n1") {
 		t.Fatal("refused peers are online")
 	}
-	if e := client.Targets()[0].Error; !strings.Contains(e, "not accepted") {
+	// A role the listener has no password for fails the handshake. / 监听方没有其密码的角色在握手时失败。
+	if e := client.Targets()[0].Error; !strings.Contains(e, "authentication") {
 		t.Fatalf("proxy error = %q", e)
 	}
 	if e := bad.Targets()[0].Error; !strings.Contains(e, "authentication") {
@@ -187,7 +193,7 @@ func TestMeshSameRoleRefused(t *testing.T) {
 	role.Store(model.RoleNode) // the hello says node / hello 中声明 node
 	waitFor(t, "the refusal", func() bool {
 		ts := n2.Targets()
-		return len(ts) == 1 && strings.Contains(ts[0].Error, "same role")
+		return len(ts) == 1 && (strings.Contains(ts[0].Error, "same role") || strings.Contains(ts[0].Error, "authentication"))
 	})
 	if len(n1.Peers()) != 0 || len(n2.Peers()) != 0 {
 		t.Fatalf("nodes connected: %v / %v", n1.Peers(), n2.Peers())

@@ -70,7 +70,15 @@ type Options struct {
 	// MaxInbound 对端在本方同时运行的请求与流的上限（0：DefaultMaxInbound，< 0：不限制）。超出的立即以 CodeRateLimited
 	// 错误拒绝，而不是排队。
 	MaxInbound int
-	Handlers   Handlers
+	// MaxOvershoot bounds, over every stream of the session together, the bytes held past their windows: a
+	// sender may overshoot a stream's window by one frame, which may be MaxFrame, so without it a peer could make
+	// a link hold MaxInbound frames of MaxFrame (0: 2 × MaxFrame, < 0: no limit). A frame past it fails its
+	// stream with ErrFlowControl.
+	// MaxOvershoot 会话所有流合计超出各自窗口的字节上限：发送方可以超出流窗口一个帧，而一帧可达 MaxFrame，没有这个上限，
+	// 对端可以让一条连接保留 MaxInbound 个 MaxFrame 大小的帧（0：2 × MaxFrame，< 0：不限制）。超出的帧以 ErrFlowControl
+	// 使其所在的流失败。
+	MaxOvershoot int
+	Handlers     Handlers
 }
 
 // Session multiplexes requests, streams and pushes over one connection. The transport passes every inbound
@@ -104,6 +112,10 @@ type Session struct {
 	drainSent atomic.Bool
 	peerDrain atomic.Bool
 
+	// overshoot is the bytes the streams hold past their windows (MaxOvershoot).
+	// overshoot 各流超出其窗口所保留的字节（MaxOvershoot）。
+	overshoot atomic.Int64
+
 	// The bytes of every frame received and sent, and the round trips of
 	// the pings: what a link's traffic and latency are shown from.
 	rx, tx atomic.Int64
@@ -132,6 +144,9 @@ func NewSession(opts Options, send func([]byte) error) *Session {
 	}
 	if opts.MaxInbound == 0 {
 		opts.MaxInbound = DefaultMaxInbound
+	}
+	if opts.MaxOvershoot == 0 {
+		opts.MaxOvershoot = 2 * opts.MaxFrame
 	}
 	s := &Session{
 		opts:    opts,

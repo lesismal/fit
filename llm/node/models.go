@@ -143,19 +143,33 @@ func (n *Node) editModels(ctx context.Context, fn func(models []model.Model) ([]
 	})
 }
 
-// saveModel adds a model, or replaces the one with the same name and API (an
-// empty or masked key keeps the one kept), in the config.
+// saveModel adds a model, or replaces the one with the same name and API, in
+// the config. An empty or masked key keeps the one kept, but only while the
+// key goes where it went: a save that changes the base URL or the API
+// version drops it unless it sends the key again, so that whoever saves
+// cannot send the kept key to a URL of their choice and read it there. A
+// hub's such save is refused instead: a hub cannot read a model's key, and
+// cannot strip one from a model the node's admin set up.
 func (n *Node) saveModel(ctx context.Context, caller model.Identity, req *model.Model) (any, error) {
 	m := *req
 	if err := validModel(&m); err != nil {
 		return nil, err
 	}
+	dropped := false
 	err := n.editModels(ctx, func(models []model.Model) ([]model.Model, error) {
 		idx := slices.IndexFunc(models, func(x model.Model) bool { return x.Name == m.Name && x.API == m.API })
 		if m.APIKey == "" || isMasked(m.APIKey) {
 			m.APIKey = ""
-			if idx >= 0 {
-				m.APIKey = models[idx].APIKey
+			if idx >= 0 && models[idx].APIKey != "" {
+				old := models[idx]
+				if old.BaseURL == m.BaseURL && old.APIVersion == m.APIVersion {
+					m.APIKey = old.APIKey
+				} else if caller.Role != model.RoleLocal {
+					return nil, mesh.Errorf(model.CodeForbidden,
+						"model %s has a key: a %s may change its base_url or api_version only by sending the key again", m.Name, caller.Role)
+				} else {
+					dropped = true
+				}
 			}
 		}
 		if idx >= 0 {
@@ -169,6 +183,9 @@ func (n *Node) saveModel(ctx context.Context, caller model.Identity, req *model.
 		return nil, err
 	}
 	n.log.Infof("model %s (%s) saved by %s, base_url %s", m.Name, m.API, caller.Role, m.BaseURL)
+	if dropped {
+		n.log.Warnf("model %s (%s): its key was dropped, since its base_url or api_version changed and no key was sent", m.Name, m.API)
+	}
 	m.APIKey = maskKey(m.APIKey)
 	return m, nil
 }
@@ -254,7 +271,10 @@ func (n *Node) setModelErr(m model.Model, msg string, checked bool) {
 // gemini, cohere), <base_url>/openai/models?api-version= (azure_openai) or
 // <base_url>/api/tags (ollama). The upstream counts as reachable unless the
 // request fails, or the answer is 401 / 403 (bad key) or 5xx: a server
-// without the list (404, 405) still serves calls.
+// without the list (404, 405) still serves calls. The error says only the
+// status: it is the model's state, which every linked hub and proxy sees, so
+// the upstream's body (which a model pointed at an internal service would
+// show them) goes only to the node's log.
 func (n *Node) probeModel(m model.Model, done func(error)) {
 	req, err := stdhttp.NewRequest(stdhttp.MethodGet, probeURL(m), nil)
 	if err != nil {
@@ -272,7 +292,8 @@ func (n *Node) probeModel(m model.Model, done func(error)) {
 			body = body[:512]
 		}
 		if resp.StatusCode == stdhttp.StatusUnauthorized || resp.StatusCode == stdhttp.StatusForbidden || resp.StatusCode >= 500 {
-			done(fmt.Errorf("upstream HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+			n.log.Debugf("model %s (%s) check: upstream HTTP %d: %s", m.Name, m.API, resp.StatusCode, strings.TrimSpace(string(body)))
+			done(fmt.Errorf("upstream HTTP %d %s", resp.StatusCode, stdhttp.StatusText(resp.StatusCode)))
 			return
 		}
 		done(nil)

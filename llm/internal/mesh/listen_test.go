@@ -23,28 +23,28 @@ func TestSetListenRuntime(t *testing.T) {
 	}
 	defer busy.Close()
 	node, _ := newTestMesh(t, model.RoleNode, "n1", allPeers)
-	if err := node.Configure(model.ListenConfig{Addr: busy.Addr().String(), Password: "pw"}, nil); err != nil {
+	if err := node.Configure(model.ListenConfig{Addr: busy.Addr().String(), Passwords: pws("pw")}, nil); err != nil {
 		t.Fatalf("start failed on a busy port: %v", err)
 	}
-	if st := node.Listen(); st.Error == "" || st.Addr != busy.Addr().String() || !st.HasPassword {
+	if st := node.Listen(); st.Error == "" || st.Addr != busy.Addr().String() || len(st.Roles) == 0 {
 		t.Fatalf("listen state after a failed bind: %+v", st)
 	}
 
 	if err := node.SetListen(model.ListenConfig{Addr: "127.0.0.1:1"}); err == nil {
 		t.Fatal("a listener without a password was accepted")
 	}
-	if err := node.SetListen(model.ListenConfig{Addr: "nonsense", Password: "x"}); err == nil {
+	if err := node.SetListen(model.ListenConfig{Addr: "nonsense", Passwords: pws("x")}); err == nil {
 		t.Fatal("a bad address was accepted")
 	}
 
 	addr := freeAddr(t)
-	if err := node.SetListen(model.ListenConfig{Addr: addr, Password: "pw"}); err != nil {
+	if err := node.SetListen(model.ListenConfig{Addr: addr, Passwords: pws("pw")}); err != nil {
 		t.Fatal(err)
 	}
 	if st := node.Listen(); st.Error != "" || st.Addr != addr {
 		t.Fatalf("listen state: %+v", st)
 	}
-	if err := node.SetListen(model.ListenConfig{Addr: addr, Password: "pw"}); err != nil {
+	if err := node.SetListen(model.ListenConfig{Addr: addr, Passwords: pws("pw")}); err != nil {
 		t.Fatalf("same config again: %v", err)
 	}
 	hub, _ := newTestMesh(t, model.RoleHub, "h1", allPeers)
@@ -53,10 +53,10 @@ func TestSetListenRuntime(t *testing.T) {
 
 	// New password on the same port: the hub is dropped and refused until it has the new password.
 	// 同一端口换新密码：hub 被断开并被拒绝，直到它使用新密码。
-	if err := node.SetListen(model.ListenConfig{Addr: addr, Password: "new"}); err != nil {
+	if err := node.SetListen(model.ListenConfig{Addr: addr, Passwords: pws("new")}); err != nil {
 		t.Fatal(err)
 	}
-	if got := node.ListenConfig(); got.Password != "new" || got.Addr != addr {
+	if got := node.ListenConfig(); got.Passwords.Hub != "new" || got.Addr != addr {
 		t.Fatalf("listen config = %+v", got)
 	}
 	waitFor(t, "auth refusal", func() bool {
@@ -73,7 +73,7 @@ func TestSetListenRuntime(t *testing.T) {
 	if err := node.SetListen(model.ListenConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	if st := node.Listen(); st.Addr != "" || st.HasPassword {
+	if st := node.Listen(); st.Addr != "" || len(st.Roles) != 0 {
 		t.Fatalf("listen state after stop: %+v", st)
 	}
 	waitFor(t, "disconnect", func() bool { return !hub.Online("n1") })
@@ -174,7 +174,7 @@ func TestRegisterAdmin(t *testing.T) {
 		t.Fatalf("a password in the reply: %s", b)
 	}
 	addr := freeAddr(t)
-	if _, code := invoke(local, model.MethodListen, model.ListenReq{Addr: addr, Password: "lpw"}); code != model.CodeOK {
+	if _, code := invoke(local, model.MethodListen, model.ListenReq{Addr: addr, Passwords: model.RolePasswords{Hub: "lpw"}}); code != model.CodeOK {
 		t.Fatalf("listen: code %d", code)
 	}
 	addr2 := freeAddr(t)
@@ -182,11 +182,11 @@ func TestRegisterAdmin(t *testing.T) {
 	if code != model.CodeOK {
 		t.Fatalf("listen keeping the password: code %d", code)
 	}
-	if st := out.(model.PeersResp).Listen; st.Addr != addr2 || !st.HasPassword || st.Error != "" {
+	if st := out.(model.PeersResp).Listen; st.Addr != addr2 || len(st.Roles) != 1 || st.Error != "" {
 		t.Fatalf("listen state %+v", st)
 	}
 	mu.Lock()
-	if saved.n != 3 || saved.listen != (model.ListenConfig{Addr: addr2, Password: "lpw"}) ||
+	if saved.n != 3 || saved.listen != (model.ListenConfig{Addr: addr2, Passwords: model.RolePasswords{Hub: "lpw"}}) ||
 		len(saved.dials) != 1 || saved.dials[0] != (model.DialReq{Addr: hubAddr, Password: "hpw", Role: model.RoleHub}) {
 		t.Fatalf("saved %+v", saved)
 	}

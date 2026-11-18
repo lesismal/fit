@@ -203,7 +203,7 @@ func TestApplyBadPeerOnlyWarns(t *testing.T) {
 func TestApplyNewIDKicksPeers(t *testing.T) {
 	addr := freeAddr(t)
 	hub := newBase(t, model.RoleHub, &editor{})
-	if err := hub.Apply(Common{ID: "hub-a", Listen: &config.LLMListen{Address: addr, Password: "pw"}}); err != nil {
+	if err := hub.Apply(Common{ID: "hub-a", Listen: &config.LLMListen{Address: addr, Passwords: config.LLMListenPasswords{Node: "pw"}}}); err != nil {
 		t.Fatal(err)
 	}
 	node := newBase(t, model.RoleNode, &editor{})
@@ -212,7 +212,7 @@ func TestApplyNewIDKicksPeers(t *testing.T) {
 	}
 	waitFor(t, "the link", func() bool { return node.Mesh.Online("hub-a") })
 	// The hub's ID changes: its peers are kicked and say hello to the new one.
-	if err := hub.Apply(Common{ID: "hub-b", Listen: &config.LLMListen{Address: addr, Password: "pw"}}); err != nil {
+	if err := hub.Apply(Common{ID: "hub-b", Listen: &config.LLMListen{Address: addr, Passwords: config.LLMListenPasswords{Node: "pw"}}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the link to the new ID", func() bool { return node.Mesh.Online("hub-b") && !node.Mesh.Online("hub-a") })
@@ -314,7 +314,7 @@ func TestEdit(t *testing.T) {
 }
 
 func TestEditMesh(t *testing.T) {
-	ed := &editor{cur: []byte(`{"listen":{"address":"127.0.0.1:1","password":"p"},"peers":[{"address":"h:1","password":"q","role":"hub"}]}`)}
+	ed := &editor{cur: []byte(`{"listen":{"address":"127.0.0.1:1","passwords":{"hub":"p"}},"peers":[{"address":"h:1","password":"q","role":"hub"}]}`)}
 	b := newBase(t, model.RoleNode, ed)
 	var seen mesh.Settings
 	err := b.EditMesh(context.Background(), func(s *mesh.Settings) error {

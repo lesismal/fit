@@ -3,7 +3,6 @@ package wire
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,8 +21,12 @@ const (
 	DefaultSlowTimeout  = 30 * time.Second
 	HandshakeTimeout    = 5 * time.Second
 
-	challengeSize = 32
-	ackOK         = 0x01
+	ackOK = 0x01
+	// maxPreAuthBytes bounds what a listener reads from a connection before its handshake completes: the
+	// upgrade request (its head is at most 16 KiB) and the handshake's answer.
+	// maxPreAuthBytes 监听方在握手完成之前从一条连接读取的字节上限：升级请求（请求头至多 16 KiB）与握手应答。
+	maxPreAuthBytes = maxHeaderBytes + 1<<10
+	maxHeaderBytes  = 16 << 10
 
 	closeAuthFailed = 4001 // the listener rejected the proof / 监听方拒绝了证明
 	closeHeartbeat  = 4002 // no frame for three ping intervals / 三个心跳周期没有收到任何帧
@@ -49,9 +52,13 @@ type ConnConfig struct {
 	// Session is the template for every connection's session; Dialer and Handlers are set per connection.
 	// Session 是每条连接会话的模板；Dialer 与 Handlers 按连接设置。
 	Session Options
-	// Auth runs the post-upgrade handshake; nil accepts / proves nothing.
-	// Auth 执行升级之后的握手；为 nil 时不做认证。
-	Auth Authenticator
+	// ListenAuth is the listener's side of the handshake (see auth.go); nil takes any dialer, as of the role it
+	// says.
+	// ListenAuth 握手中监听方一侧（见 auth.go）；为 nil 时接受任何拨号方，角色以其所述为准。
+	ListenAuth *ListenAuth
+	// DialAuth is the dialer's side of the handshake; nil proves nothing and takes any listener.
+	// DialAuth 握手中拨号方一侧；为 nil 时不做证明，也接受任何监听方。
+	DialAuth *DialAuth
 	// PingInterval: send a ping after this long without receiving a frame, close after three
 	// (0: DefaultPingInterval, < 0: off).
 	// PingInterval 这么久没收到帧就发 ping，三个周期没收到就关闭（0：DefaultPingInterval，< 0：关闭心跳）。
@@ -75,9 +82,10 @@ type ConnConfig struct {
 	// already set).
 	// Handlers 为新连接构造处理函数（在处理该连接的任何帧之前调用；此时 Request 已设置）。
 	Handlers func(*Conn) Handlers
-	// OnAuthFailed (optional) runs on the listener when a dialer's proof is rejected, before the connection is closed.
-	// OnAuthFailed（可选）在监听方拒绝拨号方的证明时、关闭连接之前执行。
-	OnAuthFailed func(r *http.Request)
+	// OnAuthFailed (optional) runs on the listener when a dialer's proof is rejected, before the connection is
+	// closed; role is the role the dialer said it is.
+	// OnAuthFailed（可选）在监听方拒绝拨号方的证明时、关闭连接之前执行；role 为拨号方声明的角色。
+	OnAuthFailed func(r *http.Request, role string)
 	// OnOpen runs on the listener once a connection is authenticated. Dialers get the Conn from Dial.
 	// OnOpen 在监听方的连接认证通过后执行。拨号方从 Dial 的返回值得到 Conn。
 	OnOpen func(*Conn)
@@ -117,6 +125,8 @@ type Conn struct {
 
 	ws  *websocket.Connection
 	cfg *ConnConfig
+	// peerRole is the role the peer proved in the handshake.
+	peerRole string
 	// abort drops the TCP connection without the close handshake (listener side; nil on the dialing side, see
 	// forceClose).
 	// abort 跳过关闭握手直接断开 TCP 连接（监听方；拨号方为 nil，见 forceClose）。
@@ -126,16 +136,20 @@ type Conn struct {
 	closeOnce sync.Once
 }
 
-func newConn(ws *websocket.Connection, cfg *ConnConfig, dialer bool, req *http.Request) *Conn {
-	c := &Conn{ws: ws, cfg: cfg, Request: req}
-	opts := cfg.Session
+// init makes the connection's session; the handlers see c with its Request and peer role set.
+func (c *Conn) init(dialer bool) {
+	opts := c.cfg.Session
 	opts.Dialer = dialer
-	if cfg.Handlers != nil {
-		opts.Handlers = cfg.Handlers(c)
+	if c.cfg.Handlers != nil {
+		opts.Handlers = c.cfg.Handlers(c)
 	}
-	c.Session = NewSession(opts, ws.WriteBinary)
-	return c
+	c.Session = NewSession(opts, c.ws.WriteBinary)
 }
+
+// PeerRole returns the role the peer proved in the handshake: the role a dialer proved it knows the password of,
+// or the role a listener proved it is. It is "" when the handshake ran without authentication.
+// PeerRole 返回对端在握手中证明的角色：拨号方证明其知道密码的角色，或监听方证明的自身角色。握手未认证时为 ""。
+func (c *Conn) PeerRole() string { return c.peerRole }
 
 // RemoteAddr returns the peer address of an accepted connection, or "" on the dialing side.
 // RemoteAddr 返回监听方连接的对端地址；拨号方为 ""。
@@ -254,12 +268,12 @@ type server struct {
 }
 
 type serverConn struct {
-	challenge []byte
-	req       *http.Request
-	tcp       *fib.Connection
-	timer     *time.Timer
-	mu        sync.Mutex
-	conn      *Conn // set once authenticated / 认证通过后设置
+	hs    *listenerState
+	req   *http.Request
+	tcp   *fib.Connection
+	timer *time.Timer
+	mu    sync.Mutex
+	conn  *Conn // set once authenticated / 认证通过后设置
 }
 
 // tcpConns wraps the WebSocket handler to learn the fib connection under each WebSocket connection, so that a
@@ -270,9 +284,17 @@ type serverConn struct {
 // tcpConns 包装 WebSocket 处理器，记录每条 WebSocket 连接下的 fib 连接，以便跳过关闭握手直接断开已死或过慢的对端。
 // fib 的 websocket.Connection 没有暴露它；升级请求的 RemoteAddr 就是 fib 连接的对端地址，在监听方的已打开连接中唯一，
 // 因此用作键。
+//
+// It also bounds what a connection may send before its handshake completes (maxPreAuthBytes): the WebSocket layer
+// takes messages of up to the session's frame limit (16 MiB), which a dialer that has not proved anything must
+// not get to make the listener hold.
+//
+// 它还限制连接在握手完成之前可以发送的字节数（maxPreAuthBytes）：WebSocket 层接受至多会话帧上限（16 MiB）的消息，
+// 尚未证明任何东西的拨号方不能让监听方为它保留这么多内存。
 type tcpConns struct {
 	fib.Handler
 	byAddr sync.Map // remote address → *fib.Connection / 对端地址 → *fib.Connection
+	pre    sync.Map // *fib.Connection → *atomic.Int64, bytes read before the handshake completed / 握手完成前读取的字节
 	closed atomic.Bool
 }
 
@@ -281,13 +303,50 @@ func (t *tcpConns) OnOpen(c *fib.Connection) {
 		_ = c.Close()
 		return
 	}
+	// A connection is found by its remote address (lookup) to stop counting its bytes once authenticated.
+	// 认证通过后按对端地址（lookup）找到连接，停止计数。
 	if a := c.RemoteAddr(); a != nil {
+		t.pre.Store(c, new(atomic.Int64))
 		t.byAddr.Store(a.String(), c)
 	}
 	t.Handler.OnOpen(c)
 }
 
+// preAuth counts n bytes read from c and reports whether c may still send them: true once c is authenticated.
+func (t *tcpConns) preAuth(c *fib.Connection, n int) bool {
+	v, ok := t.pre.Load(c)
+	if !ok {
+		return true
+	}
+	if v.(*atomic.Int64).Add(int64(n)) > maxPreAuthBytes {
+		t.pre.Delete(c)
+		_ = c.Close()
+		return false
+	}
+	return true
+}
+
+// authenticated stops counting the bytes of c.
+func (t *tcpConns) authenticated(c *fib.Connection) {
+	if c != nil {
+		t.pre.Delete(c)
+	}
+}
+
+func (t *tcpConns) OnData(c *fib.Connection, data []byte) {
+	if t.preAuth(c, len(data)) {
+		t.Handler.OnData(c, data)
+	}
+}
+
+func (t *tcpConns) OnPriorityData(c *fib.Connection, data []byte) {
+	if t.preAuth(c, len(data)) {
+		t.Handler.OnPriorityData(c, data)
+	}
+}
+
 func (t *tcpConns) OnClose(c *fib.Connection, err error) {
+	t.pre.Delete(c)
 	if a := c.RemoteAddr(); a != nil {
 		t.byAddr.CompareAndDelete(a.String(), c)
 	}
@@ -339,7 +398,7 @@ func NewHandler(cfg ConnConfig) Listener {
 	wsCfg := websocket.DefaultConfig()
 	wsCfg.MaxMessageBytes = int64(cfg.maxFrame())
 	wsCfg.CheckOrigin = func(r *http.Request) bool { return r.URL.Path == Path }
-	wsCfg.HTTP.MaxHeaderBytes = 16 << 10
+	wsCfg.HTTP.MaxHeaderBytes = maxHeaderBytes
 	wsCfg.HTTP.ReadHeaderTimeout = HandshakeTimeout
 	s.tcp = &tcpConns{Handler: websocket.NewHandlerWithConfig(wsCfg, websocket.HandlerFuncs{
 		Open:    s.open,
@@ -362,8 +421,7 @@ func (s *server) open(ws *websocket.Connection, r *http.Request) {
 		return
 	}
 	s.count.Add(1)
-	sc := &serverConn{challenge: make([]byte, challengeSize), req: r, tcp: s.tcp.lookup(r.RemoteAddr)}
-	_, _ = rand.Read(sc.challenge)
+	sc := &serverConn{hs: newListenerState(s.cfg.ListenAuth), req: r, tcp: s.tcp.lookup(r.RemoteAddr)}
 	s.conns.Store(ws, sc)
 	sc.timer = time.AfterFunc(HandshakeTimeout, func() {
 		sc.mu.Lock()
@@ -373,7 +431,7 @@ func (s *server) open(ws *websocket.Connection, r *http.Request) {
 			_ = ws.Close(closeAuthFailed, "handshake timeout")
 		}
 	})
-	if err := ws.WriteBinary(sc.challenge); err != nil {
+	if err := ws.WriteBinary(sc.hs.chal.marshal()); err != nil {
 		_ = ws.Close(websocket.CloseInternalError, "")
 	}
 }
@@ -392,19 +450,29 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 		return
 	}
 
-	var err error
-	if s.cfg.Auth != nil {
-		err = s.cfg.Auth.Verify(sc.challenge, data)
+	var (
+		role string
+		ack  []byte
+		err  = ErrAuth
+	)
+	if len(data) <= maxHandshakeMsg {
+		role, ack, err = sc.hs.verify(data)
 	}
 	if err != nil {
 		if s.cfg.OnAuthFailed != nil {
-			s.cfg.OnAuthFailed(sc.req)
+			claimed := ""
+			if a, perr := parseAnswer(data); perr == nil {
+				claimed = a.role
+			}
+			s.cfg.OnAuthFailed(sc.req, claimed)
 		}
 		_ = ws.Close(closeAuthFailed, "authentication failed")
 		return
 	}
 	sc.timer.Stop()
-	c = newConn(ws, &s.cfg, false, sc.req)
+	s.tcp.authenticated(sc.tcp)
+	c = &Conn{ws: ws, cfg: &s.cfg, Request: sc.req, peerRole: role}
+	c.init(false)
 	if tcp := sc.tcp; tcp != nil {
 		c.abort = func() { _ = tcp.Close() }
 	}
@@ -413,7 +481,7 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 	sc.mu.Unlock()
 	// The session exists before the ack goes out, so whatever the dialer sends after it finds a session.
 	// 确认发出之前会话已建立，拨号方随后发送的任何帧都有会话处理。
-	if err := ws.WriteBinary([]byte{ackOK}); err != nil {
+	if err := ws.WriteBinary(ack); err != nil {
 		_ = ws.Close(websocket.CloseInternalError, "")
 		return
 	}
@@ -493,48 +561,54 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 			return false
 		}
 	}
+	type challengeMsg struct {
+		ws   *websocket.Connection
+		data []byte
+	}
 	var (
 		mu      sync.Mutex
 		ws      *websocket.Connection
 		conn    *Conn
-		proved  bool
+		state   int // 0: waiting for the challenge, 1: answering it, 2: answered / 0：等待挑战，1：应答中，2：已应答
 		aborted bool
+		hs      = &dialerState{a: cfg.DialAuth}
+		chal    = make(chan challengeMsg, 1)
 	)
+	fail := func(w *websocket.Connection, err error, code uint16) {
+		settle(dialResult{err: err})
+		_ = w.Close(code, "")
+	}
 	handler := websocket.HandlerFuncs{
 		Message: func(w *websocket.Connection, _ websocket.Opcode, data []byte) {
 			mu.Lock()
 			ws = w
-			c, done, ab := conn, proved, aborted
+			c, st, ab := conn, state, aborted
+			if c == nil && !ab && st == 0 {
+				state = 1
+			}
 			mu.Unlock()
 			switch {
 			case ab:
 				_ = w.Close(websocket.CloseGoingAway, "")
 			case c != nil:
 				c.receive(data)
-			case !done: // the challenge / 挑战
-				var proof []byte
-				var err error
-				if cfg.Auth != nil {
-					proof, err = cfg.Auth.Prove(data)
-				}
-				if err == nil {
-					err = w.WriteBinary(proof)
-				}
-				if err != nil {
-					settle(dialResult{err: err})
-					_ = w.Close(websocket.CloseGoingAway, "")
-					return
-				}
-				mu.Lock()
-				proved = true
-				mu.Unlock()
+			case len(data) > maxHandshakeMsg || st == 1:
+				fail(w, fmt.Errorf("%w: bad handshake message", ErrProtocol), websocket.CloseProtocolError)
+			case st == 0:
+				// The answer derives the key, which is slow: it is made on the dialing goroutine, not on this
+				// worker. / 应答要派生密钥，很慢：在拨号协程上进行，而不是在这个 worker 上。
+				chal <- challengeMsg{w, bytes.Clone(data)}
 			default: // the ack / 确认
-				if len(data) != 1 || data[0] != ackOK {
-					settle(dialResult{err: fmt.Errorf("%w: bad handshake ack", ErrProtocol)})
-					_ = w.Close(websocket.CloseProtocolError, "")
+				if err := hs.accept(data); err != nil {
+					code := uint16(websocket.CloseProtocolError)
+					if errors.Is(err, ErrAuth) {
+						code = closeAuthFailed
+					}
+					fail(w, err, code)
 					return
 				}
-				c = newConn(w, &cfg.ConnConfig, true, nil)
+				c = &Conn{ws: w, cfg: &cfg.ConnConfig, peerRole: hs.peerRole}
+				c.init(true)
 				if t := tcp.Load(); t != nil {
 					c.abort = func() { _ = t.Close() }
 				}
@@ -571,26 +645,45 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 		}
 	})
 
-	select {
-	case r := <-res:
-		return r.conn, r.err
-	case <-ctx.Done():
-		mu.Lock()
-		aborted = true
-		w, c := ws, conn
-		mu.Unlock()
-		if !settle(dialResult{err: ctx.Err()}) {
-			r := <-res
-			if r.conn != nil {
-				return r.conn, nil
+	for {
+		select {
+		case r := <-res:
+			return r.conn, r.err
+		case m := <-chal:
+			msg, err := hs.answer(m.data)
+			if err == nil {
+				mu.Lock()
+				state = 2
+				mu.Unlock()
+				err = m.ws.WriteBinary(msg)
 			}
-			return nil, r.err
+			if err != nil {
+				code := uint16(websocket.CloseGoingAway)
+				if errors.Is(err, ErrProtocol) {
+					code = websocket.CloseProtocolError
+				} else if errors.Is(err, ErrAuth) {
+					code = closeAuthFailed
+				}
+				fail(m.ws, err, code)
+			}
+		case <-ctx.Done():
+			mu.Lock()
+			aborted = true
+			w, c := ws, conn
+			mu.Unlock()
+			if !settle(dialResult{err: ctx.Err()}) {
+				r := <-res
+				if r.conn != nil {
+					return r.conn, nil
+				}
+				return nil, r.err
+			}
+			if c != nil {
+				c.Close()
+			} else if w != nil {
+				_ = w.Close(websocket.CloseGoingAway, "")
+			}
+			return nil, ctx.Err()
 		}
-		if c != nil {
-			c.Close()
-		} else if w != nil {
-			_ = w.Close(websocket.CloseGoingAway, "")
-		}
-		return nil, ctx.Err()
 	}
 }

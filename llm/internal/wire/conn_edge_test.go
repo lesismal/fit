@@ -41,11 +41,6 @@ func rawDial(t *testing.T, addr string, h websocket.HandlerFuncs) {
 	t.Cleanup(func() { _ = ws.Close(websocket.CloseNormal, "") })
 }
 
-type authFunc func([]byte) ([]byte, error)
-
-func (f authFunc) Prove(c []byte) ([]byte, error) { return f(c) }
-func (authFunc) Verify(_, _ []byte) error         { return nil }
-
 // A listener and a dialer with their own frame limit and no heartbeat; a closed connection's beat does nothing,
 // and the dialer can drop its TCP connection.
 // 自定帧上限且无心跳的监听方与拨号方；已关闭连接的 beat 什么也不做，拨号方可以断开其 TCP 连接。
@@ -162,7 +157,7 @@ func TestConnProtocolError(t *testing.T) {
 // 从不应答挑战的拨号方在 HandshakeTimeout 之后被断开。
 func TestHandshakeTimeout(t *testing.T) {
 	t.Parallel()
-	addr := Listen(t, NewHandler(ConnConfig{Auth: Password("pw")}))
+	addr := Listen(t, NewHandler(ConnConfig{ListenAuth: nodeAuth(t)}))
 	codes := make(chan uint16, 1)
 	rawDial(t, addr, websocket.HandlerFuncs{Close: func(_ *websocket.Connection, code uint16, _ string, _ error) { codes <- code }})
 	select {
@@ -184,19 +179,19 @@ func TestDialFailures(t *testing.T) {
 	}
 
 	failed := make(chan string, 1)
-	addr := Listen(t, NewHandler(ConnConfig{Auth: Password("pw"), OnAuthFailed: func(r *http.Request) { failed <- r.URL.Path }}))
-	if _, err := Dial(ctxT(t), "ws://"+addr+Path, DialConfig{Engine: engine, ConnConfig: ConnConfig{Auth: Password("no")}}); !errors.Is(err, ErrAuth) {
+	addr := Listen(t, NewHandler(ConnConfig{ListenAuth: nodeAuth(t), OnAuthFailed: func(r *http.Request, _ string) { failed <- r.URL.Path }}))
+	if _, err := Dial(ctxT(t), "ws://"+addr+Path, DialConfig{Engine: engine, ConnConfig: ConnConfig{DialAuth: &DialAuth{Role: "hub", Password: "no"}}}); !errors.Is(err, ErrAuth) {
 		t.Fatalf("wrong password: %v", err)
 	}
 	if p := <-failed; p != Path {
 		t.Fatalf("OnAuthFailed saw %q", p)
 	}
-	boom := errors.New("no proof")
-	_, err := Dial(ctxT(t), "ws://"+addr+Path, DialConfig{Engine: engine, ConnConfig: ConnConfig{
-		Auth: authFunc(func([]byte) ([]byte, error) { return nil, boom }),
+	// An answer too long for the handshake. / 对握手而言过长的应答。
+	rawDial(t, addr, websocket.HandlerFuncs{Message: func(ws *websocket.Connection, _ websocket.Opcode, _ []byte) {
+		_ = ws.WriteBinary(make([]byte, maxHandshakeMsg+1))
 	}})
-	if !errors.Is(err, boom) {
-		t.Fatalf("prove error: %v", err)
+	if p := <-failed; p != Path {
+		t.Fatalf("OnAuthFailed saw %q", p)
 	}
 
 	// A bad ack. / 错误的确认。
@@ -280,14 +275,17 @@ func TestDialContextRaces(t *testing.T) {
 		t.Fatal("connection of an abandoned dial left open")
 	}
 
-	boom := errors.New("no proof")
-	for range 10 {
+	// A refused proof and a canceled context race. / 被拒绝的证明与被取消的 context 竞争。
+	authed := Listen(t, NewHandler(ConnConfig{ListenAuth: nodeAuth(t)}))
+	keys := &KeyCache{}
+	for i := range 10 {
 		ctx, cancel := context.WithCancel(context.Background())
-		_, err := Dial(ctx, "ws://"+addr+Path, DialConfig{Engine: engine, ConnConfig: ConnConfig{
-			Auth: authFunc(func([]byte) ([]byte, error) { cancel(); return nil, boom }),
+		time.AfterFunc(time.Duration(i)*time.Millisecond, cancel)
+		_, err := Dial(ctx, "ws://"+authed+Path, DialConfig{Engine: engine, ConnConfig: ConnConfig{
+			DialAuth: &DialAuth{Role: "hub", Password: "wrong", Keys: keys},
 		}})
 		cancel()
-		if !errors.Is(err, boom) && !errors.Is(err, context.Canceled) {
+		if !errors.Is(err, ErrAuth) && !errors.Is(err, context.Canceled) {
 			t.Fatalf("got %v", err)
 		}
 	}

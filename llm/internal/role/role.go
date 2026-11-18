@@ -196,7 +196,7 @@ func (b *Base) Apply(c Common) error {
 		SlowTimeout: l.Slow(), RetryInterval: l.Retry(), StreamIdle: l.Idle()})
 	var listen model.ListenConfig
 	if c.Listen != nil {
-		listen = model.ListenConfig{Addr: c.Listen.Address, Password: c.Listen.Password}
+		listen = model.ListenConfig{Addr: c.Listen.Address, Passwords: rolePasswords(c.Listen.Passwords)}
 	}
 	peers := make([]model.DialReq, 0, len(c.Peers))
 	for _, p := range c.Peers {
@@ -359,7 +359,7 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 			if err := json.Unmarshal(raw, &l); err != nil {
 				return err
 			}
-			s.Listen = &model.ListenConfig{Addr: l.Address, Password: l.Password}
+			s.Listen = &model.ListenConfig{Addr: l.Address, Passwords: rolePasswords(l.Passwords)}
 		}
 		if raw, ok := m["peers"]; ok {
 			var ps []config.LLMPeer
@@ -376,7 +376,7 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 		if s.Listen == nil {
 			delete(m, "listen")
 		} else {
-			m["listen"], _ = json.Marshal(map[string]string{"address": s.Listen.Addr, "password": s.Listen.Password})
+			m["listen"], _ = json.Marshal(map[string]any{"address": s.Listen.Addr, "passwords": s.Listen.Passwords})
 		}
 		peers := make([]map[string]string, 0, len(s.Peers))
 		for _, p := range s.Peers {
@@ -422,4 +422,9 @@ func advertiseHost(addr string) string {
 		return addr
 	}
 	return net.JoinHostPort(hostIP(), port)
+}
+
+// rolePasswords is a listener's passwords of the config as the mesh takes them.
+func rolePasswords(p config.LLMListenPasswords) model.RolePasswords {
+	return model.RolePasswords{Hub: p.Hub, Node: p.Node, Proxy: p.Proxy}
 }

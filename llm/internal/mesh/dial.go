@@ -45,7 +45,7 @@ func (m *Mesh) Dial(req model.DialReq) error {
 		}
 		delete(m.targets, addr)
 	}
-	t := &target{addr: addr, password: password, role: req.Role, stopCh: make(chan struct{})}
+	t := &target{addr: addr, password: password, role: req.Role, keys: &wire.KeyCache{}, stopCh: make(chan struct{})}
 	m.targets[addr] = t
 	m.wg.Add(1)
 	m.mu.Unlock()
@@ -129,7 +129,7 @@ func (m *Mesh) dial(t *target) (*conn, error) {
 		case <-ctx.Done():
 		}
 	}()
-	wc, err := wire.Dial(ctx, "ws://"+t.addr+WSPath, wire.DialConfig{ConnConfig: m.connConfig(t, ""), Engine: m.opts.Engine})
+	wc, err := wire.Dial(ctx, "ws://"+t.addr+WSPath, wire.DialConfig{ConnConfig: m.connConfig(t, nil), Engine: m.opts.Engine})
 	if err != nil {
 		return nil, err
 	}

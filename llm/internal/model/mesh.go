@@ -70,7 +70,9 @@ type PeerConn struct {
 // DialReq adds a dial target.
 // DialReq 添加连接目标。
 type DialReq struct {
-	Addr     string `json:"addr"`
+	Addr string `json:"addr"`
+	// Password is the peer's listener password for the dialing role (its listen.passwords.<role>).
+	// Password 对端监听为拨号方角色设置的密码（其 listen.passwords.<角色>）。
 	Password string `json:"password,omitempty"`
 	// Role the peer at Addr must have; its hello is refused otherwise.
 	// Addr 处对端必须具有的角色；否则拒绝其 hello。
@@ -87,23 +89,92 @@ type DialTarget struct {
 	Error     string    `json:"error,omitempty"`
 }
 
-// ListenConfig is the rpc listener. The password is never returned by MethodPeers (HasPassword instead).
-// ListenConfig rpc 监听。MethodPeers 从不返回密码（改为 HasPassword）。
-type ListenConfig struct {
-	Addr     string `json:"addr"`               // empty: not listening / 为空表示不监听
-	Password string `json:"password,omitempty"` // required when Addr is set / 设置 Addr 时必填
+// RolePasswords are a listener's passwords, one per role it takes links from: a dialer proves the password of the
+// role it links as, so a peer that knows one role's password cannot link as another. A role without a password
+// cannot link.
+// RolePasswords 监听方的密码，每个接受连接的角色一个：拨号方证明其所连接角色的密码，因此知道一个角色密码的对端无法以另一个
+// 角色连接。没有密码的角色无法连接。
+type RolePasswords struct {
+	Hub   string `json:"hub,omitempty"`
+	Node  string `json:"node,omitempty"`
+	Proxy string `json:"proxy,omitempty"`
 }
 
-// ListenReq changes the rpc listener; an empty Password keeps the current one.
-// ListenReq 修改 rpc 监听；Password 为空表示保留当前密码。
-type ListenReq = ListenConfig
+// For returns the password of role.
+// For 返回 role 的密码。
+func (p RolePasswords) For(role string) string {
+	switch role {
+	case RoleHub:
+		return p.Hub
+	case RoleNode:
+		return p.Node
+	case RoleProxy:
+		return p.Proxy
+	}
+	return ""
+}
+
+// Set sets the password of role.
+// Set 设置 role 的密码。
+func (p *RolePasswords) Set(role, pw string) {
+	switch role {
+	case RoleHub:
+		p.Hub = pw
+	case RoleNode:
+		p.Node = pw
+	case RoleProxy:
+		p.Proxy = pw
+	}
+}
+
+// Map returns the passwords set, by role.
+// Map 按角色返回已设置的密码。
+func (p RolePasswords) Map() map[string]string {
+	m := map[string]string{}
+	for _, r := range Roles {
+		if pw := p.For(r); pw != "" {
+			m[r] = pw
+		}
+	}
+	return m
+}
+
+// Roles returns the roles with a password.
+// Roles 返回设置了密码的角色。
+func (p RolePasswords) Roles() []string {
+	out := []string{}
+	for _, r := range Roles {
+		if p.For(r) != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ListenConfig is the rpc listener. The passwords are never returned by MethodPeers (ListenState.Roles instead).
+// ListenConfig rpc 监听。MethodPeers 从不返回密码（改为 ListenState.Roles）。
+type ListenConfig struct {
+	Addr      string        `json:"addr"`               // empty: not listening / 为空表示不监听
+	Passwords RolePasswords `json:"passwords,omitzero"` // at least one when Addr is set / 设置 Addr 时至少一个
+}
+
+// ListenReq changes the rpc listener: a role's empty password keeps its current one, and Clear lists the roles
+// whose passwords are removed, so that they can no longer link.
+// ListenReq 修改 rpc 监听：某角色的密码为空表示保留其当前密码，Clear 列出要删除密码的角色，使它们不能再连接。
+type ListenReq struct {
+	Addr      string        `json:"addr"`
+	Passwords RolePasswords `json:"passwords,omitzero"`
+	Clear     []string      `json:"clear,omitempty"`
+}
 
 // ListenState is the listener as shown on the console.
 // ListenState 控制台上显示的监听状态。
 type ListenState struct {
-	Addr        string `json:"addr"`
-	HasPassword bool   `json:"has_password"`
-	Error       string `json:"error,omitempty"` // last failure to listen / 最近一次监听失败
+	Addr string `json:"addr"`
+	// Roles are the roles with a password: those that may link.
+	// Roles 设置了密码的角色：可以连接的角色。
+	Roles []string `json:"roles"`
+	Error string   `json:"error,omitempty"` // last failure to listen / 最近一次监听失败
 }
 
 // PeersResp is the reply of MethodPeers.

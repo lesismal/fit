@@ -11,8 +11,9 @@ import (
 )
 
 // The LLM feature's roles link over a mesh of WebSocket connections: each role may
-// listen for links and dial any number of peers, which authenticate with a
-// shared password (HMAC challenge-response; the password never crosses the
+// listen for links and dial any number of peers, which authenticate with the
+// listener's password for their role (a mutual HMAC handshake over an Argon2id
+// key, binding both ends' roles; the password never crosses the
 // wire). What their pages change is written back into their members here.
 // See docs/llm.md.
 
@@ -50,17 +51,40 @@ var (
 
 // LLMListen is where a role takes links from its peers.
 type LLMListen struct {
-	Address  string `json:"address" fit:"required" doc:"The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address."`
-	Password string `json:"password" fit:"required" doc:"The password peers prove they know when they link; it never crosses the network."`
+	Address   string             `json:"address" fit:"required" doc:"The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address."`
+	Passwords LLMListenPasswords `json:"passwords" fit:"required" doc:"One password per role that links here: a peer proves the password of the role it links as, so a peer that knows one role's password cannot link as another. A role without a password cannot link. No two roles may share one. They never cross the network."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// LLMListenPasswords are a listener's passwords, by the role of the peers
+// that link with them.
+type LLMListenPasswords struct {
+	Hub   string `json:"hub,omitempty" doc:"The password hubs link with (on a node or a proxy)."`
+	Node  string `json:"node,omitempty" doc:"The password nodes link with (on a hub or a proxy)."`
+	Proxy string `json:"proxy,omitempty" doc:"The password proxies link with (on a hub or a node)."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// For returns the password of role.
+func (p LLMListenPasswords) For(role string) string {
+	switch role {
+	case "hub":
+		return p.Hub
+	case "node":
+		return p.Node
+	case "proxy":
+		return p.Proxy
+	}
+	return ""
 }
 
 // LLMPeer is a peer a role dials and keeps linked to, redialing with
 // backoff whenever the link is lost.
 type LLMPeer struct {
 	Address  string `json:"address" fit:"required" doc:"The peer's host and port, as its listen.address says."`
-	Password string `json:"password" fit:"required" doc:"The peer's listen.password."`
+	Password string `json:"password" fit:"required" doc:"The peer's listen password for this role: its listen.passwords.hub when this is a hub, .node when a node, .proxy when a proxy."`
 	Role     string `json:"role" fit:"required" enum:"hub,node,proxy" doc:"The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own."`
 
 	At Value `json:"-" fit:"self"`
@@ -359,6 +383,31 @@ func noSpace(s string) bool {
 	return strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
 }
 
+// checkLLMPasswords checks a listener's passwords: one at least, each of a
+// role that links with role, no two the same.
+func checkLLMPasswords(role string, l *LLMListen, add func(Value, string, ...any)) {
+	accept := LLMPeerRoles(role)
+	at := l.At.Field("passwords")
+	seen := map[string]string{}
+	for _, r := range []string{"hub", "node", "proxy"} {
+		pw := l.Passwords.For(r)
+		if pw == "" {
+			continue
+		}
+		switch {
+		case !slices.Contains(accept, r):
+			add(at.Field(r), "%s peers never link with a %s", r, role)
+		case seen[pw] != "":
+			add(at.Field(r), "the %s and %s passwords are the same: each role needs its own, so that a peer of one cannot link as the other", seen[pw], r)
+		default:
+			seen[pw] = r
+		}
+	}
+	if len(seen) == 0 && len(l.Passwords.Hub+l.Passwords.Node+l.Passwords.Proxy) == 0 {
+		add(at, "a listener needs a password for at least one of %s", strings.Join(accept, " and "))
+	}
+}
+
 func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, peers []LLMPeer, limits *LLMLimits, add func(Value, string, ...any)) {
 	if len(id) > 128 || !noSpace(id) {
 		add(at.Field("id"), "the ID is up to 128 characters without spaces")
@@ -370,9 +419,7 @@ func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, pee
 		if _, msg := checkAddress(l.Address); msg != "" {
 			add(l.At.Field("address"), "%s", msg)
 		}
-		if l.Password == "" {
-			add(l.At.Field("password"), "a listener needs a password")
-		}
+		checkLLMPasswords(role, l, add)
 	}
 	if len(peers) > MaxLLMPeers {
 		add(at.Field("peers"), "at most %d peers", MaxLLMPeers)

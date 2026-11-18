@@ -38,9 +38,12 @@ type Stream struct {
 	idle    *time.Timer
 	stopCtx func() bool // detaches the opener's context / 解除与打开方 context 的关联
 
-	mu        sync.Mutex
-	queue     [][]byte
-	buffered  int  // bytes queued, not yet read / 已入队未读取的字节
+	mu       sync.Mutex
+	queue    [][]byte
+	buffered int // bytes queued, not yet read / 已入队未读取的字节
+	// over is what of buffered past the window the session's overshoot counts; -1 once the stream finished.
+	// over 为 buffered 中超出窗口、计入会话 overshoot 的部分；流结束后为 -1。
+	over      int
 	consumed  int  // bytes read, not yet credited back / 已读取但未归还额度的字节
 	credit    int  // bytes we may still send / 本方还可发送的字节
 	peerEnded bool // responder side: the opener half-closed / 响应方：打开方已半关闭
@@ -125,6 +128,23 @@ func signal(ch chan struct{}) {
 
 func cost(p []byte) int { return max(len(p), 1) }
 
+// account moves the session's overshoot to what st now holds past its window, and reports whether the session is
+// past MaxOvershoot. st.mu is held.
+// account 把会话的 overshoot 调整为 st 当前超出窗口的字节，并报告会话是否超出 MaxOvershoot。调用时持有 st.mu。
+func (st *Stream) account() bool {
+	if st.over < 0 {
+		return false
+	}
+	over := max(0, st.buffered-st.s.opts.Window)
+	d := over - st.over
+	if d == 0 {
+		return false
+	}
+	st.over = over
+	total := st.s.overshoot.Add(int64(d))
+	return d > 0 && st.s.opts.MaxOvershoot > 0 && total > int64(st.s.opts.MaxOvershoot)
+}
+
 func (st *Stream) touch() {
 	if st.idle != nil {
 		st.idle.Reset(st.s.opts.StreamIdle)
@@ -184,6 +204,7 @@ func (st *Stream) Recv(ctx context.Context) ([]byte, error) {
 			st.queue = st.queue[1:]
 			n := cost(p)
 			st.buffered -= n
+			st.account()
 			st.consumed += n
 			var grant int
 			if !st.finished && !st.peerEnded && st.consumed >= st.s.opts.Window/2 {
@@ -310,6 +331,12 @@ func (st *Stream) finish(err error, result []byte) bool {
 		return false
 	}
 	st.finished, st.err, st.result = true, err, result
+	// What it held past its window no longer counts against the link.
+	// 它超出窗口所保留的字节不再计入连接。
+	if st.over > 0 {
+		st.s.overshoot.Add(-int64(st.over))
+	}
+	st.over = -1
 	if st.idle != nil {
 		st.idle.Stop()
 	}
@@ -371,11 +398,15 @@ func (st *Stream) onData(p []byte) {
 	}
 	st.buffered += cost(p)
 	st.rx.Add(int64(len(p)))
-	// The sender may overshoot the window by at most one frame.
-	// 发送方最多超出窗口一个帧。
-	over := st.buffered > st.s.opts.Window+st.s.opts.MaxFrame
+	// The sender may overshoot the window by at most one frame, and the
+	// link's streams together by MaxOvershoot.
+	// 发送方最多超出窗口一个帧，连接上的所有流合计最多超出 MaxOvershoot。
+	over := st.account() || st.buffered > st.s.opts.Window+st.s.opts.MaxFrame
 	if !over {
 		st.queue = append(st.queue, p)
+	} else {
+		st.buffered -= cost(p)
+		st.account()
 	}
 	st.mu.Unlock()
 	if over {
@@ -511,6 +542,7 @@ func (st *Stream) Release(n int) {
 func (st *Stream) release(n int) {
 	st.mu.Lock()
 	st.buffered -= n
+	st.account()
 	st.consumed += n
 	var grant int
 	if !st.finished && !st.peerEnded && st.consumed >= st.s.opts.Window/2 {

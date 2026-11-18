@@ -11,6 +11,8 @@ package mesh
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,6 +161,9 @@ type conn struct {
 	registered bool
 	closed     bool
 	peer       model.PeerConn
+	// instance is the peer process's instance token, from its hello (see hello).
+	// instance 对端进程的实例令牌，来自其 hello（见 hello）。
+	instance string
 }
 
 func (c *conn) live() bool { return c.wc.Err() == nil }
@@ -170,7 +175,8 @@ func (c *conn) usable() bool { return c.live() && !c.wc.Draining() }
 type target struct {
 	addr     string
 	password string
-	role     string // the role the peer must have / 对端必须具有的角色
+	role     string         // the role the peer must have / 对端必须具有的角色
+	keys     *wire.KeyCache // the handshake key derived for the peer's salt / 为对端盐派生的握手密钥
 
 	mu     sync.Mutex
 	conn   *conn
@@ -204,6 +210,12 @@ type Mesh struct {
 	lst     *wire.Listener
 	laddr   string
 
+	// salt is the listener's handshake salt, and instance this process's instance token: both random, for the
+	// process's lifetime.
+	// salt 监听方的握手盐，instance 本进程的实例令牌：都是随机的，在进程生命周期内不变。
+	salt     []byte
+	instance string
+
 	nextConn atomic.Int64
 	round    atomic.Uint64 // round robin over the connections of a peer / 在对端的连接之间轮询
 
@@ -227,16 +239,20 @@ type Mesh struct {
 // New 创建提供 router 中方法的 Mesh。在 Start 之前仍可向 router 添加路由。
 func New(opts Options, router *Router) *Mesh {
 	opts = withDefaults(opts)
+	inst := make([]byte, 16)
+	_, _ = crand.Read(inst)
 	return &Mesh{
-		binding: -1,
-		opts:    opts,
-		router:  router,
-		conns:   map[*wire.Conn]*conn{},
-		byID:    map[string][]*conn{},
-		targets: map[string]*target{},
-		pushes:  map[string]pushRoute{},
-		stopCh:  make(chan struct{}),
-		routes:  newRoutes(),
+		salt:     wire.NewSalt(),
+		instance: hex.EncodeToString(inst),
+		binding:  -1,
+		opts:     opts,
+		router:   router,
+		conns:    map[*wire.Conn]*conn{},
+		byID:     map[string][]*conn{},
+		targets:  map[string]*target{},
+		pushes:   map[string]pushRoute{},
+		stopCh:   make(chan struct{}),
+		routes:   newRoutes(),
 	}
 }
 
@@ -297,10 +313,12 @@ func (m *Mesh) OnPush(method string, roles []string, fn PushFunc) {
 	m.mu.Unlock()
 }
 
-// connConfig is the wire configuration of a connection: t is the dial target of an outbound one; an inbound one
-// (t == nil) is checked with the listener's password.
-// connConfig 连接的 wire 配置：出站连接的 t 为其连接目标；入站连接（t == nil）用监听密码校验。
-func (m *Mesh) connConfig(t *target, password string) wire.ConnConfig {
+// connConfig is the wire configuration of a connection: t is the dial target of an outbound one, which proves this
+// process's role with t's password and has the peer prove t's role; an inbound one (t == nil) is checked with the
+// listener's keys, la.
+// connConfig 连接的 wire 配置：出站连接的 t 为其连接目标，用 t 的密码证明本进程的角色，并要求对端证明 t 的角色；
+// 入站连接（t == nil）用监听方的密钥 la 校验。
+func (m *Mesh) connConfig(t *target, la *wire.ListenAuth) wire.ConnConfig {
 	cfg := wire.ConnConfig{
 		Session:      wire.Options{StreamIdle: m.o().StreamIdle, MaxInbound: m.o().MaxInflight},
 		PingInterval: m.o().PingInterval,
@@ -315,13 +333,14 @@ func (m *Mesh) connConfig(t *target, password string) wire.ConnConfig {
 			}
 			return nil
 		}
-		cfg.Auth = wire.Password(password)
-		cfg.OnAuthFailed = func(r *http.Request) {
-			m.log(slog.LevelWarn, "mesh: authentication failed (wrong password)", "remote", r.RemoteAddr)
+		cfg.ListenAuth = la
+		cfg.OnAuthFailed = func(r *http.Request, role string) {
+			m.log(slog.LevelWarn, "mesh: authentication failed (wrong password for the role, or a role that does not link here)",
+				"remote", r.RemoteAddr, "role", role)
 		}
 		cfg.Handlers = func(wc *wire.Conn) wire.Handlers { return m.handlers(m.connected(wc, nil)) }
 	} else {
-		cfg.Auth = wire.Password(t.password)
+		cfg.DialAuth = &wire.DialAuth{Role: m.Self().Role, PeerRole: t.role, Password: t.password, Keys: t.keys}
 		cfg.Handlers = func(wc *wire.Conn) wire.Handlers { return m.handlers(m.connected(wc, t)) }
 	}
 	return cfg
@@ -529,14 +548,47 @@ func (m *Mesh) unindexLocked(c *conn, id string) {
 	}
 }
 
-// register records the peer identity of c, already validated with checkPeer.
-// register 记录 c 的对端身份（已用 checkPeer 校验）。
-func (m *Mesh) register(c *conn, id model.Identity) error {
+// helloMsg is what both sides send in MethodHello: the identity, and Instance, a random token of the process
+// that stays the same for its lifetime. Every link of one peer ID must carry the same token, so a second process
+// that says it has the ID of a peer linked here is refused instead of being pooled with it (see register).
+// helloMsg 双方在 MethodHello 中发送的内容：身份，以及 Instance——进程的随机令牌，在进程生命周期内不变。同一对端 ID 的
+// 每条连接都必须携带相同的令牌，因此声称拥有已连接对端 ID 的另一个进程会被拒绝，而不是与它合并为一个连接池（见 register）。
+type helloMsg struct {
+	model.Identity
+	Instance string `json:"instance"`
+}
+
+func (m *Mesh) helloMsg() helloMsg { return helloMsg{Identity: m.Self(), Instance: m.instance} }
+
+// errConflict refuses a hello whose ID a live link of another process already has.
+// errConflict 拒绝其 ID 已被另一进程的存活连接占用的 hello。
+type errConflict struct{ id string }
+
+func (e errConflict) Error() string {
+	return fmt.Sprintf("peer ID %s is already linked here from another process (an impostor, or a restarted peer whose old link has not closed yet)", e.id)
+}
+
+// register records the peer identity of c, already validated with checkPeer. A peer ID that live links of another
+// instance have is refused (errConflict).
+// register 记录 c 的对端身份（已用 checkPeer 校验）。已有另一实例的存活连接使用的对端 ID 被拒绝（errConflict）。
+func (m *Mesh) register(c *conn, id model.Identity, instance string) error {
 	peer := model.PeerConn{Identity: id, ConnID: c.id, Direction: c.dir, Remote: c.remote, ConnectedAt: time.Now().Unix()}
 	if c.target != nil {
 		peer.Target = c.target.addr
 	}
 	m.mu.Lock()
+	for _, o := range m.byID[id.ID] {
+		if o == c || !o.live() {
+			continue
+		}
+		o.mu.Lock()
+		other := o.instance
+		o.mu.Unlock()
+		if other != instance {
+			m.mu.Unlock()
+			return errConflict{id.ID}
+		}
+	}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -548,7 +600,7 @@ func (m *Mesh) register(c *conn, id model.Identity) error {
 	} else {
 		close(c.ready)
 	}
-	c.registered, c.peer = true, peer
+	c.registered, c.peer, c.instance = true, peer, instance
 	c.mu.Unlock()
 	m.byID[id.ID] = append(slices.Clone(m.byID[id.ID]), c)
 	m.mu.Unlock()
@@ -562,11 +614,12 @@ func (m *Mesh) register(c *conn, id model.Identity) error {
 	return nil
 }
 
-// checkPeer validates the identity a peer announced at hello: its role must be in AcceptRoles and differ from this
-// process's own role (same-role peers never connect), and it must not be this process itself.
-// checkPeer 校验对端在 hello 中声明的身份：其角色必须在 AcceptRoles 中且与本进程角色不同（同角色对端从不互联），
-// 且不能是本进程自身。
-func (m *Mesh) checkPeer(id model.Identity) error {
+// checkPeer validates the identity a peer announced at hello on c: its role must be the one it proved in the
+// handshake (with the password of that role), be in AcceptRoles and differ from this process's own role (same-role
+// peers never connect), and it must not be this process itself.
+// checkPeer 校验对端在 c 上的 hello 中声明的身份：其角色必须是它在握手中（用该角色的密码）证明的角色，在 AcceptRoles 中且与
+// 本进程角色不同（同角色对端从不互联），且不能是本进程自身。
+func (m *Mesh) checkPeer(c *conn, id model.Identity) error {
 	if id.ID == "" || id.Role == "" {
 		return errors.New("missing role or id")
 	}
@@ -578,6 +631,8 @@ func (m *Mesh) checkPeer(id model.Identity) error {
 		return fmt.Errorf("role %s is not accepted by %s: peers of the same role never connect", id.Role, self.Role)
 	case id.Role == model.RoleLocal || !slices.Contains(m.opts.AcceptRoles, id.Role):
 		return fmt.Errorf("role %s is not accepted by %s", id.Role, self.Role)
+	case id.Role != c.wc.PeerRole():
+		return fmt.Errorf("the peer said hello as a %s, but proved the password of a %q", id.Role, c.wc.PeerRole())
 	}
 	return nil
 }
@@ -585,22 +640,26 @@ func (m *Mesh) checkPeer(id model.Identity) error {
 // handleHello serves MethodHello on an incoming connection.
 // handleHello 在入站连接上处理 MethodHello。
 func (m *Mesh) handleHello(c *conn, payload []byte) ([]byte, error) {
-	var id model.Identity
-	if err := json.Unmarshal(payload, &id); err != nil {
+	var h helloMsg
+	if err := json.Unmarshal(payload, &h); err != nil {
 		return nil, BadRequest("bad hello")
 	}
-	err := m.checkPeer(id)
+	err := m.checkPeer(c, h.Identity)
 	if err == nil {
-		err = m.register(c, id)
+		err = m.register(c, h.Identity, h.Instance)
 	}
 	if err != nil {
-		m.log(slog.LevelWarn, "mesh: hello refused", "role", id.Role, "id", id.ID, "remote", c.remote, "error", err)
+		m.log(slog.LevelWarn, "mesh: hello refused", "role", h.Role, "id", h.ID, "remote", c.remote, "error", err)
 		// Close once the refusal has gone out.
 		// 拒绝应答发出之后再关闭。
 		time.AfterFunc(time.Second, c.wc.Close)
-		return nil, Errorf(model.CodeForbidden, "%s", err.Error())
+		code := model.CodeForbidden
+		if errors.As(err, new(errConflict)) {
+			code = model.CodeConflict
+		}
+		return nil, Errorf(code, "%s", err.Error())
 	}
-	return json.Marshal(m.Self())
+	return json.Marshal(m.helloMsg())
 }
 
 // hello says hello on an outbound connection, retrying until it succeeds or the connection is gone.
@@ -612,19 +671,19 @@ func (m *Mesh) hello(c *conn) {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		id, err := call[model.Identity](ctx, c.wc, model.MethodHello, m.Self())
+		h, err := call[helloMsg](ctx, c.wc, model.MethodHello, m.helloMsg())
 		cancel()
 		refused := false
 		if err == nil {
 			// The peer answered: a bad identity will not change by retrying at once.
 			// 对端已应答：身份不符时立即重试也不会改变结果。
 			refused = true
-			err = m.checkPeer(id)
-			if err == nil && id.Role != t.role {
-				err = fmt.Errorf("%s announced role %s, but it is configured as a %s peer", t.addr, id.Role, t.role)
+			err = m.checkPeer(c, h.Identity)
+			if err == nil && h.Role != t.role {
+				err = fmt.Errorf("%s announced role %s, but it is configured as a %s peer", t.addr, h.Role, t.role)
 			}
 			if err == nil {
-				err = m.register(c, id)
+				err = m.register(c, h.Identity, h.Instance)
 			}
 			if err == nil {
 				t.setErr("")
@@ -636,6 +695,14 @@ func (m *Mesh) hello(c *conn) {
 		}
 		t.setErr(err.Error())
 		var we *wire.Error
+		if errors.As(err, new(errConflict)) || errors.As(err, &we) && we.Code == model.CodeConflict {
+			// The ID is taken by a live link of another process, which may be this peer's previous run whose link
+			// has not closed yet: dial again with the usual backoff.
+			// 该 ID 被另一进程的存活连接占用，可能是此对端上一次运行、其连接尚未关闭：按通常的退避再次拨号。
+			m.log(slog.LevelWarn, "mesh: hello refused, the ID is linked from another process; dialing again", "addr", t.addr, "error", err)
+			c.wc.Close()
+			return
+		}
 		if errors.As(err, &we) || refused {
 			// Refused (wrong role, connected to itself, ...): retrying at once would only repeat it, so drop the
 			// connection and dial again later.

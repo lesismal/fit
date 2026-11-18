@@ -38,7 +38,7 @@ func rawPeer(t *testing.T, addr string, h wire.Handlers) *wire.Conn {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	wc, err := wire.Dial(ctx, "ws://"+addr+WSPath, wire.DialConfig{Engine: testEngine(), ConnConfig: wire.ConnConfig{
-		Auth: wire.Password("pw"), Handlers: func(*wire.Conn) wire.Handlers { return h },
+		DialAuth: &wire.DialAuth{Role: model.RoleHub, Password: "pw"}, Handlers: func(*wire.Conn) wire.Handlers { return h },
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,11 @@ func rawPeer(t *testing.T, addr string, h wire.Handlers) *wire.Conn {
 // rawListener 是供互联拨号的 wire 监听方；handlers 处理它接受的每条连接。
 func rawListener(t *testing.T, handlers func(*wire.Conn) wire.Handlers, onOpen func(*wire.Conn)) string {
 	t.Helper()
-	l := wire.NewHandler(wire.ConnConfig{Auth: wire.Password("pw"), Handlers: handlers, OnOpen: onOpen})
+	la, err := wire.NewListenAuth(model.RoleNode, wire.NewSalt(), map[string]string{model.RoleHub: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := wire.NewHandler(wire.ConnConfig{ListenAuth: la, Handlers: handlers, OnOpen: onOpen})
 	e := testEngine()
 	i, err := e.AddBinding(fib.Binding{Addr: "127.0.0.1:0", Handler: l})
 	if err != nil {
@@ -305,8 +309,9 @@ func TestRouterEdges(t *testing.T) {
 // Dial and listen settings that are refused, dials stopped while they run, and a mesh used after Stop.
 // 被拒绝的拨号与监听设置、运行中被停止的拨号，以及 Stop 之后使用的互联。
 func TestLifecycleEdges(t *testing.T) {
-	noEngine := New(Options{Self: func() model.Identity { return model.Identity{Role: model.RoleHub, ID: "h0"} }}, NewRouter())
-	if err := noEngine.SetListen(model.ListenConfig{Addr: "127.0.0.1:0", Password: "pw"}); err == nil || noEngine.Listen().Error == "" {
+	noEngine := New(Options{Self: func() model.Identity { return model.Identity{Role: model.RoleHub, ID: "h0"} },
+		AcceptRoles: []string{model.RoleNode}}, NewRouter())
+	if err := noEngine.SetListen(model.ListenConfig{Addr: "127.0.0.1:0", Passwords: pws("pw")}); err == nil || noEngine.Listen().Error == "" {
 		t.Fatalf("listened without an engine: %v", err)
 	}
 	noEngine.Stop()
@@ -366,7 +371,7 @@ func TestLifecycleEdges(t *testing.T) {
 	if err := m.Dial(toNode("127.0.0.1:2")); !errors.Is(err, wire.ErrClosed) {
 		t.Fatalf("dial after stop: %v", err)
 	}
-	if err := m.SetListen(model.ListenConfig{Addr: "127.0.0.1:0", Password: "pw"}); !errors.Is(err, wire.ErrClosed) {
+	if err := m.SetListen(model.ListenConfig{Addr: "127.0.0.1:0", Passwords: pws("pw")}); !errors.Is(err, wire.ErrClosed) {
 		t.Fatalf("listen after stop: %v", err)
 	}
 	if !m.Undial(silent) {
@@ -410,7 +415,7 @@ func TestShutdownEdges(t *testing.T) {
 	waitFor(t, "draining", func() bool { return node.draining.Load() })
 	dctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if _, err := wire.Dial(dctx, "ws://"+addr+WSPath, wire.DialConfig{Engine: testEngine(), ConnConfig: wire.ConnConfig{Auth: wire.Password("pw")}}); !errors.Is(err, wire.ErrRefused) {
+	if _, err := wire.Dial(dctx, "ws://"+addr+WSPath, wire.DialConfig{Engine: testEngine(), ConnConfig: wire.ConnConfig{DialAuth: &wire.DialAuth{Role: model.RoleHub, Password: "pw"}}}); !errors.Is(err, wire.ErrRefused) {
 		t.Fatalf("dial while draining: %v", err)
 	}
 	if _, err := late.Call(ctx, wire.Head{Method: model.MethodHello}, hello(model.Identity{Role: model.RoleHub, ID: "h2"})); err != nil {
@@ -497,10 +502,10 @@ func TestAdminEdges(t *testing.T) {
 	if err != nil || out.(map[string]int)["closed"] != 0 {
 		t.Fatalf("kick: %v %v", out, err)
 	}
-	if _, err := invoke(model.MethodListen, model.ListenReq{Addr: "nope", Password: "pw"}); codeOf(err) != model.CodeBadRequest {
+	if _, err := invoke(model.MethodListen, model.ListenReq{Addr: "nope", Passwords: pws("pw")}); codeOf(err) != model.CodeBadRequest {
 		t.Fatalf("bad listen address: %v", err)
 	}
-	if _, err := invoke(model.MethodListen, model.ListenReq{Addr: "192.0.2.1:0", Password: "pw"}); codeOf(err) != model.CodeInternal {
+	if _, err := invoke(model.MethodListen, model.ListenReq{Addr: "192.0.2.1:0", Passwords: model.RolePasswords{Hub: "pw"}}); codeOf(err) != model.CodeInternal {
 		t.Fatalf("listen that cannot bind: %v", err)
 	}
 }

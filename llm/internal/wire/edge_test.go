@@ -80,13 +80,10 @@ func TestTypeStringAndHelpers(t *testing.T) {
 	if Type(0).String() != "type(0)" || Type(99).String() != "type(99)" {
 		t.Fatalf("unknown names: %s %s", Type(0), Type(99))
 	}
-	// An empty password proves nothing and accepts any proof.
-	// 空密码不做证明，并接受任何证明。
-	if p, err := Password("").Prove([]byte("c")); p != nil || err != nil {
-		t.Fatalf("empty prove: %v %v", p, err)
-	}
-	if Password("").Verify([]byte("c"), []byte("x")) != nil {
-		t.Fatal("empty password rejected a proof")
+	// No ListenAuth takes any answer, as from a dialer of no role.
+	// 没有 ListenAuth 时接受任何应答，视为没有角色的拨号方。
+	if role, ack, err := newListenerState(nil).verify([]byte("x")); role != "" || len(ack) != 1 || err != nil {
+		t.Fatalf("no auth: %q %v %v", role, ack, err)
 	}
 	for _, p := range [][]byte{[]byte("{"), []byte(`{"code":1}`)} {
 		var e *Error
@@ -395,6 +392,37 @@ func TestStreamFlowControlViolation(t *testing.T) {
 	}
 	if !errors.Is(st.Err(), ErrFlowControl) || r.find(TypeStreamCancel) == nil {
 		t.Fatalf("err %v", st.Err())
+	}
+}
+
+// The streams of a link together may hold at most MaxOvershoot past their windows: each overshoots its own window
+// by less than a frame, yet the third one past the link's bound fails, and what a stream held is given back as it is
+// read and when it ends.
+// 一条连接上的流合计最多超出各自窗口 MaxOvershoot：每个流超出自己窗口不到一帧，但超出连接上限的第三个流失败；流保留的
+// 字节在读取与结束时归还。
+func TestStreamOvershootBounded(t *testing.T) {
+	d, _ := recorded(Options{Dialer: true, Window: 16, MaxFrame: 128, MaxOvershoot: 100})
+	var sts []*Stream
+	for i := range 3 {
+		st, err := d.OpenStream(ctxT(t), Head{Method: "/s"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sts = append(sts, st)
+		_ = d.Receive(in(Frame{Type: TypeStreamData, ID: uint32(2*i + 1), Payload: make([]byte, 16+48)}))
+	}
+	if sts[0].Err() != nil || sts[1].Err() != nil || !errors.Is(sts[2].Err(), ErrFlowControl) {
+		t.Fatalf("errs %v %v %v", sts[0].Err(), sts[1].Err(), sts[2].Err())
+	}
+	if n := d.overshoot.Load(); n != 96 {
+		t.Fatalf("overshoot %d", n)
+	}
+	if _, err := sts[0].Recv(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	sts[1].Cancel()
+	if n := d.overshoot.Load(); n != 0 {
+		t.Fatalf("overshoot %d after a read and a cancel", n)
 	}
 }
 
