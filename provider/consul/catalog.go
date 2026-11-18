@@ -16,6 +16,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/apiclient"
 	"github.com/lesismal/fit/logs"
+	"github.com/lesismal/fit/provider"
 	"github.com/lesismal/fit/provider/internal/watch"
 	"github.com/lesismal/fit/provider/labels"
 )
@@ -28,6 +29,7 @@ import (
 // writes the routes and services. Tags without '=' are passed over.
 type Catalog struct {
 	name string
+	src  *catalogSource
 	f    *watch.Follower
 }
 
@@ -42,7 +44,7 @@ func NewCatalog(name string, opts *config.ConsulProvider, log *logs.Logger) *Cat
 		files:      apiclient.TLSFiles{CA: opts.CAFile, Cert: opts.CertFile, Key: opts.KeyFile},
 		timeout:    opts.Timeout(),
 	}}
-	return &Catalog{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Log: log, Source: src}}
+	return &Catalog{name: name, src: src, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Log: log, Source: src}}
 }
 
 // Name returns the provider's name.
@@ -57,9 +59,15 @@ func (p *Catalog) Run(ctx context.Context, update func([]byte)) { p.f.Run(ctx, u
 
 type catalogSource struct {
 	conn
-	opts *config.ConsulProvider
-	c    *client // the watch's
+	opts  *config.ConsulProvider
+	c     *client // the watch's
+	names func() *provider.Names
 }
+
+// SetNames gives the provider what the rest of the running config has, for
+// the services' tags not to name listeners it lacks, nor claim what it
+// has. It is called before Run.
+func (p *Catalog) SetNames(names func() *provider.Names) { p.src.names = names }
 
 func (s *catalogSource) Open(context.Context) (func(), error) {
 	c, err := s.conn.open()
@@ -151,18 +159,24 @@ func (s *catalogSource) Read(ctx context.Context) ([]byte, []string, error) {
 		}
 		instances[name] = es
 	}
-	part, more := translate(instances, s.opts)
+	var names *provider.Names
+	if s.names != nil {
+		names = s.names()
+	}
+	part, more := translate(instances, s.opts, names)
 	return part, append(problems, more...), nil
 }
 
 // translate turns the services' instances into a part, and says why it
 // left out the instances it did. The part is the same for the same
 // instances, so that an unchanged one is seen to be.
-func translate(services map[string][]entry, opts *config.ConsulProvider) (part []byte, problems []string) {
+// names, which may be nil, is what the rest of the running config has.
+func translate(services map[string][]entry, opts *config.ConsulProvider, names *provider.Names) (part []byte, problems []string) {
 	prefix := opts.Prefix() + "."
 	groups := map[string]*labels.Group{}
 	policy := &labels.Policy{AllowedHosts: opts.AllowedHosts, AllowedModules: opts.AllowedModules,
-		MaxPriority: opts.MaxPriority, AllowLocal: opts.AllowLocalAddresses}
+		MaxPriority: opts.MaxPriority, AllowLocal: opts.AllowLocalAddresses, AllowFiles: opts.AllowFilePaths}
+	scope := labels.NewScope(names)
 	for _, svc := range labels.SortedKeys(services) {
 		es := services[svc]
 		slices.SortFunc(es, func(a, b entry) int {
@@ -219,7 +233,7 @@ func translate(services map[string][]entry, opts *config.ConsulProvider) (part [
 			}
 			g := groups[name]
 			if g == nil {
-				more, err := l.Restrict(name, policy)
+				more, err := l.Restrict(name, policy, scope)
 				for _, p := range more {
 					problem("%s", p)
 				}

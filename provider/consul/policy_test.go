@@ -27,7 +27,7 @@ func TestTagPolicy(t *testing.T) {
 		"loc":   {inst{svc: "loc", id: "a5", node: "n1", addr: "localhost", port: 2019, tags: []string{"fit.enable=true"}}.entry()},
 		"evil":  {inst{svc: "evil", id: "e1", node: "n1", addr: "10.0.0.66", port: 80, tags: attack}.entry()},
 	}
-	part, problems := translate(services, &config.ConsulProvider{})
+	part, problems := translate(services, &config.ConsulProvider{}, nil)
 	if got := upstreams(t, part); !reflect.DeepEqual(got, map[string][]string{"evil": {"10.0.0.66:80"}}) || strings.Contains(string(part), `"routes"`) {
 		t.Errorf("defaults: %s", part)
 	}
@@ -47,7 +47,7 @@ func TestTagPolicy(t *testing.T) {
 	// With every host allowed, the priority and the handler are still
 	// refused; allow_local_addresses takes the loopback.
 	opts := &config.ConsulProvider{AllowedHosts: []string{"*"}, AllowLocalAddresses: true}
-	part, problems = translate(map[string][]entry{"evil": services["evil"], "adm": services["adm"]}, opts)
+	part, problems = translate(map[string][]entry{"evil": services["evil"], "adm": services["adm"]}, opts, nil)
 	if got := upstreams(t, part); !reflect.DeepEqual(got, map[string][]string{"adm": {"127.0.0.1:2019"}, "evil": {"10.0.0.66:80"}}) {
 		t.Errorf("allow_local_addresses: %v", got)
 	}
@@ -55,7 +55,7 @@ func TestTagPolicy(t *testing.T) {
 		t.Errorf("problems: %v", problems)
 	}
 	opts.MaxPriority = 2000000000
-	if _, problems = translate(map[string][]entry{"evil": services["evil"]}, opts); !hasProblem(problems,
+	if _, problems = translate(map[string][]entry{"evil": services["evil"]}, opts, nil); !hasProblem(problems,
 		`service evil, instance e1 on node n1: route x: handler: module "static" is not one labels may use`) {
 		t.Errorf("problems: %v", problems)
 	}

@@ -22,15 +22,15 @@ func TestPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Restrict("u", p); err == nil || !strings.Contains(err.Error(), "the upstream's settings: load_balancing") {
+	if _, err := l.Restrict("u", p, nil); err == nil || !strings.Contains(err.Error(), "the upstream's settings: load_balancing") {
 		t.Errorf("Restrict: %v", err)
 	}
 	if _, err := Parse(map[string]string{"fit.services.s.proxy_protocol": "v3"}, "fit.", nil, kind); err == nil {
 		t.Error("proxy_protocol v3 is taken")
 	}
 	l, _ = Parse(map[string]string{"fit.services.s.listeners": "tcp", "fit.services.s.server_names": "10.0.0.1"}, "fit.", nil, kind)
-	if _, err := l.Restrict("u", p); err == nil || !strings.HasPrefix(err.Error(), "service s: server_names[0]") {
-		t.Errorf("Restrict: %v", err)
+	if problems, err := l.Restrict("u", p, nil); err != nil || len(problems) != 1 || !strings.HasPrefix(problems[0], "service s: server_names[0]") || len(l.Services) != 0 {
+		t.Errorf("Restrict: %v %v", problems, err)
 	}
 	if !(&Policy{}).Local("127.0.0.1") || (&Policy{AllowLocal: true}).Local("127.0.0.1") {
 		t.Error("Local")

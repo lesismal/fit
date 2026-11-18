@@ -48,6 +48,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
+	"github.com/lesismal/fit/provider"
 )
 
 // Bounds on what is read from the daemon.
@@ -77,7 +78,15 @@ type Provider struct {
 
 	last     []byte          // the part sent last
 	problems map[string]bool // the problems reported at the last listing
+	// names returns what the rest of the running config has; nil until
+	// SetNames, and then the part is checked against its own sources alone.
+	names func() *provider.Names
 }
+
+// SetNames gives the provider what the rest of the running config has, for
+// the containers' labels not to name listeners it lacks, nor claim what it
+// has. It is called before Run.
+func (p *Provider) SetNames(names func() *provider.Names) { p.names = names }
 
 // New returns a Docker provider named name, with the settings opts. log,
 // which may be nil, hears what the provider reports: containers left out
@@ -184,7 +193,11 @@ func (p *Provider) refresh(ctx context.Context, update func([]byte), always bool
 	if err != nil {
 		return err
 	}
-	part, problems := translate(cs, p.opts)
+	var names *provider.Names
+	if p.names != nil {
+		names = p.names()
+	}
+	part, problems := translate(cs, p.opts, names)
 	reported := make(map[string]bool, len(problems))
 	for _, msg := range problems {
 		if !p.problems[msg] {

@@ -39,7 +39,7 @@ func TestTranslateEdges(t *testing.T) {
 		IPAddress         string `json:"IPAddress"`
 		GlobalIPv6Address string `json:"GlobalIPv6Address"`
 	}{}
-	part, problems := translate([]container{stopped, badName, noAddr}, &config.DockerProvider{})
+	part, problems := translate([]container{stopped, badName, noAddr}, &config.DockerProvider{}, nil)
 	want := []string{
 		`container badname: "no way" is not a valid name for an upstream: set fit.name`,
 		`container noaddr: it has no address on network "net"`,
@@ -58,10 +58,10 @@ func TestTranslateEdges(t *testing.T) {
 	pub.Ports[0].PublicPort, pub.Ports[0].IP = 8080, "::"
 	unpub := ctr("unpub", map[string]string{
 		"fit.enable": "true", "fit.port": "80",
-		"fit.services.b.listeners": "tcp", "fit.services.b.port": "81",
+		"fit.services.b.listeners": "tcp2", "fit.services.b.port": "81",
 	}, "10.0.0.5", 80)
 	unpub.Ports[0].PublicPort = 8081
-	part, problems = translate([]container{pub, unpub}, &config.DockerProvider{UsePublishedPorts: true})
+	part, problems = translate([]container{pub, unpub}, &config.DockerProvider{UsePublishedPorts: true}, nil)
 	if !strings.Contains(string(part), `"[::1]:8080"`) {
 		t.Errorf("the port published on :: is not on ::1:\n%s", part)
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/provider"
 	"github.com/lesismal/fit/provider/labels"
 )
 
@@ -45,12 +46,14 @@ func (c *container) name() string {
 // translate turns containers into a part, and says why it left out the
 // containers it did. The part is the same for the same containers, so
 // that an unchanged one is seen to be.
-func translate(cs []container, opts *config.DockerProvider) (part []byte, problems []string) {
+// names, which may be nil, is what the rest of the running config has.
+func translate(cs []container, opts *config.DockerProvider, names *provider.Names) (part []byte, problems []string) {
 	prefix := opts.Prefix() + "."
 	slices.SortFunc(cs, func(a, b container) int { return strings.Compare(a.name(), b.name()) })
 	groups := map[string]*labels.Group{}
 	policy := &labels.Policy{AllowedHosts: opts.AllowedHosts, AllowedModules: opts.AllowedModules,
-		MaxPriority: opts.MaxPriority, AllowLocal: opts.AllowLocalAddresses}
+		MaxPriority: opts.MaxPriority, AllowLocal: opts.AllowLocalAddresses, AllowFiles: opts.AllowFilePaths}
+	scope := labels.NewScope(names)
 	taken := 0
 	for i := range cs {
 		c := &cs[i]
@@ -103,7 +106,7 @@ func translate(cs []container, opts *config.DockerProvider) (part []byte, proble
 		if g != nil {
 			set = g.Set
 		} else {
-			more, err := l.Restrict(name, policy)
+			more, err := l.Restrict(name, policy, scope)
 			for _, p := range more {
 				problem("%s", p)
 			}

@@ -109,7 +109,7 @@ func TestTranslate(t *testing.T) {
 		ctr("svc", map[string]string{"fit.enable": "true", "fit.services.s.port": "1"}, "10.0.0.15", 80),
 		ctr("upname", map[string]string{"fit.enable": "true", "fit.upstream": `{"name": "x"}`}, "10.0.0.16", 80),
 	}
-	part, problems := translate(cs, opts)
+	part, problems := translate(cs, opts, nil)
 	want := jsonOf(t, `{
   "upstreams": [
     {"name": "api", "addresses": ["10.0.0.4:9000"]},
@@ -150,11 +150,11 @@ func TestTranslate(t *testing.T) {
 	for i := range cs {
 		rev[len(cs)-1-i] = cs[i]
 	}
-	if again, _ := translate(rev, opts); string(again) != string(part) {
+	if again, _ := translate(rev, opts, nil); string(again) != string(part) {
 		t.Errorf("another order gave another part:\n%s\n%s", again, part)
 	}
 	// Nothing taken is an empty part.
-	if empty, _ := translate(nil, opts); string(empty) != "{}" {
+	if empty, _ := translate(nil, opts, nil); string(empty) != "{}" {
 		t.Errorf("no containers: %s", empty)
 	}
 }
@@ -184,26 +184,26 @@ func TestTranslateOptions(t *testing.T) {
 	// another prefix; a container on two networks is reached on the
 	// first by name, or the one network chooses.
 	opts := &config.DockerProvider{ExposeAll: true, LabelPrefix: "app", AllowedHosts: []string{"*"}, AllowLocalAddresses: true}
-	part, problems := translate([]container{plain, host, two, off}, opts)
+	part, problems := translate([]container{plain, host, two, off}, opts, nil)
 	want := map[string]any{"plain": "10.0.0.5:80", "host": "127.0.0.1:8000", "two": "[fd00::20]:80"}
 	if got := addrs(part); !reflect.DeepEqual(got, want) || len(problems) != 0 {
 		t.Errorf("expose_all: %v %v", got, problems)
 	}
 	opts.Network = "net"
-	if got := addrs(must(translate([]container{two}, opts))); got["two"] != "10.0.0.20:80" {
+	if got := addrs(must(translate([]container{two}, opts, nil))); got["two"] != "10.0.0.20:80" {
 		t.Errorf("network: %v", got)
 	}
 	// use_published_ports sends to the host's port, and leaves out a
 	// container whose port is not published.
 	opts = &config.DockerProvider{ExposeAll: true, LabelPrefix: "app", UsePublishedPorts: true, AllowedHosts: []string{"*"}}
-	part, problems = translate([]container{plain, two}, opts)
+	part, problems = translate([]container{plain, two}, opts, nil)
 	if got := addrs(part); !reflect.DeepEqual(got, map[string]any{"plain": "127.0.0.1:32768"}) ||
 		!reflect.DeepEqual(problems, []string{"container two: port 80 is not published on the host"}) {
 		t.Errorf("use_published_ports: %v %v", got, problems)
 	}
 	// max_containers takes the first by name.
 	opts = &config.DockerProvider{ExposeAll: true, LabelPrefix: "app", MaxContainers: 1, AllowedHosts: []string{"*"}}
-	part, problems = translate([]container{plain, two}, opts)
+	part, problems = translate([]container{plain, two}, opts, nil)
 	if got := addrs(part); !reflect.DeepEqual(got, map[string]any{"plain": "10.0.0.5:80"}) ||
 		!reflect.DeepEqual(problems, []string{"container two: left out: max_containers, 1, are taken"}) {
 		t.Errorf("max_containers: %v %v", got, problems)

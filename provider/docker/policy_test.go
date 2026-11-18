@@ -8,8 +8,10 @@ import (
 	"github.com/lesismal/fit/config"
 
 	_ "github.com/lesismal/fit/handler/proxy"
+	_ "github.com/lesismal/fit/handler/respond"
 	_ "github.com/lesismal/fit/handler/static"
 	_ "github.com/lesismal/fit/middleware/headers"
+	_ "github.com/lesismal/fit/middleware/limit"
 )
 
 // TestLabelPolicy translates the labels of a container that would take the
@@ -44,7 +46,7 @@ func TestLabelPolicy(t *testing.T) {
 
 	// The defaults: no host may be matched, so no route is taken; the
 	// container on the host's network is not.
-	part, problems := translate([]container{attack, admin}, &config.DockerProvider{})
+	part, problems := translate([]container{attack, admin}, &config.DockerProvider{}, nil)
 	if got := decoded(t, part); got["routes"] != nil || len(got["upstreams"].([]any)) != 1 {
 		t.Errorf("defaults: %s", part)
 	}
@@ -61,7 +63,7 @@ func TestLabelPolicy(t *testing.T) {
 	// The hosts below apps.example.com: only ok is taken; the rest break
 	// the policy or would have the part refused.
 	opts := &config.DockerProvider{AllowedHosts: []string{"*.apps.example.com"}}
-	part, problems = translate([]container{attack}, opts)
+	part, problems = translate([]container{attack}, opts, nil)
 	got := decoded(t, part)
 	routes, _ := got["routes"].([]any)
 	if len(routes) != 1 || routes[0].(map[string]any)["name"] != "evil.ok" {
@@ -86,8 +88,8 @@ func TestLabelPolicy(t *testing.T) {
 
 	// Widened: static may be used, and priorities up to 10; the host's
 	// loopback is taken.
-	opts = &config.DockerProvider{AllowedHosts: []string{"*"}, AllowedModules: []string{"static"}, MaxPriority: 10, AllowLocalAddresses: true}
-	part, _ = translate([]container{attack, admin}, opts)
+	opts = &config.DockerProvider{AllowedHosts: []string{"*"}, AllowedModules: []string{"static"}, MaxPriority: 10, AllowLocalAddresses: true, AllowFilePaths: true}
+	part, _ = translate([]container{attack, admin}, opts, nil)
 	var names []string
 	for _, r := range decoded(t, part)["routes"].([]any) {
 		names = append(names, r.(map[string]any)["name"].(string))

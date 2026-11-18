@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/provider"
 	"github.com/lesismal/fit/provider/internal/vet"
 )
 
@@ -185,6 +186,9 @@ type translator struct {
 	// vet checks each route as the merged config will, knowing the
 	// upstreams made so far.
 	vet *vet.Checker
+	// names is what the rest of the running config has; nil when it is
+	// not known.
+	names *provider.Names
 
 	// For the statuses: fit's Gateways, in order and by namespace/name, and
 	// the routes in the namespaces watched, as each one is being and has
@@ -446,6 +450,20 @@ func (t *translator) portListener(port int, family string) (*fitListener, string
 	}
 	fl := t.listeners[name]
 	if fl == nil {
+		// A listener of the config's, or another provider's, of the same
+		// name would take this one's routes, and one on the same port
+		// would have the part refused as a whole, binding it.
+		if t.names != nil {
+			if _, ok := t.names.Listeners[name]; ok {
+				return nil, "listener " + name + " of the config or another provider"
+			}
+			if other, ok := t.names.Binds(t.opts.ListenHost, port, family == familyUDP); ok {
+				if family != familyUDP {
+					delete(t.ports, port)
+				}
+				return nil, "listener " + other + " of the config or another provider"
+			}
+		}
 		fl = &fitListener{name: name, address: net.JoinHostPort(t.opts.ListenHost, strconv.Itoa(port)), port: port,
 			family: family, names: map[string]string{}}
 		t.listeners[name] = fl
@@ -951,6 +969,11 @@ func (t *translator) upstream(ref BackendObjectRef, proto string, h2c bool) (nam
 			return "", false, err
 		}
 	}
+	// The config's upstream of the name, or another provider's, would take
+	// this one's place, and the route would send there.
+	if t.names != nil && t.names.Upstreams[name] {
+		return "", false, badRef("UnsupportedValue", "service %s/%s: its upstream's name, %s, is the config's or another provider's", ns, ref.Name, name)
+	}
 	if _, done := t.upstreams[name]; done {
 		return name, true, nil
 	}
@@ -1262,6 +1285,10 @@ func (t *translator) handle(where string, out *outRoute, filters []HTTPRouteFilt
 // one tenant's value would have fit refuse the provider's whole part, and
 // hold back every change in the cluster.
 func (t *translator) addRoute(where string, out *outRoute) {
+	if t.names != nil && t.names.Routes[out.Name] {
+		t.leftOut("%s: its name, %s, is a route's of the config or another provider; it is left out", where, out.Name)
+		return
+	}
 	data, _ := json.Marshal(out)
 	err := t.vet.Route(data)
 	if err == nil {

@@ -185,7 +185,7 @@ func TestPollIndexZero(t *testing.T) {
 func TestTranslateNoAddress(t *testing.T) {
 	e := inst{svc: "web", id: "w", node: "n", port: 80, tags: []string{"fit.enable=true"}}.entry()
 	e.Node.Address = ""
-	part, problems := translate(map[string][]entry{"web": {e}}, &config.ConsulProvider{})
+	part, problems := translate(map[string][]entry{"web": {e}}, &config.ConsulProvider{}, nil)
 	if string(part) != "{}" || len(problems) != 1 || !strings.Contains(problems[0], "it has no address, nor has its node") {
 		t.Errorf("part %s, problems %q", part, problems)
 	}

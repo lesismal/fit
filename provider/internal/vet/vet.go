@@ -69,10 +69,9 @@ var pure = map[string]bool{
 // A Checker checks routes as a config holding them, and upstreams of the
 // names it is given, will be loaded and compiled: the route as the config
 // checks it, and each of its middleware and its handler loaded and
-// provisioned by its module, for the modules in pure. Other modules, and
-// those this fit lacks, are not checked here; the config is refused for
-// them when it is applied, as it would be anyway. A Checker is used by one
-// goroutine at a time.
+// provisioned by its module, for the modules in pure, or for others their
+// params decoded. A module this fit lacks is refused, as the config would
+// be. A Checker is used by one goroutine at a time.
 type Checker struct {
 	upstreams map[string]*upstream.Pool
 }
@@ -133,8 +132,14 @@ func (c *Checker) Module(ns string, ref json.RawMessage) error {
 
 // module loads and provisions ref, at at in the config Route loads.
 func (c *Checker) module(ns string, ref config.ModuleRef, at string) error {
-	if _, ok := module.Lookup(ns + "." + ref.Module); !ok || !pure[ref.Module] {
-		return nil
+	info, ok := module.Lookup(ns + "." + ref.Module)
+	if !ok {
+		return fmt.Errorf("there is no module %q among this fit's %s", ref.Module, ns)
+	}
+	if !pure[ref.Module] {
+		// Its params are decoded, which touches nothing, but it is not
+		// provisioned.
+		return brief(ref.Params.Decode(info.New()), at)
 	}
 	m, err := module.Load(ns, ref, &module.Env{Upstreams: c.upstreams})
 	if err != nil {

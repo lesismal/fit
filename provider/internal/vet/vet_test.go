@@ -8,6 +8,7 @@ import (
 
 	_ "github.com/lesismal/fit/handler/proxy"
 	_ "github.com/lesismal/fit/handler/respond"
+	_ "github.com/lesismal/fit/handler/static"
 	_ "github.com/lesismal/fit/middleware/headers"
 	_ "github.com/lesismal/fit/middleware/rewrite"
 )
@@ -32,7 +33,8 @@ func TestRoute(t *testing.T) {
 	for _, ok := range []string{
 		`{"name": "a", "listeners": ["missing"], "match": {"host": ["**.example.com"], "path": ["/a/*"]}, "handler": {"module": "proxy", "params": {"upstream": "own"}}}`,
 		`{"middleware": [{"module": "headers", "params": {"request": {"set": {"X-A": "b"}}}}], "handler": {"module": "respond", "params": {"status": 500}}}`,
-		`{"handler": {"module": "not_linked_here"}}`,
+		// A module that is not pure has its params decoded alone.
+		`{"handler": {"module": "static", "params": {"root": "/nowhere"}}}`,
 	} {
 		if err := c.Route([]byte(ok)); err != nil {
 			t.Errorf("%s: %v", ok, err)
@@ -48,6 +50,10 @@ func TestRoute(t *testing.T) {
 		`{"handler": {"module": "proxy", "params": {"upstream": "own", "host_header": "a\r\nb"}}}`:                                             "host_header",
 		`{"handler": {"module": "proxy", "params": {"upstream": "own", "upstream": "own"}}}`:                                                   "duplicate key",
 		`{"handler": {"module": "proxy", "params": {"Upstream": "own"}}}`:                                                                      "Upstream",
+		// A module this fit lacks would have the whole config refused.
+		`{"handler": {"module": "not_linked_here"}}`:                                   `there is no module "not_linked_here"`,
+		`{"middleware": [{"module": "no_such_mw"}], "handler": {"module": "respond"}}`: `middleware 0: there is no module "no_such_mw"`,
+		`{"handler": {"module": "static", "params": {"root": "/x", "bogus": 1}}}`:      "bogus",
 	} {
 		err := c.Route([]byte(route))
 		if err == nil || !strings.Contains(err.Error(), want) {

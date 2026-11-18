@@ -281,7 +281,7 @@ func TestTranslate(t *testing.T) {
 			inst{svc: "bad", id: "b5", node: "n1", addr: "10.0.2.5", port: 80, tags: []string{"fit.enable=true", `fit.upstream={"addresses": []}`}}.entry(),
 		},
 	}
-	part, problems := translate(services, opts)
+	part, problems := translate(services, opts, nil)
 	want := decoded(t, []byte(`{
   "upstreams": [
     {"name": "db", "addresses": ["10.0.1.1:5432"]},
@@ -312,7 +312,7 @@ func TestTranslate(t *testing.T) {
 
 	// With expose_all, an instance with no tags is taken, but one tagged
 	// enable=false still is not.
-	part, _ = translate(map[string][]entry{"web": services["web"][3:]}, &config.ConsulProvider{ExposeAll: true, TagPrefix: "app"})
+	part, _ = translate(map[string][]entry{"web": services["web"][3:]}, &config.ConsulProvider{ExposeAll: true, TagPrefix: "app"}, nil)
 	if got := upstreams(t, part); !reflect.DeepEqual(got, map[string][]string{"web": {"10.0.0.9:8080", "10.0.0.9:8080"}}) {
 		t.Errorf("expose_all with another prefix: %v", got)
 	}
