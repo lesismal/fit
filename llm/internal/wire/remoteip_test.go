@@ -39,39 +39,40 @@ func TestRemoteIP(t *testing.T) {
 	}
 }
 
-// TestAuthenticated: an address not held, or held by another TCP connection
-// (one that closed after its address was taken again), leaves the pending
-// counts alone; the connection held is taken off, its IP's count with it.
-// TestAuthenticated：未记录的地址，或由另一条 TCP 连接占用的地址（其地址被再次使用之后才关闭的连接），不改动待认证计数；
-// 记录中的连接被移出，其 IP 的计数随之减少。
+// TestAuthenticated: a connection not held leaves the pending counts alone;
+// one held is taken off, its IP's count with it.
+// TestAuthenticated：未记录的连接不改动待认证计数；记录中的连接被移出，其 IP 的计数随之减少。
 func TestAuthenticated(t *testing.T) {
 	ip := netip.MustParseAddr("192.0.2.7")
 	c, other := &fib.Connection{}, &fib.Connection{}
 	tc := &tcpConns{
-		pending:   map[string]pendingConn{"192.0.2.7:1": {c: c, ip: ip}, "192.0.2.7:2": {c: other, ip: ip}},
+		pending:   map[*fib.Connection]netip.Addr{c: ip, other: ip},
 		pendingIP: map[netip.Addr]int{ip: 2},
 	}
-	tc.authenticated("192.0.2.1:1", nil)
-	tc.authenticated("192.0.2.7:1", other)
+	tc.authenticated(&fib.Connection{})
+	tc.authenticated(nil)
 	if len(tc.pending) != 2 || tc.pendingIP[ip] != 2 {
-		t.Fatalf("an address not held changed the counts: %v %v", tc.pending, tc.pendingIP)
+		t.Fatalf("a connection not held changed the counts: %v %v", tc.pending, tc.pendingIP)
 	}
-	tc.authenticated("192.0.2.7:1", c)
+	tc.authenticated(c)
 	if len(tc.pending) != 1 || tc.pendingIP[ip] != 1 {
 		t.Fatalf("authenticated(c): %v %v", tc.pending, tc.pendingIP)
 	}
-	tc.authenticated("192.0.2.7:2", nil)
+	tc.authenticated(other)
 	if len(tc.pending) != 0 || len(tc.pendingIP) != 0 {
 		t.Fatalf("authenticated left the counts: %v %v", tc.pending, tc.pendingIP)
 	}
 }
 
-// TestHoldNoAddress: a connection whose address cannot be read is not held,
-// and so closed as it opens.
-// TestHoldNoAddress：读不到地址的连接不被记录，因而在打开时即被关闭。
+// TestHoldNoAddress: a connection whose address cannot be read counts under
+// the zero Addr.
+// TestHoldNoAddress：读不到地址的连接按零值 Addr 计数。
 func TestHoldNoAddress(t *testing.T) {
-	tc := &tcpConns{maxPending: 1, maxPerIP: 1, pending: map[string]pendingConn{}, pendingIP: map[netip.Addr]int{}}
-	if tc.hold(&fib.Connection{}) || len(tc.pending) != 0 {
-		t.Fatal("a connection with no address was held")
+	tc := &tcpConns{maxPending: 2, maxPerIP: 1, pending: map[*fib.Connection]netip.Addr{}, pendingIP: map[netip.Addr]int{}}
+	if !tc.hold(&fib.Connection{}) || tc.pendingIP[netip.Addr{}] != 1 {
+		t.Fatal("a connection with no address was not held")
+	}
+	if tc.hold(&fib.Connection{}) {
+		t.Fatal("a second connection with no address passed the per-IP limit")
 	}
 }
