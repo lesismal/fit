@@ -8111,4 +8111,8 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   4.3 KB per idle bridged connection with every endpoint in one process, no goroutine per bridge.
 - **I226, I227, I228**: the LLM mesh, the tunnel and the cluster's links on those, their stopgaps gone
   (address maps, dial hooks, the tunnel's own framing, lookups per message).
+- **Benchmarks**: `tunnel/internal/transport/ws` link benchmarks (`0f651b63`), old framing at `23081fbe`
+  against the new, M4 Pro under load, 10 runs: dialer to listener 1 KiB −11%, 16 KiB −46%, 256 KiB −56%
+  time; the other way and a 64-byte echo within noise; B/op from 1–268 KB to under 0.3 KB, allocations
+  2 to 0 or 1 a send (part of it fib's own changes since `9ea8838`).
 - **Tests**: see each plan section; their decisions are there too, pending review.
