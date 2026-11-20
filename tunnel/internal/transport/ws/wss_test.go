@@ -96,7 +96,7 @@ func TestWSSRefused(t *testing.T) {
 	}
 	// The path is still the listener's.
 	pin := transport.ClientOptions{PinSHA256: transport.Fingerprint(cert)}
-	if _, err := transport.Dial(e, strings.TrimSuffix(l.URL(), "/link")+"/other", 5*time.Second, pin, open); err == nil || !strings.Contains(err.Error(), "403") {
+	if _, err := transport.Dial(e, strings.TrimSuffix(l.URL(), "/link")+"/other", 5*time.Second, pin, open); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("another path: %v", err)
 	}
 	// A tls:// listener speaks another application protocol.

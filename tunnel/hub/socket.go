@@ -24,7 +24,8 @@ import (
 // opened, the console's bytes sealed, one message per piece of at most
 // sealChunk. Each side's reads wait for the other's backlog (rule 8), and
 // what arrives before the console is connected holds the WebSocket's
-// reads. The WebSockets are fib's, served by ws.Server.
+// reads. The WebSockets are fib's, served as ws.NewServer serves them, and
+// each carries its proxy as its attachment.
 
 // sealChunk is the most of the console's bytes one message carries.
 const sealChunk = 64 << 10
@@ -81,7 +82,7 @@ func (s *Hub) applySocket(cfg *config.TunnelConsoleSocket) error {
 	wcfg := websocket.DefaultConfig()
 	wcfg.MaxMessageBytes = maxSocketMessage
 	wcfg.PendingWriteLimit = common.Watermark
-	i, err := s.h.Engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: ws.NewServer(wcfg, h, "", nil), Filter: s.gate.Allows})
+	i, err := s.h.Engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: ws.NewServer(wcfg, h, ""), Filter: s.gate.Allows})
 	if err != nil {
 		return err
 	}
@@ -107,6 +108,8 @@ type socketHandler struct {
 	s   *Hub
 	max atomic.Int64
 
+	// mu guards conns, the open WebSockets, which bound their number and
+	// are closed as the socket stops.
 	mu     sync.Mutex
 	conns  map[*websocket.Connection]*proxy
 	closed bool
@@ -152,6 +155,7 @@ func (h *socketHandler) OnOpen(c *websocket.Connection, _ *stdhttp.Request) {
 	}
 	p := &proxy{h: h, ws: c, addr: addr, wsGate: common.NewGate(c), hello: wscrypt.Hello(), secret: set.secret, ip: ip, counted: true}
 	h.conns[c] = p
+	c.SetAttachment(p)
 	h.unauth[ip]++
 	// Set under the lock, so that authed and close find it.
 	p.timer = time.AfterFunc(socketAuthTimeout, func() {
@@ -183,27 +187,22 @@ func (h *socketHandler) uncount(p *proxy) {
 	}
 }
 
-func (h *socketHandler) get(c *websocket.Connection) *proxy {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.conns[c]
-}
-
 func (h *socketHandler) OnMessage(c *websocket.Connection, _ websocket.Opcode, data []byte) {
-	if p := h.get(c); p != nil {
+	if p, ok := c.Attachment().(*proxy); ok {
 		p.message(data)
 	}
 }
 
 func (h *socketHandler) OnClose(c *websocket.Connection, _ uint16, _ string, _ error) {
+	p, ok := c.Attachment().(*proxy)
+	if !ok {
+		return
+	}
 	h.mu.Lock()
-	p := h.conns[c]
 	delete(h.conns, c)
 	h.mu.Unlock()
-	if p != nil {
-		h.uncount(p)
-		p.close()
-	}
+	h.uncount(p)
+	p.close()
 }
 
 // closeAll closes every WebSocket, as the socket stops.
