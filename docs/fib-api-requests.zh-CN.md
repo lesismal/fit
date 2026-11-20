@@ -62,8 +62,8 @@
 | A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已完成，`96a2331`（在 `80c7f76` 中） | 1, 9 | I85（P2P）、I87 |
 | A50 | QUIC DATAGRAM 帧 | 已提出 | 9 | I90（P2P） |
 | A51 | 包设备的描述符在 poller 上读写 | 已提出 | 1, 8, 11 | I95（VPN） |
-| A52 | WebSocket 连接的底层传输：强制关闭与其地址 | 已完成，fib `fd94050`（`main`） | 10, 13 | llm（028）、I225 |
-| A53 | WebSocket 连接发送的背压 | 已完成，fib `fd94050`（`main`） | 8, 9, 11 | llm、tunnel（028）、I225、I226 |
+| A52 | WebSocket 连接的底层传输：强制关闭与其地址 | 已完成，fib `fd94050`（`main`） | 10, 13 | llm（028）、I226 |
+| A53 | WebSocket 连接发送的背压 | 已完成，fib `fd94050`（`main`） | 8, 9, 11 | llm、tunnel（028）、I226、I227 |
 | A54 | 引擎 UDP binding 上的原始 QUIC 端点 | 已提出 | 15 | tunnel（028） |
 | A55 | 经 TCP 和 TLS 的 TURN | 已完成，`97201b6`（在 `84a67f7` 中） | — | I111（029） |
 | A56 | 从不让 worker 等待的 TURN 服务器 | 已完成，`74100b2`（在 `84a67f7` 中） | 1 | I87、I111（029） |
@@ -99,9 +99,9 @@
 | A92 | Store 的应答可设定自己的间隔 | 已提出 | — | I207 |
 | A93 | HTTP 客户端解压响应 | 已提出 | — | I208 |
 | A94 | 按请求设定响应大小上限 | 已提出 | 11 | I208 |
-| A95 | WebSocket 连接的本端地址、底层传输与附加数据，也可在升级时设置 | 已完成，fib `8f81545`（`main`） | — | I224、I225、I226、I227 |
-| A96 | 直接绑定的 WebSocket 处理器的握手超时与路径 | 已完成，fib `20eab8b`（`main`） | — | I226 |
-| A97 | WebSocket 客户端的帧取自缓冲池 | 已完成，fib `081d83e`（`main`） | — | I226 |
+| A95 | WebSocket 连接的本端地址、底层传输与附加数据，也可在升级时设置 | 已完成，fib `8f81545`（`main`） | — | I225、I226、I227、I228 |
+| A96 | 直接绑定的 WebSocket 处理器的握手超时与路径 | 已完成，fib `20eab8b`（`main`） | — | I227 |
+| A97 | WebSocket 客户端的帧取自缓冲池 | 已完成，fib `081d83e`（`main`） | — | I227 |
 
 ## 证据
 
@@ -1229,7 +1229,7 @@ Wintun 没有这样的描述符，不需要。
 **状态。** 2026-11-01 为 llm 的角色提出（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)）。
 已完成，fib `fd94050`（在 fib 的 `main` 上）：`websocket.Connection.Abort(err)` 立即结束连接，不经关闭握手，丢弃排队的数据，
 随后 `OnClose` 以 1006 和 err 调用；`RemoteAddr()` 在任一端读取对端地址（连接关闭后为 nil，所以 fit 在建立时记下）。
-自 I225 起，互联连接在两端都中止死掉或过慢的对端，并从 `RemoteAddr` 取得其地址；监听方的映射与拨号方的钩子已删除。
+自 I226 起，互联连接在两端都中止死掉或过慢的对端，并从 `RemoteAddr` 取得其地址；监听方的映射与拨号方的钩子已删除。
 
 **问题。** llm 的互联链路是 fib 的 WebSocket。对端已死，或积压到 ping 等了 30 秒仍没有 pong 的链路，必须立即断开。
 `Connection.Close` 发送关闭帧，它排在所有未发送内容之后，所以一个什么也不读的对端，其套接字要等到引擎的写队列上限或内核放弃才关闭。
@@ -1256,8 +1256,8 @@ func (c *Connection) RemoteAddr() net.Addr
 **状态。** 2026-11-01 为 llm 的角色提出（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)）。
 已完成，fib `fd94050`（在 fib 的 `main` 上）：`WriteMessageNoWait` 与 `WritePreparedMessageNoWait` 在超过
 `Config.PendingWriteLimit` / `DialerConfig.PendingWriteLimit`（默认 64 KiB）时报告 `above`，`OnWritable` 在队列降到其一半时
-执行一次，`HoldReads` 暂停读取（包括 ping）。自 I225 起，超过上限的互联连接阻住向其写入的流，并暂停读取（至多为其心跳周期与
-慢连接超时中较短者的四分之一），直到 `OnWritable`。tunnel 的 WebSocket 在 I226 中改用它。
+执行一次，`HoldReads` 暂停读取（包括 ping）。自 I226 起，超过上限的互联连接阻住向其写入的流，并暂停读取（至多为其心跳周期与
+慢连接超时中较短者的四分之一），直到 `OnWritable`。tunnel 的 WebSocket 在 I227 中改用它。
 
 **问题。** `websocket.Connection.WriteMessage` 把给它的内容全部排队，从不告诉调用方积压了多少，处理器也无法暂停连接的读取。
 llm 的 wire 协议用额度窗口（256 KiB）约束每个流，所以链路的队列以其各流的窗口与应答为界，但链路自身的队列与填充它的生产者之间没有联系：
@@ -2133,7 +2133,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A95：WebSocket 连接的本端地址、底层传输与附加数据
 
-**状态。** 2026-11-21 提出并完成，fib `8f81545`，来自 I224、I225 与 I226。
+**状态。** 2026-11-21 提出并完成，fib `8f81545`，来自 I225、I226 与 I227。
 
 **问题。** tunnel、LLM 互联与新的 `websockify` 桥改用 `websocket.Connection`（A52、A53）之后，各自都要在按远端地址、
 请求或连接为键的表中查找自己的状态，每条消息查一次；也无法修改被服务连接的队列上限或 keep-alive，拿不到被接受链路的本端地址。
@@ -2144,7 +2144,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A96：直接绑定的 WebSocket 处理器的握手超时与路径
 
-**状态。** 2026-11-21 提出并完成，fib `20eab8b`，来自 I226。
+**状态。** 2026-11-21 提出并完成，fib `20eab8b`，来自 I227。
 
 **问题。** 直接绑定的 `ServerHandler` 对升级请求头没有时间限制，也不检查路径；tunnel 用自己的定时器在每次读取中寻找请求头的结尾，
 并通过 `CheckOrigin` 以 403 拒绝错误的路径。
@@ -2153,7 +2153,7 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 
 ## A97：WebSocket 客户端的帧取自缓冲池
 
-**状态。** 2026-11-21 提出并完成，fib `081d83e`，来自 I226。
+**状态。** 2026-11-21 提出并完成，fib `081d83e`，来自 I227。
 
 **问题。** 客户端为每一帧新建切片来加掩码，而 tunnel 自己的客户端用的是缓冲池。现在客户端发送不再分配内存（`TestClientWriteMessageAllocs`）。
 

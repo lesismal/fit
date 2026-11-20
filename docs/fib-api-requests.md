@@ -64,8 +64,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A49 | A UDP peer opened toward an address on a listener's socket | done, `96a2331` (in `80c7f76`) | 1, 9 | I85 (P2P), I87 |
 | A50 | QUIC DATAGRAM frames | requested | 9 | I90 (P2P) |
 | A51 | A packet device's descriptor on the poller | requested | 1, 8, 11 | I95 (VPN) |
-| A52 | A WebSocket connection's transport: a forced close, and its address | done, fib `fd94050` (`main`) | 10, 13 | llm (028), I225 |
-| A53 | Backpressure on a WebSocket connection's sends | done, fib `fd94050` (`main`) | 8, 9, 11 | llm, tunnel (028), I225, I226 |
+| A52 | A WebSocket connection's transport: a forced close, and its address | done, fib `fd94050` (`main`) | 10, 13 | llm (028), I226 |
+| A53 | Backpressure on a WebSocket connection's sends | done, fib `fd94050` (`main`) | 8, 9, 11 | llm, tunnel (028), I226, I227 |
 | A54 | A raw QUIC endpoint on an engine's UDP binding | requested | 15 | tunnel (028) |
 | A55 | TURN over TCP and TLS | done, `97201b6` (in `84a67f7`) | — | I111 (029) |
 | A56 | A TURN server that never waits on a worker | done, `74100b2` (in `84a67f7`) | 1 | I87, I111 (029) |
@@ -101,9 +101,9 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A92 | A store's answer that sets its own interval | requested | — | I207 |
 | A93 | Response decompression in the HTTP client | requested | — | I208 |
 | A94 | A response size limit per request | requested | 11 | I208 |
-| A95 | A WebSocket connection's local address, transport and attachment, set at upgrade too | done, fib `8f81545` (`main`) | — | I224, I225, I226, I227 |
-| A96 | A handshake timeout and a path for a WebSocket handler bound directly | done, fib `20eab8b` (`main`) | — | I226 |
-| A97 | A WebSocket client's frames from the buffer pool | done, fib `081d83e` (`main`) | — | I226 |
+| A95 | A WebSocket connection's local address, transport and attachment, set at upgrade too | done, fib `8f81545` (`main`) | — | I225, I226, I227, I228 |
+| A96 | A handshake timeout and a path for a WebSocket handler bound directly | done, fib `20eab8b` (`main`) | — | I227 |
+| A97 | A WebSocket client's frames from the buffer pool | done, fib `081d83e` (`main`) | — | I227 |
 
 ## Evidence
 
@@ -1625,7 +1625,7 @@ handler routes each packet `OnData` hands it and sends the peers' packets with `
 **Status.** Requested on 2026-11-01, for the LLM feature's roles ([decision 028](decisions/028-llm-and-tunnel.md)).
 Done, fib `fd94050` (on fib's `main`): `websocket.Connection.Abort(err)` ends a connection at once, without the
 close handshake, dropping what is queued, and `OnClose` follows with 1006 and err; `RemoteAddr()` reads the peer's
-address on either side (nil once the connection has closed, so fit keeps it from the open). Since I225 the mesh
+address on either side (nil once the connection has closed, so fit keeps it from the open). Since I226 the mesh
 links abort a dead or slow peer on both sides and take its address from `RemoteAddr`; the listener's map and the
 dialer's hook are gone.
 
@@ -1660,9 +1660,9 @@ map and the dialer's hook go.
 **Status.** Requested on 2026-11-01, for the LLM feature's roles ([decision 028](decisions/028-llm-and-tunnel.md)).
 Done, fib `fd94050` (on fib's `main`): `WriteMessageNoWait` and `WritePreparedMessageNoWait` report `above` past
 `Config.PendingWriteLimit` / `DialerConfig.PendingWriteLimit` (64 KiB by default), `OnWritable` runs once the queue
-falls to half of it, and `HoldReads` holds reading, pings included. Since I225 a mesh link above its limit holds the
+falls to half of it, and `HoldReads` holds reading, pings included. Since I226 a mesh link above its limit holds the
 streams that feed it and, for at most a quarter of the shorter of its ping interval and slow timeout, its reads,
-until `OnWritable`. The tunnel's WebSockets move to it in I226.
+until `OnWritable`. The tunnel's WebSockets move to it in I227.
 
 **Problem.** `websocket.Connection.WriteMessage` queues whatever it is given and never says how
 much waits, and the handler cannot hold a connection's reads. The LLM feature's wire protocol bounds
@@ -2777,7 +2777,7 @@ file was changed loses two pieces and downloads them again.
 
 ## A95: A WebSocket connection's local address, transport and attachment
 
-**Status.** Requested and done on 2026-11-21, fib `8f81545`, from I224, I225 and I226.
+**Status.** Requested and done on 2026-11-21, fib `8f81545`, from I225, I226 and I227.
 
 **Problem.** Moving the tunnel, the LLM mesh and the new `websockify` bridge onto `websocket.Connection`
 (A52, A53) left each of them finding its own state in a map keyed by remote address, request or
@@ -2791,7 +2791,7 @@ state stays at 160 bytes.
 
 ## A96: A handshake timeout and a path for a WebSocket handler bound directly
 
-**Status.** Requested and done on 2026-11-21, fib `20eab8b`, from I226.
+**Status.** Requested and done on 2026-11-21, fib `20eab8b`, from I227.
 
 **Problem.** A `ServerHandler` bound straight to a binding had no limit on its upgrade head and no path
 check; the tunnel scanned each read for the head's end under a timer of its own and refused wrong
@@ -2802,7 +2802,7 @@ get 404).
 
 ## A97: A WebSocket client's frames from the buffer pool
 
-**Status.** Requested and done on 2026-11-21, fib `081d83e`, from I226.
+**Status.** Requested and done on 2026-11-21, fib `081d83e`, from I227.
 
 **Problem.** A client masked each frame into a new slice, where the tunnel's own client had used the
 buffer pool. Now a client's send allocates nothing (`TestClientWriteMessageAllocs`).

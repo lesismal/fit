@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I228。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I229。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -382,10 +382,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
 | I210 | 客户端角色用上 fib A87–A88：`/trackers` 显示各 tracker 的 announce 状态、peer 来源与 Web 种子状态，就地重新校验 | I203、I204 | done |
 | **WebSocket** | | | |
-| I224 | `websockify`：把 WebSocket 桥接到 TCP 服务，与 websockify 相同（noVNC、网页终端），借助 fib A53 双向背压 | — | done |
-| I225 | LLM 互联链路使用 fib A52 与 A53：以 `Abort` 和 `RemoteAddr` 取代地址表与拨号钩子，超出上限的链路压住其生产者 | — | done |
-| I226 | tunnel 的 Web 代理与控制台套接字改用 fib 的 `websocket.Connection`，不再自行分帧 | — | done |
-| I227 | 集群成员链路使用 fib A52、A53 与 A95：`Abort`，以附加数据取代地址表，链路队列超出上限时暂缓调用 | — | done |
+| I225 | `websockify`：把 WebSocket 桥接到 TCP 服务，与 websockify 相同（noVNC、网页终端），借助 fib A53 双向背压 | — | done |
+| I226 | LLM 互联链路使用 fib A52 与 A53：以 `Abort` 和 `RemoteAddr` 取代地址表与拨号钩子，超出上限的链路压住其生产者 | — | done |
+| I227 | tunnel 的 Web 代理与控制台套接字改用 fib 的 `websocket.Connection`，不再自行分帧 | — | done |
+| I228 | 集群成员链路使用 fib A52、A53 与 A95：`Abort`，以附加数据取代地址表，链路队列超出上限时暂缓调用 | — | done |
 
 ## M0 基础
 
@@ -2753,7 +2753,7 @@ workbench 的集群菜单，由下列迭代逐步建成：
 12. **每个凭据一条链路**：新链路取代旧链路，两个共用凭据的 fit 会轮流连接。
 13. **`Manager.Call`** 是调用成员（HTTP 或链路）的唯一方式，供 I143 起使用。
 14. **I142 的页面** 在其扩展点旁改了几行，因为扩展点没有覆盖列与编辑表单中的 `link` 访问方式。
-15. **fib WebSocket 的缺口**（A52，强制关闭；A53，发送背压）采用与 LLM mesh 相同的临时方案：按远端地址找连接，队列以在途调用数乘其大小为限。*已由 I227 取代（2026-11-21）*：改用 fib 的 `Abort`、附加数据与发送背压。
+15. **fib WebSocket 的缺口**（A52，强制关闭；A53，发送背压）采用与 LLM mesh 相同的临时方案：按远端地址找连接，队列以在途调用数乘其大小为限。*已由 I228 取代（2026-11-21）*：改用 fib 的 `Abort`、附加数据与发送背压。
 
 ### I150 跨集群的指标、日志与证书
 
@@ -6970,7 +6970,7 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 转发。下面的桥接是网关应当提供的唯一一种 WebSocket 端点。备选：由 Admin API 或 sync 目标供数据的
 `ws_broadcast` 处理器，用于没有后端的看板。
 
-### I224 `websockify`：把 WebSocket 桥接到 TCP — done
+### I225 `websockify`：把 WebSocket 桥接到 TCP — done
 
 - **为什么**：TCP 服务的浏览器客户端（VNC 的 noVNC、SSH 或 telnet 的网页终端、游戏与 MUD 客户端）只能打开
   WebSocket，所以服务前面需要 websockify 这样的桥。fit 只能把 WebSocket 代理到 WebSocket 上游。
@@ -7001,7 +7001,7 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 6. **空闲关闭**：先发 1001，下一次超时时 `Abort`；只有数据算作活动，ping 不算。
 7. **有 `upstream` 时忽略 `connect_timeout`**，用上游自己的。
 
-### I225 LLM 互联使用 fib A52 与 A53 — done
+### I226 LLM 互联使用 fib A52 与 A53 — done
 
 - **做什么**：`llm/internal/wire` 两侧都用 `Abort` 关闭已死或过慢的链路，用 `RemoteAddr` 取得对端地址，
   去掉监听方的 `fib.Connection` 表和拨号方的 `Dial` 钩子；队列超出上限（`WriteMessageNoWait`）的链路停止向为其
@@ -7024,7 +7024,7 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 5. **强制关闭不发关闭帧**，因此 4002、4004 关闭码不再使用，对端看到 1006。
 6. **不增加 `PendingWriteLimit` 配置**，用 fib 默认的 64 KiB。
 
-### I226 tunnel 的 WebSocket 改用 fib 的 `websocket.Connection` — done
+### I227 tunnel 的 WebSocket 改用 fib 的 `websocket.Connection` — done
 
 - **做什么**：tunnel 的 Web 代理与控制台套接字为了用上 `HoldReads` 和 `NotifyOutput`，在 `fib.Connection` 上
   自行分帧（`tunnel/internal/transport/ws`），现改用带 A53 的 fib `websocket.Connection`，链路的强制关闭改用 A52。
@@ -7048,7 +7048,7 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 5. **LLM 监听的握手超时为 5 秒**，与其文档一致；旧的 `ReadHeaderTimeout` 对直接绑定的处理器不起作用，实际是 fib 的 10 秒。
    其错误路径也改为 404，之前是 403。
 
-### I227 集群成员链路使用 fib A52、A53 与 A95 — done
+### I228 集群成员链路使用 fib A52、A53 与 A95 — done
 
 - **为什么**：集群一轮的决定 15 让链路采用 LLM 互联的临时办法；对端活着但读得慢时，队列仍可能无限增长，因为超时的调用
   释放了名额，其字节却仍在队列中。

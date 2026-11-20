@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I228.
+Status: `todo`, `doing` or `done`. The next free iteration number is I229.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -392,10 +392,10 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I228.
 | I209 | The roles use fib A80–A86: publishing hashes once and builds stop on a context, a public tracker's torrents listed and its bounds changed in place, the client's event queue bounded | I201, I202, I203 | done |
 | I210 | The client role uses fib A87–A88: each tracker's announces, the peer sources and the web seeds' state on `/trackers`, a recheck in place | I203, I204 | done |
 | **WebSocket** | | | |
-| I224 | `websockify`: a WebSocket bridged to a TCP service, as websockify does (noVNC, web terminals), with backpressure both ways through fib A53 | — | done |
-| I225 | The LLM mesh's links use fib A52 and A53: `Abort` and `RemoteAddr` in place of the address map and the dial hook, a link above its limit holds its producers | — | done |
-| I226 | The tunnel's web proxies and console socket on fib's `websocket.Connection`, in place of their own framing | — | done |
-| I227 | The cluster's member links on fib A52, A53 and A95: `Abort`, attachments in place of the address map, calls held while a link's queue is above its limit | — | done |
+| I225 | `websockify`: a WebSocket bridged to a TCP service, as websockify does (noVNC, web terminals), with backpressure both ways through fib A53 | — | done |
+| I226 | The LLM mesh's links use fib A52 and A53: `Abort` and `RemoteAddr` in place of the address map and the dial hook, a link above its limit holds its producers | — | done |
+| I227 | The tunnel's web proxies and console socket on fib's `websocket.Connection`, in place of their own framing | — | done |
+| I228 | The cluster's member links on fib A52, A53 and A95: `Abort`, attachments in place of the address map, calls held while a link's queue is above its limit | — | done |
 
 ## M0, foundations
 
@@ -3582,7 +3582,7 @@ also in decision 033 as its items 28–42):
     `link` in the columns and the edit form.
 15. **fib's WebSocket gaps** (A52, a forced close; A53, send backpressure) have stopgaps as the LLM mesh's:
     connections found by remote address, queues bounded by calls in flight times their size.
-    *Replaced by I227 (2026-11-21)*: fib's `Abort`, attachments and send backpressure.
+    *Replaced by I228 (2026-11-21)*: fib's `Abort`, attachments and send backpressure.
 
 ### I150 Metrics, logs and certificates across the cluster
 
@@ -9974,7 +9974,7 @@ which has one; an application's WebSocket belongs in its backend, which `proxy` 
 below is the one WebSocket endpoint a gateway is expected to offer. Alternative: a `ws_broadcast`
 handler fed by the Admin API or by a sync sink, for dashboards with no backend.
 
-### I224 `websockify`: a WebSocket bridged to TCP — done
+### I225 `websockify`: a WebSocket bridged to TCP — done
 
 - **Why**: browser clients for TCP services (noVNC for VNC, web terminals for SSH or telnet, game and
   MUD clients) can only open WebSockets, so a server needs a bridge such as websockify in front of the
@@ -10015,7 +10015,7 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
 6. **Idle close**: 1001 first, `Abort` at the next timeout; only data counts as activity, not pings.
 7. **`connect_timeout` is ignored with `upstream`**, which has its own.
 
-### I225 The LLM mesh on fib A52 and A53 — done
+### I226 The LLM mesh on fib A52 and A53 — done
 
 - **Do**: `llm/internal/wire` closes a dead or slow link with `Abort` on both sides and takes the
   peer's address from `RemoteAddr`, dropping the listener's map of `fib.Connection`s and the dialer's
@@ -10045,7 +10045,7 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
 5. **A forced close sends no close frame**, so the 4002 and 4004 codes are gone; the peer sees 1006.
 6. **No `PendingWriteLimit` setting**; fib's 64 KiB default.
 
-### I226 The tunnel's WebSockets on fib's `websocket.Connection` — done
+### I227 The tunnel's WebSockets on fib's `websocket.Connection` — done
 
 - **Do**: the tunnel's web proxies and console socket, which frame WebSocket themselves over a
   `fib.Connection` (`tunnel/internal/transport/ws`) to have `HoldReads` and `NotifyOutput`, move to
@@ -10076,7 +10076,7 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
 5. **The LLM listener's handshake timeout is 5 s**, as its docs said; the old `ReadHeaderTimeout` did not
    apply to a handler bound directly, so it had been fib's 10 s. Its wrong path is 404 too, where it was 403.
 
-### I227 The cluster's member links on fib A52, A53 and A95 — done
+### I228 The cluster's member links on fib A52, A53 and A95 — done
 
 - **Why**: decision 15 of the cluster track gave the links the LLM mesh's stopgaps; a peer that stays
   alive but reads slowly could still grow a queue without end, since a call that times out frees its
