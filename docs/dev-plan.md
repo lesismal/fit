@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I224.
+Status: `todo`, `doing` or `done`. The next free iteration number is I227.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -391,6 +391,10 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I224.
 | I208 | (second phase) RSS auto-download | I198 | done |
 | I209 | The roles use fib A80–A86: publishing hashes once and builds stop on a context, a public tracker's torrents listed and its bounds changed in place, the client's event queue bounded | I201, I202, I203 | done |
 | I210 | The client role uses fib A87–A88: each tracker's announces, the peer sources and the web seeds' state on `/trackers`, a recheck in place | I203, I204 | done |
+| **WebSocket** | | | |
+| I224 | `websockify`: a WebSocket bridged to a TCP service, as websockify does (noVNC, web terminals), with backpressure both ways through fib A53 | — | todo |
+| I225 | The LLM mesh's links use fib A52 and A53: `Abort` and `RemoteAddr` in place of the address map and the dial hook, a link above its limit holds its producers | — | todo |
+| I226 | The tunnel's web proxies and console socket on fib's `websocket.Connection`, in place of their own framing | — | todo |
 
 ## M0, foundations
 
@@ -9954,3 +9958,55 @@ Linux race run and the full suite (left to the main session).
 Open from it: nothing in fit; a cluster member running an earlier fit answers `/trackers` in the
 old shape, which the assistant reads (tested) and the pages show (web seeds without state). Not
 run: the Linux race run and the full suite (left to the main session).
+
+## WebSocket: a bridge to TCP, and links on fib's WebSocket
+
+On 2026-11-21 the user asked what fit does with WebSockets. fit proxies them (I47, I48, over HTTP/1.1, h2
+and h3) and uses them for the tunnel, the cluster's links and the LLM mesh; it has no handler that
+bridges a WebSocket to a TCP service, and fib's `websocket.Connection` lacked the forced close and the
+send backpressure fit asked for in A52 and A53, so the LLM mesh and the tunnel work around them.
+
+**Decision pending review** (2026-11-21): **no handler for WebSocket application logic** (an echo, a
+broadcast hub, scripts run per message). fit is a gateway, as nginx, Caddy and Traefik are, none of
+which has one; an application's WebSocket belongs in its backend, which `proxy` reaches. The bridge
+below is the one WebSocket endpoint a gateway is expected to offer. Alternative: a `ws_broadcast`
+handler fed by the Admin API or by a sync sink, for dashboards with no backend.
+
+### I224 `websockify`: a WebSocket bridged to TCP
+
+- **Why**: browser clients for TCP services (noVNC for VNC, web terminals for SSH or telnet, game and
+  MUD clients) can only open WebSockets, so a server needs a bridge such as websockify in front of the
+  service. fit proxies a WebSocket only to a WebSocket upstream.
+- **Do**: a `websockify` handler: it accepts a WebSocket upgrade on its route (HTTP/1.1, and extended
+  CONNECT over h2 and h3), dials a TCP target, and copies the client's binary messages to the target as
+  bytes and the target's bytes to the client as binary messages; the `binary` and `base64` subprotocols
+  as websockify offers them; a fixed `address`, or a named TCP upstream, or a token table that picks the
+  target by a query parameter (websockify's token plugin), never a target the client names; dial and
+  idle timeouts, a connection limit, metrics; backpressure both ways: a target that reads slowly holds
+  the WebSocket's reads (fib A53 `HoldReads`, `OnWritable`), a client that reads slowly holds the
+  target's. Schema, the workbench's form and labels, the reference.
+- **Done when**: e2e tests with fib's WebSocket client through fit to a TCP echo server: small and
+  large messages, base64, a token, a refused token, a target that is down, slow readers on each side
+  holding the other; the memory of an idle bridged connection measured.
+- **Touches**: a new `handler/websockify`, `schema`, the workbench, `docs/reference`.
+
+### I225 The LLM mesh on fib A52 and A53
+
+- **Do**: `llm/internal/wire` closes a dead or slow link with `Abort` on both sides and takes the
+  peer's address from `RemoteAddr`, dropping the listener's map of `fib.Connection`s and the dialer's
+  `Dial` hook; a link whose queue is above its limit (`WriteMessageNoWait`) stops granting credit to
+  the streams that feed it and holds its reads until `OnWritable`; the slow timeout stays as the last
+  resort.
+- **Done when**: the wire and mesh tests pass, a test shows a slow peer holding its producers before
+  the slow timeout, and decision 028's stopgap notes are updated.
+- **Touches**: `llm/internal/wire`, `llm/internal/mesh`, `docs/llm.md`.
+
+### I226 The tunnel's WebSockets on fib's `websocket.Connection`
+
+- **Do**: the tunnel's web proxies and console socket, which frame WebSocket themselves over a
+  `fib.Connection` (`tunnel/internal/transport/ws`) to have `HoldReads` and `NotifyOutput`, move to
+  fib's `websocket.Connection` with A53, and its links' forced closes to A52.
+- **Done when**: the tunnel's tests pass over ws and wss, backpressure tests still hold, and the
+  framing code is gone or reduced to what fib's package cannot do.
+- **Touches**: `tunnel/internal/transport`, `tunnel/hub`, `tunnel/proxy`, `docs/tunnel.md`.
+

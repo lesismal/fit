@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I224。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I227。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -381,6 +381,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I208 | （第二阶段）RSS 自动下载 | I198 | done |
 | I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
 | I210 | 客户端角色用上 fib A87–A88：`/trackers` 显示各 tracker 的 announce 状态、peer 来源与 Web 种子状态，就地重新校验 | I203、I204 | done |
+| **WebSocket** | | | |
+| I224 | `websockify`：把 WebSocket 桥接到 TCP 服务，与 websockify 相同（noVNC、网页终端），借助 fib A53 双向背压 | — | todo |
+| I225 | LLM 互联链路使用 fib A52 与 A53：以 `Abort` 和 `RemoteAddr` 取代地址表与拨号钩子，超出上限的链路压住其生产者 | — | todo |
+| I226 | tunnel 的 Web 代理与控制台套接字改用 fib 的 `websocket.Connection`，不再自行分帧 | — | todo |
 
 ## M0 基础
 
@@ -6953,3 +6957,45 @@ race 测试与完整测试套件（留给主会话）。
 
 由此遗留：fit 中没有；运行较早 fit 的集群成员以旧结构应答 `/trackers`，助手能读（已测试），页面能显示（Web 种子没有状态）。
 未运行：Linux 上的 race 测试和完整测试（留给主会话）。
+
+## WebSocket：桥接到 TCP，以及基于 fib WebSocket 的链路
+
+2026-11-21 用户询问 fit 对 WebSocket 的支持。fit 能代理 WebSocket（I47、I48，经 HTTP/1.1、h2 和 h3），tunnel、
+集群链路与 LLM 互联也用它；但没有把 WebSocket 桥接到 TCP 服务的处理器，fib 的 `websocket.Connection` 也缺少 fit
+在 A52 与 A53 中提出的强制关闭与发送背压，LLM 互联与 tunnel 只能用临时办法绕过。
+
+**待审查的决定**（2026-11-21）：**不提供承载 WebSocket 业务逻辑的处理器**（回显、广播中心、按消息运行脚本）。
+fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处理器；应用的 WebSocket 属于其后端，由 `proxy`
+转发。下面的桥接是网关应当提供的唯一一种 WebSocket 端点。备选：由 Admin API 或 sync 目标供数据的
+`ws_broadcast` 处理器，用于没有后端的看板。
+
+### I224 `websockify`：把 WebSocket 桥接到 TCP
+
+- **为什么**：TCP 服务的浏览器客户端（VNC 的 noVNC、SSH 或 telnet 的网页终端、游戏与 MUD 客户端）只能打开
+  WebSocket，所以服务前面需要 websockify 这样的桥。fit 只能把 WebSocket 代理到 WebSocket 上游。
+- **做什么**：`websockify` 处理器：在其路由上接受 WebSocket 升级（HTTP/1.1，以及 h2、h3 上的扩展 CONNECT），
+  拨号 TCP 目标，把客户端的二进制消息作为字节写给目标，把目标的字节作为二进制消息发给客户端；支持 websockify
+  提供的 `binary` 与 `base64` 子协议；目标是固定的 `address`、具名的 TCP 上游，或按查询参数选择目标的令牌表
+  （websockify 的 token 插件），绝不由客户端指定目标；拨号与空闲超时、连接数上限、指标；双向背压：读得慢的目标
+  压住 WebSocket 的读取（fib A53 `HoldReads`、`OnWritable`），读得慢的客户端压住目标的读取。Schema、工作台的
+  表单与标签、参考文档。
+- **完成标准**：用 fib 的 WebSocket 客户端经 fit 到 TCP 回显服务器的端到端测试：小消息与大消息、base64、令牌、
+  被拒绝的令牌、目标不可达、两侧读得慢时压住对方；测量一个空闲桥接连接的内存。
+- **涉及**：新的 `handler/websockify`、`schema`、工作台、`docs/reference`。
+
+### I225 LLM 互联使用 fib A52 与 A53
+
+- **做什么**：`llm/internal/wire` 两侧都用 `Abort` 关闭已死或过慢的链路，用 `RemoteAddr` 取得对端地址，
+  去掉监听方的 `fib.Connection` 表和拨号方的 `Dial` 钩子；队列超出上限（`WriteMessageNoWait`）的链路停止向为其
+  供数据的流归还额度，并暂停读取，直到 `OnWritable`；慢连接超时仍作为最后的手段。
+- **完成标准**：wire 与 mesh 的测试通过，有测试表明慢对端在慢连接超时之前就压住其生产者，决定 028 中关于临时
+  办法的说明随之更新。
+- **涉及**：`llm/internal/wire`、`llm/internal/mesh`、`docs/llm.md`。
+
+### I226 tunnel 的 WebSocket 改用 fib 的 `websocket.Connection`
+
+- **做什么**：tunnel 的 Web 代理与控制台套接字为了用上 `HoldReads` 和 `NotifyOutput`，在 `fib.Connection` 上
+  自行分帧（`tunnel/internal/transport/ws`），现改用带 A53 的 fib `websocket.Connection`，链路的强制关闭改用 A52。
+- **完成标准**：tunnel 的测试经 ws 与 wss 通过，背压测试仍然成立，自行分帧的代码去掉，或只剩 fib 的包做不到的部分。
+- **涉及**：`tunnel/internal/transport`、`tunnel/hub`、`tunnel/proxy`、`docs/tunnel.md`。
+
