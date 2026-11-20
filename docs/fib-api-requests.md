@@ -101,6 +101,9 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A92 | A store's answer that sets its own interval | requested | — | I207 |
 | A93 | Response decompression in the HTTP client | requested | — | I208 |
 | A94 | A response size limit per request | requested | 11 | I208 |
+| A95 | A WebSocket connection's local address, transport and attachment, set at upgrade too | done, fib `8f81545` (`main`) | — | I224, I225, I226, I227 |
+| A96 | A handshake timeout and a path for a WebSocket handler bound directly | done, fib `20eab8b` (`main`) | — | I226 |
+| A97 | A WebSocket client's frames from the buffer pool | done, fib `081d83e` (`main`) | — | I226 |
 
 ## Evidence
 
@@ -2771,3 +2774,36 @@ file was changed loses two pieces and downloads them again.
 **Suggested API.** A per-request limit (on the request or its options) under the client's.
 
 **How fit uses it.** One HTTP client for the BitTorrent role's fetches.
+
+## A95: A WebSocket connection's local address, transport and attachment
+
+**Status.** Requested and done on 2026-11-21, fib `8f81545`, from I224, I225 and I226.
+
+**Problem.** Moving the tunnel, the LLM mesh and the new `websockify` bridge onto `websocket.Connection`
+(A52, A53) left each of them finding its own state in a map keyed by remote address, request or
+connection, looked up on every message, and unable to change a served connection's queue limit or
+keep-alive, or to give an accepted link's local address.
+
+**API.** `LocalAddr()`; `NetConn() *fib.Connection` (nil when upgraded) and `Tunnel() *http.Tunnel`
+(when upgraded); `SetAttachment(any)` and `Attachment() any`, atomic and still readable in `OnClose`;
+`ServerHandler.UpgradeWithAttachment(c, header, v)`, which sets it before `OnOpen`. A connection's
+state stays at 160 bytes.
+
+## A96: A handshake timeout and a path for a WebSocket handler bound directly
+
+**Status.** Requested and done on 2026-11-21, fib `20eab8b`, from I226.
+
+**Problem.** A `ServerHandler` bound straight to a binding had no limit on its upgrade head and no path
+check; the tunnel scanned each read for the head's end under a timer of its own and refused wrong
+paths through `CheckOrigin` with 403.
+
+**API.** `Config.HandshakeTimeout` (10 s by default, below zero for none) and `Config.Path` (other paths
+get 404).
+
+## A97: A WebSocket client's frames from the buffer pool
+
+**Status.** Requested and done on 2026-11-21, fib `081d83e`, from I226.
+
+**Problem.** A client masked each frame into a new slice, where the tunnel's own client had used the
+buffer pool. Now a client's send allocates nothing (`TestClientWriteMessageAllocs`).
+

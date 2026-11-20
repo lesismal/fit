@@ -99,6 +99,9 @@
 | A92 | Store 的应答可设定自己的间隔 | 已提出 | — | I207 |
 | A93 | HTTP 客户端解压响应 | 已提出 | — | I208 |
 | A94 | 按请求设定响应大小上限 | 已提出 | 11 | I208 |
+| A95 | WebSocket 连接的本端地址、底层传输与附加数据，也可在升级时设置 | 已完成，fib `8f81545`（`main`） | — | I224、I225、I226、I227 |
+| A96 | 直接绑定的 WebSocket 处理器的握手超时与路径 | 已完成，fib `20eab8b`（`main`） | — | I226 |
+| A97 | WebSocket 客户端的帧取自缓冲池 | 已完成，fib `081d83e`（`main`） | — | I226 |
 
 ## 证据
 
@@ -2127,3 +2130,30 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 **建议的 API。** 按请求的上限（在请求或其选项上），不超过客户端的上限。
 
 **fit 如何使用。** BitTorrent 角色的各种抓取共用一个 HTTP 客户端。
+
+## A95：WebSocket 连接的本端地址、底层传输与附加数据
+
+**状态。** 2026-11-21 提出并完成，fib `8f81545`，来自 I224、I225 与 I226。
+
+**问题。** tunnel、LLM 互联与新的 `websockify` 桥改用 `websocket.Connection`（A52、A53）之后，各自都要在按远端地址、
+请求或连接为键的表中查找自己的状态，每条消息查一次；也无法修改被服务连接的队列上限或 keep-alive，拿不到被接受链路的本端地址。
+
+**API。** `LocalAddr()`；`NetConn() *fib.Connection`（升级而来时为 nil）与 `Tunnel() *http.Tunnel`（升级而来时）；
+`SetAttachment(any)` 与 `Attachment() any`，原子操作，在 `OnClose` 中仍可读取；`ServerHandler.UpgradeWithAttachment(c, header, v)`
+在 `OnOpen` 之前设置它。连接的状态仍为 160 字节。
+
+## A96：直接绑定的 WebSocket 处理器的握手超时与路径
+
+**状态。** 2026-11-21 提出并完成，fib `20eab8b`，来自 I226。
+
+**问题。** 直接绑定的 `ServerHandler` 对升级请求头没有时间限制，也不检查路径；tunnel 用自己的定时器在每次读取中寻找请求头的结尾，
+并通过 `CheckOrigin` 以 403 拒绝错误的路径。
+
+**API。** `Config.HandshakeTimeout`（默认 10 秒，小于零表示不限）与 `Config.Path`（其他路径得到 404）。
+
+## A97：WebSocket 客户端的帧取自缓冲池
+
+**状态。** 2026-11-21 提出并完成，fib `081d83e`，来自 I226。
+
+**问题。** 客户端为每一帧新建切片来加掩码，而 tunnel 自己的客户端用的是缓冲池。现在客户端发送不再分配内存（`TestClientWriteMessageAllocs`）。
+
