@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/andybalholm/brotli v1.2.6
 	github.com/klauspost/compress v1.20.3
-	github.com/lesismal/fib v1.8.1-0.20261120222831-fd94050a9e1d
+	github.com/lesismal/fib v1.8.1-0.20261120230513-48c4d83efe92
 	github.com/tetratelabs/wazero v1.12.0
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.58.0
