@@ -8,6 +8,9 @@ import (
 	"io"
 	"net"
 	stdhttp "net/http"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -173,4 +176,63 @@ func TestTLSReloadNewCertificate(t *testing.T) {
 	if _, _, err := h3Get(t, target, "a.example", a); err == nil {
 		t.Error("h3: the old certificate is still served")
 	}
+}
+
+// engine.kernel_tls_offload hands each TLS connection's sealing to the
+// kernel right after its handshake: the listener's HTTP over TLS still
+// answers, over HTTP/1.1 and HTTP/2, and on Linux with the kernel's TLS
+// (/proc/net/tls_stat) the open connections count among the kernel's.
+func TestKernelTLSOffload(t *testing.T) {
+	a, err := certtest.Write(t.TempDir(), "a.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, on := range []bool{false, true} {
+		doc := strings.Replace(tlsDoc(t, "", a), `{"listeners"`, fmt.Sprintf(`{"engine": {"kernel_tls_offload": %v}, "listeners"`, on), 1)
+		_, s := start(t, doc)
+		if s.kernelTLS != on {
+			t.Fatalf("kernel_tls_offload %v: the server took %v", on, s.kernelTLS)
+		}
+		addr := s.Addrs()[0].Addr.String()
+		before, haveStat := kernelTLSSends()
+		for _, h2 := range []bool{false, true} {
+			c := tlsClient(addr, h2, a)
+			defer c.CloseIdleConnections()
+			for i := 0; i < 3; i++ {
+				resp, err := c.Get("https://a.example/")
+				if err != nil {
+					t.Fatalf("kernel_tls_offload %v, h2=%v: %v", on, h2, err)
+				}
+				body, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if string(body) != "ok" {
+					t.Fatalf("kernel_tls_offload %v, h2=%v: %q", on, h2, body)
+				}
+			}
+		}
+		// The two clients' connections stay open, so the kernel counts them
+		// while they do. Others on the machine may come and go, so only the
+		// count going up is checked.
+		if after, _ := kernelTLSSends(); on && haveStat && after <= before {
+			t.Errorf("kernel_tls_offload on: the kernel seals %d connections, %d before", after, before)
+		}
+	}
+}
+
+// kernelTLSSends is how many sockets the kernel's TLS seals for now, in
+// software or on the network card, and whether the system tells.
+func kernelTLSSends() (int, bool) {
+	data, err := os.ReadFile("/proc/net/tls_stat")
+	if err != nil {
+		return 0, false
+	}
+	n := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && (f[0] == "TlsCurrTxSw" || f[0] == "TlsCurrTxDevice") {
+			v, _ := strconv.Atoi(f[1])
+			n += v
+		}
+	}
+	return n, true
 }

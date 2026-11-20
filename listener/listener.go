@@ -57,6 +57,11 @@ type Server struct {
 	engine  *fib.Engine
 	running chan error
 
+	// kernelTLS is engine.kernel_tls_offload, read when fit starts as the
+	// rest of engine is: TLS listeners hand their connections' sealing to
+	// the kernel right after the handshake.
+	kernelTLS bool
+
 	mu    sync.Mutex // orders reloads
 	bound []*binding // the current graph's listeners, in its order
 	drain time.Duration
@@ -175,6 +180,7 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{rt: rt, engine: engine, running: make(chan error, 1), drain: DefaultDrainTimeout}
+	s.kernelTLS = g.Engine != nil && g.Engine.KernelTLSOffload
 	for _, l := range g.Listeners {
 		b, err := s.bind(l, false)
 		if err != nil {
@@ -308,8 +314,9 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 				// fib's TLS hands the HTTP handler plaintext, which serves
 				// HTTP/2 or HTTP/1.1 as ALPN chose. A connection that sends
 				// a large file hands its sealing to the kernel's TLS, by
-				// fib's default.
-				h = &fibtls.Handler{Config: tlsConfig, Handler: h}
+				// fib's default, or every connection right after its
+				// handshake with engine.kernel_tls_offload.
+				h = &fibtls.Handler{Config: tlsConfig, Handler: h, KernelTLSFromHandshake: s.kernelTLS}
 			}
 		}
 		switch {
