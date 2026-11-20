@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I223。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I224。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -309,6 +309,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I157 | workbench 的日志页面：每个输出、写向它的 logger 与格式、磁盘上的文件及其大小和时间、切割与保留表单、带预览和确认的立即切割与立即清理，以及警告 | I155, I156, I120 | done |
 | **性能** | | | |
 | I158 | 让 fib v1.7.1 的 HTTP/2 请求检查开销尽可能低：fit 的 `fixed` 和 `static` 在 h2c 上回到与 fib `5c0e5b9` 噪声内的水平（2026-11-05 为 −2.4% 和 −1.7%），检查全部保留 | — | done |
+| I223 | 压缩更省：`compress` 支持按数字设压缩等级，默认 `fastest`，gzip 排在 br 之前，`min_bytes` 改为 1400，过滤器的尾部不再复制（fib `BodyReleaser`）；`static` 的 `compress` 为内存中的文件保存压缩副本；`cache` 放在 `compress` 之前的用法写入文档并有测试；适配器转换压缩等级 | — | done |
 | **Agent 与隧道（续）** | | | |
 | I159 | 为隧道与 LLM 功能的 mesh 派发 token：监听方生成、列出、设置过期与吊销 token，任何角色都可用 token 代替共享密码，每个 token 是独立凭据，可设有效期；对端无需知道长期密码，没有对所有部署都通用的猜测表，也不会因为知道某个角色的密码就能冒充另一个成员 | I106, I113 | done |
 | I160 | 隧道与 LLM mesh 的 TLS（2026-11-06 审查所得）：链路的证书选项与地址分开传递，地址中的任何内容都不能覆盖 pin；非 loopback 时拒绝 `quic_insecure`；没有 store 时自签证书在重启后保留；LLM 监听的证书文件变化时重新加载 | I159 | done |
@@ -3122,6 +3123,23 @@ fit 自身的日志和访问日志都会写文件，而今天的文件只打开�
 4. **A/B 构建的是什么。** fit 的 main 调用了 `Context.SetIdleTimeout`，`5c0e5b9` 没有它，因此两边都从 fit `35270ef4`（v1.7.1 的
    固定版本，与发现开销的那次 A/B 相同）构建，在临时 modfile 中用 `replace`。由于用户的 `qwen27b.service` 占着 8081，运行时把
    基准框架的 h2c 端口临时改为 8091，未提交。
+
+### I223 压缩更省 — done
+
+- **原因**：2026-11-20 用户问 fit 是否支持 gzip 压缩回包、性能如何、还能怎么优化。压缩一个响应的开销是发送它的许多倍（一个 16 KB 的 JSON 整体发送约 2.6 µs，在笔记本上用 gzip 5 压缩约 50 µs，仅作参考，不是基准测试结果），而 fit 每次请求都重新压缩，内存里同一个文件也是，默认等级还是 gzip 5、brotli 4。包里的基准用一行 57 字节的文本重复填充，压缩比约 50 比 1，让 gzip 看起来有 1.8 GB/s。
+- **完成**：`compress` 新增 `gzip_level`（1-9）、`brotli_level`（1-11）、`zstd_level`（1-22），各自覆盖 `level` 给该编码的等级，参考文档列出 `fastest`、`default`、`better` 对应的数字；`level` 不写时为 `fastest`；默认编码顺序为 zstd、gzip、br；`min_bytes` 改为 1400。过滤器不再复制 `Close` 返回的尾部：fib `9ea8838` 新增 `BodyReleaser`，fib 发送或复制完尾部后调用 `Release`，压缩器这时才回到池中。这个 fib 提交还修了此次发现的 fib bug：异步过滤器之后的同步过滤器，`Close` 在其 `Filter` 输出被复制之前执行，复用缓冲区的过滤器会把 `BODY<end>` 发成 `<end<end>`。`static` 新增 `compress`：内存中的文件按客户端要的编码各存一份压缩副本，在文件池中只压缩一次（gzip 9、brotli 9、zstd 最高档），带自己的 ETag，计入 `max_cache_bytes`；Range 请求、小于 1400 字节的文件、不可压缩的类型、压缩后缩小不到二十分之一的文件按原样发送。`cache` 放在 `compress` 之前时按编码分别缓存压缩后的响应，有测试保证，参考文档已写明。nginx 适配器转换 `gzip_comp_level` 和 `gzip_min_length`，Caddyfile 适配器转换 `encode` 的等级。`BenchmarkCompressBody` 和 `BenchmarkCompressParallel` 使用压缩比接近 API 响应的 JSON 记录。
+- **测试**：按名称和数字设等级、越界的数字被拒绝；`max_in_flight: 1` 时连续多个响应（整体与流式，HTTP/1.1 与 h2c）都被压缩（在 fib v1.8.0 上不复制尾部时名额不会归还，测试失败）；cache 在 compress 之前，六个请求三种编码，处理器只被调用三次；文件副本按编码和 q 值选择、解压比对、ETag 与 304、Range、预压缩文件优先、小文件、图片和随机数据、缓存放不下、文件池拒绝任务；适配器的等级转换；fib 的 `TestBodyFilterRelease`（有无异步过滤器）。
+
+**待审决定**（实现时所做，2026-11-20；在用户裁定前有效）：
+
+1. **默认 `fastest`。** 不设等级的配置现在用 gzip 1、brotli 1、zstd 1 压缩，原来是 gzip 5、brotli 4、zstd 默认档：体积大百分之几，开销小很多，与 nginx 默认的 `gzip_comp_level 1` 一致。`level: "default"` 含义不变，因此它的名字不再表示默认值；另一种做法是给 gzip 5 等起新名字，这会破坏配置 v1。
+2. **默认 `encodings` 中 gzip 排在 br 前面**：在边发边压的等级下，brotli 1 比 gzip 1 慢，JSON 上也不更小，所以发送 `gzip, deflate, br` 的浏览器会得到 gzip。另一种做法：保持 br 第二，以便 `better` 时压缩比更好。
+3. **每种编码单独用数字设等级**，而不是三种共用一个数字：它们的范围不同（gzip 1-9、brotli 0-11、zstd 1-22）。不支持 brotli 0，这样 0 可以表示"未设置"；zstd 用它通常的 1-22，编码器只有四档速度（1-2、3-5、6-9、10-22）。
+4. **`min_bytes` 改为 1400**（原为 1024）：更小的响应连同响应头不论压缩与否都在一个包内发完。未声明长度的响应体仍会被压缩，与以前一样。
+5. **静态副本的等级**为 gzip 9、brotli 9、zstd 最高档，没有用 brotli 11：后者慢很多倍、只小百分之几，1 MiB 的文件会占住文件池的一个工作者数秒，文件每次变化都要重做。副本只在客户端请求该编码时才生成，生成后才使用；之前文件按原样发送（路由上有 `compress` 中间件时由它压缩）。缩小不到二十分之一的副本不保留。副本的 ETag 是文件的 ETag 在引号内加 `-<编码>`，且不带 `Accept-Ranges`：Range 请求得到原文件。
+6. **`compress` 保留在途计数**（每个响应一次原子加、一次减），直到下面的 A/B 说明它是否有开销。
+
+**未完成**：决定 1、2、6 所依据的压测机微基准尚未运行（压测机的 ssh master 未打开）：`bench/microbench.sh -pkg ./middleware/compress -bench CompressBody`，`2208938a`（旧代码，fib `9ea8838`）对比 `95b54023`，看各等级的开销与压缩比以及 `Close` 去掉的复制；`-bench CompressParallel`，`95b54023` 对比 `253fe3cb`（本地分支 `bench-noinflight`，去掉计数），用于决定 6。
 
 ## 数据同步：从生产者到消费者
 

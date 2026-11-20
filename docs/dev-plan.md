@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I223.
+Status: `todo`, `doing` or `done`. The next free iteration number is I224.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -319,6 +319,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I223.
 | I157 | The workbench's Logs page: each output, its loggers and format, the files on disk with sizes and ages, the rotation and retention form, rotate now and clean up now with a preview and a confirmation, and warnings | I155, I156, I120 | done |
 | **Performance** | | | |
 | I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | done |
+| I223 | Compression made cheaper: `compress` levels by number, `fastest` by default, gzip ahead of br, `min_bytes` 1400, no copy of a filter's tail (fib `BodyReleaser`); `static`'s `compress` keeps compressed copies of files in memory; `cache` before `compress` documented and tested; the adapters convert levels | — | done |
 | **Agent and tunnel, continued** | | | |
 | I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | done |
 | I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | done |
@@ -4129,6 +4130,68 @@ Work on throughput and latency that no feature track owns.
    sides were built from fit `35270ef4` (the v1.7.1 pin, as in the A/B that found the cost) with a
    `replace` in a scratch modfile. The harness's h2c port was moved to 8091 for the run, uncommitted,
    since the user's `qwen27b.service` holds 8081.
+
+### I223 Compression made cheaper — done
+
+- **Why**: on 2026-11-20 the user asked whether fit compresses responses with gzip, how fast, and what
+  could be faster. Compressing costs a response many times what sending it does (a 16 KB JSON body
+  that took 2.6 µs to send whole took about 50 µs with gzip 5 on a laptop, a hint, not a benchmark
+  result), and fit compressed every
+  request anew, also the same file kept in memory, at gzip 5 and brotli 4 by default. The package's
+  benchmark sent one 57-byte line repeated, which compresses about 50 to 1 and made gzip look like
+  1.8 GB/s.
+- **Done**: `compress` takes `gzip_level` (1-9), `brotli_level` (1-11) and `zstd_level` (1-22), each
+  in place of what `level` gives that encoding, and the reference has a table of the numbers
+  `fastest`, `default` and `better` stand for; `level` is `fastest` when left out; the encodings
+  offered are zstd, gzip, br in that order; `min_bytes` is 1400. The filter no longer copies what
+  `Close` returns: fib `9ea8838` adds `BodyReleaser`, whose `Release` fib calls once it has sent or
+  copied the tail, and the compressor goes back to its pool then. That fib commit also fixes a fib
+  bug the work found: after an asynchronous filter, a synchronous filter's `Close` ran before its
+  `Filter` output was copied, so a filter reusing its buffer sent `<end<end>` for `BODY<end>`.
+  `static` takes `compress`: a file it keeps in memory is also kept compressed, one copy for each
+  encoding a client asks for, made once on the file pool at gzip 9, brotli 9 or zstd's best, served
+  with its own ETag, counted in `max_cache_bytes`; ranged requests, files under 1400 bytes, types that
+  do not compress and files that compress by less than a twentieth get the file as it is. `cache`
+  before `compress` keeps each encoding's response; a test holds it to that and the reference says
+  so. The nginx adapter converts `gzip_comp_level` and `gzip_min_length`, the Caddyfile adapter
+  `encode`'s levels. `BenchmarkCompressBody` and `BenchmarkCompressParallel` send JSON records that
+  compress as API responses do.
+- **Tests**: levels by name and by number, out-of-range numbers refused; a run of compressed
+  responses with `max_in_flight: 1`, whole and streamed, over HTTP/1.1 and h2c, each compressed (it
+  failed on fib v1.8.0, where the place was never given back without the copy); cache before
+  compress over six requests and three encodings, the handler reached three times; a file's copies
+  by encoding and q value, decompressed and compared, their ETags and 304s, a range, a twin ahead of
+  a copy, small files, images and noise, a cache with no room, a pool that refuses the job; the
+  adapters' levels; fib's `TestBodyFilterRelease` with and without an asynchronous filter.
+
+**Decisions pending review** (made while building it, 2026-11-20; each stands until the user rules on it):
+
+1. **`fastest` by default.** A config that sets no level now compresses at gzip 1, brotli 1, zstd 1
+   where it was gzip 5, brotli 4, zstd's default: a few hundredths larger, much cheaper, as nginx's
+   default `gzip_comp_level 1`. `level: "default"` keeps its meaning, so its name no longer says the
+   default; the alternative was a new name for gzip 5 and friends, a breaking change to config v1.
+2. **gzip ahead of br** in the default `encodings`: at the levels a response is compressed at as it
+   goes, brotli 1 is slower than gzip 1 and no smaller on JSON, so a browser sending `gzip, deflate,
+   br` gets gzip. Alternative: keep br second, for the better ratio at `better`.
+3. **Levels by number per encoding**, not one number for all three: their scales differ (gzip 1-9,
+   brotli 0-11, zstd 1-22). brotli 0 is left out, so that 0 can mean "not set"; zstd's numbers are its
+   usual scale, which the encoder runs at four speeds (1-2, 3-5, 6-9, 10-22).
+4. **`min_bytes` 1400**, where it was 1024: a smaller body goes in one packet with its header
+   whether compressed or not. A body that declares no length is still compressed, as before.
+5. **The static copies' levels** are gzip 9, brotli 9 and zstd's best, not brotli 11, which is many
+   times slower for a few hundredths: a 1 MiB file at 11 would hold a file pool worker for seconds,
+   and every change of the file makes it again. A copy is made only when a client asks for that
+   encoding, and served once made; until then the file goes as it is (for a `compress` middleware,
+   if the route has one). A copy smaller by less than a twentieth is not kept. A copy has the file's
+   ETag with `-<encoding>` inside the quotes, and no `Accept-Ranges`: a ranged request gets the file.
+6. **The count in flight stays** in `compress` (one atomic add and one subtract per response), until
+   the A/B below says whether it costs anything.
+
+**Open**: the benchmark host's micro-benchmarks, which decisions 1, 2 and 6 rest on, were not run (the
+host's ssh master was not open): `bench/microbench.sh -pkg ./middleware/compress -bench
+CompressBody` at `2208938a` (the old code, fib `9ea8838`) against `95b54023`, for the levels' costs and
+ratios and the copy `Close` no longer makes; and `-bench CompressParallel` at `95b54023` against
+`253fe3cb` (local branch `bench-noinflight`, the count removed), for decision 6.
 
 ## Sync: moving data from producers to consumers
 
