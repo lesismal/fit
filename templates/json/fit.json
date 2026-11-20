@@ -467,19 +467,37 @@
           // "module": "compress",
           // "params": {
             // // The encodings offered, the one the client prefers most chosen, and among those it prefers as
-            // // much, the first here; zstd, br and gzip when left out.
-            // // list of: zstd, br, gzip; default ["zstd","br","gzip"].
-            // "encodings": ["zstd","br","gzip"],
+            // // much, the first here; zstd, gzip and br when left out, gzip ahead of br since at the levels
+            // // a response is compressed at as it goes, brotli is slower than gzip for about the same size.
+            // // list of: zstd, br, gzip; default ["zstd","gzip","br"].
+            // "encodings": ["zstd","gzip","br"],
 
-            // // How hard the compressors work: fastest, default (gzip 5, zstd's default, brotli 4) or better
-            // // (gzip 7, zstd's better, brotli 6); default when left out.
-            // // one of: fastest, default, better; default "default".
-            // "level": "default",
+            // // How hard the compressors work: fastest (gzip 1, brotli 1, zstd 1), default (gzip 5, brotli
+            // // 4, zstd 3) or better (gzip 7, brotli 6, zstd 6); fastest when left out. gzip_level,
+            // // brotli_level and zstd_level set one encoding's level by number instead.
+            // // one of: fastest, default, better; default "fastest".
+            // "level": "fastest",
 
-            // // The shortest declared body compressed; 1024 when left out. A body that declares no length,
-            // // as one that streams, is compressed.
-            // // integer, 0 or more; default 1024.
-            // "min_bytes": 1024,
+            // // gzip's level, 1 to 9, in place of the one level gives it: 1 is fastest, 5 default, 7 better
+            // // and 9 the smallest.
+            // // integer, 1 to 9.
+            // "gzip_level": 1,
+
+            // // brotli's quality, 1 to 11, in place of the one level gives it: 1 is fastest, 4 default, 6
+            // // better and 11 the smallest, many times slower.
+            // // integer, 1 to 11.
+            // "brotli_level": 1,
+
+            // // zstd's level, 1 to 22, in place of the one level gives it: 1 is fastest, 3 default, 6 better
+            // // and 10 the smallest. The encoder has four speeds, which the levels fall into: 1-2, 3-5, 6-9
+            // // and 10-22.
+            // // integer, 1 to 22.
+            // "zstd_level": 1,
+
+            // // The shortest declared body compressed; 1400 when left out, below which a response goes in
+            // // one packet either way. A body that declares no length, as one that streams, is compressed.
+            // // integer, 0 or more; default 1400.
+            // "min_bytes": 1400,
 
             // // Deprecated: renamed min_bytes; the old name goes in config version 2.
             // "min_length": null,
@@ -1536,6 +1554,17 @@
           // // the first listed. None when left out.
           // // list of: br, zstd, gzip.
           // "precompressed": ["br","zstd","gzip"],
+
+          // // Encodings a file kept in memory is also kept compressed with, for a client that accepts one:
+          // // the one it prefers by Accept-Encoding, and among equals the first listed. Each copy is made
+          // // once, on the file pool, at a level that makes it small (gzip 9, brotli 9, zstd's best), the
+          // // first time a client asks for it, and kept until the file changes; until then the file goes
+          // // as it is, for a compress middleware to compress. A file smaller than 1400 bytes, of a type
+          // // that does not compress, as images and archives, or that compresses by less than a twentieth
+          // // is not; nor is a ranged request answered from a copy. The copies count in max_cache_bytes. A
+          // // precompressed twin on disk goes ahead of a copy. None when left out.
+          // // list of: zstd, br, gzip.
+          // "compress": ["zstd","br","gzip"],
 
           // // Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's
           // // path, and one ending in / for a directory, served by its index file. The first that exists

@@ -5445,6 +5445,15 @@ case is found once, when the config is loaded, and the names are checked only wh
 looked at, so a request answered from what the handler knows costs nothing more; a file system
 that does not fold case costs nothing at all.
 
+With `compress`, a file kept in memory (`max_file_bytes`, `max_cache_bytes`) is also kept
+compressed, one copy for each encoding a client asks for, made once on the file pool at a level
+that makes it small (gzip 9, brotli 9, zstd's best) and served from then on, so that no request
+compresses it again. Until a copy is made the file goes as it is, for a `compress` middleware to
+compress if the route has one. A copy has its own `ETag`; a ranged request gets the file as it
+is; files smaller than 1400 bytes, of types that do not compress (images, video, archives), or
+that compress by less than a twentieth get no copy. The copies count in `max_cache_bytes`, and go
+with their file when it changes. A `precompressed` twin on disk goes ahead of a copy.
+
 In a .conf file:
 
 ```fit
@@ -5454,6 +5463,7 @@ route {
 		root /srv/www
 		try_files {path} {path}/ /index.html
 		precompressed br gzip
+		compress zstd br gzip
 	}
 }
 ```
@@ -5475,6 +5485,10 @@ handler:
     precompressed:
       - br
       - gzip
+    compress:
+      - zstd
+      - br
+      - gzip
 ```
 
 In JSON:
@@ -5485,7 +5499,8 @@ In JSON:
   "handler": {"module": "static", "params": {
     "root": "/srv/www",
     "try_files": ["{path}", "{path}/", "/index.html"],
-    "precompressed": ["br", "gzip"]
+    "precompressed": ["br", "gzip"],
+    "compress": ["zstd", "br", "gzip"]
   }}
 }
 ```
@@ -5498,6 +5513,7 @@ In JSON:
 | `max_file_bytes` | integer, 0 or more | `1048576` | The largest file kept in memory, in bytes; 1 MiB when left out. |
 | `max_cache_bytes` | integer, 0 or more | `67108864` | How many bytes of files are kept in memory at most; 64 MiB when left out. |
 | `precompressed` | list of string: `br`, `zstd`, `gzip` |  | Encodings whose compressed twins, name.br, name.zst and name.gz, are served in place of a file to a client that accepts them: the one it prefers by Accept-Encoding, and among equals the first listed. None when left out. |
+| `compress` | list of string: `zstd`, `br`, `gzip` |  | Encodings a file kept in memory is also kept compressed with, for a client that accepts one: the one it prefers by Accept-Encoding, and among equals the first listed. Each copy is made once, on the file pool, at a level that makes it small (gzip 9, brotli 9, zstd's best), the first time a client asks for it, and kept until the file changes; until then the file goes as it is, for a compress middleware to compress. A file smaller than 1400 bytes, of a type that does not compress, as images and archives, or that compresses by less than a twentieth is not; nor is a ranged request answered from a copy. The copies count in max_cache_bytes. A precompressed twin on disk goes ahead of a copy. None when left out. |
 | `try_files` | list of string |  | Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's path, and one ending in / for a directory, served by its index file. The first that exists is served, and when none does the answer is 404; ["{path}", "{path}/", "/index.html"] serves a single-page app. A directory asked for without its slash is not redirected then. |
 | `browse` | boolean |  | List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out. |
 | `browse_max_entries` | integer, 0 or more | `10000` | The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0. |
@@ -6287,46 +6303,89 @@ Compresses responses with zstd, brotli or gzip as they are written.
 
 Compresses responses as they are written, with the encoding the client prefers.
 
+How hard each encoding works is `level`, one name for all three, or a number for one encoding,
+which takes its place in `level`:
+
+| `level` | `gzip_level` (1-9) | `brotli_level` (1-11) | `zstd_level` (1-22) |
+| --- | --- | --- | --- |
+| `fastest`, the default | 1 | 1 | 1 |
+| `default` | 5 | 4 | 3 |
+| `better` | 7 | 6 | 6 |
+| the smallest | 9 | 11 | 10 |
+
+zstd's encoder runs at four speeds, which its levels fall into: 1-2 fastest, 3-5 default, 6-9
+better and 10-22 best. A response compressed as it goes costs its CPU on every request: on the
+benchmark host, gzip 5 takes about half as long again as gzip 1 for a body a few hundredths
+smaller, and brotli 4 two to three times brotli 1. That is why `fastest` is the default, and why
+gzip goes ahead of brotli when a client accepts both equally: at these levels brotli is slower
+than gzip for about the same size.
+
+Every request is compressed anew. Where the same response goes out many times, compress it once:
+
+- **Files**: the `static` handler's `compress` keeps a compressed copy of each file it holds in
+  memory, made once at a level that makes it small, and its `precompressed` serves `.br`, `.zst`
+  and `.gz` files made beforehand. Either answers without this middleware compressing anything;
+  with both, this middleware compresses only what they do not.
+- **Responses that may be kept**: put the [`cache`](#http-middleware-cache) middleware before
+  `compress`. The cache then keeps each response as `compress` made it, one for each
+  `Accept-Encoding` the clients send, and a request it answers is not compressed again.
+
 In a .conf file:
 
 ```fit
 route {
-	middleware compress { encodings zstd gzip; level default; min_bytes 512 }
-	handler respond { body hello }
+	match { path /api/catalog/* }
+	middleware cache { zone catalog; default_ttl 1m }
+	middleware compress { encodings zstd gzip; gzip_level 6; min_bytes 512 }
+	handler proxy { upstream app }
 }
 ```
 
 In YAML, a route:
 
 ```yaml
+match:
+  path:
+    - /api/catalog/*
 middleware:
+  - module: cache
+    params:
+      zone: catalog
+      default_ttl: 1m
   - module: compress
     params:
       encodings:
         - zstd
         - gzip
-      level: default
+      gzip_level: 6
       min_bytes: 512
 handler:
-  module: respond
+  module: proxy
   params:
-    body: hello
+    upstream: app
 ```
 
 In JSON:
 
 ```json
 {
-  "middleware": [{"module": "compress", "params": {"encodings": ["zstd", "gzip"], "level": "default", "min_bytes": 512}}],
-  "handler": {"module": "respond", "params": {"body": "hello"}}
+  "match": {"path": ["/api/catalog/*"]},
+  "middleware": [
+    {"module": "cache", "params": {"zone": "catalog", "default_ttl": "1m"}},
+    {"module": "compress", "params": {"encodings": ["zstd", "gzip"], "gzip_level": 6, "min_bytes": 512}}
+  ],
+  "handler": {"module": "proxy", "params": {"upstream": "app"}}
 }
 ```
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `encodings` | list of string: `zstd`, `br`, `gzip` | `["zstd","br","gzip"]` | The encodings offered, the one the client prefers most chosen, and among those it prefers as much, the first here; zstd, br and gzip when left out. |
-| `level` | string: `fastest`, `default`, `better` | `"default"` | How hard the compressors work: fastest, default (gzip 5, zstd's default, brotli 4) or better (gzip 7, zstd's better, brotli 6); default when left out. |
-| `min_bytes` | integer, 0 or more | `1024` | The shortest declared body compressed; 1024 when left out. A body that declares no length, as one that streams, is compressed. |
+| `encodings` | list of string: `zstd`, `br`, `gzip` | `["zstd","gzip","br"]` | The encodings offered, the one the client prefers most chosen, and among those it prefers as much, the first here; zstd, gzip and br when left out, gzip ahead of br since at the levels a response is compressed at as it goes, brotli is slower than gzip for about the same size. |
+| `level` | string: `fastest`, `default`, `better` | `"fastest"` | How hard the compressors work: fastest (gzip 1, brotli 1, zstd 1), default (gzip 5, brotli 4, zstd 3) or better (gzip 7, brotli 6, zstd 6); fastest when left out. gzip_level, brotli_level and zstd_level set one encoding's level by number instead. |
+| `gzip_level` | integer, 1 to 9 |  | gzip's level, 1 to 9, in place of the one level gives it: 1 is fastest, 5 default, 7 better and 9 the smallest. |
+| `brotli_level` | integer, 1 to 11 |  | brotli's quality, 1 to 11, in place of the one level gives it: 1 is fastest, 4 default, 6 better and 11 the smallest, many times slower. |
+| `zstd_level` | integer, 1 to 22 |  | zstd's level, 1 to 22, in place of the one level gives it: 1 is fastest, 3 default, 6 better and 10 the smallest. The encoder has four speeds, which the levels fall into: 1-2, 3-5, 6-9 and 10-22. |
+| `min_bytes` | integer, 0 or more | `1400` | The shortest declared body compressed; 1400 when left out, below which a response goes in one packet either way. A body that declares no length, as one that streams, is compressed. |
 | `min_length` |  |  | Deprecated: renamed `min_bytes`; the old name goes in config version 2. |
 | `max_in_flight` | integer, 1 or more | `1024` | How many responses are compressed at once; past it, responses go uncompressed, so that the compressors' memory, a few hundred kilobytes each, is bounded. 1024 when left out. |
 

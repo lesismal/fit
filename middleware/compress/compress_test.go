@@ -4,11 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	stdhttp "net/http"
-	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,8 +17,8 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
-	"github.com/lesismal/fit/internal/fibtest"
 	"github.com/lesismal/fit/listener"
+	_ "github.com/lesismal/fit/middleware/cache"
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/runtime"
 )
@@ -34,6 +33,9 @@ var long = strings.Repeat(`{"name": "a record", "value": 12345, "tags": ["x", "y
 // events tells the streaming handler to go on, once the test has read the
 // first event.
 var events = make(chan struct{}, 1)
+
+// counted counts the requests /counted reached the handler with.
+var counted atomic.Int64
 
 // textHandler answers by path.
 type textHandler struct{}
@@ -62,6 +64,9 @@ func (textHandler) ServeHTTP(c *fibhttp.Context) {
 		for i := 0; i < len(long); i += 10000 {
 			_, _ = io.WriteString(c, long[i:min(i+10000, len(long))])
 		}
+	case "/counted":
+		counted.Add(1)
+		_ = c.Respond(200, "application/json", []byte(long))
 	case "/small":
 		_ = c.Respond(200, "text/plain", []byte("tiny"))
 	case "/png":
@@ -79,10 +84,15 @@ func (textHandler) ServeHTTP(c *fibhttp.Context) {
 }
 
 func serve(t *testing.T, params string) string {
+	return serveWith(t, `[{"module": "compress", "params": `+params+`}]`)
+}
+
+// serveWith serves test_text behind the middleware listed.
+func serveWith(t *testing.T, middleware string) string {
 	t.Helper()
 	c, err := config.Load([]byte(`{
   "listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c"]}],
-  "routes": [{"middleware": [{"module": "compress", "params": ` + params + `}], "handler": {"module": "test_text"}}]
+  "routes": [{"middleware": ` + middleware + `, "handler": {"module": "test_text"}}]
 }`))
 	if err != nil {
 		t.Fatal(err)
@@ -298,6 +308,50 @@ func TestCompressBounded(t *testing.T) {
 	}
 }
 
+// TestCompressReleased checks that a response compressed to its end gives
+// its place back once fib has sent what Close returned: with one place,
+// responses one after another, whole and streamed, over each protocol, are
+// all compressed, and none is left in flight.
+func TestCompressReleased(t *testing.T) {
+	base := serve(t, `{"max_in_flight": 1}`)
+	for proto, c := range clients() {
+		for range 3 {
+			for _, path := range []string{"/whole", "/large"} {
+				g := fetch(t, c, "GET", base+path, "gzip, br, zstd")
+				if g.encoding != Zstd || g.body != long {
+					t.Fatalf("%s %s: %q, %d bytes", proto, path, g.encoding, len(g.body))
+				}
+			}
+		}
+	}
+}
+
+// TestCacheOutside checks the config the docs give for responses that may
+// be kept: cache before compress keeps each compressed response, by
+// Accept-Encoding, so that a request the cache answers is not compressed
+// again, and one asking for another encoding is a response of its own.
+func TestCacheOutside(t *testing.T) {
+	base := serveWith(t, `[{"module": "cache", "params": {"zone": "compress_test", "default_ttl": "1m"}}, {"module": "compress"}]`)
+	c := clients()["http/1.1"]
+	start := counted.Load()
+	for _, tt := range []struct {
+		accept, encoding string
+		calls            int64
+	}{
+		{"gzip", Gzip, 1},
+		{"gzip", Gzip, 1}, // kept
+		{"zstd", Zstd, 2},
+		{"zstd", Zstd, 2},
+		{"", "", 3},
+		{"gzip", Gzip, 3},
+	} {
+		g := fetch(t, c, "GET", base+"/counted", tt.accept)
+		if g.encoding != tt.encoding || g.body != long || counted.Load()-start != tt.calls {
+			t.Fatalf("%q: %q, %d bytes, %d calls, want %q and %d", tt.accept, g.encoding, len(g.body), counted.Load()-start, tt.encoding, tt.calls)
+		}
+	}
+}
+
 func TestNegotiate(t *testing.T) {
 	offered := []string{Zstd, Brotli, Gzip}
 	for accept, want := range map[string]string{
@@ -324,6 +378,9 @@ func TestCompressParams(t *testing.T) {
 		{`{"encodings": ["deflate"]}`, `"deflate" is not one of`},
 		{`{"encodings": ["gzip", "gzip"]}`, "listed twice"},
 		{`{"level": "max"}`, `"max" is not one of`},
+		{`{"gzip_level": 10}`, "gzip_level"},
+		{`{"brotli_level": 0.5}`, "brotli_level"},
+		{`{"zstd_level": 23}`, "zstd_level"},
 	} {
 		v, err := config.ParseValue([]byte(`{"module": "compress", "params": `+tt.params+`}`), "middleware")
 		if err != nil {
@@ -336,36 +393,6 @@ func TestCompressParams(t *testing.T) {
 		}
 		if err == nil || !strings.Contains(err.Error(), tt.err) {
 			t.Errorf("%s: %v, want %q", tt.params, err, tt.err)
-		}
-	}
-}
-
-// BenchmarkCompress compresses a 16 KB JSON body sent whole, by encoding.
-func BenchmarkCompress(b *testing.B) {
-	body := []byte(long[:16<<10])
-	for _, enc := range []string{"none", Gzip, Brotli, Zstd} {
-		for _, level := range []string{"fastest", "default"} {
-			v, _ := config.ParseValue([]byte(`{"module": "compress", "params": {"level": "`+level+`"}}`), "middleware")
-			var ref config.ModuleRef
-			_ = v.Decode(&ref)
-			m, err := module.Load(module.Middlewares, ref, nil)
-			if err != nil {
-				b.Fatal(err)
-			}
-			h := m.(module.Middleware).Wrap(fibhttp.HandlerFunc(func(c *fibhttp.Context) {
-				_ = c.Respond(200, "application/json", body)
-			}))
-			b.Run(fmt.Sprintf("%s/%s", enc, level), func(b *testing.B) {
-				r := httptest.NewRequest("GET", "/", nil)
-				if enc != "none" {
-					r.Header.Set("Accept-Encoding", enc)
-				}
-				b.SetBytes(int64(len(body)))
-				b.ReportAllocs()
-				for b.Loop() {
-					fibtest.ServeRequest(h, r)
-				}
-			})
 		}
 	}
 }

@@ -53,6 +53,30 @@ func TestConversions(t *testing.T) {
 					t.Errorf("%+v %+v", out.Listeners, out.Routes)
 				}
 			}},
+		{name: "gzip levels", src: server("listen 80; gzip on; gzip_comp_level 6; gzip_min_length 1k; location /a { gzip_comp_level 12; gzip_min_length 0; return 204; } location /b { gzip_comp_level 1; return 204; }"),
+			warn: []string{"gzip_comp_level: skipped: gzip_comp_level takes a level of 1 to 9", "gzip_min_length: skipped: gzip_min_length takes a length"},
+			check: func(t *testing.T, out outConfig) {
+				want := map[string]string{"/a": `{"gzip_level":6,"min_bytes":1024}`, "/b": `{"gzip_level":1,"min_bytes":1024}`}
+				for _, r := range out.Routes {
+					if r.Match == nil {
+						continue
+					}
+					for _, p := range r.Match.Path {
+						w, ok := want[strings.TrimSuffix(p, "*")]
+						if !ok {
+							continue
+						}
+						b, _ := json.Marshal(r.Middleware[len(r.Middleware)-1].Params)
+						if r.Middleware[len(r.Middleware)-1].Module != "compress" || string(b) != w {
+							t.Errorf("%s: %s, want %s", p, b, w)
+						}
+						delete(want, strings.TrimSuffix(p, "*"))
+					}
+				}
+				if len(want) != 0 {
+					t.Errorf("routes not found: %v; %+v", want, out.Routes)
+				}
+			}},
 		{name: "server directives", src: server("listen 80; listen 81 proxy_protocol; listen 82 fastopen=3 default_server; listen; http2 on; ssl on; server_name a.* b.test; add_header X-A $host; add_header X-B b; gzip on; gzip_types text/plain; ssl_protocols TLSv1.3; location /a { return 204; }"),
 			warn: []string{"PROXY protocol is not converted", "listen 82 fastopen=3: skipped: not converted", "listen: skipped: no address",
 				"ssl: skipped: write ssl on listen", "server_name a.*: skipped: a wildcard at the end", "add_header: skipped: its value has variables",

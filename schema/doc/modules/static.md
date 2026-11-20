@@ -25,13 +25,23 @@ case is found once, when the config is loaded, and the names are checked only wh
 looked at, so a request answered from what the handler knows costs nothing more; a file system
 that does not fold case costs nothing at all.
 
+With `compress`, a file kept in memory (`max_file_bytes`, `max_cache_bytes`) is also kept
+compressed, one copy for each encoding a client asks for, made once on the file pool at a level
+that makes it small (gzip 9, brotli 9, zstd's best) and served from then on, so that no request
+compresses it again. Until a copy is made the file goes as it is, for a `compress` middleware to
+compress if the route has one. A copy has its own `ETag`; a ranged request gets the file as it
+is; files smaller than 1400 bytes, of types that do not compress (images, video, archives), or
+that compress by less than a twentieth get no copy. The copies count in `max_cache_bytes`, and go
+with their file when it changes. A `precompressed` twin on disk goes ahead of a copy.
+
 ```json route
 {
   "match": {"host": ["example.com"]},
   "handler": {"module": "static", "params": {
     "root": "/srv/www",
     "try_files": ["{path}", "{path}/", "/index.html"],
-    "precompressed": ["br", "gzip"]
+    "precompressed": ["br", "gzip"],
+    "compress": ["zstd", "br", "gzip"]
   }}
 }
 ```

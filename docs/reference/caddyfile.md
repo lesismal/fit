@@ -202,7 +202,7 @@ directives keep the order they are written in.
 | `handle [<matcher>] { ... }`, `route [<matcher>] { ... }` | the routes of their directives |
 | `header [<matcher>] [+\|-\|?\|>]<field> [<value>]`, or a block of them | the [`headers`](config.md#http-middleware-headers) middleware's `response`: a field is set, `+` adds, `-` deletes |
 | `request_header [<matcher>] ...` | the `headers` middleware's `request` |
-| `encode [<matcher>] [zstd] [gzip] [br] { minimum_length <n> }` | the [`compress`](config.md#http-middleware-compress) middleware; zstd and gzip when none are named |
+| `encode [<matcher>] [zstd] [gzip] [br] { minimum_length <n>; gzip <level>; zstd <level>; br <level> }` | the [`compress`](config.md#http-middleware-compress) middleware; zstd and gzip when none are named; the levels as `gzip_level`, `zstd_level` (`fastest`, `default`, `better` and `best` as 1, 3, 6 and 10) and `brotli_level` |
 | `basic_auth`, `basicauth [<matcher>] [bcrypt [<realm>]] { <user> <hash> }` | the [`basic_auth`](config.md#http-middleware-basic_auth) middleware; base64 hashes of older Caddy too |
 | `forward_auth [<matcher>] <upstreams...> { uri; copy_headers }` | the [`forward_auth`](config.md#http-middleware-forward_auth) middleware and an upstream |
 | `request_body [<matcher>] { max_size <size> }` | the [`body_limit`](config.md#http-middleware-body_limit) middleware; `10MB` is 10,000,000 bytes, `10MiB` 10,485,760 |

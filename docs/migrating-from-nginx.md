@@ -53,7 +53,7 @@ it left, merged into the running config as one proposal that lists what could no
 | `return 301 https://$host$request_uri;` | the `redirect` middleware: `{"status": 301, "to": "https://{host}{uri}"}` |
 | `rewrite ^/old/(.*)$ /new/$1;` | the `rewrite` middleware's `regexp` and `replacement` |
 | `return 200 "ok";` | the `respond` handler |
-| `gzip on;` | the `compress` middleware, with zstd and brotli too |
+| `gzip on;`, `gzip_comp_level`, `gzip_min_length` | the `compress` middleware, with zstd and brotli too; `gzip_level`, `min_bytes` |
 | `limit_req_zone` and `limit_req` | the `rate_limit` middleware: `rate`, `burst`, `key` |
 | `limit_conn` | the `concurrency_limit` middleware |
 | `client_max_body_size 10m;` | the `body_limit` middleware, or `limits.max_body_bytes` for every listener |

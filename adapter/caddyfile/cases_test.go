@@ -513,8 +513,9 @@ http://*:8090/api/*, https://localhost:8443 {
 		{"middleware directives", `:8080 {
 	encode /e1 deflate
 	encode /e2 {
-		zstd 3
-		gzip
+		zstd better
+		gzip 6
+		br 12
 		minimum_length 256
 		match {
 			header Content-Type text/*
@@ -549,13 +550,13 @@ http://*:8090/api/*, https://localhost:8443 {
 	forward_auth /f2
 	respond 200
 }
-`, []string{"encode deflate: skipped: fit compresses with", "encode: skipped: none of its encodings converted", "encode zstd 3: the level is not converted",
+`, []string{"encode deflate: skipped: fit compresses with", "encode: skipped: none of its encodings converted", "encode br 12: the level is not converted",
 			"minimum_length: skipped: minimum_length takes a number", "match: skipped: fit compresses what compresses well", "bogus: skipped: not converted",
 			"basicauth: skipped: fit checks bcrypt hashes", "carol: skipped: a user takes a name", "dave: skipped: not a bcrypt hash",
 			"basic_auth: skipped: no user converted", "uri: skipped: a URI with placeholders", "header_up: skipped: fit sends the request's fields",
 			"trusted_proxies: skipped: not converted", "copy_headers X-A>X-B: skipped: renaming", "forward_auth: skipped: no upstream address"},
 			func(t *testing.T, out outConfig) {
-				if b := js(routeAt(t, out, "/e2").Middleware[0].Params); b != `{"encodings":["zstd","gzip"],"min_bytes":256}` {
+				if b := js(routeAt(t, out, "/e2").Middleware[0].Params); b != `{"encodings":["zstd","gzip","br"],"gzip_level":6,"min_bytes":256,"zstd_level":6}` {
 					t.Errorf("/e2: %s", b)
 				}
 				if b := js(routeAt(t, out, "/b2").Middleware[0].Params); b != `{"realm":"Realm","users":[{"password_hash":"$2a$14$abc","username":"bob"}]}` {
@@ -1091,5 +1092,22 @@ func TestMatchHelpers(t *testing.T) {
 	}
 	if _, ok := size("ten"); ok {
 		t.Error("not a size")
+	}
+}
+
+func TestEncodeLevel(t *testing.T) {
+	for _, tt := range []struct {
+		encoding, level, field string
+		n                      int
+	}{
+		{"gzip", "1", "gzip_level", 1}, {"gzip", "9", "gzip_level", 9}, {"gzip", "10", "", 0}, {"gzip", "0", "", 0},
+		{"br", "11", "brotli_level", 11}, {"br", "fast", "", 0},
+		{"zstd", "3", "zstd_level", 3}, {"zstd", "22", "zstd_level", 22}, {"zstd", "fastest", "zstd_level", 1},
+		{"zstd", "best", "zstd_level", 10}, {"zstd", "23", "", 0},
+	} {
+		field, n, ok := encodeLevel(tt.encoding, tt.level)
+		if field != tt.field || n != tt.n || ok != (tt.field != "") {
+			t.Errorf("%s %s: %q %d %v", tt.encoding, tt.level, field, n, ok)
+		}
 	}
 }

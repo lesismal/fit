@@ -186,7 +186,7 @@ example.com {
 | `handle [<matcher>] { ... }`、`route [<matcher>] { ... }` | 其中指令的路由 |
 | `header [<matcher>] [+\|-\|?\|>]<field> [<value>]`，或其块形式 | [`headers`](config.md#http-middleware-headers) 中间件的 `response`：设置字段，`+` 追加，`-` 删除 |
 | `request_header [<matcher>] ...` | `headers` 中间件的 `request` |
-| `encode [<matcher>] [zstd] [gzip] [br] { minimum_length <n> }` | [`compress`](config.md#http-middleware-compress) 中间件；未指定时为 zstd 和 gzip |
+| `encode [<matcher>] [zstd] [gzip] [br] { minimum_length <n>; gzip <level>; zstd <level>; br <level> }` | [`compress`](config.md#http-middleware-compress) 中间件；未指定时为 zstd 和 gzip；压缩等级转为 `gzip_level`、`zstd_level`（`fastest`、`default`、`better`、`best` 分别为 1、3、6、10）和 `brotli_level` |
 | `basic_auth`、`basicauth [<matcher>] [bcrypt [<realm>]] { <user> <hash> }` | [`basic_auth`](config.md#http-middleware-basic_auth) 中间件；也支持旧版 Caddy 的 base64 哈希 |
 | `forward_auth [<matcher>] <upstreams...> { uri; copy_headers }` | [`forward_auth`](config.md#http-middleware-forward_auth) 中间件和一个 upstream |
 | `request_body [<matcher>] { max_size <size> }` | [`body_limit`](config.md#http-middleware-body_limit) 中间件；`10MB` 为 10,000,000 字节，`10MiB` 为 10,485,760 |

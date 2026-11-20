@@ -63,6 +63,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -97,6 +98,7 @@ type Static struct {
 	MaxFileBytes  int64    `json:"max_file_bytes,omitempty" min:"0" default:"1048576" doc:"The largest file kept in memory, in bytes; 1 MiB when left out."`
 	MaxCacheBytes int64    `json:"max_cache_bytes,omitempty" min:"0" default:"67108864" doc:"How many bytes of files are kept in memory at most; 64 MiB when left out."`
 	Precompressed []string `json:"precompressed,omitempty" enum:"br,zstd,gzip" doc:"Encodings whose compressed twins, name.br, name.zst and name.gz, are served in place of a file to a client that accepts them: the one it prefers by Accept-Encoding, and among equals the first listed. None when left out."`
+	Compress      []string `json:"compress,omitempty" enum:"zstd,br,gzip" doc:"Encodings a file kept in memory is also kept compressed with, for a client that accepts one: the one it prefers by Accept-Encoding, and among equals the first listed. Each copy is made once, on the file pool, at a level that makes it small (gzip 9, brotli 9, zstd's best), the first time a client asks for it, and kept until the file changes; until then the file goes as it is, for a compress middleware to compress. A file smaller than 1400 bytes, of a type that does not compress, as images and archives, or that compresses by less than a twentieth is not; nor is a ranged request answered from a copy. The copies count in max_cache_bytes. A precompressed twin on disk goes ahead of a copy. None when left out."`
 	TryFiles      []string `json:"try_files,omitempty" doc:"Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's path, and one ending in / for a directory, served by its index file. The first that exists is served, and when none does the answer is 404; [\"{path}\", \"{path}/\", \"/index.html\"] serves a single-page app. A directory asked for without its slash is not redirected then."`
 	Browse        bool     `json:"browse,omitempty" doc:"List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out."`
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
@@ -124,9 +126,14 @@ type Static struct {
 	// source. It is looked at when the disk is, not on a fib worker.
 	foldCase      bool
 	precompressed []encoding
-	cache         cache
-	stall         time.Duration
-	pool          *filepool.Pool
+	// compress are the encodings files kept in memory are compressed with.
+	compress []encoding
+	// vary says responses vary by Accept-Encoding: the handler serves
+	// twins or compressed copies.
+	vary  bool
+	cache cache
+	stall time.Duration
+	pool  *filepool.Pool
 	// watch reports changes under the root to the cache; nil where the
 	// system has none, or with a check_interval of 0.
 	watch *filewatch.Watcher
@@ -168,6 +175,13 @@ func (s *Static) Provision(ctx *module.Context) error {
 	for _, name := range s.Precompressed {
 		s.precompressed = append(s.precompressed, encodings[name])
 	}
+	for i, name := range s.Compress {
+		if slices.Index(s.Compress, name) < i {
+			return ctx.Params.Field("compress").Index(i).Errorf("%q is listed twice", name)
+		}
+		s.compress = append(s.compress, encodings[name])
+	}
+	s.vary = len(s.precompressed) > 0 || len(s.compress) > 0
 	for i, t := range s.TryFiles {
 		if !strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "{path}") {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
@@ -190,6 +204,7 @@ func (s *Static) Provision(ctx *module.Context) error {
 	if s.cache.maxBytes == 0 {
 		s.cache.maxBytes = DefaultMaxCacheBytes
 	}
+	s.cache.packs = len(s.compress)
 	s.cache.entries = make(map[string]*entry)
 	s.cache.lookups = make(map[string]*lookup)
 	s.cache.maxLookups = DefaultMaxLookups
@@ -325,7 +340,7 @@ func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queue
 	switch {
 	case e != nil:
 		if q.claim() {
-			serveMemory(c, v.name, e)
+			serveMemory(c, v.name, s.compressed(c.Request, full, e, v))
 		}
 	case q == nil:
 		return false

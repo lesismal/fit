@@ -47,8 +47,11 @@ const lookupOverhead = 256
 // system has none or for a file that is a symbolic link, is trusted for the
 // check interval.
 type cache struct {
-	maxFile        int64
-	maxBytes       int64
+	maxFile  int64
+	maxBytes int64
+	// packs is how many compressed copies a file kept may have: one for
+	// each of the handler's compress encodings.
+	packs          int
 	maxLookups     int
 	maxLookupBytes int64
 	// check is how long a lookup is trusted; 0 trusts none.
@@ -114,11 +117,17 @@ type entry struct {
 	data    []byte
 	header  stdhttp.Header
 	modTime time.Time
-	size    int64
+	// size is what keeping it costs: its data's bytes, and its compressed
+	// copies'.
+	size int64
 	// stamp is the file's when it was read: its size, times and inode,
 	// which tell apart a file replaced by one of the same size and
 	// modification time.
 	stamp filewatch.Stamp
+	// packs are its copies compressed with the handler's compress
+	// encodings, in their order, nil for a file not worth compressing: each
+	// nil until it is asked for, then packing, and then made or unpacked.
+	packs []atomic.Pointer[entry]
 }
 
 // lookup returns what the cache knows of name, if it learned it within the
@@ -293,6 +302,9 @@ func (c *cache) load(full string, info fs.FileInfo, stamp filewatch.Stamp, v var
 		return nil
 	}
 	e := &entry{data: data, header: fileHeader(v, info, data), modTime: info.ModTime(), size: info.Size(), stamp: stamp}
+	if v.encoding == "" {
+		e.packs = packSlots(c.packs, e.header, data)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	old := c.entries[full]
@@ -434,7 +446,7 @@ func (s *Static) twins(l *lookup) {
 // compressed twin the client prefers among those on disk. It returns the
 // variant, and the path, stat and stamp of the file that carries it.
 func (s *Static) variant(r *stdhttp.Request, l *lookup) (variant, string, fs.FileInfo, filewatch.Stamp) {
-	v := variant{name: l.name, vary: len(s.precompressed) > 0}
+	v := variant{name: l.name, vary: s.vary}
 	if i := s.preferred(r, l); i >= 0 {
 		v.encoding = s.precompressed[i].name
 		t := &l.twins[i]

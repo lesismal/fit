@@ -6628,6 +6628,18 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "compress": {
+          "description": "Encodings a file kept in memory is also kept compressed with, for a client that accepts one: the one it prefers by Accept-Encoding, and among equals the first listed. Each copy is made once, on the file pool, at a level that makes it small (gzip 9, brotli 9, zstd's best), the first time a client asks for it, and kept until the file changes; until then the file goes as it is, for a compress middleware to compress. A file smaller than 1400 bytes, of a type that does not compress, as images and archives, or that compresses by less than a twentieth is not; nor is a ranged request answered from a copy. The copies count in max_cache_bytes. A precompressed twin on disk goes ahead of a copy. None when left out.",
+          "items": {
+            "enum": [
+              "zstd",
+              "br",
+              "gzip"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
         "dotfiles": {
           "default": "deny",
           "description": "Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out.",
@@ -7338,13 +7350,19 @@
     "http.middleware.compress": {
       "additionalProperties": false,
       "properties": {
+        "brotli_level": {
+          "description": "brotli's quality, 1 to 11, in place of the one level gives it: 1 is fastest, 4 default, 6 better and 11 the smallest, many times slower.",
+          "maximum": 11,
+          "minimum": 1,
+          "type": "integer"
+        },
         "encodings": {
           "default": [
             "zstd",
-            "br",
-            "gzip"
+            "gzip",
+            "br"
           ],
-          "description": "The encodings offered, the one the client prefers most chosen, and among those it prefers as much, the first here; zstd, br and gzip when left out.",
+          "description": "The encodings offered, the one the client prefers most chosen, and among those it prefers as much, the first here; zstd, gzip and br when left out, gzip ahead of br since at the levels a response is compressed at as it goes, brotli is slower than gzip for about the same size.",
           "items": {
             "enum": [
               "zstd",
@@ -7355,9 +7373,15 @@
           },
           "type": "array"
         },
+        "gzip_level": {
+          "description": "gzip's level, 1 to 9, in place of the one level gives it: 1 is fastest, 5 default, 7 better and 9 the smallest.",
+          "maximum": 9,
+          "minimum": 1,
+          "type": "integer"
+        },
         "level": {
-          "default": "default",
-          "description": "How hard the compressors work: fastest, default (gzip 5, zstd's default, brotli 4) or better (gzip 7, zstd's better, brotli 6); default when left out.",
+          "default": "fastest",
+          "description": "How hard the compressors work: fastest (gzip 1, brotli 1, zstd 1), default (gzip 5, brotli 4, zstd 3) or better (gzip 7, brotli 6, zstd 6); fastest when left out. gzip_level, brotli_level and zstd_level set one encoding's level by number instead.",
           "enum": [
             "fastest",
             "default",
@@ -7372,16 +7396,22 @@
           "type": "integer"
         },
         "min_bytes": {
-          "default": 1024,
-          "description": "The shortest declared body compressed; 1024 when left out. A body that declares no length, as one that streams, is compressed.",
+          "default": 1400,
+          "description": "The shortest declared body compressed; 1400 when left out, below which a response goes in one packet either way. A body that declares no length, as one that streams, is compressed.",
           "minimum": 0,
           "type": "integer"
         },
         "min_length": {
-          "default": 1024,
+          "default": 1400,
           "deprecated": true,
           "description": "Renamed min_bytes; the old name goes in config version 2.",
           "minimum": 0,
+          "type": "integer"
+        },
+        "zstd_level": {
+          "description": "zstd's level, 1 to 22, in place of the one level gives it: 1 is fastest, 3 default, 6 better and 10 the smallest. The encoder has four speeds, which the levels fall into: 1-2, 3-5, 6-9 and 10-22.",
+          "maximum": 22,
+          "minimum": 1,
           "type": "integer"
         }
       },

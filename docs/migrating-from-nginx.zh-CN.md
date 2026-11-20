@@ -46,7 +46,7 @@ fit validate -c fit.conf
 | `return 301 https://$host$request_uri;` | `redirect` 中间件：`{"status": 301, "to": "https://{host}{uri}"}` |
 | `rewrite ^/old/(.*)$ /new/$1;` | `rewrite` 中间件的 `regexp` 和 `replacement` |
 | `return 200 "ok";` | `respond` 处理器 |
-| `gzip on;` | `compress` 中间件，还支持 zstd 和 brotli |
+| `gzip on;`、`gzip_comp_level`、`gzip_min_length` | `compress` 中间件，还支持 zstd 和 brotli；`gzip_level`、`min_bytes` |
 | `limit_req_zone` 与 `limit_req` | `rate_limit` 中间件：`rate`、`burst`、`key` |
 | `limit_conn` | `concurrency_limit` 中间件 |
 | `client_max_body_size 10m;` | `body_limit` 中间件，或对所有 listener 生效的 `limits.max_body_bytes` |

@@ -344,7 +344,11 @@ func (c *converter) encode(d *directive, args []string) (map[string]any, bool) {
 		case "zstd", "gzip", "br":
 			addEnc(e.line, e.name)
 			if len(e.args) > 0 {
-				c.warn(e.line, "encode %s %s: the level is not converted: fit's compress has levels fastest, default and better", e.name, e.args[0])
+				if field, n, ok := encodeLevel(e.name, e.args[0]); ok {
+					params[field] = n
+				} else {
+					c.warn(e.line, "encode %s %s: the level is not converted: fit's compress takes gzip 1 to 9, br 1 to 11, and zstd 1 to 22 or fastest, default, better and best", e.name, e.args[0])
+				}
 			}
 		case "minimum_length":
 			if len(e.args) == 1 {
@@ -371,6 +375,27 @@ func (c *converter) encode(d *directive, args []string) (map[string]any, bool) {
 		params["encodings"] = []string{"zstd", "gzip"}
 	}
 	return params, true
+}
+
+// encodeLevel is the compress param, and its value, that an encode
+// subdirective's level for encoding comes to: gzip and br by number, and
+// zstd by number or by Caddy's names for its four speeds.
+func encodeLevel(encoding, level string) (string, int, bool) {
+	field, hi := "gzip_level", 9
+	switch encoding {
+	case "br":
+		field, hi = "brotli_level", 11
+	case "zstd":
+		field, hi = "zstd_level", 22
+		if n, ok := map[string]int{"fastest": 1, "default": 3, "better": 6, "best": 10}[level]; ok {
+			return field, n, true
+		}
+	}
+	n, err := strconv.Atoi(level)
+	if err != nil || n < 1 || n > hi {
+		return "", 0, false
+	}
+	return field, n, true
 }
 
 func (c *converter) basicAuth(d *directive, args []string) (map[string]any, bool) {

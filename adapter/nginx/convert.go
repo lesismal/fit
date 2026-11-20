@@ -148,15 +148,19 @@ type zone struct {
 // from http to server to location, and for add_header, limit_req and
 // proxy_set_header only when the inner context sets none of its own.
 type settings struct {
-	root, alias  string
-	index        []string
-	tryFiles     []string
-	bodyLimit    int64
-	gzip         bool
-	addHeaders   [][2]string
-	limitReqs    []map[string]any
-	proxyHeaders [][2]string
-	hostHeader   string
+	root, alias string
+	index       []string
+	tryFiles    []string
+	bodyLimit   int64
+	gzip        bool
+	// gzipLevel and gzipMinLength are gzip_comp_level's and
+	// gzip_min_length's, 0 when not set.
+	gzipLevel     int
+	gzipMinLength int
+	addHeaders    [][2]string
+	limitReqs     []map[string]any
+	proxyHeaders  [][2]string
+	hostHeader    string
 	// authBasic is the line of the auth_basic this context is under, 0
 	// for none: its requests answer 401, since its users are not
 	// converted.
@@ -333,7 +337,25 @@ func (c *converter) setting(s *settings, d *directive, where string) {
 	case "proxy_http_version", "proxy_redirect":
 		// fit's proxy speaks HTTP/1.1 to upstreams and keeps their Location.
 		return
-	case "gzip_types", "gzip_comp_level", "gzip_min_length", "gzip_vary", "gzip_proxied", "gzip_http_version", "gzip_disable", "gzip_buffers":
+	case "gzip_comp_level":
+		if len(d.args) == 1 {
+			if n, err := strconv.Atoi(d.args[0]); err == nil && n >= 1 && n <= 9 {
+				s.gzipLevel = n
+				return
+			}
+		}
+		c.skip(d, "gzip_comp_level takes a level of 1 to 9")
+		return
+	case "gzip_min_length":
+		if len(d.args) == 1 {
+			if n, ok := size(d.args[0]); ok && n > 0 {
+				s.gzipMinLength = int(n)
+				return
+			}
+		}
+		c.skip(d, "gzip_min_length takes a length of 1 byte or more")
+		return
+	case "gzip_types", "gzip_vary", "gzip_proxied", "gzip_http_version", "gzip_disable", "gzip_buffers":
 		c.skip(d, "fit's compress middleware compresses what compresses well, with zstd, brotli or gzip")
 		return
 	case "ssl_protocols", "ssl_ciphers", "ssl_prefer_server_ciphers", "ssl_session_cache", "ssl_session_timeout",
@@ -750,7 +772,18 @@ func (c *converter) response(s *settings) []outRef {
 		mw = append(mw, outRef{Module: "headers", Params: map[string]any{"response": map[string]any{"add": add}}})
 	}
 	if s.gzip {
-		mw = append(mw, outRef{Module: "compress"})
+		ref := outRef{Module: "compress"}
+		if s.gzipLevel != 0 || s.gzipMinLength != 0 {
+			params := map[string]any{}
+			if s.gzipLevel != 0 {
+				params["gzip_level"] = s.gzipLevel
+			}
+			if s.gzipMinLength != 0 {
+				params["min_bytes"] = s.gzipMinLength
+			}
+			ref.Params = params
+		}
+		mw = append(mw, ref)
 	}
 	return mw
 }

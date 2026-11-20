@@ -2,6 +2,7 @@ package compress
 
 import (
 	stdhttp "net/http"
+	"slices"
 	"testing"
 
 	"github.com/lesismal/fit/config"
@@ -26,12 +27,24 @@ func loadCompress(t *testing.T, params string) *Compress {
 	return m.(*Compress)
 }
 
-// TestCompressLevels checks the levels' names.
+// TestCompressLevels checks the levels' names, and the levels by number,
+// which take an encoding's place in them.
 func TestCompressLevels(t *testing.T) {
-	for params, want := range map[string]int{`{"level": "fastest"}`: 0, `{}`: 1, `{"level": "better"}`: 2} {
-		if cm := loadCompress(t, params); cm.level != want || cm.InFlight() != 0 {
-			t.Errorf("%s: level %d, %d in flight", params, cm.level, cm.InFlight())
+	for params, want := range map[string][3]int{
+		`{}`:                   {1, 1, 1},
+		`{"level": "fastest"}`: {1, 1, 1},
+		`{"level": "default"}`: {5, 4, 3},
+		`{"level": "better"}`:  {7, 6, 6},
+		`{"gzip_level": 9}`:    {9, 1, 1},
+		`{"level": "better", "brotli_level": 11, "zstd_level": 22}`: {7, 11, 22},
+	} {
+		cm := loadCompress(t, params)
+		if got := [3]int{cm.gzipLevel, cm.brotliLevel, cm.zstdLevel}; got != want || cm.InFlight() != 0 {
+			t.Errorf("%s: levels %v, want %v, %d in flight", params, got, want, cm.InFlight())
 		}
+	}
+	if cm := loadCompress(t, `{}`); cm.MinBytes != 1400 || !slices.Equal(cm.encodings, []string{Zstd, Gzip, Brotli}) {
+		t.Errorf("defaults: min_bytes %d, encodings %v", cm.MinBytes, cm.encodings)
 	}
 }
 
