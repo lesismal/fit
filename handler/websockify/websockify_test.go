@@ -345,6 +345,17 @@ func TestIdleTimeout(t *testing.T) {
 	eventually(t, 5*time.Second, "the deaf bridge to end", func() bool { return f.handler().conns.Load() == 0 })
 }
 
+// TestIdleTimeoutStuck aborts, the second time the idle timeout passes, a
+// bridge whose close frame cannot go: its client stopped reading behind
+// more than the sockets hold.
+func TestIdleTimeoutStuck(t *testing.T) {
+	flood := backend(t, func(c net.Conn) { _, _ = c.Write(make([]byte, 16<<20)) })
+	f := startFit(t, routeDoc(`{"address": `+q(flood)+`, "idle_timeout": "300ms"}`, ""))
+	c := mustDial(t, clientEngine(t), "ws://"+f.addr+"/", nil)
+	c.conn.HoldReads(true)
+	eventually(t, 10*time.Second, "the stuck bridge to end", func() bool { return f.handler().conns.Load() == 0 })
+}
+
 // TestMaxConns answers 503 past max_conns, and bridges again once one has
 // ended.
 func TestMaxConns(t *testing.T) {

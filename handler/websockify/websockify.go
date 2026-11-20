@@ -107,15 +107,11 @@ type Websockify struct {
 // shardCount is how many shards a handler's bridges are kept in.
 const shardCount = 32
 
-// shard keeps some of a handler's bridges: all of them, for a drain; those
-// whose WebSocket is open, by connection, for its callbacks; and, for the
-// moment between Upgrade's call and the handler's OnOpen, those whose
-// request is being switched.
+// shard keeps some of a handler's bridges, for a drain. A bridge's
+// WebSocket carries the bridge as its attachment, for its callbacks.
 type shard struct {
-	mu     sync.Mutex
-	all    map[*bridge]struct{}
-	byConn map[*websocket.Connection]*bridge
-	byReq  map[*stdhttp.Request]*bridge
+	mu  sync.Mutex
+	all map[*bridge]struct{}
 }
 
 // Provision checks the params and builds the WebSocket handler.
@@ -366,42 +362,20 @@ func queryValue(raw, name string) string {
 	return ""
 }
 
-// shardOf returns the shard p is kept in.
-func shardOf[T any](w *Websockify, p *T) *shard {
-	return &w.shards[maphash.Comparable(w.seed, p)%shardCount]
+// shardOf returns the shard b is kept in.
+func shardOf(w *Websockify, b *bridge) *shard {
+	return &w.shards[maphash.Comparable(w.seed, b)%shardCount]
 }
 
 // wsHandler is the handler of the WebSockets a Websockify bridges.
 type wsHandler Websockify
 
-// OnOpen finds the bridge whose request switched, and keeps it by its
-// connection. It runs before Upgrade returns.
-func (h *wsHandler) OnOpen(conn *websocket.Connection, r *stdhttp.Request) {
-	w := (*Websockify)(h)
-	s := shardOf(w, r)
-	s.mu.Lock()
-	b := s.byReq[r]
-	delete(s.byReq, r)
-	s.mu.Unlock()
-	// Before any frame of the client's: the map's lock hands them over.
+// OnOpen readies the WebSocket of the bridge it carries. It runs before
+// Upgrade returns, and before any frame of the client's.
+func (h *wsHandler) OnOpen(conn *websocket.Connection, _ *stdhttp.Request) {
+	b := conn.Attachment().(*bridge)
 	b.b64 = conn.Subprotocol() == "base64"
 	conn.SetWriteBackpressure(false)
-	s = shardOf(w, conn)
-	s.mu.Lock()
-	if s.byConn == nil {
-		s.byConn = map[*websocket.Connection]*bridge{}
-	}
-	s.byConn[conn] = b
-	s.mu.Unlock()
-}
-
-// lookup returns the bridge of conn, or nil.
-func (h *wsHandler) lookup(conn *websocket.Connection) *bridge {
-	s := shardOf((*Websockify)(h), conn)
-	s.mu.Lock()
-	b := s.byConn[conn]
-	s.mu.Unlock()
-	return b
 }
 
 // OnMessage is never called for a data message: OnFrame takes them.
@@ -409,22 +383,12 @@ func (h *wsHandler) OnMessage(*websocket.Connection, websocket.Opcode, []byte) {
 
 // OnFrame passes a frame the client sent to the target.
 func (h *wsHandler) OnFrame(conn *websocket.Connection, _ websocket.Opcode, fin bool, payload []byte) {
-	if b := h.lookup(conn); b != nil {
-		b.fromClient(conn, fin, payload)
-	}
+	conn.Attachment().(*bridge).fromClient(conn, fin, payload)
 }
 
 // OnClose ends the target's side once what the client sent has gone.
 func (h *wsHandler) OnClose(conn *websocket.Connection, _ uint16, _ string, _ error) {
-	w := (*Websockify)(h)
-	s := shardOf(w, conn)
-	s.mu.Lock()
-	b := s.byConn[conn]
-	delete(s.byConn, conn)
-	s.mu.Unlock()
-	if b != nil {
-		b.clientClosed()
-	}
+	conn.Attachment().(*bridge).clientClosed()
 }
 
 // add keeps b among the handler's bridges, for a drain.
