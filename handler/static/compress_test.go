@@ -156,8 +156,9 @@ func TestCompressCopies(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	e = s.cache.current(filepath.Join(s.root, "noise.txt"), fileStamp(t, filepath.Join(s.root, "noise.txt")))
-	if e == nil || e.packs[2].Load() != unpacked {
+	// The job that finds noise not worth compressing runs on the file pool:
+	// it is marked once that job is done.
+	if e = waitPacked(t, s, filepath.Join(s.root, "noise.txt"), 2); e == nil || e.packs[2].Load() != unpacked {
 		t.Errorf("noise: not marked unpacked")
 	}
 	// Refused, nothing compresses.
@@ -182,7 +183,7 @@ func TestCompressBounds(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	full := filepath.Join(s.root, "app.js")
-	if e := s.cache.current(full, fileStamp(t, full)); e == nil || e.packs[0].Load() != unpacked || s.cache.bytes != int64(len(js)) {
+	if e := waitPacked(t, s, full, 0); e == nil || e.packs[0].Load() != unpacked || s.cache.bytes != int64(len(js)) {
 		t.Errorf("no room: kept a copy")
 	}
 	// Too large to keep: from disk, never compressed by the handler.
@@ -209,6 +210,21 @@ func TestCompressBounds(t *testing.T) {
 	if s.cache.keepPacked(full, &entry{}, &entry{size: 1}) {
 		t.Error("kept a copy of an entry not held")
 	}
+}
+
+// waitPacked returns the entry of the file at full once its i-th copy is
+// settled, made or not kept, which the file pool's job does in its time;
+// or as it is after 5 seconds.
+func waitPacked(t *testing.T, s *Static, full string, i int) *entry {
+	t.Helper()
+	e := s.cache.current(full, fileStamp(t, full))
+	for deadline := time.Now().Add(5 * time.Second); e != nil && time.Now().Before(deadline); {
+		if p := e.packs[i].Load(); p != nil && p != packing {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return e
 }
 
 // fileStamp is the stamp of the file at full.
