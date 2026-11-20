@@ -165,6 +165,11 @@ func cases(e *env) []tc {
 		{module: "fastcgi", handler: `{"module": "fastcgi", "params": {"address": "` + e.fcgi + `", "root": "/srv"}}`, status: 200},
 		{module: "static", handler: `{"module": "static", "params": {"root": "` + e.root + `"}}`, status: 200, inline: true},
 		{module: "respond", handler: `{"module": "respond", "params": {"body": "x"}}`, status: 200, inline: true},
+		// A request that is not a handshake is 426, answered inline; the
+		// target's dial runs on the engine with ServeHTTP returned, which
+		// handler/websockify's TestTargetDown and TestClientGoneWhileDialing
+		// drive.
+		{module: "websockify", handler: `{"module": "websockify", "params": {"address": "127.0.0.1:9"}}`, status: 426, inline: true},
 		// The pages' files are in memory; the room API's waits, a bcrypt
 		// login and an event stream, are handler/mediapages' TestLogin and
 		// TestWatcherCutAndSlow.
