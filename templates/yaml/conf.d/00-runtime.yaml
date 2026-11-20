@@ -125,7 +125,8 @@ schema_version: 1
   # # such a card the kernel encrypts small responses at more CPU than fit does, so it is off by
   # # default, and a connection then hands its encryption to the kernel only when it sends a large
   # # file, which goes by sendfile. Linux, AES-GCM suites of TLS 1.2 and 1.3; ChaCha20-Poly1305
-  # # and other systems keep the encryption in fit. Receiving stays in fit either way. Listeners
+  # # and other systems keep the encryption in fit. Receiving stays in fit either way. A
+  # # listener's tls.kernel_tls_offload, when set, decides for that listener instead. Listeners
   # # only: the console, the tunnel and the other TLS servers fit runs keep the default.
   # # boolean.
   # kernel_tls_offload: true

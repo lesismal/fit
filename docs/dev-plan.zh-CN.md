@@ -310,7 +310,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | **性能** | | | |
 | I158 | 让 fib v1.7.1 的 HTTP/2 请求检查开销尽可能低：fit 的 `fixed` 和 `static` 在 h2c 上回到与 fib `5c0e5b9` 噪声内的水平（2026-11-05 为 −2.4% 和 −1.7%），检查全部保留 | — | done |
 | I223 | 压缩更省：`compress` 支持按数字设压缩等级，默认 `fastest`，gzip 排在 br 之前，`min_bytes` 改为 1400，过滤器的尾部不再复制（fib `BodyReleaser`）；`static` 的 `compress` 为内存中的文件保存压缩副本；`cache` 放在 `compress` 之前的用法写入文档并有测试；适配器转换压缩等级 | — | done |
-| I224 | `engine.kernel_tls_offload`，默认关闭：TLS 监听器的连接在握手后立即把加密交给内核 TLS，用于能加密 TLS 记录的网卡（fib `KernelTLSFromHandshake`）；nginx 适配器把 `ssl_conf_command Options KTLS` 指向它 | — | done |
+| I224 | `engine.kernel_tls_offload`，默认关闭：TLS 监听器的连接在握手后立即把加密交给内核 TLS，用于能加密 TLS 记录的网卡（fib `KernelTLSFromHandshake`），监听器的 `tls.kernel_tls_offload` 可单独覆盖；nginx 适配器把 `ssl_conf_command Options KTLS` 指向它 | — | done |
 | **Agent 与隧道（续）** | | | |
 | I159 | 为隧道与 LLM 功能的 mesh 派发 token：监听方生成、列出、设置过期与吊销 token，任何角色都可用 token 代替共享密码，每个 token 是独立凭据，可设有效期；对端无需知道长期密码，没有对所有部署都通用的猜测表，也不会因为知道某个角色的密码就能冒充另一个成员 | I106, I113 | done |
 | I160 | 隧道与 LLM mesh 的 TLS（2026-11-06 审查所得）：链路的证书选项与地址分开传递，地址中的任何内容都不能覆盖 pin；非 loopback 时拒绝 `quic_insecure`；没有 store 时自签证书在重启后保留；LLM 监听的证书文件变化时重新加载 | I159 | done |
@@ -3222,12 +3222,12 @@ workbench 的 Sync 菜单由下面的迭代逐步建成：流水线列表及其�
 ### I224 给能加密 TLS 的网卡用的内核 TLS — done
 
 - **原因**：2026-11-21 用户问 “kTLS + mlnx” offload 是什么、fib 是否支持，随后要求 fib（`e95a5e1`）和 fit 都把它做成可配置、默认关闭的选项。NVIDIA（Mellanox）ConnectX-6 Dx 这类网卡在内核 TLS 持有连接密钥后自己加密 TLS 记录，配合 sendfile，文件从页缓存直达网卡，CPU 不碰数据。fib 原来只在连接发第一个大文件时才交给内核 TLS，因为软件 kTLS 加密小响应比 fib 自己更贵，所以在这种网卡上，服务 API 响应的连接永远用不上它。
-- **完成**：fib `e95a5e1` 新增 `tls.Handler.KernelTLSFromHandshake`：握手后第一次遇到用户态加密数据都已离开队列的应用数据发送时，把加密交给内核；只有应用数据会触发切换，KeyUpdate 和 alert 仍用它们对应的密钥。fit 的 `engine` 新增 `kernel_tls_offload`，与 `engine` 其他设置一样在启动时读取，所有 TLS 监听器的 `fib/tls` handler 都使用它。nginx 适配器对 `ssl_conf_command Options KTLS` 的警告会指出这个设置。fit 的 `go.mod` 升到 fib `5ce78a3`，其中也带上了 fib 的 arena 分配器改动（需显式启用，fit 未使用）。
-- **测试**：fib 的 `TestKernelTLSFromHandshake` 覆盖 TLS 1.3 以及 TLS 1.2 的 AES-128-GCM、AES-256-GCM、ChaCha20、CBC，开、关和 `NoKernelTLS` 三种情况，包括跨越切换的回复、handler 外的发送和 close_notify；在基准测试机（Linux 7.0，已加载 tls 模块）上 `TlsTxSw` 恰好增加了三个 AES-GCM 连接。fit 的 `TestKernelTLSOffload` 在开、关两种设置下通过 TLS 提供 HTTP/1.1 和 HTTP/2，在有 `/proc/net/tls_stat` 的系统上检查开启后内核加密的 socket 数增加；以及 nginx 适配器的警告。
+- **完成**：fib `e95a5e1` 新增 `tls.Handler.KernelTLSFromHandshake`：握手后第一次遇到用户态加密数据都已离开队列的应用数据发送时，把加密交给内核；只有应用数据会触发切换，KeyUpdate 和 alert 仍用它们对应的密钥。fit 的 `engine` 新增 `kernel_tls_offload`，与 `engine` 其他设置一样在启动时读取，所有 TLS 监听器的 `fib/tls` handler 都使用它；监听器的 `tls.kernel_tls_offload`（true 或 false）可以单独为这个监听器决定，重载时改了它会重新绑定这个监听器，与改 `client_auth` 相同。nginx 适配器对 `ssl_conf_command Options KTLS` 的警告会指出这个设置。fit 的 `go.mod` 升到 fib `5ce78a3`，其中也带上了 fib 的 arena 分配器改动（需显式启用，fit 未使用）。
+- **测试**：fib 的 `TestKernelTLSFromHandshake` 覆盖 TLS 1.3 以及 TLS 1.2 的 AES-128-GCM、AES-256-GCM、ChaCha20、CBC，开、关和 `NoKernelTLS` 三种情况，包括跨越切换的回复、handler 外的发送和 close_notify；在基准测试机（Linux 7.0，已加载 tls 模块）上 `TlsTxSw` 恰好增加了三个 AES-GCM 连接。fit 的 `TestKernelTLSOffload` 在开、关两种设置下通过 TLS 提供 HTTP/1.1 和 HTTP/2，在有 `/proc/net/tls_stat` 的系统上检查开启后内核加密的 socket 数增加；`TestKernelTLSOffloadPerListener` 在引擎设置关、开两种情况下运行三个监听器（开、关、不设置），检查各自的选择，以及重载只改其中一个时只重新绑定它，在基准测试机上 `TlsTxSw` 恰好增加了测试交给内核的七条连接；以及 nginx 适配器的警告。
 
 **待审决定**（实现时所做，2026-11-21；在用户裁定前有效）：
 
-1. **放在 `engine`，不放在监听器的 `tls`。** 网卡属于整台机器，用户要的是一个全局开关；`engine` 也是其他与主机硬件相关的设置所在，同样在 fit 重启时生效。另一种做法是每个监听器的 `tls.kernel_offload`，可以让公网监听器打开而控制台不开。
+1. **`engine` 设默认值，监听器的 `tls` 可以覆盖。** 网卡属于整台机器，所以默认值放在 `engine`，与 `engine` 其他设置一样在 fit 重启时生效；用户随后要求不同监听器可以不同，于是 `tls.kernel_tls_offload`（true 或 false）为单个监听器决定，重载即生效。不设置时跟随引擎。另一种做法是只有监听器级设置，那样有网卡的机器得在每个监听器上都写一遍。
 2. **只作用于监听器。** 控制台、LLM 代理、隧道传输、TURN over TLS 和集群的 link server 各自构造 `fib/tls` handler，保持 fib 的默认：它们承载的是少量、稀疏的控制流量，切换只会增加开销。
 3. **nginx 适配器只警告不转换。** `ssl_conf_command` 写在 `server` 块里，而 `kernel_tls_offload` 是整个引擎的设置，所以适配器说明对应的设置，把选择留给使用转换结果的人，与它跳过的其他指令处理方式一致。
 

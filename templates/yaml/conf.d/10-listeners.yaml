@@ -93,6 +93,14 @@ listeners:
         # # one of: require, verify_if_given; default "require".
         # mode: "require"
 
+      # # Hand the encryption of what this listener's connections send to the kernel's TLS right after
+      # # their handshakes (true) or only when one sends a large file (false), whatever
+      # # engine.kernel_tls_offload says; as engine.kernel_tls_offload when left out. For a machine
+      # # whose network card encrypts TLS, where a listener of large files gains from it and one of
+      # # small API responses may not. A reload that changes it binds the listener anew.
+      # # boolean.
+      # kernel_tls_offload: true
+
     # Who may use the listener's socks, and where it connects them: needed with socks. It serves
     # CONNECT, without authentication, and refuses BIND and UDP ASSOCIATE.
     # object.
