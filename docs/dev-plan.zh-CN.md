@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I227。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I228。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -382,9 +382,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I209 | 各角色用上 fib A80–A86：发布只哈希一次、生成可按 context 停止，列出公开 tracker 的种子并原地修改其上限，客户端事件队列有界 | I201、I202、I203 | done |
 | I210 | 客户端角色用上 fib A87–A88：`/trackers` 显示各 tracker 的 announce 状态、peer 来源与 Web 种子状态，就地重新校验 | I203、I204 | done |
 | **WebSocket** | | | |
-| I224 | `websockify`：把 WebSocket 桥接到 TCP 服务，与 websockify 相同（noVNC、网页终端），借助 fib A53 双向背压 | — | todo |
-| I225 | LLM 互联链路使用 fib A52 与 A53：以 `Abort` 和 `RemoteAddr` 取代地址表与拨号钩子，超出上限的链路压住其生产者 | — | todo |
-| I226 | tunnel 的 Web 代理与控制台套接字改用 fib 的 `websocket.Connection`，不再自行分帧 | — | todo |
+| I224 | `websockify`：把 WebSocket 桥接到 TCP 服务，与 websockify 相同（noVNC、网页终端），借助 fib A53 双向背压 | — | done |
+| I225 | LLM 互联链路使用 fib A52 与 A53：以 `Abort` 和 `RemoteAddr` 取代地址表与拨号钩子，超出上限的链路压住其生产者 | — | done |
+| I226 | tunnel 的 Web 代理与控制台套接字改用 fib 的 `websocket.Connection`，不再自行分帧 | — | done |
+| I227 | 集群成员链路使用 fib A52、A53 与 A95：`Abort`，以附加数据取代地址表，链路队列超出上限时暂缓调用 | — | done |
 
 ## M0 基础
 
@@ -2752,7 +2753,7 @@ workbench 的集群菜单，由下列迭代逐步建成：
 12. **每个凭据一条链路**：新链路取代旧链路，两个共用凭据的 fit 会轮流连接。
 13. **`Manager.Call`** 是调用成员（HTTP 或链路）的唯一方式，供 I143 起使用。
 14. **I142 的页面** 在其扩展点旁改了几行，因为扩展点没有覆盖列与编辑表单中的 `link` 访问方式。
-15. **fib WebSocket 的缺口**（A52，强制关闭；A53，发送背压）采用与 LLM mesh 相同的临时方案：按远端地址找连接，队列以在途调用数乘其大小为限。
+15. **fib WebSocket 的缺口**（A52，强制关闭；A53，发送背压）采用与 LLM mesh 相同的临时方案：按远端地址找连接，队列以在途调用数乘其大小为限。*已由 I227 取代（2026-11-21）*：改用 fib 的 `Abort`、附加数据与发送背压。
 
 ### I150 跨集群的指标、日志与证书
 
@@ -6969,7 +6970,7 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 转发。下面的桥接是网关应当提供的唯一一种 WebSocket 端点。备选：由 Admin API 或 sync 目标供数据的
 `ws_broadcast` 处理器，用于没有后端的看板。
 
-### I224 `websockify`：把 WebSocket 桥接到 TCP
+### I224 `websockify`：把 WebSocket 桥接到 TCP — done
 
 - **为什么**：TCP 服务的浏览器客户端（VNC 的 noVNC、SSH 或 telnet 的网页终端、游戏与 MUD 客户端）只能打开
   WebSocket，所以服务前面需要 websockify 这样的桥。fit 只能把 WebSocket 代理到 WebSocket 上游。
@@ -6983,7 +6984,24 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
   被拒绝的令牌、目标不可达、两侧读得慢时压住对方；测量一个空闲桥接连接的内存。
 - **涉及**：新的 `handler/websockify`、`schema`、工作台、`docs/reference`。
 
-### I225 LLM 互联使用 fib A52 与 A53
+- **完成**：`handler/websockify`（`30cf6347`、`26115c91`）：`address`、`upstream`（至多尝试其三个地址，遵循其健康检查与
+  `deny_internal`）或 `tokens` 加 `token_param`；`origins`、`connect_timeout`（10s）、`idle_timeout`（10m）、`max_conns`
+  （1024）、`max_frame_bytes`（1 MiB）、`name`；指标 `fit_websockify_connections_open`、`_requests_total`、`_bytes_total`；
+  模块章节、参考文档、工作台的处理器列表与标签。一个空闲桥接连接总共约 4.5 KB，fit 的部分约 3.0–3.4 KB，没有每桥一个的
+  goroutine（`FIT_WEBSOCKIFY_MEM=1 go test -run TestIdleMemory ./handler/websockify`）。
+
+**待审查的决定**（2026-11-21；在用户裁定前有效）：
+
+1. **先拨号目标，再接受 WebSocket**，因此目标不可达或令牌被拒时得到 HTTP 应答（502、504、403），不缓冲任何数据。
+   websockify 是先接受再关闭。
+2. **令牌只写在配置里**：没有令牌文件（websockify 的 file 插件需要监视文件），也不从 cookie 取令牌；缺少与未知的令牌都得 403。
+3. **默认同源**，与 fib 的默认一致，防止跨站劫持；`origins: ["*"]` 即 websockify 的行为。没有 Origin 的请求放行（不是浏览器）。
+4. **子协议**按客户端的偏好；没有子协议即二进制；二进制模式下文本帧按字节转发，base64 模式下每个数据帧都解码。
+5. **逐帧转发**，不重组消息，所以 `max_frame_bytes`（1 MiB，而非 fib 的 16 MiB）限定每个连接的内存；不压缩。
+6. **空闲关闭**：先发 1001，下一次超时时 `Abort`；只有数据算作活动，ping 不算。
+7. **有 `upstream` 时忽略 `connect_timeout`**，用上游自己的。
+
+### I225 LLM 互联使用 fib A52 与 A53 — done
 
 - **做什么**：`llm/internal/wire` 两侧都用 `Abort` 关闭已死或过慢的链路，用 `RemoteAddr` 取得对端地址，
   去掉监听方的 `fib.Connection` 表和拨号方的 `Dial` 钩子；队列超出上限（`WriteMessageNoWait`）的链路停止向为其
@@ -6992,10 +7010,41 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
   办法的说明随之更新。
 - **涉及**：`llm/internal/wire`、`llm/internal/mesh`、`docs/llm.md`。
 
-### I226 tunnel 的 WebSocket 改用 fib 的 `websocket.Connection`
+- **完成**：`01d841d5`、`221d663e`：所有强制关闭与 `CloseAll` 两侧都用 `Abort`，对端地址在打开时取自 `RemoteAddr` 并保存，
+  地址表与 `Dial` 钩子去掉；队列超过 fib 64 KiB 上限的链路暂停其所有流的数据发送与自身的读取，直到 `OnWritable`。
+  `TestSlowPeerHoldsProducers`：慢连接超时为 10 秒，生产者在约 600 KiB、约 0.6 秒后停下；关闭暂停时测试失败。
+
+**待审查的决定**（2026-11-21）：
+
+1. **"停止归还额度"即暂停所有流的数据发送**，不论对端给了多少额度，队列因此保持在 64 KiB 左右，而不是流数 × 256 KiB。
+   备选：只推迟新的额度，每个流仍可用完已有的。
+2. **读取至多暂停 ping 间隔与慢连接超时中较短者的四分之一**（默认 2.5 秒），每轮一次，所以 ping 仍会得到回应，两端不会互相卡住。
+3. **监听方保留 fib 的写水位**：它限制只发不读的对端，而拨号方的暂停有上限，所以不会死锁。
+4. **调用、应答、推送与控制帧不暂停**，由 MaxInbound 与暂停的读取限定。
+5. **强制关闭不发关闭帧**，因此 4002、4004 关闭码不再使用，对端看到 1006。
+6. **不增加 `PendingWriteLimit` 配置**，用 fib 默认的 64 KiB。
+
+### I226 tunnel 的 WebSocket 改用 fib 的 `websocket.Connection` — done
 
 - **做什么**：tunnel 的 Web 代理与控制台套接字为了用上 `HoldReads` 和 `NotifyOutput`，在 `fib.Connection` 上
   自行分帧（`tunnel/internal/transport/ws`），现改用带 A53 的 fib `websocket.Connection`，链路的强制关闭改用 A52。
 - **完成标准**：tunnel 的测试经 ws 与 wss 通过，背压测试仍然成立，自行分帧的代码去掉，或只剩 fib 的包做不到的部分。
 - **涉及**：`tunnel/internal/transport`、`tunnel/hub`、`tunnel/proxy`、`docs/tunnel.md`。
 
+### I227 集群成员链路使用 fib A52、A53 与 A95 — done
+
+- **为什么**：集群一轮的决定 15 让链路采用 LLM 互联的临时办法；对端活着但读得慢时，队列仍可能无限增长，因为超时的调用
+  释放了名额，其字节却仍在队列中。
+- **完成**：`f15f743e`：两侧都用 `Abort`（地址表、`raw` 与成员的 `Dial` 钩子去掉），链路保存在 WebSocket 的附加数据中，
+  用于限额的连接集合经 `NetConn` 得到；监听使用 fib 的 `Path`（404）与 `HandshakeTimeout`；共用的 `linkFlow` 以
+  `WriteMessageNoWait` 发送。测试：积压 12 MiB 而不读的成员在 2 秒内被关闭（优雅关闭则不能），不读的管理节点触发成员的死链检查，
+  调用被暂缓并在对端读取后发出，错误路径与带 Origin 的请求被拒绝。覆盖率前后都是 98.6%。
+
+**待审查的决定**（2026-11-21）：
+
+1. **两侧都加背压，而不只是强制关闭**，理由见上。
+2. **超出上限时管理节点按顺序暂缓新调用**，而不是回答忙，所以超过 64 KiB 的配置推送不会成为偶发错误；它们仍受 16 个调用的限额
+   与各自的超时约束，暂缓中超时的调用不会发出。管理节点不暂停读取（读到的应答会释放调用）。
+3. **成员至多暂停读取 `linkPing/4`（3.75 秒），之后回答忙**，直到队列降到一半：远低于其 45 秒的死链检查，两端也不会互相卡住。
+4. **没有针对"一直超出上限"的单独中止**：慢链路上的大消息可能需要很久；45 秒的检查已能结束真正卡住的链路。
+5. **被替换的旧链路仍被中止**，与之前一致。
