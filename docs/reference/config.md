@@ -6314,10 +6314,11 @@ which takes its place in `level`:
 | the smallest | 9 | 11 | 10 |
 
 zstd's encoder runs at four speeds, which its levels fall into: 1-2 fastest, 3-5 default, 6-9
-better and 10-22 best. A response compressed as it goes costs its CPU on every request, and a
-higher level costs more of it for a body only a few hundredths smaller. That is why `fastest` is
-the default, as nginx's `gzip_comp_level` is 1, and why gzip goes ahead of brotli when a client
-accepts both equally: at these levels brotli is slower than gzip for about the same size.
+better and 10-22 best. A response compressed as it goes costs its CPU on every request: on the
+benchmark host, a 16 KB JSON body that takes 2.7 µs to send as it is takes 37 µs at gzip 1, 59 µs
+at gzip 5 for a body 6% smaller, 44 µs at zstd 1, 81 µs at brotli 1, larger than gzip 1's, and
+241 µs at brotli 4. That is why `fastest` is the default, as nginx's `gzip_comp_level` is 1, and
+why gzip goes ahead of brotli when a client accepts both equally.
 
 Every request is compressed anew. Where the same response goes out many times, compress it once:
 

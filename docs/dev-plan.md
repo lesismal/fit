@@ -4184,14 +4184,19 @@ Work on throughput and latency that no feature track owns.
    encoding, and served once made; until then the file goes as it is (for a `compress` middleware,
    if the route has one). A copy smaller by less than a twentieth is not kept. A copy has the file's
    ETag with `-<encoding>` inside the quotes, and no `Accept-Ranges`: a ranged request gets the file.
-6. **The count in flight stays** in `compress` (one atomic add and one subtract per response), until
-   the A/B below says whether it costs anything.
+6. **The count in flight stays** in `compress` (one atomic add and one subtract per response): the
+   A/B below finds no cost.
 
-**Open**: the benchmark host's micro-benchmarks, which decisions 1, 2 and 6 rest on, were not run (the
-host's ssh master was not open): `bench/microbench.sh -pkg ./middleware/compress -bench
-CompressBody` at `2208938a` (the old code, fib `9ea8838`) against `95b54023`, for the levels' costs and
-ratios and the copy `Close` no longer makes; and `-bench CompressParallel` at `95b54023` against
-`253fe3cb` (local branch `bench-noinflight`, the count removed), for decision 6.
+**Benchmarks** (the benchmark host, `bench/microbench.sh`, 10 alternating runs, 2026-11-20):
+`BenchmarkCompressBody` at `2208938a` (the old code on fib `9ea8838`) against `95b54023`: what the
+filter no longer copies is 18-20% of the bytes allocated for a 1 KB body and 31-39% for 16 and 64 KB,
+one allocation fewer, and 1-5% of the time where the difference is significant (geomean −1.3%); the
+ratios are the same. At `95b54023`, a 16 KB JSON body takes 2.7 µs uncompressed, 37.4 µs at gzip 1
+(ratio 0.337), 58.8 µs at gzip 5 (0.318), 95.8 µs at gzip 7 (0.305), 80.8 µs at brotli 1 (0.348),
+241 µs at brotli 4 (0.306), 44.2 µs at zstd 1 (0.314) and 54.4 µs at zstd 3 (0.304); at 64 KB gzip 5
+takes 2.1 times gzip 1's 129 µs and brotli 1 2.4 times, which decisions 1 and 2 rest on.
+`BenchmarkCompressParallel` at `95b54023` against `253fe3cb` (the count in flight removed): 1.091 µs
+against 1.092 µs, p=0.67, no difference, so decision 6 stands.
 
 ## Sync: moving data from producers to consumers
 
