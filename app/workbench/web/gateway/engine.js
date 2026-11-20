@@ -28,6 +28,7 @@
     // a port's handlers / 端口的处理器
     ['e.f.static', 'Static files', '静态文件'], ['e.f.respond', 'Respond', '直接应答'], ['e.f.fastcgi', 'FastCGI', 'FastCGI'],
     ['e.f.media_tokens', 'Media tokens', '媒体令牌'], ['e.f.media_pages', 'Media pages', '媒体页面'],
+    ['e.f.websockify', 'WebSocket to TCP', 'WebSocket 转 TCP'],
     // routes / 路由
     ['e.reverse', 'Reverse proxy routes', '反向代理路由'], ['e.forward', 'Forward proxy routes', '正向代理路由'],
     ['e.zones', 'Cache zones', '缓存区'], ['e.cached', 'Cached routes', '缓存的路由'],
@@ -72,12 +73,13 @@
 
   // The entries of a port keep the user's order: the handlers in this order first, then the routes, the middleware,
   // the streaming and WebRTC handlers, and the layer-4, SOCKS and TLS settings. / 端口条目的顺序即用户的顺序。
-  var HANDLERS = ['static', 'respond', 'fastcgi', 'media_tokens', 'media_pages'];
+  var HANDLERS = ['static', 'respond', 'fastcgi', 'media_tokens', 'media_pages', 'websockify'];
   var STREAM_HANDLERS = ['hls', 'httpflv', 'stream_whip', 'stream_whep'];
   var WEBRTC_HANDLERS = ['whip', 'whep', 'webrtc_proxy'];
   var HANDLER_WORDS = { static: 'e.f.static', respond: 'e.f.respond', fastcgi: 'e.f.fastcgi',
-    media_tokens: 'e.f.media_tokens', media_pages: 'e.f.media_pages' };
-  var HANDLER_ICONS = { static: 'book', respond: 'zap', fastcgi: 'plug', media_tokens: 'key', media_pages: 'log' };
+    media_tokens: 'e.f.media_tokens', media_pages: 'e.f.media_pages', websockify: 'e.f.websockify' };
+  var HANDLER_ICONS = { static: 'book', respond: 'zap', fastcgi: 'plug', media_tokens: 'key', media_pages: 'log',
+    websockify: 'terminal' };
   var STREAM_WORDS = { hls: 'e.r.hls', httpflv: 'e.r.httpflv', stream_whip: 'e.r.stream_whip', stream_whep: 'e.r.stream_whep' };
   var WEBRTC_WORDS = { whip: 'e.r.whip', whep: 'e.r.whep', webrtc_proxy: 'e.r.webrtc_proxy' };
   var STREAM_ICONS = { hls: 'play', httpflv: 'play', stream_whip: 'radio', stream_whep: 'radio' };
