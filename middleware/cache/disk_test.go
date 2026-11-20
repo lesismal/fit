@@ -296,13 +296,18 @@ func TestDiskInvalidate(t *testing.T) {
 
 	base, stop = start(t, diskParams(dir, ""))
 	defer stop()
-	waitReady(t, diskOf(t, "disk"))
+	d = diskOf(t, "disk")
+	waitReady(t, d)
 	if r := get(t, c, "GET", base+"/fresh", "Host", "cache.test"); r.cacheStatus() != "fit; fwd=uri-miss; stored" {
 		t.Errorf("/fresh after its DELETE: %q", r.cacheStatus())
 	}
 	if r := get(t, c, "GET", base+"/s-maxage", "Host", "cache.test"); !strings.HasSuffix(r.cacheStatus(), "detail=disk") {
 		t.Errorf("/s-maxage: %q", r.cacheStatus())
 	}
+	// /fresh stored again goes to disk on the file pool: its write lands
+	// before the test's directory is removed, which a file still being
+	// written in tmp would fail.
+	waitFor(t, "/fresh written again", func() bool { n, _ := d.stats(); return n == 2 })
 }
 
 // TestDiskBounds checks max_entries and max_bytes: the least recently used
