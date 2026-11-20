@@ -1819,6 +1819,74 @@
       // },
     // },
     // {
+      // // A route whose handler is websockify, with every one of its params.
+      // "name": "websockify-example",
+      // "handler": {
+        // // Bridges a WebSocket to a TCP service, as websockify does for noVNC and web terminals: the
+        // // client's binary messages go to the target as bytes and the target's bytes come back as
+        // // binary messages, or as text messages of base64 with the base64 subprotocol. The target is an
+        // // address, a named upstream, or one a token in the query picks; never one the client names.
+        // "module": "websockify",
+        // "params": {
+          // // The TCP service every WebSocket is bridged to, a host and a port, as "127.0.0.1:5900". One
+          // // of address, upstream and tokens.
+          // // string.
+          // "address": "127.0.0.1:9000",
+
+          // // The upstream whose addresses the WebSockets are bridged to, picked by its load_balancing; a
+          // // connect that fails is tried on the next address, up to 3, and its connect_timeout,
+          // // deny_internal, max_fails and health checks apply. One of address, upstream and tokens.
+          // // string.
+          // "upstream": "app",
+
+          // // Targets by token, as websockify's token plugin keeps them, each a host and a port: {"desk1":
+          // // "10.0.0.5:5900"}. The query parameter token_param names a request's token; a request without
+          // // one, or with one not listed, is answered 403. One of address, upstream and tokens.
+          // // object of string.
+          // "tokens": {},
+
+          // // With tokens, the query parameter that names a request's token, as in
+          // // /websockify?token=desk1. token when left out.
+          // // string; default "token".
+          // "token_param": "token",
+
+          // // The origins whose pages may open the WebSocket, as "https://example.com", or "*" for any; a
+          // // request with another Origin is answered 403, and one without any, which is not from a
+          // // browser, is let through. When left out, only a page of the host the request is for (its
+          // // Origin names the request's Host), which keeps other sites from opening it with the user's
+          // // cookies.
+          // // list of string.
+          // "origins": [],
+
+          // // How long connecting to the target may take; past it the request is answered 504. With
+          // // upstream, the upstream's connect_timeout applies instead. 10s when left out or 0.
+          // // duration, as "1.5s" or "2m"; default "10s".
+          // "connect_timeout": "10s",
+
+          // // How long a bridge may carry nothing either way before it is closed: the WebSocket with 1001
+          // // and the target's connection with it. 10m when left out or 0.
+          // // duration, as "1.5s" or "2m"; default "10m".
+          // "idle_timeout": "10m",
+
+          // // The most WebSockets the handler bridges, or is opening, at once; one past it is answered
+          // // 503. 1024 when left out or 0.
+          // // integer, 0 or more; default 1024.
+          // "max_conns": 1024,
+
+          // // The largest WebSocket frame the client may send, which is what a browser sends a message as;
+          // // a larger one closes the WebSocket with 1009. Messages are passed on frame by frame, so a
+          // // message of many frames may be larger. 1 MiB when left out or 0.
+          // // integer, 0 to 67108864; default 1048576.
+          // "max_frame_bytes": 1048576,
+
+          // // The bridge's name in the metrics, the label bridge of the fit_websockify_ families. The
+          // // address, the upstream's name, or tokens when left out.
+          // // string.
+          // "name": "",
+        // },
+      // },
+    // },
+    // {
       // // A route whose handler is whep, with every one of its params.
       // "name": "whep-example",
       // "handler": {

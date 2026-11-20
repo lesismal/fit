@@ -47,7 +47,7 @@ a config against it and more.
 - [Sync](#sync): [`sync`](#config-sync), [`sync.pipelines[]`](#config-syncpipeline), [`sync.pipelines[].sinks[]`](#config-syncsink), [`sync.pipelines[].sinks[].batch`](#config-syncbatch), [`sync.pipelines[].queue`](#config-syncqueue), [`sync.pipelines[].retry`](#config-syncretry), [`sync.pipelines[].job`](#config-syncjob)
 - [BitTorrent](#bittorrent): [`bittorrent`](#config-bittorrent), [`bittorrent.client`](#config-bittorrentclient), [`bittorrent.client.limits`](#config-bittorrentlimits), [`bittorrent.client.categories[]`](#config-bittorrentcategory), [`bittorrent.client.categories[].limits`](#config-bittorrenttorrentlimits), [`bittorrent.client.alt_speed`](#config-bittorrentaltspeed), [`bittorrent.client.alt_speed.schedules[]`](#config-bittorrentschedule), [`bittorrent.client.rss`](#config-bittorrentrss), [`bittorrent.client.rss.feeds[]`](#config-bittorrentrssfeed), [`bittorrent.client.rss.rules[]`](#config-bittorrentrssrule), [`bittorrent.client.publish[]`](#config-bittorrentpublish), [`bittorrent.tracker`](#config-bittorrenttracker), [`bittorrent.tracker.store`](#config-bittorrenttrackerstore)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`bt_publish`](#http-handlers-bt_publish), [`bt_stream`](#http-handlers-bt_stream), [`bt_tracker`](#http-handlers-bt_tracker), [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`sync_ingest`](#http-handlers-sync_ingest), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`websockify`](#http-handlers-websockify), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 - [Sync sources](#sync-sources): [`clickhouse`](#sync-sources-clickhouse), [`doris`](#sync-sources-doris), [`elasticsearch`](#sync-sources-elasticsearch), [`file`](#sync-sources-file), [`generate`](#sync-sources-generate), [`http`](#sync-sources-http), [`kafka`](#sync-sources-kafka), [`mongo`](#sync-sources-mongo), [`mqtt`](#sync-sources-mqtt), [`mssql`](#sync-sources-mssql), [`mysql`](#sync-sources-mysql), [`nats`](#sync-sources-nats), [`postgres`](#sync-sources-postgres), [`pulsar`](#sync-sources-pulsar), [`rabbitmq`](#sync-sources-rabbitmq), [`redis`](#sync-sources-redis), [`s3`](#sync-sources-s3), [`tidb`](#sync-sources-tidb), [`wasm`](#sync-sources-wasm)
 - [Sync sinks](#sync-sinks): [`clickhouse`](#sync-sinks-clickhouse), [`dead_letters`](#sync-sinks-dead_letters), [`doris`](#sync-sinks-doris), [`elasticsearch`](#sync-sinks-elasticsearch), [`file`](#sync-sinks-file), [`http`](#sync-sinks-http), [`influxdb`](#sync-sinks-influxdb), [`kafka`](#sync-sinks-kafka), [`loki`](#sync-sinks-loki), [`memory`](#sync-sinks-memory), [`milvus`](#sync-sinks-milvus), [`mongo`](#sync-sinks-mongo), [`mqtt`](#sync-sinks-mqtt), [`mssql`](#sync-sinks-mssql), [`mysql`](#sync-sinks-mysql), [`nats`](#sync-sinks-nats), [`otlp_logs`](#sync-sinks-otlp_logs), [`postgres`](#sync-sinks-postgres), [`pulsar`](#sync-sinks-pulsar), [`qdrant`](#sync-sinks-qdrant), [`rabbitmq`](#sync-sinks-rabbitmq), [`redis`](#sync-sinks-redis), [`s3`](#sync-sinks-s3), [`stdout`](#sync-sinks-stdout), [`tdengine`](#sync-sinks-tdengine), [`wasm`](#sync-sinks-wasm)
@@ -4512,6 +4512,7 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 | [`respond`](#http-handlers-respond) | A fixed status, fields and body |
 | [`static`](#http-handlers-static) | Files from a directory |
 | [`sync_ingest`](#http-handlers-sync_ingest) | Records posted into a sync pipeline's `http` source, answered once its sinks have them |
+| [`websockify`](#http-handlers-websockify) | A WebSocket bridged to a TCP service, as for noVNC |
 
 <a id="http-handlers-bt_publish"></a>
 
@@ -5831,6 +5832,113 @@ In JSON:
 | `max_sdp_bytes` | integer, 0 or more | `32768` | The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0. |
 | `auth` | string |  | The media_auth policy an offer must satisfy before it is sent to a media server: its credentials need action on the stream, the last segment of the POST's path, which must then be 1 to 128 letters, digits, '.', '_', '~' and '-', decoded, or the offer is answered 400. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL is passed on without credentials, its ID being the capability; the request's Authorization goes on to the media server as it came. Everyone may when left out, as the route's middleware allow. |
 | `action` | string: `publish`, `play` |  | What an offer asks of auth: publish for a WHIP endpoint, play for a WHEP one. Required with auth. |
+
+<a id="http-handlers-websockify"></a>
+
+### `websockify`
+
+Bridges a WebSocket to a TCP service, as websockify does for noVNC and web terminals: the client's binary messages go to the target as bytes and the target's bytes come back as binary messages, or as text messages of base64 with the base64 subprotocol. The target is an address, a named upstream, or one a token in the query picks; never one the client names.
+
+Bridges a WebSocket to a TCP service, as [websockify](https://github.com/novnc/websockify) does, for
+the browser clients of services that speak plain TCP: noVNC for a VNC server, a web terminal for SSH
+or telnet, a game or MUD client. The handshake is taken over HTTP/1.1, and as an extended CONNECT over
+h2 and h3. Each binary message the client sends goes to the target as its bytes, frame by frame, and
+what the target sends comes back as binary messages; a client that offers the `base64` subprotocol,
+as older noVNC does, sends and gets text messages of base64 instead. A client that offers `binary`
+gets it, and one that offers none gets binary messages without a subprotocol.
+
+The target is never one the client names: it is `address`, an address of `upstream` (picked by the
+upstream's `load_balancing`, a connect that fails tried on the next address, up to 3, with its
+`deny_internal`, `max_fails` and health checks), or the address `tokens` lists for the token in the
+query parameter `token_param` (`token`), as websockify's token plugin keeps them: a request without a
+token, or with one not listed, is answered `403`. The target is dialed before the WebSocket is
+accepted, so one that is down is answered `502`, or `504` past `connect_timeout`, and a target that
+speaks first, as a VNC server does, has its greeting sent once the WebSocket is open. A request that
+is not a WebSocket handshake is answered `426`; one past `max_conns` (1024) `503`; one from a page of
+another site `403`, unless `origins` lists it.
+
+Nothing waits on a fib worker, and each side paces the other: while the client has more than 64 KiB
+of the target's messages unsent, the target's reads are held, and while the target has more than 64
+KiB of the client's bytes unsent, the WebSocket's reads are, so a slow end slows the other by TCP's
+flow control (or the stream's, over h2 and h3) rather than by memory in fit. A frame from the client
+is bounded by `max_frame_bytes` (1 MiB; a larger one closes the WebSocket with `1009`). When one side
+closes, the other is closed once what it was sent has gone: a target that hangs up closes the
+WebSocket with `1000`. A bridge that carries nothing either way for `idle_timeout` (10m) is closed
+with `1001`, and at once if the client has not taken that close by the next timeout. The bridges of a
+config swapped out are closed once its drain timeout passes.
+
+The route's middleware applies as to any handler: put an authenticating middleware (`basic_auth`,
+`jwt`, `forward_auth`, `client_cert`) before it, since anyone who reaches the route reaches the
+target, and a route's `access` lists the clients. The metrics `fit_websockify_connections_open`,
+`fit_websockify_requests_total` (by `result`: `bridged`, `refused`, `busy`, `failed`) and
+`fit_websockify_bytes_total` (by `direction`) carry the label `bridge`, `name` or the target.
+
+In a .conf file:
+
+```fit
+route {
+	match { path /websockify }
+	middleware basic_auth {
+		users {
+			username alice
+			password_hash $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+		}
+	}
+	handler websockify {
+		tokens { desk1 10.0.0.5:5900; desk2 10.0.0.6:5900 }
+		idle_timeout 30m
+	}
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /websockify
+middleware:
+  - module: basic_auth
+    params:
+      users:
+        - username: alice
+          password_hash: $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+handler:
+  module: websockify
+  params:
+    tokens:
+      desk1: 10.0.0.5:5900
+      desk2: 10.0.0.6:5900
+    idle_timeout: 30m
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/websockify"]},
+  "middleware": [{"module": "basic_auth", "params": {
+    "users": [{"username": "alice", "password_hash": "$2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG"}]
+  }}],
+  "handler": {"module": "websockify", "params": {
+    "tokens": {"desk1": "10.0.0.5:5900", "desk2": "10.0.0.6:5900"},
+    "idle_timeout": "30m"
+  }}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string |  | The TCP service every WebSocket is bridged to, a host and a port, as "127.0.0.1:5900". One of address, upstream and tokens. |
+| `upstream` | string |  | The upstream whose addresses the WebSockets are bridged to, picked by its load_balancing; a connect that fails is tried on the next address, up to 3, and its connect_timeout, deny_internal, max_fails and health checks apply. One of address, upstream and tokens. |
+| `tokens` | object of string |  | Targets by token, as websockify's token plugin keeps them, each a host and a port: {"desk1": "10.0.0.5:5900"}. The query parameter token_param names a request's token; a request without one, or with one not listed, is answered 403. One of address, upstream and tokens. |
+| `token_param` | string | `"token"` | With tokens, the query parameter that names a request's token, as in /websockify?token=desk1. token when left out. |
+| `origins` | list of string |  | The origins whose pages may open the WebSocket, as "https://example.com", or "*" for any; a request with another Origin is answered 403, and one without any, which is not from a browser, is let through. When left out, only a page of the host the request is for (its Origin names the request's Host), which keeps other sites from opening it with the user's cookies. |
+| `connect_timeout` | duration | `"10s"` | How long connecting to the target may take; past it the request is answered 504. With upstream, the upstream's connect_timeout applies instead. 10s when left out or 0. |
+| `idle_timeout` | duration | `"10m"` | How long a bridge may carry nothing either way before it is closed: the WebSocket with 1001 and the target's connection with it. 10m when left out or 0. |
+| `max_conns` | integer, 0 or more | `1024` | The most WebSockets the handler bridges, or is opening, at once; one past it is answered 503. 1024 when left out or 0. |
+| `max_frame_bytes` | integer, 0 to 67108864 | `1048576` | The largest WebSocket frame the client may send, which is what a browser sends a message as; a larger one closes the WebSocket with 1009. Messages are passed on frame by frame, so a message of many frames may be larger. 1 MiB when left out or 0. |
+| `name` | string |  | The bridge's name in the metrics, the label bridge of the fit_websockify_ families. The address, the upstream's name, or tokens when left out. |
 
 <a id="http-handlers-whep"></a>
 

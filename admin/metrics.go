@@ -6,6 +6,7 @@ import (
 	"runtime/metrics"
 
 	"github.com/lesismal/fit/handler/vod"
+	"github.com/lesismal/fit/handler/websockify"
 	"github.com/lesismal/fit/observe"
 )
 
@@ -154,6 +155,7 @@ func (cs *Configs) WriteMetricsTo(w observe.MetricWriter) {
 		apps.WriteMetrics(w)
 	}
 	vod.WriteMetrics(w, cs.env.Engine)
+	websockify.WriteMetrics(w, cs.env.Engine)
 
 	samples := make([]metrics.Sample, len(goMetrics))
 	for i, m := range goMetrics {
