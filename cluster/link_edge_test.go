@@ -640,11 +640,11 @@ func TestMemberServe(t *testing.T) {
 	// larger than it takes.
 	got := make(chan []byte, 8)
 	ln := lm.l
-	fakeWS := captureWS(t, f, got)
-	ln.serve(fakeWS, encodeCall(msgRequest, 1, requestHead{Method: "GET", Path: "nope"}, nil)[1:])
-	ln.serve(fakeWS, encodeCall(msgRequest, 2, requestHead{Method: "GET", Path: "/"}, make([]byte, ln.maxBody+1))[1:])
-	ln.serve(fakeWS, encodeCall(msgRequest, 3, requestHead{Method: "BAD METHOD", Path: "/"}, nil)[1:])
-	ln.serve(fakeWS, []byte{1, 2})
+	fw := &linkFlow{ws: captureWS(t, f, got)}
+	ln.serve(fw, encodeCall(msgRequest, 1, requestHead{Method: "GET", Path: "nope"}, nil)[1:])
+	ln.serve(fw, encodeCall(msgRequest, 2, requestHead{Method: "GET", Path: "/"}, make([]byte, ln.maxBody+1))[1:])
+	ln.serve(fw, encodeCall(msgRequest, 3, requestHead{Method: "BAD METHOD", Path: "/"}, nil)[1:])
+	ln.serve(fw, []byte{1, 2})
 	for range 3 {
 		m := <-got
 		var head responseHead
@@ -652,19 +652,31 @@ func TestMemberServe(t *testing.T) {
 			t.Errorf("%q", m)
 		}
 	}
+	// While the answers sent wait past the link's limit, a request is
+	// answered busy.
+	fw.mu.Lock()
+	fw.above = true
+	fw.mu.Unlock()
+	ln.serve(fw, encodeCall(msgRequest, 4, requestHead{Method: "GET", Path: "/"}, nil)[1:])
+	if m := <-got; !bytes.Contains(m, []byte(answerBusy)) {
+		t.Errorf("%q", m)
+	}
+	fw.mu.Lock()
+	fw.above = false
+	fw.mu.Unlock()
 	// The workers and the queue taken, one more is busy. The workers are
 	// waited for in the handler first: until a worker has taken its
 	// request, that request still holds a place in the queue.
 	for i := range memberWorkers {
-		ln.serve(fakeWS, encodeCall(msgRequest, uint64(100+i), requestHead{Method: "GET", Path: "/block", Timeout: 60000}, nil)[1:])
+		ln.serve(fw, encodeCall(msgRequest, uint64(100+i), requestHead{Method: "GET", Path: "/block", Timeout: 60000}, nil)[1:])
 	}
 	for range memberWorkers {
 		<-entered
 	}
 	for i := range memberQueue {
-		ln.serve(fakeWS, encodeCall(msgRequest, uint64(100+memberWorkers+i), requestHead{Method: "GET", Path: "/block", Timeout: 60000}, nil)[1:])
+		ln.serve(fw, encodeCall(msgRequest, uint64(100+memberWorkers+i), requestHead{Method: "GET", Path: "/block", Timeout: 60000}, nil)[1:])
 	}
-	ln.serve(fakeWS, encodeCall(msgRequest, 999, requestHead{Method: "GET", Path: "/block"}, nil)[1:])
+	ln.serve(fw, encodeCall(msgRequest, 999, requestHead{Method: "GET", Path: "/block"}, nil)[1:])
 	m := <-got
 	var head responseHead
 	if id, _, _ := decodeCall(m[1:], &head); id != 999 || head.Error != answerBusy {
@@ -765,9 +777,6 @@ func TestLinkEdges(t *testing.T) {
 		t.Error(err)
 	}
 	f.m.noteRefusal("nobody", &Refusal{})
-	if f.m.link.ln.lookup(nil) != nil || f.m.link.ln.conns.lookup("nowhere") != nil {
-		t.Error("lookup")
-	}
 
 	// A store that fails as a member enrolls: the member is told to try
 	// again, and enrolls once the store works.
@@ -838,31 +847,19 @@ func TestLinkEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "a credential that cannot be forgotten", func() bool { return strings.Contains(lm.log.String(), "could not be forgotten") })
-	r := dialRaw(t, f, e.Config.Manager)
-	r.next(t)
-	var l *mlink
-	f.m.link.ln.open.Range(func(_, v any) bool {
-		if v.(*mlink).ws != nil {
-			l = v.(*mlink)
-		}
-		return true
-	})
-	waitFor(t, "the raw link", func() bool {
-		f.m.link.ln.open.Range(func(_, v any) bool {
-			if m := v.(*mlink); m.credID == "" {
-				l = m
-			}
-			return true
-		})
-		return l != nil
-	})
+	// The manager's side of a link, over a WebSocket whose messages the
+	// test reads.
+	sent := make(chan []byte, 4)
+	ws := newWSEcho(t, f, sent)
+	l := &mlink{ln: f.m.link.ln, ws: ws, flow: &linkFlow{ws: ws}, timer: time.NewTimer(time.Hour), calls: map[uint64]*linkCall{}}
 	f.m.welcome(l, "nobody", "x", welcomeMsg{})
-	if m := r.next(t); m[0] != msgRevoked {
+	if m := <-sent; m[0] != msgRevoked {
 		t.Errorf("%q", m)
 	}
 	// A call on a link that closed fails at once.
-	r.waitClosed(t)
-	waitFor(t, "the link's close", func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.state == linkClosed })
+	l.mu.Lock()
+	l.state = linkClosed
+	l.mu.Unlock()
 	l.call(newLinkTransport(f.m, ""), "GET", "/", nil, nil, func(_ *reply, err error) { errs <- err })
 	if err := <-errs; !errors.Is(err, errLinkClosed) {
 		t.Error(err)

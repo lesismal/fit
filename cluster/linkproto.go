@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	stdhttp "net/http"
+	"sync"
 	"time"
+
+	"github.com/lesismal/fib/websocket"
 
 	"github.com/lesismal/fit/internal/linktoken"
 )
@@ -214,4 +217,89 @@ func decodeCall(data []byte, head any) (uint64, []byte, error) {
 // encodeCancel is a cancel of the request id.
 func encodeCancel(id uint64) []byte {
 	return binary.BigEndian.AppendUint64([]byte{msgCancel}, id)
+}
+
+// linkFlow is one side's sending on a link, paced by what the peer reads
+// (fib's WebSocket send backpressure, A53): a message goes out without
+// waiting, and once more than the connection's PendingWriteLimit (fib's
+// default, 64 KiB) waits for the peer, the side is above its limit until
+// what waits falls to half (OnWritable). What a side does meanwhile is its
+// own: the manager holds its new calls, the member its reads for a while,
+// and answers busy what it reads. Nothing is refused for being above: a
+// message sent then still queues.
+type linkFlow struct {
+	ws *websocket.Connection
+	// hold, when not zero, holds the connection's reads for at most that
+	// long once the side goes above its limit, once each time.
+	hold time.Duration
+	// drained runs, outside the lock, when the side falls back to half its
+	// limit, or the link ends.
+	drained func()
+
+	mu    sync.Mutex
+	above bool
+	gen   uint64 // the times the side went above, ending a hold of an earlier one
+	timer *time.Timer
+}
+
+// send sends the message b.
+func (f *linkFlow) send(b []byte) error {
+	above, err := f.ws.WriteMessageNoWait(websocket.Binary, b)
+	if err == nil && above {
+		f.over()
+	}
+	return err
+}
+
+// isAbove reports whether the side is above its limit.
+func (f *linkFlow) isAbove() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.above
+}
+
+// over notes that the side went above its limit, unless it is already.
+func (f *linkFlow) over() {
+	f.mu.Lock()
+	if f.above {
+		f.mu.Unlock()
+		return
+	}
+	f.above = true
+	f.gen++
+	gen := f.gen
+	if f.hold > 0 {
+		f.ws.HoldReads(true)
+		f.timer = time.AfterFunc(f.hold, func() {
+			f.mu.Lock()
+			if f.above && f.gen == gen {
+				f.ws.HoldReads(false)
+			}
+			f.mu.Unlock()
+		})
+	}
+	f.mu.Unlock()
+	if !f.ws.OnWritable(func(error) { f.writable(gen) }) {
+		f.writable(gen) // drained already
+	}
+}
+
+// writable ends the time above the limit that began as gen: what waits fell
+// to half, or the link ended.
+func (f *linkFlow) writable(gen uint64) {
+	f.mu.Lock()
+	if !f.above || f.gen != gen {
+		f.mu.Unlock()
+		return
+	}
+	f.above = false
+	if f.timer != nil {
+		f.timer.Stop()
+		f.timer = nil
+		f.ws.HoldReads(false)
+	}
+	f.mu.Unlock()
+	if f.drained != nil {
+		f.drained()
+	}
 }

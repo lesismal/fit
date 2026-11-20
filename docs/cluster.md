@@ -907,13 +907,18 @@ handshake of [issued link tokens](decisions/035-link-tokens.md), each proof boun
 nonces and to its direction.
 
 The link is kept alive by pings both ways, and closed by either side after 45 seconds without a
-word; the member links again whenever it ends, after a wait that doubles from a second to a minute.
+word, at once, without the close handshake and whatever still waits to be sent; the member links
+again whenever it ends, after a wait that doubles from a second to a minute.
 It survives the manager's restart and a network cut. Over the link the manager sends the member's
 Admin API its requests, which the member serves in process, on two workers of the link's own with
 16 waiting at most (one more is answered busy at once); a request is bounded by `timeout`, and its
 body and its answer by `max_response_bytes`; one the manager gives up on is canceled on the member.
-At most 16 calls go over one link at once. The member logs each change made through the link as
-the manager's, and a config so applied has the source `cluster`.
+At most 16 calls go over one link at once. Each side sends as fast as the other reads: once more
+than 64 KiB waits for the member, the manager's new calls wait, in order and within their
+`timeout`, until that falls to half; once as much waits for the manager, the member answers busy
+the requests it reads until that falls to half, and meanwhile stops reading them for at most a
+quarter of the ping interval. The member logs each change made through the link as the manager's,
+and a config so applied has the source `cluster`.
 
 Each linked member's row says whether it is **Linked** (and from where) or **Waiting**: for its
 enrollment, until its token expires; or for it to link again. Its state's `link` holds the same

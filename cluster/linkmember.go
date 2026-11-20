@@ -34,6 +34,13 @@ const (
 	MemberFileSuffix = ".cluster-member"
 )
 
+// The errors a member ends its link with.
+var (
+	errNotManager = errors.New("the manager does not speak the link's protocol")
+	errLinkDead   = errors.New("the manager was not heard from in time")
+	errLinkEnded  = errors.New("the member ended its link")
+)
+
 // The bounds of a member's side of its link.
 const (
 	// memberWorkers serve the manager's requests, at most memberQueue
@@ -397,21 +404,46 @@ func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
 	// the welcome before the link is taken as open, which the manager
 	// bounds by maxLinkCalls.
 	events := make(chan memberEvent, maxLinkCalls+8)
-	var raw atomic.Pointer[fib.Connection]
+	// The link once it opens, and whether the attempt ended: a link that
+	// opens after is aborted as it opens.
+	var wire atomic.Pointer[linkFlow]
+	var ended atomic.Bool
+	defer ended.Store(true)
+	// abort ends the link at once, without the close handshake (fib's
+	// websocket.Connection.Abort, A52), what waits for the manager dropped:
+	// a close frame would wait behind everything a dead or slow manager has
+	// not read. end ends the attempt too.
+	abort := func(err error) {
+		if f := wire.Load(); f != nil {
+			f.ws.Abort(err)
+		}
+	}
+	end := func(err error) {
+		ended.Store(true)
+		abort(err)
+	}
+	// retry ends the attempt for msg, to be tried again.
+	retry := func(msg string) outcome {
+		end(errors.New(msg))
+		return outcome{kind: outRetry, err: msg}
+	}
 	var active atomic.Int64
 	active.Store(time.Now().UnixNano())
 	var open atomic.Bool
-	push := func(ev memberEvent) {
+	push := func(c *websocket.Connection, ev memberEvent) {
 		select {
 		case events <- ev:
 		default:
-			// More than a handshake sends: not a manager.
-			if c := raw.Load(); c != nil {
-				_ = c.Close()
-			}
+			c.Abort(errNotManager)
 		}
 	}
 	handler := websocket.HandlerFuncs{
+		Open: func(c *websocket.Connection, _ *stdhttp.Request) {
+			wire.Store(&linkFlow{ws: c, hold: linkPing / 4})
+			if ended.Load() {
+				c.Abort(errLinkEnded)
+			}
+		},
 		Message: func(c *websocket.Connection, _ websocket.Opcode, data []byte) {
 			active.Store(time.Now().UnixNano())
 			if len(data) == 0 {
@@ -420,14 +452,14 @@ func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
 			if open.Load() {
 				switch data[0] {
 				case msgRequest:
-					l.serve(c, data[1:])
+					l.serve(wire.Load(), data[1:])
 					return
 				case msgCancel:
 					l.cancel(data[1:])
 					return
 				}
 			}
-			push(memberEvent{kind: data[0], ws: c, data: bytes.Clone(data[1:])})
+			push(c, memberEvent{kind: data[0], ws: c, data: bytes.Clone(data[1:])})
 		},
 		Close: func(_ *websocket.Connection, code uint16, reason string, err error) {
 			if err == nil && code != 0 {
@@ -460,19 +492,6 @@ func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
 			return nil
 		},
 	}
-	cfg.Dial = func(e *fib.Engine, network, addr string, timeout time.Duration, h fib.Handler, done func(*fib.Connection, error)) error {
-		return e.DialWithHandler(network, addr, timeout, h, func(c *fib.Connection, err error) {
-			if c != nil {
-				raw.Store(c)
-			}
-			done(c, err)
-		})
-	}
-	closeRaw := func() {
-		if c := raw.Load(); c != nil {
-			_ = c.Close()
-		}
-	}
 	websocket.NewDialer(l.o.Engine, cfg).Dial(l.url, stdhttp.Header{"User-Agent": {"fit-cluster-member"}}, handler,
 		func(_ *websocket.Connection, _ *stdhttp.Response, err error) {
 			if err != nil {
@@ -490,14 +509,13 @@ func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
 	for {
 		select {
 		case <-l.stop:
-			closeRaw()
+			end(errLinkEnded)
 			return outcome{kind: outStop}
 		case <-handshake.C:
-			closeRaw()
-			return outcome{kind: outRetry, err: "the handshake with the manager took too long"}
+			return retry("the handshake with the manager took too long")
 		case <-tick:
 			if time.Since(time.Unix(0, active.Load())) > linkDead {
-				closeRaw()
+				abort(errLinkDead)
 				continue
 			}
 			_ = ws.Ping(nil)
@@ -518,26 +536,22 @@ func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
 			case msgChallenge:
 				var ch challengeMsg
 				if ws != nil || json.Unmarshal(ev.data, &ch) != nil || len(ch.Nonce) != linktoken.NonceSize {
-					closeRaw()
-					return outcome{kind: outRetry, err: "the manager's challenge is not one"}
+					return retry("the manager's challenge is not one")
 				}
 				ws, managerNonce, nonce = ev.ws, ch.Nonce, linktoken.Nonce()
 				hello := helloMsg{Mode: mode, ID: secret.ID, Nonce: nonce, Proof: secret.Prove(transcript(secret.ID, nonce, managerNonce, mode)),
 					Node: helloNode{ID: l.o.Node.ID, Hostname: l.o.Node.Hostname, FitVersion: l.o.Node.FitVersion}}
 				if err := ws.WriteBinary(encodeJSON(msgHello, hello)); err != nil {
-					closeRaw()
-					return outcome{kind: outRetry, err: err.Error()}
+					return retry(err.Error())
 				}
 			case msgWelcome:
 				var w welcomeMsg
 				if ws == nil || open.Load() || json.Unmarshal(ev.data, &w) != nil ||
 					secret.VerifyListener(transcript(secret.ID, nonce, managerNonce, mode), w.Proof, w.Name, w.Credential) != nil {
-					closeRaw()
-					return outcome{kind: outRetry, err: "the manager did not prove the token: it is not the manager that made it"}
+					return retry("the manager did not prove the token: it is not the manager that made it")
 				}
 				if mode == modeEnroll && !l.enrolled(secret.ID, &w) {
-					closeRaw()
-					return outcome{kind: outRetry, err: "the manager's credential is not one"}
+					return retry("the manager's credential is not one")
 				}
 				handshake.Stop()
 				open.Store(true)
@@ -552,23 +566,22 @@ func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
 				// Sent right after the welcome, before the link was
 				// taken as open.
 				if !open.Load() {
-					closeRaw()
-					return outcome{kind: outRetry, err: "the manager sent a call before its welcome"}
+					return retry("the manager sent a call before its welcome")
 				}
 				if ev.kind == msgRequest {
-					l.serve(ev.ws, ev.data)
+					l.serve(wire.Load(), ev.data)
 				} else {
 					l.cancel(ev.data)
 				}
 			case msgRefuse, msgRevoked:
 				var r refuseMsg
 				_ = json.Unmarshal(ev.data, &r)
-				closeRaw()
-				l.cancelAll()
 				msg := "the manager refused the link (" + r.Reason + "): " + r.Message
 				if ev.kind == msgRevoked {
 					msg = "the manager revoked this fit's credential (" + r.Reason + "): " + r.Message
 				}
+				end(errors.New(msg))
+				l.cancelAll()
 				switch r.Reason {
 				case ReasonUnknown, ReasonProof, ReasonUsed, ReasonExpired, ReasonRevoked:
 					l.logf("cluster: %s", msg)
@@ -579,8 +592,7 @@ func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
 				}
 				return outcome{kind: outRetry, err: msg}
 			default:
-				closeRaw()
-				return outcome{kind: outRetry, err: "the manager sent a message that is not one"}
+				return retry("the manager sent a message that is not one")
 			}
 		}
 	}
@@ -605,15 +617,29 @@ func (l *MemberLink) enrolled(tokenID string, w *welcomeMsg) bool {
 }
 
 // serve takes a request of the manager's, on a fib worker: it waits for a
-// worker of the link's own, or is answered busy at once.
-func (l *MemberLink) serve(c *websocket.Connection, data []byte) {
+// worker of the link's own, or is answered busy at once, as it is while the
+// answers sent wait for the manager past the link's limit (see linkFlow):
+// what waits on the member is bounded by the requests under way, whose
+// answers went out before, and the busy answers.
+//
+// An answer that takes the link above its limit holds the link's reads, so
+// that the manager's requests wait for it in TCP's flow control rather than
+// for busy answers, until the link falls back to half its limit, for at most
+// a quarter of the ping interval: the member hears no pong while it holds,
+// and the manager, which holds its own reads while its queue is past fib's
+// write watermark, may wait for the member to read.
+func (l *MemberLink) serve(f *linkFlow, data []byte) {
 	var head requestHead
 	id, body, err := decodeCall(data, &head)
 	if err != nil {
 		return
 	}
+	if f.isAbove() {
+		_ = f.send(encodeCall(msgResponse, id, responseHead{Error: answerBusy}, nil))
+		return
+	}
 	if !strings.HasPrefix(head.Path, "/") || int64(len(body)) > l.maxBody {
-		_ = c.WriteBinary(encodeCall(msgResponse, id, responseHead{Status: stdhttp.StatusBadRequest}, []byte(`{"error":"the request is not one the link takes"}`)))
+		_ = f.send(encodeCall(msgResponse, id, responseHead{Status: stdhttp.StatusBadRequest}, []byte(`{"error":"the request is not one the link takes"}`)))
 		return
 	}
 	timeout := min(max(time.Duration(head.Timeout)*time.Millisecond, time.Second), maxMemberTimeout)
@@ -626,7 +652,7 @@ func (l *MemberLink) serve(c *websocket.Connection, data []byte) {
 		defer l.done1(id, cancel)
 		req, err := stdhttp.NewRequestWithContext(ctx, head.Method, "http://cluster-link"+head.Path, bytes.NewReader(body))
 		if err != nil {
-			_ = c.WriteBinary(encodeCall(msgResponse, id, responseHead{Status: stdhttp.StatusBadRequest}, []byte(`{"error":"the request is not one the link takes"}`)))
+			_ = f.send(encodeCall(msgResponse, id, responseHead{Status: stdhttp.StatusBadRequest}, []byte(`{"error":"the request is not one the link takes"}`)))
 			return
 		}
 		for k, v := range head.Header {
@@ -639,18 +665,18 @@ func (l *MemberLink) serve(c *websocket.Connection, data []byte) {
 		case errors.Is(ctx.Err(), context.Canceled):
 			// The manager gave up on it.
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
-			_ = c.WriteBinary(encodeCall(msgResponse, id, responseHead{Error: answerTimeout}, nil))
+			_ = f.send(encodeCall(msgResponse, id, responseHead{Error: answerTimeout}, nil))
 		case w.over:
-			_ = c.WriteBinary(encodeCall(msgResponse, id, responseHead{Error: answerTooLarge}, nil))
+			_ = f.send(encodeCall(msgResponse, id, responseHead{Error: answerTooLarge}, nil))
 		default:
-			_ = c.WriteBinary(encodeCall(msgResponse, id, responseHead{Status: w.status, Header: w.header}, w.body.Bytes()))
+			_ = f.send(encodeCall(msgResponse, id, responseHead{Status: w.status, Header: w.header}, w.body.Bytes()))
 		}
 	}
 	select {
 	case l.jobs <- job:
 	default:
 		l.done1(id, cancel)
-		_ = c.WriteBinary(encodeCall(msgResponse, id, responseHead{Error: answerBusy}, nil))
+		_ = f.send(encodeCall(msgResponse, id, responseHead{Error: answerBusy}, nil))
 	}
 }
 

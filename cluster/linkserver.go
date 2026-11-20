@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	stdhttp "net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ var (
 	errLinkTooLarge = errors.New("the member's answer is larger than max_response_bytes")
 	errLinkBody     = errors.New("the request is larger than max_response_bytes, which bounds a link's messages both ways")
 	errDeadline     = errors.New("deadline exceeded")
+	errReplaced     = errors.New("another link of the member took this one's place")
 )
 
 // linkHub is the manager's side of the links members open to it: its
@@ -249,19 +251,17 @@ type linkListener struct {
 	index  int
 	addr   net.Addr
 	conns  *linkConns
-	open   sync.Map // *websocket.Connection → *mlink
 }
 
 func listenLinks(m *Manager, address string, cert tls.Certificate) (*linkListener, error) {
 	ln := &linkListener{m: m, engine: m.o.Engine, index: -1}
 	wsCfg := websocket.DefaultConfig()
 	wsCfg.MaxMessageBytes = m.lim.maxBytes + maxHeadBytes + 64
-	// No web page opens a link; the path is the link's alone.
-	wsCfg.CheckOrigin = func(r *stdhttp.Request) bool {
-		return r.URL.Path == config.ClusterLinkPath && r.Header.Get("Origin") == ""
-	}
+	// The path is the link's alone, and no web page opens a link.
+	wsCfg.Path = config.ClusterLinkPath
+	wsCfg.CheckOrigin = func(r *stdhttp.Request) bool { return r.Header.Get("Origin") == "" }
 	wsCfg.HTTP.MaxHeaderBytes = 16 << 10
-	wsCfg.HTTP.ReadHeaderTimeout = linkHandshake
+	wsCfg.HandshakeTimeout = linkHandshake
 	h := websocket.NewHandlerWithConfig(wsCfg, websocket.HandlerFuncs{
 		Open:    ln.onOpen,
 		Message: ln.onMessage,
@@ -298,11 +298,10 @@ func (ln *linkListener) close() {
 	ln.conns.closeAll()
 }
 
+// lookup returns the link of the WebSocket c, kept as its attachment.
 func (ln *linkListener) lookup(c *websocket.Connection) *mlink {
-	if v, ok := ln.open.Load(c); ok {
-		return v.(*mlink)
-	}
-	return nil
+	l, _ := c.Attachment().(*mlink)
+	return l
 }
 
 // The states of a link.
@@ -317,8 +316,8 @@ const (
 type mlink struct {
 	ln     *linkListener
 	ws     *websocket.Connection
-	raw    *fib.Connection // the connection under it, to close at once
-	remote string
+	flow   *linkFlow
+	remote string // the member's address, as the link opened
 	nonce  []byte
 	timer  *time.Timer // the handshake's, then the idle one
 	// active is when the link last heard from the member, in Unix
@@ -332,13 +331,17 @@ type mlink struct {
 	host   string
 	since  time.Time
 	calls  map[uint64]*linkCall
-	next   uint64
+	// held are the calls waiting, in order, for the link to fall back below
+	// its limit; they are among calls.
+	held []*linkCall
+	next uint64
 }
 
 func (ln *linkListener) onOpen(c *websocket.Connection, r *stdhttp.Request) {
-	l := &mlink{ln: ln, ws: c, raw: ln.conns.lookup(r.RemoteAddr), remote: r.RemoteAddr, nonce: linktoken.Nonce(), calls: map[uint64]*linkCall{}}
+	l := &mlink{ln: ln, ws: c, remote: r.RemoteAddr, nonce: linktoken.Nonce(), calls: map[uint64]*linkCall{}}
+	l.flow = &linkFlow{ws: c, drained: l.sendHeld}
 	l.active.Store(time.Now().UnixNano())
-	ln.open.Store(c, l)
+	c.SetAttachment(l)
 	l.timer = time.AfterFunc(linkHandshake, func() {
 		l.mu.Lock()
 		state := l.state
@@ -377,17 +380,16 @@ func (ln *linkListener) onMessage(c *websocket.Connection, _ websocket.Opcode, d
 }
 
 func (ln *linkListener) onClose(c *websocket.Connection, _ uint16, _ string, err error) {
-	v, ok := ln.open.LoadAndDelete(c)
-	if !ok {
+	l := ln.lookup(c)
+	if l == nil {
 		return
 	}
-	l := v.(*mlink)
 	l.timer.Stop()
 	l.mu.Lock()
 	wasOpen := l.state == linkOpen
 	l.state = linkClosed
 	calls := l.calls
-	l.calls = map[uint64]*linkCall{}
+	l.calls, l.held = map[uint64]*linkCall{}, nil
 	l.mu.Unlock()
 	for _, k := range calls {
 		k.finish(nil, errLinkClosed)
@@ -409,14 +411,12 @@ func (l *mlink) touch() {
 	}
 }
 
-// closeNow closes the link's connection at once, without the close
-// handshake: a member that hears nothing links again.
-func (l *mlink) closeNow(error) {
-	if l.raw != nil {
-		_ = l.raw.Close()
-		return
-	}
-	_ = l.ws.Close(websocket.CloseGoingAway, "")
+// closeNow closes the link at once, without the close handshake (fib's
+// websocket.Connection.Abort, A52), what waits for the member dropped: a
+// close frame would wait behind everything a dead or slow member has not
+// read. A member that hears nothing links again.
+func (l *mlink) closeNow(err error) {
+	l.ws.Abort(err)
 }
 
 // The close codes of a link the manager ends.
@@ -631,7 +631,7 @@ func (m *Manager) welcome(l *mlink, name, credID string, w welcomeMsg) {
 	host := l.host
 	l.mu.Unlock()
 	l.timer.Reset(linkDead)
-	l.ln.conns.linked(l.raw)
+	l.ln.conns.linked(l.ws.NetConn())
 	h.mu.Lock()
 	old := h.links[credID]
 	h.links[credID] = l
@@ -642,7 +642,7 @@ func (m *Manager) welcome(l *mlink, name, credID string, w welcomeMsg) {
 	m.mu.Unlock()
 	if old != nil && old != l {
 		_ = old.ws.WriteBinary(encodeJSON(msgRefuse, refuseMsg{Reason: ReasonReplaced, Message: "another link of the member took this one's place"}))
-		old.closeNow(nil)
+		old.closeNow(errReplaced)
 	}
 	m.logf("cluster: the member %q linked from %s", name, l.remote)
 	if n != nil {
@@ -790,6 +790,9 @@ type linkCall struct {
 	done  func(*reply, error)
 	timer *time.Timer
 	once  sync.Once
+	// msg is the request while the call is held, nil once it is sent; l.mu
+	// guards it.
+	msg []byte
 }
 
 func (k *linkCall) finish(r *reply, err error) {
@@ -800,14 +803,33 @@ func (k *linkCall) finish(r *reply, err error) {
 	})
 }
 
-// take removes the call id from l, returning it; nil when it was taken
-// already.
-func (l *mlink) take(id uint64) *linkCall {
+// take removes the call id from l, returning it, and whether its request
+// was sent; nil when it was taken already.
+func (l *mlink) take(id uint64) (k *linkCall, sent bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	k := l.calls[id]
+	k = l.calls[id]
+	if k == nil {
+		return nil, false
+	}
 	delete(l.calls, id)
-	return k
+	if k.msg == nil {
+		return k, true
+	}
+	k.msg = nil
+	l.held = slices.DeleteFunc(l.held, func(h *linkCall) bool { return h == k })
+	return k, false
+}
+
+// giveUp ends the call k with err, unless it ended already, and tells the
+// member, when its request went out.
+func (l *mlink) giveUp(k *linkCall, err error) {
+	if got, sent := l.take(k.id); got == k {
+		if sent {
+			_ = l.flow.send(encodeCancel(k.id))
+		}
+		k.finish(nil, err)
+	}
 }
 
 // call sends a request to the member over l.
@@ -831,24 +853,55 @@ func (l *mlink) call(t *linkTransport, method, path string, header stdhttp.Heade
 	l.next++
 	k.id = l.next
 	l.calls[k.id] = k
-	k.timer = time.AfterFunc(t.lim.timeout, func() {
-		if l.take(k.id) == k {
-			_ = l.ws.WriteBinary(encodeCancel(k.id))
-			k.finish(nil, errLinkTimeout)
-		}
-	})
+	k.timer = time.AfterFunc(t.lim.timeout, func() { l.giveUp(k, errLinkTimeout) })
 	l.mu.Unlock()
 	if !t.track(k) {
-		if l.take(k.id) == k {
-			k.finish(nil, errClosed)
-		}
+		l.giveUp(k, errClosed)
 		return
 	}
 	head := requestHead{Method: method, Path: path, Header: header, Timeout: t.lim.timeout.Milliseconds(), Max: t.lim.maxBytes}
-	if err := l.ws.WriteBinary(encodeCall(msgRequest, k.id, head, body)); err != nil {
-		if l.take(k.id) == k {
+	msg := encodeCall(msgRequest, k.id, head, body)
+	// Above its limit, or behind calls that are, the call waits for the
+	// link to fall back; it may time out waiting, never sent.
+	l.mu.Lock()
+	switch {
+	case l.calls[k.id] != k:
+		l.mu.Unlock()
+		return
+	case len(l.held) > 0 || l.flow.isAbove():
+		k.msg = msg
+		l.held = append(l.held, k)
+		l.mu.Unlock()
+		return
+	}
+	l.mu.Unlock()
+	l.send(k, msg)
+}
+
+// send sends the request msg of the call k.
+func (l *mlink) send(k *linkCall, msg []byte) {
+	if err := l.flow.send(msg); err != nil {
+		if got, _ := l.take(k.id); got == k {
 			k.finish(nil, errLinkClosed)
 		}
+	}
+}
+
+// sendHeld sends the calls held, in order, until the link is above its
+// limit again: it fell back to half.
+func (l *mlink) sendHeld() {
+	for !l.flow.isAbove() {
+		l.mu.Lock()
+		if l.state != linkOpen || len(l.held) == 0 {
+			l.mu.Unlock()
+			return
+		}
+		k := l.held[0]
+		l.held = l.held[1:]
+		msg := k.msg
+		k.msg = nil
+		l.mu.Unlock()
+		l.send(k, msg)
 	}
 }
 
@@ -860,7 +913,7 @@ func (l *mlink) answer(data []byte) {
 		l.closeNow(err)
 		return
 	}
-	k := l.take(id)
+	k, _ := l.take(id)
 	if k == nil {
 		return // given up on
 	}
@@ -935,10 +988,7 @@ func (t *linkTransport) abandon() {
 	}
 	t.mu.Unlock()
 	for _, k := range calls {
-		if k.l.take(k.id) == k {
-			_ = k.l.ws.WriteBinary(encodeCancel(k.id))
-			k.finish(nil, errClosed)
-		}
+		k.l.giveUp(k, errClosed)
 	}
 }
 
@@ -975,24 +1025,21 @@ func (m *Manager) notLinkedMessage(id string) string {
 }
 
 // linkConns wraps the link listener's handler: it counts the connections,
-// at most max in all and maxPending that have not linked, and keeps the fib
-// connection under each WebSocket by its remote address (fib's
-// websocket.Connection does not give it; fib API request A52), so that a
-// dead link is closed at once.
+// at most max in all and maxPending that have not linked, and closes them
+// all once the listener's binding goes, which leaves them open.
 type linkConns struct {
 	fib.Handler
 	max, maxPending int
-	byAddr          sync.Map // remote address → *fib.Connection
-	closed          atomic.Bool
 
 	mu      sync.Mutex
+	closed  bool
 	conns   map[*fib.Connection]bool // true: not linked yet
 	pending int
 }
 
 func (t *linkConns) OnOpen(c *fib.Connection) {
 	t.mu.Lock()
-	ok := !t.closed.Load() && len(t.conns) < t.max && t.pending < t.maxPending
+	ok := !t.closed && len(t.conns) < t.max && t.pending < t.maxPending
 	if ok {
 		t.conns[c] = true
 		t.pending++
@@ -1001,9 +1048,6 @@ func (t *linkConns) OnOpen(c *fib.Connection) {
 	if !ok {
 		_ = c.Close()
 		return
-	}
-	if a := c.RemoteAddr(); a != nil {
-		t.byAddr.Store(a.String(), c)
 	}
 	t.Handler.OnOpen(c)
 }
@@ -1019,13 +1063,11 @@ func (t *linkConns) OnClose(c *fib.Connection, err error) {
 	if !ok {
 		return // closed as it opened
 	}
-	if a := c.RemoteAddr(); a != nil {
-		t.byAddr.CompareAndDelete(a.String(), c)
-	}
 	t.Handler.OnClose(c, err)
 }
 
-// linked takes c off the connections that have not linked.
+// linked takes c, a link's connection (websocket.Connection.NetConn), off
+// those that have not linked.
 func (t *linkConns) linked(c *fib.Connection) {
 	if c == nil {
 		return
@@ -1036,13 +1078,6 @@ func (t *linkConns) linked(c *fib.Connection) {
 		t.pending--
 	}
 	t.mu.Unlock()
-}
-
-func (t *linkConns) lookup(addr string) *fib.Connection {
-	if v, ok := t.byAddr.Load(addr); ok {
-		return v.(*fib.Connection)
-	}
-	return nil
 }
 
 func (t *linkConns) OnShutdown(c *fib.Connection) {
@@ -1059,9 +1094,14 @@ func (t *linkConns) OnEngineClose(c *fib.Connection) {
 
 // closeAll closes every connection, and every one opened from now on.
 func (t *linkConns) closeAll() {
-	t.closed.Store(true)
-	t.byAddr.Range(func(_, v any) bool {
-		_ = v.(*fib.Connection).Close()
-		return true
-	})
+	t.mu.Lock()
+	t.closed = true
+	conns := make([]*fib.Connection, 0, len(t.conns))
+	for c := range t.conns {
+		conns = append(conns, c)
+	}
+	t.mu.Unlock()
+	for _, c := range conns {
+		_ = c.Close()
+	}
 }
