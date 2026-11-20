@@ -10054,6 +10054,28 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
   framing code is gone or reduced to what fib's package cannot do.
 - **Touches**: `tunnel/internal/transport`, `tunnel/hub`, `tunnel/proxy`, `docs/tunnel.md`.
 
+- **Done**: `4d832e97`, `790c0ee0`, then `4ca3e5b3` on fib A95–A97: the hand-rolled frames, handshake
+  parser and client are gone (`ws/ws.go` 541 to about 300 lines); links are a `websocket.ServerHandler`
+  with fib's `Path` (404 elsewhere) and `HandshakeTimeout` (10 s) and a `websocket.Dialer`; a link's TCP
+  settings (write backpressure off, keep-alive, `proto.LinkQueue`) are set on `NetConn()` as it opens;
+  state rides in each WebSocket's attachment, with no lookup per message; `Close` is `Abort`. The
+  console socket and web proxies pace with `OnWritable` and `HoldReads` at 256 KiB. `compat_test.go`
+  speaks the old wire byte for byte both ways: the old framing was RFC 6455, so old nodes and hubs
+  keep working.
+
+**Decisions pending review** (2026-11-21):
+
+1. **Any Origin is accepted** on links and the console socket, as before: no browser opens them, and
+   the console's messages are sealed with its password. Alternative: the cluster's rule, no Origin.
+2. **A link's sends are binary messages of at most 1 MiB**, under a lock, so old peers (2 MiB cap) take
+   them; links accept up to 2 MiB a message, the console socket and web proxies 128 KiB (twice
+   `sealChunk`) where they took 2 MiB.
+3. **Close codes other than 1000, 1001, 1005 and 1006** become a `ws:` error, so the link's log says why.
+4. **TCP settings start when the WebSocket opens**, not at connect: the handshake before it is bounded
+   by its timeout.
+5. **The LLM listener's handshake timeout is 5 s**, as its docs said; the old `ReadHeaderTimeout` did not
+   apply to a handler bound directly, so it had been fib's 10 s. Its wrong path is 404 too, where it was 403.
+
 ### I227 The cluster's member links on fib A52, A53 and A95 — done
 
 - **Why**: decision 15 of the cluster track gave the links the LLM mesh's stopgaps; a peer that stays

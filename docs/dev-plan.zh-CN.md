@@ -7031,6 +7031,23 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 - **完成标准**：tunnel 的测试经 ws 与 wss 通过，背压测试仍然成立，自行分帧的代码去掉，或只剩 fib 的包做不到的部分。
 - **涉及**：`tunnel/internal/transport`、`tunnel/hub`、`tunnel/proxy`、`docs/tunnel.md`。
 
+- **完成**：`4d832e97`、`790c0ee0`，以及基于 fib A95–A97 的 `4ca3e5b3`：自行实现的帧、握手解析与客户端都已去掉
+  （`ws/ws.go` 从 541 行减到约 300 行）；链路是带 fib `Path`（其他路径 404）与 `HandshakeTimeout`（10 秒）的
+  `websocket.ServerHandler` 和 `websocket.Dialer`；链路的 TCP 设置（关闭写背压、keep-alive、`proto.LinkQueue`）在打开时
+  经 `NetConn()` 设置；状态保存在各 WebSocket 的附加数据中，每条消息不再查表；`Close` 即 `Abort`。控制台套接字与 Web 代理
+  以 256 KiB 用 `OnWritable` 与 `HoldReads` 控制节奏。`compat_test.go` 双向逐字节模拟旧的线上格式：旧的分帧就是 RFC 6455，
+  所以旧的节点与 hub 照常工作。
+
+**待审查的决定**（2026-11-21）：
+
+1. **链路与控制台套接字接受任何 Origin**，与之前一致：没有浏览器打开它们，控制台的消息用其密码加密。备选：集群的规则，不许带 Origin。
+2. **链路的发送是至多 1 MiB 的二进制消息**，在锁内发出，旧的对端（上限 2 MiB）能接受；链路接受至多 2 MiB 的消息，控制台套接字与
+   Web 代理接受 128 KiB（`sealChunk` 的两倍），之前是 2 MiB。
+3. **1000、1001、1005、1006 以外的关闭码**变成 `ws:` 错误，链路的日志会说明原因。
+4. **TCP 设置在 WebSocket 打开时生效**，而不是连接时：之前的握手受其超时限制。
+5. **LLM 监听的握手超时为 5 秒**，与其文档一致；旧的 `ReadHeaderTimeout` 对直接绑定的处理器不起作用，实际是 fib 的 10 秒。
+   其错误路径也改为 404，之前是 403。
+
 ### I227 集群成员链路使用 fib A52、A53 与 A95 — done
 
 - **为什么**：集群一轮的决定 15 让链路采用 LLM 互联的临时办法；对端活着但读得慢时，队列仍可能无限增长，因为超时的调用
