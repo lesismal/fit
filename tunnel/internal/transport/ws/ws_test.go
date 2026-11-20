@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	fib "github.com/lesismal/fib"
 	"github.com/lesismal/fib/websocket"
 
 	"github.com/lesismal/fit/tunnel/internal/transport"
@@ -98,7 +97,7 @@ func listen(t *testing.T, path string, echo bool) (transport.Listener, <-chan *r
 }
 
 // Sends of every size, up to several messages' worth, echo whole and in
-// order; the dialed link knows its local address, the accepted one not.
+// order; both links know their addresses.
 func TestEcho(t *testing.T) {
 	l, srv := listen(t, "/link", true)
 	if !strings.HasPrefix(l.URL(), "ws://127.0.0.1:") || !strings.HasSuffix(l.URL(), "/link") {
@@ -116,7 +115,7 @@ func TestEcho(t *testing.T) {
 	if c.LocalAddr() == nil || !strings.Contains(l.URL(), c.RemoteAddr().String()) {
 		t.Errorf("addrs %v %v", c.LocalAddr(), c.RemoteAddr())
 	}
-	if s := (<-srv).c; s.LocalAddr() != nil || s.RemoteAddr().String() != c.LocalAddr().String() {
+	if s := (<-srv).c; s.LocalAddr() == nil || s.LocalAddr().String() != c.RemoteAddr().String() || s.RemoteAddr().String() != c.LocalAddr().String() {
 		t.Errorf("the accepted link's addrs %v %v", s.LocalAddr(), s.RemoteAddr())
 	}
 	var want []byte
@@ -228,7 +227,8 @@ func TestServerRefuses(t *testing.T) {
 		status    int
 	}{
 		{"garbage", "NOT HTTP\r\n\r\n", stdhttp.StatusBadRequest},
-		{"wrong path", "GET /other HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n", stdhttp.StatusForbidden},
+		{"wrong path", "GET /other HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n", stdhttp.StatusNotFound},
+		{"wrong path with a query", "GET /other?x=/link HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n", stdhttp.StatusNotFound},
 		{"not an upgrade", "GET /link HTTP/1.1\r\nHost: x\r\n\r\n", stdhttp.StatusBadRequest},
 		{"post", "POST /link HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n", stdhttp.StatusBadRequest},
 	} {
@@ -260,12 +260,14 @@ func TestServerHandshakeTooLong(t *testing.T) {
 	}
 }
 
-// A handshake head that does not end in time closes the connection; one
-// that ends, in pieces, does not.
+// A handshake that does not complete in time closes the connection; one
+// that does, in pieces, does not.
 func TestServerHandshakeTimeout(t *testing.T) {
 	opened := make(chan *websocket.Connection, 1)
-	s := NewServer(websocket.DefaultConfig(), websocket.HandlerFuncs{Open: func(c *websocket.Connection, _ *stdhttp.Request) { opened <- c }}, "", nil)
-	s.timeout = 200 * time.Millisecond
+	cfg := websocket.DefaultConfig()
+	const timeout = 200 * time.Millisecond
+	cfg.HandshakeTimeout = timeout
+	s := NewServer(cfg, websocket.HandlerFuncs{Open: func(c *websocket.Connection, _ *stdhttp.Request) { opened <- c }}, "")
 	e := tunneltest.Engine(t)
 	l, err := transport.ListenFib(e, "127.0.0.1:0", s, nil, func(hostport string) string { return "ws://" + hostport + "/" })
 	if err != nil {
@@ -293,44 +295,13 @@ func TestServerHandshakeTimeout(t *testing.T) {
 		t.Fatalf("%v, %v", rsp, err)
 	}
 	ws := <-opened
-	time.Sleep(2 * s.timeout)
+	time.Sleep(2 * timeout)
 	if err := ws.WriteMessage(websocket.Binary, []byte("still open")); err != nil {
 		t.Fatalf("the WebSocket closed: %v", err)
 	}
 	_ = c.SetReadDeadline(time.Now().Add(time.Second))
 	if _, p := readFrame(t, c); string(p) != "still open" {
 		t.Fatalf("%q", p)
-	}
-}
-
-// The end of a head is found wherever the reads split it.
-func TestHeadEnded(t *testing.T) {
-	msg := "GET / HTTP/1.1\r\nHost: x\r\n\r\nrest"
-	for i := 0; i <= len(msg); i++ {
-		for j := i; j <= len(msg); j++ {
-			h := &head{}
-			at := -1
-			for k, part := range []string{msg[:i], msg[i:j], msg[j:]} {
-				if h.ended([]byte(part)) {
-					at = k
-					break
-				}
-			}
-			end := strings.Index(msg, "\r\n\r\n") + 4
-			want := 0
-			switch {
-			case end > j:
-				want = 2
-			case end > i:
-				want = 1
-			}
-			if at != want {
-				t.Fatalf("split at %d, %d: ended in part %d, want %d", i, j, at, want)
-			}
-		}
-	}
-	if (&head{}).ended([]byte("\r\n\r")) {
-		t.Fatal("ended early")
 	}
 }
 
@@ -394,37 +365,16 @@ func TestServerCloseBeforeOpen(t *testing.T) {
 	}
 }
 
-// capture is a fib.Handler that hands over the connection it opens.
-type capture chan *fib.Connection
-
-func (c capture) OnOpen(conn *fib.Connection)          { c <- conn }
-func (capture) OnData(*fib.Connection, []byte)         {}
-func (capture) OnPriorityData(*fib.Connection, []byte) {}
-func (capture) OnClose(*fib.Connection, error)         {}
-
-// Events of a WebSocket the handlers do not know are dropped, and the
-// server passes a shutdown and priority data on.
+// Events of a WebSocket the handlers do not know are dropped, and a
+// WebSocket without a connection of its own is not readied.
 func TestUnknownConn(t *testing.T) {
 	l := &links{}
-	l.OnMessage(nil, websocket.Binary, []byte("x"))
-	l.OnClose(nil, 1000, "", nil)
+	l.OnMessage(&websocket.Connection{}, websocket.Binary, []byte("x"))
+	l.OnClose(&websocket.Connection{}, 1000, "", nil)
 	d := &dialed{c: &conn{}}
 	d.OnMessage(nil, websocket.Binary, []byte("x"))
 	d.OnClose(nil, 1000, "", nil)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	opened := make(capture, 1)
-	if err := tunneltest.Engine(t).DialWithHandler("tcp", ln.Addr().String(), 5*time.Second, opened, func(*fib.Connection, error) {}); err != nil {
-		t.Fatal(err)
-	}
-	c := <-opened
-	s := NewServer(websocket.DefaultConfig(), nil, "", nil)
-	s.OnPriorityData(c, nil)
-	s.OnShutdown(c)
+	prepareLink(&websocket.Connection{})
 }
 
 func TestCloseErr(t *testing.T) {

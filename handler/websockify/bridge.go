@@ -144,19 +144,9 @@ func dialStatus(err error) int {
 // two.
 func (b *bridge) upgrade(up *fib.Connection) {
 	w, c := b.w, b.c
-	s := shardOf(w, c.Request)
-	s.mu.Lock()
-	if s.byReq == nil {
-		s.byReq = map[*stdhttp.Request]*bridge{}
-	}
-	s.byReq[c.Request] = b
-	s.mu.Unlock()
-	ws, err := w.ws.Upgrade(c, nil)
+	ws, err := w.ws.UpgradeWithAttachment(c, nil, b)
 	if err != nil {
 		// Upgrade answered the request, 400 or 403.
-		s.mu.Lock()
-		delete(s.byReq, c.Request)
-		s.mu.Unlock()
 		b.mu.Lock()
 		b.state = done
 		b.mu.Unlock()

@@ -12,19 +12,17 @@
 // sends go out as binary messages of at most maxFrame bytes, and the
 // messages that arrive go to the link as if they had been read off a plain
 // TCP connection. A link is a byte stream, so where its frames fall in
-// messages does not matter. Server is also what the hub's console socket
+// messages does not matter. NewServer is also what the hub's console socket
 // serves its WebSockets with.
 package ws
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"net"
 	stdhttp "net/http"
 	"net/url"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	fib "github.com/lesismal/fib"
@@ -58,10 +56,6 @@ const (
 	HandshakeTimeout = 10 * time.Second
 )
 
-// errTimeout is the error of a connection whose opening handshake head did
-// not arrive in time.
-var errTimeout = errors.New("ws: websocket handshake timed out")
-
 // wsTransport dials and listens on ws:// and wss:// URLs.
 type wsTransport struct{}
 
@@ -82,17 +76,6 @@ func (wsTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, 
 		HandshakeTimeout:  timeout,
 		MaxMessageBytes:   maxMessage,
 		MaxHandshakeBytes: MaxHandshake,
-		// The link's TCP connection is readied as it connects, before
-		// the handshake.
-		Dial: func(e *fib.Engine, network, addr string, timeout time.Duration, h fib.Handler, done func(*fib.Connection, error)) error {
-			return e.DialWithHandler(network, addr, timeout, h, func(fc *fib.Connection, err error) {
-				if fc != nil {
-					prepareLink(fc)
-					c.fc.Store(fc)
-				}
-				done(fc, err)
-			})
-		},
 	}
 	switch u.Scheme {
 	case "ws":
@@ -128,7 +111,8 @@ func (wsTransport) Listen(engine *fib.Engine, addr string, o transport.ListenOpt
 	path := u.Path
 	cfg := websocket.DefaultConfig()
 	cfg.MaxMessageBytes = maxMessage
-	srv := NewServer(cfg, &links{open: open}, path, prepareLink)
+	cfg.HandshakeTimeout = HandshakeTimeout
+	srv := NewServer(cfg, &links{open: open}, path)
 	switch u.Scheme {
 	case "ws":
 		return transport.ListenFib(engine, u.Host, srv, o.Filter, func(hostport string) string { return "ws://" + hostport + path })
@@ -142,109 +126,35 @@ func (wsTransport) Listen(engine *fib.Engine, addr string, o transport.ListenOpt
 	return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// and wss:// are", u.Scheme)
 }
 
-// prepareLink readies the TCP connection of a link as it opens: write
-// backpressure off and keep-alive on, as transport.FibHandler readies a
-// link's; and the queue limit of a link (proto.LinkQueue), which the link
-// sets itself on the connections of the other transports but cannot reach
-// under a WebSocket.
-func prepareLink(c *fib.Connection) {
-	c.SetWriteBackpressure(false)
-	_ = c.SetKeepAliveConfig(transport.KeepAlive)
-	c.SetWriteQueueLimit(proto.LinkQueue)
-}
-
-// Server is a fib.Handler that serves WebSockets with fib's
-// websocket.ServerHandler, adding what a binding of their own needs: a path,
-// a bound on the opening handshake, and a hook for each connection as it
-// opens.
-type Server struct {
-	ws      *websocket.ServerHandler
-	prepare func(*fib.Connection)
-	timeout time.Duration
-	// heads is the connections whose handshake head has not all arrived,
-	// each with the timer that closes it.
-	heads sync.Map // *fib.Connection -> *head
-}
-
-// head is the end of what arrived of a connection's handshake head, which
-// may hold the start of the "\r\n\r\n" that ends it, and the timer that
-// closes the connection if the end does not come.
-type head struct {
-	timer *time.Timer
-	tail  []byte
-}
-
-var endOfHead = []byte("\r\n\r\n")
-
-// ended reports whether data, after what came before, ends the head.
-func (h *head) ended(data []byte) bool {
-	if bytes.Contains(data, endOfHead) {
-		return true
+// prepareLink readies the TCP connection of a link as its WebSocket opens:
+// write backpressure off and keep-alive on, as transport.FibHandler readies
+// a link's; and the queue limit of a link (proto.LinkQueue), which the link
+// sets itself on the connections of the other transports.
+func prepareLink(ws *websocket.Connection) {
+	if c := ws.NetConn(); c != nil {
+		c.SetWriteBackpressure(false)
+		_ = c.SetKeepAliveConfig(transport.KeepAlive)
+		c.SetWriteQueueLimit(proto.LinkQueue)
 	}
-	n := len(endOfHead) - 1
-	b := append(h.tail, data[:min(len(data), n)]...)
-	if bytes.Contains(b, endOfHead) {
-		return true
-	}
-	if len(data) >= n {
-		b = data
-	}
-	h.tail = append([]byte(nil), b[len(b)-min(len(b), n):]...)
-	return false
 }
 
-// NewServer serves h to WebSocket clients that ask for path, or for any
-// path when it is empty, as cfg says; a handshake for another path is
-// refused with 403 Forbidden, and any Origin is taken. A connection whose
-// handshake head has not arrived within HandshakeTimeout is closed;
-// prepare, unless nil, is called with each connection as it opens.
-func NewServer(cfg websocket.Config, h websocket.Handler, path string, prepare func(*fib.Connection)) *Server {
-	cfg.CheckOrigin = func(r *stdhttp.Request) bool { return path == "" || r.URL.Path == path }
+// NewServer returns the handler of WebSockets served on a binding of their
+// own: h's, for clients that ask for path, or any path when it is empty,
+// as cfg says. A handshake for another path is answered 404 Not Found, and
+// any Origin is taken. The handshake head is bounded by MaxHandshake, and
+// the handshake by cfg.HandshakeTimeout.
+func NewServer(cfg websocket.Config, h websocket.Handler, path string) *websocket.ServerHandler {
+	cfg.Path = path
+	cfg.CheckOrigin = func(*stdhttp.Request) bool { return true }
 	cfg.HTTP.MaxHeaderBytes = MaxHandshake
-	return &Server{ws: websocket.NewHandlerWithConfig(cfg, h), prepare: prepare, timeout: HandshakeTimeout}
+	return websocket.NewHandlerWithConfig(cfg, h)
 }
-
-func (s *Server) OnOpen(c *fib.Connection) {
-	if s.prepare != nil {
-		s.prepare(c)
-	}
-	s.heads.Store(c, &head{timer: time.AfterFunc(s.timeout, func() { c.CloseWithError(errTimeout) })})
-	s.ws.OnOpen(c)
-}
-
-func (s *Server) OnData(c *fib.Connection, data []byte) {
-	if v, ok := s.heads.Load(c); ok {
-		if h := v.(*head); h.ended(data) {
-			h.timer.Stop()
-			s.heads.Delete(c)
-		}
-	}
-	s.ws.OnData(c, data)
-}
-
-func (s *Server) OnPriorityData(c *fib.Connection, data []byte) { s.ws.OnPriorityData(c, data) }
-
-// OnShutdown sends an open WebSocket a close frame as the engine shuts
-// down; see websocket.ServerHandler.OnShutdown.
-func (s *Server) OnShutdown(c *fib.Connection) { s.ws.OnShutdown(c) }
-
-func (s *Server) OnClose(c *fib.Connection, err error) {
-	if v, ok := s.heads.LoadAndDelete(c); ok {
-		v.(*head).timer.Stop()
-	}
-	s.ws.OnClose(c, err)
-}
-
-var _ fib.ShutdownHandler = (*Server)(nil)
 
 // conn is a link's transport.Conn on a WebSocket.
 type conn struct {
-	ws     *websocket.Connection
-	h      transport.Handler
-	remote net.Addr
-	// fc is the TCP connection under a dialed WebSocket, whose address is
-	// the link's local one.
-	fc atomic.Pointer[fib.Connection]
+	ws            *websocket.Connection
+	h             transport.Handler
+	local, remote net.Addr
 	// mu keeps the messages of one send together.
 	mu sync.Mutex
 }
@@ -273,21 +183,15 @@ func (c *conn) Close() error {
 // CloseAfterSend sends a close frame behind what is queued.
 func (c *conn) CloseAfterSend() { _ = c.ws.Close(websocket.CloseNormal, "") }
 
-// LocalAddr is a dialed link's local address; an accepted WebSocket does
-// not tell its own, and has none.
-func (c *conn) LocalAddr() net.Addr {
-	if fc := c.fc.Load(); fc != nil {
-		return fc.LocalAddr()
-	}
-	return nil
-}
+func (c *conn) LocalAddr() net.Addr { return c.local }
 
 func (c *conn) RemoteAddr() net.Addr { return c.remote }
 
-// opened gives c the WebSocket that opened, and the link's handler; one
-// that open refuses is ended.
+// opened readies the WebSocket that opened, and gives it to c with the
+// link's handler; one that open refuses is ended.
 func (c *conn) opened(ws *websocket.Connection, open transport.OpenFunc) {
-	c.ws, c.remote = ws, ws.RemoteAddr()
+	prepareLink(ws)
+	c.ws, c.local, c.remote = ws, ws.LocalAddr(), ws.RemoteAddr()
 	if c.h = open(c); c.h == nil {
 		ws.Abort(nil)
 	}
@@ -305,28 +209,28 @@ func closeErr(code uint16, reason string, err error) error {
 	return fmt.Errorf("ws: closed with %d %s", code, reason)
 }
 
-// links is the websocket.Handler of a listener's WebSockets.
+// links is the websocket.Handler of a listener's WebSockets, each of which
+// carries its link's conn as its attachment.
 type links struct {
-	open  transport.OpenFunc
-	conns sync.Map // *websocket.Connection -> *conn
+	open transport.OpenFunc
 }
 
 func (l *links) OnOpen(ws *websocket.Connection, _ *stdhttp.Request) {
 	c := &conn{}
 	if c.opened(ws, l.open); c.h != nil {
-		l.conns.Store(ws, c)
+		ws.SetAttachment(c)
 	}
 }
 
 func (l *links) OnMessage(ws *websocket.Connection, _ websocket.Opcode, data []byte) {
-	if v, ok := l.conns.Load(ws); ok {
-		v.(*conn).h.OnData(data)
+	if c, ok := ws.Attachment().(*conn); ok {
+		c.h.OnData(data)
 	}
 }
 
 func (l *links) OnClose(ws *websocket.Connection, code uint16, reason string, err error) {
-	if v, ok := l.conns.LoadAndDelete(ws); ok {
-		v.(*conn).h.OnClose(closeErr(code, reason, err))
+	if c, ok := ws.Attachment().(*conn); ok {
+		c.h.OnClose(closeErr(code, reason, err))
 	}
 }
 

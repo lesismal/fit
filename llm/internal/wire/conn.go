@@ -416,9 +416,12 @@ func (c *Conn) closed(err error) {
 // ---- listener ----
 
 type server struct {
-	cfg   ConnConfig
-	tcp   *tcpConns
-	conns sync.Map // *websocket.Connection → *serverConn
+	cfg ConnConfig
+	tcp *tcpConns
+	// conns is every connection upgraded and not yet closed, for CloseAll; each carries its serverConn as its
+	// attachment.
+	// conns 是每条已升级且尚未关闭的连接，供 CloseAll 使用；每条连接以其 serverConn 作为附件。
+	conns sync.Map // *websocket.Connection → struct{}
 	count atomic.Int64
 }
 
@@ -432,29 +435,22 @@ type serverConn struct {
 
 // tcpConns wraps the WebSocket handler to bound the connections that have not authenticated yet, from their TCP
 // connect (TLS and the upgrade included) to their proof, and to close them all once the listener's binding goes.
-// They are kept by remote address, unique among the listener's open connections, as their TCP connection reports
-// it and the upgrade request carries it: fib's websocket.Connection does not expose the fib connection under it.
+// A WebSocket's own TCP connection, its NetConn, takes it off once it authenticates.
 //
 // tcpConns 包装 WebSocket 处理器，限制尚未认证的连接（从 TCP 连接建立，经 TLS 与升级，到证明通过），并在监听方的绑定移除后
-// 将它们全部关闭。它们按对端地址记录：该地址在监听方的已打开连接中唯一，TCP 连接报告的与升级请求携带的相同；fib 的
-// websocket.Connection 没有暴露其下的 fib 连接。
+// 将它们全部关闭。WebSocket 认证通过后，由其自身的 TCP 连接（NetConn）将其移出。
 type tcpConns struct {
 	fib.Handler
 	srv *server
 
-	// The connections that have not authenticated, by remote address, at most maxPending in all and maxPerIP from
-	// one IP address; closed once the listener is.
-	// 尚未认证的连接，按对端地址记录，总数至多 maxPending，同一 IP 地址至多 maxPerIP；closed 表示监听方已关闭。
+	// The connections that have not authenticated, each with its IP address, at most maxPending in all and maxPerIP
+	// from one IP address; closed once the listener is.
+	// 尚未认证的连接及其 IP 地址，总数至多 maxPending，同一 IP 地址至多 maxPerIP；closed 表示监听方已关闭。
 	maxPending, maxPerIP int
 	pmu                  sync.Mutex
 	closed               bool
-	pending              map[string]pendingConn
+	pending              map[*fib.Connection]netip.Addr
 	pendingIP            map[netip.Addr]int
-}
-
-type pendingConn struct {
-	c  *fib.Connection
-	ip netip.Addr
 }
 
 func (t *tcpConns) OnOpen(c *fib.Connection) {
@@ -466,46 +462,39 @@ func (t *tcpConns) OnOpen(c *fib.Connection) {
 }
 
 func (t *tcpConns) OnClose(c *fib.Connection, err error) {
-	if a := c.RemoteAddr(); a != nil {
-		t.authenticated(a.String(), c)
-	}
+	t.authenticated(c)
 	t.Handler.OnClose(c, err)
 }
 
 // hold counts c among the connections that have not authenticated, unless the listener is closed or there are as
-// many as it holds, in all or from c's address.
-// hold 将 c 计入尚未认证的连接，除非监听方已关闭，或总数、来自 c 的地址的数量已达上限。
+// many as it holds, in all or from c's IP address.
+// hold 将 c 计入尚未认证的连接，除非监听方已关闭，或总数、来自 c 的 IP 地址的数量已达上限。
 func (t *tcpConns) hold(c *fib.Connection) bool {
-	a := c.RemoteAddr()
-	if a == nil {
-		return false
-	}
-	ip := remoteIP(a)
+	ip := remoteIP(c.RemoteAddr())
 	t.pmu.Lock()
 	defer t.pmu.Unlock()
 	if t.closed || len(t.pending) >= t.maxPending || t.pendingIP[ip] >= t.maxPerIP {
 		return false
 	}
-	t.pending[a.String()] = pendingConn{c: c, ip: ip}
+	t.pending[c] = ip
 	t.pendingIP[ip]++
 	return true
 }
 
-// authenticated takes the connection from addr off the connections that have not authenticated: it has, or it
-// closed. c, when not nil, must be the one held.
-// authenticated 将来自 addr 的连接移出尚未认证的连接：它已通过认证，或已关闭。c 不为 nil 时必须是记录中的那条连接。
-func (t *tcpConns) authenticated(addr string, c *fib.Connection) {
+// authenticated takes c off the connections that have not authenticated, if it is among them: it has, or it closed.
+// authenticated 将 c 移出尚未认证的连接（若在其中）：它已通过认证，或已关闭。
+func (t *tcpConns) authenticated(c *fib.Connection) {
 	t.pmu.Lock()
 	defer t.pmu.Unlock()
-	p, ok := t.pending[addr]
-	if !ok || c != nil && p.c != c {
+	ip, ok := t.pending[c]
+	if !ok {
 		return
 	}
-	delete(t.pending, addr)
-	if t.pendingIP[p.ip] <= 1 {
-		delete(t.pendingIP, p.ip)
+	delete(t.pending, c)
+	if t.pendingIP[ip] <= 1 {
+		delete(t.pendingIP, ip)
 	} else {
-		t.pendingIP[p.ip]--
+		t.pendingIP[ip]--
 	}
 }
 
@@ -550,8 +539,8 @@ func (l Listener) CloseAll() {
 	l.pmu.Lock()
 	l.closed = true
 	pending := make([]*fib.Connection, 0, len(l.pending))
-	for _, p := range l.pending {
-		pending = append(pending, p.c)
+	for c := range l.pending {
+		pending = append(pending, c)
 	}
 	l.pmu.Unlock()
 	for _, c := range pending {
@@ -565,19 +554,21 @@ func (l Listener) CloseAll() {
 	})
 }
 
-// Path is the only path a listener upgrades; any other is refused with 403.
+// Path is the only path a listener upgrades; any other is answered 404.
 const Path = "/ws"
 
 // NewHandler returns the handler of a listener's fib binding: it upgrades
-// WebSocket connections on Path (any other path is refused with 403),
+// WebSocket connections on Path (any other path is answered 404),
 // authenticates them and runs a session on each.
 func NewHandler(cfg ConnConfig) Listener {
 	s := &server{cfg: cfg}
 	wsCfg := websocket.DefaultConfig()
 	wsCfg.MaxMessageBytes = int64(cfg.maxFrame())
-	wsCfg.CheckOrigin = func(r *http.Request) bool { return r.URL.Path == Path }
+	wsCfg.Path = Path
+	// Links are not opened from a browser's page.
+	wsCfg.CheckOrigin = func(*http.Request) bool { return true }
 	wsCfg.HTTP.MaxHeaderBytes = 16 << 10
-	wsCfg.HTTP.ReadHeaderTimeout = HandshakeTimeout
+	wsCfg.HandshakeTimeout = HandshakeTimeout
 	var h fib.Handler = websocket.NewHandlerWithConfig(wsCfg, websocket.HandlerFuncs{
 		Open:    s.open,
 		Message: s.message,
@@ -592,7 +583,7 @@ func NewHandler(cfg ConnConfig) Listener {
 		h = th
 	}
 	s.tcp = &tcpConns{Handler: h, srv: s, maxPending: cfg.MaxPending, maxPerIP: cfg.MaxPendingPerIP,
-		pending: map[string]pendingConn{}, pendingIP: map[netip.Addr]int{}}
+		pending: map[*fib.Connection]netip.Addr{}, pendingIP: map[netip.Addr]int{}}
 	if s.tcp.maxPending <= 0 {
 		s.tcp.maxPending = DefaultMaxPending
 	}
@@ -617,7 +608,8 @@ func (s *server) open(ws *websocket.Connection, r *http.Request) {
 	s.count.Add(1)
 	sc := &serverConn{challenge: make([]byte, challengeSize), req: r}
 	_, _ = rand.Read(sc.challenge)
-	s.conns.Store(ws, sc)
+	ws.SetAttachment(sc)
+	s.conns.Store(ws, struct{}{})
 	sc.timer = time.AfterFunc(HandshakeTimeout, func() {
 		sc.mu.Lock()
 		authed := sc.conn != nil
@@ -632,11 +624,10 @@ func (s *server) open(ws *websocket.Connection, r *http.Request) {
 }
 
 func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []byte) {
-	v, ok := s.conns.Load(ws)
+	sc, ok := ws.Attachment().(*serverConn)
 	if !ok {
 		return
 	}
-	sc := v.(*serverConn)
 	sc.mu.Lock()
 	c := sc.conn
 	sc.mu.Unlock()
@@ -681,7 +672,7 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 	}
 	sc.timer.Stop()
 	c = newConn(ws, &s.cfg, false, sc.req, roles, token)
-	s.tcp.authenticated(sc.req.RemoteAddr, nil)
+	s.tcp.authenticated(ws.NetConn())
 	sc.mu.Lock()
 	sc.conn = c
 	sc.mu.Unlock()
@@ -726,12 +717,12 @@ func (s *server) verify(challenge, data []byte, nonced bool) (Mutual, []string, 
 }
 
 func (s *server) close(ws *websocket.Connection, _ uint16, _ string, err error) {
-	v, ok := s.conns.LoadAndDelete(ws)
+	sc, ok := ws.Attachment().(*serverConn)
 	if !ok {
 		return
 	}
+	s.conns.Delete(ws)
 	s.count.Add(-1)
-	sc := v.(*serverConn)
 	sc.timer.Stop()
 	sc.mu.Lock()
 	c := sc.conn

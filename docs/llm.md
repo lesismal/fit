@@ -458,7 +458,7 @@ The roles link over a mesh of WebSocket connections.
 
 A role with `listen` adds a binding on the listeners' engine at `listen.address`, which closes a
 connection from an address the role's `access`, then the global one, refuses as it accepts it. It
-upgrades only `/ws`; any other path is refused with 403. A dialer connects to `wss://<address>/ws`
+upgrades only `/ws`; any other path is answered 404. A dialer connects to `wss://<address>/ws`
 when its peer has a `pin` or a `ca_file`, and to `ws://<address>/ws` otherwise, which only a
 loopback address allows; the whole dial, TLS and authentication included, is bounded by 10 seconds.
 

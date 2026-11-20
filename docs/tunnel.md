@@ -188,8 +188,8 @@ a peer that needs more opens a larger pool.
   `http/1.1`, then a WebSocket, fib's (package `fib/websocket`), whose binary messages carry the
   link, at most 1 MiB each; through nginx it takes `proxy_pass` with `Upgrade`, and a proxy that
   ends the TLS itself needs `ca_file` or the system's roots to check its certificate, and
-  `body_password` past it. A handshake for another path than the listener's is refused with 403,
-  and one whose head has not arrived in 10s is closed. The WebSockets are plain RFC 6455, as those
+  `body_password` past it. A handshake for another path than the listener's is answered 404,
+  and one that has not completed in 10s is closed. The WebSockets are plain RFC 6455, as those
   of earlier releases were, so a node or proxy of an earlier release links to a hub of this one,
   and the other way round. **TCP** links (`tcp://`) are the
   frames in the clear. Handshakes run on fib's state machines, a verification of the certificate

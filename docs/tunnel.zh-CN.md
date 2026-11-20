@@ -177,8 +177,8 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
   `fit-tunnel`。**WebSocket** 链路（`wss://`，以及明文的 `ws://`）用于只放行 HTTP(S) 的网络：wss 链路是
   ALPN 为 `http/1.1` 的 TLS 1.3，其上是一个 fib 的 WebSocket（`fib/websocket` 包），用二进制消息承载链路，
   每条至多 1 MiB；经 nginx 时需要 `proxy_pass` 加 `Upgrade`，自己终止 TLS 的代理需要用 `ca_file` 或系统根证书
-  校验它的证书，并且代理之后的部分需要 `body_password`。请求的路径不是监听的路径时，握手以 403 拒绝；10 秒内
-  握手请求头没有到齐的连接被关闭。这些 WebSocket 与之前版本的一样是标准的 RFC 6455，所以之前版本的节点或
+  校验它的证书，并且代理之后的部分需要 `body_password`。请求的路径不是监听的路径时，握手以 404 回答；10 秒内
+  没有完成握手的连接被关闭。这些 WebSocket 与之前版本的一样是标准的 RFC 6455，所以之前版本的节点或
   proxy 能连到这个版本的 hub，反过来也一样。**TCP** 链路（`tcp://`）是明文的帧。握手运行在 fib 的状态机上，证书校验运行在 fib 的握手池
   上，从不占用 worker。
 - **QUIC** 链路运行在同一个引擎的 UDP 绑定上，使用 fib 的 QUIC、TLS 1.3 和 ALPN `fit-tunnel`。
