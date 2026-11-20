@@ -48,9 +48,9 @@ type authFunc func([]byte) ([]byte, error)
 func (f authFunc) Prove(c []byte) ([]byte, error) { return f(c) }
 func (authFunc) Verify(_, _ []byte) error         { return nil }
 
-// A listener and a dialer with their own frame limit and no heartbeat; a closed connection's beat does nothing,
-// and the dialer can drop its TCP connection.
-// 自定帧上限且无心跳的监听方与拨号方；已关闭连接的 beat 什么也不做，拨号方可以断开其 TCP 连接。
+// A listener and a dialer with their own frame limit and no heartbeat; both know the peer's address, a closed
+// connection's beat does nothing, and the dialer can abort its connection.
+// 自定帧上限且无心跳的监听方与拨号方；两端都知道对端地址，已关闭连接的 beat 什么也不做，拨号方可以中止其连接。
 func TestConnOptionsAndAbort(t *testing.T) {
 	opened := make(chan *Conn, 2)
 	closed := make(chan error, 2)
@@ -60,16 +60,13 @@ func TestConnOptionsAndAbort(t *testing.T) {
 	lcfg.OnClose = func(_ *Conn, err error) { closed <- err }
 	l := NewHandler(lcfg)
 	addr := Listen(t, l)
-	if l.lookup("192.0.2.1:1") != nil {
-		t.Fatal("lookup found an unknown address")
-	}
 
 	d, err := Dial(ctxT(t), "ws://"+addr+Path, DialConfig{ConnConfig: cfg, Engine: SharedEngine(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := <-opened
-	if c.hb != nil || d.hb != nil || d.RemoteAddr() != "" || c.RemoteAddr() == "" {
+	if c.hb != nil || d.hb != nil || d.RemoteAddr() != addr || c.RemoteAddr() == "" || c.RemoteAddr() != c.Request.RemoteAddr {
 		t.Fatalf("heartbeat armed (%v %v) or bad addrs %q %q", c.hb, d.hb, d.RemoteAddr(), c.RemoteAddr())
 	}
 	d.Close()
@@ -81,7 +78,10 @@ func TestConnOptionsAndAbort(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-opened
-	d.abort()
+	d.forceClose(ErrHeartbeat)
+	if !errors.Is(d.Err(), ErrHeartbeat) {
+		t.Fatalf("dialer closed with %v", d.Err())
+	}
 	select {
 	case <-closed:
 	case <-time.After(3 * time.Second):

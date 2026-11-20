@@ -380,6 +380,44 @@ func TestProxySlowUpstreamReader(t *testing.T) {
 	idle(t, n)
 }
 
+// A link that holds its streams, its send queue above its limit, holds the
+// response's head, and the body behind it, until it lets them go; then the
+// call ends whole.
+func TestProxyHeldLink(t *testing.T) {
+	u := newUpstream(t)
+	n := startNode(t, &config.LLMNode{Models: []config.LLMModel{{Name: "big", API: model.APIOpenAI, BaseURL: u.URL + "/big"}}}, nil)
+	d, l, closeFn := wire.Pipe(wire.Options{}, wire.Handlers{}, wire.Handlers{
+		Stream: func(ctx context.Context, st *wire.Stream) ([]byte, error) {
+			data, err := n.Router.InvokeStream(ctx, client, model.MethodNodeProxy, st.Payload(), st)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(data)
+		},
+	})
+	defer closeFn()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	l.HoldStreams(true)
+	raw, _ := json.Marshal(model.ProxyReq{API: model.APIOpenAI, Path: "chat/completions", Model: "big", Body: []byte("{}")})
+	st, err := d.OpenStream(ctx, wire.Head{Method: model.MethodNodeProxy}, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The upstream answers meanwhile; nothing comes while the link holds.
+	short, stop := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer stop()
+	if _, err := st.Recv(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a frame came on a held link: %v", err)
+	}
+	l.HoldStreams(false)
+	head, body, err := readProxy(ctx, st)
+	if err != nil || head.Status != 200 || len(body) != bigSize {
+		t.Fatalf("head %+v, %d bytes, %v", head, len(body), err)
+	}
+	idle(t, n)
+}
+
 // A caller that leaves while the node holds the upstream body for want of
 // credit, with nothing of it pending, ends the exchange: the stream's end
 // runs the credit callback, which no credit will ever follow.

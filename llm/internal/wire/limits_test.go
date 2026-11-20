@@ -173,29 +173,50 @@ func waitUntil(t *testing.T, cond func() bool) {
 	t.Fatal("condition not reached")
 }
 
-// The listener finds the fib connection under each WebSocket connection, so forceClose drops the TCP connection
-// itself; so does the dialing side, through the dialer's Dial hook.
-// 监听方能找到每条 WebSocket 连接下的 fib 连接，因此 forceClose 直接断开 TCP 连接（拨号方没有这样的句柄）。
-func TestForceCloseListener(t *testing.T) {
-	opened := make(chan *Conn, 1)
-	addr := Listen(t, NewHandler(ConnConfig{OnOpen: func(c *Conn) { opened <- c }}))
-
-	d, err := Dial(ctxT(t), "ws://"+addr+"/ws", DialConfig{Engine: SharedEngine(t)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
-	c := <-opened
-	if c.abort == nil {
-		t.Fatal("listener connection has no handle on its TCP connection")
-	}
-	if d.abort == nil {
-		t.Fatal("dialer connection has no handle on its TCP connection")
-	}
-	c.forceClose(closeSlow, "too slow", ErrSlow)
-	select {
-	case <-d.Done():
-	case <-time.After(2 * time.Second):
-		t.Fatal("dialer did not see the connection drop")
+// forceClose aborts the WebSocket without the close handshake, on either side, even with megabytes queued for a
+// peer that reads nothing: the side that closed is done at once, its OnClose reporting err, where a close frame would
+// wait behind all of it for the peer's; the other side sees the drop as soon as it reads.
+// forceClose 跳过关闭握手中止 WebSocket（两端皆然），即使有数 MB 数据排队等待一个什么都不读的对端：关闭的一端立即结束，其
+// OnClose 报告 err，而关闭帧要排在这些数据之后等待对端的关闭帧；另一端一读取就看到连接断开。
+func TestForceClose(t *testing.T) {
+	for _, side := range []string{"listener", "dialer"} {
+		t.Run(side, func(t *testing.T) {
+			opened := make(chan *Conn, 1)
+			closed := map[bool]chan error{false: make(chan error, 1), true: make(chan error, 1)}
+			onClose := func(c *Conn, err error) { closed[c.Request == nil] <- err }
+			addr := Listen(t, NewHandler(ConnConfig{OnOpen: func(c *Conn) { opened <- c }, OnClose: onClose}))
+			d, err := Dial(ctxT(t), "ws://"+addr+"/ws", DialConfig{ConnConfig: ConnConfig{OnClose: onClose}, Engine: SharedEngine(t)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			c := <-opened
+			closer, other := c, d
+			if side == "dialer" {
+				closer, other = d, c
+			}
+			// The other side reads nothing, so a close frame would wait behind all of this.
+			// 另一端什么都不读，关闭帧会排在这些数据之后。
+			other.ws.HoldReads(true)
+			big := make([]byte, 1<<20)
+			for range 8 {
+				_ = closer.ws.WriteBinary(big)
+			}
+			closer.forceClose(ErrSlow)
+			select {
+			case err := <-closed[closer.Request == nil]:
+				if !errors.Is(err, ErrSlow) {
+					t.Fatalf("closed with %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("the side that closed is not done")
+			}
+			other.ws.HoldReads(false)
+			select {
+			case <-other.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("the other side did not see the connection drop")
+			}
+		})
 	}
 }

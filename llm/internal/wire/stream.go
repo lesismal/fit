@@ -131,8 +131,8 @@ func (st *Stream) touch() {
 	}
 }
 
-// Send sends one data frame, waiting for window credit.
-// Send 发送一个数据帧，必要时等待窗口额度。
+// Send sends one data frame, waiting for window credit, and while the link holds its streams.
+// Send 发送一个数据帧，必要时等待窗口额度，连接停止其流时也等待。
 func (st *Stream) Send(ctx context.Context, data []byte) error {
 	for {
 		st.mu.Lock()
@@ -147,7 +147,7 @@ func (st *Stream) Send(ctx context.Context, data []byte) error {
 		case st.sentEnd:
 			st.mu.Unlock()
 			return ErrStreamEnded
-		case st.credit > 0:
+		case st.canSendLocked():
 			n := cost(data)
 			st.credit -= n
 			st.mu.Unlock()
@@ -400,7 +400,7 @@ func (st *Stream) onCredit(n int) {
 	st.mu.Lock()
 	st.credit += n
 	var fn func()
-	if st.credit > 0 {
+	if st.canSendLocked() {
 		fn, st.creditFn = st.creditFn, nil
 	}
 	st.mu.Unlock()
@@ -540,7 +540,7 @@ func (st *Stream) TrySend(data []byte) (bool, error) {
 	case st.sentEnd:
 		st.mu.Unlock()
 		return false, ErrStreamEnded
-	case st.credit <= 0:
+	case !st.canSendLocked():
 		st.mu.Unlock()
 		return false, nil
 	}
@@ -555,26 +555,47 @@ func (st *Stream) TrySend(data []byte) (bool, error) {
 	return true, nil
 }
 
-// Credit reports whether the peer has granted room for another frame.
+// Credit reports whether the peer has granted room for another frame, and
+// the link lets the stream use it (see Session.holdStreams).
 func (st *Stream) Credit() bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	return st.credit > 0
+	return st.canSendLocked()
 }
 
-// OnCredit arranges for fn to run once, when the peer grants credit or the
-// stream ends, and reports true; it reports false, and never runs fn, when
-// there is credit already or the stream has ended. One fn at a time: a
-// second replaces the first. fn runs on the goroutine that read the credit,
-// and must not block.
+// canSendLocked reports whether a data frame may go: the peer granted
+// credit, and the link does not hold its streams.
+func (st *Stream) canSendLocked() bool { return st.credit > 0 && !st.s.held.Load() }
+
+// OnCredit arranges for fn to run once, when the stream may send again (the
+// peer grants credit, or the link that held its streams lets them go) or
+// the stream ends, and reports true; it reports false, and never runs fn,
+// when it may send already or the stream has ended. Either can change at
+// once on another goroutine, so a caller told false tries to send again. One
+// fn at a time: a second replaces the first. fn runs on the goroutine that
+// read the credit, or let the link go, and must not block.
 func (st *Stream) OnCredit(fn func()) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.finished || st.credit > 0 {
+	if st.finished || st.canSendLocked() {
 		return false
 	}
 	st.creditFn = fn
 	return true
+}
+
+// resume wakes the stream's senders once the link lets its streams go again.
+func (st *Stream) resume() {
+	signal(st.sendSig)
+	st.mu.Lock()
+	var fn func()
+	if st.canSendLocked() {
+		fn, st.creditFn = st.creditFn, nil
+	}
+	st.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 // Err returns why the stream ended, nil while it runs or when the responder

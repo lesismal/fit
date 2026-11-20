@@ -43,9 +43,7 @@ const (
 	ackOK     = 0x01
 
 	closeAuthFailed = 4001 // the listener rejected the proof / 监听方拒绝了证明
-	closeHeartbeat  = 4002 // no frame for three ping intervals / 三个心跳周期没有收到任何帧
 	closeRefused    = 4003 // the listener is full or shutting down / 监听方已满或正在下线
-	closeSlow       = 4004 // a ping went unanswered for SlowTimeout / ping 在 SlowTimeout 内未得到应答
 )
 
 var (
@@ -92,9 +90,11 @@ type ConnConfig struct {
 	// SlowTimeout closes a connection whose ping has waited this long for its pong: everything sent before the ping,
 	// in both directions, must drain first, so a peer that cannot keep up, or whose reads the fib write watermark has
 	// paused on this side, gets dropped instead of piling up (0: DefaultSlowTimeout, < 0: off). Checked once per
-	// ping interval.
+	// ping interval. It is the last resort: a link whose send queue passes its limit holds its streams, and for a
+	// while its reads, long before (see Conn.send).
 	// SlowTimeout ping 等待 pong 超过这么久即关闭连接：两个方向上在 ping 之前发送的所有内容都要先排空，因此跟不上的对端、
 	// 或本端因 fib 写水位而暂停读取的连接会被断开，而不是不断积压（0：DefaultSlowTimeout，< 0：关闭）。每个心跳周期检查一次。
+	// 它是最后的手段：发送队列超过上限的连接早在此之前就停止了其流，并暂停读取一段时间（见 Conn.send）。
 	SlowTimeout time.Duration
 	// MaxConns caps the connections a listener holds at once, handshakes included (≤ 0: no limit); one more is
 	// closed with ErrRefused at the dialer.
@@ -148,6 +148,21 @@ func (cfg *ConnConfig) slowTimeout() time.Duration {
 	return cfg.SlowTimeout
 }
 
+// maxHold bounds how long a link whose send queue is above its limit holds its reads: a quarter of the shorter of
+// the ping interval and the slow timeout (2.5 s by default), or of DefaultPingInterval with both off. See Conn.send.
+// maxHold 限制发送队列超过上限的连接暂停读取的时长：心跳周期与慢连接超时中较短者的四分之一（默认 2.5 秒），两者都关闭时为
+// DefaultPingInterval 的四分之一。见 Conn.send。
+func (cfg *ConnConfig) maxHold() time.Duration {
+	d := cfg.pingInterval()
+	if s := cfg.slowTimeout(); s > 0 && (d <= 0 || s < d) {
+		d = s
+	}
+	if d <= 0 {
+		d = DefaultPingInterval
+	}
+	return d / 4
+}
+
 func (cfg *ConnConfig) maxFrame() int {
 	if cfg.Session.MaxFrame > 0 {
 		return cfg.Session.MaxFrame
@@ -170,35 +185,133 @@ type Conn struct {
 	// Token 是拨号方所证明的连接令牌 ID（监听方），密码则为 ""。
 	Token string
 
-	ws  *websocket.Connection
-	cfg *ConnConfig
-	// abort drops the TCP connection without the close handshake (listener side; nil on the dialing side, see
-	// forceClose).
-	// abort 跳过关闭握手直接断开 TCP 连接（监听方；拨号方为 nil，见 forceClose）。
-	abort     func()
+	ws *websocket.Connection
+	// remote is the peer's address, kept as the connection opens: the socket's may be gone once it closes.
+	// remote 是对端地址，在连接建立时记下：连接关闭后套接字的地址可能已取不到。
+	remote    string
+	cfg       *ConnConfig
 	hb        *time.Timer
 	lastBeat  time.Time
 	closeOnce sync.Once
+
+	// The send queue's episodes above its limit (see send): above while one lasts, gen counting them, and the timer
+	// that ends its hold on reads.
+	// 发送队列超过上限的时段（见 send）：above 表示正处于其中，gen 为其计数，hold 为结束读取暂停的定时器。
+	flowMu sync.Mutex
+	above  bool
+	gen    uint64
+	hold   *time.Timer
 }
 
 func newConn(ws *websocket.Connection, cfg *ConnConfig, dialer bool, req *http.Request, roles []string, token string) *Conn {
 	c := &Conn{ws: ws, cfg: cfg, Request: req, Roles: roles, Token: token}
+	if a := ws.RemoteAddr(); a != nil {
+		c.remote = a.String()
+	}
 	opts := cfg.Session
 	opts.Dialer = dialer
 	if cfg.Handlers != nil {
 		opts.Handlers = cfg.Handlers(c)
 	}
-	c.Session = NewSession(opts, ws.WriteBinary)
+	c.Session = NewSession(opts, c.send)
 	return c
 }
 
-// RemoteAddr returns the peer address of an accepted connection, or "" on the dialing side.
-// RemoteAddr 返回监听方连接的对端地址；拨号方为 ""。
-func (c *Conn) RemoteAddr() string {
-	if c.Request != nil {
-		return c.Request.RemoteAddr
+// RemoteAddr returns the peer's address, on either side, as it was when the connection opened.
+// RemoteAddr 返回对端地址（两端皆可），即连接建立时的地址。
+func (c *Conn) RemoteAddr() string { return c.remote }
+
+// send writes a frame without waiting. When more than the WebSocket's PendingWriteLimit (fib's default, 64 KiB) then
+// waits for the peer, the link holds back what feeds it until the queue falls to half the limit (OnWritable):
+//
+//   - its streams stop sending data (Session.holdStreams), as if the peer granted no credit, so that the producers
+//     writing to them wait, and a Pump into one of them stops releasing, and so granting credit to, the stream it
+//     reads;
+//   - its reads are held, so that the peer's new calls, streams and pushes, whose replies would queue here too, wait
+//     in TCP's flow control. Holding reads leaves the peer's pings unanswered, and the peer may hold its own reads
+//     because this end reads too little: the two ends of a link, each holding the other, would wait for each other
+//     until their slow timeouts. So a hold lasts at most maxHold, a quarter of the ping interval or the slow timeout,
+//     whichever is shorter, once per episode: well within the peer's slow timeout, and then the link reads again
+//     while its streams stay held. A peer slow enough for its own ping to wait the slow timeout is still dropped by
+//     it, the last resort.
+//
+// On the listener's side fib's write watermark, on for a connection a listener accepts, also pauses reads while
+// more than it waits, for as long as that lasts; it is left on, as it bounds what a peer that sends and never reads
+// can queue here. It cannot hold both ends at once with no end: the dialer's own hold ends after maxHold, and its
+// reads then drain the listener's queue.
+//
+// Calls, replies, pushes and control frames are not held: they are bounded by the calls the peer may have running
+// (MaxInbound) and by the reads held.
+//
+// send 不等待地写入一帧。若此后等待发往对端的数据超过 WebSocket 的 PendingWriteLimit（fib 默认 64 KiB），连接就阻住向其
+// 写入的一方，直到队列降到上限的一半（OnWritable）：
+//
+//   - 其各个流停止发送数据（Session.holdStreams），如同对端没有授予额度，使向这些流写入的生产者等待，向其中某个流转发的
+//     Pump 也不再释放、因而不再向其读取的流授予额度；
+//   - 暂停读取，使对端新的调用、流与推送（其应答也会排在这里）在 TCP 流控中等待。暂停读取会让对端的 ping 得不到应答；对端
+//     也可能因本端读得太少而暂停读取：连接的两端互相暂停，会彼此等待，直到慢连接超时。因此每个时段内暂停至多 maxHold，即
+//     心跳周期与慢连接超时中较短者的四分之一，远小于对端的慢连接超时；此后连接恢复读取，而其流仍保持停止。慢到连自己的 ping
+//     都要等满慢连接超时的对端仍由它断开，这是最后的手段。
+//
+// 在监听方，fib 的写水位（对监听方接受的连接默认开启）也会在等待的数据超过水位时暂停读取，直到降下来为止；它保持开启，因为
+// 它限制了只发不读的对端能在这里排队的数据量。它不会让两端无休止地同时暂停：拨号方自己的暂停在 maxHold 后结束，随后其读取
+// 会排空监听方的队列。
+//
+// 调用、应答、推送与控制帧不受阻：它们受对端可同时运行的调用数（MaxInbound）与暂停的读取约束。
+func (c *Conn) send(b []byte) error {
+	above, err := c.ws.WriteMessageNoWait(websocket.Binary, b)
+	if err == nil && above {
+		c.overLimit()
 	}
-	return ""
+	return err
+}
+
+// overLimit begins an episode above the send queue's limit, unless one is under way.
+// overLimit 开始一个发送队列超过上限的时段，除非已在其中。
+func (c *Conn) overLimit() {
+	c.flowMu.Lock()
+	if c.above {
+		c.flowMu.Unlock()
+		return
+	}
+	c.above = true
+	c.gen++
+	gen := c.gen
+	c.Session.holdStreams(true)
+	c.ws.HoldReads(true)
+	c.hold = time.AfterFunc(c.cfg.maxHold(), func() { c.releaseReads(gen) })
+	c.flowMu.Unlock()
+	if !c.ws.OnWritable(func(error) { c.writable(gen) }) {
+		c.writable(gen) // drained already / 已经排空
+	}
+}
+
+// releaseReads ends the hold on reads of episode gen, which goes on otherwise.
+// releaseReads 结束第 gen 个时段的读取暂停，时段本身继续。
+func (c *Conn) releaseReads(gen uint64) {
+	c.flowMu.Lock()
+	if c.above && c.gen == gen {
+		c.ws.HoldReads(false)
+	}
+	c.flowMu.Unlock()
+}
+
+// writable ends episode gen: the queue fell to half its limit, or the connection ended.
+// writable 结束第 gen 个时段：队列已降到上限的一半，或连接已结束。
+func (c *Conn) writable(gen uint64) {
+	c.flowMu.Lock()
+	if !c.above || c.gen != gen {
+		c.flowMu.Unlock()
+		return
+	}
+	c.above = false
+	c.hold.Stop()
+	c.ws.HoldReads(false)
+	c.Session.holdStreams(false)
+	c.flowMu.Unlock()
+	// Outside the lock: a sender woken may go above the limit again at once.
+	// 在锁外唤醒：被唤醒的发送方可能立刻再次超过上限。
+	c.Session.wakeStreams()
 }
 
 // Close closes the connection and its session.
@@ -214,19 +327,15 @@ func (c *Conn) closeWith(code uint16, reason string, err error) {
 	_ = c.ws.Close(code, reason)
 }
 
-// forceClose closes a connection whose peer is dead or too slow. The close frame queues behind whatever is still
-// unsent, so on the listener side the TCP connection is dropped at once (abort). The dialing side has no handle on
-// its TCP connection (fib's websocket.Connection does not expose it): it can only send the close frame, and its
-// socket lingers until the queue drains or the kernel gives up; the session closes right away either way.
+// forceClose closes a connection whose peer is dead or too slow at once, on either side: a close frame would queue
+// behind whatever is still unsent, so the WebSocket is aborted without the close handshake, what waits for the peer
+// dropped. The session closes first, with err (see closeWith).
 //
-// forceClose 关闭对端已死或过慢的连接。关闭帧排在所有未发送的内容之后，所以监听方立即断开 TCP 连接（abort）。拨号方拿不到
-// 其 TCP 连接（fib 的 websocket.Connection 没有暴露）：只能发送关闭帧，套接字要等队列排空或内核放弃才释放；无论哪种情况，
-// 会话都会立即关闭。
-func (c *Conn) forceClose(code uint16, reason string, err error) {
-	c.closeWith(code, reason, err)
-	if c.abort != nil {
-		c.abort()
-	}
+// forceClose 立即关闭对端已死或过慢的连接（两端皆然）：关闭帧会排在所有未发送的内容之后，所以跳过关闭握手直接中止 WebSocket，
+// 丢弃等待发往对端的数据。会话先以 err 关闭（见 closeWith）。
+func (c *Conn) forceClose(err error) {
+	c.Session.Close(err)
+	c.ws.Abort(err)
 }
 
 func (c *Conn) receive(data []byte) {
@@ -264,12 +373,12 @@ func (c *Conn) beat(d time.Duration) {
 	now := time.Now()
 	idle := now.Sub(c.LastRecv())
 	if idle >= 3*d {
-		c.forceClose(closeHeartbeat, "heartbeat timeout", ErrHeartbeat)
+		c.forceClose(ErrHeartbeat)
 		return
 	}
 	waited := c.Unanswered()
 	if slow := c.cfg.slowTimeout(); slow > 0 && waited >= slow {
-		c.forceClose(closeSlow, "too slow", ErrSlow)
+		c.forceClose(ErrSlow)
 		return
 	}
 	// A ping also goes out when the last round trip is two intervals old,
@@ -289,6 +398,11 @@ func (c *Conn) closed(err error) {
 		if c.hb != nil {
 			c.hb.Stop()
 		}
+		c.flowMu.Lock()
+		if c.hold != nil {
+			c.hold.Stop()
+		}
+		c.flowMu.Unlock()
 		if err == nil {
 			err = ErrClosed
 		}
@@ -311,86 +425,87 @@ type server struct {
 type serverConn struct {
 	challenge []byte
 	req       *http.Request
-	tcp       *fib.Connection
 	timer     *time.Timer
 	mu        sync.Mutex
 	conn      *Conn // set once authenticated / 认证通过后设置
 }
 
-// tcpConns wraps the WebSocket handler to learn the fib connection under each WebSocket connection, so that a
-// dead or slow peer's socket can be dropped without the close handshake. fib's websocket.Connection does not expose
-// it; the upgrade request's RemoteAddr is the fib connection's remote address, which is unique among the
-// listener's open connections, so it is the key.
+// tcpConns wraps the WebSocket handler to bound the connections that have not authenticated yet, from their TCP
+// connect (TLS and the upgrade included) to their proof, and to close them all once the listener's binding goes.
+// They are kept by remote address, unique among the listener's open connections, as their TCP connection reports
+// it and the upgrade request carries it: fib's websocket.Connection does not expose the fib connection under it.
 //
-// tcpConns 包装 WebSocket 处理器，记录每条 WebSocket 连接下的 fib 连接，以便跳过关闭握手直接断开已死或过慢的对端。
-// fib 的 websocket.Connection 没有暴露它；升级请求的 RemoteAddr 就是 fib 连接的对端地址，在监听方的已打开连接中唯一，
-// 因此用作键。
+// tcpConns 包装 WebSocket 处理器，限制尚未认证的连接（从 TCP 连接建立，经 TLS 与升级，到证明通过），并在监听方的绑定移除后
+// 将它们全部关闭。它们按对端地址记录：该地址在监听方的已打开连接中唯一，TCP 连接报告的与升级请求携带的相同；fib 的
+// websocket.Connection 没有暴露其下的 fib 连接。
 type tcpConns struct {
 	fib.Handler
-	byAddr sync.Map // remote address → *fib.Connection / 对端地址 → *fib.Connection
-	closed atomic.Bool
+	srv *server
 
-	// The connections that have not authenticated, by IP address, at most
-	// maxPending in all and maxPerIP from one address.
-	// 尚未认证的连接，按 IP 地址计数，总数至多 maxPending，同一地址至多 maxPerIP。
+	// The connections that have not authenticated, by remote address, at most maxPending in all and maxPerIP from
+	// one IP address; closed once the listener is.
+	// 尚未认证的连接，按对端地址记录，总数至多 maxPending，同一 IP 地址至多 maxPerIP；closed 表示监听方已关闭。
 	maxPending, maxPerIP int
 	pmu                  sync.Mutex
-	pending              map[*fib.Connection]netip.Addr
+	closed               bool
+	pending              map[string]pendingConn
 	pendingIP            map[netip.Addr]int
 }
 
+type pendingConn struct {
+	c  *fib.Connection
+	ip netip.Addr
+}
+
 func (t *tcpConns) OnOpen(c *fib.Connection) {
-	if t.closed.Load() || !t.hold(c) {
+	if !t.hold(c) {
 		_ = c.Close()
 		return
-	}
-	if a := c.RemoteAddr(); a != nil {
-		t.byAddr.Store(a.String(), c)
 	}
 	t.Handler.OnOpen(c)
 }
 
 func (t *tcpConns) OnClose(c *fib.Connection, err error) {
 	if a := c.RemoteAddr(); a != nil {
-		t.byAddr.CompareAndDelete(a.String(), c)
+		t.authenticated(a.String(), c)
 	}
-	t.authenticated(c)
 	t.Handler.OnClose(c, err)
 }
 
-// hold counts c among the connections that have not authenticated, unless
-// there are as many as the listener holds, in all or from c's address.
-// hold 将 c 计入尚未认证的连接，除非总数或来自 c 的地址的数量已达上限。
+// hold counts c among the connections that have not authenticated, unless the listener is closed or there are as
+// many as it holds, in all or from c's address.
+// hold 将 c 计入尚未认证的连接，除非监听方已关闭，或总数、来自 c 的地址的数量已达上限。
 func (t *tcpConns) hold(c *fib.Connection) bool {
-	ip := remoteIP(c.RemoteAddr())
-	t.pmu.Lock()
-	defer t.pmu.Unlock()
-	if len(t.pending) >= t.maxPending || t.pendingIP[ip] >= t.maxPerIP {
+	a := c.RemoteAddr()
+	if a == nil {
 		return false
 	}
-	t.pending[c] = ip
+	ip := remoteIP(a)
+	t.pmu.Lock()
+	defer t.pmu.Unlock()
+	if t.closed || len(t.pending) >= t.maxPending || t.pendingIP[ip] >= t.maxPerIP {
+		return false
+	}
+	t.pending[a.String()] = pendingConn{c: c, ip: ip}
 	t.pendingIP[ip]++
 	return true
 }
 
-// authenticated takes c off the connections that have not authenticated: it
-// has, or it closed.
-// authenticated 将 c 移出尚未认证的连接：它已通过认证，或已关闭。
-func (t *tcpConns) authenticated(c *fib.Connection) {
-	if c == nil {
-		return
-	}
+// authenticated takes the connection from addr off the connections that have not authenticated: it has, or it
+// closed. c, when not nil, must be the one held.
+// authenticated 将来自 addr 的连接移出尚未认证的连接：它已通过认证，或已关闭。c 不为 nil 时必须是记录中的那条连接。
+func (t *tcpConns) authenticated(addr string, c *fib.Connection) {
 	t.pmu.Lock()
 	defer t.pmu.Unlock()
-	ip, ok := t.pending[c]
-	if !ok {
+	p, ok := t.pending[addr]
+	if !ok || c != nil && p.c != c {
 		return
 	}
-	delete(t.pending, c)
-	if t.pendingIP[ip] <= 1 {
-		delete(t.pendingIP, ip)
+	delete(t.pending, addr)
+	if t.pendingIP[p.ip] <= 1 {
+		delete(t.pendingIP, p.ip)
 	} else {
-		t.pendingIP[ip]--
+		t.pendingIP[p.ip]--
 	}
 }
 
@@ -423,24 +538,29 @@ func (t *tcpConns) OnEngineClose(c *fib.Connection) {
 	}
 }
 
-func (t *tcpConns) lookup(addr string) *fib.Connection {
-	if v, ok := t.byAddr.Load(addr); ok {
-		return v.(*fib.Connection)
-	}
-	return nil
-}
-
 // Listener is the handler NewHandler returns: a binding's handler that
 // takes WebSocket links on Path.
 type Listener struct{ *tcpConns }
 
 // CloseAll closes every connection the listener took, authenticated or
 // not, and every one it takes from now on, once its binding is removed:
-// a removed fib binding leaves its connections open.
+// a removed fib binding leaves its connections open. Links are aborted
+// without the close handshake, their sessions closed with ErrClosed.
 func (l Listener) CloseAll() {
-	l.closed.Store(true)
-	l.byAddr.Range(func(_, v any) bool {
-		_ = v.(*fib.Connection).Close()
+	l.pmu.Lock()
+	l.closed = true
+	pending := make([]*fib.Connection, 0, len(l.pending))
+	for _, p := range l.pending {
+		pending = append(pending, p.c)
+	}
+	l.pmu.Unlock()
+	for _, c := range pending {
+		_ = c.Close()
+	}
+	// Every connection upgraded is in conns from its upgrade, and in pending until it authenticates.
+	// 每条已升级的连接自升级起就在 conns 中，认证之前也在 pending 中。
+	l.srv.conns.Range(func(k, _ any) bool {
+		k.(*websocket.Connection).Abort(ErrClosed)
 		return true
 	})
 }
@@ -471,8 +591,8 @@ func NewHandler(cfg ConnConfig) Listener {
 		th.HandshakeTimeout = HandshakeTimeout
 		h = th
 	}
-	s.tcp = &tcpConns{Handler: h, maxPending: cfg.MaxPending, maxPerIP: cfg.MaxPendingPerIP,
-		pending: map[*fib.Connection]netip.Addr{}, pendingIP: map[netip.Addr]int{}}
+	s.tcp = &tcpConns{Handler: h, srv: s, maxPending: cfg.MaxPending, maxPerIP: cfg.MaxPendingPerIP,
+		pending: map[string]pendingConn{}, pendingIP: map[netip.Addr]int{}}
 	if s.tcp.maxPending <= 0 {
 		s.tcp.maxPending = DefaultMaxPending
 	}
@@ -495,7 +615,7 @@ func (s *server) open(ws *websocket.Connection, r *http.Request) {
 		return
 	}
 	s.count.Add(1)
-	sc := &serverConn{challenge: make([]byte, challengeSize), req: r, tcp: s.tcp.lookup(r.RemoteAddr)}
+	sc := &serverConn{challenge: make([]byte, challengeSize), req: r}
 	_, _ = rand.Read(sc.challenge)
 	s.conns.Store(ws, sc)
 	sc.timer = time.AfterFunc(HandshakeTimeout, func() {
@@ -560,11 +680,8 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 		return
 	}
 	sc.timer.Stop()
-	s.tcp.authenticated(sc.tcp)
 	c = newConn(ws, &s.cfg, false, sc.req, roles, token)
-	if tcp := sc.tcp; tcp != nil {
-		c.abort = func() { _ = tcp.Close() }
-	}
+	s.tcp.authenticated(sc.req.RemoteAddr, nil)
 	sc.mu.Lock()
 	sc.conn = c
 	sc.mu.Unlock()
@@ -661,17 +778,6 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 	wsCfg.HandshakeTimeout = timeout
 	wsCfg.MaxMessageBytes = int64(cfg.maxFrame())
 	wsCfg.TLSConfig = cfg.TLS
-	// The fib connection under the link, so that a dead or slow peer's
-	// socket can be dropped without the close handshake.
-	var tcp atomic.Pointer[fib.Connection]
-	wsCfg.Dial = func(e *fib.Engine, network, addr string, timeout time.Duration, h fib.Handler, done func(*fib.Connection, error)) error {
-		return e.DialWithHandler(network, addr, timeout, h, func(c *fib.Connection, err error) {
-			if c != nil {
-				tcp.Store(c)
-			}
-			done(c, err)
-		})
-	}
 	dialer := websocket.NewDialer(engine, wsCfg)
 
 	res := make(chan dialResult, 1)
@@ -760,9 +866,6 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 					return
 				}
 				c = newConn(w, &cfg.ConnConfig, true, nil, nil, "")
-				if t := tcp.Load(); t != nil {
-					c.abort = func() { _ = t.Close() }
-				}
 				mu.Lock()
 				conn = c
 				mu.Unlock()

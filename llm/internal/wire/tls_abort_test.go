@@ -9,8 +9,7 @@ import (
 	"github.com/lesismal/fit/internal/certpin"
 )
 
-// Over TLS both ends still find the fib connection under a link, so that a
-// dead or slow peer's socket is dropped at once.
+// Over TLS a forced close still drops the link at once.
 func TestTLSAbortFound(t *testing.T) {
 	c, k, err := certpin.SelfSigned("test", "127.0.0.1")
 	if err != nil {
@@ -39,10 +38,10 @@ func TestTLSAbortFound(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the listener did not open the link")
 	}
-	if d.abort == nil || l.abort == nil {
-		t.Fatalf("abort: dialer %v, listener %v", d.abort != nil, l.abort != nil)
+	if d.RemoteAddr() != addr || l.RemoteAddr() == "" {
+		t.Fatalf("addresses: dialer %q, listener %q", d.RemoteAddr(), l.RemoteAddr())
 	}
-	l.forceClose(closeHeartbeat, "test", ErrHeartbeat)
+	l.forceClose(ErrHeartbeat)
 	select {
 	case <-d.Done():
 	case <-time.After(5 * time.Second):

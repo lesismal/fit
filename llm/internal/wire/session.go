@@ -103,6 +103,10 @@ type Session struct {
 	pingAt    atomic.Int64 // when the unanswered ping was sent, 0 if none / 未应答的 ping 的发送时间，没有则为 0
 	drainSent atomic.Bool
 	peerDrain atomic.Bool
+	// held stops the streams' data frames while the link's send queue is
+	// above its limit (see holdStreams).
+	// held 在连接的发送队列超过上限时停止各个流的数据帧（见 holdStreams）。
+	held atomic.Bool
 
 	// The bytes of every frame received and sent, and the round trips of
 	// the pings: what a link's traffic and latency are shown from.
@@ -612,6 +616,41 @@ func (s *Session) enqueuePush(r *Request) {
 			h(r)
 		}
 	}()
+}
+
+// holdStreams stops, with hold, the data frames of every stream: Send waits, TrySend and Credit report no credit and
+// OnCredit waits, as if the peer had granted none, whatever it has granted; without hold it lets them go again, and
+// wakeStreams then wakes the senders that wait. The transport holds them while its send queue is above its limit,
+// so that the producers that feed it, and through a Pump the streams they read, are held back with it. Control
+// frames, calls, replies and pushes still go.
+//
+// holdStreams 在 hold 为真时停止所有流的数据帧：无论对端授予了多少额度，Send 都等待，TrySend 与 Credit 都报告没有额度，
+// OnCredit 都等待，如同对端没有授予额度；hold 为假时放行，随后由 wakeStreams 唤醒等待的发送方。传输层在发送队列超过上限时
+// 停止它们，使向其写入的生产者、以及经 Pump 被读取的流随之被阻住。控制帧、调用、应答与推送照常发送。
+func (s *Session) holdStreams(hold bool) { s.held.Store(hold) }
+
+// HoldStreams holds the data frames of every stream, or lets them go and wakes their senders, as a transport that
+// paces the session by its own send queue does (see holdStreams); Conn does it itself.
+// HoldStreams 停止所有流的数据帧，或放行并唤醒其发送方，供按自身发送队列为会话限速的传输层使用（见 holdStreams）；Conn 自行处理。
+func (s *Session) HoldStreams(hold bool) {
+	s.holdStreams(hold)
+	if !hold {
+		s.wakeStreams()
+	}
+}
+
+// wakeStreams wakes the senders of every stream that may send again.
+// wakeStreams 唤醒每个可以再次发送的流的发送方。
+func (s *Session) wakeStreams() {
+	s.mu.Lock()
+	streams := make([]*Stream, 0, len(s.streams))
+	for _, st := range s.streams {
+		streams = append(streams, st)
+	}
+	s.mu.Unlock()
+	for _, st := range streams {
+		st.resume()
+	}
 }
 
 func (s *Session) removeStream(st *Stream) {

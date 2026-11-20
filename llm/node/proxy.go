@@ -562,11 +562,9 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 	x.mu.Unlock()
 	head := model.ProxyHead{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Node: x.res.Node}
 	b, _ := json.Marshal(head)
-	if ok, err := x.st.TrySend(b); err != nil || !ok {
+	ok, err := x.st.TrySend(b)
+	if err != nil {
 		resp.Close()
-		if err == nil {
-			err = wire.ErrFlowControl
-		}
 		x.finish(nil, err)
 		return
 	}
@@ -574,7 +572,20 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 		x.n.setModelErr(x.model, "", false) // the upstream answers
 	}
 	x.arm(x.lim.idle)
+	if ok {
+		resp.OnBody(x.onBody)
+		return
+	}
+	// The link holds its streams, its send queue above its limit: the head
+	// waits, and the body behind it.
+	x.mu.Lock()
+	x.pending = b
+	x.mu.Unlock()
+	resp.HoldBody(true)
 	resp.OnBody(x.onBody)
+	if !x.st.OnCredit(func() { x.resume(resp) }) {
+		x.resume(resp)
+	}
 }
 
 // onBody streams the response body to the caller, a frame per piece. It
@@ -663,13 +674,17 @@ func (x *exchange) resume(resp *fibhttp.ClientResponse) {
 		if x.st.OnCredit(func() { x.resume(resp) }) {
 			return
 		}
-		// OnCredit refuses with credit granted since, or with the stream
-		// ended, which no credit will ever follow.
-		if !x.st.Credit() {
+		// OnCredit refuses with the stream ended, which no credit will ever
+		// follow, or with credit granted since, which may be held again by
+		// now: try again.
+		select {
+		case <-x.st.Done():
 			resp.Close()
 			x.finish(nil, wire.ErrStreamEnded)
-			return
+		default:
+			x.resume(resp)
 		}
+		return
 	}
 	resp.HoldBody(false)
 }
