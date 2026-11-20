@@ -2,17 +2,18 @@ package proxy
 
 import (
 	"fmt"
+	stdhttp "net/http"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fib"
+	"github.com/lesismal/fib/websocket"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/tunnel/internal/common"
-	"github.com/lesismal/fit/tunnel/internal/transport/ws"
 	"github.com/lesismal/fit/tunnel/internal/wscrypt"
 )
 
@@ -21,7 +22,8 @@ import (
 // WebSocket of its own to the socket, which carries what the two exchange,
 // encrypted with the socket's password, one message per piece of at most
 // sealChunk. Each side's reads wait for the other's backlog (rule 8), and
-// the local connection's wait for the WebSocket to open.
+// the local connection's wait for the WebSocket to open. The WebSockets are
+// fib's (package fib/websocket).
 
 // sealChunk is the most of the local connection's bytes one message
 // carries.
@@ -29,6 +31,19 @@ const sealChunk = 64 << 10
 
 // proxyDialTimeout bounds the dial of a WebSocket and its handshake.
 const proxyDialTimeout = 10 * time.Second
+
+// wsDialer is the dialer of the web proxies' WebSockets on engine: a
+// message is a sealed chunk, with room to spare, and the WebSocket's reads
+// wait while the local connection's backlog is past common.Watermark, as the
+// local connection's do while the WebSocket's is.
+func wsDialer(engine *fib.Engine) *websocket.Dialer {
+	return websocket.NewDialer(engine, websocket.DialerConfig{
+		HandshakeTimeout:  proxyDialTimeout,
+		MaxMessageBytes:   2 * sealChunk,
+		MaxHandshakeBytes: 16 << 10,
+		PendingWriteLimit: common.Watermark,
+	})
+}
 
 // proxyCfg is a web proxy's settings with the secret of its password.
 type proxyCfg struct {
@@ -39,11 +54,12 @@ type proxyCfg struct {
 // webProxy is a web proxy of the config and its binding: listening on
 // addr, or failed to with err.
 type webProxy struct {
-	c     *Proxy
-	set   atomic.Pointer[proxyCfg]
-	index int
-	addr  string
-	err   string
+	c      *Proxy
+	dialer *websocket.Dialer
+	set    atomic.Pointer[proxyCfg]
+	index  int
+	addr   string
+	err    string
 
 	mu     sync.Mutex
 	conns  map[*fib.Connection]*proxyConn
@@ -104,7 +120,7 @@ func (c *Proxy) applyProxies(want []config.TunnelWebProxy) []error {
 
 // startProxy listens for pc.
 func (c *Proxy) startProxy(pc *config.TunnelWebProxy) *webProxy {
-	p := &webProxy{c: c, index: -1, conns: map[*fib.Connection]*proxyConn{}}
+	p := &webProxy{c: c, dialer: wsDialer(c.h.Engine), index: -1, conns: map[*fib.Connection]*proxyConn{}}
 	secret, err := wscrypt.NewSecret(pc.Password)
 	p.set.Store(&proxyCfg{cfg: pc, secret: secret})
 	if err != nil {
@@ -151,7 +167,7 @@ type proxyConn struct {
 	secret wscrypt.Secret
 
 	mu      sync.Mutex
-	ws      *fib.Connection
+	ws      *websocket.Connection
 	wsGate  *common.Gate
 	sess    *wscrypt.Session
 	pending [][]byte
@@ -172,18 +188,12 @@ func (p *webProxy) OnOpen(local *fib.Connection) {
 	local.SetAttachment(pc)
 	// The local connection waits for the WebSocket.
 	pc.lgate.Hold()
-	dial, err := ws.Dialer(p.c.h.Engine, set.cfg.URL, proxyDialTimeout, &proxyWS{pc: pc})
-	if err == nil {
-		err = dial(func(_ *fib.Connection, err error) {
-			if err != nil {
-				p.c.log.Warnf("web proxy %s: %s: %v", set.cfg.Listen, set.cfg.URL, err)
-				_ = local.Close()
-			}
-		})
-	}
-	if err != nil {
-		_ = local.Close()
-	}
+	p.dialer.Dial(set.cfg.URL, stdhttp.Header{"User-Agent": {"fit"}}, &proxyWS{pc: pc}, func(_ *websocket.Connection, _ *stdhttp.Response, err error) {
+		if err != nil {
+			p.c.log.Warnf("web proxy %s: %s: %v", set.cfg.Listen, set.cfg.URL, err)
+			_ = local.Close()
+		}
+	})
 }
 
 // OnData seals what the local connection sends, once the session is up.
@@ -210,7 +220,7 @@ func (p *webProxy) OnData(local *fib.Connection, data []byte) {
 func (pc *proxyConn) sendLocked(data []byte) {
 	for len(data) > 0 {
 		n := min(len(data), sealChunk)
-		_ = pc.ws.Send(pc.sess.Seal(data[:n]))
+		_ = pc.ws.WriteMessage(websocket.Binary, pc.sess.Seal(data[:n]))
 		data = data[n:]
 	}
 	pc.lgate.Pace(pc.ws)
@@ -231,27 +241,26 @@ func (p *webProxy) OnClose(local *fib.Connection, _ error) {
 	w := pc.ws
 	pc.mu.Unlock()
 	if w != nil {
-		w.CloseAfterSend()
+		_ = w.Close(websocket.CloseNormal, "")
 	}
 }
 
-// proxyWS is the handler of a proxyConn's WebSocket, which ws.Dialer
-// calls with each message.
+// proxyWS is the websocket.Handler of a proxyConn's WebSocket.
 type proxyWS struct{ pc *proxyConn }
 
-func (h *proxyWS) OnOpen(c *fib.Connection) {
+func (h *proxyWS) OnOpen(c *websocket.Connection, _ *stdhttp.Request) {
 	pc := h.pc
 	pc.mu.Lock()
 	pc.ws, pc.wsGate = c, common.NewGate(c)
 	closed := pc.closed
 	pc.mu.Unlock()
 	if closed {
-		_ = c.Close()
+		c.Abort(nil)
 	}
 }
 
-// OnData is the hub's hello, and then what the console sends.
-func (h *proxyWS) OnData(c *fib.Connection, data []byte) {
+// OnMessage is the hub's hello, and then what the console sends.
+func (h *proxyWS) OnMessage(c *websocket.Connection, _ websocket.Opcode, data []byte) {
 	pc := h.pc
 	pc.mu.Lock()
 	if pc.closed {
@@ -263,14 +272,14 @@ func (h *proxyWS) OnData(c *fib.Connection, data []byte) {
 		sess, err := wscrypt.NewSession(pc.secret, data, hello, false)
 		if err != nil {
 			pc.mu.Unlock()
-			_ = c.Close()
+			c.Abort(err)
 			return
 		}
 		pc.sess = sess
-		_ = c.Send(hello)
+		_ = c.WriteMessage(websocket.Binary, hello)
 		// An empty message proves the password at once, so that the hub
 		// keeps the WebSocket while the browser sends nothing yet.
-		_ = c.Send(sess.Seal(nil))
+		_ = c.WriteMessage(websocket.Binary, sess.Seal(nil))
 		pending := pc.pending
 		pc.pending = nil
 		for _, b := range pending {
@@ -284,16 +293,14 @@ func (h *proxyWS) OnData(c *fib.Connection, data []byte) {
 	pc.mu.Unlock()
 	if err != nil {
 		pc.p.c.log.Warnf("web proxy %s: a message failed to decrypt; is the password right?", pc.p.set.Load().cfg.Listen)
-		_ = c.Close()
+		c.Abort(err)
 		return
 	}
 	_ = pc.local.Send(plain)
-	pc.wsGate.Pace(pc.local)
+	pc.wsGate.Pace(common.Out(pc.local))
 }
 
-func (h *proxyWS) OnPriorityData(*fib.Connection, []byte) {}
-
-func (h *proxyWS) OnClose(*fib.Connection, error) {
+func (h *proxyWS) OnClose(*websocket.Connection, uint16, string, error) {
 	h.pc.local.CloseAfterSend()
 }
 

@@ -3,6 +3,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fib"
+	"github.com/lesismal/fib/websocket"
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
@@ -184,6 +186,58 @@ func expectEOF(t *testing.T, c net.Conn) {
 	}
 }
 
+// wsPeer is the server's side of a WebSocket a test dials: the messages
+// it gets, and its close.
+type wsPeer struct {
+	t      *testing.T
+	msgs   chan []byte
+	closed chan struct{}
+}
+
+func (p *wsPeer) next() []byte {
+	p.t.Helper()
+	select {
+	case b := <-p.msgs:
+		return b
+	case <-time.After(10 * time.Second):
+		p.t.Fatal("timed out waiting for a message")
+		return nil
+	}
+}
+
+func (p *wsPeer) waitClosed() {
+	p.t.Helper()
+	select {
+	case <-p.closed:
+	case <-time.After(10 * time.Second):
+		p.t.Fatal("the WebSocket did not close")
+	}
+}
+
+// wsPair dials a WebSocket on e, with a handler that does nothing, to a
+// server of the test's own, and returns the dialed connection, which the
+// test drives a handler with, and the server's side.
+func wsPair(t *testing.T, e *fib.Engine) (*websocket.Connection, *wsPeer) {
+	t.Helper()
+	p := &wsPeer{t: t, msgs: make(chan []byte, 16), closed: make(chan struct{})}
+	h := websocket.NewHandler(websocket.HandlerFuncs{
+		Message: func(_ *websocket.Connection, _ websocket.Opcode, data []byte) { p.msgs <- bytes.Clone(data) },
+		Close:   func(*websocket.Connection, uint16, string, error) { close(p.closed) },
+	})
+	srv := tunneltest.Engine(t)
+	i, err := srv.AddBinding(fib.Binding{Addr: "127.0.0.1:0", Handler: h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addrs, _ := srv.BindingAddrs(i)
+	ws, _, err := websocket.NewDialer(e, websocket.DialerConfig{}).Go("ws://"+addrs[0].String()+"/", nil, websocket.HandlerFuncs{}).Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ws.Abort(nil) })
+	return ws, p
+}
+
 // The handlers of a proxy's two connections, driven one step at a time:
 // what the local connection sends before the session is up waits for it,
 // and then goes sealed, in order; what the socket sends is opened, and one
@@ -207,37 +261,36 @@ func TestProxyConnSession(t *testing.T) {
 		t.Fatalf("pending %q", pc.pending)
 	}
 
-	ws, wsPeer := d.dial()
+	ws, wsPeer := wsPair(t, d.e)
 	w := &proxyWS{pc: pc}
-	w.OnOpen(ws)
-	w.OnPriorityData(ws, nil)
+	w.OnOpen(ws, nil)
 	serverHello := wscrypt.Hello()
-	w.OnData(ws, serverHello)
+	w.OnMessage(ws, websocket.Binary, serverHello)
 	p.OnData(local, []byte("later"))
 
-	clientHello := readN(t, wsPeer, wscrypt.HelloLen)
+	clientHello := wsPeer.next()
 	srv, err := wscrypt.NewSession(secret, serverHello, clientHello, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The proof of the password comes first: an empty message.
-	if got, err := srv.Open(readN(t, wsPeer, 16)); err != nil || len(got) != 0 {
+	if got, err := srv.Open(wsPeer.next()); err != nil || len(got) != 0 {
 		t.Fatalf("the proof: %q, %v", got, err)
 	}
 	for _, want := range []string{"early", "later"} {
-		got, err := srv.Open(readN(t, wsPeer, len(want)+16))
+		got, err := srv.Open(wsPeer.next())
 		if err != nil || string(got) != want {
 			t.Fatalf("%q, %v", got, err)
 		}
 	}
 
-	w.OnData(ws, srv.Seal([]byte("reply")))
+	w.OnMessage(ws, websocket.Binary, srv.Seal([]byte("reply")))
 	if got := readN(t, localPeer, 5); string(got) != "reply" {
 		t.Fatalf("%q", got)
 	}
-	w.OnData(ws, []byte("not sealed"))
-	expectEOF(t, wsPeer)
-	w.OnClose(ws, nil)
+	w.OnMessage(ws, websocket.Binary, []byte("not sealed"))
+	wsPeer.waitClosed()
+	w.OnClose(ws, 1006, "", nil)
 	expectEOF(t, localPeer)
 }
 
@@ -256,19 +309,19 @@ func TestProxyConnClosed(t *testing.T) {
 	if len(pc.pending) != 0 {
 		t.Fatal("a closed connection kept data")
 	}
-	ws, wsPeer := d.dial()
+	ws, wsPeer := wsPair(t, d.e)
 	w := &proxyWS{pc: pc}
-	w.OnOpen(ws)
-	expectEOF(t, wsPeer)
-	w.OnData(ws, wscrypt.Hello())
+	w.OnOpen(ws, nil)
+	wsPeer.waitClosed()
+	w.OnMessage(ws, websocket.Binary, wscrypt.Hello())
 	if pc.sess != nil {
 		t.Fatal("a closed connection's session opened")
 	}
 
 	local2, _ := d.dial()
-	ws2, ws2Peer := d.dial()
+	ws2, ws2Peer := wsPair(t, d.e)
 	w2 := &proxyWS{pc: &proxyConn{p: p, local: local2, secret: secret}}
-	w2.OnOpen(ws2)
-	w2.OnData(ws2, []byte("short"))
-	expectEOF(t, ws2Peer)
+	w2.OnOpen(ws2, nil)
+	w2.OnMessage(ws2, websocket.Binary, []byte("short"))
+	ws2Peer.waitClosed()
 }

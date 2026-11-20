@@ -2,12 +2,14 @@ package hub
 
 import (
 	"net"
+	stdhttp "net/http"
 	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fib"
+	"github.com/lesismal/fib/websocket"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/bindcheck"
@@ -22,10 +24,14 @@ import (
 // opened, the console's bytes sealed, one message per piece of at most
 // sealChunk. Each side's reads wait for the other's backlog (rule 8), and
 // what arrives before the console is connected holds the WebSocket's
-// reads.
+// reads. The WebSockets are fib's, served by ws.Server.
 
 // sealChunk is the most of the console's bytes one message carries.
 const sealChunk = 64 << 10
+
+// maxSocketMessage bounds a message the socket takes: a sealed chunk, with
+// room to spare.
+const maxSocketMessage = 2 * sealChunk
 
 // socketDialTimeout bounds the connect to the console.
 const socketDialTimeout = 5 * time.Second
@@ -70,9 +76,12 @@ func (s *Hub) applySocket(cfg *config.TunnelConsoleSocket) error {
 	if err := bindcheck.Free("tcp", cfg.Address); err != nil {
 		return err
 	}
-	h := &socketHandler{s: s, conns: map[*fib.Connection]*proxy{}, unauth: map[netip.Addr]int{}}
+	h := &socketHandler{s: s, conns: map[*websocket.Connection]*proxy{}, unauth: map[netip.Addr]int{}}
 	h.max.Store(int64(cfg.Conns()))
-	i, err := s.h.Engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: ws.NewServer(h, ""), Filter: s.gate.Allows})
+	wcfg := websocket.DefaultConfig()
+	wcfg.MaxMessageBytes = maxSocketMessage
+	wcfg.PendingWriteLimit = common.Watermark
+	i, err := s.h.Engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: ws.NewServer(wcfg, h, "", nil), Filter: s.gate.Allows})
 	if err != nil {
 		return err
 	}
@@ -93,14 +102,13 @@ func (s *Hub) SocketAddr() string {
 	return s.socketAddr
 }
 
-// socketHandler serves the WebSockets once they are open: ws.Server calls
-// it with each one's messages.
+// socketHandler is the websocket.Handler of the socket's WebSockets.
 type socketHandler struct {
 	s   *Hub
 	max atomic.Int64
 
 	mu     sync.Mutex
-	conns  map[*fib.Connection]*proxy
+	conns  map[*websocket.Connection]*proxy
 	closed bool
 	// unauth counts, by IP address, the WebSockets that have not proven
 	// the password.
@@ -110,7 +118,8 @@ type socketHandler struct {
 // proxy is one WebSocket and its connection to the console.
 type proxy struct {
 	h      *socketHandler
-	ws     *fib.Connection
+	ws     *websocket.Connection
+	addr   net.Addr
 	wsGate *common.Gate
 	hello  []byte
 	secret wscrypt.Secret
@@ -130,17 +139,18 @@ type proxy struct {
 	closed  bool
 }
 
-func (h *socketHandler) OnOpen(c *fib.Connection) {
+func (h *socketHandler) OnOpen(c *websocket.Connection, _ *stdhttp.Request) {
 	set := h.s.settings()
-	ip := addrIP(c.RemoteAddr())
+	addr := c.RemoteAddr()
+	ip := addrIP(addr)
 	h.mu.Lock()
 	conns := h.max.Load()
 	if h.closed || int64(len(h.conns)) >= conns || set.secret == nil || int64(h.unauth[ip]) >= unauthPerIP(conns) {
 		h.mu.Unlock()
-		_ = c.Close()
+		c.Abort(nil)
 		return
 	}
-	p := &proxy{h: h, ws: c, wsGate: common.NewGate(c), hello: wscrypt.Hello(), secret: set.secret, ip: ip, counted: true}
+	p := &proxy{h: h, ws: c, addr: addr, wsGate: common.NewGate(c), hello: wscrypt.Hello(), secret: set.secret, ip: ip, counted: true}
 	h.conns[c] = p
 	h.unauth[ip]++
 	// Set under the lock, so that authed and close find it.
@@ -149,12 +159,12 @@ func (h *socketHandler) OnOpen(c *fib.Connection) {
 		waiting := p.counted
 		h.mu.Unlock()
 		if waiting {
-			h.s.log.Warnf("console socket: %s did not prove the password in %v", c.RemoteAddr(), socketAuthTimeout)
-			_ = c.Close()
+			h.s.log.Warnf("console socket: %s did not prove the password in %v", addr, socketAuthTimeout)
+			c.Abort(nil)
 		}
 	})
 	h.mu.Unlock()
-	_ = c.Send(p.hello)
+	_ = c.WriteMessage(websocket.Binary, p.hello)
 }
 
 // uncount takes p off the WebSockets that have not proven the password.
@@ -173,21 +183,19 @@ func (h *socketHandler) uncount(p *proxy) {
 	}
 }
 
-func (h *socketHandler) get(c *fib.Connection) *proxy {
+func (h *socketHandler) get(c *websocket.Connection) *proxy {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.conns[c]
 }
 
-func (h *socketHandler) OnData(c *fib.Connection, data []byte) {
+func (h *socketHandler) OnMessage(c *websocket.Connection, _ websocket.Opcode, data []byte) {
 	if p := h.get(c); p != nil {
 		p.message(data)
 	}
 }
 
-func (h *socketHandler) OnPriorityData(*fib.Connection, []byte) {}
-
-func (h *socketHandler) OnClose(c *fib.Connection, _ error) {
+func (h *socketHandler) OnClose(c *websocket.Connection, _ uint16, _ string, _ error) {
 	h.mu.Lock()
 	p := h.conns[c]
 	delete(h.conns, c)
@@ -202,13 +210,13 @@ func (h *socketHandler) OnClose(c *fib.Connection, _ error) {
 func (h *socketHandler) closeAll() {
 	h.mu.Lock()
 	h.closed = true
-	conns := make([]*fib.Connection, 0, len(h.conns))
+	conns := make([]*websocket.Connection, 0, len(h.conns))
 	for c := range h.conns {
 		conns = append(conns, c)
 	}
 	h.mu.Unlock()
 	for _, c := range conns {
-		_ = c.Close()
+		c.Abort(nil)
 	}
 }
 
@@ -225,15 +233,15 @@ func (p *proxy) message(data []byte) {
 		p.sess = sess
 		p.mu.Unlock()
 		if err != nil {
-			_ = p.ws.Close()
+			p.ws.Abort(err)
 		}
 		return
 	}
 	plain, err := p.sess.Open(data)
 	if err != nil {
 		p.mu.Unlock()
-		p.h.s.log.Warnf("console socket: a message from %s failed to decrypt; is the password right?", p.ws.RemoteAddr())
-		_ = p.ws.Close()
+		p.h.s.log.Warnf("console socket: a message from %s failed to decrypt; is the password right?", p.addr)
+		p.ws.Abort(err)
 		return
 	}
 	// A message that opens proves the password.
@@ -246,7 +254,7 @@ func (p *proxy) message(data []byte) {
 	if up := p.up; up != nil {
 		p.mu.Unlock()
 		_ = up.Send(plain)
-		p.wsGate.Pace(up)
+		p.wsGate.Pace(common.Out(up))
 		return
 	}
 	// The console is not connected yet: what arrives waits, and the
@@ -261,16 +269,16 @@ func (p *proxy) message(data []byte) {
 	}
 	addr := consoleAddr(p.h.s.console.Addr())
 	if addr == "" {
-		_ = p.ws.Close()
+		p.ws.Abort(nil)
 		return
 	}
 	err = p.h.s.h.Engine.DialWithHandler("tcp", addr, socketDialTimeout, &socketUpstream{p: p}, func(_ *fib.Connection, err error) {
 		if err != nil {
-			_ = p.ws.Close()
+			p.ws.Abort(err)
 		}
 	})
 	if err != nil {
-		_ = p.ws.Close()
+		p.ws.Abort(err)
 	}
 }
 
@@ -317,7 +325,7 @@ func (u *socketUpstream) OnOpen(c *fib.Connection) {
 		_ = c.Send(b)
 	}
 	p.wsGate.Release()
-	p.wsGate.Pace(c)
+	p.wsGate.Pace(common.Out(c))
 }
 
 // OnData seals what the console sends, a message per piece.
@@ -332,7 +340,7 @@ func (u *socketUpstream) OnData(_ *fib.Connection, data []byte) {
 		n := min(len(data), sealChunk)
 		// Sealed and sent under the lock, so that the messages go out in
 		// the order of their numbers.
-		_ = p.ws.Send(p.sess.Seal(data[:n]))
+		_ = p.ws.WriteMessage(websocket.Binary, p.sess.Seal(data[:n]))
 		data = data[n:]
 	}
 	p.upGate.Pace(p.ws)
@@ -341,5 +349,5 @@ func (u *socketUpstream) OnData(_ *fib.Connection, data []byte) {
 func (u *socketUpstream) OnPriorityData(*fib.Connection, []byte) {}
 
 func (u *socketUpstream) OnClose(*fib.Connection, error) {
-	u.p.ws.CloseAfterSend()
+	_ = u.p.ws.Close(websocket.CloseNormal, "")
 }

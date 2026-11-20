@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"net"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -97,7 +96,7 @@ func TestWSSRefused(t *testing.T) {
 	}
 	// The path is still the listener's.
 	pin := transport.ClientOptions{PinSHA256: transport.Fingerprint(cert)}
-	if _, err := transport.Dial(e, strings.TrimSuffix(l.URL(), "/link")+"/other", 5*time.Second, pin, open); err == nil || !strings.Contains(err.Error(), "404") {
+	if _, err := transport.Dial(e, strings.TrimSuffix(l.URL(), "/link")+"/other", 5*time.Second, pin, open); err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("another path: %v", err)
 	}
 	// A tls:// listener speaks another application protocol.
@@ -153,7 +152,7 @@ func TestWSSAddressCannotChangeTheCheck(t *testing.T) {
 }
 
 // The request asks for the path alone; how the hub's certificate is
-// checked is not in it. A wss URL without a port is 443.
+// checked is not in it.
 func TestWSSRequestLine(t *testing.T) {
 	cert, fp := wssCert(t)
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{ALPN}})
@@ -181,11 +180,6 @@ func TestWSSRequestLine(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no request")
-	}
-	u, _ := url.Parse("wss://example.invalid/x")
-	dial, err := dialer(tunneltest.Engine(t), u, time.Second, transport.ClientOptions{PinSHA256: fp}, nil)
-	if err != nil || dial == nil || u.Host != "example.invalid:443" {
-		t.Fatalf("a wss URL without a port: %v %v", u, err)
 	}
 }
 
