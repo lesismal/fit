@@ -148,7 +148,6 @@ func TestSocketClosed(t *testing.T) {
 	u := &socketUpstream{p: p}
 	u.OnData(nil, []byte("x"))
 	u.OnPriorityData(nil, nil)
-	(&socketHandler{}).OnPriorityData(nil, nil)
 }
 
 func TestConsoleAddr(t *testing.T) {
@@ -228,5 +227,33 @@ func TestSocketUnauthenticated(t *testing.T) {
 	plain, err := sess.Open(w.next())
 	if err != nil || !bytes.HasPrefix(plain, []byte("HTTP/1.1 200")) {
 		t.Fatalf("%.100q, %v", plain, err)
+	}
+}
+
+// A message that does not open aborts its WebSocket, and so does the
+// socket's removal every WebSocket it has.
+func TestSocketAborts(t *testing.T) {
+	console := consoleJSON("127.0.0.1:0")
+	v := newHub(t, fmt.Sprintf(`{"password": "pw", "console": %s, "console_socket": {"address": "127.0.0.1:0", "password": "s"}}`, console))
+	sock := v.s.SocketAddr()
+	w := v.dialSocket(sock)
+	w.session("s")
+	_ = w.c.Send(bytes.Repeat([]byte{1}, 32))
+	w.waitClosed()
+
+	w = v.dialSocket(sock)
+	w.session("s")
+	waitFor(t, "the WebSocket", func() bool {
+		h := v.s.socket.h
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(h.conns) == 1
+	})
+	if err := v.apply(fmt.Sprintf(`{"password": "pw", "console": %s}`, console)); err != nil {
+		t.Fatal(err)
+	}
+	w.waitClosed()
+	if v.s.SocketAddr() != "" {
+		t.Fatal("the socket still listens")
 	}
 }

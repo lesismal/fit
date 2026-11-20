@@ -185,9 +185,13 @@ a peer that needs more opens a larger pool.
 - **TLS** links (`tls://`) are TCP connections of the engine with fib's TLS 1.3 (package `fib/tls`)
   under the link's frames, and the ALPN `fit-tunnel`. **WebSocket** links (`wss://`, and `ws://` in the
   clear) are for networks that let only HTTP(S) through: a wss link is TLS 1.3 with the ALPN
-  `http/1.1`, then a WebSocket whose binary frames carry the link; through nginx it takes
-  `proxy_pass` with `Upgrade`, and a proxy that ends the TLS itself needs `ca_file` or the system's
-  roots to check its certificate, and `body_password` past it. **TCP** links (`tcp://`) are the
+  `http/1.1`, then a WebSocket, fib's (package `fib/websocket`), whose binary messages carry the
+  link, at most 1 MiB each; through nginx it takes `proxy_pass` with `Upgrade`, and a proxy that
+  ends the TLS itself needs `ca_file` or the system's roots to check its certificate, and
+  `body_password` past it. A handshake for another path than the listener's is refused with 403,
+  and one whose head has not arrived in 10s is closed. The WebSockets are plain RFC 6455, as those
+  of earlier releases were, so a node or proxy of an earlier release links to a hub of this one,
+  and the other way round. **TCP** links (`tcp://`) are the
   frames in the clear. Handshakes run on fib's state machines, a verification of the certificate
   on fib's handshake pool, never on a worker.
 - **QUIC** links run on a UDP binding of the same engine, with fib's QUIC, TLS 1.3 and the ALPN
@@ -347,7 +351,10 @@ connection's reads once it has; the other end acknowledges what its own connecti
 slow service holds back the proxy that writes to it, and a slow proxy the service, one tunnel at
 a time, with no more than a window and the sockets' buffers between them. What waits for a link is
 bounded by the windows of its tunnels. The console socket and web proxies hold one side's reads
-while the other side's backlog passes 256 KiB.
+while the other side's backlog passes 256 KiB: a WebSocket's, as fib's `OnWritable` tells it,
+with `HoldReads` on the WebSocket when the other side is the slow one. A WebSocket they close
+for cause (a message that does not open, a password not proven in time) is aborted, without the
+close handshake, so that a slow peer cannot hold it open.
 
 Every dial, registration and call has its timeout; a link's TCP connection is probed after 30s of
 quiet, and closed when its peer stops answering; a QUIC connection pings every `keep_alive` and
@@ -392,7 +399,7 @@ again, and the page says so. Every page has a tunnel map,
 A hub's console can be reached where it cannot be directly, through an encrypted WebSocket: set
 the hub's `console_socket`, and a proxy's `web_proxies` entry with its URL and password serves
 the console on a local address. The WebSocket's messages are AES-256-GCM sealed with keys from the
-password; the console's own login still applies.
+password, at most 64 KiB of the console's bytes each; the console's own login still applies.
 
 ## Reloads and bounds
 

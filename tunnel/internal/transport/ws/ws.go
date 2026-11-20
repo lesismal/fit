@@ -8,37 +8,30 @@
 // transport.ClientOptions given to Dial say, never as its address does: a
 // dial's address has no query and no fragment (see transport.ParseURL).
 //
-// It is a fib.Layer below the link rather than a WebSocket handler beside
-// it: once the opening handshake is done, every send of the connection goes
-// out as binary frames, and the payloads of the frames that arrive go to the
-// wrapped handler as if they had been read off a plain TCP connection. A
-// link is a byte stream, so where its frames fall in WebSocket frames does
-// not matter. Over TLS the connection's layer is TLS's, and the frames go
-// through it: the link sends through the frames itself
-// (transport.FibHandlerVia).
+// The WebSockets are fib's (package fib/websocket), plain RFC 6455: a link's
+// sends go out as binary messages of at most maxFrame bytes, and the
+// messages that arrive go to the link as if they had been read off a plain
+// TCP connection. A link is a byte stream, so where its frames fall in
+// messages does not matter. Server is also what the hub's console socket
+// serves its WebSockets with.
 package ws
 
 import (
-	"bufio"
 	"bytes"
-	"crypto/rand"
-	"crypto/sha1"
-	"crypto/tls"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	stdhttp "net/http"
 	"net/url"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	fib "github.com/lesismal/fib"
-	"github.com/lesismal/fib/bufferpool"
 	fibtls "github.com/lesismal/fib/tls"
 	"github.com/lesismal/fib/websocket"
+
+	"github.com/lesismal/fit/tunnel/internal/proto"
 	"github.com/lesismal/fit/tunnel/internal/transport"
 )
 
@@ -52,27 +45,76 @@ func init() {
 // proxy.
 const ALPN = "http/1.1"
 
+const (
+	// maxFrame is the most of a send one message carries; a longer send,
+	// such as a link frame of up to 4 MiB, goes in several. A peer of an
+	// earlier release takes messages of at most twice that.
+	maxFrame = 1 << 20
+	// maxMessage is the longest message a link takes.
+	maxMessage = 2 * maxFrame
+	// MaxHandshake bounds the opening handshake's head.
+	MaxHandshake = 16 << 10
+	// HandshakeTimeout bounds the opening handshake.
+	HandshakeTimeout = 10 * time.Second
+)
+
+// errTimeout is the error of a connection whose opening handshake head did
+// not arrive in time.
+var errTimeout = errors.New("ws: websocket handshake timed out")
+
 // wsTransport dials and listens on ws:// and wss:// URLs.
 type wsTransport struct{}
 
 // Dial opens a link to addr, a ws:// or wss:// URL without a user, a query
 // or a fragment (see transport.ParseURL); a wss dial checks the hub's
-// certificate as opts says, and a ws dial ignores opts.
+// certificate as opts says, and a ws dial ignores opts. timeout bounds the
+// dial and the handshake both, HandshakeTimeout when it is not positive.
 func (wsTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, opts transport.ClientOptions, open transport.OpenFunc) (transport.Conn, error) {
 	u, err := transport.ParseURL(addr)
 	if err != nil {
 		return nil, err
 	}
-	dial, err := dialer(engine, u, timeout, opts, func(out fib.Layer) fib.Handler {
-		if out == nil {
-			return transport.FibHandler(open)
+	if timeout <= 0 {
+		timeout = HandshakeTimeout
+	}
+	c := &conn{}
+	cfg := websocket.DialerConfig{
+		HandshakeTimeout:  timeout,
+		MaxMessageBytes:   maxMessage,
+		MaxHandshakeBytes: MaxHandshake,
+		// The link's TCP connection is readied as it connects, before
+		// the handshake.
+		Dial: func(e *fib.Engine, network, addr string, timeout time.Duration, h fib.Handler, done func(*fib.Connection, error)) error {
+			return e.DialWithHandler(network, addr, timeout, h, func(fc *fib.Connection, err error) {
+				if fc != nil {
+					prepareLink(fc)
+					c.fc.Store(fc)
+				}
+				done(fc, err)
+			})
+		},
+	}
+	switch u.Scheme {
+	case "ws":
+	case "wss":
+		if cfg.TLSConfig, err = transport.TLSClientConfig(u, opts, ALPN, false); err != nil {
+			return nil, err
 		}
-		return transport.FibHandlerVia(open, func(*fib.Connection) fib.Layer { return out })
-	})
-	if err != nil {
+	default:
+		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// and wss:// are", u.Scheme)
+	}
+	// Dial waits for the handshake, as transport.Dial says: on a role's
+	// goroutine, never a fib worker.
+	ch := make(chan error, 1)
+	websocket.NewDialer(engine, cfg).Dial(u.String(), stdhttp.Header{"User-Agent": {"fit"}}, &dialed{c: c, open: open},
+		func(_ *websocket.Connection, _ *stdhttp.Response, err error) { ch <- err })
+	if err := <-ch; err != nil {
 		return nil, err
 	}
-	return transport.DialFib(dial)
+	if c.h == nil {
+		return nil, transport.ErrClosedOpening
+	}
+	return c, nil
 }
 
 // Listen serves WebSockets on the host and port of addr, a ws:// or wss://
@@ -84,458 +126,226 @@ func (wsTransport) Listen(engine *fib.Engine, addr string, o transport.ListenOpt
 		return nil, err
 	}
 	path := u.Path
+	cfg := websocket.DefaultConfig()
+	cfg.MaxMessageBytes = maxMessage
+	srv := NewServer(cfg, &links{open: open}, path, prepareLink)
 	switch u.Scheme {
 	case "ws":
-		return transport.ListenFib(engine, u.Host, NewServer(transport.FibHandler(open), path), o.Filter, func(hostport string) string { return "ws://" + hostport + path })
+		return transport.ListenFib(engine, u.Host, srv, o.Filter, func(hostport string) string { return "ws://" + hostport + path })
 	case "wss":
 		if o.Cert == nil {
 			return nil, errors.New("wss: a listener needs a certificate")
 		}
-		s := &Server{path: path, tls: true}
-		s.inner = transport.FibHandlerVia(open, s.framesOf)
-		h := fibtls.NewServer(transport.ServerTLSConfig(*o.Cert, ALPN), s)
+		h := fibtls.NewServer(transport.ServerTLSConfig(*o.Cert, ALPN), srv)
 		return transport.ListenFib(engine, u.Host, h, o.Filter, func(hostport string) string { return "wss://" + hostport + path })
 	}
 	return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// and wss:// are", u.Scheme)
 }
 
-const (
-	// maxFrame is the most payload one frame carries; a longer send is
-	// split.
-	maxFrame = 1 << 20
-	// maxHandshake bounds the opening handshake's head.
-	maxHandshake = 16 << 10
-	// HandshakeTimeout bounds the opening handshake.
-	HandshakeTimeout = 10 * time.Second
-	guid             = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-)
-
-var (
-	// ErrBadHandshake is the error of a connection whose opening handshake
-	// failed.
-	ErrBadHandshake = errors.New("ws: bad websocket handshake")
-	errTimeout      = errors.New("ws: websocket handshake timed out")
-)
-
-func acceptKey(key string) string {
-	h := sha1.Sum([]byte(key + guid))
-	return base64.StdEncoding.EncodeToString(h[:])
+// prepareLink readies the TCP connection of a link as it opens: write
+// backpressure off and keep-alive on, as transport.FibHandler readies a
+// link's; and the queue limit of a link (proto.LinkQueue), which the link
+// sets itself on the connections of the other transports but cannot reach
+// under a WebSocket.
+func prepareLink(c *fib.Connection) {
+	c.SetWriteBackpressure(false)
+	_ = c.SetKeepAliveConfig(transport.KeepAlive)
+	c.SetWriteQueueLimit(proto.LinkQueue)
 }
 
-// frames is the layer of one connection: it frames what is sent, masked when
-// the connection is a client's. A send longer than maxFrame takes several
-// frames, and mu keeps another send's from landing between them. Over TLS,
-// under is TLS's layer, which the frames go out through; otherwise they go
-// straight to the socket.
-type frames struct {
-	c      *fib.Connection
-	under  fib.Layer
-	client bool
-	mu     sync.Mutex
-	closed bool
-}
-
-// raw sends b, a buffer of package bufferpool, below the frames.
-func (f *frames) raw(b []byte) error {
-	if f.under != nil {
-		err := f.under.Send(b, nil)
-		bufferpool.Put(b)
-		return err
-	}
-	return f.c.SendRawPooled(b)
-}
-
-// rawCopy sends b below the frames, copying it.
-func (f *frames) rawCopy(b []byte) error {
-	if f.under != nil {
-		return f.under.Send(b, nil)
-	}
-	return f.c.SendRaw(b)
-}
-
-// closeRaw closes the connection once what was sent has gone out.
-func (f *frames) closeRaw() {
-	if f.under != nil {
-		f.under.CloseAfterSend()
-		return
-	}
-	f.c.CloseAfterSendRaw()
-}
-
-func (f *frames) Send(first, second []byte) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
-		return net.ErrClosed
-	}
-	for len(first)+len(second) > 0 {
-		n := min(len(first)+len(second), maxFrame)
-		head := frameHead(websocket.Binary, n, f.client)
-		b := bufferpool.Get(len(head) + n)[:len(head)+n]
-		copy(b, head)
-		m := copy(b[len(head):], first)
-		first = first[m:]
-		if m < n {
-			k := copy(b[len(head)+m:], second[:n-m])
-			second = second[k:]
-		}
-		if f.client {
-			mask(b[len(head):], head[len(head)-4:])
-		}
-		if err := f.raw(b); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (f *frames) CloseAfterSend() {
-	f.sendControl(websocket.Close, []byte{0x03, 0xe8}) // 1000, normal closure
-	f.closeRaw()
-}
-
-// sendControl sends a control frame, nothing after a Close.
-func (f *frames) sendControl(op websocket.Opcode, payload []byte) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
-		return
-	}
-	f.closed = op == websocket.Close
-	head := frameHead(op, len(payload), f.client)
-	b := append(head, payload...)
-	if f.client {
-		mask(b[len(head):], head[len(head)-4:])
-	}
-	_ = f.rawCopy(b)
-}
-
-// frameHead is the head of a final frame of op with n bytes of payload,
-// with a random mask key at its end when masked.
-func frameHead(op websocket.Opcode, n int, masked bool) []byte {
-	head := make([]byte, 2, 14)
-	head[0] = 0x80 | byte(op)
-	switch {
-	case n < 126:
-		head[1] = byte(n)
-	case n <= 0xffff:
-		head[1] = 126
-		head = binary.BigEndian.AppendUint16(head, uint16(n))
-	default:
-		head[1] = 127
-		head = binary.BigEndian.AppendUint64(head, uint64(n))
-	}
-	if masked {
-		head[1] |= 0x80
-		var key [4]byte
-		_, _ = rand.Read(key[:])
-		head = append(head, key[:]...)
-	}
-	return head
-}
-
-func mask(b, key []byte) {
-	for i := range b {
-		b[i] ^= key[i&3]
-	}
-}
-
-// deliver feeds data to parser and hands the payloads to inner.
-func deliver(f *frames, parser *websocket.Parser, inner fib.Handler, data []byte) {
-	for {
-		ev, ok, err := parser.FeedOne(data)
-		data = nil
-		if err != nil {
-			f.c.CloseWithError(fmt.Errorf("ws: %w", err))
-			return
-		}
-		if !ok {
-			return
-		}
-		switch ev.Opcode {
-		case websocket.Binary, websocket.Text:
-			inner.OnData(f.c, ev.Payload)
-		case websocket.Ping:
-			f.sendControl(websocket.Pong, ev.Payload)
-		case websocket.Close:
-			f.sendControl(websocket.Close, ev.Payload)
-			f.closeRaw()
-			return
-		}
-	}
-}
-
-// Server serves inner to WebSocket clients that ask for its path.
+// Server is a fib.Handler that serves WebSockets with fib's
+// websocket.ServerHandler, adding what a binding of their own needs: a path,
+// a bound on the opening handshake, and a hook for each connection as it
+// opens.
 type Server struct {
-	inner fib.Handler
-	path  string
-	// tls says that the connections run TLS, whose layer the frames go
-	// through.
-	tls   bool
-	conns sync.Map // *fib.Connection -> *serverConn
+	ws      *websocket.ServerHandler
+	prepare func(*fib.Connection)
+	timeout time.Duration
+	// heads is the connections whose handshake head has not all arrived,
+	// each with the timer that closes it.
+	heads sync.Map // *fib.Connection -> *head
 }
 
-// framesOf is the frames of c, which the link sends through over TLS.
-func (s *Server) framesOf(c *fib.Connection) fib.Layer {
-	if v, ok := s.conns.Load(c); ok {
-		return &v.(*serverConn).frames
-	}
-	return nil
+// head is the end of what arrived of a connection's handshake head, which
+// may hold the start of the "\r\n\r\n" that ends it, and the timer that
+// closes the connection if the end does not come.
+type head struct {
+	timer *time.Timer
+	tail  []byte
 }
 
-// NewServer wraps inner for clients that open WebSockets on path; an empty
-// path takes any.
-func NewServer(inner fib.Handler, path string) *Server {
-	return &Server{inner: inner, path: path}
-}
+var endOfHead = []byte("\r\n\r\n")
 
-type serverConn struct {
-	frames
-	head   []byte
-	open   bool
-	parser *websocket.Parser
-	timer  *time.Timer
-}
-
-func (s *Server) OnOpen(c *fib.Connection) {
-	sc := &serverConn{frames: frames{c: c}}
-	if s.tls {
-		sc.under = c.Layer()
-	} else {
-		c.SetLayer(&sc.frames)
+// ended reports whether data, after what came before, ends the head.
+func (h *head) ended(data []byte) bool {
+	if bytes.Contains(data, endOfHead) {
+		return true
 	}
-	s.conns.Store(c, sc)
-	sc.timer = time.AfterFunc(HandshakeTimeout, func() { c.CloseWithError(errTimeout) })
-}
-
-func (s *Server) OnData(c *fib.Connection, data []byte) {
-	v, ok := s.conns.Load(c)
-	if !ok {
-		return
+	n := len(endOfHead) - 1
+	b := append(h.tail, data[:min(len(data), n)]...)
+	if bytes.Contains(b, endOfHead) {
+		return true
 	}
-	sc := v.(*serverConn)
-	if !sc.open {
-		sc.head = append(sc.head, data...)
-		end := bytes.Index(sc.head, []byte("\r\n\r\n"))
-		if end < 0 {
-			if len(sc.head) > maxHandshake {
-				c.CloseWithError(ErrBadHandshake)
-			}
-			return
-		}
-		rest := sc.head[end+4:]
-		if !s.handshake(sc, sc.head[:end+4]) {
-			return
-		}
-		sc.timer.Stop()
-		sc.open, sc.head = true, nil
-		sc.parser = websocket.NewParser(2 * maxFrame)
-		s.inner.OnOpen(c)
-		if len(rest) == 0 {
-			return
-		}
-		data = rest
+	if len(data) >= n {
+		b = data
 	}
-	deliver(&sc.frames, sc.parser, s.inner, data)
-}
-
-// handshake answers the opening handshake in head, reporting whether it
-// switched protocols.
-func (s *Server) handshake(sc *serverConn, head []byte) bool {
-	fail := func(status int) bool {
-		_ = sc.rawCopy([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", status, stdhttp.StatusText(status))))
-		sc.closeRaw()
-		return false
-	}
-	req, err := stdhttp.ReadRequest(bufio.NewReader(bytes.NewReader(head)))
-	if err != nil {
-		return fail(stdhttp.StatusBadRequest)
-	}
-	if s.path != "" && req.URL.Path != s.path {
-		return fail(stdhttp.StatusNotFound)
-	}
-	key := req.Header.Get("Sec-WebSocket-Key")
-	if req.Method != stdhttp.MethodGet || !headerHas(req.Header, "Connection", "upgrade") ||
-		!headerHas(req.Header, "Upgrade", "websocket") || req.Header.Get("Sec-WebSocket-Version") != "13" || key == "" {
-		return fail(stdhttp.StatusBadRequest)
-	}
-	_ = sc.rawCopy([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + acceptKey(key) + "\r\n\r\n"))
-	return true
-}
-
-func headerHas(h stdhttp.Header, name, token string) bool {
-	for _, v := range h.Values(name) {
-		for _, t := range strings.Split(v, ",") {
-			if strings.EqualFold(strings.TrimSpace(t), token) {
-				return true
-			}
-		}
-	}
+	h.tail = append([]byte(nil), b[len(b)-min(len(b), n):]...)
 	return false
 }
 
-func (s *Server) OnPriorityData(*fib.Connection, []byte) {}
+// NewServer serves h to WebSocket clients that ask for path, or for any
+// path when it is empty, as cfg says; a handshake for another path is
+// refused with 403 Forbidden, and any Origin is taken. A connection whose
+// handshake head has not arrived within HandshakeTimeout is closed;
+// prepare, unless nil, is called with each connection as it opens.
+func NewServer(cfg websocket.Config, h websocket.Handler, path string, prepare func(*fib.Connection)) *Server {
+	cfg.CheckOrigin = func(r *stdhttp.Request) bool { return path == "" || r.URL.Path == path }
+	cfg.HTTP.MaxHeaderBytes = MaxHandshake
+	return &Server{ws: websocket.NewHandlerWithConfig(cfg, h), prepare: prepare, timeout: HandshakeTimeout}
+}
+
+func (s *Server) OnOpen(c *fib.Connection) {
+	if s.prepare != nil {
+		s.prepare(c)
+	}
+	s.heads.Store(c, &head{timer: time.AfterFunc(s.timeout, func() { c.CloseWithError(errTimeout) })})
+	s.ws.OnOpen(c)
+}
+
+func (s *Server) OnData(c *fib.Connection, data []byte) {
+	if v, ok := s.heads.Load(c); ok {
+		if h := v.(*head); h.ended(data) {
+			h.timer.Stop()
+			s.heads.Delete(c)
+		}
+	}
+	s.ws.OnData(c, data)
+}
+
+func (s *Server) OnPriorityData(c *fib.Connection, data []byte) { s.ws.OnPriorityData(c, data) }
+
+// OnShutdown sends an open WebSocket a close frame as the engine shuts
+// down; see websocket.ServerHandler.OnShutdown.
+func (s *Server) OnShutdown(c *fib.Connection) { s.ws.OnShutdown(c) }
 
 func (s *Server) OnClose(c *fib.Connection, err error) {
-	v, ok := s.conns.LoadAndDelete(c)
-	if !ok {
-		return
+	if v, ok := s.heads.LoadAndDelete(c); ok {
+		v.(*head).timer.Stop()
 	}
-	sc := v.(*serverConn)
-	sc.timer.Stop()
-	if sc.open {
-		s.inner.OnClose(c, err)
+	s.ws.OnClose(c, err)
+}
+
+var _ fib.ShutdownHandler = (*Server)(nil)
+
+// conn is a link's transport.Conn on a WebSocket.
+type conn struct {
+	ws     *websocket.Connection
+	h      transport.Handler
+	remote net.Addr
+	// fc is the TCP connection under a dialed WebSocket, whose address is
+	// the link's local one.
+	fc atomic.Pointer[fib.Connection]
+	// mu keeps the messages of one send together.
+	mu sync.Mutex
+}
+
+// Send sends b as binary messages of at most maxFrame bytes.
+func (c *conn) Send(b []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for len(b) > 0 {
+		n := min(len(b), maxFrame)
+		if err := c.ws.WriteMessage(websocket.Binary, b[:n]); err != nil {
+			return err
+		}
+		b = b[n:]
+	}
+	return nil
+}
+
+// Close ends the WebSocket at once, without the close handshake, dropping
+// what is queued.
+func (c *conn) Close() error {
+	c.ws.Abort(nil)
+	return nil
+}
+
+// CloseAfterSend sends a close frame behind what is queued.
+func (c *conn) CloseAfterSend() { _ = c.ws.Close(websocket.CloseNormal, "") }
+
+// LocalAddr is a dialed link's local address; an accepted WebSocket does
+// not tell its own, and has none.
+func (c *conn) LocalAddr() net.Addr {
+	if fc := c.fc.Load(); fc != nil {
+		return fc.LocalAddr()
+	}
+	return nil
+}
+
+func (c *conn) RemoteAddr() net.Addr { return c.remote }
+
+// opened gives c the WebSocket that opened, and the link's handler; one
+// that open refuses is ended.
+func (c *conn) opened(ws *websocket.Connection, open transport.OpenFunc) {
+	c.ws, c.remote = ws, ws.RemoteAddr()
+	if c.h = open(c); c.h == nil {
+		ws.Abort(nil)
 	}
 }
 
-// Dialer is a dial that opens a WebSocket to rawURL, a ws:// URL, on engine,
-// and hands the connection to handler once the server has switched
-// protocols; done is told the connection then, or why there is none.
-func Dialer(engine *fib.Engine, rawURL string, timeout time.Duration, handler fib.Handler) (func(done func(*fib.Connection, error)) error, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, err
+// closeErr is why a link's WebSocket closed: err, or a close code that is
+// not a plain end.
+func closeErr(code uint16, reason string, err error) error {
+	switch {
+	case err != nil:
+		return err
+	case code == websocket.CloseNormal, code == websocket.CloseGoingAway, code == 1005, code == 1006:
+		return nil
 	}
-	if u.Scheme != "ws" {
-		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// is", u.Scheme)
-	}
-	return dialer(engine, u, timeout, transport.ClientOptions{}, func(fib.Layer) fib.Handler { return handler })
+	return fmt.Errorf("ws: closed with %d %s", code, reason)
 }
 
-// dialer is a dial that opens a WebSocket to u, a ws:// or wss:// URL, on
-// engine, and hands the connection to the handler handler makes once the
-// server has switched protocols. A wss dial checks the server's certificate
-// as opts says. Over TLS, handler is given the layer to send through;
-// otherwise nil, and the frames are the connection's layer.
-func dialer(engine *fib.Engine, u *url.URL, timeout time.Duration, opts transport.ClientOptions, handler func(out fib.Layer) fib.Handler) (func(done func(*fib.Connection, error)) error, error) {
-	var conf *tls.Config
-	switch u.Scheme {
-	case "ws":
-	case "wss":
-		if u.Port() == "" {
-			u.Host = net.JoinHostPort(u.Hostname(), "443")
-		}
-		var err error
-		if conf, err = transport.TLSClientConfig(u, opts, ALPN, false); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// and wss:// are", u.Scheme)
-	}
-	addr := u.Host
-	if u.Port() == "" {
-		addr = net.JoinHostPort(u.Hostname(), "80")
-	}
-	path := u.RequestURI()
-	return func(done func(*fib.Connection, error)) error {
-		var k [16]byte
-		_, _ = rand.Read(k[:])
-		key := base64.StdEncoding.EncodeToString(k[:])
-		cc := &clientConn{
-			done:   done,
-			accept: acceptKey(key),
-			req: []byte("GET " + path + " HTTP/1.1\r\nHost: " + u.Host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-				"Sec-WebSocket-Key: " + key + "\r\nSec-WebSocket-Version: 13\r\nUser-Agent: fit\r\n\r\n"),
-			timeout: timeout,
-			tls:     conf != nil,
-		}
-		failed := func(_ *fib.Connection, err error) {
-			if err != nil {
-				cc.finish(nil, err)
-			}
-		}
-		if conf == nil {
-			cc.inner = handler(nil)
-			return engine.DialWithHandler("tcp", addr, timeout, cc, failed)
-		}
-		cc.inner = handler(&cc.frames)
-		return fibtls.DialWithOptions(engine, "tcp", addr, timeout, conf, fibtls.DialOptions{HandshakeTimeout: timeout}, cc, failed)
-	}, nil
+// links is the websocket.Handler of a listener's WebSockets.
+type links struct {
+	open  transport.OpenFunc
+	conns sync.Map // *websocket.Connection -> *conn
 }
 
-// clientConn is the handler of a dialed WebSocket until, and around, the
-// one it wraps.
-type clientConn struct {
-	frames
-	inner   fib.Handler
-	done    func(*fib.Connection, error)
-	req     []byte
-	accept  string
-	timeout time.Duration
-	// tls says that the connection runs TLS, whose layer the frames go
-	// through.
-	tls bool
-
-	head     []byte
-	open     bool
-	parser   *websocket.Parser
-	timer    *time.Timer
-	doneOnce sync.Once
+func (l *links) OnOpen(ws *websocket.Connection, _ *stdhttp.Request) {
+	c := &conn{}
+	if c.opened(ws, l.open); c.h != nil {
+		l.conns.Store(ws, c)
+	}
 }
 
-func (cc *clientConn) finish(c *fib.Connection, err error) {
-	cc.doneOnce.Do(func() { cc.done(c, err) })
+func (l *links) OnMessage(ws *websocket.Connection, _ websocket.Opcode, data []byte) {
+	if v, ok := l.conns.Load(ws); ok {
+		v.(*conn).h.OnData(data)
+	}
 }
 
-func (cc *clientConn) OnOpen(c *fib.Connection) {
-	cc.c, cc.client = c, true
-	if cc.tls {
-		cc.under = c.Layer()
-	} else {
-		c.SetLayer(&cc.frames)
+func (l *links) OnClose(ws *websocket.Connection, code uint16, reason string, err error) {
+	if v, ok := l.conns.LoadAndDelete(ws); ok {
+		v.(*conn).h.OnClose(closeErr(code, reason, err))
 	}
-	timeout := cc.timeout
-	if timeout <= 0 {
-		timeout = HandshakeTimeout
-	}
-	cc.timer = time.AfterFunc(timeout, func() { c.CloseWithError(errTimeout) })
-	_ = cc.rawCopy(cc.req)
 }
 
-func (cc *clientConn) OnData(c *fib.Connection, data []byte) {
-	if !cc.open {
-		cc.head = append(cc.head, data...)
-		end := bytes.Index(cc.head, []byte("\r\n\r\n"))
-		if end < 0 {
-			if len(cc.head) > maxHandshake {
-				c.CloseWithError(ErrBadHandshake)
-			}
-			return
-		}
-		rest := cc.head[end+4:]
-		rsp, err := stdhttp.ReadResponse(bufio.NewReader(bytes.NewReader(cc.head[:end+4])), nil)
-		if err != nil || rsp.StatusCode != stdhttp.StatusSwitchingProtocols || rsp.Header.Get("Sec-WebSocket-Accept") != cc.accept {
-			if err == nil {
-				err = fmt.Errorf("%w: %s", ErrBadHandshake, rsp.Status)
-			}
-			c.CloseWithError(err)
-			return
-		}
-		cc.timer.Stop()
-		cc.open, cc.head = true, nil
-		cc.parser = websocket.NewServerFrameParser(2 * maxFrame)
-		cc.inner.OnOpen(c)
-		cc.finish(c, nil)
-		if len(rest) == 0 {
-			return
-		}
-		data = rest
-	}
-	deliver(&cc.frames, cc.parser, cc.inner, data)
+// dialed is the websocket.Handler of one dialed WebSocket.
+type dialed struct {
+	c    *conn
+	open transport.OpenFunc
 }
 
-func (cc *clientConn) OnPriorityData(*fib.Connection, []byte) {}
+func (d *dialed) OnOpen(ws *websocket.Connection, _ *stdhttp.Request) { d.c.opened(ws, d.open) }
 
-func (cc *clientConn) OnClose(c *fib.Connection, err error) {
-	if cc.timer != nil {
-		cc.timer.Stop()
+func (d *dialed) OnMessage(_ *websocket.Connection, _ websocket.Opcode, data []byte) {
+	if d.c.h != nil {
+		d.c.h.OnData(data)
 	}
-	if cc.open {
-		cc.inner.OnClose(c, err)
-		return
+}
+
+func (d *dialed) OnClose(_ *websocket.Connection, code uint16, reason string, err error) {
+	if d.c.h != nil {
+		d.c.h.OnClose(closeErr(code, reason, err))
 	}
-	if err == nil {
-		err = ErrBadHandshake
-	}
-	cc.finish(nil, err)
 }

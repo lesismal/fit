@@ -3,11 +3,11 @@ package ws
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"io"
 	"net"
 	stdhttp "net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -97,10 +97,10 @@ func listen(t *testing.T, path string, echo bool) (transport.Listener, <-chan *r
 	return l, srv
 }
 
-// Sends of every size, up to several frames' worth, echo whole and in
-// order.
+// Sends of every size, up to several messages' worth, echo whole and in
+// order; the dialed link knows its local address, the accepted one not.
 func TestEcho(t *testing.T) {
-	l, _ := listen(t, "/link", true)
+	l, srv := listen(t, "/link", true)
 	if !strings.HasPrefix(l.URL(), "ws://127.0.0.1:") || !strings.HasSuffix(l.URL(), "/link") {
 		t.Fatalf("URL %q", l.URL())
 	}
@@ -113,8 +113,14 @@ func TestEcho(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	if c.LocalAddr() == nil || !strings.Contains(l.URL(), c.RemoteAddr().String()) {
+		t.Errorf("addrs %v %v", c.LocalAddr(), c.RemoteAddr())
+	}
+	if s := (<-srv).c; s.LocalAddr() != nil || s.RemoteAddr().String() != c.LocalAddr().String() {
+		t.Errorf("the accepted link's addrs %v %v", s.LocalAddr(), s.RemoteAddr())
+	}
 	var want []byte
-	for i, n := range []int{1, 125, 126, 0xffff, 0x10000, maxFrame + 3} {
+	for i, n := range []int{0, 1, 125, 126, 0xffff, 0x10000, maxFrame + 3} {
 		b := bytes.Repeat([]byte{byte('a' + i)}, n)
 		want = append(want, b...)
 		if err := c.Send(append([]byte(nil), b...)); err != nil {
@@ -126,10 +132,55 @@ func TestEcho(t *testing.T) {
 		t.Fatal("the echo differs")
 	}
 	c.CloseAfterSend()
-	waitClosed(t, r.closed)
+	if err := waitClosed(t, r.closed); err != nil {
+		t.Errorf("a plain close: %v", err)
+	}
 	// Nothing is sent after the close.
 	if err := c.Send([]byte("x")); err == nil {
 		t.Error("a send after the close went out")
+	}
+}
+
+// Close ends a link at once; the other side learns it.
+func TestAbort(t *testing.T) {
+	l, srv := listen(t, "", false)
+	var r *recorder
+	c, err := transport.Dial(tunneltest.Engine(t), l.URL(), 5*time.Second, transport.ClientOptions{}, func(c transport.Conn) transport.Handler {
+		r = newRecorder(c, false)
+		return r
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := <-srv
+	_ = s.c.Close()
+	waitClosed(t, s.closed)
+	waitClosed(t, r.closed)
+	_ = c.Close()
+}
+
+// A link the listener's or the dialer's open refuses closes as it opens.
+func TestOpenRefuses(t *testing.T) {
+	e := tunneltest.Engine(t)
+	l, err := transport.Listen(e, "ws://127.0.0.1:0/", transport.ListenOptions{}, func(transport.Conn) transport.Handler { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	r := make(chan *recorder, 1)
+	c, err := transport.Dial(e, l.URL(), 5*time.Second, transport.ClientOptions{}, func(c transport.Conn) transport.Handler {
+		rec := newRecorder(c, false)
+		r <- rec
+		return rec
+	})
+	if err == nil {
+		waitClosed(t, (<-r).closed)
+		_ = c.Close()
+	}
+
+	l2, _ := listen(t, "", false)
+	if _, err := transport.Dial(e, l2.URL(), 5*time.Second, transport.ClientOptions{}, func(transport.Conn) transport.Handler { return nil }); !errors.Is(err, transport.ErrClosedOpening) {
+		t.Errorf("a link the dialer refused: %v", err)
 	}
 }
 
@@ -143,6 +194,13 @@ func TestBadURLs(t *testing.T) {
 		if _, err := transport.Listen(e, addr, transport.ListenOptions{}, open); err == nil {
 			t.Errorf("listened on %q", addr)
 		}
+	}
+	var tr wsTransport
+	if _, err := tr.Dial(e, "http://127.0.0.1:1/", time.Second, transport.ClientOptions{}, open); err == nil {
+		t.Error("dialed http://")
+	}
+	if _, err := tr.Listen(e, "http://127.0.0.1:0/", transport.ListenOptions{}, open); err == nil {
+		t.Error("listened on http://")
 	}
 }
 
@@ -170,7 +228,7 @@ func TestServerRefuses(t *testing.T) {
 		status    int
 	}{
 		{"garbage", "NOT HTTP\r\n\r\n", stdhttp.StatusBadRequest},
-		{"wrong path", "GET /other HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n", stdhttp.StatusNotFound},
+		{"wrong path", "GET /other HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n", stdhttp.StatusForbidden},
 		{"not an upgrade", "GET /link HTTP/1.1\r\nHost: x\r\n\r\n", stdhttp.StatusBadRequest},
 		{"post", "POST /link HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n", stdhttp.StatusBadRequest},
 	} {
@@ -190,11 +248,11 @@ func TestServerRefuses(t *testing.T) {
 	}
 }
 
-// A handshake head past maxHandshake closes the connection.
+// A handshake head past MaxHandshake closes the connection.
 func TestServerHandshakeTooLong(t *testing.T) {
 	l, _ := listen(t, "", false)
 	c := rawDial(t, l)
-	_, _ = c.Write([]byte("GET / HTTP/1.1\r\nX: " + strings.Repeat("a", maxHandshake+1)))
+	_, _ = c.Write([]byte("GET / HTTP/1.1\r\nX: " + strings.Repeat("a", MaxHandshake+1)))
 	if _, err := io.ReadAll(c); err != nil {
 		if ne, ok := err.(net.Error); ok && ne.Timeout() {
 			t.Fatal("the connection stayed open")
@@ -202,38 +260,78 @@ func TestServerHandshakeTooLong(t *testing.T) {
 	}
 }
 
-// frame is a final client frame of op with payload, masked as a client's
-// must be.
-func frame(op websocket.Opcode, payload []byte) []byte {
-	head := frameHead(op, len(payload), true)
-	b := append(head, payload...)
-	mask(b[len(head):], head[len(head)-4:])
-	return b
+// A handshake head that does not end in time closes the connection; one
+// that ends, in pieces, does not.
+func TestServerHandshakeTimeout(t *testing.T) {
+	opened := make(chan *websocket.Connection, 1)
+	s := NewServer(websocket.DefaultConfig(), websocket.HandlerFuncs{Open: func(c *websocket.Connection, _ *stdhttp.Request) { opened <- c }}, "", nil)
+	s.timeout = 200 * time.Millisecond
+	e := tunneltest.Engine(t)
+	l, err := transport.ListenFib(e, "127.0.0.1:0", s, nil, func(hostport string) string { return "ws://" + hostport + "/" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	slow := rawDial(t, l)
+	_, _ = slow.Write([]byte("GET / HTTP/1.1\r\n"))
+	start := time.Now()
+	if _, err := io.ReadAll(slow); err != nil {
+		t.Fatalf("the connection stayed open: %v", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("closed after %v", d)
+	}
+
+	c := rawDial(t, l)
+	req := "GET / HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n"
+	for _, piece := range []string{req[:len(req)-3], req[len(req)-3 : len(req)-1], req[len(req)-1:]} {
+		_, _ = c.Write([]byte(piece))
+		time.Sleep(20 * time.Millisecond)
+	}
+	if rsp, err := stdhttp.ReadResponse(bufio.NewReader(c), nil); err != nil || rsp.StatusCode != stdhttp.StatusSwitchingProtocols {
+		t.Fatalf("%v, %v", rsp, err)
+	}
+	ws := <-opened
+	time.Sleep(2 * s.timeout)
+	if err := ws.WriteMessage(websocket.Binary, []byte("still open")); err != nil {
+		t.Fatalf("the WebSocket closed: %v", err)
+	}
+	_ = c.SetReadDeadline(time.Now().Add(time.Second))
+	if _, p := readFrame(t, c); string(p) != "still open" {
+		t.Fatalf("%q", p)
+	}
 }
 
-// readFrame reads a server frame off r.
-func readFrame(t *testing.T, r io.Reader) (websocket.Opcode, []byte) {
-	t.Helper()
-	var h [2]byte
-	if _, err := io.ReadFull(r, h[:]); err != nil {
-		t.Fatal(err)
+// The end of a head is found wherever the reads split it.
+func TestHeadEnded(t *testing.T) {
+	msg := "GET / HTTP/1.1\r\nHost: x\r\n\r\nrest"
+	for i := 0; i <= len(msg); i++ {
+		for j := i; j <= len(msg); j++ {
+			h := &head{}
+			at := -1
+			for k, part := range []string{msg[:i], msg[i:j], msg[j:]} {
+				if h.ended([]byte(part)) {
+					at = k
+					break
+				}
+			}
+			end := strings.Index(msg, "\r\n\r\n") + 4
+			want := 0
+			switch {
+			case end > j:
+				want = 2
+			case end > i:
+				want = 1
+			}
+			if at != want {
+				t.Fatalf("split at %d, %d: ended in part %d, want %d", i, j, at, want)
+			}
+		}
 	}
-	n := int(h[1] & 0x7f)
-	switch n {
-	case 126:
-		var b [2]byte
-		_, _ = io.ReadFull(r, b[:])
-		n = int(binary.BigEndian.Uint16(b[:]))
-	case 127:
-		var b [8]byte
-		_, _ = io.ReadFull(r, b[:])
-		n = int(binary.BigEndian.Uint64(b[:]))
+	if (&head{}).ended([]byte("\r\n\r")) {
+		t.Fatal("ended early")
 	}
-	p := make([]byte, n)
-	if _, err := io.ReadFull(r, p); err != nil {
-		t.Fatal(err)
-	}
-	return websocket.Opcode(h[0] & 0x0f), p
 }
 
 // A client that sends its first frames with its handshake, pings and
@@ -242,7 +340,7 @@ func TestServerControlFrames(t *testing.T) {
 	l, srv := listen(t, "", false)
 	c := rawDial(t, l)
 	req := "GET /any HTTP/1.1\r\nHost: x\r\n" + upgrade + "\r\n"
-	if _, err := c.Write(append([]byte(req), frame(websocket.Binary, []byte("early"))...)); err != nil {
+	if _, err := c.Write(append([]byte(req), clientFrame(websocket.Binary, []byte("early"))...)); err != nil {
 		t.Fatal(err)
 	}
 	br := bufio.NewReader(c)
@@ -252,18 +350,20 @@ func TestServerControlFrames(t *testing.T) {
 	}
 	r := <-srv
 	waitFor(t, "the early frame", func() bool { return string(r.bytes()) == "early" })
-	_, _ = c.Write(frame(websocket.Ping, []byte("hi")))
+	_, _ = c.Write(clientFrame(websocket.Ping, []byte("hi")))
 	if op, p := readFrame(t, br); op != websocket.Pong || string(p) != "hi" {
 		t.Fatalf("answer to a ping: %v %q", op, p)
 	}
-	_, _ = c.Write(frame(websocket.Close, []byte{0x03, 0xe8}))
+	_, _ = c.Write(clientFrame(websocket.Close, []byte{0x03, 0xe8}))
 	if op, _ := readFrame(t, br); op != websocket.Close {
 		t.Fatalf("answer to a close: %v", op)
 	}
-	waitClosed(t, r.closed)
+	if err := waitClosed(t, r.closed); err != nil {
+		t.Errorf("a plain close: %v", err)
+	}
 }
 
-// A frame that does not parse closes the link.
+// A frame that does not parse closes the link, with why.
 func TestServerBadFrame(t *testing.T) {
 	l, srv := listen(t, "", false)
 	c := rawDial(t, l)
@@ -274,14 +374,14 @@ func TestServerBadFrame(t *testing.T) {
 	}
 	r := <-srv
 	// An unmasked frame from a client breaks the protocol.
-	_, _ = c.Write(frameHead(websocket.Binary, 0, false))
-	if err := waitClosed(t, r.closed); err == nil || !strings.Contains(err.Error(), "ws:") {
+	_, _ = c.Write(serverFrame(websocket.Binary, nil))
+	if err := waitClosed(t, r.closed); err == nil || !strings.Contains(err.Error(), "ws: closed with 1002") {
 		t.Errorf("err %v", err)
 	}
 }
 
 // A client that leaves before its handshake is done never reaches the
-// wrapped handler.
+// link.
 func TestServerCloseBeforeOpen(t *testing.T) {
 	l, srv := listen(t, "", false)
 	c := rawDial(t, l)
@@ -294,18 +394,64 @@ func TestServerCloseBeforeOpen(t *testing.T) {
 	}
 }
 
-// Events of a connection the server does not know are dropped.
-func TestServerUnknownConn(t *testing.T) {
-	s := NewServer(nil, "")
-	s.OnData(nil, []byte("x"))
-	s.OnClose(nil, nil)
-	s.OnPriorityData(nil, nil)
-	(&clientConn{}).OnPriorityData(nil, nil)
+// capture is a fib.Handler that hands over the connection it opens.
+type capture chan *fib.Connection
+
+func (c capture) OnOpen(conn *fib.Connection)          { c <- conn }
+func (capture) OnData(*fib.Connection, []byte)         {}
+func (capture) OnPriorityData(*fib.Connection, []byte) {}
+func (capture) OnClose(*fib.Connection, error)         {}
+
+// Events of a WebSocket the handlers do not know are dropped, and the
+// server passes a shutdown and priority data on.
+func TestUnknownConn(t *testing.T) {
+	l := &links{}
+	l.OnMessage(nil, websocket.Binary, []byte("x"))
+	l.OnClose(nil, 1000, "", nil)
+	d := &dialed{c: &conn{}}
+	d.OnMessage(nil, websocket.Binary, []byte("x"))
+	d.OnClose(nil, 1000, "", nil)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	opened := make(capture, 1)
+	if err := tunneltest.Engine(t).DialWithHandler("tcp", ln.Addr().String(), 5*time.Second, opened, func(*fib.Connection, error) {}); err != nil {
+		t.Fatal(err)
+	}
+	c := <-opened
+	s := NewServer(websocket.DefaultConfig(), nil, "", nil)
+	s.OnPriorityData(c, nil)
+	s.OnShutdown(c)
+}
+
+func TestCloseErr(t *testing.T) {
+	cut := errors.New("cut")
+	for _, tc := range []struct {
+		code uint16
+		err  error
+		want string
+	}{
+		{1000, nil, ""},
+		{1001, nil, ""},
+		{1005, nil, ""},
+		{1006, nil, ""},
+		{1006, cut, "cut"},
+		{1002, cut, "cut"},
+		{1009, nil, "ws: closed with 1009 too big"},
+	} {
+		got := closeErr(tc.code, "too big", tc.err)
+		if tc.want == "" && got != nil || tc.want != "" && (got == nil || got.Error() != tc.want) {
+			t.Errorf("closeErr(%d, %v) = %v", tc.code, tc.err, got)
+		}
+	}
 }
 
 // rawServer answers each WebSocket handshake with what answer makes of the
 // client's key, then does what after says with the connection.
-func rawServer(t *testing.T, answer func(key string) string, after func(net.Conn)) string {
+func rawServer(t *testing.T, answer func(key string) string, after func(net.Conn, *bufio.Reader)) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -332,17 +478,13 @@ func rawServer(t *testing.T, answer func(key string) string, after func(net.Conn
 					}
 				}
 				if after != nil {
-					after(c)
+					after(c, br)
 				}
 				_, _ = io.Copy(io.Discard, br)
 			}()
 		}
 	}()
 	return "ws://" + ln.Addr().String() + "/"
-}
-
-func switched(key string) string {
-	return "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + acceptKey(key) + "\r\n\r\n"
 }
 
 func dialRaw(t *testing.T, url string, timeout time.Duration) (transport.Conn, *recorder, error) {
@@ -367,15 +509,15 @@ func TestClientBadAnswers(t *testing.T) {
 		want   string
 	}{
 		{"refused", func(string) string { return "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n" }, "403"},
-		{"wrong key", func(string) string { return switched("other") }, "bad websocket handshake"},
+		{"wrong key", func(string) string { return switched("other") }, "bad handshake"},
 		{"garbage", func(string) string { return "garbage\r\n\r\n" }, "malformed"},
 		{"too long", func(string) string {
-			return "HTTP/1.1 101 Switching Protocols\r\nX: " + strings.Repeat("a", maxHandshake+1)
-		}, "bad websocket handshake"},
+			return "HTTP/1.1 101 Switching Protocols\r\nX: " + strings.Repeat("a", MaxHandshake+1)
+		}, "bad handshake"},
 		{"closed", func(string) string { return "" }, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			url := rawServer(t, tc.answer, func(c net.Conn) {
+			url := rawServer(t, tc.answer, func(c net.Conn, _ *bufio.Reader) {
 				if tc.name == "closed" {
 					_ = c.Close()
 				}
@@ -393,7 +535,7 @@ func TestClientHandshakeTimeout(t *testing.T) {
 	url := rawServer(t, func(string) string { return "" }, nil)
 	start := time.Now()
 	_, _, err := dialRaw(t, url, 200*time.Millisecond)
-	if !errors.Is(err, errTimeout) {
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Errorf("err %v", err)
 	}
 	if d := time.Since(start); d > 5*time.Second {
@@ -414,15 +556,14 @@ func TestClientDialRefused(t *testing.T) {
 }
 
 // A server's frames that come with its answer, its pings and its close
-// reach the client as they should; a dial without a timeout or a port takes
-// the defaults.
+// reach the client as they should; a dial without a timeout takes the
+// default.
 func TestClientControlFrames(t *testing.T) {
 	got := make(chan []byte, 2)
 	url := rawServer(t, func(key string) string {
 		return switched(key) + string(serverFrame(websocket.Binary, []byte("early")))
-	}, func(c net.Conn) {
+	}, func(c net.Conn, br *bufio.Reader) {
 		_, _ = c.Write(serverFrame(websocket.Ping, []byte("hi")))
-		br := bufio.NewReader(c)
 		_, p := readClientFrame(br)
 		got <- p
 		_, _ = c.Write(serverFrame(websocket.Close, []byte{0x03, 0xe8}))
@@ -441,88 +582,4 @@ func TestClientControlFrames(t *testing.T) {
 		t.Errorf("close %x", p)
 	}
 	waitClosed(t, r.closed)
-}
-
-// A ws:// URL without a port takes port 80.
-func TestDialerDefaultPort(t *testing.T) {
-	if _, err := Dialer(tunneltest.Engine(t), "ws://127.0.0.1/x", time.Second, nil); err != nil {
-		t.Fatal(err)
-	}
-	// Dialer is for ws:// only, and a web proxy's URL may have a query.
-	for _, bad := range []string{"wss://127.0.0.1/x", "ws://%zz/x"} {
-		if _, err := Dialer(tunneltest.Engine(t), bad, time.Second, nil); err == nil {
-			t.Errorf("Dialer(%q)", bad)
-		}
-	}
-	if _, err := Dialer(tunneltest.Engine(t), "ws://127.0.0.1/x?a=b", time.Second, nil); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func serverFrame(op websocket.Opcode, payload []byte) []byte {
-	return append(frameHead(op, len(payload), false), payload...)
-}
-
-// readClientFrame reads a masked frame and unmasks it.
-func readClientFrame(br *bufio.Reader) (websocket.Opcode, []byte) {
-	var h [2]byte
-	if _, err := io.ReadFull(br, h[:]); err != nil {
-		return 0, nil
-	}
-	n := int(h[1] & 0x7f)
-	var key [4]byte
-	_, _ = io.ReadFull(br, key[:])
-	p := make([]byte, n)
-	_, _ = io.ReadFull(br, p)
-	mask(p, key[:])
-	return websocket.Opcode(h[0] & 0x0f), p
-}
-
-var _ fib.Handler = (*Server)(nil)
-
-// capture is a fib.Handler that hands over the connection it opens.
-type capture chan *fib.Connection
-
-func (c capture) OnOpen(conn *fib.Connection)          { c <- conn }
-func (capture) OnData(*fib.Connection, []byte)         {}
-func (capture) OnPriorityData(*fib.Connection, []byte) {}
-func (capture) OnClose(*fib.Connection, error)         {}
-
-// A send of two parts goes out as one frame; nothing goes out after a
-// close frame, nor on a connection that closed.
-func TestFramesSend(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	opened := make(capture, 1)
-	if err := tunneltest.Engine(t).DialWithHandler("tcp", ln.Addr().String(), 5*time.Second, opened, func(*fib.Connection, error) {}); err != nil {
-		t.Fatal(err)
-	}
-	peer, err := ln.Accept()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer peer.Close()
-	_ = peer.SetDeadline(time.Now().Add(10 * time.Second))
-	f := &frames{c: <-opened}
-	if err := f.Send([]byte("ab"), []byte("cd")); err != nil {
-		t.Fatal(err)
-	}
-	br := bufio.NewReader(peer)
-	if op, p := readFrame(t, br); op != websocket.Binary || string(p) != "abcd" {
-		t.Fatalf("frame %v %q", op, p)
-	}
-	f.sendControl(websocket.Close, nil)
-	f.sendControl(websocket.Ping, nil)
-	if op, _ := readFrame(t, br); op != websocket.Close {
-		t.Fatalf("frame %v", op)
-	}
-	if err := f.Send([]byte("x"), nil); !errors.Is(err, net.ErrClosed) {
-		t.Errorf("send after a close frame: %v", err)
-	}
-	f.closed = false
-	_ = f.c.Close()
-	waitFor(t, "the send to fail", func() bool { return f.Send([]byte("x"), nil) != nil })
 }

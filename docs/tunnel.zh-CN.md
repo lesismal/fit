@@ -175,9 +175,11 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 
 - **TLS** 链路（`tls://`）是引擎上的 TCP 连接，链路的帧之下是 fib 的 TLS 1.3（`fib/tls` 包），ALPN 为
   `fit-tunnel`。**WebSocket** 链路（`wss://`，以及明文的 `ws://`）用于只放行 HTTP(S) 的网络：wss 链路是
-  ALPN 为 `http/1.1` 的 TLS 1.3，其上是一个 WebSocket，用二进制帧承载链路；经 nginx 时需要 `proxy_pass`
-  加 `Upgrade`，自己终止 TLS 的代理需要用 `ca_file` 或系统根证书校验它的证书，并且代理之后的部分需要
-  `body_password`。**TCP** 链路（`tcp://`）是明文的帧。握手运行在 fib 的状态机上，证书校验运行在 fib 的握手池
+  ALPN 为 `http/1.1` 的 TLS 1.3，其上是一个 fib 的 WebSocket（`fib/websocket` 包），用二进制消息承载链路，
+  每条至多 1 MiB；经 nginx 时需要 `proxy_pass` 加 `Upgrade`，自己终止 TLS 的代理需要用 `ca_file` 或系统根证书
+  校验它的证书，并且代理之后的部分需要 `body_password`。请求的路径不是监听的路径时，握手以 403 拒绝；10 秒内
+  握手请求头没有到齐的连接被关闭。这些 WebSocket 与之前版本的一样是标准的 RFC 6455，所以之前版本的节点或
+  proxy 能连到这个版本的 hub，反过来也一样。**TCP** 链路（`tcp://`）是明文的帧。握手运行在 fib 的状态机上，证书校验运行在 fib 的握手池
   上，从不占用 worker。
 - **QUIC** 链路运行在同一个引擎的 UDP 绑定上，使用 fib 的 QUIC、TLS 1.3 和 ALPN `fit-tunnel`。
 - **hub 的证书。** 有 tls、wss 或 quic 监听需要证书时，hub 生成自签名证书并保存，所以节点和 proxy 固定的
@@ -297,7 +299,9 @@ hub 为每个向它注册的节点或 proxy 签发一个令牌，代替所有成
 隧道每一端最多发送 4 MiB 对端尚未确认的数据，达到后暂停读取自己的 TCP 连接；对端在自己的连接接收了数据
 之后才确认。慢的服务会拖住向它写数据的 proxy，慢的 proxy 也会拖住服务，按隧道各自进行，中间最多只有一个
 窗口和套接字缓冲区的数据。等待一条链路发送的数据，以它所承载隧道的窗口为界。控制台 WebSocket 和 Web 代理
-在一侧的积压超过 256 KiB 时暂停读取另一侧。
+在一侧的积压超过 256 KiB 时暂停读取另一侧：WebSocket 的积压由 fib 的 `OnWritable` 告知，另一侧慢时则对
+WebSocket 调用 `HoldReads`。它们因故关闭的 WebSocket（消息解不开、未按时证明密码）直接中止，不走关闭握手，
+慢的对端因此无法让它一直开着。
 
 每次拨号、注册和调用都有时限；链路的 TCP 连接空闲 30s 后开始探测，对端不再应答时关闭；QUIC 连接每隔
 `keep_alive` 发送 ping，`idle_timeout` 后关闭；空闲超过 `idle_timeout` 的隧道会被关闭。 hub 限制链路、
@@ -331,7 +335,7 @@ hub 为每个向它注册的节点或 proxy 签发一个令牌，代替所有成
 
 hub 的控制台在无法直接访问的地方，可以经加密 WebSocket 访问：设置 hub 的 `console_socket`，proxy 的
 `web_proxies` 条目填上它的 URL 和密码，就在本地地址上提供这个控制台。WebSocket 的消息用由密码派生的密钥
-做 AES-256-GCM 加密；控制台自己的登录照样需要。
+做 AES-256-GCM 加密，每条至多承载控制台的 64 KiB 数据；控制台自己的登录照样需要。
 
 ## 重载与上限
 
