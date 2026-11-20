@@ -362,6 +362,16 @@ func (c *converter) setting(s *settings, d *directive, where string) {
 		"ssl_session_tickets", "ssl_ecdh_curve", "ssl_dhparam", "ssl_stapling", "ssl_stapling_verify":
 		c.skip(d, "fit picks TLS versions and ciphers, and staples OCSP, itself")
 		return
+	case "ssl_conf_command":
+		if len(d.args) == 2 && strings.EqualFold(d.args[0], "Options") && strings.Contains(strings.ToUpper(d.args[1]), "KTLS") {
+			// fit hands a connection that sends a large file to the
+			// kernel's TLS anyway; every connection, as Options KTLS
+			// does, is a setting of the whole engine.
+			c.skip(d, "fit uses kTLS for large files by default; for every connection, as for a network card that encrypts TLS, set engine.kernel_tls_offload")
+			return
+		}
+		c.skip(d, "fit picks TLS versions and ciphers, and staples OCSP, itself")
+		return
 	case "error_log":
 		c.errorLog(d, where)
 		return

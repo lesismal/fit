@@ -32,6 +32,9 @@ func TestConversions(t *testing.T) {
 					t.Errorf("%q", out.Routes[0].Name)
 				}
 			}},
+		{name: "kTLS", src: server(`listen 80; ssl_conf_command Options KTLS; ssl_conf_command Ciphersuites TLS_AES_128_GCM_SHA256; return 204;`), noLoad: true,
+			warn: []string{"ssl_conf_command: skipped: fit uses kTLS for large files by default; for every connection, as for a network card that encrypts TLS, set engine.kernel_tls_offload",
+				"ssl_conf_command: skipped: fit picks TLS versions"}},
 		{name: "a server's return before its locations", src: server("listen 80; return 204; location /a { return 200; }"),
 			warn: []string{"location /a: skipped: the server's return answers every request first"},
 			check: func(t *testing.T, out outConfig) {

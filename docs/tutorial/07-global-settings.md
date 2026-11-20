@@ -115,7 +115,7 @@ A single route's body limit is set by the `body_limit` middleware.
 ### Engine (`engine`)
 
 Edits `engine`: `event_loops`, `workers`, `min_workers`, `task_queue`, `poll_batch`,
-`read_buffer_size`, `write_watermark`, `loop_wait` and `backlog`. fit runs two engines: the listeners'
+`read_buffer_size`, `write_watermark`, `loop_wait`, `kernel_tls_offload` and `backlog`. fit runs two engines: the listeners'
 serves clients, and upstream connections are dialed through the other, so that a response waiting for a
 slow client does not hold up the workers that read upstreams; each takes these settings. What is left
 out keeps fib's own default, so most configs write no `engine` at all; it is for tuning a busy server on
@@ -263,6 +263,7 @@ Full table: [limits](../reference/config.md#limits).
 | `read_buffer_size` | 64 KiB | The bytes a connection reads its socket into at a time, also the most a proxied body is passed on in one write |
 | `write_watermark` | four read buffers, 64 KiB to 256 KiB | The bytes a connection may have waiting to be written before it stops reading: the backpressure on one connection |
 | `loop_wait` | `park` | How an event loop waits with no event ready: `park` (Go's poller) or `block` (epoll_wait), Linux only; `block` shortens the latency tail near saturation over HTTP/1.1 at the cost of the median |
+| `kernel_tls_offload` | off | Hand each TLS listener connection's encryption to the kernel's TLS right after its handshake, for a network card that encrypts TLS itself (NVIDIA/Mellanox ConnectX-6 Dx and later, `tls-hw-tx-offload` on); Linux, AES-GCM. Off, a connection does so only when it sends a large file. A listener's `tls.kernel_tls_offload` overrides it for that listener |
 | `backlog` | the system's | The length of each listening socket's queue of connections not yet accepted |
 
 Full table: [engine](../reference/config.md#engine).

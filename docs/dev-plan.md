@@ -320,6 +320,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I229.
 | **Performance** | | | |
 | I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | done |
 | I223 | Compression made cheaper: `compress` levels by number, `fastest` by default, gzip ahead of br, `min_bytes` 1400, no copy of a filter's tail (fib `BodyReleaser`); `static`'s `compress` keeps compressed copies of files in memory; `cache` before `compress` documented and tested; the adapters convert levels | — | done |
+| I224 | `engine.kernel_tls_offload`, off by default: TLS listeners hand each connection's encryption to the kernel's TLS right after its handshake, for a network card that encrypts TLS records (fib `KernelTLSFromHandshake`), and a listener's `tls.kernel_tls_offload` over it; the nginx adapter points `ssl_conf_command Options KTLS` at it | — | done |
 | **Agent and tunnel, continued** | | | |
 | I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | done |
 | I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | done |
@@ -4297,6 +4298,48 @@ Not in this track: SQL joins or aggregations across sources (a stream processor'
 transform sees one batch at a time); DDL replayed into SQL sinks (I163 decides; reported, not
 applied); one pipeline run on several fit instances at once (a pipeline runs on one fit; the cluster
 track can place it); exactly-once into sinks with no transactions.
+
+### I224 Kernel TLS for network cards that encrypt TLS — done
+
+- **Why**: on 2026-11-21 the user asked what "kTLS + mlnx" offload is and whether fib supports it, and
+  then had fib (`e95a5e1`) and fit both take it as a setting, off by default. A network card such as
+  NVIDIA (Mellanox) ConnectX-6 Dx encrypts TLS records itself once the kernel's TLS holds the
+  connection's keys, and with sendfile a file goes from the page cache to the card without the CPU
+  touching it. fib handed a connection to the kernel's TLS only at its first large file, since in
+  software the kernel encrypts small responses at more cost than fib does, so on such a card a
+  connection serving API responses never reached it.
+- **Done**: fib `e95a5e1` adds `tls.Handler.KernelTLSFromHandshake`: the first send of application
+  data after the handshake that finds nothing sealed in user space still queued hands the sealing to
+  the kernel; only application data tries, so that a KeyUpdate or an alert keeps the keys it was made
+  for. fit's `engine` takes `kernel_tls_offload`, read when fit starts like the rest of `engine`, and
+  every TLS listener's `fib/tls` handler gets it; a listener's `tls.kernel_tls_offload` decides for
+  that listener instead (true or false), and a reload that changes it binds the listener anew, as a
+  change of `client_auth` does. The nginx adapter's warning for `ssl_conf_command
+  Options KTLS` names it. fit's `go.mod` moves to fib `5ce78a3`, which also brings fib's arena
+  allocator changes (opt-in, unused by fit).
+- **Tests**: fib's `TestKernelTLSFromHandshake` over TLS 1.3 and TLS 1.2 AES-128-GCM, AES-256-GCM,
+  ChaCha20 and CBC, on, off and with `NoKernelTLS`, replies crossing the switch, sends from outside the
+  handler and the close_notify; on the benchmark host (Linux 7.0, tls module) `TlsTxSw` grew by exactly
+  the three AES-GCM connections. fit's `TestKernelTLSOffload` serves HTTP/1.1 and HTTP/2 over TLS with
+  the setting off and on and, where `/proc/net/tls_stat` exists, checks the kernel's count of sealed
+  sockets went up with it on; `TestKernelTLSOffloadPerListener` runs three listeners (on, off, left out)
+  under the engine's setting off and on, checks each one's choice and that a reload changing one
+  rebinds only it, and on the benchmark host `TlsTxSw` grew by exactly the seven connections the test
+  hands over; the nginx adapter's warnings.
+
+**Decisions pending review** (made while building it, 2026-11-21; each stands until the user rules on it):
+
+1. **A setting of `engine`, and of each listener's `tls` over it.** The card is the machine's, so the
+   engine holds the default, which like the rest of `engine` takes effect when fit restarts; the user
+   then asked for listeners to differ, so `tls.kernel_tls_offload` decides for one listener, true or
+   false, and takes effect on a reload. Left out, a listener follows the engine. The alternative, a
+   listener setting alone, would make a machine with the card set it on every listener.
+2. **Listeners only.** The console, the LLM proxy, the tunnel's transports, TURN over TLS and the
+   cluster's link server build their own `fib/tls` handlers and keep fib's default: their traffic is
+   control traffic, small and seldom, where the switch only costs.
+3. **The nginx adapter warns rather than converts.** `ssl_conf_command` lives in a `server` block and
+   `kernel_tls_offload` is a setting of the whole engine, so the adapter says which setting it is and
+   leaves the choice to whoever runs the result, as it does for other directives it skips.
 
 ### I163 Decision 036; records, pipelines and checkpoints
 

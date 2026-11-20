@@ -144,6 +144,9 @@ type Listener struct {
 	// ClientAuth, when not nil, is how a TLS listener verifies its clients'
 	// certificates.
 	ClientAuth *tlsmgr.ClientAuth
+	// KernelTLSOffload, when not nil, is the listener's tls.kernel_tls_offload,
+	// which decides in place of engine.kernel_tls_offload.
+	KernelTLSOffload *bool
 	// MaxHeaderBytes and MaxBodyBytes bound the requests it takes; see
 	// config.Limits.
 	MaxHeaderBytes int
@@ -481,6 +484,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			}
 		}
 		if t := lc.TLS; t != nil {
+			l.KernelTLSOffload = t.KernelTLSOffload
 			var static *tlsmgr.Static
 			if len(t.Certificates) > 0 {
 				certs, err := tlsmgr.LoadStatic(t)

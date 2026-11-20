@@ -57,6 +57,12 @@ type Server struct {
 	engine  *fib.Engine
 	running chan error
 
+	// kernelTLS is engine.kernel_tls_offload, read when fit starts as the
+	// rest of engine is: TLS listeners that do not decide for themselves
+	// hand their connections' sealing to the kernel right after the
+	// handshake (see kernelTLSFor).
+	kernelTLS bool
+
 	mu    sync.Mutex // orders reloads
 	bound []*binding // the current graph's listeners, in its order
 	drain time.Duration
@@ -92,6 +98,10 @@ type binding struct {
 	// TCP; a reload that changes it binds it anew, since a listening
 	// socket's transport is fixed once it is made.
 	mptcp bool
+	// kernelTLS is whether its TLS connections hand their sealing to the
+	// kernel right after the handshake; a reload that changes it binds it
+	// anew, since the TLS handler is fixed once the binding is made.
+	kernelTLS bool
 	// addr is where it listens: its TCP address, or for HTTP/3 alone its
 	// UDP one; udpAddr is HTTP/3's.
 	addr    net.Addr
@@ -125,6 +135,22 @@ func (b *binding) same(l *runtime.Listener) bool {
 		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes &&
 		slices.Equal(b.proxyTrusted, l.ProxyTrusted) && b.socks == l.SOCKS.Key() &&
 		b.clientAuth == clientAuthSum(l) && b.mptcp == l.MPTCP
+}
+
+// keeps reports whether b can serve l as it is: same, and the same choice
+// of kernel TLS.
+func (s *Server) keeps(b *binding, l *runtime.Listener) bool {
+	return b.same(l) && b.kernelTLS == s.kernelTLSFor(l)
+}
+
+// kernelTLSFor is whether l's TLS connections hand their sealing to the
+// kernel right after the handshake: its tls.kernel_tls_offload, or
+// engine.kernel_tls_offload where it sets none.
+func (s *Server) kernelTLSFor(l *runtime.Listener) bool {
+	if l.KernelTLSOffload != nil {
+		return *l.KernelTLSOffload
+	}
+	return s.kernelTLS
 }
 
 // clientAuthSum identifies how l verifies client certificates: zero for a
@@ -175,6 +201,7 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{rt: rt, engine: engine, running: make(chan error, 1), drain: DefaultDrainTimeout}
+	s.kernelTLS = g.Engine != nil && g.Engine.KernelTLSOffload
 	for _, l := range g.Listeners {
 		b, err := s.bind(l, false)
 		if err != nil {
@@ -239,7 +266,7 @@ const maxPortZeroBinds = 8
 func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
 		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted, socks: l.SOCKS.Key(),
-		mptcp: l.MPTCP}
+		mptcp: l.MPTCP, kernelTLS: s.kernelTLSFor(l)}
 	b.setAccess(l)
 	b.filter = b.accept.Allows
 	var tlsConfig *tls.Config
@@ -308,8 +335,9 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 				// fib's TLS hands the HTTP handler plaintext, which serves
 				// HTTP/2 or HTTP/1.1 as ALPN chose. A connection that sends
 				// a large file hands its sealing to the kernel's TLS, by
-				// fib's default.
-				h = &fibtls.Handler{Config: tlsConfig, Handler: h}
+				// fib's default, or every connection right after its
+				// handshake with kernel_tls_offload (kernelTLSFor).
+				h = &fibtls.Handler{Config: tlsConfig, Handler: h, KernelTLSFromHandshake: b.kernelTLS}
 			}
 		}
 		switch {
@@ -447,7 +475,7 @@ func (s *Server) Plan(g *runtime.Graph) (added, removed []Addr, err error) {
 	var kept []*binding
 	fresh := make([]*runtime.Listener, 0, len(g.Listeners))
 	for _, l := range g.Listeners {
-		i := slices.IndexFunc(s.bound, func(b *binding) bool { return b.same(l) && !slices.Contains(kept, b) })
+		i := slices.IndexFunc(s.bound, func(b *binding) bool { return s.keeps(b, l) && !slices.Contains(kept, b) })
 		if i < 0 {
 			fresh = append(fresh, l)
 			continue
@@ -515,7 +543,7 @@ func (s *Server) Reload(g *runtime.Graph) (added, removed []Addr, err error) {
 	next := make([]*binding, len(g.Listeners))
 	for i, l := range g.Listeners {
 		for _, b := range s.bound {
-			if b.same(l) {
+			if s.keeps(b, l) {
 				next[i] = b
 				kept = append(kept, b)
 				break

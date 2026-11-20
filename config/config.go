@@ -652,6 +652,9 @@ type TLS struct {
 	ACME         []string      `json:"acme,omitempty" doc:"Host names to obtain certificates for with ACME, as the top-level acme says, through its challenges: the CA must reach fit at each name on port 80, where any listener of fit's in the clear answers HTTP-01, or on port 443, where this listener answers TLS-ALPN-01. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files."`
 	OnDemand     bool          `json:"on_demand,omitempty" doc:"Obtain a certificate during the handshake for a name a client asks for that neither the files nor acme have, as the top-level acme.on_demand allows; needs it."`
 	ClientAuth   *ClientAuth   `json:"client_auth,omitempty" doc:"Ask clients for certificates and verify them (mutual TLS)."`
+	// KernelTLSOffload is a pointer so that a listener that leaves it out
+	// follows engine.kernel_tls_offload.
+	KernelTLSOffload *bool `json:"kernel_tls_offload,omitempty" doc:"Hand the encryption of what this listener's connections send to the kernel's TLS right after their handshakes (true) or only when one sends a large file (false), whatever engine.kernel_tls_offload says; as engine.kernel_tls_offload when left out. For a machine whose network card encrypts TLS, where a listener of large files gains from it and one of small API responses may not. A reload that changes it binds the listener anew."`
 
 	At Value `json:"-" fit:"self"`
 }
