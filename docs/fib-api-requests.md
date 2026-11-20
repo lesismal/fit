@@ -64,8 +64,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A49 | A UDP peer opened toward an address on a listener's socket | done, `96a2331` (in `80c7f76`) | 1, 9 | I85 (P2P), I87 |
 | A50 | QUIC DATAGRAM frames | requested | 9 | I90 (P2P) |
 | A51 | A packet device's descriptor on the poller | requested | 1, 8, 11 | I95 (VPN) |
-| A52 | A WebSocket connection's transport: a forced close, and its address | requested | 10, 13 | llm (028) |
-| A53 | Backpressure on a WebSocket connection's sends | requested | 8, 9, 11 | llm, tunnel (028) |
+| A52 | A WebSocket connection's transport: a forced close, and its address | done, fib `fd94050` (`main`) | 10, 13 | llm (028), I225 |
+| A53 | Backpressure on a WebSocket connection's sends | done, fib `fd94050` (`main`) | 8, 9, 11 | llm, tunnel (028), I225, I226 |
 | A54 | A raw QUIC endpoint on an engine's UDP binding | requested | 15 | tunnel (028) |
 | A55 | TURN over TCP and TLS | done, `97201b6` (in `84a67f7`) | — | I111 (029) |
 | A56 | A TURN server that never waits on a worker | done, `74100b2` (in `84a67f7`) | 1 | I87, I111 (029) |
@@ -1620,6 +1620,11 @@ handler routes each packet `OnData` hands it and sends the peers' packets with `
 ## A52: A WebSocket connection's transport: a forced close, and its address
 
 **Status.** Requested on 2026-11-01, for the LLM feature's roles ([decision 028](decisions/028-llm-and-tunnel.md)).
+Done, fib `fd94050` (on fib's `main`): `websocket.Connection.Abort(err)` ends a connection at once, without the
+close handshake, dropping what is queued, and `OnClose` follows with 1006 and err; `RemoteAddr()` reads the peer's
+address on either side (nil once the connection has closed, so fit keeps it from the open). Since I225 the mesh
+links abort a dead or slow peer on both sides and take its address from `RemoteAddr`; the listener's map and the
+dialer's hook are gone.
 
 **Problem.** The LLM feature's mesh links are WebSockets of fib's. A link whose peer is dead, or so far
 behind that a ping has waited 30 seconds for its pong, must be dropped at once. `Connection.Close`
@@ -1650,6 +1655,11 @@ map and the dialer's hook go.
 ## A53: Backpressure on a WebSocket connection's sends
 
 **Status.** Requested on 2026-11-01, for the LLM feature's roles ([decision 028](decisions/028-llm-and-tunnel.md)).
+Done, fib `fd94050` (on fib's `main`): `WriteMessageNoWait` and `WritePreparedMessageNoWait` report `above` past
+`Config.PendingWriteLimit` / `DialerConfig.PendingWriteLimit` (64 KiB by default), `OnWritable` runs once the queue
+falls to half of it, and `HoldReads` holds reading, pings included. Since I225 a mesh link above its limit holds the
+streams that feed it and, for at most a quarter of the shorter of its ping interval and slow timeout, its reads,
+until `OnWritable`. The tunnel's WebSockets move to it in I226.
 
 **Problem.** `websocket.Connection.WriteMessage` queues whatever it is given and never says how
 much waits, and the handler cannot hold a connection's reads. The LLM feature's wire protocol bounds

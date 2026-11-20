@@ -594,9 +594,23 @@ upstream's first token, sends stream-keepalive frames, which reset the idle time
 
 Each link has a timer. A link that hears nothing for `ping_interval` is pinged, and so is one whose
 last round trip was measured two intervals ago, so that both ends know its latency; one that hears
-nothing for three intervals is closed (code 4002). A pong is sent behind everything sent before
-its ping, so a ping waiting `slow_timeout` for its pong means the link is that far behind; it is
-closed (code 4004). A listener past `max_conns` refuses a link with code 4003.
+nothing for three intervals is closed. A pong is sent behind everything sent before its ping, so a
+ping waiting `slow_timeout` for its pong means the link is that far behind; it is closed too. Both
+are closed at once, without the close handshake, whose close frame would wait behind everything
+the peer has not read: what is queued for the peer is dropped, and the peer sees the connection
+end (1006). A listener past `max_conns` refuses a link with code 4003.
+
+A link paces what feeds it by its own send queue. When more than 64 KiB waits for the peer (fib's
+`PendingWriteLimit`), the link's streams stop sending, whatever credit the peer granted, so that
+the producers writing to them wait, and a hub that passes one stream on to another stops granting
+credit to the stream it reads; and the link stops reading, so that the peer's new calls, whose
+replies would queue behind, wait in TCP. Both go on once the queue falls to half. The link reads
+again after a quarter of the shorter of `ping_interval` and `slow_timeout` even if the queue has
+not fallen, its streams still held: holding reads leaves the peer's pings unanswered, and the two
+ends of a link, each holding the other, must not wait for each other until their slow timeouts.
+A listener's reads also pause while fib's write watermark is passed, as for every connection fib
+accepts, which ends as the dialer reads. Calls, replies, pushes and control frames are not held.
+The slow timeout stays as the last resort, for a peer that reads too little to drain the queue.
 
 A role that stops sends drain on every link: its peers start no new call on it, the calls running
 finish, for up to 10 seconds, and then the links close. Dialers link again with backoff.
@@ -1113,12 +1127,14 @@ How [the rules](rules.md) hold:
 - **Every exchange has timeouts**: dials, handshakes, hello, methods, streams, upstream calls and
   the agents' connections.
 
-Two things fib does not offer yet are written up in [fib's API requests](fib-api-requests.md):
+- **Backpressure is linked.** A link whose send queue passes its limit holds the streams that
+  feed it and, for a while, its reads, until the queue drains (see
+  [Heartbeat, slow links and drain](#heartbeat-slow-links-and-drain)).
 
-- **A52**, a WebSocket connection's transport: a close that skips the close handshake, and its
-  remote address on the dialing side. Until then a listener finds a link's `fib.Connection` by its
-  remote address through a wrapper around the WebSocket handler, and a dialer catches its own
-  through the dial hook, so that a dead or slow link is closed at once.
-- **A53**, backpressure on a WebSocket connection's sends. Until then a link's queue is bounded by
-  its streams' windows and the slow timeout: a peer that reads slowly is found when a ping has
-  waited `slow_timeout`, and the link is closed.
+The links use what fib added for them in [fib's API requests](fib-api-requests.md), in fib
+`fd94050`:
+
+- **A52**, a WebSocket connection's transport: `Abort` closes a dead or slow link at once on
+  either side, and `RemoteAddr` gives the peer's address on either side.
+- **A53**, backpressure on a WebSocket connection's sends: `WriteMessageNoWait`, `OnWritable` and
+  `HoldReads` pace a link's streams and reads by its send queue.

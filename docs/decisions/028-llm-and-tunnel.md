@@ -70,6 +70,14 @@ development rules to hold in full, with nothing left for later.
   both ways; every map, queue and buffer has a bound with a safe default; every exchange with the
   outside has timeouts. No role serves with `net/http` handlers, proxies with
   `net/http.Client`, or runs an engine of its own.
+- **What fib lacked, fib added.** The LLM feature's mesh links are fib WebSockets, which at first
+  could neither be closed without the close handshake nor pace their sends, and the links worked
+  around both, within the rules: the listener found a link's `fib.Connection` by its remote
+  address, the dialer caught its own through the dial hook, and a peer that read slowly was found
+  only by the slow timeout. fib added both ([A52 and A53](../fib-api-requests.md#a52-a-websocket-connections-transport-a-forced-close-and-its-address),
+  fib `fd94050`): a dead or slow link is aborted at once on either side, and a link whose send
+  queue passes its limit holds the streams that feed it, and for a while its reads, until it
+  drains, the slow timeout left as the last resort.
 
 ## Consequences
 
