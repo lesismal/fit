@@ -10,6 +10,7 @@ package runtime
 
 import (
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -147,6 +148,9 @@ type Listener struct {
 	// KernelTLSOffload, when not nil, is the listener's tls.kernel_tls_offload,
 	// which decides in place of engine.kernel_tls_offload.
 	KernelTLSOffload *bool
+	// MaxTLSVersion is the newest TLS version its TCP connections may use,
+	// from tls.max_version, or 0 for the newest Go has.
+	MaxTLSVersion uint16
 	// MaxHeaderBytes and MaxBodyBytes bound the requests it takes; see
 	// config.Limits.
 	MaxHeaderBytes int
@@ -485,6 +489,9 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		}
 		if t := lc.TLS; t != nil {
 			l.KernelTLSOffload = t.KernelTLSOffload
+			if t.MaxVersion == "1.2" {
+				l.MaxTLSVersion = tls.VersionTLS12
+			}
 			var static *tlsmgr.Static
 			if len(t.Certificates) > 0 {
 				certs, err := tlsmgr.LoadStatic(t)

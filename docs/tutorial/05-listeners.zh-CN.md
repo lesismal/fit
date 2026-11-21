@@ -39,7 +39,7 @@ matches a host name for HTTPS by default”。`tls` 写空（`{}`）的监听会
   `protocols` 为 `http/1.1`。每行有**上移**、**下移**与**删除**按钮。删除不再确认，保存后才生效；删掉
   最后一个监听时 `listeners` 成员被移除，此时由 HTTPS by default 接管。
 - 表单的字段是 `name`、`address`、`protocols`、`mptcp`、`tls`（含 `certificates`、`acme`、`on_demand`、
-  `client_auth`、`kernel_tls_offload`）、`socks`、`access`、`proxy_protocol`。每个字段带说明；可选成员前有复选框，勾选即设置，
+  `client_auth`、`kernel_tls_offload`、`max_version`）、`socks`、`access`、`proxy_protocol`。每个字段带说明；可选成员前有复选框，勾选即设置，
   取消即不写。
 - 本页与所有编辑配置的页面共用同一份草稿。顶栏显示配置版本（或**有未保存的修改**），旁边是**放弃修改**、
   **检查**、**保存并应用**。**保存并应用**校验草稿并作为新的配置版本应用；**检查**发送同一请求并带上
@@ -70,7 +70,8 @@ matches a host name for HTTPS by default”。`tls` 写空（`{}`）的监听会
 | `mptcp` | 关闭 | 内核支持时（Linux 5.6+、`net.mptcp.enabled`）以多路径 TCP 监听该监听的 TCP 连接，不支持时回退到普通 TCP，没有多路径 TCP 的客户端也回退。默认关闭时监听是普通 TCP，这也是 CVE-2026-98432 的漏洞利用公开后加固的结果：该内核 use-after-free 的利用需要目标上有 MPTCP 监听，所以只在已修复的内核上开启。`udp` 监听与 HTTP/3 没有该功能。 |
 | `tls` | 无 | 有 `tls` 时该监听的 HTTP 就是 HTTPS。`certificates` 是证书文件（客户端拿到第一张名字与其请求相符的证书）；`acme` 是要为哪些 host 名申请证书；`on_demand` 在握手中现场申请（需要顶层 `acme.on_demand`）；写空的 `tls`（`{}`）为路由的 host 名取得证书。不提供 HTTP 的监听不能写 `tls`：`tcp` 与 `udp` 连同其中的 TLS 原样转发。 |
 | `tls.client_auth` | `mode` 为 `require` | 要求并校验客户端证书（mTLS）：`ca_files` 是客户端证书必须链到的 CA 文件。`require` 在握手中拒绝没有有效证书的客户端；`verify_if_given` 允许客户端不送证书，但送来的必须有效，需要证书的路由用 `client_cert` 中间件声明。要求证书的监听无法应答 ACME 的 TLS-ALPN-01 挑战，所以配合 `acme` 时需要 `verify_if_given`，或允许 HTTP-01 挑战。 |
-| `tls.kernel_tls_offload` | `engine.kernel_tls_offload` | 这个监听器的连接在握手后立即把加密交给内核 TLS（`true`），还是只在发送大文件时才交给内核（`false`），不管引擎的设置：用于网卡能加密 TLS 的机器，发大文件的监听器打开，发小 API 响应的监听器关闭。重载时改了它会重新绑定这个监听器。 |
+| `tls.kernel_tls_offload` | `engine.kernel_tls_offload` | 这个监听器的连接在握手后立即把加密交给内核 TLS（`true`），还是只在发送大文件时才交给内核（`false`），不管引擎的设置：用于网卡能加密 TLS 的机器，发大文件的监听器打开，发小 API 响应的监听器关闭。网卡只接 TLS 1.2 的连接，所以这种监听器还要把 `max_version` 设为 `1.2`。重载时改了它会重新绑定这个监听器。 |
+| `tls.max_version` | `1.3` | 这个监听器的连接最高可用的 TLS 版本，`1.2` 或 `1.3`。Linux 只把 TLS 1.2 连接交给能加密 TLS 的网卡；用 1.3 时由内核自己加密，要耗 CPU。TLS 1.2 建立连接多一个往返。HTTP/3 始终用 TLS 1.3。重载时改了它会重新绑定这个监听器。 |
 | `socks` | 无（`socks` 协议必需） | 谁可以用这个 SOCKS 代理（`clients`，必填），以及它能连到哪里（`allow`、`deny`、`ports`、`connect_timeout` 默认 10s、`idle_timeout` 默认 5m）：只服务 CONNECT，无认证，拒绝 BIND 与 UDP ASSOCIATE。环回、链路本地（含元数据服务 169.254.169.254）、未指定、多播地址与主机自身的地址一律拒绝，除非 `allow` 写出了落在其中的网段。 |
 | `access` | 全部地址 | 该监听服务的客户端地址（`allow`/`deny`，也可用 `allow_files`/`deny_files`），先于全局 `access` 决定；被拒绝的连接一被接受就关闭，HTTP/3 与 `udp` 则丢弃数据报——除非该监听的路由或服务自己设了 `access`，那由它先决定。有 `proxy_protocol` 时地址是头部写出的那个。 |
 | `proxy_protocol` | 无 | 从 `trusted` 地址读取 PROXY 协议 v1 或 v2 头，并按头中写出的客户端地址服务这条连接：来自这些地址的连接必须在 10s 内以头部开头，否则关闭；来自其他地址的连接原样服务，不读头部。用于 `tcp` 与 HTTP over TCP；有 `tls` 时头部在 TLS 之前。HTTP/3 与 `udp` 不读取。 |

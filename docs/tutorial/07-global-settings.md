@@ -263,7 +263,7 @@ Full table: [limits](../reference/config.md#limits).
 | `read_buffer_size` | 64 KiB | The bytes a connection reads its socket into at a time, also the most a proxied body is passed on in one write |
 | `write_watermark` | four read buffers, 64 KiB to 256 KiB | The bytes a connection may have waiting to be written before it stops reading: the backpressure on one connection |
 | `loop_wait` | `park` | How an event loop waits with no event ready: `park` (Go's poller) or `block` (epoll_wait), Linux only; `block` shortens the latency tail near saturation over HTTP/1.1 at the cost of the median |
-| `kernel_tls_offload` | off | Hand each TLS listener connection's encryption to the kernel's TLS right after its handshake, for a network card that encrypts TLS itself (NVIDIA/Mellanox ConnectX-6 Dx and later, `tls-hw-tx-offload` on); Linux, AES-GCM. Off, a connection does so only when it sends a large file. A listener's `tls.kernel_tls_offload` overrides it for that listener |
+| `kernel_tls_offload` | off | Hand each TLS listener connection's encryption to the kernel's TLS right after its handshake, for a network card that encrypts TLS itself (NVIDIA/Mellanox ConnectX-6 Dx and later, `tls-hw-tx-offload` on); Linux, AES-GCM, and the card takes TLS 1.2 connections only, so its listeners set `tls.max_version` to `1.2`. Off, a connection does so only when it sends a large file. A listener's `tls.kernel_tls_offload` overrides it for that listener |
 | `backlog` | the system's | The length of each listening socket's queue of connections not yet accepted |
 
 Full table: [engine](../reference/config.md#engine).

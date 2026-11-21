@@ -646,7 +646,8 @@ func (l *Listener) networks() []string {
 
 // TLS is a listener's TLS: the certificates it serves, chosen by the name the
 // client asks for (SNI), from files or obtained with ACME. It allows TLS 1.2
-// and 1.3, and only AEAD cipher suites with forward secrecy for 1.2.
+// and, unless max_version caps it, 1.3, and only AEAD cipher suites with
+// forward secrecy for 1.2.
 type TLS struct {
 	Certificates []Certificate `json:"certificates,omitempty" doc:"Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none."`
 	ACME         []string      `json:"acme,omitempty" doc:"Host names to obtain certificates for with ACME, as the top-level acme says, through its challenges: the CA must reach fit at each name on port 80, where any listener of fit's in the clear answers HTTP-01, or on port 443, where this listener answers TLS-ALPN-01. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files."`
@@ -654,7 +655,8 @@ type TLS struct {
 	ClientAuth   *ClientAuth   `json:"client_auth,omitempty" doc:"Ask clients for certificates and verify them (mutual TLS)."`
 	// KernelTLSOffload is a pointer so that a listener that leaves it out
 	// follows engine.kernel_tls_offload.
-	KernelTLSOffload *bool `json:"kernel_tls_offload,omitempty" doc:"Hand the encryption of what this listener's connections send to the kernel's TLS right after their handshakes (true) or only when one sends a large file (false), whatever engine.kernel_tls_offload says; as engine.kernel_tls_offload when left out. For a machine whose network card encrypts TLS, where a listener of large files gains from it and one of small API responses may not. A reload that changes it binds the listener anew."`
+	KernelTLSOffload *bool  `json:"kernel_tls_offload,omitempty" doc:"Hand the encryption of what this listener's connections send to the kernel's TLS right after their handshakes (true) or only when one sends a large file (false), whatever engine.kernel_tls_offload says; as engine.kernel_tls_offload when left out. For a machine whose network card encrypts TLS, where a listener of large files gains from it and one of small API responses may not. The card takes TLS 1.2 connections only (see max_version); the kernel encrypts TLS 1.3 ones itself. A reload that changes it binds the listener anew."`
+	MaxVersion       string `json:"max_version,omitempty" enum:"1.2,1.3" doc:"The newest TLS version this listener's connections may use: 1.2 or 1.3; 1.3 when left out. Network cards that encrypt TLS (kernel_tls_offload) take TLS 1.2 connections only, Linux's offload having none for 1.3, so a listener meant for such a card sets 1.2; under 1.3 the kernel encrypts instead, at the CPU's cost. TLS 1.2 takes a round trip more to connect than 1.3. HTTP/3, which needs TLS 1.3, keeps it. A reload that changes it binds the listener anew."`
 
 	At Value `json:"-" fit:"self"`
 }

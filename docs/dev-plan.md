@@ -320,7 +320,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I229.
 | **Performance** | | | |
 | I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | done |
 | I223 | Compression made cheaper: `compress` levels by number, `fastest` by default, gzip ahead of br, `min_bytes` 1400, no copy of a filter's tail (fib `BodyReleaser`); `static`'s `compress` keeps compressed copies of files in memory; `cache` before `compress` documented and tested; the adapters convert levels | — | done |
-| I224 | `engine.kernel_tls_offload`, off by default: TLS listeners hand each connection's encryption to the kernel's TLS right after its handshake, for a network card that encrypts TLS records (fib `KernelTLSFromHandshake`), and a listener's `tls.kernel_tls_offload` over it; the nginx adapter points `ssl_conf_command Options KTLS` at it | — | done |
+| I224 | `engine.kernel_tls_offload`, off by default: TLS listeners hand each connection's encryption to the kernel's TLS right after its handshake, for a network card that encrypts TLS records (fib `KernelTLSFromHandshake`), and a listener's `tls.kernel_tls_offload` over it, and `tls.max_version` to cap a listener at TLS 1.2, the only version Linux hands the card; the nginx adapter points `ssl_conf_command Options KTLS` at it | — | done |
 | **Agent and tunnel, continued** | | | |
 | I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | done |
 | I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | done |
@@ -4317,6 +4317,16 @@ track can place it); exactly-once into sinks with no transactions.
   change of `client_auth` does. The nginx adapter's warning for `ssl_conf_command
   Options KTLS` names it. fit's `go.mod` moves to fib `5ce78a3`, which also brings fib's arena
   allocator changes (opt-in, unused by fit).
+- **Follow-up, TLS 1.2 for the card** (2026-11-21): the user asked whether only device testing was
+  left. Linux's source (7.4-rc3) says not: `tls_set_device_offload` in `net/tls/tls_device.c`
+  refuses any version but TLS 1.2, as mlx5's `mlx5e_ktls_type_check` does, and `do_tls_setsockopt_conf`
+  then falls back to the kernel's software TLS without an error, so with fit's TLS 1.3 by default a
+  card would encrypt nothing for today's clients. (A KeyUpdate is no risk: the kernel takes new keys
+  only for TLS 1.3, which never reaches the card.) A listener's `tls.max_version` (`"1.2"` or
+  `"1.3"`, 1.3 when left out) now caps its TCP connections; its HTTP/3 stays TLS 1.3, which QUIC needs,
+  and a reload that changes it binds the listener anew. The config decoder takes a string enum of
+  numbers written bare (`max_version: 1.2` in YAML and `.conf`). fib's `KernelTLSFromHandshake` doc and
+  fit's `kernel_tls_offload` docs say the card takes TLS 1.2 only.
 - **Tests**: fib's `TestKernelTLSFromHandshake` over TLS 1.3 and TLS 1.2 AES-128-GCM, AES-256-GCM,
   ChaCha20 and CBC, on, off and with `NoKernelTLS`, replies crossing the switch, sends from outside the
   handler and the close_notify; on the benchmark host (Linux 7.0, tls module) `TlsTxSw` grew by exactly
@@ -4325,7 +4335,10 @@ track can place it); exactly-once into sinks with no transactions.
   sockets went up with it on; `TestKernelTLSOffloadPerListener` runs three listeners (on, off, left out)
   under the engine's setting off and on, checks each one's choice and that a reload changing one
   rebinds only it, and on the benchmark host `TlsTxSw` grew by exactly the seven connections the test
-  hands over; the nginx adapter's warnings.
+  hands over; the nginx adapter's warnings. `TestTLSMaxVersion` (listener) checks a capped listener
+  speaks TLS 1.2 over HTTP/1.1 and HTTP/2 and TLS 1.3 over HTTP/3, an uncapped one TLS 1.3, that the
+  kernel takes both, and that a reload capping one rebinds only it; `TestTLSMaxVersion` (config) the
+  values taken, quoted or bare, and those refused.
 
 **Decisions pending review** (made while building it, 2026-11-21; each stands until the user rules on it):
 
@@ -4340,6 +4353,12 @@ track can place it); exactly-once into sinks with no transactions.
 3. **The nginx adapter warns rather than converts.** `ssl_conf_command` lives in a `server` block and
    `kernel_tls_offload` is a setting of the whole engine, so the adapter says which setting it is and
    leaves the choice to whoever runs the result, as it does for other directives it skips.
+4. **`tls.max_version` rather than a switch that implies it.** `kernel_tls_offload` does not cap the
+   version itself: TLS 1.2 costs every client a round trip, a listener may want kTLS for its files
+   under 1.3, and a cap is useful without a card. Only a maximum, and only 1.2 or 1.3: fit already
+   refuses anything below 1.2, so a `min_version` would have one value. HTTP/3 ignores it rather
+   than the config refusing `h3` with 1.2, so that one listener can serve the card over TCP and
+   QUIC beside it.
 
 ### I163 Decision 036; records, pipelines and checkpoints
 

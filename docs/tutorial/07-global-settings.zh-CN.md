@@ -231,7 +231,7 @@ store 时写入 store；它会在确认后放弃未保存的修改。`.store` �
 | `read_buffer_size` | 64 KiB | 连接一次从 socket 读入的字节，也是转发请求体一次写出的最多字节 |
 | `write_watermark` | 四个读缓冲，64 KiB 到 256 KiB | 连接待写字节达到这么多时停止读取：单连接的背压 |
 | `loop_wait` | `park` | 没有就绪事件时 event loop 的等待方式：`park`（Go 的 poller）或 `block`（epoll_wait），仅 Linux；`block` 在接近饱和时缩短 HTTP/1.1 的延迟尾部，代价是中位数 |
-| `kernel_tls_offload` | 关 | TLS 监听器的连接在握手后立即把加密交给内核 TLS，用于自己能加密 TLS 的网卡（NVIDIA/Mellanox ConnectX-6 Dx 及以后，打开 `tls-hw-tx-offload`）；仅 Linux、AES-GCM。关闭时只在发送大文件时才交给内核。监听器的 `tls.kernel_tls_offload` 可以单独覆盖 |
+| `kernel_tls_offload` | 关 | TLS 监听器的连接在握手后立即把加密交给内核 TLS，用于自己能加密 TLS 的网卡（NVIDIA/Mellanox ConnectX-6 Dx 及以后，打开 `tls-hw-tx-offload`）；仅 Linux、AES-GCM，且网卡只接 TLS 1.2 的连接，所以这些监听器要把 `tls.max_version` 设为 `1.2`。关闭时只在发送大文件时才交给内核。监听器的 `tls.kernel_tls_offload` 可以单独覆盖 |
 | `backlog` | 系统的 | 每个监听 socket 尚未接受的连接队列长度 |
 
 完整表：[engine](../reference/config.md#engine)。

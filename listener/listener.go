@@ -102,6 +102,9 @@ type binding struct {
 	// kernel right after the handshake; a reload that changes it binds it
 	// anew, since the TLS handler is fixed once the binding is made.
 	kernelTLS bool
+	// maxTLSVersion is the newest TLS version its TCP connections may use;
+	// a reload that changes it binds it anew, as clientAuth does.
+	maxTLSVersion uint16
 	// addr is where it listens: its TCP address, or for HTTP/3 alone its
 	// UDP one; udpAddr is HTTP/3's.
 	addr    net.Addr
@@ -125,7 +128,8 @@ func (b *binding) setAccess(l *runtime.Listener) {
 type certs struct{ tlsmgr.Manager }
 
 // same reports whether b can serve the listener l as it is: the same name,
-// address and protocols, and TLS or not as l has it, and the same limits,
+// address and protocols, and TLS or not as l has it, and the same TLS
+// versions and client authentication, limits,
 // proxy trust, SOCKS rules and Multipath TCP choice, each of which is fixed
 // in the binding. Its certificates may differ: b takes on l's when it is
 // kept.
@@ -134,7 +138,7 @@ func (b *binding) same(l *runtime.Listener) bool {
 		(b.certs.Load() != nil) == (l.Certificates != nil) &&
 		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes &&
 		slices.Equal(b.proxyTrusted, l.ProxyTrusted) && b.socks == l.SOCKS.Key() &&
-		b.clientAuth == clientAuthSum(l) && b.mptcp == l.MPTCP
+		b.clientAuth == clientAuthSum(l) && b.maxTLSVersion == l.MaxTLSVersion && b.mptcp == l.MPTCP
 }
 
 // keeps reports whether b can serve l as it is: same, and the same choice
@@ -266,13 +270,14 @@ const maxPortZeroBinds = 8
 func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
 		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted, socks: l.SOCKS.Key(),
-		mptcp: l.MPTCP, kernelTLS: s.kernelTLSFor(l)}
+		mptcp: l.MPTCP, kernelTLS: s.kernelTLSFor(l), maxTLSVersion: l.MaxTLSVersion}
 	b.setAccess(l)
 	b.filter = b.accept.Allows
 	var tlsConfig *tls.Config
 	if l.Certificates != nil {
 		b.certs.Store(&certs{l.Certificates})
 		tlsConfig = tlsmgr.ServerConfig(l.Protocols, b.getCertificate)
+		tlsConfig.MaxVersion = l.MaxTLSVersion
 		if ca := l.ClientAuth; ca != nil {
 			tlsConfig.ClientAuth = ca.Type
 			tlsConfig.ClientCAs = ca.CAs
@@ -454,6 +459,8 @@ func (s *Server) unbind(b *binding) {
 func http3Config(l *runtime.Listener, tlsConfig *tls.Config) http3.Config {
 	c := http3.DefaultConfig()
 	c.TLSConfig = http3.ConfigureTLS(tlsConfig)
+	// QUIC is TLS 1.3 alone, whatever tls.max_version caps TCP at.
+	c.TLSConfig.MaxVersion = 0
 	c.StreamRequestBody = true
 	c.StreamRequestBodyThreshold = StreamThreshold
 	c.StreamRequestBodyAtHeader = streamsAtHeader

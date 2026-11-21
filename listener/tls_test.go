@@ -321,3 +321,93 @@ func TestKernelTLSOffloadPerListener(t *testing.T) {
 		get(s, "off")
 	}
 }
+
+// tls.max_version 1.2 caps a listener's TCP connections at TLS 1.2, as a
+// network card that encrypts TLS needs, and leaves its HTTP/3 at TLS 1.3; a
+// listener without it speaks TLS 1.3, and a reload that changes it binds
+// just that listener anew.
+func TestTLSMaxVersion(t *testing.T) {
+	a, err := certtest.Write(t.TempDir(), "a.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certs, _ := json.Marshal([]map[string]string{{"cert_file": a.CertFile, "key_file": a.KeyFile}})
+	doc := func(versions map[string]string) string {
+		var ls []string
+		for _, name := range []string{"capped", "open"} {
+			field := ""
+			if v, ok := versions[name]; ok {
+				field = fmt.Sprintf(`, "max_version": %q`, v)
+			}
+			ls = append(ls, fmt.Sprintf(`{"name": %q, "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2", "h3"],
+  "tls": {"certificates": %s, "kernel_tls_offload": true%s}}`, name, certs, field))
+		}
+		return fmt.Sprintf(`{"listeners": [%s], "routes": [{"handler": {"module": "respond", "params": {"body": "ok"}}}]}`,
+			strings.Join(ls, ", "))
+	}
+	bindingOf := func(s *Server, name string) *binding {
+		for _, b := range s.bound {
+			if b.name == name {
+				return b
+			}
+		}
+		t.Fatalf("no listener %s", name)
+		return nil
+	}
+	version := func(s *Server, name string, h2 bool) uint16 {
+		t.Helper()
+		c := tlsClient(addrOf(s, name), h2, a)
+		defer c.CloseIdleConnections()
+		resp, err := c.Get("https://a.example/")
+		if err != nil {
+			t.Fatalf("%s, h2=%v: %v", name, h2, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if string(body) != "ok" {
+			t.Fatalf("%s, h2=%v: %q", name, h2, body)
+		}
+		return resp.TLS.Version
+	}
+
+	_, s := start(t, doc(map[string]string{"capped": "1.2"}))
+	before, haveStat := kernelTLSSends()
+	for _, h2 := range []bool{false, true} {
+		if v := version(s, "capped", h2); v != tls.VersionTLS12 {
+			t.Errorf("capped, h2=%v: %s", h2, tls.VersionName(v))
+		}
+		if v := version(s, "open", h2); v != tls.VersionTLS13 {
+			t.Errorf("open, h2=%v: %s", h2, tls.VersionName(v))
+		}
+	}
+	// Each connection, TLS 1.2 as well as 1.3, is the kernel's to seal.
+	if after, _ := kernelTLSSends(); haveStat && after < before+4 {
+		t.Errorf("the kernel has sealed %d connections, %d before; want 4 more", after, before)
+	}
+	// HTTP/3 is TLS 1.3 alone, whatever max_version says for TCP.
+	for _, addr := range s.Addrs() {
+		resp, body, err := h3Get(t, "https://"+addr.UDPAddr.String()+"/", "a.example", a)
+		if err != nil || body != "ok" || resp.TLS == nil || resp.TLS.Version != tls.VersionTLS13 {
+			t.Errorf("%s over HTTP/3: %v %q %v", addr.Name, resp, body, err)
+		}
+	}
+
+	// Capping open binds it anew and leaves capped be.
+	capped := bindingOf(s, "capped")
+	if _, _, err := s.Reload(compile(t, doc(map[string]string{"capped": "1.2", "open": "1.2"}))); err != nil {
+		t.Fatal(err)
+	}
+	if bindingOf(s, "capped") != capped {
+		t.Error("a reload that capped only open bound capped anew")
+	}
+	if v := version(s, "open", false); v != tls.VersionTLS12 {
+		t.Errorf("open after the reload: %s", tls.VersionName(v))
+	}
+	open := bindingOf(s, "open")
+	if _, _, err := s.Reload(compile(t, doc(map[string]string{"capped": "1.2", "open": "1.2"}))); err != nil {
+		t.Fatal(err)
+	}
+	if bindingOf(s, "open") != open {
+		t.Error("a reload that changed nothing bound open anew")
+	}
+}

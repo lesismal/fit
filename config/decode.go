@@ -197,7 +197,10 @@ func (d *decoder) decode(n *node, path string, rv reflect.Value, f *Field) {
 		}
 		rv.Set(m)
 	case reflect.String:
-		if !d.expect(n, path, kindString) {
+		// An enum of numbers, as tls.max_version's "1.2", takes one written
+		// bare too, as YAML and .conf have it unless quoted.
+		bare := n.kind == kindNumber && f != nil && slices.Contains(f.Enum, n.s)
+		if !bare && !d.expect(n, path, kindString) {
 			return
 		}
 		if f != nil && len(f.Enum) > 0 && !slices.Contains(f.Enum, n.s) {
