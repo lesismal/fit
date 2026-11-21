@@ -20,7 +20,7 @@ import (
 // done; otherwise f is closed, and the response complete. It runs on the
 // file pool, with the request retained.
 func send(c *fibhttp.Context, f *os.File, name string, info fs.FileInfo, stall time.Duration) bool {
-	w := &rangeWriter{c: c, src: &offsetFile{f: f}}
+	w := &rangeWriter{c: c, src: &offsetFile{f: f, size: info.Size()}}
 	stdhttp.ServeContent(w, c.Request, name, info.ModTime(), w.src)
 	if !w.taken {
 		// HEAD, 304, 412, 416: no body, or ServeContent's short one.
@@ -82,10 +82,13 @@ func (w *rangeWriter) ReadFrom(r io.Reader) (int64, error) {
 type writerOnly struct{ io.Writer }
 
 // offsetFile is the file as ServeContent reads it: to sniff its type, and
-// to seek to the range it sends, whose start Seek records.
+// to seek to the range it sends, whose start Seek records. Reads go to the
+// offset they are at, and SendFile sends from one, so Seek moves only the
+// offset, of a file of size bytes, without asking the system: ServeContent
+// seeks three times for every file it sends.
 type offsetFile struct {
-	f      *os.File
-	offset int64
+	f            *os.File
+	offset, size int64
 }
 
 func (o *offsetFile) Read(p []byte) (int, error) {
@@ -98,9 +101,18 @@ func (o *offsetFile) Read(p []byte) (int, error) {
 }
 
 func (o *offsetFile) Seek(offset int64, whence int) (int64, error) {
-	n, err := o.f.Seek(offset, whence)
-	if err == nil {
-		o.offset = n
+	switch whence {
+	case io.SeekStart:
+	case io.SeekCurrent:
+		offset += o.offset
+	case io.SeekEnd:
+		offset += o.size
+	default:
+		return 0, errors.New("static: invalid whence")
 	}
-	return n, err
+	if offset < 0 {
+		return 0, errors.New("static: negative position")
+	}
+	o.offset = offset
+	return offset, nil
 }

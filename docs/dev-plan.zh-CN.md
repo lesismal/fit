@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I230。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I231。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -389,6 +389,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I228 | 集群成员链路使用 fib A52、A53 与 A95：`Abort`，以附加数据取代地址表，链路队列超出上限时暂缓调用 | — | done |
 | **静态文件** | | | |
 | I229 | static handler 的路径缓存分片，满后经门卫准入；fib worker 不再等待其锁 | — | done |
+| I230 | 小文件从磁盘整读，只需三次系统调用；文件池每 CPU 一个 worker，仅为阻塞的 worker 扩容 | I229 | done |
 
 ## M0 基础
 
@@ -7118,3 +7119,40 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 4. **fib worker 遇到锁被占用时把请求当作未命中**交给文件池，代价是一次切换，但 worker 永不挂起。文件池自己的读取仍会等待。
 5. **文件内容缓存保留一把锁**，现在与路径缓存分开：以读为主、从不淘汰，512 并发下等待很少（8207 次写入，平均等待 14 µs）。
 6. **锁统计以 `fit_lockstat` 标签留在代码中**，默认构建编译为普通的 Lock/Unlock，供以后再看这条路径时使用。
+
+### I230 小文件整读，弹性文件池 — done
+
+- **原因**：I229 之后，512 并发随机 8 KiB 文件时 fit 每请求 36 µs CPU，nginx 24 µs；系统调用 17 次对 7.7 次（`perf stat`），
+  67% 的时间在内核：`os.Open` 对每个普通文件做 4 次 `fcntl` 和一次失败的 `epoll_ctl`，`ServeContent` 的 3 次 `lseek` 和
+  512 字节类型嗅探，`resolve` 的一次 stat 加一次 lstat，以及低于 fib 16 KiB sendfile 阈值的正文要再交给 fib 自己的文件池。
+- **完成**：`handler/static`：缓存不保存的 16 KiB 以内文件，用原始 `open`、一次 `pread` 读入 bufferpool 缓冲区（比 stat 的
+  大小多读一字节，以发现变大的文件；短读即文件末尾）和 `close` 整读，像缓存文件一样从内存应答，经 `WriteResponseOwned`；
+  大小变了的仍走原路径。更大的文件以原始 open 打开再用 `os.NewFile` 包装（一次 `fcntl`），`offsetFile.Seek` 只移动偏移。
+  `resolve` 和预压缩副本先 `lstat`，只对符号链接再 `stat`。`internal/filepool`：池保留 GOMAXPROCS 个 worker（不超过上限），
+  每有一个 worker 在一个任务里超过 1 ms 就加一个，直到上限；有任务等待时每 1 ms 再看一次；新增的 worker 在没有任务等待时
+  退出。static handler、缓存磁盘层和 fastcgi 的池上限仍是 4 × GOMAXPROCS，至少 16。测试：小文件整读（校验头、条件、范围、
+  大小变化、错误）、大文件无正文的应答和预压缩副本、虚拟 seek、`statLink`、池（保留的 worker、有无 Submit 时的扩容、上限、
+  短任务不扩容、超时、队列满）。覆盖率：static 98.3% → 98.6%，filepool 97.9%（此前没有自己的测试）。
+- **压测**（.51，三轮，
+  [bench/results/static-small-reads-2026-11-21](../bench/results/static-small-reads-2026-11-21/README.md)）：
+  512 并发随机 8 KiB 221,695 → 258,576 QPS（+16.6%；从 nginx 的 68.0% 到 79.3%），256 并发 +16.8%；64 KiB 文件 +8.2%；
+  热文件不变。512 并发 p99 6.94 → 3.94 ms，256 并发 4.36 → 2.38，各分位都更好。每请求 CPU 35.8 → 30.0 µs（nginx 24.4）；
+  系统调用 17 → 7（nginx 7.7）。512 并发 RSS +28 MB。短读随后单独测量（两轮）：256 并发 +2.1%，512 并发 +1.8%，系统调用
+  7 → 6；512 并发约 26.46 万 QPS，比 I229 高 19%，为 nginx 的 81%。
+- **途中发现**：只做小文件整读时 264k QPS，但 p99 10-11 ms。32 个池 worker 在 8 个 CPU 上一直可运行，没有 P 空闲，Go 只由
+  sysmon 每 10 ms 查一次网络轮询器，停在那里的 fib 事件循环就要等这么久（执行跟踪：68% 的调度延迟是等待运行的池 worker）。
+  8 个 worker 时 p99 2.8 ms，每个任务后 `Gosched` 反而更差。
+- **遗留**：每请求 CPU 30 µs 对 nginx 24 µs；fib 的 `filewatch.Watcher.Watch` 每次未命中都取一把普通互斥锁（跟踪中 4% 的
+  调度延迟，需向 fib 提请求）；256 并发下每秒约 40 次 GC（存活堆小，每请求一两次分配）；超过 16 KiB 的文件请求多个范围时仍
+  回整个文件。`handler/vod` 有自己的 `offsetFile` 副本，仍真的 seek。
+
+**待审查的决定**（2026-11-21）：
+
+1. **整读到 16 KiB 为止**：fib 的 sendfile 阈值，低于它 SendFile 反正在自己的 goroutine 上分块读；高于它 sendfile 更好。
+2. **小文件整读用查找时的 stat 作校验头**，与内存缓存的 `load` 相同，只核对大小：stat 与读取之间被同样大小的文件替换时，
+   直到下次查找（监听事件或检查间隔）都带旧的 ETag 和 Last-Modified。大文件路径仍在打开后 stat。
+3. **普通文件的 `pread` 短读视为文件末尾**，每请求省一次读；在别处也会短读的文件系统会让大小不符，文件走原路径。
+4. **从磁盘整读的小文件请求多个范围时回 multipart**，与缓存文件一致，此前回整个文件。
+5. **池保留 GOMAXPROCS 个 worker，任务超过 1 ms 才扩容，上限不变**；1 ms 远超从内存读，对磁盘又够短。没有配置项：上限
+   维持原值。所有 filepool 使用者都受影响（static、缓存磁盘层、fastcgi；日志压缩池的 worker 少于 CPU 数，不变）。
+6. **原始 `open`/`pread`/`close` 只用于 Unix**；其他系统仍用 `os.Open` 和 `io.ReadFull`。

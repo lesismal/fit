@@ -1,0 +1,40 @@
+    86.90%  nginx            [kernel.kallsyms]
+            |          
+            |--1.33%--prepend_path
+            |          |          
+            |           --1.31%--d_absolute_path
+            |                     d_namespace_path.constprop.0
+            |                     aa_path_name
+            |                     path_name
+            |                     aa_path_perm
+            |                     |          
+            |                     |--0.76%--common_perm
+            |                     |          common_perm_cond
+            |                     |          apparmor_inode_getattr
+            |                     |          security_inode_getattr
+            |                     |          vfs_fstat
+            |                     |          __do_sys_newfstat
+            |                     |          __x64_sys_newfstat
+            |                     |          x64_sys_call
+            |                     |          do_syscall_64
+            |                     |          entry_SYSCALL_64_after_hwframe
+            |                     |          __fstat64
+            |                     |          
+            |                      --0.55%--apparmor_file_open
+            |                                security_file_open
+            |                                do_dentry_open
+            |                                vfs_open
+            |                                do_open
+            |                                path_openat
+            |                                do_file_open
+            |                                do_sys_openat2
+            |                                __x64_sys_openat
+            |                                x64_sys_call
+            |                                do_syscall_64
+            |                                entry_SYSCALL_64_after_hwframe
+            |                                0x70be6c152687
+            |                                0
+            |          
+            |--1.29%--__fput
+            |          |          
+            |           --1.28%--fput_close_sync

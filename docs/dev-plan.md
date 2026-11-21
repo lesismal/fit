@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I230.
+Status: `todo`, `doing` or `done`. The next free iteration number is I231.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -399,6 +399,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I230.
 | I228 | The cluster's member links on fib A52, A53 and A95: `Abort`, attachments in place of the address map, calls held while a link's queue is above its limit | — | done |
 | **Static files** | | | |
 | I229 | The static handler's lookup cache in shards, with a doorkeeper once full; fib workers never wait for its locks | — | done |
+| I230 | Small files read whole from disk with three system calls; the file pool keeps a worker a CPU and grows only for blocked ones | I229 | done |
 
 ## M0, foundations
 
@@ -10215,3 +10216,58 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
    evicts, and its waits at 512 connections were small (8207 writes, mean wait 14 µs).
 6. **The lock measurements stay in the code behind `fit_lockstat`**, compiled to a plain Lock/Unlock
    otherwise, for the next look at this path.
+
+### I230 Small files read whole, an elastic file pool — done
+
+- **Why**: after I229, at 512 connections on random 8 KiB files fit took 36 µs of CPU a request
+  against nginx's 24, with 17 system calls against 7.7 (`perf stat`), 67% of its time in the kernel:
+  `os.Open`'s four `fcntl` and failed `epoll_ctl` for every regular file, `ServeContent`'s three
+  `lseek` and 512-byte sniff, a stat and an lstat in `resolve`, and the hand-off to fib's own file
+  pool for a body below its 16 KiB sendfile threshold.
+- **Done**: `handler/static`: a file up to 16 KiB the cache does not keep is read whole with a raw
+  `open`, one `pread` into a bufferpool buffer (one byte more than its stat's size tells a file that
+  grew; a short read is its end) and `close`, and answered from memory as a cached file is, through
+  `WriteResponseOwned`; one that changed size goes the old way. A larger one is opened raw and
+  wrapped with `os.NewFile` (one `fcntl`), and `offsetFile.Seek` moves only its offset. `resolve`
+  and the twins `lstat` first and `stat` only a link. `internal/filepool`: the pool keeps
+  GOMAXPROCS workers (up to its bound) and adds one, up to the bound, for each worker held in a job
+  past 1 ms, looking again every 1 ms while jobs wait; added workers leave when none waits. The
+  static handler's, the cache's disk tier's and fastcgi's pools keep their bound of 4 × GOMAXPROCS,
+  at least 16. Tests: the small read (validators, conditional, ranged, a changed size, errors), a
+  large file's bodiless answers and twin, the virtual seek, `statLink`, the pool (kept workers,
+  growth with and without a Submit, the bound, no growth for short jobs, expiry, a full queue).
+  Coverage: static 98.3% → 98.6%, filepool 97.9% (it had no tests of its own).
+- **Benchmark** (.51, three rounds,
+  [bench/results/static-small-reads-2026-11-21](../bench/results/static-small-reads-2026-11-21/README.md)):
+  random 8 KiB at 512 connections 221,695 → 258,576 QPS (+16.6%; 68.0% → 79.3% of nginx), at 256
+  +16.8%; 64 KiB files +8.2%; the hot file unchanged. p99 at 512 6.94 → 3.94 ms, at 256 4.36 → 2.38,
+  every percentile better. CPU a request 35.8 → 30.0 µs (nginx 24.4); system calls 17 → 7 (nginx
+  7.7). RSS +28 MB at 512 connections. The short read, measured on its own after (two rounds): +2.1%
+  at 256, +1.8% at 512, 7 → 6 system calls; rand-512 about 264.6k QPS, +19% on I229, 81% of nginx.
+- **Found on the way**: the small reads alone gave 264k QPS with a p99 of 10-11 ms. With 32 pool
+  workers always runnable on 8 CPUs, no P idles, Go checks its network poller only every 10 ms from
+  sysmon, and fib's loops parked there wait that long (an execution trace: 68% of scheduling delay
+  on runnable pool workers). 8 workers gave a p99 of 2.8 ms, `Gosched` after each job made it worse.
+- **Left**: CPU a request 30 µs against nginx's 24; fib's `filewatch.Watcher.Watch` takes a plain
+  mutex on every miss (4% of the scheduling delay in the trace, fib request to write); about 40 GCs
+  a second at 256 connections (small live heap, an allocation or two a request); multi-range
+  requests of a file over 16 KiB still get the whole file. `handler/vod` keeps its own copy of
+  `offsetFile`, which still seeks for real.
+
+**Decisions pending review** (2026-11-21):
+
+1. **16 KiB is where reading whole stops**: fib's sendfile threshold, below which SendFile reads
+   pieces on a goroutine of its own anyway; above it sendfile wins.
+2. **The small read uses the lookup's stat for the validators**, as the memory cache's `load` does,
+   and checks only the size: a file replaced by one of the same size between the stat and the read
+   goes out with the old ETag and Last-Modified until the next lookup (a watch event or the check
+   interval). The large path still stats after opening.
+3. **A short `pread` is taken as the end of a regular file**, which saves a read a request; a file
+   system that reads short elsewhere makes the size differ and the file go the old way.
+4. **Several ranges of a small file read from disk get a multipart answer**, as a cached file does,
+   where they got the whole file before.
+5. **The pool's kept workers are GOMAXPROCS, growth is for a job past 1 ms, up to the old bound**;
+   1 ms is far past a read from memory and short for a disk. No config field: the bound stays where
+   it was. Every filepool user gets it (static, cache disk tier, fastcgi; logs' compress pool has
+   fewer workers than CPUs and is unchanged).
+6. **Raw `open`/`pread`/`close` on Unix only**; elsewhere `os.Open` and `io.ReadFull`, as before.

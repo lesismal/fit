@@ -1,0 +1,45 @@
+Type: delay
+Showing nodes accounting for 93409063.19us, 98.19% of 95135560.59us total
+Dropped 254 nodes (cum <= 475677.80us)
+Showing top 40 nodes out of 55
+      flat  flat%   sum%        cum   cum%
+65057917.84us 68.38% 68.38% 65058467.47us 68.39%  runtime.selectnbsend
+15599661.30us 16.40% 84.78% 15599661.30us 16.40%  runtime.chansend1
+5881360.88us  6.18% 90.96% 5908646.57us  6.21%  sync.(*Mutex).Unlock
+3841342.63us  4.04% 95.00% 3841342.63us  4.04%  runtime.Gosched
+1227140.61us  1.29% 96.29% 1227140.61us  1.29%  runtime.systemstack_switch
+803868.28us  0.84% 97.14% 825574.20us  0.87%  sync.(*RWMutex).Unlock
+680764.38us  0.72% 97.85% 680764.38us  0.72%  runtime.goschedIfBusy
+123989.98us  0.13% 97.98% 1852281.83us  1.95%  github.com/lesismal/fib/bufferpool.Get
+68870.21us 0.072% 98.05% 1885290.46us  1.98%  github.com/lesismal/fit/handler/static.readSmall
+55375.18us 0.058% 98.11% 65242980.21us 68.58%  github.com/lesismal/fib/http.(*ServerHandler).OnData
+ 8369.98us 0.0088% 98.12% 551352.58us  0.58%  runtime.mallocgc
+ 6832.06us 0.0072% 98.13% 65112597.33us 68.44%  github.com/lesismal/fit/handler/static.(*Static).queue
+ 6769.73us 0.0071% 98.14% 478997.93us   0.5%  github.com/lesismal/fib/core.(*Connection).SendPartsShared
+ 6656.26us 0.007% 98.14% 65131157.46us 68.46%  github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP
+ 6125.44us 0.0064% 98.15% 65448693.78us 68.80%  github.com/lesismal/fib/taskpool.(*executor).call
+ 5633.98us 0.0059% 98.16% 15591269.29us 16.39%  github.com/lesismal/fib/taskpool.(*adaptivePool).kick
+ 5199.62us 0.0055% 98.16% 7922915.22us  8.33%  github.com/lesismal/fit/handler/static.(*Static).queue.func3
+ 4587.84us 0.0048% 98.17% 65195700.39us 68.53%  github.com/lesismal/fib/http.(*ServerHandler).drive
+ 3151.30us 0.0033% 98.17% 4425476.75us  4.65%  github.com/lesismal/fit/handler/static.(*Static).resolve
+ 2603.65us 0.0027% 98.17% 65119483.87us 68.45%  github.com/lesismal/fit/handler/static.(*Static).ServeHTTP
+ 2267.27us 0.0024% 98.17% 528254.70us  0.56%  github.com/lesismal/fib/http.(*Context).sendResponse
+ 1916.35us 0.002% 98.18% 4068117.05us  4.28%  github.com/lesismal/fib/filewatch.(*Watcher).Watch
+ 1798.08us 0.0019% 98.18% 2581910.29us  2.71%  github.com/lesismal/fit/handler/static.(*Static).answer
+ 1776.26us 0.0019% 98.18% 7888532.95us  8.29%  github.com/lesismal/fit/handler/static.(*Static).serve
+ 1468.35us 0.0015% 98.18% 532438.26us  0.56%  github.com/lesismal/fib/http.(*Context).writeHTTP1
+ 1341.82us 0.0014% 98.18% 65440005.15us 68.79%  github.com/lesismal/fib/core.(*Connection).RunTask
+  745.99us 0.00078% 98.18% 532310.45us  0.56%  github.com/lesismal/fib/http.(*Context).WriteResponseOwned
+  702.14us 0.00074% 98.18% 7453724.16us  7.83%  github.com/lesismal/fib/core.(*Engine).submitReady
+  443.58us 0.00047% 98.18% 2571067.67us  2.70%  github.com/lesismal/fit/handler/static.(*Static).sendFromDisk
+  139.58us 0.00015% 98.18% 1307382.09us  1.37%  github.com/lesismal/fib/bufferpool.(*class).take
+  100.67us 0.00011% 98.19% 532987.89us  0.56%  github.com/lesismal/fit/handler/static.serveOwned
+   77.70us 8.2e-05% 98.19% 5304846.40us  5.58%  github.com/lesismal/fit/handler/static.(*Static).find
+   56.96us 6e-05% 98.19% 65132031us 68.46%  github.com/lesismal/fib/http.serveRequestOn
+    7.30us 7.7e-06% 98.19% 7452933.63us  7.83%  github.com/lesismal/fib/taskpool.(*adaptiveBackend).submitBatch
+         0     0% 98.19% 65438663.32us 68.78%  github.com/lesismal/fib/core.(*Connection).process
+         0     0% 98.19% 65433154.46us 68.78%  github.com/lesismal/fib/core.(*Connection).readLoop
+         0     0% 98.19% 65434064.79us 68.78%  github.com/lesismal/fib/core.(*Connection).readRound
+         0     0% 98.19% 11309623.33us 11.89%  github.com/lesismal/fib/core.(*Engine).Run.func1
+         0     0% 98.19% 11309623.33us 11.89%  github.com/lesismal/fib/core.(*Engine).runLoop
+         0     0% 98.19% 11294610.02us 11.87%  github.com/lesismal/fib/core.(*Engine).runReady

@@ -1,0 +1,40 @@
+fit-i229.rand-256.r1 rps=220039.81 srvcpu=7.94 clicpu=2.83 rss_kb=247544 50%=1.08ms 90%=1.89ms 99%=4.31ms  errs=0
+fit-i230.rand-256.r1 rps=258439.30 srvcpu=7.70 clicpu=3.27 rss_kb=269252 50%=0.89ms 90%=1.31ms 99%=2.37ms  errs=0
+nginx.rand-256.r1 rps=329764.50 srvcpu=7.93 clicpu=6.50 rss_kb=292064 50%=718.00us 90%=0.95ms 99%=1.34ms  errs=0
+fit-i229.rand-512.r1 rps=221328.50 srvcpu=7.93 clicpu=4.01 rss_kb=249940 50%=2.18ms 90%=3.69ms 99%=6.96ms  errs=0
+fit-i230.rand-512.r1 rps=258082.88 srvcpu=7.75 clicpu=4.63 rss_kb=281816 50%=1.82ms 90%=2.65ms 99%=4.07ms  errs=0
+nginx.rand-512.r1 rps=320979.40 srvcpu=7.94 clicpu=6.42 rss_kb=291980 50%=1.50ms 90%=1.90ms 99%=2.39ms  errs=0
+fit-i229.hot-256.r1 rps=579145.42 srvcpu=7.93 clicpu=7.57 rss_kb=50460 50%=365.00us 90%=801.00us 99%=1.94ms  errs=0
+fit-i230.hot-256.r1 rps=577703.27 srvcpu=7.93 clicpu=7.56 rss_kb=49048 50%=367.00us 90%=801.00us 99%=1.86ms  errs=0
+nginx.hot-256.r1 rps=470761.20 srvcpu=7.91 clicpu=7.84 rss_kb=265100 50%=406.00us 90%=615.00us 99%=3.27ms  errs=0
+fit-i229.mid-256.r1 rps=193979.85 srvcpu=7.88 clicpu=7.03 rss_kb=223236 50%=1.06ms 90%=2.37ms 99%=5.53ms  errs=0
+fit-i230.mid-256.r1 rps=209681.17 srvcpu=7.87 clicpu=7.42 rss_kb=222320 50%=0.97ms 90%=1.93ms 99%=3.58ms  errs=0
+nginx.mid-256.r1 rps=256155.58 srvcpu=6.52 clicpu=7.92 rss_kb=291812 50%=478.00us 90%=1.04ms 99%=1.65ms  errs=0
+fit-i229.rand-256.r2 rps=219845.61 srvcpu=7.94 clicpu=4.05 rss_kb=246892 50%=1.07ms 90%=1.89ms 99%=4.36ms  errs=0
+fit-i230.rand-256.r2 rps=256313.21 srvcpu=7.68 clicpu=4.80 rss_kb=275404 50%=0.90ms 90%=1.33ms 99%=2.47ms  errs=0
+nginx.rand-256.r2 rps=323951.90 srvcpu=7.92 clicpu=5.94 rss_kb=290776 50%=749.00us 90%=0.90ms 99%=1.22ms  errs=0
+fit-i229.rand-512.r2 rps=221695.14 srvcpu=7.93 clicpu=2.93 rss_kb=247252 50%=2.18ms 90%=3.69ms 99%=6.85ms  errs=0
+fit-i230.rand-512.r2 rps=259973.98 srvcpu=7.76 clicpu=3.38 rss_kb=277840 50%=1.80ms 90%=2.61ms 99%=3.94ms  errs=0
+nginx.rand-512.r2 rps=326059.31 srvcpu=7.94 clicpu=5.69 rss_kb=291700 50%=1.54ms 90%=1.83ms 99%=2.17ms  errs=0
+fit-i229.hot-256.r2 rps=578384.63 srvcpu=7.94 clicpu=6.94 rss_kb=47344 50%=394.00us 90%=776.00us 99%=1.31ms  errs=0
+fit-i230.hot-256.r2 rps=577434.31 srvcpu=7.91 clicpu=6.92 rss_kb=49200 50%=394.00us 90%=774.00us 99%=1.29ms  errs=0
+nginx.hot-256.r2 rps=479231.28 srvcpu=7.94 clicpu=7.51 rss_kb=263252 50%=502.00us 90%=656.00us 99%=1.37ms  errs=0
+fit-i229.mid-256.r2 rps=194914.86 srvcpu=7.89 clicpu=6.24 rss_kb=221696 50%=1.12ms 90%=2.47ms 99%=6.22ms  errs=0
+fit-i230.mid-256.r2 rps=212062.06 srvcpu=7.85 clicpu=6.78 rss_kb=222176 50%=1.07ms 90%=1.94ms 99%=3.28ms  errs=0
+nginx.mid-256.r2 rps=257795.12 srvcpu=5.67 clicpu=7.93 rss_kb=290964 50%=489.00us 90%=0.92ms 99%=1.23ms  errs=0
+fit-i229.rand-256.r3 rps=220206.56 srvcpu=7.94 clicpu=2.85 rss_kb=246028 50%=1.07ms 90%=1.89ms 99%=4.39ms  errs=0
+fit-i230.rand-256.r3 rps=257023.86 srvcpu=7.68 clicpu=3.50 rss_kb=270920 50%=0.90ms 90%=1.32ms 99%=2.38ms  errs=0
+nginx.rand-256.r3 rps=325742.89 srvcpu=7.93 clicpu=5.72 rss_kb=291080 50%=752.00us 90%=0.94ms 99%=1.16ms  errs=0
+fit-i229.rand-512.r3 rps=222103.36 srvcpu=7.93 clicpu=2.97 rss_kb=249640 50%=2.17ms 90%=3.69ms 99%=6.94ms  errs=0
+fit-i230.rand-512.r3 rps=258576.44 srvcpu=7.78 clicpu=3.38 rss_kb=278756 50%=1.81ms 90%=2.62ms 99%=3.91ms  errs=0
+nginx.rand-512.r3 rps=327740.93 srvcpu=7.94 clicpu=5.70 rss_kb=292568 50%=1.50ms 90%=1.86ms 99%=2.17ms  errs=0
+fit-i229.hot-256.r3 rps=578667.33 srvcpu=7.93 clicpu=6.92 rss_kb=49060 50%=393.00us 90%=776.00us 99%=1.34ms  errs=0
+fit-i230.hot-256.r3 rps=578577.02 srvcpu=7.94 clicpu=6.92 rss_kb=48600 50%=395.00us 90%=773.00us 99%=1.27ms  errs=0
+nginx.hot-256.r3 rps=479379.67 srvcpu=7.93 clicpu=7.51 rss_kb=265132 50%=514.00us 90%=571.00us 99%=1.16ms  errs=0
+fit-i229.mid-256.r3 rps=195281.80 srvcpu=7.91 clicpu=6.25 rss_kb=223268 50%=1.12ms 90%=2.49ms 99%=6.12ms  errs=0
+fit-i230.mid-256.r3 rps=210858.16 srvcpu=7.81 clicpu=6.76 rss_kb=222600 50%=1.08ms 90%=1.96ms 99%=3.36ms  errs=0
+nginx.mid-256.r3 rps=258149.35 srvcpu=5.63 clicpu=7.94 rss_kb=290712 50%=488.00us 90%=0.92ms 99%=1.27ms  errs=0
+fit-i229 syscalls: all=16.00 openat=0.94 read=0.00 pread64=1.87 close=0.94 newfstat=0.93 newfstatat=1.86 fcntl=3.74 lseek=2.80 epoll_ctl=0.96 sendto=0.93 recvfrom=0.94 
+fit-i230 syscalls: all=6.93 openat=0.96 read=0.00 pread64=1.92 close=0.96 newfstat=0.00 newfstatat=0.96 fcntl=0.00 epoll_ctl=0.03 recvfrom=0.96 
+nginx syscalls: all=7.65 openat=0.95 read=0.00 close=0.95 newfstat=0.95 newfstatat=0.00 writev=0.96 sendfile64=0.96 recvfrom=0.96 
+done 20:01:05

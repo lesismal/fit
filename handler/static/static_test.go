@@ -230,16 +230,47 @@ func TestConditional(t *testing.T) {
 				t.Errorf("%s%s: 304 without the ETag", tt.name, extra)
 			}
 		}
-		// Several ranges: a multipart body from memory, and the whole file
-		// from disk.
+		// Several ranges: a multipart body from memory, as for a small file
+		// read whole from disk.
 		multi := get(s, "GET", "/a.txt", map[string]string{"Range": "bytes=0-1,5-6"}).Response
-		if extra == "" {
-			if multi.StatusCode != 206 || !strings.HasPrefix(multi.Header.Get("Content-Type"), "multipart/byteranges") {
-				t.Errorf("multiple ranges: got %d %v", multi.StatusCode, multi.Header)
-			}
-		} else if multi.StatusCode != 200 || string(multi.Body) != "0123456789" {
-			t.Errorf("multiple ranges%s: got %d %q", extra, multi.StatusCode, multi.Body)
+		if multi.StatusCode != 206 || !strings.HasPrefix(multi.Header.Get("Content-Type"), "multipart/byteranges") {
+			t.Errorf("multiple ranges%s: got %d %v", extra, multi.StatusCode, multi.Header)
 		}
+	}
+	// A larger file sent from disk answers several ranges with the whole
+	// file.
+	big := strings.Repeat("0123456789", smallFile/10+1)
+	s := mustLoad(t, tree(t, map[string]string{"big.txt": big}), `, "max_file_bytes": 4`)
+	multi := get(s, "GET", "/big.txt", map[string]string{"Range": "bytes=0-1,5-6"}).Response
+	if multi.StatusCode != 200 || string(multi.Body) != big {
+		t.Errorf("multiple ranges of a large file: got %d, %d bytes", multi.StatusCode, len(multi.Body))
+	}
+}
+
+// TestLargeFromDisk checks what a file larger than 16 KiB sent from disk is
+// answered with when ServeContent sends no body of it, and a large
+// precompressed twin sent with its length.
+func TestLargeFromDisk(t *testing.T) {
+	big := strings.Repeat("0123456789", smallFile/10+1)
+	twin := strings.Repeat("z", smallFile+3)
+	s := mustLoad(t, tree(t, map[string]string{"big.txt": big, "big.txt.gz": twin}), `, "max_file_bytes": 4, "precompressed": ["gzip"]`)
+	whole := get(s, "GET", "/big.txt", nil).Response
+	tag := whole.Header.Get("Etag")
+	if whole.StatusCode != 200 || string(whole.Body) != big || tag == "" {
+		t.Fatalf("whole: %d, %d bytes", whole.StatusCode, len(whole.Body))
+	}
+	if got := get(s, "HEAD", "/big.txt", nil).Response; got.StatusCode != 200 || len(got.Body) != 0 {
+		t.Errorf("HEAD: %d, %d bytes", got.StatusCode, len(got.Body))
+	}
+	if got := get(s, "GET", "/big.txt", map[string]string{"If-None-Match": tag}).Response; got.StatusCode != 304 || len(got.Body) != 0 {
+		t.Errorf("conditional: %d, %d bytes", got.StatusCode, len(got.Body))
+	}
+	if got := get(s, "GET", "/big.txt", map[string]string{"Range": "bytes=999999-"}).Response; got.StatusCode != 416 {
+		t.Errorf("unsatisfiable: %d", got.StatusCode)
+	}
+	got := get(s, "GET", "/big.txt", map[string]string{"Accept-Encoding": "gzip"}).Response
+	if got.StatusCode != 200 || string(got.Body) != twin || got.Header.Get("Content-Encoding") != "gzip" {
+		t.Errorf("twin: %d, %d bytes, %v", got.StatusCode, len(got.Body), got.Header)
 	}
 }
 

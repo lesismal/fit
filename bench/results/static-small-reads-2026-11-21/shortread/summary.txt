@@ -1,0 +1,11 @@
+fit-i230.rand-256.r1 rps=258053.59 srvcpu=7.69 clicpu=3.25 rss_kb=274908 50%=0.89ms 90%=1.31ms 99%=2.31ms  errs=0
+fit-i230b.rand-256.r1 rps=263235.30 srvcpu=7.69 clicpu=3.36 rss_kb=270272 50%=0.88ms 90%=1.29ms 99%=2.46ms  errs=0
+fit-i230.rand-512.r1 rps=260355.17 srvcpu=7.79 clicpu=3.42 rss_kb=279236 50%=1.80ms 90%=2.60ms 99%=3.98ms  errs=0
+fit-i230b.rand-512.r1 rps=265328.76 srvcpu=7.79 clicpu=3.48 rss_kb=275768 50%=1.76ms 90%=2.54ms 99%=3.78ms  errs=0
+fit-i230.rand-256.r2 rps=258173.30 srvcpu=7.70 clicpu=3.30 rss_kb=270688 50%=0.89ms 90%=1.31ms 99%=2.51ms  errs=0
+fit-i230b.rand-256.r2 rps=263987.36 srvcpu=7.68 clicpu=3.38 rss_kb=271040 50%=0.87ms 90%=1.29ms 99%=2.32ms  errs=0
+fit-i230.rand-512.r2 rps=259615.63 srvcpu=7.78 clicpu=3.40 rss_kb=275964 50%=1.80ms 90%=2.61ms 99%=3.97ms  errs=0
+fit-i230b.rand-512.r2 rps=263884.67 srvcpu=7.76 clicpu=3.78 rss_kb=283852 50%=1.78ms 90%=2.58ms 99%=3.91ms  errs=0
+fit-i230 syscalls: all=6.94 openat=0.96 read=0.00 pread64=1.92 close=0.96 newfstat=0.00 newfstatat=0.96 fcntl=0.00 lseek=0.00 epoll_ctl=0.03 recvfrom=0.96 
+fit-i230b syscalls: all=5.98 openat=0.96 read=0.00 pread64=0.96 close=0.96 newfstat=0.00 newfstatat=0.96 fcntl=0.00 epoll_ctl=0.03 recvfrom=0.97 
+done 20:06:08

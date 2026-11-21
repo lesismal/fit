@@ -5706,3 +5706,11 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **压测**（.51，210 万个随机 8 KiB 文件，服务端 8 线程）：512 并发 11.3 万 → 22.0 万 QPS（1.95 倍，nginx 的 67.6%，原为
   34.7%），热文件不变；缓存写锁平均等待 261 µs → 1.4 µs。结果在 `bench/results/static-lookup-shards-2026-11-21`。
 - **未完成**：与 nginx 相比的每请求 CPU（文件池切换、每请求 open/fstat/pread/close）；p99 不变。待审查的决定见计划章节。
+
+### I230 小文件整读，弹性文件池 — done
+
+- **改动**：16 KiB 以内的文件用 open、pread、close 整读并从内存应答；更大的文件原始打开，seek 只做算术；先 lstat；文件池
+  每 CPU 一个 worker，只为阻塞超过 1 ms 的 worker 扩容。
+- **压测**（.51，随机 8 KiB，512 并发）：22.2 万 → 25.9 万 QPS（nginx 的 79.3%，原为 68.0%），p99 6.94 → 3.94 ms；随后单独测量
+  的短读再加约 2%，约 26.5 万（81%），每请求系统调用 6 次，原为 17 次（nginx 7.7）；64 KiB 文件 +8.2%；热文件不变。结果在 `bench/results/static-small-reads-2026-11-21`。
+- **未完成**：每请求 CPU 30 µs 对 nginx 24 µs；fib `filewatch.Watch` 的互斥锁；GC 频率；待审查的决定见计划章节。

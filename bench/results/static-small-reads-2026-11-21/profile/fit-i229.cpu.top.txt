@@ -1,0 +1,69 @@
+File: fit-prof
+Build ID: 8901969d8d9822ca427d8cc5b75ed3a0d1777571
+Type: cpu
+Time: 2026-11-21 19:21:17 +08
+Duration: 20s, Total samples = 159.77s (798.84%)
+Showing nodes accounting for 124.38s, 77.85% of 159.77s total
+Dropped 698 nodes (cum <= 0.80s)
+Showing top 60 nodes out of 164
+      flat  flat%   sum%        cum   cum%
+   105.29s 65.90% 65.90%    105.29s 65.90%  internal/runtime/syscall/linux.Syscall6
+     2.60s  1.63% 67.53%      2.60s  1.63%  runtime.memmove
+     1.13s  0.71% 68.24%      1.26s  0.79%  runtime.exitsyscall
+     1.09s  0.68% 68.92%    104.35s 65.31%  syscall.RawSyscall6
+     0.92s  0.58% 69.49%      0.92s  0.58%  time.runtimeNow
+     0.86s  0.54% 70.03%      2.22s  1.39%  time.Time.appendFormat
+     0.84s  0.53% 70.56%      1.03s  0.64%  runtime.mallocgcSmallScanNoHeaderSC2
+     0.82s  0.51% 71.07%      2.34s  1.46%  runtime.mapaccess2_faststr
+     0.75s  0.47% 71.54%      4.87s  3.05%  runtime.mallocgc
+     0.53s  0.33% 71.87%      0.83s  0.52%  runtime.reentersyscall
+     0.52s  0.33% 72.20%     22.56s 14.12%  net/http.serveContent
+     0.48s   0.3% 72.50%      0.97s  0.61%  runtime.tryDeferToSpanScan
+     0.47s  0.29% 72.79%     22.36s 14.00%  syscall.Syscall
+     0.41s  0.26% 73.05%      1.89s  1.18%  github.com/lesismal/fib/http.appendHeaderLines
+     0.38s  0.24% 73.29%      1.36s  0.85%  net/http/internal.DetectContentType
+     0.32s   0.2% 73.49%      2.50s  1.56%  runtime.mapassign_faststr
+     0.28s  0.18% 73.66%     19.48s 12.19%  github.com/lesismal/fit/handler/static.(*Static).resolve
+     0.28s  0.18% 73.84%      2.16s  1.35%  runtime.mallocgcSmallScanNoHeader (inline)
+     0.26s  0.16% 74.00%      1.17s  0.73%  github.com/lesismal/fib/http.parseSimpleRequestHead
+     0.26s  0.16% 74.16%     54.66s 34.21%  github.com/lesismal/fit/handler/static.(*Static).sendFromDisk
+     0.26s  0.16% 74.33%      6.86s  4.29%  internal/poll.(*FD).Seek
+     0.25s  0.16% 74.48%      0.91s  0.57%  net/textproto.CanonicalMIMEHeaderKey
+     0.21s  0.13% 74.61%     12.54s  7.85%  os.newFile
+     0.20s  0.13% 74.74%     47.82s 29.93%  github.com/lesismal/fib/http.(*Context).commit
+     0.20s  0.13% 74.86%      1.48s  0.93%  runtime.SetFinalizer
+     0.19s  0.12% 74.98%     50.05s 31.33%  github.com/lesismal/fib/http.(*Context).giveBack
+     0.19s  0.12% 75.10%      1.49s  0.93%  github.com/lesismal/fib/http.(*Parser).frameLength (inline)
+     0.19s  0.12% 75.22%     55.62s 34.81%  github.com/lesismal/fit/handler/static.(*Static).answer
+     0.19s  0.12% 75.34%     77.28s 48.37%  github.com/lesismal/fit/internal/filepool.(*Pool).work
+     0.19s  0.12% 75.46%     13.65s  8.54%  os.(*File).ReadAt
+     0.18s  0.11% 75.57%      7.26s  4.54%  github.com/lesismal/fib/http.(*ServerHandler).drive
+     0.18s  0.11% 75.68%      7.22s  4.52%  os.(*File).Seek
+     0.17s  0.11% 75.79%      2.33s  1.46%  net/http.Header.Clone (inline)
+     0.15s 0.094% 75.88%      1.44s   0.9%  github.com/lesismal/fib/http.(*Context).WriteNoWait
+     0.15s 0.094% 75.98%     36.79s 23.03%  syscall.Syscall6
+     0.14s 0.088% 76.07%     11.60s  7.26%  github.com/lesismal/fib/core.(*Connection).process
+     0.14s 0.088% 76.15%      6.33s  3.96%  github.com/lesismal/fib/http.(*ServerHandler).serveParsed
+     0.14s 0.088% 76.24%     65.23s 40.83%  github.com/lesismal/fib/http.(*fileSend).pump
+     0.14s 0.088% 76.33%      2.56s  1.60%  github.com/lesismal/fib/http.appendResponseHead
+     0.14s 0.088% 76.42%     77.93s 48.78%  github.com/lesismal/fib/taskpool.(*adaptivePool).work
+     0.14s 0.088% 76.50%     23.59s 14.76%  github.com/lesismal/fit/handler/static.send
+     0.14s 0.088% 76.59%      7.04s  4.41%  os.(*File).seek
+     0.13s 0.081% 76.67%     11.87s  7.43%  github.com/lesismal/fib/core.(*Connection).RunTask
+     0.13s 0.081% 76.75%      1.68s  1.05%  github.com/lesismal/fib/http.(*Parser).feedOne
+     0.13s 0.081% 76.84%     77.36s 48.42%  github.com/lesismal/fib/taskpool.(*executor).call
+     0.13s 0.081% 76.92%     76.66s 47.98%  github.com/lesismal/fit/handler/static.(*Static).queue.func3
+     0.13s 0.081% 77.00%      1.46s  0.91%  runtime.scanSpan
+     0.13s 0.081% 77.08%      8.16s  5.11%  syscall.SetNonblock
+     0.12s 0.075% 77.15%     55.83s 34.94%  github.com/lesismal/fib/http.(*fileSend).finish
+     0.12s 0.075% 77.23%      3.83s  2.40%  github.com/lesismal/fit/handler/static.fileHeader
+     0.12s 0.075% 77.30%      2.41s  1.51%  runtime.newobject
+     0.11s 0.069% 77.37%     11.25s  7.04%  github.com/lesismal/fib/core.(*Connection).readLoop
+     0.11s 0.069% 77.44%      4.04s  2.53%  github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP
+     0.11s 0.069% 77.51%      2.08s  1.30%  runtime.netpollopen
+     0.10s 0.063% 77.57%     65.33s 40.89%  github.com/lesismal/fib/taskpool.taskFunc.RunTask
+     0.09s 0.056% 77.63%      0.93s  0.58%  github.com/lesismal/fit/handler/static.copyHeader (inline)
+     0.09s 0.056% 77.69%      1.05s  0.66%  runtime.entersyscall
+     0.09s 0.056% 77.74%      0.83s  0.52%  runtime.lock (inline)
+     0.09s 0.056% 77.80%     13.32s  8.34%  syscall.Pread (inline)
+     0.08s  0.05% 77.85%     42.95s 26.88%  github.com/lesismal/fib/core.(*Connection).send

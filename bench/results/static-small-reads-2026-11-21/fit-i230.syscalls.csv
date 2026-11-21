@@ -1,0 +1,16 @@
+# started on Sat Nov 21 20:00:23 2026
+
+17438810,,raw_syscalls:sys_enter,80023889414,100.00,,
+2416769,,syscalls:sys_enter_openat,80023865394,100.00,,
+5462,,syscalls:sys_enter_read,80023859064,100.00,,
+4823972,,syscalls:sys_enter_pread64,80023852864,100.00,,
+2415809,,syscalls:sys_enter_close,80023844594,100.00,,
+15,,syscalls:sys_enter_newfstat,80023837304,100.00,,
+2403749,,syscalls:sys_enter_newfstatat,80023828114,100.00,,
+7,,syscalls:sys_enter_fcntl,80023818364,100.00,,
+0,,syscalls:sys_enter_lseek,80023808954,100.00,,
+70998,,syscalls:sys_enter_epoll_ctl,80023797054,100.00,,
+0,,syscalls:sys_enter_sendto,80023783044,100.00,,
+0,,syscalls:sys_enter_writev,80023769034,100.00,,
+0,,syscalls:sys_enter_sendfile64,80023753574,100.00,,
+2421570,,syscalls:sys_enter_recvfrom,80023736324,100.00,,

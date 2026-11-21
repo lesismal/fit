@@ -253,8 +253,16 @@ func TestSendHelpers(t *testing.T) {
 // directory where a file was, and a request the timeout answered while the
 // file was opened.
 func TestSendFromDiskErrors(t *testing.T) {
-	root := tree(t, map[string]string{"a": "abc", "d/x": "x"})
+	root := tree(t, map[string]string{"a": "abc", "d/x": "x", "big": strings.Repeat("b", smallFile+1)})
 	s := mustLoad(t, root, "")
+	small, err := os.Stat(filepath.Join(root, "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	big, err := os.Stat(filepath.Join(root, "big"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		full   string
 		q      *queued
@@ -266,13 +274,120 @@ func TestSendFromDiskErrors(t *testing.T) {
 		{filepath.Join(root, "d"), done(), 0},
 		{filepath.Join(root, "a"), done(), 0},
 	}
-	for _, tt := range tests {
-		rec := with("/a", func(c *fibhttp.Context) { s.sendFromDisk(c, variant{name: "a"}, tt.full, tt.q) })
-		// Status 0 is no answer of the handler's, which fib finishes with an empty 200.
-		got := rec.Response
-		if tt.status == 0 && (got.StatusCode != 200 || len(got.Body) != 0) || tt.status != 0 && got.StatusCode != tt.status {
-			t.Errorf("%s: %v %d", tt.full, rec.Written, rec.Response.StatusCode)
+	// Each as a small file, read whole, and as a large one, sent with
+	// SendFile.
+	for _, info := range []fs.FileInfo{small, big} {
+		for _, tt := range tests {
+			rec := with("/a", func(c *fibhttp.Context) { s.sendFromDisk(c, variant{name: "a"}, tt.full, info, tt.q) })
+			// Status 0 is no answer of the handler's, which fib finishes with an empty 200.
+			got := rec.Response
+			if tt.status == 0 && (got.StatusCode != 200 || len(got.Body) != 0) || tt.status != 0 && got.StatusCode != tt.status {
+				t.Errorf("%s as %d bytes: %v %d", tt.full, info.Size(), rec.Written, rec.Response.StatusCode)
+			}
 		}
+	}
+}
+
+// TestSmallFromDisk checks a small file read whole: answered with its
+// validators, conditional and ranged requests answered from the buffer, and
+// a file whose size changed since the lookup's stat sent as it is now.
+func TestSmallFromDisk(t *testing.T) {
+	root := tree(t, map[string]string{"a": "abcdef", "two": "xy"})
+	s := mustLoad(t, root, "")
+	full := filepath.Join(root, "a")
+	info, err := os.Stat(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(info fs.FileInfo, header map[string]string) *fibtest.Recorder {
+		r := httptest.NewRequest("GET", "/a", nil)
+		for k, v := range header {
+			r.Header.Set(k, v)
+		}
+		// Queued, as a request served from the file pool is.
+		q := &queued{timer: time.NewTimer(time.Hour)}
+		return fibtest.ServeRequest(fibhttp.HandlerFunc(func(c *fibhttp.Context) {
+			s.sendFromDisk(c, variant{name: "a"}, full, info, q)
+			if q.state.Load() == queuedClaimed && !q.sending {
+				c.Release()
+			}
+		}), r)
+	}
+	got := serve(info, nil).Response
+	tag := got.Header.Get("Etag")
+	if got.StatusCode != 200 || string(got.Body) != "abcdef" || tag != etag(info) || got.Header.Get("Last-Modified") == "" {
+		t.Fatalf("whole: %d %q %v", got.StatusCode, got.Body, got.Header)
+	}
+	if got := serve(info, map[string]string{"If-None-Match": tag}).Response; got.StatusCode != 304 || len(got.Body) != 0 {
+		t.Errorf("conditional: %d %q", got.StatusCode, got.Body)
+	}
+	if got := serve(info, map[string]string{"Range": "bytes=1-2"}).Response; got.StatusCode != 206 || string(got.Body) != "bc" {
+		t.Errorf("range: %d %q", got.StatusCode, got.Body)
+	}
+	// A stat of two bytes: the file has six now, which goes as it is.
+	stale, err := os.Stat(filepath.Join(root, "two"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := serve(stale, nil).Response; got.StatusCode != 200 || string(got.Body) != "abcdef" {
+		t.Errorf("changed size: %d %q", got.StatusCode, got.Body)
+	}
+	for _, size := range []int64{5, 7} {
+		if data, err := readSmall(full, size); data != nil || err != nil {
+			t.Errorf("read as %d bytes: %q %v", size, data, err)
+		}
+	}
+	if data, err := readSmall(filepath.Join(root, "missing"), 1); data != nil || !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing: %q %v", data, err)
+	}
+	if data, err := readSmall(root, 1); data != nil || err == nil {
+		t.Errorf("a directory: %q %v", data, err)
+	}
+}
+
+// TestOffsetFileSeek checks that offsetFile seeks by arithmetic, as
+// ServeContent asks it to, and refuses a position before the start.
+func TestOffsetFileSeek(t *testing.T) {
+	o := &offsetFile{size: 10}
+	for _, tt := range []struct {
+		offset int64
+		whence int
+		want   int64
+	}{
+		{0, io.SeekEnd, 10},
+		{0, io.SeekStart, 0},
+		{4, io.SeekStart, 4},
+		{2, io.SeekCurrent, 6},
+		{-3, io.SeekEnd, 7},
+	} {
+		if n, err := o.Seek(tt.offset, tt.whence); n != tt.want || err != nil || o.offset != tt.want {
+			t.Errorf("Seek(%d, %d) = %d %v, offset %d", tt.offset, tt.whence, n, err, o.offset)
+		}
+	}
+	if _, err := o.Seek(-11, io.SeekEnd); err == nil || o.offset != 7 {
+		t.Errorf("before the start: %v, offset %d", err, o.offset)
+	}
+	if _, err := o.Seek(0, 3); err == nil {
+		t.Error("an invalid whence taken")
+	}
+}
+
+// TestStatLink checks statLink on a file, a link to it, and a path that is
+// not there.
+func TestStatLink(t *testing.T) {
+	root := tree(t, map[string]string{"a": "abc"})
+	full := filepath.Join(root, "a")
+	if info, link, err := statLink(full); err != nil || link || info.Size() != 3 {
+		t.Fatalf("file: %v %v %v", info, link, err)
+	}
+	if _, link, err := statLink(filepath.Join(root, "missing")); err == nil || link {
+		t.Fatalf("missing: %v %v", link, err)
+	}
+	if err := os.Symlink(full, filepath.Join(root, "l")); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+	if info, link, err := statLink(filepath.Join(root, "l")); err != nil || !link || info.Size() != 3 || !info.Mode().IsRegular() {
+		t.Fatalf("link: %v %v %v", info, link, err)
 	}
 }
 

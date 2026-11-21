@@ -47,8 +47,8 @@ const (
 )
 
 // diskPool returns the pool every disk tier reads and writes its files on,
-// apart from the static handler's: 4 workers a CPU, at least 16. Tests
-// replace it.
+// apart from the static handler's: a worker a CPU, and up to 4 a CPU, at
+// least 16, while the disk keeps them waiting. Tests replace it.
 var diskPool = sync.OnceValue(func() *filepool.Pool {
 	return filepool.New(max(16, 4*goruntime.GOMAXPROCS(0)), diskQueue, diskTimeout)
 })

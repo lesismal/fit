@@ -8127,3 +8127,14 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   261 µs → 1.4 µs. Results in `bench/results/static-lookup-shards-2026-11-21`.
 - **Open**: CPU per request against nginx (file pool hand-off, open/fstat/pread/close per request);
   p99 unchanged. Decisions pending review in the plan section.
+
+### I230 Small files read whole, an elastic file pool — done
+
+- **Change**: files up to 16 KiB read with open, pread and close and answered from memory; larger
+  ones opened raw with seeks by arithmetic; lstat first; the file pool keeps a worker a CPU and grows
+  only for workers blocked past 1 ms.
+- **Benchmark** (.51, random 8 KiB, 512 connections): 222k → 259k QPS (79.3% of nginx, was 68.0%),
+  p99 6.94 → 3.94 ms; with the short read measured after, about 265k (81%) and 6 system calls a
+  request against 17 (nginx 7.7); 64 KiB files +8.2%; hot file unchanged. Results in `bench/results/static-small-reads-2026-11-21`.
+- **Open**: 30 µs of CPU a request against nginx's 24; fib `filewatch.Watch`'s mutex; GC rate;
+  decisions pending review in the plan section.

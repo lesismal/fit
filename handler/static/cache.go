@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lesismal/fib/bufferpool"
 	"github.com/lesismal/fib/filewatch"
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -197,6 +198,9 @@ type lookup struct {
 	name, full string
 	info       fs.FileInfo
 	stamp      filewatch.Stamp
+	// link says full is a symbolic link, whose target's changes a watch
+	// does not see.
+	link bool
 	// twins are the file's compressed twins, one for each of the handler's
 	// encodings in their order, with a nil info for one not on disk.
 	twins             []twin
@@ -211,6 +215,7 @@ type twin struct {
 	full  string
 	info  fs.FileInfo
 	stamp filewatch.Stamp
+	link  bool
 }
 
 // entry is a file as last read.
@@ -551,7 +556,7 @@ func (s *Static) resolve(name string) *lookup {
 	// look goes unreported.
 	l.watched = s.watch.Watch(path.Dir(name))
 	full := filepath.Join(s.root, filepath.FromSlash(name))
-	info, err := os.Stat(full)
+	info, link, err := statLink(full)
 	if err != nil {
 		s.cache.forget(full)
 		l.status = statusOf(err)
@@ -572,8 +577,8 @@ func (s *Static) resolve(name string) *lookup {
 		l.deps = append(l.deps, entriesOf(name))
 		for _, index := range s.index {
 			indexFull := filepath.Join(full, index)
-			if info, err = os.Stat(indexFull); err == nil && info.Mode().IsRegular() {
-				l.name, l.full, l.info, l.stamp = path.Join(name, index), indexFull, info, filewatch.StampOf(info)
+			if info, link, err = statLink(indexFull); err == nil && info.Mode().IsRegular() {
+				l.name, l.full, l.info, l.stamp, l.link = path.Join(name, index), indexFull, info, filewatch.StampOf(info), link
 				return s.file(l)
 			}
 		}
@@ -589,7 +594,7 @@ func (s *Static) resolve(name string) *lookup {
 		l.status = stdhttp.StatusNotFound
 		return l
 	}
-	l.name, l.full, l.info, l.stamp = name, full, info, filewatch.StampOf(info)
+	l.name, l.full, l.info, l.stamp, l.link = name, full, info, filewatch.StampOf(info), link
 	return s.file(l)
 }
 
@@ -607,23 +612,30 @@ func (s *Static) file(l *lookup) *lookup {
 		return &lookup{checked: l.checked, gen: l.gen, watched: l.watched, rel: l.rel, deps: l.deps, status: stdhttp.StatusNotFound}
 	}
 	s.twins(l)
-	if l.watched && isLink(l.full) {
+	if l.watched && l.link {
 		// The watch sees the link replaced, not the file it leads to
 		// changed.
 		l.watched = false
 	}
 	for _, t := range l.twins {
-		if l.watched && t.info != nil && isLink(t.full) {
+		if l.watched && t.info != nil && t.link {
 			l.watched = false
 		}
 	}
 	return l
 }
 
-// isLink reports whether full is a symbolic link.
-func isLink(full string) bool {
+// statLink stats full as os.Stat does, following a symbolic link, and
+// reports whether full is one: with one lstat for a path that is not a
+// link, the common case, where os.Stat and a check for a link would make
+// two calls, and a stat after it for one that is.
+func statLink(full string) (fs.FileInfo, bool, error) {
 	info, err := os.Lstat(full)
-	return err == nil && info.Mode()&fs.ModeSymlink != 0
+	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		return info, false, err
+	}
+	info, err = os.Stat(full)
+	return info, true, err
 }
 
 // twins looks for the compressed twins of l's file.
@@ -634,8 +646,8 @@ func (s *Static) twins(l *lookup) {
 	l.twins = make([]twin, len(s.precompressed))
 	for i, enc := range s.precompressed {
 		full := l.full + enc.suffix
-		if info, err := os.Stat(full); err == nil && info.Mode().IsRegular() {
-			l.twins[i] = twin{full: full, info: info, stamp: filewatch.StampOf(info)}
+		if info, link, err := statLink(full); err == nil && info.Mode().IsRegular() {
+			l.twins[i] = twin{full: full, info: info, stamp: filewatch.StampOf(info), link: link}
 		}
 	}
 }
@@ -669,6 +681,20 @@ func serveMemory(c *fibhttp.Context, name string, e *entry) {
 	// ServeContent always sets the status.
 	stdhttp.ServeContent(w, r, name, e.modTime, bytes.NewReader(e.data))
 	_ = c.WriteResponse(fibhttp.Response{StatusCode: w.status, Header: w.header, Body: w.body.Bytes()})
+}
+
+// serveOwned answers with data, a whole file read into a buffer of package
+// bufferpool, as serveMemory answers with a file the cache holds, and gives
+// the buffer back: through WriteResponseOwned, which hands it to the
+// response, or once a conditional or ranged answer has been gathered from
+// it.
+func serveOwned(c *fibhttp.Context, name string, h stdhttp.Header, modTime time.Time, data []byte) {
+	if !hasConditions(c.Request) {
+		_ = c.WriteResponseOwned(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: h, Body: data})
+		return
+	}
+	serveMemory(c, name, &entry{data: data, header: h, modTime: modTime})
+	bufferpool.Put(data)
 }
 
 // gathered is a ResponseWriter that keeps what it is given. What

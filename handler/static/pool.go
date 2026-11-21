@@ -23,9 +23,10 @@ var (
 )
 
 // defaultPool is the pool every static handler shares for its file
-// operations, stat, open, read and list: 4 workers a CPU, and at least 16,
-// which is about what nginx's thread pools and Go's own os package make of a
-// disk.
+// operations, stat, open, read and list: a worker a CPU, and up to 4 a CPU,
+// at least 16, which is about what nginx's thread pools and Go's own os
+// package make of a disk, while the disk keeps them waiting (see
+// filepool.Pool).
 func defaultPool() *filepool.Pool {
 	sharedPoolOnce.Do(func() {
 		sharedPool = filepool.New(max(16, 4*goruntime.GOMAXPROCS(0)), fileQueue, DefaultFileTimeout)

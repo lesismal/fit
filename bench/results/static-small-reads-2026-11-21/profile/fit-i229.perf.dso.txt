@@ -1,0 +1,40 @@
+    66.95%  fit-prof      [kernel.kallsyms]
+            |          
+            |--2.88%--syscall.Syscall
+            |          |          
+            |          |--1.25%--syscall.fcntl
+            |          |          syscall.SetNonblock
+            |          |          os.newFile
+            |          |          os.openFileNolog
+            |          |          os.OpenFile
+            |          |          github.com/lesismal/fit/handler/static.(*Static).sendFromDisk
+            |          |          github.com/lesismal/fit/handler/static.(*Static).answer
+            |          |          github.com/lesismal/fit/handler/static.(*Static).serve
+            |          |          github.com/lesismal/fit/handler/static.(*Static).queue.func3
+            |          |          github.com/lesismal/fit/internal/filepool.(*Pool).work
+            |          |          github.com/lesismal/fit/internal/filepool.New.gowrap1
+            |          |          runtime.goexit.abi0
+            |          |          
+            |           --1.01%--syscall.Seek
+            |                     internal/poll.(*FD).Seek
+            |                     os.(*File).seek
+            |                     os.(*File).Seek
+            |                     github.com/lesismal/fit/handler/static.(*offsetFile).Seek
+            |                     |          
+            |                      --0.69%--net/http.ServeContent.func1
+            |                                net/http.serveContent
+            |                                net/http.ServeContent
+            |                                github.com/lesismal/fit/handler/static.send
+            |                                github.com/lesismal/fit/handler/static.(*Static).sendFromDisk
+            |                                github.com/lesismal/fit/handler/static.(*Static).answer
+            |                                github.com/lesismal/fit/handler/static.(*Static).serve
+            |                                github.com/lesismal/fit/handler/static.(*Static).queue.func3
+            |                                github.com/lesismal/fit/internal/filepool.(*Pool).work
+            |                                github.com/lesismal/fit/internal/filepool.New.gowrap1
+            |                                runtime.goexit.abi0
+            |          
+            |--2.02%--runtime.exitsyscall
+            |          |          
+            |          |--1.09%--syscall.Syscall
+            |          |          |          
+            |          |           --0.54%--syscall.fcntl

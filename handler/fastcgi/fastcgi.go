@@ -200,8 +200,9 @@ var (
 	lookups     *filepool.Pool
 )
 
-// lookupPool is where try_files looks at the disk: 4 workers a CPU, at
-// least 16, as the static handler's.
+// lookupPool is where try_files looks at the disk: a worker a CPU, and up
+// to 4 a CPU, at least 16, while the disk keeps them waiting, as the static
+// handler's.
 func lookupPool() *filepool.Pool {
 	lookupsOnce.Do(func() {
 		lookups = filepool.New(max(16, 4*goruntime.GOMAXPROCS(0)), 4096, 10*time.Second)

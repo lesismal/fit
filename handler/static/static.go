@@ -37,7 +37,8 @@
 // Conditional requests (If-None-Match, If-Modified-Since, If-Match,
 // If-Unmodified-Since) and range requests, If-Range included, are answered as
 // net/http.ServeContent answers them, but for a request for several ranges of
-// a file sent from disk, which is answered with the whole file.
+// a file larger than 16 KiB sent from disk, which is answered with the whole
+// file.
 //
 // A request path is taken as a path under the root once strip_prefix is
 // removed from it. A path with a ".." segment, a NUL or a backslash is
@@ -75,6 +76,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lesismal/fib/bufferpool"
 	"github.com/lesismal/fib/filewatch"
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -350,7 +352,7 @@ func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queue
 	case q == nil:
 		return false
 	default:
-		s.sendFromDisk(c, v, full, q)
+		s.sendFromDisk(c, v, full, info, q)
 	}
 	return true
 }
@@ -419,19 +421,48 @@ func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
 	}
 }
 
-// sendFromDisk serves a file the cache does not keep, as v describes it,
-// claiming the request from q once the file is open. A file that cannot be
-// opened gets 404. The body goes through SendFile, which neither waits for
-// the disk nor for the client; see send.go.
-func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, q *queued) {
-	f, err := os.Open(full)
+// smallFile is the size up to which a file the cache does not keep is read
+// whole and answered from memory rather than through SendFile: fib's
+// SendFile reads a file below its sendfile threshold, 16 KiB, a piece at a
+// time anyway, on a goroutine of its own, while reading it whole here takes
+// an open, a read and a close, where SendFile's way, as ServeContent drives
+// it, takes ten system calls.
+const smallFile = 16 << 10
+
+// sendFromDisk serves a file the cache does not keep, as v describes it and
+// info, the stat of it the lookup made, sizes it, claiming the request from
+// q once the file is open. A file that cannot be opened gets 404. A small
+// one is read whole and answered from memory; a larger one goes through
+// SendFile, which neither waits for the disk nor for the client; see
+// send.go.
+func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info fs.FileInfo, q *queued) {
+	if info.Size() <= smallFile {
+		data, err := readSmall(full, info.Size())
+		switch {
+		case err != nil:
+			if q.claim() {
+				respondError(c, statusOf(err))
+			}
+			return
+		case data != nil:
+			if !q.claim() {
+				bufferpool.Put(data)
+				return
+			}
+			// The validators are the lookup's stat, as for a file the cache
+			// reads; a file that changed size since is sent as below.
+			serveOwned(c, v.name, fileHeader(v, info, data), info.ModTime(), data)
+			return
+		}
+	}
+	f, err := openFile(full)
 	if err != nil {
 		if q.claim() {
 			respondError(c, statusOf(err))
 		}
 		return
 	}
-	info, err := f.Stat()
+	info, err = f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		f.Close()
 		if q.claim() {
