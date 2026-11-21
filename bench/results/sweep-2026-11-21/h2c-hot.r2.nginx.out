@@ -1,0 +1,68 @@
+starting benchmark...
+spawning thread #0: 8 total client(s). Timing-based test with 0s of warm-up time and 15s of main duration for measurements.
+spawning thread #1: 8 total client(s). Timing-based test with 0s of warm-up time and 15s of main duration for measurements.
+spawning thread #2: 8 total client(s). Timing-based test with 0s of warm-up time and 15s of main duration for measurements.
+spawning thread #3: 8 total client(s). Timing-based test with 0s of warm-up time and 15s of main duration for measurements.
+spawning thread #4: 8 total client(s). Timing-based test with 0s of warm-up time and 15s of main duration for measurements.
+spawning thread #5: 8 total client(s). Timing-based test with 0s of warm-up time and 15s of main duration for measurements.
+spawning thread #6: 8 total client(s). Timing-based test with 0s of warm-up time and 15s of main duration for measurements.
+spawning thread #7: 8 total client(s). Timing-based test with 0s of warm-up time and 15s of main duration for measurements.
+Warm-up started for thread #4.
+Warm-up started for thread #3.
+Warm-up started for thread #0.
+Warm-up started for thread #6.
+progress: 12% of clients started
+progress: 25% of clients started
+Warm-up phase is over for thread #4.Warm-up started for thread #
+2.
+progress: 37% of clients started
+Main benchmark duration is started for thread #4.
+progress: 50% of clients started
+progress: 62% of clients started
+Warm-up started for thread #7.
+progress: 75% of clients started
+progress: 87% of clients started
+Warm-up started for thread #1.
+progress: 100% of clients started
+Warm-up phase is over for thread #3.
+Main benchmark duration is started for thread #3.
+Warm-up phase is over for thread #6.
+Main benchmark duration is started for thread #6.
+Warm-up started for thread #5.
+Warm-up phase is over for thread #0.
+Main benchmark duration is started for thread #0.
+Application protocol: h2c
+Warm-up phase is over for thread #2.
+Main benchmark duration is started for thread #2.
+Warm-up phase is over for thread #7.
+Main benchmark duration is started for thread #7.
+Warm-up phase is over for thread #5.
+Main benchmark duration is started for thread #5.
+Warm-up phase is over for thread #1.
+Main benchmark duration is started for thread #1.
+Main benchmark duration is over for thread #4. Stopping all clients.
+Stopped all clients for thread #4
+Main benchmark duration is over for thread #3. Stopping all clients.
+Stopped all clients for thread #3
+Main benchmark duration is over for thread #6. Stopping all clients.
+Stopped all clients for thread #6
+Main benchmark duration is over for thread #2. Stopping all clients.
+Stopped all clients for thread #2
+Main benchmark duration is over for thread #0. Stopping all clients.
+Stopped all clients for thread #0
+Main benchmark duration is over for thread #7. Stopping all clients.
+Stopped all clients for thread #7
+Main benchmark duration is over for thread #5. Stopping all clients.
+Stopped all clients for thread #5
+Main benchmark duration is over for thread #1. Stopping all clients.
+Stopped all clients for thread #1
+
+finished in 15.01s, 385969.53 req/s, 2.99GB/s
+requests: 5789543 total, 5790567 started, 5789543 done, 5789543 succeeded, 0 failed, 0 errored, 0 timeout
+status codes: 5789553 2xx, 0 3xx, 0 4xx, 0 5xx
+traffic: 44.90GB (48215354710) total, 651.52MB (683167254) headers (space savings 39.18%), 44.17GB (47427972411) data
+                     min         max         mean         sd        +/- sd
+time for request:       47us      7.88ms      2.67ms      1.15ms    62.22%
+time for connect:       15us       160us        80us        37us    60.94%
+time to 1st byte:      293us      6.32ms      2.78ms      1.68ms    60.94%
+req/s           :    4369.54    16080.51     6030.69     2994.65    89.06%
