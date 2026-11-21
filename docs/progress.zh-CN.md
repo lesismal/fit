@@ -5722,3 +5722,10 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   24.4）；GC 每秒 42 → 3 次；低于饱和时各分位都更好。结果在 `bench/results/static-fewer-allocs-2026-11-21`。
 - **未完成**：饱和时 128/256 并发 p99 为 5-8 ms，fib A99（没有空闲 P 时循环被晚唤醒）；fib 的
   `TestResponseHeaderTimeoutSkipsRetryWait` 偶发失败；待审查的决定。
+
+### fib A99：worker 唤醒事件循环 — done
+
+- fit 改用 fib `3354267`（A99 是 `9dcfc6b`，其后是上面提到的客户端竞态修复）：worker 处理完一个连接的轮次后，唤醒停靠超过 100 µs 且有事件等待的循环。静态文件饱和时 128/256 并发：
+  p99 8.34 → 4.78 ms、5.87 → 3.23 ms；低于饱和 1.34 → 1.17 ms；吞吐 +0.2..+1.0%；fib 的 hello 服务 −0.5..+0.4%。结果在
+  `bench/results/fib-loop-nudge-2026-11-21`。
+- 遗留：128/256 并发的 p99 仍高于让 P 有空闲的慢构建的 2.2-2.5 ms。

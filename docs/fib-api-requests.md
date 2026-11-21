@@ -2821,7 +2821,11 @@ mutex, with no lock taken and nothing allocated. `BenchmarkWatchWatched`: 29 →
 
 ## A99: Event loops woken late on a saturated process
 
-**Status.** Requested on 2026-11-21, from I231; open.
+**Status.** Requested on 2026-11-21, from I231; done on 2026-11-21, fib `9dcfc6b`: a worker that
+finishes a connection's round wakes a loop parked past 100 µs whose epoll instance has events
+waiting, through a deadline on the relay's `Read`. Static files on .51 at 128/256 connections: p99
+8.34 → 4.78 ms and 5.87 → 3.23 ms, throughput +0.2..+1.0%, a hello server within −0.5..+0.4%
+([bench/results/fib-loop-nudge-2026-11-21](../bench/results/fib-loop-nudge-2026-11-21/README.md)).
 
 **Problem.** A loop with no event ready parks in Go's network poller, which the runtime looks at
 when a P runs out of work, or else from sysmon every 10 ms. When handlers and file work keep every P

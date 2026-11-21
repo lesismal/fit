@@ -8152,3 +8152,12 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   that returned after the server's hang-up had been handled started the header wait for the
   retry still waiting for its connection; .51 stress 5/800 failures before, 0/800 after, quick CI
   green. fit stays on fib `047fd40` until it next moves.
+
+### fib A99: loops woken by workers — done
+
+- fit moves to fib `3354267` (A99 is `9dcfc6b`; the client race fix above comes after it): a
+  worker finishing a connection's round wakes a loop parked past 100 µs with events waiting.
+  Static files at saturation, 128/256 connections: p99 8.34 → 4.78 ms and 5.87 → 3.23 ms; below
+  saturation 1.34 → 1.17 ms; throughput +0.2..+1.0%; fib's hello server −0.5..+0.4%. Results in
+  `bench/results/fib-loop-nudge-2026-11-21`.
+- Left: the p99 at 128/256 is still above the 2.2-2.5 ms of slower builds that left Ps idle.

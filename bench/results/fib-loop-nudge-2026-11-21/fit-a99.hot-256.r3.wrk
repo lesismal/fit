@@ -1,0 +1,13 @@
+Running 20s test @ http://127.0.0.1:8082/hot.bin
+  8 threads and 256 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   447.05us  290.97us  12.51ms   80.20%
+    Req/Sec    73.12k     3.93k   85.54k    75.12%
+  Latency Distribution
+     50%  393.00us
+     75%  573.00us
+     90%  772.00us
+     99%    1.32ms
+  11641638 requests in 20.03s, 91.17GB read
+Requests/sec: 581167.90
+Transfer/sec:      4.55GB
