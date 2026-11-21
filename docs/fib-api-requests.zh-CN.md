@@ -2181,3 +2181,23 @@ tracker、PEX、LSD 和 DHT 得到并拨号的 peer，接受任何地址。
 此前的尝试（按 fd 分片派发、各种等待方式）见 fib 自己的记录。
 
 **期望。** 不必等空闲 P 就能发现循环的事件：例如 fib 的 worker 做完一个任务时，若某个循环已有一阵没有轮次，就非阻塞地查一下它的 epoll。
+
+## A100：HTTP/1 发送完大的自有正文后将其还池
+
+**状态。** 2026-11-21 提出并完成，fib `2db63ea`，来自对 I231 的复查。
+
+**问题。** HTTP/1 下 `WriteResponseOwned` 对超过 4 KiB 的正文按引用发送，并把缓冲区留给 GC，而文档说会还池。fit 的代理用它转发
+fib 客户端收到的正文。
+
+**接口。** `core.Connection.SendPartsOwned(first, second)`：接管 second（bufferpool 缓冲区），在发送完、随关闭连接的队列丢弃、
+或 socket 一次写完及发送失败时立即还池。`WriteResponseOwned` 与 `*Copy` 调用把超过 4 KiB 的此类正文交给它。
+
+## A101：客户端把 1 MiB 以内的完整正文放在池化缓冲区里
+
+**状态。** 2026-11-21 提出并完成，fib `415e755`，与 A100 一起。
+
+**问题。** 客户端把超过 4 KiB 的完整正文复制进与其等大的新缓冲区，`TakeBody` 报告 `pooled=false`，fit 的代理只能用
+`WriteResponse` 发送，每个正文都成了垃圾：代理 8 KiB 和 32 KiB 正文时每秒 GC 133 和 152 次。
+
+**接口。** 无：1 MiB 以内的正文都池化；`BodyBytes` 对超过 4 KiB 的正文返回等大的副本。加上 A100：代理 +4.4%（8 KiB）和
++19.8%（32 KiB），每秒 GC 17 和 7 次（[bench/results/fib-owned-bodies-2026-11-21](../bench/results/fib-owned-bodies-2026-11-21/README.md)）。

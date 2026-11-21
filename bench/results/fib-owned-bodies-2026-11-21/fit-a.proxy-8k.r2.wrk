@@ -1,0 +1,13 @@
+Running 20s test @ http://127.0.0.1:8082/p8k.bin
+  8 threads and 256 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     1.14ms  629.26us  21.55ms   88.39%
+    Req/Sec    28.94k     1.08k   35.15k    73.00%
+  Latency Distribution
+     50%    1.00ms
+     75%    1.33ms
+     90%    1.66ms
+     99%    3.80ms
+  4607049 requests in 20.03s, 36.14GB read
+Requests/sec: 229979.45
+Transfer/sec:      1.80GB

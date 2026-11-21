@@ -5729,3 +5729,11 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   p99 8.34 → 4.78 ms、5.87 → 3.23 ms；低于饱和 1.34 → 1.17 ms；吞吐 +0.2..+1.0%；fib 的 hello 服务 −0.5..+0.4%。结果在
   `bench/results/fib-loop-nudge-2026-11-21`。
 - 遗留：128/256 并发的 p99 仍高于让 P 有空闲的慢构建的 2.2-2.5 ms。
+
+### fib A100 与 A101：池化正文发送后还池 — done
+
+- fit 改用 fib `415e755`：HTTP/1 发送完超过 4 KiB 的自有正文后还池（A100），客户端把 1 MiB 以内的完整正文池化（A101）。代理 nginx 的
+  8 KiB 和 32 KiB 正文：+4.4% 和 +19.8%，每秒 GC 133 → 17 和 152 → 7，p99 4.00 → 3.30 和 4.76 → 3.03 ms。静态文件在 +0.5% 以内。
+  结果在 `bench/results/fib-owned-bodies-2026-11-21`。
+- 待审查的决定：static handler 对整读的文件仍用 `WriteResponseCopy`；改用 `WriteResponseOwned` 在饱和时 +1.7-1.8%，但 256 并发的
+  p99 每轮都更高（2.74 → 3.70 ms）。

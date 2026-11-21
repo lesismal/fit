@@ -1,0 +1,13 @@
+Running 20s test @ http://127.0.0.1:8082/p32k.bin
+  8 threads and 256 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     1.44ms    0.93ms  24.15ms   88.60%
+    Req/Sec    22.78k     0.91k   26.98k    71.50%
+  Latency Distribution
+     50%    1.24ms
+     75%    1.67ms
+     90%    2.27ms
+     99%    4.88ms
+  3628007 requests in 20.03s, 111.50GB read
+Requests/sec: 181124.88
+Transfer/sec:      5.57GB

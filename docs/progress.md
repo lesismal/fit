@@ -8161,3 +8161,13 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   saturation 1.34 → 1.17 ms; throughput +0.2..+1.0%; fib's hello server −0.5..+0.4%. Results in
   `bench/results/fib-loop-nudge-2026-11-21`.
 - Left: the p99 at 128/256 is still above the 2.2-2.5 ms of slower builds that left Ps idle.
+
+### fib A100 and A101: pooled bodies back to the pool once sent — done
+
+- fit moves to fib `415e755`: HTTP/1 gives an owned body above 4 KiB back to the pool once sent
+  (A100), and the client pools whole bodies up to 1 MiB (A101). Proxying 8 and 32 KiB bodies from
+  nginx: +4.4% and +19.8%, collections 133 → 17 and 152 → 7 a second, p99 4.00 → 3.30 and 4.76 →
+  3.03 ms. Static files within +0.5%. Results in `bench/results/fib-owned-bodies-2026-11-21`.
+- Decision pending review: the static handler keeps `WriteResponseCopy` for files read whole;
+  `WriteResponseOwned` there gave +1.7-1.8% at saturation but a higher p99 at 256 connections in
+  every round (2.74 → 3.70 ms).

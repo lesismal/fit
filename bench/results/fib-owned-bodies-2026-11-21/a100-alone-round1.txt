@@ -1,0 +1,14 @@
+fit-a99.proxy-8k.r1 rps=231011.23 srvcpu=7.80 gcs=2705 50%=1.02ms 90%=1.63ms 99%=4.13ms  errs=0
+fit-b.proxy-8k.r1 rps=231742.03 srvcpu=7.80 gcs=2608 50%=1.02ms 90%=1.62ms 99%=3.94ms  errs=0
+fit-c.proxy-8k.r1 rps=231190.74 srvcpu=7.81 gcs=2663 50%=1.02ms 90%=1.61ms 99%=3.97ms  errs=0
+fit-a99.proxy-32k.r1 rps=182079.67 srvcpu=7.78 gcs=2968 50%=1.24ms 90%=2.28ms 99%=5.71ms  errs=0
+fit-b.proxy-32k.r1 rps=178909.29 srvcpu=7.75 gcs=2915 50%=1.24ms 90%=2.35ms 99%=5.66ms  errs=0
+fit-c.proxy-32k.r1 rps=181420.24 srvcpu=7.81 gcs=3080 50%=1.25ms 90%=2.25ms 99%=4.34ms  errs=0
+fit-a99.rand-256.r1 rps=323971.84 srvcpu=7.84 gcs=60 50%=764.00us 90%=0.89ms 99%=2.40ms  errs=0
+fit-b.rand-256.r1 rps=325995.56 srvcpu=7.84 gcs=60 50%=758.00us 90%=0.90ms 99%=3.24ms  errs=0
+fit-c.rand-256.r1 rps=330715.52 srvcpu=7.85 gcs=60 50%=748.00us 90%=0.89ms 99%=3.67ms  errs=0
+fit-a99.rand-512.r1 rps=326330.52 srvcpu=7.86 gcs=59 50%=1.53ms 90%=1.78ms 99%=2.80ms  errs=0
+fit-b.rand-512.r1 rps=327569.01 srvcpu=7.85 gcs=59 50%=1.52ms 90%=1.78ms 99%=2.97ms  errs=0
+fit-c.rand-512.r1 rps=331439.29 srvcpu=7.86 gcs=60 50%=1.50ms 90%=1.75ms 99%=2.93ms  errs=0
+fit-a99.proxy-8k.r2 rps=231655.95 srvcpu=7.80 gcs=2630 50%=1.01ms 90%=1.61ms 99%=4.02ms  errs=0
+fit-b.proxy-8k.r2 rps=231595.49 srvcpu=7.81 gcs=2702 50%=1.01ms 90%=1.60ms 99%=3.90ms  errs=0

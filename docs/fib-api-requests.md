@@ -2838,3 +2838,26 @@ attempts (`fd-sharded dispatch`, waiter variants) are in fib's own notes.
 
 **Wanted.** A loop's events found without waiting for an idle P: such as fib's workers polling a
 loop's epoll without blocking as they finish a task, when it has gone a while without a round.
+
+## A100: HTTP/1 gives a large owned body back to the pool once sent
+
+**Status.** Requested and done on 2026-11-21, fib `2db63ea`, from the review of I231.
+
+**Problem.** `WriteResponseOwned` on HTTP/1 sent a body above 4 KiB by reference and left the buffer
+to the collector; its doc said it gave it back. fit's proxy sends bodies from fib's client with it.
+
+**API.** `core.Connection.SendPartsOwned(first, second)`: takes second, a bufferpool buffer, and
+gives it back once sent, dropped with a closing connection's queue, or at once when the socket takes
+it all or the send fails. `WriteResponseOwned` and `*Copy` calls hand such a body above 4 KiB to it.
+
+## A101: The client keeps whole bodies up to 1 MiB in pooled buffers
+
+**Status.** Requested and done on 2026-11-21, fib `415e755`, with A100.
+
+**Problem.** The client copied a whole body above 4 KiB into a buffer of its own size, so
+`TakeBody` reported `pooled=false` and fit's proxy wrote every such body with `WriteResponse`, as
+garbage: 133 and 152 collections a second proxying 8 and 32 KiB bodies.
+
+**API.** None: bodies up to 1 MiB are pooled; `BodyBytes` hands out a copy of its own size above
+4 KiB. With A100: the proxy +4.4% (8 KiB) and +19.8% (32 KiB), 17 and 7 collections a second
+([bench/results/fib-owned-bodies-2026-11-21](../bench/results/fib-owned-bodies-2026-11-21/README.md)).
