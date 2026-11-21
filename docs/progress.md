@@ -8147,4 +8147,8 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   nginx; 24 µs of CPU a request (nginx 24.4); 42 → 3 collections a second; below saturation every
   percentile better. Results in `bench/results/static-fewer-allocs-2026-11-21`.
 - **Open**: at saturation the p99 at 128/256 connections is 5-8 ms, fib A99 (loops woken late when
-  no P idles); fib's `TestResponseHeaderTimeoutSkipsRetryWait` flake; decisions pending review.
+  no P idles); decisions pending review. fib's `TestResponseHeaderTimeoutSkipsRetryWait` flake,
+  found while landing A98, was a real client race, fixed in fib `3354267` (2026-11-21): a send
+  that returned after the server's hang-up had been handled started the header wait for the
+  retry still waiting for its connection; .51 stress 5/800 failures before, 0/800 after, quick CI
+  green. fit stays on fib `047fd40` until it next moves.
