@@ -40,7 +40,7 @@ started with, in clear text, and the encrypted store.
 - **`fit run -admin`** *(added 2026-11-04)* sets `admin`, `admin.console` and their defaults where
   the config leaves them out, and keeps the config in a store (the default one above when there is
   no `admin.store`). With no console user configured, the user `admin` has the password `admin`,
-  which is temporary: it must be changed within `-timeout` (10m) of the start. Until then a session
+  which is temporary: it must be changed within `-timeout` (30m; 10m before 2026-11-21) of the start. Until then a session
   with it may only read who it is and change the password (other console endpoints answer 403 with
   `must_change_password`), and the Admin API refuses every request; after the time it no longer
   logs in, until fit restarts. A changed password is kept in the store, so that a restart asks

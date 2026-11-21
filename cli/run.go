@@ -64,7 +64,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	watchInterval := flags.Duration("watch-interval", file.DefaultInterval, "how often watched files are looked at: the config's, with -watch, and certificate files, with -watch-certs")
 	watchCerts := flags.Bool("watch-certs", true, "apply the running config again each time the certificate or key files it loaded change")
 	adminOn := flags.Bool("admin", false, "serve the Admin API and the console with their defaults where the config leaves them out, and keep the config in a store; with no console user in the config, the user admin logs in with the password admin, which must be changed within -timeout")
-	timeout := flags.Duration("timeout", 10*time.Minute, "with -admin, how long the console's default password, admin, works: it must be changed within that time, before the console or the Admin API can be used, or fit must be restarted")
+	timeout := flags.Duration("timeout", 30*time.Minute, "with -admin, how long the console's default password, admin, works: it must be changed within that time, before the console or the Admin API can be used, or fit must be restarted")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}

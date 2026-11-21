@@ -80,7 +80,7 @@ fit run -admin -c site.yaml -timeout 30m
 
 - 配置未设置的 `admin` 与 `admin.console` 使用默认值：Admin API 在 `127.0.0.1:2019`，控制台在
   `127.0.0.1:2020`。没有 `admin.console.users` 时，用户 `admin` 以密码 `admin` 登录。
-- 该密码是**临时的**：必须在 `-timeout`（默认 `10m`，自启动时起算）内修改，fit 的日志会写明截止时间。
+- 该密码是**临时的**：必须在 `-timeout`（默认 `30m`，自启动时起算）内修改，fit 的日志会写明截止时间。
   修改之前，用它登录只能打开“修改默认密码”页面（见[登录](02-login.zh-CN.md)），Admin API 对所有请求答
   `403`。超过 `-timeout` 后它无法再登录，须以 `-admin` 重启 fit 并及时修改。新密码不能是 `admin`；它保存
   在 store 中，重启后用它登录，不再要求修改。不带 `-admin` 给出 `-timeout` 会报错。

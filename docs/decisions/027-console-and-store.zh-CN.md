@@ -30,7 +30,7 @@ Admin API（[决定 005](005-admin-api.zh-CN.md)）已经可以修改一切，�
   由 fit 以随机内容创建，权限 0600。
 - **`fit run -admin`**（2026-11-04 新增）为配置未设置的 `admin`、`admin.console` 填入默认值，并把配置保存在 store 中（没有
   `admin.store` 时用上述默认 store）。没有配置控制台用户时，用户 `admin` 的密码为 `admin`，且是临时的：必须在启动后
-  `-timeout`（10m）内修改。修改前，用它登录的会话只能查看自己并修改密码（控制台其他接口返回 403 及
+  `-timeout`（30m；2026-11-21 前为 10m）内修改。修改前，用它登录的会话只能查看自己并修改密码（控制台其他接口返回 403 及
   `must_change_password`），Admin API 拒绝所有请求；超时后它无法再登录，直到 fit 重启。改过的密码保存在 store 中，重启后
   不再要求修改。只有控制台、没有监听的配置是合法的。
 - **导入与导出**（2026-11-04 新增）：`POST /config/export` 与 `POST /config/import` 以 `.conf`、`.yaml`、`.json`，或用自身

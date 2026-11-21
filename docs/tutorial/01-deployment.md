@@ -97,7 +97,7 @@ fit run -admin -c site.yaml -timeout 30m
 - `admin` and `admin.console` get their defaults where the config leaves them out: the Admin API on
   `127.0.0.1:2019`, the console on `127.0.0.1:2020`. With no `admin.console.users`, the user `admin` logs
   in with the password `admin`.
-- That password is **temporary**: it must be changed within `-timeout` (`10m` when left out), counted from
+- That password is **temporary**: it must be changed within `-timeout` (`30m` when left out), counted from
   the start, and fit's log says until when. Until it is changed, a login with it opens only the "change the
   default password" page (see [Login](02-login.md)), and the Admin API answers every request `403`. After
   `-timeout` it no longer logs in, and fit must be restarted with `-admin` to change it in time. The new
