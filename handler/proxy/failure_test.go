@@ -29,7 +29,8 @@ func upstreamConfig(fields string) string {
 }
 
 // blackhole returns an address whose connects neither succeed nor fail: a
-// listener that never accepts, its backlog filled.
+// listener that never accepts, its backlog filled, or, where a full backlog
+// refuses connects, an address that does not answer.
 func blackhole(t *testing.T) string {
 	t.Helper()
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
@@ -48,11 +49,28 @@ func blackhole(t *testing.T) string {
 	for range 2000 {
 		c, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 		if err != nil {
-			return addr
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				return addr
+			}
+			// macOS resets connects to a full backlog instead of leaving
+			// them waiting.
+			break
 		}
 		t.Cleanup(func() { c.Close() })
 	}
-	t.Skip("the backlog never filled")
+	// Then an RFC 5737 documentation address, which no host answers: its
+	// connects wait where there is a route to it.
+	for _, a := range []string{"192.0.2.1:80", "198.51.100.1:80", "203.0.113.1:80"} {
+		c, err := net.DialTimeout("tcp", a, 100*time.Millisecond)
+		if err == nil {
+			c.Close()
+			continue
+		}
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			return a
+		}
+	}
+	t.Skip("no address here leaves a connect waiting")
 	return ""
 }
 

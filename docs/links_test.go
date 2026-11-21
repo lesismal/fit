@@ -63,7 +63,7 @@ func TestLinks(t *testing.T) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", ".claude", "node_modules", "testdata":
+			case ".git", ".claude", ".VSCodeCounter", "node_modules", "testdata":
 				return filepath.SkipDir
 			}
 			// The reference's chapters link within the page they are made

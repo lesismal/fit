@@ -30,8 +30,14 @@ func TestSetListenRuntime(t *testing.T) {
 		t.Fatalf("listen state after a failed bind: %+v", st)
 	}
 
-	if err := node.SetListen(model.ListenConfig{Addr: "127.0.0.1:1"}); err == nil {
-		t.Fatal("a listener without a password was accepted")
+	// A listener without a password is taken: it links with tokens alone.
+	// 没有密码的监听器被接受：它只凭令牌建立链接。
+	noPassword := freeAddr(t)
+	if err := node.SetListen(model.ListenConfig{Addr: noPassword}); err != nil {
+		t.Fatalf("a listener without a password: %v", err)
+	}
+	if st := node.Listen(); st.Error != "" || st.Addr != noPassword || st.HasPassword {
+		t.Fatalf("listen state without a password: %+v", st)
 	}
 	if err := node.SetListen(model.ListenConfig{Addr: "nonsense", Password: "x"}); err == nil {
 		t.Fatal("a bad address was accepted")

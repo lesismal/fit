@@ -122,11 +122,16 @@ func TestMirrorDoesNotSlow(t *testing.T) {
 	a, _ := countingServer(t, 200, "main")
 	m := newMirrorServer(t, true)
 	base := startFit(t, splitConfig(`{"upstream": "a", "mirror": {"upstream": "c"}}`, a, refused(t), m.Listener.Addr().String()))
+	// More requests than the bound, 64 at a time: macOS resets connects past
+	// its listen queue, 128 deep. The copies outlive their requests, so they
+	// pile up to the bound all the same.
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, 64)
 	for range 400 {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func() {
-			defer wg.Done()
+			defer func() { <-sem; wg.Done() }()
 			if code, _ := do(t, "GET", base+"/", ""); code != 200 {
 				t.Errorf("%d", code)
 			}
