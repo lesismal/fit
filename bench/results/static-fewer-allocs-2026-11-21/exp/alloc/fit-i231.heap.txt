@@ -1,0 +1,1116 @@
+heap profile: 215: 1915472 [10606: 7588264] @ heap/1048576
+0: 0 [273: 6552] @ 0x1183795 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x1183794	github.com/lesismal/fit/handler/static.(*Static).queue+0xb4		github.com/lesismal/fit/handler/static/static.go:395
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [0: 0] @ 0xf8b2bb 0x7bb359 0xf99bb3 0x4a1201
+#	0xf8b2ba	github.com/lesismal/fit/admin.(*limitListener).Accept+0x13a	github.com/lesismal/fit/admin/server.go:889
+#	0x7bb358	net/http.(*Server).Serve+0x378					net/http/server.go:3574
+#	0xf99bb2	github.com/lesismal/fit/admin.Start.func4+0x52			github.com/lesismal/fit/admin/server.go:308
+
+0: 0 [0: 0] @ 0x4970b5 0x4221c5 0x760fee 0x760fc8 0xf1869f 0xf3be52 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0x760fed	compress/flate.NewWriter+0x28d						compress/flate/deflate.go:827
+#	0x760fc7	compress/gzip.(*Writer).Write+0x267					compress/gzip/gzip.go:199
+#	0xf1869e	internal/profile.(*Profile).Write+0x9e					internal/profile/profile.go:178
+#	0xf3be51	net/http/pprof.handler.serveDeltaProfile+0x711				net/http/pprof/pprof.go:336
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407b17 0x407885 0x409d9f 0xf121ee 0xf12188 0xf18626 0xf3be52 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0xf121ed	internal/profile.addString+0xdad					internal/profile/encode.go:467
+#	0xf12187	internal/profile.(*Profile).preEncode+0xd47				internal/profile/encode.go:89
+#	0xf18625	internal/profile.(*Profile).Write+0x25					internal/profile/profile.go:175
+#	0xf3be51	net/http/pprof.handler.serveDeltaProfile+0x711				net/http/pprof/pprof.go:336
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x49777c 0x49761b 0xf154a5 0xf15871 0xf3bac5 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0xf154a4	internal/profile.Merge+0x144						internal/profile/merge.go:32
+#	0xf15870	internal/profile.Merge+0x510						internal/profile/merge.go:63
+#	0xf3bac4	net/http/pprof.handler.serveDeltaProfile+0x384				net/http/pprof/pprof.go:325
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x496abb 0x4974de 0x497573 0x404605 0x4045f8 0x409cbc 0xf15d8a 0xf157d4 0xf3bac5 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0xf15d89	internal/profile.(*profileMerger).mapSample+0x4c9			internal/profile/merge.go:156
+#	0xf157d3	internal/profile.Merge+0x473						internal/profile/merge.go:54
+#	0xf3bac4	net/http/pprof.handler.serveDeltaProfile+0x384				net/http/pprof/pprof.go:325
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x4961f9 0x4221c5 0x497639 0x49761b 0xf159ba 0xf157d4 0xf3bac5 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0xf159b9	internal/profile.(*profileMerger).mapSample+0xf9			internal/profile/merge.go:140
+#	0xf157d3	internal/profile.Merge+0x473						internal/profile/merge.go:54
+#	0xf3bac4	net/http/pprof.handler.serveDeltaProfile+0x384				net/http/pprof/pprof.go:325
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407b17 0x407885 0x409207 0xf12e50 0xf1857c 0xf18337 0xf3bfc5 0xf3ba4e 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0xf12e4f	internal/profile.(*Profile).postDecode+0x50f				internal/profile/encode.go:224
+#	0xf1857b	internal/profile.parseUncompressed+0xdb					internal/profile/profile.go:166
+#	0xf18336	internal/profile.Parse+0x236						internal/profile/profile.go:142
+#	0xf3bfc4	net/http/pprof.collectProfile+0xa4					net/http/pprof/pprof.go:345
+#	0xf3ba4d	net/http/pprof.handler.serveDeltaProfile+0x30d				net/http/pprof/pprof.go:315
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x4970af 0x49caf3 0x4cf766 0xf182a5 0xf3bfc5 0xf3ba4e 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0x4cf765	io.ReadAll+0x265							io/io.go:746
+#	0xf182a4	internal/profile.Parse+0x1a4						internal/profile/profile.go:135
+#	0xf3bfc4	net/http/pprof.collectProfile+0xa4					net/http/pprof/pprof.go:345
+#	0xf3ba4d	net/http/pprof.handler.serveDeltaProfile+0x30d				net/http/pprof/pprof.go:315
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x4970af 0x49caf3 0x4cf766 0xf1812f 0xf3bfc5 0xf3ba4e 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0x4cf765	io.ReadAll+0x265							io/io.go:746
+#	0xf1812e	internal/profile.Parse+0x2e						internal/profile/profile.go:125
+#	0xf3bfc4	net/http/pprof.collectProfile+0xa4					net/http/pprof/pprof.go:345
+#	0xf3ba4d	net/http/pprof.handler.serveDeltaProfile+0x30d				net/http/pprof/pprof.go:315
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x4970b5 0x4221c5 0x760fee 0x760fc8 0xf25c48 0xf26356 0xf2e72a 0xf239ff 0xf23709 0xf21a6c 0xf3bf68 0xf3ba4e 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0x760fed	compress/flate.NewWriter+0x28d						compress/flate/deflate.go:827
+#	0x760fc7	compress/gzip.(*Writer).Write+0x267					compress/gzip/gzip.go:199
+#	0xf25c47	runtime/pprof.(*profileBuilder).flush+0x47				runtime/pprof/proto.go:146
+#	0xf26355	runtime/pprof.(*profileBuilder).pbSample+0xb5				runtime/pprof/proto.go:168
+#	0xf2e729	runtime/pprof.writeHeapProto+0x4a9					runtime/pprof/protomem.go:56
+#	0xf239fe	runtime/pprof.writeHeapInternal+0x2be					runtime/pprof/pprof.go:660
+#	0xf23708	runtime/pprof.writeAlloc+0x28						runtime/pprof/pprof.go:625
+#	0xf21a6b	runtime/pprof.(*Profile).WriteTo+0x10b					runtime/pprof/pprof.go:405
+#	0xf3bf67	net/http/pprof.collectProfile+0x47					net/http/pprof/pprof.go:341
+#	0xf3ba4d	net/http/pprof.handler.serveDeltaProfile+0x30d				net/http/pprof/pprof.go:315
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [0: 0] @ 0x496abb 0x4221c5 0xf28334 0xf29925 0xf2e856 0xf239ff 0xf23709 0xf21a6c 0xf3bf68 0xf3ba4e 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0xf28333	runtime/pprof.allFrames+0x233						runtime/pprof/proto.go:232
+#	0xf29924	runtime/pprof.(*profileBuilder).appendLocsForStack+0x3c4		runtime/pprof/proto.go:454
+#	0xf2e855	runtime/pprof.writeHeapProto+0x5d5					runtime/pprof/protomem.go:47
+#	0xf239fe	runtime/pprof.writeHeapInternal+0x2be					runtime/pprof/pprof.go:660
+#	0xf23708	runtime/pprof.writeAlloc+0x28						runtime/pprof/pprof.go:625
+#	0xf21a6b	runtime/pprof.(*Profile).WriteTo+0x10b					runtime/pprof/pprof.go:405
+#	0xf3bf67	net/http/pprof.collectProfile+0x47					net/http/pprof/pprof.go:341
+#	0xf3ba4d	net/http/pprof.handler.serveDeltaProfile+0x30d				net/http/pprof/pprof.go:315
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [1: 1152] @ 0x496ac4 0x49c4c9 0x4aa19c 0x4a988a 0x4a9881 0x8eac14 0x8ea95e 0x8c0a65 0x8c08dc 0x8c2f9f 0x1185d0f 0x1185d03 0x91adf7 0x4a1201
+#	0x4aa19b	sync.(*Pool).pinSlow+0x15b						sync/pool.go:242
+#	0x4a9889	sync.(*Pool).pin+0x69							sync/pool.go:221
+#	0x4a9880	sync.(*Pool).Put+0x60							sync/pool.go:112
+#	0x8eac13	github.com/lesismal/fib/http.(*requestBlock).recycle+0x2f3		github.com/lesismal/fib/http/request_head.go:125
+#	0x8ea95d	github.com/lesismal/fib/http.(*ServerHandler).recycle+0x3d		github.com/lesismal/fib/http/handler.go:1587
+#	0x8c0a64	github.com/lesismal/fib/http.(*Context).ended+0x1e4			github.com/lesismal/fib/http/context.go:275
+#	0x8c08db	github.com/lesismal/fib/http.(*Context).drop+0x5b			github.com/lesismal/fib/http/context.go:240
+#	0x8c2f9e	github.com/lesismal/fib/http.(*Context).giveBack+0x35e			github.com/lesismal/fib/http/context.go:1064
+#	0x1185d0e	github.com/lesismal/fib/http.(*Context).Release+0xae			github.com/lesismal/fib/http/context.go:461
+#	0x1185d02	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0xa2	github.com/lesismal/fit/handler/static/static.go:416
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 32] @ 0x425648 0x496454 0x47279f 0x4b2605 0x4b7837 0x4b7841 0x4e8095 0x4e8071 0x4e807a 0x4e806e 0x4e7bcc 0x117ea85 0x117e165 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x4b2604	syscall.ByteSliceFromString+0x84					syscall/syscall.go:52
+#	0x4b7836	syscall.BytePtrFromString+0x36						syscall/syscall.go:68
+#	0x4b7840	syscall.fstatat+0x40							syscall/zsyscall_linux_amd64.go:1433
+#	0x4e8094	syscall.Lstat+0x54							syscall/syscall_linux_amd64.go:71
+#	0x4e8070	os.lstatNolog.func1+0x30						os/stat_unix.go:45
+#	0x4e8079	os.ignoringEINTR+0x39							os/file_posix.go:263
+#	0x4e806d	os.lstatNolog+0x2d							os/stat_unix.go:44
+#	0x4e7bcb	os.Lstat+0x2b								os/stat.go:26
+#	0x117ea84	github.com/lesismal/fit/handler/static.statLink+0x24			github.com/lesismal/fit/handler/static/cache.go:637
+#	0x117e164	github.com/lesismal/fit/handler/static.(*Static).resolve+0x284		github.com/lesismal/fit/handler/static/cache.go:563
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 4864] @ 0x496ac4 0x49c4c9 0x4a99c5 0x4a9a3a 0x8eac14 0x8ea95e 0x8c0a65 0x8c08dc 0x8c2f9f 0x1185d0f 0x1185d03 0x91adf7 0x4a1201
+#	0x4a99c4	sync.(*poolChain).pushHead+0x1a4					sync/poolqueue.go:245
+#	0x4a9a39	sync.(*Pool).Put+0x219							sync/pool.go:116
+#	0x8eac13	github.com/lesismal/fib/http.(*requestBlock).recycle+0x2f3		github.com/lesismal/fib/http/request_head.go:125
+#	0x8ea95d	github.com/lesismal/fib/http.(*ServerHandler).recycle+0x3d		github.com/lesismal/fib/http/handler.go:1587
+#	0x8c0a64	github.com/lesismal/fib/http.(*Context).ended+0x1e4			github.com/lesismal/fib/http/context.go:275
+#	0x8c08db	github.com/lesismal/fib/http.(*Context).drop+0x5b			github.com/lesismal/fib/http/context.go:240
+#	0x8c2f9e	github.com/lesismal/fib/http.(*Context).giveBack+0x35e			github.com/lesismal/fib/http/context.go:1064
+#	0x1185d0e	github.com/lesismal/fib/http.(*Context).Release+0xae			github.com/lesismal/fib/http/context.go:461
+#	0x1185d02	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0xa2	github.com/lesismal/fit/handler/static/static.go:416
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 512] @ 0x496abb 0x49c4c9 0x4a99c5 0x4a9a3a 0x8eac14 0x8ea95e 0x8c0a65 0x8c08dc 0x8c2f9f 0x1185d0f 0x1185d03 0x91adf7 0x4a1201
+#	0x4a99c4	sync.(*poolChain).pushHead+0x1a4					sync/poolqueue.go:245
+#	0x4a9a39	sync.(*Pool).Put+0x219							sync/pool.go:116
+#	0x8eac13	github.com/lesismal/fib/http.(*requestBlock).recycle+0x2f3		github.com/lesismal/fib/http/request_head.go:125
+#	0x8ea95d	github.com/lesismal/fib/http.(*ServerHandler).recycle+0x3d		github.com/lesismal/fib/http/handler.go:1587
+#	0x8c0a64	github.com/lesismal/fib/http.(*Context).ended+0x1e4			github.com/lesismal/fib/http/context.go:275
+#	0x8c08db	github.com/lesismal/fib/http.(*Context).drop+0x5b			github.com/lesismal/fib/http/context.go:240
+#	0x8c2f9e	github.com/lesismal/fib/http.(*Context).giveBack+0x35e			github.com/lesismal/fib/http/context.go:1064
+#	0x1185d0e	github.com/lesismal/fib/http.(*Context).Release+0xae			github.com/lesismal/fib/http/context.go:461
+#	0x1185d02	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0xa2	github.com/lesismal/fit/handler/static/static.go:416
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 16] @ 0x4964a7 0x49caf3 0x6438b0 0x6437a1 0x6486ff 0x64460c 0x64483a 0x644b0f 0x64560c 0x645600 0xee287f 0x46a0b5 0x45a2f0 0x45a2c7 0x4a1201
+#	0x6438af	regexp.mergeRuneSets.func2+0x46f			regexp/onepass.go:185
+#	0x6437a0	regexp.mergeRuneSets+0x360				regexp/onepass.go:194
+#	0x6486fe	regexp.makeOnePass.func1+0x2de				regexp/onepass.go:336
+#	0x64460b	regexp.makeOnePass+0x42b				regexp/onepass.go:442
+#	0x644839	regexp.compileOnePass+0x139				regexp/onepass.go:502
+#	0x644b0e	regexp.compile+0x8e					regexp/regexp.go:186
+#	0x64560b	regexp.Compile+0x2b					regexp/regexp.go:130
+#	0x6455ff	regexp.MustCompile+0x1f					regexp/regexp.go:310
+#	0xee287e	github.com/lesismal/fit/internal/managed.init+0x1e	github.com/lesismal/fit/internal/managed/managed.go:88
+#	0x46a0b4	runtime.doInit1+0xd4					runtime/proc.go:8154
+#	0x45a2ef	runtime.doInit+0x3af					runtime/proc.go:8121
+#	0x45a2c6	runtime.main+0x386					runtime/proc.go:269
+
+0: 0 [1: 128] @ 0x496abb 0x49c4c9 0x4a98d7 0x4a9a3a 0x5f3052 0x117f9fc 0x1183d56 0x1183545 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x4a98d6	sync.(*poolChain).pushHead+0xb6						sync/poolqueue.go:226
+#	0x4a9a39	sync.(*Pool).Put+0x219							sync/pool.go:116
+#	0x5f3051	github.com/lesismal/fib/bufferpool.Put+0x1d1				github.com/lesismal/fib/bufferpool/bufferpool.go:675
+#	0x117f9fb	github.com/lesismal/fit/handler/static.serveRead+0x45b			github.com/lesismal/fit/handler/static/cache.go:707
+#	0x1183d55	github.com/lesismal/fit/handler/static.(*Static).sendFromDisk+0x355	github.com/lesismal/fit/handler/static/static.go:454
+#	0x1183544	github.com/lesismal/fit/handler/static.(*Static).answer+0x3a4		github.com/lesismal/fit/handler/static/static.go:355
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 112] @ 0x496abb 0x4221c5 0x63f57b 0x63f107 0x644aed 0x64560c 0x645600 0x7e5199 0x46a0b5 0x45a2f0 0x45a2c7 0x4a1201
+#	0x63f57a	regexp/syntax.(*Regexp).Simplify+0x89a		regexp/syntax/simplify.go:98
+#	0x63f106	regexp/syntax.(*Regexp).Simplify+0x426		regexp/syntax/simplify.go:23
+#	0x644aec	regexp.compile+0x6c				regexp/regexp.go:174
+#	0x64560b	regexp.Compile+0x2b				regexp/regexp.go:130
+#	0x6455ff	regexp.MustCompile+0x1f				regexp/regexp.go:310
+#	0x7e5198	github.com/lesismal/fit/config.init+0x2d8	github.com/lesismal/fit/config/mediaauth.go:239
+#	0x46a0b4	runtime.doInit1+0xd4				runtime/proc.go:8154
+#	0x45a2ef	runtime.doInit+0x3af				runtime/proc.go:8121
+#	0x45a2c6	runtime.main+0x386				runtime/proc.go:269
+
+0: 0 [1: 327680] @ 0x4970b5 0x49c4c9 0x74e3ca 0x755690 0x74d1ee 0x74de2a 0x7612ba 0x7612aa 0xf291ed 0xf2e86f 0xf239ff 0xf23709 0xf21a6c 0xf3bf68 0xf3b885 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0x74e3c9	compress/flate.(*fastGen).addBlock+0x109				compress/flate/deflatefast.go:90
+#	0x75568f	compress/flate.(*fastEncL1).encode+0xcf					compress/flate/level1.go:41
+#	0x74d1ed	compress/flate.(*compressor).deflateFast+0x1ad				compress/flate/deflate.go:664
+#	0x74de29	compress/flate.(*compressor).close+0x69					compress/flate/deflate.go:794
+#	0x7612b9	compress/flate.(*Writer).Close+0x79					compress/flate/deflate.go:885
+#	0x7612a9	compress/gzip.(*Writer).Close+0x69					compress/gzip/gzip.go:250
+#	0xf291ec	runtime/pprof.(*profileBuilder).build+0x54c				runtime/pprof/proto.go:394
+#	0xf2e86e	runtime/pprof.writeHeapProto+0x5ee					runtime/pprof/protomem.go:60
+#	0xf239fe	runtime/pprof.writeHeapInternal+0x2be					runtime/pprof/pprof.go:660
+#	0xf23708	runtime/pprof.writeAlloc+0x28						runtime/pprof/pprof.go:625
+#	0xf21a6b	runtime/pprof.(*Profile).WriteTo+0x10b					runtime/pprof/pprof.go:405
+#	0xf3bf67	net/http/pprof.collectProfile+0x47					net/http/pprof/pprof.go:341
+#	0xf3b884	net/http/pprof.handler.serveDeltaProfile+0x144				net/http/pprof/pprof.go:294
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [1: 9472] @ 0x4970af 0x49caf3 0xf2da66 0xf2d7a5 0xf29198 0xf2e86f 0xf239ff 0xf23709 0xf21a6c 0xf3bf68 0xf3b885 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0xf2da65	runtime/pprof.(*protobuf).string+0x345					runtime/pprof/protobuf.go:94
+#	0xf2d7a4	runtime/pprof.(*protobuf).strings+0x84					runtime/pprof/protobuf.go:99
+#	0xf29197	runtime/pprof.(*profileBuilder).build+0x4f7				runtime/pprof/proto.go:389
+#	0xf2e86e	runtime/pprof.writeHeapProto+0x5ee					runtime/pprof/protomem.go:60
+#	0xf239fe	runtime/pprof.writeHeapInternal+0x2be					runtime/pprof/pprof.go:660
+#	0xf23708	runtime/pprof.writeAlloc+0x28						runtime/pprof/pprof.go:625
+#	0xf21a6b	runtime/pprof.(*Profile).WriteTo+0x10b					runtime/pprof/pprof.go:405
+#	0xf3bf67	net/http/pprof.collectProfile+0x47					net/http/pprof/pprof.go:341
+#	0xf3b884	net/http/pprof.handler.serveDeltaProfile+0x144				net/http/pprof/pprof.go:294
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [1: 24] @ 0x4233ee 0x1183831 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x1183830	github.com/lesismal/fit/handler/static.(*Static).queue+0x150		github.com/lesismal/fit/handler/static/static.go:403
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [1: 8192] @ 0x4970af 0x49c4c9 0x5f2a79 0x8e6b99 0x8e6565 0x117f9e5 0x1183d56 0x1183545 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x5f2a78	github.com/lesismal/fib/bufferpool.Get+0x218				github.com/lesismal/fib/bufferpool/bufferpool.go:572
+#	0x8e6b98	github.com/lesismal/fib/http.(*Context).copyResponseBody+0xd8		github.com/lesismal/fib/http/handler.go:760
+#	0x8e6564	github.com/lesismal/fib/http.(*Context).WriteResponseCopy+0x64		github.com/lesismal/fib/http/handler.go:721
+#	0x117f9e4	github.com/lesismal/fit/handler/static.serveRead+0x444			github.com/lesismal/fit/handler/static/cache.go:706
+#	0x1183d55	github.com/lesismal/fit/handler/static.(*Static).sendFromDisk+0x355	github.com/lesismal/fit/handler/static/static.go:454
+#	0x1183544	github.com/lesismal/fit/handler/static.(*Static).answer+0x3a4		github.com/lesismal/fit/handler/static/static.go:355
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 144] @ 0x496abb 0x4221c5 0x908065 0x4a9d27 0x8f505d 0x8f4745 0x8f07db 0x8f04f4 0x8f0476 0x8e9d3a 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x908064	github.com/lesismal/fib/http.init.func14+0x24			github.com/lesismal/fib/http/request_head.go:78
+#	0x4a9d26	sync.(*Pool).Get+0x266						sync/pool.go:156
+#	0x8f505c	github.com/lesismal/fib/http.parseSimpleRequestHead+0x89c	github.com/lesismal/fib/http/request_head.go:206
+#	0x8f4744	github.com/lesismal/fib/http.parseRequestHead+0x24		github.com/lesismal/fib/http/request_head.go:29
+#	0x8f07da	github.com/lesismal/fib/http.(*Parser).frameLength+0x31a	github.com/lesismal/fib/http/parser.go:814
+#	0x8f04f3	github.com/lesismal/fib/http.(*Parser).feedOne+0x33		github.com/lesismal/fib/http/parser.go:537
+#	0x8f0475	github.com/lesismal/fib/http.(*Parser).feedBorrowed+0x475	github.com/lesismal/fib/http/parser.go:530
+#	0x8e9d39	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0xd9	github.com/lesismal/fib/http/handler.go:1402
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147	github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6	github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281	github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17	github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9	github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b		github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c		github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71	github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b	github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [2: 48] @ 0x4233ee 0x1183795 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x1183794	github.com/lesismal/fit/handler/static.(*Static).queue+0xb4		github.com/lesismal/fit/handler/static/static.go:395
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [1: 1152] @ 0x496ac4 0x49c4c9 0x4a99c5 0x4a9a3a 0x8eac14 0x8ea95e 0x8c0a65 0x8c08dc 0x8c2f9f 0x1185d0f 0x1185d03 0x91adf7 0x4a1201
+#	0x4a99c4	sync.(*poolChain).pushHead+0x1a4					sync/poolqueue.go:245
+#	0x4a9a39	sync.(*Pool).Put+0x219							sync/pool.go:116
+#	0x8eac13	github.com/lesismal/fib/http.(*requestBlock).recycle+0x2f3		github.com/lesismal/fib/http/request_head.go:125
+#	0x8ea95d	github.com/lesismal/fib/http.(*ServerHandler).recycle+0x3d		github.com/lesismal/fib/http/handler.go:1587
+#	0x8c0a64	github.com/lesismal/fib/http.(*Context).ended+0x1e4			github.com/lesismal/fib/http/context.go:275
+#	0x8c08db	github.com/lesismal/fib/http.(*Context).drop+0x5b			github.com/lesismal/fib/http/context.go:240
+#	0x8c2f9e	github.com/lesismal/fib/http.(*Context).giveBack+0x35e			github.com/lesismal/fib/http/context.go:1064
+#	0x1185d0e	github.com/lesismal/fib/http.(*Context).Release+0xae			github.com/lesismal/fib/http/context.go:461
+#	0x1185d02	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0xa2	github.com/lesismal/fit/handler/static/static.go:416
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [3: 72] @ 0x4233ee 0x118377a 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x1183779	github.com/lesismal/fit/handler/static.(*Static).queue+0x99		github.com/lesismal/fit/handler/static/static.go:394
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [1: 896] @ 0x496ac4 0x4221c5 0x90801a 0x4a9d27 0x8f4c3b 0x8f4c59 0x8f4745 0x8f07db 0x8f04f4 0x8f0476 0x8e9d3a 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x908019	github.com/lesismal/fib/http.init.func13+0x19			github.com/lesismal/fib/http/request_head.go:77
+#	0x4a9d26	sync.(*Pool).Get+0x266						sync/pool.go:156
+#	0x8f4c3a	github.com/lesismal/fib/http.newRequestBlock+0x47a		github.com/lesismal/fib/http/request_head.go:91
+#	0x8f4c58	github.com/lesismal/fib/http.parseSimpleRequestHead+0x498	github.com/lesismal/fib/http/request_head.go:178
+#	0x8f4744	github.com/lesismal/fib/http.parseRequestHead+0x24		github.com/lesismal/fib/http/request_head.go:29
+#	0x8f07da	github.com/lesismal/fib/http.(*Parser).frameLength+0x31a	github.com/lesismal/fib/http/parser.go:814
+#	0x8f04f3	github.com/lesismal/fib/http.(*Parser).feedOne+0x33		github.com/lesismal/fib/http/parser.go:537
+#	0x8f0475	github.com/lesismal/fib/http.(*Parser).feedBorrowed+0x475	github.com/lesismal/fib/http/parser.go:530
+#	0x8e9d39	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0xd9	github.com/lesismal/fib/http/handler.go:1402
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147	github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6	github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281	github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17	github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9	github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b		github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c		github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71	github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b	github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [11: 880] @ 0x424c25 0x1183889 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x1183888	github.com/lesismal/fit/handler/static.(*Static).queue+0x1a8		github.com/lesismal/fit/handler/static/static.go:407
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [2: 32] @ 0x422ffe 0x117e049 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x117e048	github.com/lesismal/fit/handler/static.(*Static).resolve+0x168		github.com/lesismal/fit/handler/static/cache.go:558
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [5: 160] @ 0x425648 0x496454 0x47279f 0x4b2605 0x4b5016 0x4b501e 0x1180b45 0x1180b29 0x1180d25 0x1183ab6 0x1183545 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x4b2604	syscall.ByteSliceFromString+0x84					syscall/syscall.go:52
+#	0x4b5015	syscall.BytePtrFromString+0x35						syscall/syscall.go:68
+#	0x4b501d	syscall.openat+0x3d							syscall/zsyscall_linux_amd64.go:94
+#	0x1180b44	syscall.Open+0x44							syscall/syscall_linux.go:280
+#	0x1180b28	github.com/lesismal/fit/handler/static.openRead+0x28			github.com/lesismal/fit/handler/static/open_unix.go:19
+#	0x1180d24	github.com/lesismal/fit/handler/static.readSmall+0x64			github.com/lesismal/fit/handler/static/open_unix.go:44
+#	0x1183ab5	github.com/lesismal/fit/handler/static.(*Static).sendFromDisk+0xb5	github.com/lesismal/fit/handler/static/static.go:440
+#	0x1183544	github.com/lesismal/fit/handler/static.(*Static).answer+0x3a4		github.com/lesismal/fit/handler/static/static.go:355
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [3: 6912] @ 0x496ac4 0x49c4c9 0x4a99c5 0x4a9a3a 0x8eac14 0x8ea95e 0x8c0a65 0x8c08dc 0x8c2f9f 0x1185d0f 0x1185d03 0x91adf7 0x4a1201
+#	0x4a99c4	sync.(*poolChain).pushHead+0x1a4					sync/poolqueue.go:245
+#	0x4a9a39	sync.(*Pool).Put+0x219							sync/pool.go:116
+#	0x8eac13	github.com/lesismal/fib/http.(*requestBlock).recycle+0x2f3		github.com/lesismal/fib/http/request_head.go:125
+#	0x8ea95d	github.com/lesismal/fib/http.(*ServerHandler).recycle+0x3d		github.com/lesismal/fib/http/handler.go:1587
+#	0x8c0a64	github.com/lesismal/fib/http.(*Context).ended+0x1e4			github.com/lesismal/fib/http/context.go:275
+#	0x8c08db	github.com/lesismal/fib/http.(*Context).drop+0x5b			github.com/lesismal/fib/http/context.go:240
+#	0x8c2f9e	github.com/lesismal/fib/http.(*Context).giveBack+0x35e			github.com/lesismal/fib/http/context.go:1064
+#	0x1185d0e	github.com/lesismal/fib/http.(*Context).Release+0xae			github.com/lesismal/fib/http/context.go:461
+#	0x1185d02	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0xa2	github.com/lesismal/fit/handler/static/static.go:416
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 112] @ 0x496abb 0x4221c5 0x634b8a 0x634ac1 0x637cbc 0x644ab0 0x644aab 0x64560c 0x645600 0xd39b1d 0x46a0b5 0x45a2f0 0x45a2c7 0x4a1201
+#	0x634b89	regexp/syntax.(*parser).newRegexp+0x309			regexp/syntax/parse.go:147
+#	0x634ac0	regexp/syntax.(*parser).repeat+0x240			regexp/syntax/parse.go:427
+#	0x637cbb	regexp/syntax.parse+0xabb				regexp/syntax/parse.go:988
+#	0x644aaf	regexp/syntax.Parse+0x2f				regexp/syntax/parse.go:888
+#	0x644aaa	regexp.compile+0x2a					regexp/regexp.go:167
+#	0x64560b	regexp.Compile+0x2b					regexp/regexp.go:130
+#	0x6455ff	regexp.MustCompile+0x1f					regexp/regexp.go:310
+#	0xd39b1c	github.com/lesismal/fit/adapter/caddyfile.init+0x2fc	github.com/lesismal/fit/adapter/caddyfile/parse.go:173
+#	0x46a0b4	runtime.doInit1+0xd4					runtime/proc.go:8154
+#	0x45a2ef	runtime.doInit+0x3af					runtime/proc.go:8121
+#	0x45a2c6	runtime.main+0x386					runtime/proc.go:269
+
+0: 0 [325: 7800] @ 0x496454 0x49cdf2 0x5251a5 0x525290 0x529692 0x52f053 0x117e153 0x117e0f4 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x49cdf1	internal/bytealg.MakeNoZero+0xb1					runtime/slice.go:437
+#	0x5251a4	strings.(*Builder).grow+0x24						strings/builder.go:67
+#	0x52528f	strings.(*Builder).Grow+0x4f						strings/builder.go:81
+#	0x529691	strings.Join+0xf1							strings/strings.go:491
+#	0x52f052	path/filepath.join+0x52							path/filepath/path_unix.go:36
+#	0x117e152	path/filepath.Join+0x272						path/filepath/path.go:131
+#	0x117e0f3	github.com/lesismal/fit/handler/static.(*Static).resolve+0x213		github.com/lesismal/fit/handler/static/cache.go:562
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [369: 11808] @ 0x496454 0x47279f 0x4b2605 0x4b7837 0x4b7841 0x4e8095 0x4e8071 0x4e807a 0x4e806e 0x4e7bcc 0x117ea85 0x117e165 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x4b2604	syscall.ByteSliceFromString+0x84					syscall/syscall.go:52
+#	0x4b7836	syscall.BytePtrFromString+0x36						syscall/syscall.go:68
+#	0x4b7840	syscall.fstatat+0x40							syscall/zsyscall_linux_amd64.go:1433
+#	0x4e8094	syscall.Lstat+0x54							syscall/syscall_linux_amd64.go:71
+#	0x4e8070	os.lstatNolog.func1+0x30						os/stat_unix.go:45
+#	0x4e8079	os.ignoringEINTR+0x39							os/file_posix.go:263
+#	0x4e806d	os.lstatNolog+0x2d							os/stat_unix.go:44
+#	0x4e7bcb	os.Lstat+0x2b								os/stat.go:26
+#	0x117ea84	github.com/lesismal/fit/handler/static.statLink+0x24			github.com/lesismal/fit/handler/static/cache.go:637
+#	0x117e164	github.com/lesismal/fit/handler/static.(*Static).resolve+0x284		github.com/lesismal/fit/handler/static/cache.go:563
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [294: 7056] @ 0x1183831 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x1183830	github.com/lesismal/fit/handler/static.(*Static).queue+0x150		github.com/lesismal/fit/handler/static/static.go:403
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [1: 112] @ 0x496abb 0x4221c5 0x63f676 0x63f636 0x63f107 0x644aed 0x64560c 0x645600 0x10cc5ed 0x46a0b5 0x45a2f0 0x45a2c7 0x4a1201
+#	0x63f675	regexp/syntax.simplify1+0x995				regexp/syntax/simplify.go:148
+#	0x63f635	regexp/syntax.(*Regexp).Simplify+0x955			regexp/syntax/simplify.go:100
+#	0x63f106	regexp/syntax.(*Regexp).Simplify+0x426			regexp/syntax/simplify.go:23
+#	0x644aec	regexp.compile+0x6c					regexp/regexp.go:174
+#	0x64560b	regexp.Compile+0x2b					regexp/regexp.go:130
+#	0x6455ff	regexp.MustCompile+0x1f					regexp/regexp.go:310
+#	0x10cc5ec	github.com/lesismal/fit/handler/mediapages.init+0x8c	github.com/lesismal/fit/handler/mediapages/rooms.go:54
+#	0x46a0b4	runtime.doInit1+0xd4					runtime/proc.go:8154
+#	0x45a2ef	runtime.doInit+0x3af					runtime/proc.go:8121
+#	0x45a2c6	runtime.main+0x386					runtime/proc.go:269
+
+0: 0 [1: 4864] @ 0x496ac4 0x49ca87 0xd6f559 0xd6f4a6 0xd6b20e 0xd634e8 0xd32bcd 0xd33545 0x109f031 0x10aa34c 0x10a2750 0x10a21aa 0x1093f85 0x155459a 0x155454b 0x45a367 0x4a1201
+#	0xd6f558	github.com/lesismal/fit/adapter/fitconf.lex.func2+0x1dd8	github.com/lesismal/fit/adapter/fitconf/parse.go:98
+#	0xd6f4a5	github.com/lesismal/fit/adapter/fitconf.lex+0x1d25		github.com/lesismal/fit/adapter/fitconf/parse.go:202
+#	0xd6b20d	github.com/lesismal/fit/adapter/fitconf.(*reader).read+0x4d	github.com/lesismal/fit/adapter/fitconf/include.go:81
+#	0xd634e7	github.com/lesismal/fit/adapter/fitconf.AdaptFile+0x127		github.com/lesismal/fit/adapter/fitconf/convert.go:71
+#	0xd32bcc	github.com/lesismal/fit/adapter.(*snapshot).adaptSource+0x14c	github.com/lesismal/fit/adapter/refs.go:271
+#	0xd33544	github.com/lesismal/fit/adapter.AdaptSet+0x1a4			github.com/lesismal/fit/adapter/set.go:124
+#	0x109f030	github.com/lesismal/fit/cli.loadSet+0x30			github.com/lesismal/fit/cli/configfiles.go:39
+#	0x10aa34b	github.com/lesismal/fit/cli.loadBoot+0x18b			github.com/lesismal/fit/cli/store.go:231
+#	0x10a274f	github.com/lesismal/fit/cli.serve+0x4ef				github.com/lesismal/fit/cli/run.go:93
+#	0x10a21a9	github.com/lesismal/fit/cli.runRun+0x249			github.com/lesismal/fit/cli/run.go:50
+#	0x1093f84	github.com/lesismal/fit/cli.run+0xe4				github.com/lesismal/fit/cli/cli.go:67
+#	0x1554599	github.com/lesismal/fit/cli.Main+0x99				github.com/lesismal/fit/cli/cli.go:57
+#	0x155454a	main.main+0x4a							github.com/lesismal/fit/cmd/fit/main.go:21
+#	0x45a366	runtime.main+0x426						runtime/proc.go:302
+
+0: 0 [294: 7056] @ 0x118377a 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x1183779	github.com/lesismal/fit/handler/static.(*Static).queue+0x99		github.com/lesismal/fit/handler/static/static.go:394
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [368: 11776] @ 0x496454 0x47279f 0x4b2605 0x4b5016 0x4b501e 0x1180b45 0x1180b29 0x1180d25 0x1183ab6 0x1183545 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x4b2604	syscall.ByteSliceFromString+0x84					syscall/syscall.go:52
+#	0x4b5015	syscall.BytePtrFromString+0x35						syscall/syscall.go:68
+#	0x4b501d	syscall.openat+0x3d							syscall/zsyscall_linux_amd64.go:94
+#	0x1180b44	syscall.Open+0x44							syscall/syscall_linux.go:280
+#	0x1180b28	github.com/lesismal/fit/handler/static.openRead+0x28			github.com/lesismal/fit/handler/static/open_unix.go:19
+#	0x1180d24	github.com/lesismal/fit/handler/static.readSmall+0x64			github.com/lesismal/fit/handler/static/open_unix.go:44
+#	0x1183ab5	github.com/lesismal/fit/handler/static.(*Static).sendFromDisk+0xb5	github.com/lesismal/fit/handler/static/static.go:440
+#	0x1183544	github.com/lesismal/fit/handler/static.(*Static).answer+0x3a4		github.com/lesismal/fit/handler/static/static.go:355
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [0: 0] @ 0x4970b5 0x49c4c9 0x74d7c6 0x761007 0x760fc8 0xf1869f 0xf3be52 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0x74d7c5	compress/flate.(*compressor).init+0x1c5					compress/flate/deflate.go:737
+#	0x761006	compress/flate.NewWriter+0x2a6						compress/flate/deflate.go:828
+#	0x760fc7	compress/gzip.(*Writer).Write+0x267					compress/gzip/gzip.go:199
+#	0xf1869e	internal/profile.(*Profile).Write+0x9e					internal/profile/profile.go:178
+#	0xf3be51	net/http/pprof.handler.serveDeltaProfile+0x711				net/http/pprof/pprof.go:336
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+0: 0 [972: 77760] @ 0x1183889 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x1183888	github.com/lesismal/fit/handler/static.(*Static).queue+0x1a8		github.com/lesismal/fit/handler/static/static.go:407
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [1: 128] @ 0x4970af 0x4179a8 0x5e9b0f 0x5e9b50 0x5ea5f2 0x5e872b 0x5eef0f 0x607f42 0x607a3b 0x614e36 0x61d445 0x4a1201
+#	0x5e9b0e	github.com/lesismal/fib/taskpool.newAdaptiveWorker+0x18e		github.com/lesismal/fib/taskpool/adaptive.go:349
+#	0x5e9b4f	github.com/lesismal/fib/taskpool.(*adaptivePool).kick+0x1cf		github.com/lesismal/fib/taskpool/adaptive.go:605
+#	0x5ea5f1	github.com/lesismal/fib/taskpool.(*adaptivePool).submitBatch+0x2f1	github.com/lesismal/fib/taskpool/adaptive.go:713
+#	0x5e872a	github.com/lesismal/fib/taskpool.(*adaptiveBackend).submitBatch+0x18a	github.com/lesismal/fib/taskpool/adaptive.go:146
+#	0x5eef0e	github.com/lesismal/fib/taskpool.(*TaskPool).GoTasks+0x2e		github.com/lesismal/fib/taskpool/taskpool.go:236
+#	0x607f41	github.com/lesismal/fib/core.(*Engine).submitReady+0x181		github.com/lesismal/fib/core/engine.go:589
+#	0x607a3a	github.com/lesismal/fib/core.(*Engine).runReady+0x19a			github.com/lesismal/fib/core/engine.go:511
+#	0x614e35	github.com/lesismal/fib/core.(*Engine).runLoop+0x5d5			github.com/lesismal/fib/core/poller_epoll.go:146
+#	0x61d444	github.com/lesismal/fib/core.(*Engine).Run.func1+0x24			github.com/lesismal/fib/core/engine_unix.go:767
+
+0: 0 [3: 49152] @ 0x4970af 0x49c4c9 0x5f2a79 0x5fff06 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x5f2a78	github.com/lesismal/fib/bufferpool.Get+0x218			github.com/lesismal/fib/bufferpool/bufferpool.go:572
+#	0x5fff05	github.com/lesismal/fib/core.(*Connection).readLoop+0x65	github.com/lesismal/fib/core/connection.go:1981
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17	github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9	github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b		github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c		github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71	github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b	github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [4: 54272] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407b17 0x407885 0x409d9f 0x117ca0e 0x1183146 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x117ca0d	github.com/lesismal/fit/handler/static.(*cache).keep+0x56d		github.com/lesismal/fit/handler/static/cache.go:308
+#	0x1183145	github.com/lesismal/fit/handler/static.(*Static).find+0x105		github.com/lesismal/fit/handler/static/static.go:329
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 32] @ 0x496454 0x47279f 0x4b2605 0x4b5016 0x4b501e 0x4e31eb 0x4e31d4 0x4e41b0 0x4e4173 0x4e4135 0x4e24fe 0x4e2cea 0x4e2ce1 0x117d8a8 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x4b2604	syscall.ByteSliceFromString+0x84					syscall/syscall.go:52
+#	0x4b5015	syscall.BytePtrFromString+0x35						syscall/syscall.go:68
+#	0x4b501d	syscall.openat+0x3d							syscall/zsyscall_linux_amd64.go:94
+#	0x4e31ea	syscall.Open+0x2a							syscall/syscall_linux.go:280
+#	0x4e31d3	os.open+0x13								os/file_open_unix.go:15
+#	0x4e41af	os.openFileNolog.func1+0xaf						os/file_unix.go:261
+#	0x4e4172	os.ignoringEINTR+0x72							os/file_posix.go:263
+#	0x4e4134	os.openFileNolog+0x34							os/file_unix.go:260
+#	0x4e24fd	os.OpenFile+0x3d							os/file.go:412
+#	0x4e2ce9	os.Open+0x49								os/file.go:390
+#	0x4e2ce0	os.ReadFile+0x40							os/file.go:872
+#	0x117d8a7	github.com/lesismal/fit/handler/static.(*cache).load+0x67		github.com/lesismal/fit/handler/static/cache.go:500
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 27264] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407931 0x407890 0x409d9f 0x117dc7b 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x117dc7a	github.com/lesismal/fit/handler/static.(*cache).load+0x43a		github.com/lesismal/fit/handler/static/cache.go:525
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [4: 832] @ 0x496abb 0x4221c5 0x4e7e2c 0x4e2e13 0x4e2d53 0x117d8a8 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x4e7e2b	os.(*File).Stat+0x2b							os/stat_unix.go:19
+#	0x4e2e12	os.statOrZero+0x12							os/file.go:882
+#	0x4e2d52	os.ReadFile+0xb2							os/file.go:878
+#	0x117d8a7	github.com/lesismal/fit/handler/static.(*cache).load+0x67		github.com/lesismal/fit/handler/static/cache.go:500
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 6528] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407b17 0x407885 0x409d9f 0x117ca0e 0x1183146 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x117ca0d	github.com/lesismal/fit/handler/static.(*cache).keep+0x56d		github.com/lesismal/fit/handler/static/cache.go:308
+#	0x1183145	github.com/lesismal/fit/handler/static.(*Static).find+0x105		github.com/lesismal/fit/handler/static/static.go:329
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 96] @ 0x496abb 0x4221c5 0x4e3f4a 0x4e42af 0x4e24fe 0x4e2cea 0x4e2ce1 0x117d8a8 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x4e3f49	os.newFile+0x69								os/file_unix.go:145
+#	0x4e42ae	os.openFileNolog+0x1ae							os/file_unix.go:279
+#	0x4e24fd	os.OpenFile+0x3d							os/file.go:412
+#	0x4e2ce9	os.Open+0x49								os/file.go:390
+#	0x4e2ce0	os.ReadFile+0x40							os/file.go:872
+#	0x117d8a7	github.com/lesismal/fit/handler/static.(*cache).load+0x67		github.com/lesismal/fit/handler/static/cache.go:500
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 13568] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407b17 0x407885 0x409d9f 0x887af7 0x117e0e8 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x887af6	github.com/lesismal/fib/filewatch.(*Watcher).Watch+0x376		github.com/lesismal/fib/filewatch/watch_linux.go:128
+#	0x117e0e7	github.com/lesismal/fit/handler/static.(*Static).resolve+0x207		github.com/lesismal/fit/handler/static/cache.go:561
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 32] @ 0x423b7e 0x601ef1 0x601b28 0x60195a 0x8e8438 0x8e8c25 0x60ff3d 0x60fcf7 0x60967d 0x608fff 0x614e55 0x61d445 0x4a1201
+#	0x601ef0	github.com/lesismal/fib/core.(*Connection).armDeadlineLocked+0x330	github.com/lesismal/fib/core/connection.go:2748
+#	0x601b27	github.com/lesismal/fib/core.(*Connection).setDeadline+0x127		github.com/lesismal/fib/core/connection.go:2700
+#	0x601959	github.com/lesismal/fib/core.(*Connection).SetReadDeadline+0x19		github.com/lesismal/fib/core/connection.go:2682
+#	0x8e8437	github.com/lesismal/fib/http.(*ServerHandler).armRead+0x57		github.com/lesismal/fib/http/handler.go:1081
+#	0x8e8c24	github.com/lesismal/fib/http.(*ServerHandler).OnOpen+0x64		github.com/lesismal/fib/http/handler.go:1201
+#	0x60ff3c	github.com/lesismal/fib/core.(*Engine).admit+0x21c			github.com/lesismal/fib/core/engine_unix.go:879
+#	0x60fcf6	github.com/lesismal/fib/core.(*Engine).admitAccepted+0x56		github.com/lesismal/fib/core/engine_unix.go:856
+#	0x60967c	github.com/lesismal/fib/core.(*Engine).drainCommands+0x17c		github.com/lesismal/fib/core/engine.go:947
+#	0x608ffe	github.com/lesismal/fib/core.(*Engine).settle+0x3e			github.com/lesismal/fib/core/engine.go:837
+#	0x614e54	github.com/lesismal/fib/core.(*Engine).runLoop+0x5f4			github.com/lesismal/fib/core/poller_epoll.go:147
+#	0x61d444	github.com/lesismal/fib/core.(*Engine).Run.func1+0x24			github.com/lesismal/fib/core/engine_unix.go:767
+
+0: 0 [621: 2543616] @ 0x4970af 0x49c4c9 0x8f4cd9 0x8f4c86 0x8f4745 0x8f07db 0x8f04f4 0x8f0476 0x8e9d3a 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x8f4cd8	github.com/lesismal/fib/http.headString+0x518			github.com/lesismal/fib/http/request_head.go:356
+#	0x8f4c85	github.com/lesismal/fib/http.parseSimpleRequestHead+0x4c5	github.com/lesismal/fib/http/request_head.go:182
+#	0x8f4744	github.com/lesismal/fib/http.parseRequestHead+0x24		github.com/lesismal/fib/http/request_head.go:29
+#	0x8f07da	github.com/lesismal/fib/http.(*Parser).frameLength+0x31a	github.com/lesismal/fib/http/parser.go:814
+#	0x8f04f3	github.com/lesismal/fib/http.(*Parser).feedOne+0x33		github.com/lesismal/fib/http/parser.go:537
+#	0x8f0475	github.com/lesismal/fib/http.(*Parser).feedBorrowed+0x475	github.com/lesismal/fib/http/parser.go:530
+#	0x8e9d39	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0xd9	github.com/lesismal/fib/http/handler.go:1402
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147	github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6	github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281	github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17	github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9	github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b		github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c		github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71	github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b	github.com/lesismal/fib/taskpool/adaptive.go:742
+
+0: 0 [1: 18432] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x40790e 0x407890 0x408b25 0x887ecd 0x887ac5 0x117e0e8 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x887ecc	github.com/lesismal/fib/filewatch.(*Watcher).addLocked+0xac		github.com/lesismal/fib/filewatch/watch_linux.go:174
+#	0x887ac4	github.com/lesismal/fib/filewatch.(*Watcher).Watch+0x344		github.com/lesismal/fib/filewatch/watch_linux.go:124
+#	0x117e0e7	github.com/lesismal/fit/handler/static.(*Static).resolve+0x207		github.com/lesismal/fit/handler/static/cache.go:561
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1: 27264] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407931 0x407890 0x409d9f 0x887af7 0x117e0e8 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x887af6	github.com/lesismal/fib/filewatch.(*Watcher).Watch+0x376		github.com/lesismal/fib/filewatch/watch_linux.go:128
+#	0x117e0e7	github.com/lesismal/fit/handler/static.(*Static).resolve+0x207		github.com/lesismal/fit/handler/static/cache.go:561
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+0: 0 [1322: 148064] @ 0x496abb 0x4221c5 0x49e29c 0x4c18f5 0x11837f2 0x1182c1c 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x49e29b	time.newTimer+0x3b							runtime/time.go:395
+#	0x4c18f4	time.AfterFunc+0x34							time/sleep.go:178
+#	0x11837f1	github.com/lesismal/fit/handler/static.(*Static).queue+0x111		github.com/lesismal/fit/handler/static/static.go:401
+#	0x1182c1b	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x19b	github.com/lesismal/fit/handler/static/static.go:263
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+1: 16 [1: 16] @ 0x7bb03f 0xf99bb3 0x4a1201
+#	0x7bb03e	net/http.(*Server).Serve+0x5e			net/http/server.go:3529
+#	0xf99bb2	github.com/lesismal/fit/admin.Start.func4+0x52	github.com/lesismal/fit/admin/server.go:308
+
+1: 16 [213: 3408] @ 0x4964a7 0x11830e5 0x11830d7 0x118310f 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x11830e4	internal/stringslite.Clone+0xa4						internal/stringslite/strings.go:119
+#	0x11830d6	strings.Clone+0x96							strings/clone.go:22
+#	0x118310e	github.com/lesismal/fit/handler/static.(*Static).find+0xce		github.com/lesismal/fit/handler/static/static.go:327
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 16 [1: 16] @ 0x4961f9 0x495be5 0x73d545 0x73daa5 0x73de0e 0x73d01d 0x4a97b8 0x73d088 0x73d06b 0x1184f05 0x117d96e 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x73d544	mime.setExtensionType+0x204						mime/type.go:254
+#	0x73daa4	mime.loadMimeGlobsFile+0x204						mime/type_unix.go:71
+#	0x73de0d	mime.initMimeUnix+0x4d							mime/type_unix.go:107
+#	0x73d01c	mime.initMime+0x3c							mime/type.go:141
+#	0x4a97b7	sync.(*Once).doSlow+0x97						sync/once.go:78
+#	0x73d087	sync.(*Once).Do+0x47							sync/once.go:69
+#	0x73d06a	mime.TypeByExtension+0x2a						mime/type.go:166
+#	0x1184f04	github.com/lesismal/fit/handler/static.fileHeader+0xa4			github.com/lesismal/fit/handler/static/static.go:627
+#	0x117d96d	github.com/lesismal/fit/handler/static.(*cache).load+0x12d		github.com/lesismal/fit/handler/static/cache.go:507
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 16 [1: 16] @ 0x1185313 0x117d96e 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x1185312	github.com/lesismal/fit/handler/static.fileHeader+0x4b2			github.com/lesismal/fit/handler/static/static.go:644
+#	0x117d96d	github.com/lesismal/fit/handler/static.(*cache).load+0x12d		github.com/lesismal/fit/handler/static/cache.go:507
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 24 [1: 24] @ 0x496454 0x477257 0x11852f3 0x11852fe 0x117d96e 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x11852f2	github.com/lesismal/fit/handler/static.etag+0x492			github.com/lesismal/fit/handler/static/static.go:574
+#	0x11852fd	github.com/lesismal/fit/handler/static.fileHeader+0x49d			github.com/lesismal/fit/handler/static/static.go:644
+#	0x117d96d	github.com/lesismal/fit/handler/static.(*cache).load+0x12d		github.com/lesismal/fit/handler/static/cache.go:507
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 24 [2: 48] @ 0x4253e8 0x496454 0x49cdf2 0x5251a5 0x525290 0x529692 0x52f053 0x117e153 0x117e0f4 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x49cdf1	internal/bytealg.MakeNoZero+0xb1					runtime/slice.go:437
+#	0x5251a4	strings.(*Builder).grow+0x24						strings/builder.go:67
+#	0x52528f	strings.(*Builder).Grow+0x4f						strings/builder.go:81
+#	0x529691	strings.Join+0xf1							strings/strings.go:491
+#	0x52f052	path/filepath.join+0x52							path/filepath/path_unix.go:36
+#	0x117e152	path/filepath.Join+0x272						path/filepath/path.go:131
+#	0x117e0f3	github.com/lesismal/fit/handler/static.(*Static).resolve+0x213		github.com/lesismal/fit/handler/static/cache.go:562
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+2: 32 [181: 2896] @ 0x117e049 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x117e048	github.com/lesismal/fit/handler/static.(*Static).resolve+0x168		github.com/lesismal/fit/handler/static/cache.go:558
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 48 [1: 48] @ 0x4ac897 0x4ac7f5 0x73d588 0x73d567 0x73d533 0x73daa5 0x73de0e 0x73d01d 0x4a97b8 0x73d088 0x73d06b 0x1184f05 0x117d96e 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x4ac896	internal/sync.newEntryNode[...]+0x2b6					internal/sync/hashtriemap.go:572
+#	0x4ac7f4	internal/sync.(*HashTrieMap[...]).Swap+0x214				internal/sync/hashtriemap.go:263
+#	0x73d587	internal/sync.(*HashTrieMap[...]).Store+0x247				internal/sync/hashtriemap.go:200
+#	0x73d566	sync.(*Map).Store+0x226							sync/map.go:53
+#	0x73d532	mime.setExtensionType+0x1f2						mime/type.go:254
+#	0x73daa4	mime.loadMimeGlobsFile+0x204						mime/type_unix.go:71
+#	0x73de0d	mime.initMimeUnix+0x4d							mime/type_unix.go:107
+#	0x73d01c	mime.initMime+0x3c							mime/type.go:141
+#	0x4a97b7	sync.(*Once).doSlow+0x97						sync/once.go:78
+#	0x73d087	sync.(*Once).Do+0x47							sync/once.go:69
+#	0x73d06a	mime.TypeByExtension+0x2a						mime/type.go:166
+#	0x1184f04	github.com/lesismal/fit/handler/static.fileHeader+0xa4			github.com/lesismal/fit/handler/static/static.go:627
+#	0x117d96d	github.com/lesismal/fit/handler/static.(*cache).load+0x12d		github.com/lesismal/fit/handler/static/cache.go:507
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 48 [1: 48] @ 0x4961f9 0x4221c5 0x4975ba 0x4975cf 0x1184eb7 0x117d96e 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x1184eb6	github.com/lesismal/fit/handler/static.fileHeader+0x56			github.com/lesismal/fit/handler/static/static.go:626
+#	0x117d96d	github.com/lesismal/fit/handler/static.(*cache).load+0x12d		github.com/lesismal/fit/handler/static/cache.go:507
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 48 [1: 48] @ 0x4ac897 0x4ac7f5 0x887b3c 0x887b17 0x887afe 0x117e0e8 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x4ac896	internal/sync.newEntryNode[...]+0x2b6					internal/sync/hashtriemap.go:572
+#	0x4ac7f4	internal/sync.(*HashTrieMap[...]).Swap+0x214				internal/sync/hashtriemap.go:263
+#	0x887b3b	internal/sync.(*HashTrieMap[...]).Store+0x3bb				internal/sync/hashtriemap.go:200
+#	0x887b16	sync.(*Map).Store+0x396							sync/map.go:53
+#	0x887afd	github.com/lesismal/fib/filewatch.(*Watcher).Watch+0x37d		github.com/lesismal/fib/filewatch/watch_linux.go:129
+#	0x117e0e7	github.com/lesismal/fit/handler/static.(*Static).resolve+0x207		github.com/lesismal/fit/handler/static/cache.go:561
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 80 [1: 80] @ 0x7acc14 0x7aca5e 0x7aca50 0x7aca98 0x7aca98 0x7ac87f 0x7ba214 0x7b9d4a 0x7b9d3b 0xf86139 0xf84127 0x10a6fab 0x10a21aa 0x1093f85 0x155459a 0x155454b 0x45a367 0x4a1201
+#	0x7acc13	net/http.(*routingNode).addChild+0xd3			net/http/routing_tree.go:98
+#	0x7aca5d	net/http.(*routingNode).addSegments+0x19d		net/http/routing_tree.go:72
+#	0x7aca4f	net/http.(*routingNode).addSegments+0x18f		net/http/routing_tree.go:70
+#	0x7aca97	net/http.(*routingNode).addSegments+0x1d7		net/http/routing_tree.go:72
+#	0x7aca97	net/http.(*routingNode).addSegments+0x1d7		net/http/routing_tree.go:72
+#	0x7ac87e	net/http.(*routingNode).addPattern+0x5e			net/http/routing_tree.go:50
+#	0x7ba213	net/http.(*ServeMux).registerErr+0x373			net/http/server.go:3019
+#	0x7b9d49	net/http.(*ServeMux).register+0x49			net/http/server.go:2976
+#	0x7b9d3a	net/http.(*ServeMux).HandleFunc+0x3a			net/http/server.go:2951
+#	0xf86138	github.com/lesismal/fit/admin.(*Server).routes+0x1b38	github.com/lesismal/fit/admin/server.go:386
+#	0xf84126	github.com/lesismal/fit/admin.Start+0xa06		github.com/lesismal/fit/admin/server.go:279
+#	0x10a6faa	github.com/lesismal/fit/cli.serve+0x4d4a		github.com/lesismal/fit/cli/run.go:333
+#	0x10a21a9	github.com/lesismal/fit/cli.runRun+0x249		github.com/lesismal/fit/cli/run.go:50
+#	0x1093f84	github.com/lesismal/fit/cli.run+0xe4			github.com/lesismal/fit/cli/cli.go:67
+#	0x1554599	github.com/lesismal/fit/cli.Main+0x99			github.com/lesismal/fit/cli/cli.go:57
+#	0x155454a	main.main+0x4a						github.com/lesismal/fit/cmd/fit/main.go:21
+#	0x45a366	runtime.main+0x426					runtime/proc.go:302
+
+1: 96 [1: 96] @ 0x496abb 0x4221c5 0xf1d8ad 0xf1cb86 0xf1856d 0xf1856e 0xf18337 0xf3bfc5 0xf3b885 0xf3b665 0xf3c0fc 0x7b8089 0x7b9c0f 0xf99991 0x7b8089 0x7b9c0f 0xf99e7d 0x7b8089 0x7d964e 0x7b671c 0x4a1201
+#	0xf1d8ac	internal/profile.init.func5+0x2c					internal/profile/encode.go:167
+#	0xf1cb85	internal/profile.decodeMessage+0x125					internal/profile/proto.go:271
+#	0xf1856c	internal/profile.unmarshal+0xcc						internal/profile/proto.go:168
+#	0xf1856d	internal/profile.parseUncompressed+0xcd					internal/profile/profile.go:162
+#	0xf18336	internal/profile.Parse+0x236						internal/profile/profile.go:142
+#	0xf3bfc4	net/http/pprof.collectProfile+0xa4					net/http/pprof/pprof.go:345
+#	0xf3b884	net/http/pprof.handler.serveDeltaProfile+0x144				net/http/pprof/pprof.go:294
+#	0xf3b664	net/http/pprof.handler.ServeHTTP+0x504					net/http/pprof/pprof.go:258
+#	0xf3c0fb	net/http/pprof.Index+0xdb						net/http/pprof/pprof.go:391
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99990	github.com/lesismal/fit/admin.(*Server).pprofHandler.func1+0x2f0	github.com/lesismal/fit/admin/pprof.go:53
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7b9c0e	net/http.(*ServeMux).ServeHTTP+0x1ce					net/http/server.go:2923
+#	0xf99e7c	github.com/lesismal/fit/admin.(*Server).guard.func1+0x21c		github.com/lesismal/fit/admin/server.go:497
+#	0x7b8088	net/http.HandlerFunc.ServeHTTP+0x28					net/http/server.go:2358
+#	0x7d964d	net/http.serverHandler.ServeHTTP+0x8d					net/http/server.go:3436
+#	0x7b671b	net/http.(*conn).serve+0x6db						net/http/server.go:2157
+
+1: 112 [1: 112] @ 0x496abb 0x4221c5 0x45a932 0x46e9ca 0x49b585 0x4a8fba 0x4a966c 0x4a9652 0x887899 0x117e0e8 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x49b584	internal/sync.runtime_SemacquireMutex+0x24				runtime/sema.go:95
+#	0x4a8fb9	internal/sync.(*Mutex).lockSlow+0x179					internal/sync/mutex.go:149
+#	0x4a966b	internal/sync.(*Mutex).Lock+0x2b					internal/sync/mutex.go:70
+#	0x4a9651	sync.(*Mutex).Lock+0x11							sync/mutex.go:46
+#	0x887898	github.com/lesismal/fib/filewatch.(*Watcher).Watch+0x118		github.com/lesismal/fib/filewatch/watch_linux.go:113
+#	0x117e0e7	github.com/lesismal/fit/handler/static.(*Static).resolve+0x207		github.com/lesismal/fit/handler/static/cache.go:561
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 512 [1: 512] @ 0x4970af 0x4221c5 0x433f25 0x4a1201
+#	0x4970ae	runtime.mallocgc+0x116e		runtime/malloc.go:1125
+#	0x4221c4	runtime.newobject+0x24		runtime/malloc.go:2141
+#	0x433f24	runtime.gcBgMarkWorker+0x64	runtime/mgc.go:1779
+
+7: 1456 [2490: 517920] @ 0x496abb 0x4221c5 0x4e8068 0x4e7bcc 0x117ea85 0x117e165 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x4e8067	os.lstatNolog+0x27							os/stat_unix.go:43
+#	0x4e7bcb	os.Lstat+0x2b								os/stat.go:26
+#	0x117ea84	github.com/lesismal/fit/handler/static.statLink+0x24			github.com/lesismal/fit/handler/static/cache.go:637
+#	0x117e164	github.com/lesismal/fit/handler/static.(*Static).resolve+0x284		github.com/lesismal/fit/handler/static/cache.go:563
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+7: 1568 [2613: 585312] @ 0x496abb 0x4221c5 0x117df52 0x1183125 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x117df51	github.com/lesismal/fit/handler/static.(*Static).resolve+0x71		github.com/lesismal/fit/handler/static/cache.go:551
+#	0x1183124	github.com/lesismal/fit/handler/static.(*Static).find+0xe4		github.com/lesismal/fit/handler/static/static.go:328
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+6: 2112 [6: 2112] @ 0x496abb 0x4974de 0x497573 0x404605 0x4045f8 0x409cbc 0x1185149 0x117d96e 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x1185148	github.com/lesismal/fit/handler/static.fileHeader+0x2e8			github.com/lesismal/fit/handler/static/static.go:641
+#	0x117d96d	github.com/lesismal/fit/handler/static.(*cache).load+0x12d		github.com/lesismal/fit/handler/static/cache.go:507
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+2: 4096 [2: 4096] @ 0x496ac4 0x4221c5 0x45e451 0x45ee95 0x45f530 0x49a108 0x46217e 0x462e4d 0x462d18 0x49f813
+#	0x496ac3	runtime.mallocgc+0xb83		runtime/malloc.go:1133
+#	0x4221c4	runtime.newobject+0x24		runtime/malloc.go:2141
+#	0x45e450	runtime.allocm+0x90		runtime/proc.go:2342
+#	0x45ee94	runtime.newm+0x34		runtime/proc.go:2888
+#	0x45f52f	runtime.startm+0x12f		runtime/proc.go:3111
+#	0x49a107	runtime.wakep+0xe7		runtime/proc.go:3258
+#	0x46217d	runtime.resetspinning+0x3d	runtime/proc.go:4049
+#	0x462e4c	runtime.schedule+0x5cc		runtime/proc.go:4214
+#	0x462d17	runtime.park_m+0x497		runtime/proc.go:4319
+#	0x49f812	runtime.mcall+0x52		runtime/asm_amd64.s:463
+
+1: 4096 [1: 4096] @ 0x496ac4 0x49c4c9 0x5f1ebe 0x5f24c5 0x46a0b5 0x45a2f0 0x45a2c7 0x4a1201
+#	0x5f1ebd	github.com/lesismal/fib/bufferpool.setReserveShards+0xfd	github.com/lesismal/fib/bufferpool/bufferpool.go:220
+#	0x5f24c4	github.com/lesismal/fib/bufferpool.init.0+0xa4			github.com/lesismal/fib/bufferpool/bufferpool.go:370
+#	0x46a0b4	runtime.doInit1+0xd4						runtime/proc.go:8154
+#	0x45a2ef	runtime.doInit+0x3af						runtime/proc.go:8121
+#	0x45a2c6	runtime.main+0x386						runtime/proc.go:269
+
+2: 4096 [2: 4096] @ 0x496ac4 0x4221c5 0x45e451 0x45ee95 0x45f530 0x49a108 0x46217e 0x4626c7 0x45dcad 0x45dbb5 0x49f78a
+#	0x496ac3	runtime.mallocgc+0xb83		runtime/malloc.go:1133
+#	0x4221c4	runtime.newobject+0x24		runtime/malloc.go:2141
+#	0x45e450	runtime.allocm+0x90		runtime/proc.go:2342
+#	0x45ee94	runtime.newm+0x34		runtime/proc.go:2888
+#	0x45f52f	runtime.startm+0x12f		runtime/proc.go:3111
+#	0x49a107	runtime.wakep+0xe7		runtime/proc.go:3258
+#	0x46217d	runtime.resetspinning+0x3d	runtime/proc.go:4049
+#	0x4626c6	runtime.schedule+0x146		runtime/proc.go:4214
+#	0x45dcac	runtime.mstart1+0xcc		runtime/proc.go:1955
+#	0x45dbb4	runtime.mstart0+0x74		runtime/proc.go:1901
+#	0x49f789	runtime.mstart+0x9		runtime/asm_amd64.s:393
+
+1: 8192 [1: 8192] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407b17 0x407885 0x409d9f 0xa92ccb 0x12e6358 0x46a0b5 0x45a2f0 0x45a2c7 0x4a1201
+#	0xa92cca	github.com/lesismal/fit/module.Register+0x12a		github.com/lesismal/fit/module/module.go:323
+#	0x12e6357	github.com/lesismal/fit/sync/clickhouse.init.0+0x57	github.com/lesismal/fit/sync/clickhouse/sink.go:24
+#	0x46a0b4	runtime.doInit1+0xd4					runtime/proc.go:8154
+#	0x45a2ef	runtime.doInit+0x3af					runtime/proc.go:8121
+#	0x45a2c6	runtime.main+0x386					runtime/proc.go:269
+
+3: 40704 [3: 40704] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407b17 0x407885 0x409d9f 0x117c826 0x1183146 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x117c825	github.com/lesismal/fit/handler/static.(*cache).keep+0x385		github.com/lesismal/fit/handler/static/cache.go:305
+#	0x1183145	github.com/lesismal/fit/handler/static.(*Static).find+0x105		github.com/lesismal/fit/handler/static/static.go:329
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+1: 131072 [10: 1310720] @ 0x4970b5 0x49c4c9 0x5f2a79 0x5fc465 0x5fc452 0x5fc731 0x5fc66c 0x5fda6a 0x5fd7c5 0x8ec76b 0x8e7e0c 0x8e7b79 0x8e714f 0x8e5f69 0x117f2e6 0x117f150 0x11835e5 0x1182de5 0x1182be9 0xe2eefe 0x8eb2e9 0x8ea54a 0x8ea4bb 0x8e9b68 0x8e9367 0x600122 0x5fe978 0x5fe3fa 0x5fe00c 0x5ee84d 0x5ea772 0x5ea69c 0x4a1201
+#	0x5f2a78	github.com/lesismal/fib/bufferpool.Get+0x218				github.com/lesismal/fib/bufferpool/bufferpool.go:572
+#	0x5fc464	github.com/lesismal/fib/core.(*Engine).acquireSendBuffer+0x1e4		github.com/lesismal/fib/core/engine.go:271
+#	0x5fc451	github.com/lesismal/fib/core.(*Connection).queueLocked+0x1d1		github.com/lesismal/fib/core/connection.go:749
+#	0x5fc730	github.com/lesismal/fib/core.(*Connection).queueSharedPartsLocked+0x50	github.com/lesismal/fib/core/connection.go:788
+#	0x5fc66b	github.com/lesismal/fib/core.(*Connection).queueCorkedSharedLocked+0x2b	github.com/lesismal/fib/core/connection.go:775
+#	0x5fda69	github.com/lesismal/fib/core.(*Connection).sendParts+0x249		github.com/lesismal/fib/core/connection.go:1209
+#	0x5fd7c4	github.com/lesismal/fib/core.(*Connection).SendPartsShared+0x24		github.com/lesismal/fib/core/connection.go:1178
+#	0x8ec76a	github.com/lesismal/fib/http.(*Context).sendResponse+0x52a		github.com/lesismal/fib/http/handler.go:1990
+#	0x8e7e0b	github.com/lesismal/fib/http.(*Context).sendHTTP1+0x22b			github.com/lesismal/fib/http/handler.go:941
+#	0x8e7b78	github.com/lesismal/fib/http.(*Context).writeHTTP1+0x98			github.com/lesismal/fib/http/handler.go:929
+#	0x8e714e	github.com/lesismal/fib/http.(*Context).writeResponse+0x44e		github.com/lesismal/fib/http/handler.go:878
+#	0x8e5f68	github.com/lesismal/fib/http.(*Context).writeWhole+0x1e8		github.com/lesismal/fib/http/handler.go:704
+#	0x117f2e5	github.com/lesismal/fib/http.(*Context).WriteResponse+0x265		github.com/lesismal/fib/http/handler.go:681
+#	0x117f14f	github.com/lesismal/fit/handler/static.serveMemory+0xcf			github.com/lesismal/fit/handler/static/cache.go:680
+#	0x11835e4	github.com/lesismal/fit/handler/static.(*Static).answer+0x444		github.com/lesismal/fit/handler/static/static.go:350
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1182be8	github.com/lesismal/fit/handler/static.(*Static).ServeHTTP+0x168	github.com/lesismal/fit/handler/static/static.go:260
+#	0xe2eefd	github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP+0x7bd		github.com/lesismal/fit/listener/listener.go:926
+#	0x8eb2e8	github.com/lesismal/fib/http.serveRequestOn+0xa8			github.com/lesismal/fib/http/handler.go:1685
+#	0x8ea549	github.com/lesismal/fib/http.serveRequest+0x8e9				github.com/lesismal/fib/http/handler.go:1674
+#	0x8ea4ba	github.com/lesismal/fib/http.(*ServerHandler).serveParsed+0x85a		github.com/lesismal/fib/http/handler.go:1471
+#	0x8e9b67	github.com/lesismal/fib/http.(*ServerHandler).drive+0x147		github.com/lesismal/fib/http/handler.go:1347
+#	0x8e9366	github.com/lesismal/fib/http.(*ServerHandler).OnData+0x2e6		github.com/lesismal/fib/http/handler.go:1257
+#	0x600121	github.com/lesismal/fib/core.(*Connection).readLoop+0x281		github.com/lesismal/fib/core/connection.go:2033
+#	0x5fe977	github.com/lesismal/fib/core.(*Connection).readRound+0x17		github.com/lesismal/fib/core/connection.go:1515
+#	0x5fe3f9	github.com/lesismal/fib/core.(*Connection).process+0x3b9		github.com/lesismal/fib/core/connection.go:1365
+#	0x5fe00b	github.com/lesismal/fib/core.(*Connection).RunTask+0x4b			github.com/lesismal/fib/core/connection.go:1275
+#	0x5ee84c	github.com/lesismal/fib/taskpool.(*executor).call+0x4c			github.com/lesismal/fib/taskpool/taskpool.go:116
+#	0x5ea771	github.com/lesismal/fib/taskpool.(*adaptivePool).work+0x71		github.com/lesismal/fib/taskpool/adaptive.go:768
+#	0x5ea69b	github.com/lesismal/fib/taskpool.(*adaptivePool).worker+0x1b		github.com/lesismal/fib/taskpool/adaptive.go:742
+
+6: 163584 [6: 163584] @ 0x496ac4 0x4974c5 0x497573 0x4060dd 0x4060de 0x40602f 0x407b17 0x407885 0x409d9f 0x117ca0e 0x1183146 0x1182d51 0x1185ced 0x91adf7 0x4a1201
+#	0x117ca0d	github.com/lesismal/fit/handler/static.(*cache).keep+0x56d		github.com/lesismal/fit/handler/static/cache.go:308
+#	0x1183145	github.com/lesismal/fit/handler/static.(*Static).find+0x105		github.com/lesismal/fit/handler/static/static.go:329
+#	0x1182d50	github.com/lesismal/fit/handler/static.(*Static).serve+0xd0		github.com/lesismal/fit/handler/static/static.go:273
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+164: 1553408 [164: 1553408] @ 0x4970af 0x49c4c9 0x4e2ea9 0x4e2d73 0x117d8a8 0x11834c5 0x1182de5 0x1185ced 0x91adf7 0x4a1201
+#	0x4e2ea8	os.readFileContents+0x48						os/file.go:913
+#	0x4e2d72	os.ReadFile+0xd2							os/file.go:878
+#	0x117d8a7	github.com/lesismal/fit/handler/static.(*cache).load+0x67		github.com/lesismal/fit/handler/static/cache.go:500
+#	0x11834c4	github.com/lesismal/fit/handler/static.(*Static).answer+0x324		github.com/lesismal/fit/handler/static/static.go:345
+#	0x1182de4	github.com/lesismal/fit/handler/static.(*Static).serve+0x164		github.com/lesismal/fit/handler/static/static.go:287
+#	0x1185cec	github.com/lesismal/fit/handler/static.(*Static).queue.func3+0x8c	github.com/lesismal/fit/handler/static/static.go:414
+#	0x91adf6	github.com/lesismal/fit/internal/filepool.(*Pool).work+0x176		github.com/lesismal/fit/internal/filepool/filepool.go:120
+
+
+# runtime.MemStats
+# Alloc = 152843808
+# TotalAlloc = 5681975504
+# Sys = 224676152
+# Lookups = 0
+# Mallocs = 77322317
+# Frees = 76406611
+# HeapAlloc = 152843808
+# HeapSys = 210993152
+# HeapIdle = 26320896
+# HeapInuse = 184672256
+# HeapReleased = 4038656
+# HeapObjects = 915706
+# Stack = 2916352 / 2916352
+# MSpan = 2199840 / 2611200
+# MCache = 18368 / 32144
+# BuckHashSys = 1464441
+# GCSys = 5551904
+# OtherSys = 1106959
+# NextGC = 202536170
+# LastGC = 1795266036766059698
+# PauseNs = [27630 25640 26051 31500 12950 70311 70661 68000 91600 85130 81032 100550 83600 89541 90071 92440 97600 101250 92741 88660 85301 75910 107130 105421 100430 91011 87290 92321 86130 101950 83140 78990 80291 79401 72730 89441 84401 103610 81261 96411 85071 101170 87521 87621 76262 79740 85150 83480 93040 86921 77761 77280 94590 94641 94540 98891 69601 81171 81260 83241 104441 88620 90510 81140 101220 111440 89660 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+# PauseEnd = [1795266016575454981 1795266016680646554 1795266016776930090 1795266016803586822 1795266016823172487 1795266016857802533 1795266016894502479 1795266016931103795 1795266017130070140 1795266017462421139 1795266017796035466 1795266018127856162 1795266018458805124 1795266018793423966 1795266019129885567 1795266019464691269 1795266019805000671 1795266020148443770 1795266020483470984 1795266020818769809 1795266021156024324 1795266021491133049 1795266021827958442 1795266022298676032 1795266022636081058 1795266022974366040 1795266023310452499 1795266023645222861 1795266023977233109 1795266024312751195 1795266024648619713 1795266024984359231 1795266025318470230 1795266025650901269 1795266025984657586 1795266026322969587 1795266026656416403 1795266026984656420 1795266027321214922 1795266027658827049 1795266027997724204 1795266028334989289 1795266028670496876 1795266029010696027 1795266029345720791 1795266029682621624 1795266030022995007 1795266030358578903 1795266030700562934 1795266031039726430 1795266031374852314 1795266031710509641 1795266032050787323 1795266032388392461 1795266032722492879 1795266033057252332 1795266033392533977 1795266033726852187 1795266034066303954 1795266034404529885 1795266034740714154 1795266035079947581 1795266035420433314 1795266035757329827 1795266036093506897 1795266036429949988 1795266036766059698 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+# NumGC = 67
+# NumForcedGC = 0
+# GCCPUFraction = 0.004605978766667921
+# DebugGC = false
+# MaxRSS = 244314112

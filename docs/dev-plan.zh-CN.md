@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I231。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I232。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -390,6 +390,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | **静态文件** | | | |
 | I229 | static handler 的路径缓存分片，满后经门卫准入；fib worker 不再等待其锁 | — | done |
 | I230 | 小文件从磁盘整读，只需三次系统调用；文件池每 CPU 一个 worker，仅为阻塞的 worker 扩容 | I229 | done |
+| I231 | 整读的文件不再产生垃圾，响应头以块发送，fib 的 `Watch` 不再加锁（fib A98） | I230 | done |
 
 ## M0 基础
 
@@ -7156,3 +7157,34 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 5. **池保留 GOMAXPROCS 个 worker，任务超过 1 ms 才扩容，上限不变**；1 ms 远超从内存读，对磁盘又够短。没有配置项：上限
    维持原值。所有 filepool 使用者都受影响（static、缓存磁盘层、fastcgi；日志压缩池的 worker 少于 CPU 数，不变）。
 6. **原始 `open`/`pread`/`close` 只用于 Unix**；其他系统仍用 `os.Open` 和 `io.ReadFull`。
+
+### I231 整读的文件不再产生垃圾，响应头以块发送，fib 的 Watch 不再加锁 — done
+
+- **原因**：I230 之后，256 并发随机 8 KiB 文件时 fit 每秒 GC 42 次，约 4 GB/s 的分配：91.6% 是小文件整读的池化缓冲区——
+  `WriteResponseOwned` 对超过 4 KiB 的 HTTP/1 正文交给 GC 而不还给池；其次是 `fileHeader` 每请求 6 个对象，`resolve` 对每个
+  路径复制两次。fib 的 `filewatch.Watch` 每次未命中都取互斥锁（调度延迟的 4%）。
+- **完成**：`handler/static`：整读的文件经 `WriteResponseCopy` 发送，缓冲区立即还池；响应头（条件或范围请求除外）由
+  `appendFileHeader` 以 `HeaderBlock` 写入池化缓冲区（`TestFileHeaderBlock` 与 `fileHeader` 对照）；ETag 追加而不格式化；
+  `resolve` 对以 "/" 开头的路径直接清理。fib A98（`047fd40`）：已监听目录从 `sync.Map` 镜像中查找，不加锁（fib quick CI 重跑
+  后通过；失败的是 `TestResponseHeaderTimeoutSkipsRetryWait`，见遗留）；fit 改用它。
+- **压测**（.51，三轮，
+  [bench/results/static-fewer-allocs-2026-11-21](../bench/results/static-fewer-allocs-2026-11-21/README.md)）：
+  随机 8 KiB 256 并发 262,808 → 324,501 QPS，512 并发 265,439 → 327,360（+23%；nginx 325,743 与 326,059）；热文件和
+  64 KiB 文件不变。每请求 CPU 29.3 → 24.0 µs（nginx 24.4）；GC 每秒 42 → 3 次；RSS −37 MB。低于饱和时（约每秒 22.6 万，
+  限速）各分位都更好：p50 0.37 → 0.28 ms，p90 1.06 → 0.50，p99 1.65 → 1.23-1.38。
+- **途中发现**：饱和时 128 和 256 并发的 p99 上升（2.1-2.5 → 5.2-8.6 ms），p50、p90 下降，512 并发 p99 下降（3.83 → 2.86）。
+  不是某一项改动造成的（关 GC、Owned、不扩容的池、响应头 map、旧 fib：超过每秒 30 万时都有）；fib 的事件循环停在 Go 的轮询器
+  里，没有空闲 P 时要等 sysmon 每 10 ms 查一次。`loop_wait block` 更差。已向 fib 提出 A99。.51 放宽的临时端口范围不保留
+  8090：就绪探测连到了自己并占住端口；压测脚本改用 8082。
+- **遗留**：fib A99；fib 的 `TestResponseHeaderTimeoutSkipsRetryWait` 在 2 s 余量下又失败一次（之前已放宽三次），更可能是
+  客户端重试的问题而非余量。
+
+**待审查的决定**（2026-11-21）：
+
+1. **取吞吐和低于饱和时更短的尾延迟，而非 128、256 并发饱和时的 p99**：后者来自 fib 循环的唤醒（A99），慢代码靠浪费 CPU
+   掩盖了它，fit 每变快一次它就会回来。列在这里是因为用户的规则不愿以 p99 换小幅吞吐：这次吞吐 +23%，低于饱和时 p99 更好。
+2. **fit 改用 fib `047fd40`**，尽管旧 `Watch` 的互斥锁让 256 并发饱和 p99 更短（2.5-3.6 ms 对 5.2-6.6）而吞吐只少 1%：它是靠
+   让池 worker 挂起做到的，低于饱和时两者相同。
+3. **用 `WriteResponseCopy`，不改 fib 的 `WriteResponseOwned`**：每请求复制 8 KiB 比原来的垃圾便宜；让 HTTP/1 的自有正文
+   发送后还池留给 fib。
+4. **响应头块只用于整读路径**；内存缓存本就让所有响应共享一个响应头 map，大文件路径为 SendFile 设置响应头。

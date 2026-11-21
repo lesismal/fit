@@ -451,7 +451,7 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info f
 			}
 			// The validators are the lookup's stat, as for a file the cache
 			// reads; a file that changed size since is sent as below.
-			serveOwned(c, v.name, fileHeader(v, info, data), info.ModTime(), data)
+			serveRead(c, v, info, data)
 			return
 		}
 	}
@@ -571,7 +571,43 @@ func hasConditions(r *stdhttp.Request) bool {
 // nginx makes it, but with the time in nanoseconds, so that two writes within
 // one second that keep the size tell apart where the clock can.
 func etag(info fs.FileInfo) string {
-	return `"` + strconv.FormatInt(info.ModTime().UnixNano(), 16) + "-" + strconv.FormatInt(info.Size(), 16) + `"`
+	return string(appendEtag(make([]byte, 0, 32), info))
+}
+
+// appendEtag appends etag's tag to b.
+func appendEtag(b []byte, info fs.FileInfo) []byte {
+	b = append(b, '"')
+	b = strconv.AppendInt(b, info.ModTime().UnixNano(), 16)
+	b = append(b, '-')
+	b = strconv.AppendInt(b, info.Size(), 16)
+	return append(b, '"')
+}
+
+// appendFileHeader appends to b, as lines of "Name: value" each ended by
+// CRLF, the fields fileHeader makes for v, info and data, without making
+// them: for Response.HeaderBlock.
+func appendFileHeader(b []byte, v variant, info fs.FileInfo, data []byte) []byte {
+	contentType := mime.TypeByExtension(filepath.Ext(v.name))
+	if contentType == "" && data != nil && v.encoding == "" {
+		contentType = stdhttp.DetectContentType(data)
+	}
+	if contentType == "" && v.encoding != "" {
+		contentType = "application/octet-stream"
+	}
+	if v.encoding != "" {
+		b = append(append(append(b, "Content-Encoding: "...), v.encoding...), "\r\n"...)
+	}
+	if v.vary {
+		b = append(b, "Vary: Accept-Encoding\r\n"...)
+	}
+	if contentType != "" {
+		b = append(append(append(b, "Content-Type: "...), contentType...), "\r\n"...)
+	}
+	b = append(b, "Last-Modified: "...)
+	b = info.ModTime().UTC().AppendFormat(b, stdhttp.TimeFormat)
+	b = append(b, "\r\nEtag: "...)
+	b = appendEtag(b, info)
+	return append(b, "\r\nAccept-Ranges: bytes\r\n"...)
 }
 
 // variant is how a file goes out: as the file name names, or as its twin

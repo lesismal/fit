@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I231.
+Status: `todo`, `doing` or `done`. The next free iteration number is I232.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -400,6 +400,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I231.
 | **Static files** | | | |
 | I229 | The static handler's lookup cache in shards, with a doorkeeper once full; fib workers never wait for its locks | — | done |
 | I230 | Small files read whole from disk with three system calls; the file pool keeps a worker a CPU and grows only for blocked ones | I229 | done |
+| I231 | A file read whole leaves no garbage, its header goes as a block, and fib's `Watch` takes no lock (fib A98) | I230 | done |
 
 ## M0, foundations
 
@@ -10271,3 +10272,46 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
    it was. Every filepool user gets it (static, cache disk tier, fastcgi; logs' compress pool has
    fewer workers than CPUs and is unchanged).
 6. **Raw `open`/`pread`/`close` on Unix only**; elsewhere `os.Open` and `io.ReadFull`, as before.
+
+### I231 No garbage for a file read whole, a header block, fib's Watch without a lock — done
+
+- **Why**: after I230 fit collected 42 times a second at 256 connections on random 8 KiB files,
+  allocating about 4 GB/s: 91.6% of it the small-file read's pooled buffer, which
+  `WriteResponseOwned` leaves to the collector for an HTTP/1 body above 4 KiB; then `fileHeader`'s
+  six objects a request and `resolve`'s two copies of every path. fib's `filewatch.Watch` took a
+  mutex on every miss (4% of the scheduling delay).
+- **Done**: `handler/static`: the read file goes out with `WriteResponseCopy` and its buffer back to
+  the pool at once; the header, but for a conditional or ranged request, as a `HeaderBlock` built by
+  `appendFileHeader` in a pooled buffer (`TestFileHeaderBlock` checks it against `fileHeader`); the
+  ETag appended, not formatted; `resolve` cleans a path that starts with "/" as it is. fib A98
+  (`047fd40`): `Watch` of a watched directory from a `sync.Map` mirror, no lock (fib CI quick green on
+  a rerun; its failure was `TestResponseHeaderTimeoutSkipsRetryWait`, see *Left*); fit on it.
+- **Benchmark** (.51, three rounds,
+  [bench/results/static-fewer-allocs-2026-11-21](../bench/results/static-fewer-allocs-2026-11-21/README.md)):
+  random 8 KiB 262,808 → 324,501 QPS at 256 connections and 265,439 → 327,360 at 512 (+23%; nginx
+  325,743 and 326,059); hot file and 64 KiB files unchanged. CPU a request 29.3 → 24.0 µs (nginx
+  24.4); 42 → 3 collections a second; RSS −37 MB. Below saturation (about 226k requests a second,
+  paced) every percentile is better: p50 0.37 → 0.28 ms, p90 1.06 → 0.50, p99 1.65 → 1.23-1.38.
+- **Found on the way**: at saturation the p99 rose at 128 and 256 connections (2.1-2.5 → 5.2-8.6 ms)
+  while p50 and p90 fell, and fell at 512 (3.83 → 2.86). No single change causes it (garbage
+  collector off, Owned, a pool that never grows, the header map, the old fib: each still has it past
+  300k a second); fib's loops park in Go's poller and, with no P idle, wait for sysmon's 10 ms look.
+  `loop_wait block` is worse. Requested of fib as A99. Port 8090 is not reserved from .51's widened
+  ephemeral range: a readiness probe connected to itself and held it; the bench scripts use 8082.
+- **Left**: fib A99; fib's `TestResponseHeaderTimeoutSkipsRetryWait` failed once more at its 2 s
+  margin (widened three times before), a likely bug in the client's retry rather than the margin.
+
+**Decisions pending review** (2026-11-21):
+
+1. **Take the throughput and the shorter tail below saturation over the saturated p99 at 128 and 256
+   connections**, since the latter comes from fib's loop wake-ups (A99), which slower code hid by
+   wasting CPU, and comes back whenever fit gets faster. The user's rule against trading p99 for small
+   throughput is why this is listed here: the gain is 23%, and the p99 below saturation is better.
+2. **fit moves to fib `047fd40`** although the old `Watch`'s mutex gave a shorter saturated p99 at
+   256 connections (2.5-3.6 ms against 5.2-6.6) for 1% less throughput: it did so by parking pool
+   workers, and below saturation the two are the same.
+3. **`WriteResponseCopy`, not a fib change to `WriteResponseOwned`**: a copy of 8 KiB a request
+   costs less than the garbage did; giving owned HTTP/1 bodies back to the pool once sent is left to
+   fib.
+4. **The header block only on the read-whole path**; the memory cache shares one header map across
+   responses already, and the large path sets the header for SendFile.

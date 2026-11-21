@@ -1,0 +1,5 @@
+locked 21:17:20
+fit.rand-256.r1 rps=324347.82 50%=762.00us 90%=0.91ms 99%=5.50ms 
+fit-block.rand-256.r1 rps=296926.75 50%=0.88ms 90%=0.99ms 99%=7.69ms 
+fit.rand-512.r1 rps=327336.51 50%=1.52ms 90%=1.78ms 99%=3.17ms 
+fit-block.rand-512.r1 rps=299484.76 50%=1.75ms 90%=2.04ms 99%=8.89ms 

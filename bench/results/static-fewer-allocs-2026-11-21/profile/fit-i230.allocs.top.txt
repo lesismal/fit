@@ -1,0 +1,34 @@
+File: fit-main
+Build ID: 6570d5ad455a609c3d0e9e6b77db8bd9e1cf7cc2
+Type: alloc_space
+Time: 2026-11-21 20:43:39 +08
+Duration: 10s, Total samples = 43.42GB 
+Showing nodes accounting for 42.78GB, 98.51% of 43.42GB total
+Dropped 82 nodes (cum <= 0.22GB)
+Showing top 25 nodes out of 30
+      flat  flat%   sum%        cum   cum%
+   39.78GB 91.60% 91.60%    39.78GB 91.60%  github.com/lesismal/fib/bufferpool.Get
+    1.20GB  2.76% 94.36%     1.37GB  3.16%  github.com/lesismal/fit/handler/static.fileHeader
+    0.63GB  1.46% 95.82%     1.36GB  3.12%  github.com/lesismal/fit/handler/static.(*Static).resolve
+    0.51GB  1.18% 97.00%     0.59GB  1.36%  os.lstatNolog
+    0.36GB  0.83% 97.83%     0.65GB  1.50%  github.com/lesismal/fit/handler/static.(*Static).queue
+    0.29GB  0.68% 98.51%     0.29GB  0.68%  time.newTimer
+         0     0% 98.51%     4.28GB  9.86%  github.com/lesismal/fib/core.(*Connection).RunTask
+         0     0% 98.51%     4.28GB  9.86%  github.com/lesismal/fib/core.(*Connection).process
+         0     0% 98.51%     4.28GB  9.86%  github.com/lesismal/fib/core.(*Connection).readLoop
+         0     0% 98.51%     4.28GB  9.86%  github.com/lesismal/fib/core.(*Connection).readRound
+         0     0% 98.51%     0.79GB  1.83%  github.com/lesismal/fib/http.(*ServerHandler).OnData
+         0     0% 98.51%     0.79GB  1.83%  github.com/lesismal/fib/http.(*ServerHandler).drive
+         0     0% 98.51%     0.79GB  1.83%  github.com/lesismal/fib/http.(*ServerHandler).serveParsed
+         0     0% 98.51%     0.65GB  1.50%  github.com/lesismal/fib/http.serveRequest (inline)
+         0     0% 98.51%     0.65GB  1.50%  github.com/lesismal/fib/http.serveRequestOn
+         0     0% 98.51%     4.28GB  9.86%  github.com/lesismal/fib/taskpool.(*adaptivePool).work
+         0     0% 98.51%     4.28GB  9.86%  github.com/lesismal/fib/taskpool.(*adaptivePool).worker
+         0     0% 98.51%     4.28GB  9.86%  github.com/lesismal/fib/taskpool.(*executor).call
+         0     0% 98.51%     0.65GB  1.50%  github.com/lesismal/fit/handler/static.(*Static).ServeHTTP
+         0     0% 98.51%    37.74GB 86.90%  github.com/lesismal/fit/handler/static.(*Static).answer
+         0     0% 98.51%     1.40GB  3.22%  github.com/lesismal/fit/handler/static.(*Static).find
+         0     0% 98.51%    39.14GB 90.13%  github.com/lesismal/fit/handler/static.(*Static).queue.func3
+         0     0% 98.51%    37.74GB 86.90%  github.com/lesismal/fit/handler/static.(*Static).sendFromDisk
+         0     0% 98.51%    39.13GB 90.11%  github.com/lesismal/fit/handler/static.(*Static).serve
+         0     0% 98.51%    36.36GB 83.74%  github.com/lesismal/fit/handler/static.readSmall

@@ -8138,3 +8138,13 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   request against 17 (nginx 7.7); 64 KiB files +8.2%; hot file unchanged. Results in `bench/results/static-small-reads-2026-11-21`.
 - **Open**: 30 µs of CPU a request against nginx's 24; fib `filewatch.Watch`'s mutex; GC rate;
   decisions pending review in the plan section.
+
+### I231 No garbage for a file read whole, fib's Watch without a lock — done
+
+- **Change**: `WriteResponseCopy` and the read buffer back to the pool, the header as a block, no
+  copy of a clean path; fib A98 (`047fd40`) for `Watch`.
+- **Benchmark** (.51, random 8 KiB): 263k/265k → 325k/327k QPS at 256/512 connections, level with
+  nginx; 24 µs of CPU a request (nginx 24.4); 42 → 3 collections a second; below saturation every
+  percentile better. Results in `bench/results/static-fewer-allocs-2026-11-21`.
+- **Open**: at saturation the p99 at 128/256 connections is 5-8 ms, fib A99 (loops woken late when
+  no P idles); fib's `TestResponseHeaderTimeoutSkipsRetryWait` flake; decisions pending review.

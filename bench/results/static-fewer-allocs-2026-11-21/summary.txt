@@ -1,0 +1,27 @@
+fit-main.rand-256.r1 rps=264177.28 srvcpu=7.72 clicpu=3.35 rss_kb=272940 50%=0.87ms 90%=1.28ms 99%=2.50ms  errs=0
+fit-i231.rand-256.r1 rps=324262.84 srvcpu=7.80 clicpu=4.39 rss_kb=236884 50%=760.00us 90%=0.93ms 99%=5.92ms  errs=0
+fit-main.rand-512.r1 rps=265372.18 srvcpu=7.78 clicpu=3.44 rss_kb=279104 50%=1.77ms 90%=2.56ms 99%=3.96ms  errs=0
+fit-i231.rand-512.r1 rps=327320.78 srvcpu=7.85 clicpu=4.45 rss_kb=240028 50%=1.52ms 90%=1.79ms 99%=3.58ms  errs=0
+fit-main.hot-256.r1 rps=577305.67 srvcpu=7.94 clicpu=6.87 rss_kb=49704 50%=396.00us 90%=775.00us 99%=1.28ms  errs=0
+fit-i231.hot-256.r1 rps=580986.37 srvcpu=7.94 clicpu=7.12 rss_kb=47952 50%=389.00us 90%=772.00us 99%=1.35ms  errs=0
+fit-main.mid-256.r1 rps=209317.52 srvcpu=7.84 clicpu=6.71 rss_kb=222720 50%=1.09ms 90%=1.96ms 99%=3.33ms  errs=0
+fit-i231.mid-256.r1 rps=210629.19 srvcpu=7.84 clicpu=6.76 rss_kb=221484 50%=1.08ms 90%=1.95ms 99%=3.35ms  errs=0
+fit-main.rand-256.r2 rps=262808.26 srvcpu=7.69 clicpu=3.36 rss_kb=274620 50%=0.88ms 90%=1.29ms 99%=2.32ms  errs=0
+fit-i231.rand-256.r2 rps=324500.98 srvcpu=7.82 clicpu=4.38 rss_kb=239020 50%=760.00us 90%=0.92ms 99%=5.22ms  errs=0
+fit-main.rand-512.r2 rps=265438.95 srvcpu=7.79 clicpu=3.45 rss_kb=276564 50%=1.76ms 90%=2.54ms 99%=3.82ms  errs=0
+fit-i231.rand-512.r2 rps=327799.18 srvcpu=7.85 clicpu=4.46 rss_kb=239780 50%=1.52ms 90%=1.77ms 99%=2.72ms  errs=0
+fit-main.hot-256.r2 rps=578852.57 srvcpu=7.93 clicpu=6.94 rss_kb=47952 50%=396.00us 90%=773.00us 99%=1.28ms  errs=0
+fit-i231.hot-256.r2 rps=579303.71 srvcpu=7.94 clicpu=6.94 rss_kb=48876 50%=395.00us 90%=772.00us 99%=1.28ms  errs=0
+fit-main.mid-256.r2 rps=209817.14 srvcpu=7.85 clicpu=6.73 rss_kb=225128 50%=1.09ms 90%=1.95ms 99%=3.32ms  errs=0
+fit-i231.mid-256.r2 rps=211861.76 srvcpu=7.83 clicpu=6.78 rss_kb=224304 50%=1.07ms 90%=1.95ms 99%=3.34ms  errs=0
+fit-main.rand-256.r3 rps=261371.23 srvcpu=7.69 clicpu=3.63 rss_kb=279068 50%=0.88ms 90%=1.30ms 99%=2.45ms  errs=0
+fit-i231.rand-256.r3 rps=324755.47 srvcpu=7.82 clicpu=4.38 rss_kb=239948 50%=761.00us 90%=0.92ms 99%=5.60ms  errs=0
+fit-main.rand-512.r3 rps=265699.06 srvcpu=7.78 clicpu=3.47 rss_kb=277496 50%=1.77ms 90%=2.56ms 99%=3.83ms  errs=0
+fit-i231.rand-512.r3 rps=327360.33 srvcpu=7.85 clicpu=4.46 rss_kb=239316 50%=1.52ms 90%=1.77ms 99%=2.86ms  errs=0
+fit-main.hot-256.r3 rps=579258.28 srvcpu=7.94 clicpu=6.92 rss_kb=47936 50%=396.00us 90%=769.00us 99%=1.22ms  errs=0
+fit-i231.hot-256.r3 rps=580369.48 srvcpu=7.93 clicpu=6.93 rss_kb=47944 50%=394.00us 90%=770.00us 99%=1.26ms  errs=0
+fit-main.mid-256.r3 rps=210032.82 srvcpu=7.84 clicpu=6.74 rss_kb=222396 50%=1.09ms 90%=1.95ms 99%=3.33ms  errs=0
+fit-i231.mid-256.r3 rps=211472.21 srvcpu=7.83 clicpu=6.79 rss_kb=223820 50%=1.08ms 90%=1.95ms 99%=3.35ms  errs=0
+fit-main syscalls: all=6.00 openat=0.97 read=0.00 pread64=0.96 close=0.97 newfstat=0.00 newfstatat=0.96 fcntl=0.00 lseek=0.00 epoll_ctl=0.03 sendto=0.00 recvfrom=0.97 
+fit-i231 syscalls: all=5.82 openat=0.96 read=0.00 pread64=0.95 close=0.96 newfstat=0.00 newfstatat=0.95 fcntl=0.00 lseek=0.00 epoll_ctl=0.01 sendto=0.00 recvfrom=0.96 
+done 20:59:13

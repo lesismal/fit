@@ -5714,3 +5714,11 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **压测**（.51，随机 8 KiB，512 并发）：22.2 万 → 25.9 万 QPS（nginx 的 79.3%，原为 68.0%），p99 6.94 → 3.94 ms；随后单独测量
   的短读再加约 2%，约 26.5 万（81%），每请求系统调用 6 次，原为 17 次（nginx 7.7）；64 KiB 文件 +8.2%；热文件不变。结果在 `bench/results/static-small-reads-2026-11-21`。
 - **未完成**：每请求 CPU 30 µs 对 nginx 24 µs；fib `filewatch.Watch` 的互斥锁；GC 频率；待审查的决定见计划章节。
+
+### I231 整读的文件不再产生垃圾，fib 的 Watch 不再加锁 — done
+
+- **改动**：`WriteResponseCopy`，读缓冲区立即还池，响应头以块发送，干净路径不再复制；`Watch` 用 fib A98（`047fd40`）。
+- **压测**（.51，随机 8 KiB）：256/512 并发 26.3 万/26.5 万 → 32.5 万/32.7 万 QPS，与 nginx 持平；每请求 CPU 24 µs（nginx
+  24.4）；GC 每秒 42 → 3 次；低于饱和时各分位都更好。结果在 `bench/results/static-fewer-allocs-2026-11-21`。
+- **未完成**：饱和时 128/256 并发 p99 为 5-8 ms，fib A99（没有空闲 P 时循环被晚唤醒）；fib 的
+  `TestResponseHeaderTimeoutSkipsRetryWait` 偶发失败；待审查的决定。

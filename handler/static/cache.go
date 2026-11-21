@@ -550,7 +550,11 @@ func (c *cache) forget(full string) {
 func (s *Static) resolve(name string) *lookup {
 	l := &lookup{checked: time.Now(), gen: s.cache.gen.Load()}
 	dir := name == "" || strings.HasSuffix(name, "/")
-	name = strings.TrimPrefix(path.Clean("/"+name), "/")
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	// A request path written clean, as most are, is cleaned without a copy.
+	name = strings.TrimPrefix(path.Clean(name), "/")
 	l.rel, l.deps = name, []string{name}
 	// Watched before the disk is looked at, so that no change after the
 	// look goes unreported.
@@ -683,19 +687,28 @@ func serveMemory(c *fibhttp.Context, name string, e *entry) {
 	_ = c.WriteResponse(fibhttp.Response{StatusCode: w.status, Header: w.header, Body: w.body.Bytes()})
 }
 
-// serveOwned answers with data, a whole file read into a buffer of package
-// bufferpool, as serveMemory answers with a file the cache holds, and gives
-// the buffer back: through WriteResponseOwned, which hands it to the
-// response, or once a conditional or ranged answer has been gathered from
-// it.
-func serveOwned(c *fibhttp.Context, name string, h stdhttp.Header, modTime time.Time, data []byte) {
-	if !hasConditions(c.Request) {
-		_ = c.WriteResponseOwned(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: h, Body: data})
+// serveRead answers with data, the whole file v names, which info
+// describes, read into a buffer of package bufferpool, as serveMemory
+// answers with a file the cache holds, and gives the buffer back. The
+// response is written with WriteResponseCopy, whose copy the send path
+// gives back to the pool as it is done with it, where WriteResponseOwned
+// would leave a body above a small reply's to the collector on HTTP/1; and
+// its header as a block of lines built in a pooled buffer, with no map nor
+// strings made for it, but for a conditional or ranged request, which
+// ServeContent answers.
+func serveRead(c *fibhttp.Context, v variant, info fs.FileInfo, data []byte) {
+	defer bufferpool.Put(data)
+	if hasConditions(c.Request) {
+		serveMemory(c, v.name, &entry{data: data, header: fileHeader(v, info, data), modTime: info.ModTime()})
 		return
 	}
-	serveMemory(c, name, &entry{data: data, header: h, modTime: modTime})
-	bufferpool.Put(data)
+	block := appendFileHeader(bufferpool.Get(headerBlockSize)[:0], v, info, data)
+	_ = c.WriteResponseCopy(fibhttp.Response{StatusCode: stdhttp.StatusOK, HeaderBlock: block, Body: data})
+	bufferpool.Put(block)
 }
+
+// headerBlockSize is room for the lines appendFileHeader writes.
+const headerBlockSize = 512
 
 // gathered is a ResponseWriter that keeps what it is given. What
 // ServeContent writes of a file in memory is no larger than the file, but

@@ -1,0 +1,25 @@
+Type: delay
+Showing nodes accounting for 16602.48ms, 99.21% of 16734.21ms total
+Dropped 182 nodes (cum <= 83.67ms)
+Showing top 20 nodes out of 46
+      flat  flat%   sum%        cum   cum%
+ 8653.88ms 51.71% 51.71%  8653.88ms 51.71%  runtime.chansend1
+ 4199.84ms 25.10% 76.81%  4199.84ms 25.10%  runtime.Gosched
+ 3451.78ms 20.63% 97.44%  3451.78ms 20.63%  runtime.selectnbsend
+  163.69ms  0.98% 98.42%   163.69ms  0.98%  sync.(*Mutex).Unlock
+  127.88ms  0.76% 99.18%   142.97ms  0.85%  sync.(*RWMutex).Unlock
+    1.84ms 0.011% 99.19%  3458.99ms 20.67%  github.com/lesismal/fib/http.(*ServerHandler).OnData
+    1.02ms 0.0061% 99.20%  3460.35ms 20.68%  github.com/lesismal/fib/taskpool.(*executor).call
+    0.71ms 0.0043% 99.20%   149.02ms  0.89%  github.com/lesismal/fib/http.(*Context).writeWhole
+    0.45ms 0.0027% 99.20%   159.58ms  0.95%  github.com/lesismal/fit/handler/static.(*Static).answer
+    0.37ms 0.0022% 99.21%   148.01ms  0.88%  github.com/lesismal/fib/http.(*Context).sendResponse
+    0.23ms 0.0014% 99.21%  3452.16ms 20.63%  github.com/lesismal/fit/internal/filepool.(*Pool).Submit
+    0.18ms 0.0011% 99.21%   151.54ms  0.91%  github.com/lesismal/fit/handler/static.serveRead
+    0.17ms 0.001% 99.21%   146.02ms  0.87%  github.com/lesismal/fib/core.(*Connection).SendParts
+    0.13ms 0.00077% 99.21%   320.27ms  1.91%  github.com/lesismal/fit/handler/static.(*Static).serve
+    0.09ms 0.00051% 99.21%  3452.91ms 20.63%  github.com/lesismal/fit/handler/static.(*Static).queue
+    0.06ms 0.00038% 99.21%  3455.10ms 20.65%  github.com/lesismal/fib/http.serveRequestOn
+    0.05ms 0.00031% 99.21%   148.31ms  0.89%  github.com/lesismal/fib/http.(*Context).writeResponse
+    0.03ms 0.0002% 99.21%  3453.07ms 20.63%  github.com/lesismal/fit/handler/static.(*Static).ServeHTTP
+    0.03ms 0.00019% 99.21%  3455.03ms 20.65%  github.com/lesismal/fit/listener.(*dispatcher).ServeHTTP
+    0.03ms 0.00017% 99.21%  3459.53ms 20.67%  github.com/lesismal/fib/http.(*ServerHandler).drive

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -461,5 +462,43 @@ func TestProvisionNoCwd(t *testing.T) {
 	}
 	if _, err := load(t, `{"root": "rel"}`); err == nil || !strings.Contains(err.Error(), "root") {
 		t.Errorf("err %v", err)
+	}
+}
+
+// TestFileHeaderBlock checks that the header block appendFileHeader writes
+// holds what fileHeader makes, for a type by name, one sniffed, a twin's,
+// and with Vary.
+func TestFileHeaderBlock(t *testing.T) {
+	info, err := os.Stat(tree(t, map[string]string{"a": "a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := []byte("<html><body>x</body></html>")
+	for _, tt := range []struct {
+		v    variant
+		data []byte
+	}{
+		{variant{name: "a.css"}, []byte("body{}")},
+		{variant{name: "noext"}, html},
+		{variant{name: "noext"}, nil},
+		{variant{name: "a.js", encoding: "br", vary: true}, []byte("x")},
+		{variant{name: "noext", encoding: "gzip"}, html},
+	} {
+		want := fileHeader(tt.v, info, tt.data)
+		block := string(appendFileHeader(nil, tt.v, info, tt.data))
+		if !strings.HasSuffix(block, "\r\n") {
+			t.Fatalf("%+v: block %q", tt.v, block)
+		}
+		got := stdhttp.Header{}
+		for _, line := range strings.Split(strings.TrimSuffix(block, "\r\n"), "\r\n") {
+			name, value, ok := strings.Cut(line, ": ")
+			if !ok {
+				t.Fatalf("%+v: line %q", tt.v, line)
+			}
+			got[name] = append(got[name], value)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%+v:\nblock %v\nmap   %v", tt.v, got, want)
+		}
 	}
 }

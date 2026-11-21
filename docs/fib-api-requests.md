@@ -2807,3 +2807,30 @@ get 404).
 **Problem.** A client masked each frame into a new slice, where the tunnel's own client had used the
 buffer pool. Now a client's send allocates nothing (`TestClientWriteMessageAllocs`).
 
+## A98: Watch of a directory watched already without the lock
+
+**Status.** Requested and done on 2026-11-21, fib `047fd40`, from I231.
+
+**Problem.** The static handler asks `filewatch.Watcher.Watch` for the directory of every path it
+looks up on the disk, and each call took the Watcher's mutex: 4% of the scheduling delay of fit's
+file pool on random files (an execution trace on .51).
+
+**API.** None: `Watch` finds a watched directory in a `sync.Map` mirror of the set, changed under the
+mutex, with no lock taken and nothing allocated. `BenchmarkWatchWatched`: 29 → 12.5 ns alone, 41.5 →
+3.0 ns from 8 CPUs at once.
+
+## A99: Event loops woken late on a saturated process
+
+**Status.** Requested on 2026-11-21, from I231; open.
+
+**Problem.** A loop with no event ready parks in Go's network poller, which the runtime looks at
+when a P runs out of work, or else from sysmon every 10 ms. When handlers and file work keep every P
+busy, a parked loop waits up to that long for its next event: fit's static handler at 320k requests a
+second on 8 CPUs had a p99 of 5-8 ms at 128 and 256 connections against 2.2-2.5 ms for a build
+slower by a fifth, whose wasted CPU left Ps idle. Below saturation (226k a second) the faster build
+was better at every percentile (p99 1.2-1.4 against 1.65 ms). `loop_wait block` made it worse
+(p99 7.7-8.9 ms, 8% less throughput): the loop wakes in its thread, then waits for a P. Earlier
+attempts (`fd-sharded dispatch`, waiter variants) are in fib's own notes.
+
+**Wanted.** A loop's events found without waiting for an idle P: such as fib's workers polling a
+loop's epoll without blocking as they finish a task, when it has gone a while without a round.
