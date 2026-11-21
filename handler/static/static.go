@@ -14,9 +14,15 @@
 // served from memory while the file's stamp, its size, modification and
 // status change times and inode, is what it was when they were read, which
 // tells apart a file replaced by one of the same size and modification time.
-// A check_interval of 0 looks at the disk for every request. What it keeps
-// of request paths is bounded, to 16384 paths and 16 MiB, and a path longer
-// than 4096 bytes is not kept. Anything else, a path not seen lately, a file
+// A check_interval of 0 looks at the disk for every request, and keeps
+// nothing of request paths. What it keeps of them is bounded, to 16384 paths
+// and 16 MiB, and a path longer than 4096 bytes is not kept; they are split
+// in shards by a hash of the path, each with its own lock and share of the
+// bounds, and once a shard is full a path is kept only the second time it is
+// asked for within a while, so that paths asked for once, as of a set of
+// files far larger than the cache asked for at random, do not push out
+// others and wait on each other to. A fib worker never waits for the cache's
+// locks: a request whose lock is taken goes to the file pool. Anything else, a path not seen lately, a file
 // to read, open or list, goes to a pool of goroutines of the package's own
 // for the disk, bounded in size and queue, with a timeout, and is answered
 // from there. A file larger
@@ -206,10 +212,7 @@ func (s *Static) Provision(ctx *module.Context) error {
 	}
 	s.cache.packs = len(s.compress)
 	s.cache.entries = make(map[string]*entry)
-	s.cache.lookups = make(map[string]*lookup)
-	s.cache.maxLookups = DefaultMaxLookups
-	s.cache.maxLookupBytes = DefaultMaxLookupBytes
-	s.cache.index = make(map[string]map[string]struct{})
+	s.cache.initLookups(lookupShards(), DefaultMaxLookups, DefaultMaxLookupBytes)
 	s.cache.check = DefaultCheckInterval
 	if s.CheckInterval != nil {
 		s.cache.check = s.CheckInterval.Std()
@@ -307,9 +310,11 @@ func (s *Static) serve(c *fibhttp.Context, name, urlPath string, q *queued) bool
 // find returns what the cache knows of name, a request path within the
 // root, when it was learned within check_interval; or, with disk, what a look
 // at the disk finds, which the cache then keeps. Without disk it returns nil
-// for a name the cache does not know.
+// for a name the cache does not know, or cannot tell at once.
 func (s *Static) find(name string, disk bool) *lookup {
-	if l := s.cache.lookup(name); l != nil {
+	h := s.cache.hash(name)
+	// Without disk, on a fib worker, the cache's lock is not waited for.
+	if l := s.cache.lookup(name, h, disk); l != nil {
 		return l
 	}
 	if !disk {
@@ -319,7 +324,7 @@ func (s *Static) find(name string, disk bool) *lookup {
 	// whole for as long as it keeps the name.
 	name = strings.Clone(name)
 	l := s.resolve(name)
-	s.cache.keep(name, l)
+	s.cache.keep(name, h, l)
 	return l
 }
 
@@ -333,7 +338,7 @@ func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queue
 		return true
 	}
 	v, full, info, stamp := s.variant(c.Request, l)
-	e := s.cache.current(full, stamp)
+	e := s.cache.current(full, stamp, q != nil)
 	if e == nil && q != nil && s.cache.fits(full, info.Size()) {
 		e = s.cache.load(full, info, stamp, v)
 	}

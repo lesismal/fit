@@ -2,11 +2,14 @@ package static
 
 import (
 	"bytes"
+	"hash/maphash"
 	"io/fs"
+	"math/bits"
 	stdhttp "net/http"
 	"os"
 	"path"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,31 +49,129 @@ const lookupOverhead = 256
 // without going through them all. A lookup no watch vouches for, where the
 // system has none or for a file that is a symbolic link, is trusted for the
 // check interval.
+//
+// The lookups are split in shards by a hash of the request path, each with
+// its own lock, index and share of the bounds, so that the file pool's
+// workers keeping lookups of different paths do not wait for each other,
+// nor fib's workers reading them. Once a shard is full, a path is kept only
+// the second time it is looked up within a while (see doorkeeper), so that
+// paths asked for once, as of a set of files far larger than the cache
+// asked for at random, do not each take a shard's lock to push out another
+// as rarely asked for. The contents of files are under a lock of their own.
 type cache struct {
 	maxFile  int64
 	maxBytes int64
 	// packs is how many compressed copies a file kept may have: one for
 	// each of the handler's compress encodings.
-	packs          int
-	maxLookups     int
-	maxLookupBytes int64
-	// check is how long a lookup is trusted; 0 trusts none.
-	check time.Duration
+	packs int
 
+	// check is how long a lookup is trusted; 0 trusts none, and keeps none.
+	check time.Duration
 	// gen moves on with every change a watch reports, so that a lookup
 	// resolved while one arrived is not kept as if it were current.
 	gen atomic.Uint64
 	// watching says the watch that vouches for watched lookups runs.
 	watching atomic.Bool
 
+	// seed hashes request paths to their shard and their doorkeeper bits;
+	// shift takes a shard's number from a hash's top bits.
+	seed   maphash.Seed
+	shards []lookupShard
+	shift  uint
+	seen   doorkeeper
+
+	// mu guards entries and bytes, the contents of files.
+	mu      sync.RWMutex
+	entries map[string]*entry
+	bytes   int64
+}
+
+// lookupShard holds the lookups of the request paths whose hash falls on
+// it, with their index, under its own lock, and bounded by its share of
+// the cache's bounds.
+type lookupShard struct {
 	mu          sync.RWMutex
 	lookups     map[string]*lookup
 	lookupBytes int64
 	// index holds, for each dependency a lookup has (see lookup.deps), the
 	// request paths whose lookups have it.
-	index   map[string]map[string]struct{}
-	entries map[string]*entry
-	bytes   int64
+	index      map[string]depNames
+	maxLookups int
+	maxBytes   int64
+	// full says the shard holds as many lookups, or as many bytes, as it
+	// may, so that keeping one more pushes another out: the doorkeeper then
+	// decides whether a path is kept.
+	full atomic.Bool
+	// The padding keeps a shard's lock off the cache line of the next
+	// shard's.
+	_ [64]byte
+}
+
+// depNames are the request paths whose lookups have a dependency: most
+// often one, held without a map of its own.
+type depNames struct {
+	one    string
+	single bool
+	more   map[string]struct{}
+}
+
+// add returns d with name.
+func (d depNames) add(name string) depNames {
+	switch {
+	case d.more != nil:
+		d.more[name] = struct{}{}
+	case !d.single:
+		return depNames{one: name, single: true}
+	case d.one != name:
+		return depNames{more: map[string]struct{}{d.one: {}, name: {}}}
+	}
+	return d
+}
+
+// remove returns d without name, and whether that leaves none.
+func (d depNames) remove(name string) (depNames, bool) {
+	if d.more != nil {
+		delete(d.more, name)
+		return d, len(d.more) == 0
+	}
+	if d.single && d.one == name {
+		return depNames{}, true
+	}
+	return d, !d.single
+}
+
+// lookupShards is how many shards a cache's lookups are split in: twice
+// the file pool's workers, which keep lookups, rounded up to a power of
+// two, and from 16 to 256.
+func lookupShards() int {
+	n := 2 * max(16, 4*goruntime.GOMAXPROCS(0))
+	return min(max(16, 1<<bits.Len(uint(n-1))), 256)
+}
+
+// initLookups splits the lookups in n shards, a power of two, with
+// maxLookups and maxBytes shared among them.
+func (c *cache) initLookups(n, maxLookups int, maxBytes int64) {
+	c.seed = maphash.MakeSeed()
+	c.shards = make([]lookupShard, n)
+	c.shift = uint(64 - bits.TrailingZeros(uint(n)))
+	for i := range c.shards {
+		sh := &c.shards[i]
+		sh.lookups = make(map[string]*lookup)
+		sh.index = make(map[string]depNames)
+		sh.maxLookups = max(1, maxLookups/n)
+		sh.maxBytes = maxBytes / int64(n)
+	}
+	c.seen.init(maxLookups)
+}
+
+// hash is name's hash, which picks its shard and its doorkeeper bits.
+func (c *cache) hash(name string) uint64 {
+	return maphash.String(c.seed, name)
+}
+
+// shard is the shard of the request path whose hash is h.
+func (c *cache) shard(h uint64) *lookupShard {
+	return &c.shards[h>>c.shift&uint64(len(c.shards)-1)]
 }
 
 // lookup is what a request path named when it was last looked at: a file,
@@ -130,12 +231,22 @@ type entry struct {
 	packs []atomic.Pointer[entry]
 }
 
-// lookup returns what the cache knows of name, if it learned it within the
-// check interval.
-func (c *cache) lookup(name string) *lookup {
-	c.mu.RLock()
-	l := c.lookups[name]
-	c.mu.RUnlock()
+// lookup returns what the cache knows of name, whose hash is h, if it
+// learned it within the check interval. Without wait, as on a fib worker,
+// it returns nil rather than wait for the shard's lock, which a file pool
+// worker keeping a lookup holds.
+func (c *cache) lookup(name string, h uint64, wait bool) *lookup {
+	if c.check <= 0 {
+		return nil
+	}
+	sh := c.shard(h)
+	if wait {
+		sh.mu.RLock()
+	} else if !sh.mu.TryRLock() {
+		return nil
+	}
+	l := sh.lookups[name]
+	sh.mu.RUnlock()
 	if l == nil {
 		return nil
 	}
@@ -148,12 +259,18 @@ func (c *cache) lookup(name string) *lookup {
 	return l
 }
 
-// keep remembers l for name, forgetting other paths, any of them, while
-// the cache holds as many, or as many bytes, as it may. A name longer than
-// MaxLookupPath is not remembered, nor is l when a watch reported a change
-// after it began.
-func (c *cache) keep(name string, l *lookup) {
-	if len(name) > MaxLookupPath {
+// keep remembers l for name, whose hash is h, forgetting other paths of its
+// shard, any of them, while the shard holds as many, or as many bytes, as
+// it may. A name longer than MaxLookupPath is not remembered, nor is l when
+// a watch reported a change after it began, nor anything with a check
+// interval of 0, which trusts nothing kept. Once the shard is full, name is
+// remembered only when the doorkeeper saw it lately.
+func (c *cache) keep(name string, h uint64, l *lookup) {
+	if len(name) > MaxLookupPath || c.check <= 0 {
+		return
+	}
+	sh := c.shard(h)
+	if sh.full.Load() && !c.seen.admit(h) {
 		return
 	}
 	l.size = int64(len(name)+len(l.name)+len(l.full)) + lookupOverhead
@@ -163,31 +280,29 @@ func (c *cache) keep(name string, l *lookup) {
 	for _, d := range l.deps {
 		l.size += int64(len(d)) + indexOverhead
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	t := lockWait(&sh.mu, siteKeep)
+	defer lockHold(&sh.mu, siteKeep, t)
 	if c.gen.Load() != l.gen {
 		// Whatever changed may be what l found.
 		return
 	}
-	if old, ok := c.lookups[name]; ok {
-		c.dropLocked(name, old)
+	if old, ok := sh.lookups[name]; ok {
+		sh.dropLocked(name, old)
 	}
-	for other, ol := range c.lookups {
-		if len(c.lookups) < c.maxLookups && c.lookupBytes+l.size <= c.maxLookupBytes {
+	pushed := false
+	for other, ol := range sh.lookups {
+		if len(sh.lookups) < sh.maxLookups && sh.lookupBytes+l.size <= sh.maxBytes {
 			break
 		}
-		c.dropLocked(other, ol)
+		sh.dropLocked(other, ol)
+		pushed = true
 	}
-	c.lookups[name] = l
-	c.lookupBytes += l.size
+	sh.lookups[name] = l
+	sh.lookupBytes += l.size
 	for _, d := range l.deps {
-		names := c.index[d]
-		if names == nil {
-			names = make(map[string]struct{})
-			c.index[d] = names
-		}
-		names[name] = struct{}{}
+		sh.index[d] = sh.index[d].add(name)
 	}
+	sh.full.Store(pushed || len(sh.lookups) >= sh.maxLookups)
 }
 
 // indexOverhead is what a dependency costs in the index beyond its bytes,
@@ -195,24 +310,34 @@ func (c *cache) keep(name string, l *lookup) {
 const indexOverhead = 64
 
 // dropLocked forgets l, the lookup of name.
-func (c *cache) dropLocked(name string, l *lookup) {
-	delete(c.lookups, name)
-	c.lookupBytes -= l.size
+func (sh *lookupShard) dropLocked(name string, l *lookup) {
+	delete(sh.lookups, name)
+	sh.lookupBytes -= l.size
 	for _, d := range l.deps {
-		if names := c.index[d]; names != nil {
-			delete(names, name)
-			if len(names) == 0 {
-				delete(c.index, d)
+		if names, ok := sh.index[d]; ok {
+			if names, empty := names.remove(name); empty {
+				delete(sh.index, d)
+			} else {
+				sh.index[d] = names
 			}
 		}
 	}
 }
 
 // dropDependentsLocked forgets the lookups that depend on dep.
-func (c *cache) dropDependentsLocked(dep string) {
-	for name := range c.index[dep] {
-		if l := c.lookups[name]; l != nil {
-			c.dropLocked(name, l)
+func (sh *lookupShard) dropDependentsLocked(dep string) {
+	names, ok := sh.index[dep]
+	switch {
+	case !ok:
+	case names.more == nil:
+		if l := sh.lookups[names.one]; l != nil {
+			sh.dropLocked(names.one, l)
+		}
+	default:
+		for name := range names.more {
+			if l := sh.lookups[name]; l != nil {
+				sh.dropLocked(name, l)
+			}
 		}
 	}
 }
@@ -230,41 +355,114 @@ func entriesOf(dir string) string {
 // may have made stale: the lookups that depend on the path it names, or
 // that go through it, a directory, or every lookup. The contents of files
 // are kept: each is checked against its file's stamp when it is served.
+// gen moves on before any shard is looked at, so that a lookup that began
+// before ev and is kept after its shard was is refused by keep, and one
+// kept before is found here.
 func (c *cache) event(ev filewatch.Event) {
 	c.gen.Add(1)
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	for i := range c.shards {
+		c.shards[i].event(ev)
+	}
+}
+
+// event is cache.event for one shard.
+func (sh *lookupShard) event(ev filewatch.Event) {
+	t := lockWait(&sh.mu, siteEvent)
+	defer lockHold(&sh.mu, siteEvent, t)
+	defer func() { sh.full.Store(len(sh.lookups) >= sh.maxLookups) }()
 	switch {
 	case ev.All:
-		clear(c.lookups)
-		clear(c.index)
-		c.lookupBytes = 0
+		clear(sh.lookups)
+		clear(sh.index)
+		sh.lookupBytes = 0
 		return
 	case ev.Dir:
 		// What was found under it, or not found there, was found in a
 		// directory not there any more.
 		prefix := ev.Name + "/"
-		for name, l := range c.lookups {
+		for name, l := range sh.lookups {
 			if l.rel == ev.Name || strings.HasPrefix(l.rel, prefix) {
-				c.dropLocked(name, l)
+				sh.dropLocked(name, l)
 			}
 		}
 	default:
-		c.dropDependentsLocked(ev.Name)
+		sh.dropDependentsLocked(ev.Name)
 		for _, enc := range encodings {
 			if original, ok := strings.CutSuffix(ev.Name, enc.suffix); ok {
 				// A twin, which its original's lookup found or not.
-				c.dropDependentsLocked(original)
+				sh.dropDependentsLocked(original)
 			}
 		}
 	}
-	c.dropDependentsLocked(entriesOf(path.Dir(ev.Name)))
+	sh.dropDependentsLocked(entriesOf(path.Dir(ev.Name)))
+}
+
+// doorkeeper remembers, roughly, which request paths were looked up lately:
+// two bits of a bitmap for each, set from its hash, which a path seen
+// before finds both set. Once a quarter of the bits are set, it forgets
+// them all and starts again, so that a path is told seen with a chance of
+// one in sixteen at most when it was not, and it remembers about as many
+// paths as the cache keeps lookups. It takes no lock: two
+// lookups at once may lose a bit, or a count, which only makes a path kept
+// a time later, or the bitmap cleared a little early or late.
+type doorkeeper struct {
+	words []atomic.Uint64
+	mask  uint64
+	// set counts the bits set since the bitmap was last cleared, and limit
+	// is how many clear it.
+	set      atomic.Int64
+	limit    int64
+	clearing atomic.Bool
+}
+
+// doorkeeperBits is how many bits the doorkeeper has for each lookup the
+// cache may keep.
+const doorkeeperBits = 8
+
+// init sizes the bitmap for a cache of n lookups.
+func (d *doorkeeper) init(n int) {
+	size := max(1<<bits.Len(uint(n*doorkeeperBits-1)), 64)
+	d.words = make([]atomic.Uint64, size/64)
+	d.mask = uint64(size - 1)
+	d.limit = int64(size / 4)
+}
+
+// admit reports whether the path whose hash is h was seen since the bitmap
+// was last cleared, and remembers it.
+func (d *doorkeeper) admit(h uint64) bool {
+	i, j := h&d.mask, h>>32&d.mask
+	wi, bi := &d.words[i/64], uint64(1)<<(i%64)
+	wj, bj := &d.words[j/64], uint64(1)<<(j%64)
+	if wi.Load()&bi != 0 && wj.Load()&bj != 0 {
+		return true
+	}
+	var added int64
+	if wi.Or(bi)&bi == 0 {
+		added++
+	}
+	if wj.Or(bj)&bj == 0 {
+		added++
+	}
+	if d.set.Add(added) >= d.limit && d.clearing.CompareAndSwap(false, true) {
+		for k := range d.words {
+			d.words[k].Store(0)
+		}
+		d.set.Store(0)
+		d.clearing.Store(false)
+	}
+	return false
 }
 
 // current returns the contents of the file at full, if the cache holds them
-// as read from the file stamp stands for.
-func (c *cache) current(full string, stamp filewatch.Stamp) *entry {
-	c.mu.RLock()
+// as read from the file stamp stands for. Without wait, as on a fib worker,
+// it returns nil rather than wait for the lock, which the file pool holds
+// to keep a file it read.
+func (c *cache) current(full string, stamp filewatch.Stamp, wait bool) *entry {
+	if wait {
+		c.mu.RLock()
+	} else if !c.mu.TryRLock() {
+		return nil
+	}
 	e := c.entries[full]
 	c.mu.RUnlock()
 	if e != nil && e.stamp == stamp {
@@ -305,8 +503,8 @@ func (c *cache) load(full string, info fs.FileInfo, stamp filewatch.Stamp, v var
 	if v.encoding == "" {
 		e.packs = packSlots(c.packs, e.header, data)
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	t := lockWait(&c.mu, siteLoad)
+	defer lockHold(&c.mu, siteLoad, t)
 	old := c.entries[full]
 	var freed int64
 	if old != nil {

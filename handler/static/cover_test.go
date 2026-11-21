@@ -79,12 +79,19 @@ func TestBrowseOrder(t *testing.T) {
 func TestCacheEdges(t *testing.T) {
 	root := tree(t, map[string]string{"a": "aaaa"})
 	full := filepath.Join(root, "a")
-	c := cache{entries: map[string]*entry{}, lookups: map[string]*lookup{}, maxLookups: 2, maxLookupBytes: 1 << 20, maxBytes: 6, maxFile: 6, check: time.Hour}
+	c := cache{entries: map[string]*entry{}, maxBytes: 6, maxFile: 6, check: time.Hour}
+	c.initLookups(1, 2, 1<<20)
+	keep := func(name string) { c.keep(name, c.hash(name), &lookup{checked: time.Now()}) }
 	for _, name := range []string{"/1", "/2", "/3"} {
-		c.keep(name, &lookup{checked: time.Now()})
+		keep(name)
 	}
-	if len(c.lookups) != 2 || c.lookups["/3"] == nil {
-		t.Fatalf("lookups %v", c.lookups)
+	// The cache is full: /3, looked up once, is not kept until it is again.
+	if got := c.known(); len(got) != 2 || got["/3"] != nil {
+		t.Fatalf("lookups %v", got)
+	}
+	keep("/3")
+	if got := c.known(); len(got) != 2 || got["/3"] == nil {
+		t.Fatalf("lookups %v", got)
 	}
 	info, _ := os.Stat(full)
 	if e := c.load(full, info, filewatch.StampOf(info), variant{name: "a"}); e == nil || c.bytes != 4 {
@@ -113,39 +120,50 @@ func TestLookupBounds(t *testing.T) {
 	if l := s.find(long, true); l == nil || l.status == 0 {
 		t.Fatalf("find of a long path: %+v", l)
 	}
-	if len(s.cache.lookups) != 0 || s.cache.lookupBytes != 0 {
-		t.Fatalf("a path longer than %d kept: %d lookups, %d bytes", MaxLookupPath, len(s.cache.lookups), s.cache.lookupBytes)
+	if n, size := s.cache.lookupTotals(); n != 0 || size != 0 {
+		t.Fatalf("a path longer than %d kept: %d lookups, %d bytes", MaxLookupPath, n, size)
 	}
-	if l := s.find(long[:MaxLookupPath], true); l == nil || len(s.cache.lookups) != 1 {
+	if l := s.find(long[:MaxLookupPath], true); l == nil || len(s.cache.known()) != 1 {
 		t.Fatalf("a path of %d bytes not kept: %+v", MaxLookupPath, l)
 	}
 
 	const bound = 64 << 10
-	c := cache{lookups: map[string]*lookup{}, maxLookups: 1 << 20, maxLookupBytes: bound, check: time.Hour}
+	c := cache{check: time.Hour}
+	c.initLookups(1, 1<<20, bound)
+	sh := &c.shards[0]
 	for i := range 1000 {
 		name := "/" + strconv.Itoa(i) + strings.Repeat("y", 1000)
-		c.keep(name, &lookup{checked: time.Now(), name: name, full: "/root" + name})
+		// Twice, since a full cache keeps a path the second time it is
+		// looked up.
+		for range 2 {
+			c.keep(name, c.hash(name), &lookup{checked: time.Now(), name: name, full: "/root" + name})
+		}
 		var sum int64
-		for k, l := range c.lookups {
+		for k, l := range sh.lookups {
 			if want := int64(3*len(k)+len("/root")) + lookupOverhead; l.size != want {
 				t.Fatalf("%s counted %d bytes", k[:8], l.size)
 			}
 			sum += l.size
 		}
-		if sum != c.lookupBytes || c.lookupBytes > bound {
-			t.Fatalf("after %d: %d bytes counted, %d held, bound %d", i, c.lookupBytes, sum, bound)
+		if sum != sh.lookupBytes || sh.lookupBytes > bound {
+			t.Fatalf("after %d: %d bytes counted, %d held, bound %d", i, sh.lookupBytes, sum, bound)
+		}
+		if sh.lookups[name] == nil {
+			t.Fatalf("after %d: the path looked up twice not kept", i)
 		}
 	}
-	if n := len(c.lookups); n == 0 || n > bound/1000 {
+	if n := len(sh.lookups); n == 0 || n > bound/1000 {
 		t.Fatalf("%d lookups kept", n)
 	}
 	// Keeping a name again replaces it, counted once.
 	name := "/again"
-	c.keep(name, &lookup{checked: time.Now()})
-	before := c.lookupBytes
-	c.keep(name, &lookup{checked: time.Now()})
-	if c.lookupBytes != before {
-		t.Fatalf("a name kept twice: %d then %d bytes", before, c.lookupBytes)
+	for range 2 {
+		c.keep(name, c.hash(name), &lookup{checked: time.Now()})
+	}
+	before := sh.lookupBytes
+	c.keep(name, c.hash(name), &lookup{checked: time.Now()})
+	if sh.lookupBytes != before || sh.lookups[name] == nil {
+		t.Fatalf("a name kept twice: %d then %d bytes", before, sh.lookupBytes)
 	}
 }
 
@@ -183,7 +201,7 @@ func TestLookupKeepsOwnName(t *testing.T) {
 	if l := s.find(name, true); l == nil || l.status != 0 {
 		t.Fatalf("find: %+v", l)
 	}
-	for key, l := range s.cache.lookups {
+	for key, l := range s.cache.known() {
 		for _, kept := range []string{key, l.name} {
 			if p := unsafe.StringData(kept); uintptr(unsafe.Pointer(p)) >= uintptr(unsafe.Pointer(&head[0])) &&
 				uintptr(unsafe.Pointer(p)) < uintptr(unsafe.Pointer(&head[0]))+uintptr(len(head)) {

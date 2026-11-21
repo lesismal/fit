@@ -1,6 +1,7 @@
 package static
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -111,10 +112,8 @@ func TestCacheEvent(t *testing.T) {
 		}
 	}
 	known := func() map[string]bool {
-		s.cache.mu.RLock()
-		defer s.cache.mu.RUnlock()
 		m := map[string]bool{}
-		for name := range s.cache.lookups {
+		for name := range s.cache.known() {
 			m[name] = true
 		}
 		return m
@@ -148,20 +147,12 @@ func TestCacheEvent(t *testing.T) {
 				t.Errorf("%+v: %s dropped %v, want %v", tt.ev, target, dropped, want)
 			}
 		}
-		s.cache.mu.RLock()
-		for dep, names := range s.cache.index {
-			for name := range names {
-				if s.cache.lookups[name] == nil {
-					t.Errorf("%+v: index %q holds %s, which is not kept", tt.ev, dep, name)
-				}
-			}
-		}
-		s.cache.mu.RUnlock()
+		s.cache.checkIndex(t, fmt.Sprintf("%+v", tt.ev))
 	}
 	// A lookup that began before a change is not kept.
 	l := s.resolve("a.txt")
 	s.cache.event(filewatch.Event{Name: "other"})
-	s.cache.keep("/a.txt", l)
+	s.cache.keep("/a.txt", s.cache.hash("/a.txt"), l)
 	if known()["/a.txt"] {
 		t.Fatal("a lookup that began before a change was kept")
 	}

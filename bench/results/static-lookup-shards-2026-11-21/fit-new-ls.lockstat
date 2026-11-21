@@ -1,0 +1,6 @@
+lockstat keep wait n=125421 mean=1.438µs p50<=63ns p90<=63ns p99<=127ns p99.9<=262.143µs max=5.733451ms
+lockstat keep hold n=125421 mean=1.029µs p50<=1.023µs p90<=2.047µs p99<=2.047µs p99.9<=16.383µs max=370.921µs
+lockstat event wait n=0
+lockstat event hold n=0
+lockstat load wait n=8207 mean=14.109µs p50<=63ns p90<=1.023µs p99<=524.287µs p99.9<=2.097151ms max=1.452388ms
+lockstat load hold n=8207 mean=218ns p50<=127ns p90<=255ns p99<=511ns p99.9<=65.535µs max=66.821µs

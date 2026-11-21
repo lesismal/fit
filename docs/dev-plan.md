@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I229.
+Status: `todo`, `doing` or `done`. The next free iteration number is I230.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -397,6 +397,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I229.
 | I226 | The LLM mesh's links use fib A52 and A53: `Abort` and `RemoteAddr` in place of the address map and the dial hook, a link above its limit holds its producers | — | done |
 | I227 | The tunnel's web proxies and console socket on fib's `websocket.Connection`, in place of their own framing | — | done |
 | I228 | The cluster's member links on fib A52, A53 and A95: `Abort`, attachments in place of the address map, calls held while a link's queue is above its limit | — | done |
+| **Static files** | | | |
+| I229 | The static handler's lookup cache in shards, with a doorkeeper once full; fib workers never wait for its locks | — | done |
 
 ## M0, foundations
 
@@ -10161,3 +10163,55 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
 4. **No separate abort for a link stuck above the limit**: a large message on a slow link may take
    long; the 45 s checks already end a stuck link.
 5. **A replaced old link is aborted**, as before.
+
+## Static files
+
+### I229 The static handler's lookup cache in shards, with a doorkeeper — done
+
+- **Why**: a load test on two hosts (10 server cores, 80 GiB of random 8 KiB files on tmpfs, 512
+  connections) gave fit 37,840 QPS against nginx's 263,182, with fit's CPUs half idle: 99.15% of the
+  mutex profile's waiting was on `cache.keep`. With 10 million files against 16384 kept paths, nearly
+  every request missed, and every miss took the handler's one cache lock for writing to keep a path it
+  would never be asked for again, pushing out another; `RWMutex` then held back the readers too, fib's
+  workers among them (rule 1). Splitting the files over 10 handlers by hand gave 2.66x, which said the
+  lock, not the disk, was the limit.
+- **Done**: `handler/static/cache.go`: the lookups in shards by a seeded `maphash` of the request
+  path (twice the file pool's workers, a power of two from 16 to 256), each with its own lock, index
+  and share of the 16384 paths / 16 MiB; a watch event moves `gen` on before it visits the shards one
+  by one, which keeps the stale-lookup guard. Once a shard is full, a path is kept only the second time
+  it is looked up (a two-bit doorkeeper, 8 bits per path the cache keeps, cleared once a quarter is
+  set: at most 1/16 false positives). fib workers take the cache's read locks with `TryRLock` and send
+  a request to the file pool when one is taken. The index holds a dependency's single path without a
+  map (no allocation under the lock); a check interval of 0 keeps nothing; the file contents keep a
+  lock of their own. `-tags fit_lockstat` measures the waits and holds of the write locks, for
+  benchmarks only. Tests: shard spread and bounds, the doorkeeper (admission, clearing, false positive
+  rate), a worker past a held lock, check 0, an event emptying a full shard, a shared dependency,
+  expiry. Coverage 98.1% → 98.3% (package, macOS).
+- **Benchmark** (.51, 8 server threads, 2.1 M files of 8 KiB, three rounds,
+  [bench/results/static-lookup-shards-2026-11-21](../bench/results/static-lookup-shards-2026-11-21/README.md)):
+  random at 512 connections 113,157 → 220,229 QPS (1.95x; 34.7% → 67.6% of nginx), at 256 1.92x; the
+  hot file unchanged (580k, nginx 474k). Server CPU 5.3 → 7.93 of 8; CPU per request 46.9 → 36.0 µs
+  (nginx 24.3). p50 4.29 → 2.19 ms, p99 unchanged (6.9 ms). Write locks 2.18 M → 125 k; mean wait
+  261 µs → 1.4 µs, with the hold about 1.1 µs in both.
+- **Left**: the gap to nginx is CPU per request, not the lock: the hand-off to the file pool, and
+  open/fstat/pread/close per request (8 KiB is below fib's 16 KiB sendfile threshold) against nginx's
+  sendfile on a cached descriptor. p99 did not improve. The two-host 80 GiB setup was not available;
+  the change was measured on .51 at 16 GiB, still 128 times the paths kept.
+
+**Decisions pending review** (2026-11-21):
+
+1. **Shards are sized from GOMAXPROCS, not configured**: 2 × the file pool's workers (4 × GOMAXPROCS,
+   at least 16), rounded up to a power of two, 16 to 256; each gets an equal share of the bounds, so a
+   handler still keeps at most 16384 paths and 16 MiB. No new config field.
+2. **The doorkeeper only acts on a full shard**: a site whose paths fit is cached on the first request
+   as before; tests and small sites see no change. A hot path in a full shard is kept from its second
+   request; a path asked for less often than once per about 16384 others is never kept, as a
+   random-eviction cache would push it out anyway.
+3. **A two-hash doorkeeper bitmap, no lock, cleared at a quarter set**: 16 KiB per handler with the
+   default bounds; races may lose a bit or a count, which only delays a path by a request.
+4. **A fib worker that finds a lock taken treats the request as a miss** and sends it to the file
+   pool, which costs a hand-off but never parks the worker. The file pool's own reads still wait.
+5. **The file contents' cache keeps one lock**, now apart from the lookups: it is read-mostly, never
+   evicts, and its waits at 512 connections were small (8207 writes, mean wait 14 µs).
+6. **The lock measurements stay in the code behind `fit_lockstat`**, compiled to a plain Lock/Unlock
+   otherwise, for the next look at this path.

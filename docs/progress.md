@@ -8116,3 +8116,14 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   time; the other way and a 64-byte echo within noise; B/op from 1–268 KB to under 0.3 KB, allocations
   2 to 0 or 1 a send (part of it fib's own changes since `9ea8838`).
 - **Tests**: see each plan section; their decisions are there too, pending review.
+
+### I229 The static handler's lookup cache in shards — done
+
+- **Change**: lookups in shards (64 on 8 CPUs), a doorkeeper once a shard is full, `TryRLock` on fib
+  workers, no allocation under a shard's lock, nothing kept with a check interval of 0, the file
+  contents under a lock of their own; `-tags fit_lockstat` for lock measurements.
+- **Benchmark** (.51, 2.1 M random 8 KiB files, 8 server threads): 512 connections 113k → 220k QPS
+  (1.95x, 67.6% of nginx, was 34.7%), hot file unchanged; mean wait for the cache's write lock
+  261 µs → 1.4 µs. Results in `bench/results/static-lookup-shards-2026-11-21`.
+- **Open**: CPU per request against nginx (file pool hand-off, open/fstat/pread/close per request);
+  p99 unchanged. Decisions pending review in the plan section.
