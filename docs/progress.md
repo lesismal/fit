@@ -8181,3 +8181,14 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   94%); up to 16 KiB and 128 KiB level. Results in `bench/results/static-sendfile-path-2026-11-22`.
 - **Open**: 17-32 KiB still 17-20% below nginx; one header segment with the file was tried and
   was slower. Decisions pending review in the plan section.
+
+### I233 The static handler's default_type — done
+
+- **Change**: `default_type`, as nginx's, types files whose extension gives none without sniffing
+  them (a 512-byte read for a file not in memory); left out, they are sniffed as before. fit is on
+  fib `65f407b` (fib's Upgrade race fix).
+- **Benchmark** (.51, `default_type application/octet-stream` as nginx's config): 20/32/64 KiB
+  +6.1/+5.3/+3.2%; against nginx 8 KiB 99.5%, 16 KiB 92%, 20-32 KiB 86-87%, 64 KiB 93%. A
+  profile and a ceiling build of each candidate in `bench/results/static-default-type-2026-11-22`.
+- **Open**: 20-32 KiB still 13-14% below nginx; a fib header-block API was tried and gained
+  nothing. Decisions pending review in the plan section.

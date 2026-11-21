@@ -5745,3 +5745,11 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **压测**（.51）：17/20/32/64 KiB +15.6/+16.5/+15.1/+12.8%，相对 nginx 70% → 80-83%（64 KiB 94%）；16 KiB 以下与 128 KiB
   持平。结果见 `bench/results/static-sendfile-path-2026-11-22`。
 - **未决**：17-32 KiB 仍比 nginx 低 17-20%；响应头与文件同段发送试过，更慢。待审查的决定见计划部分。
+
+### I233 静态处理器的 default_type — done
+
+- **改动**：`default_type`（同 nginx）为扩展名给不出类型的文件直接指定类型，不再嗅探（对不在内存中的文件要读 512 字节）；
+  不设置时照旧嗅探。fit 改用 fib `65f407b`（含 fib 的 Upgrade 竞争修复）。
+- **压测**（.51，`default_type application/octet-stream`，同 nginx 配置）：20/32/64 KiB +6.1/+5.3/+3.2%；相对 nginx：8 KiB
+  99.5%，16 KiB 92%，20-32 KiB 86-87%，64 KiB 93%。profile 与逐项上限实验见 `bench/results/static-default-type-2026-11-22`。
+- **未决**：20-32 KiB 仍比 nginx 低 13-14%；fib 响应头块接口试过，没有收益。待审查的决定见计划部分。

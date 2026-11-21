@@ -483,6 +483,7 @@ window.FitSchemaZh = {
 "The directory the zone's responses are kept in, made if it is missing. It is the zone's alone: no other zone may name it. What it holds is found again when fit starts.": "存放该区域响应的目录，不存在时创建。它仅属于该区域：其他区域不得使用同一目录。其中的内容在 fit 启动时会被重新找到。",
 "The document root, which SCRIPT_FILENAME, DOCUMENT_ROOT and PATH_TRANSLATED are made from, as the application sees it.": "文档根目录，SCRIPT_FILENAME、DOCUMENT_ROOT 和 PATH_TRANSLATED 由它生成，即应用所看到的路径。",
 "The files that stand for a directory, tried in order; [\"index.html\"] when left out, and none for [].": "代表目录的文件，按顺序尝试；不设置时为 [\"index.html\"]，设为 [] 则为无。",
+"The Content-Type of a file whose extension gives none, as nginx's default_type, such as application/octet-stream; when left out, such a file's type is sniffed from its first 512 bytes, as net/http's is, which costs a read of a file not in memory.": "扩展名给不出类型的文件所用的 Content-Type，同 nginx 的 default_type，例如 application/octet-stream；不设置时按前 512 字节嗅探类型（同 net/http），对不在内存中的文件要多读一次。",
 "The highest local port of the sockets toward the media servers; with port_min. The range bounds the relays at once, beside max_relays.": "通向媒体服务器的套接字的最高本地端口；与 port_min 配合。该范围同时限制中继数量，与 max_relays 并用。",
 "The highest port of the relayed sockets; with port_min.": "中继套接字的最高端口；与 port_min 配合。",
 "The host and port it listens on, as in \":7000\"; an empty host is every address.": "监听的主机和端口，如 \":7000\"；主机为空表示所有地址。",

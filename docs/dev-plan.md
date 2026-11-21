@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I233.
+Status: `todo`, `doing` or `done`. The next free iteration number is I234.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -402,6 +402,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I233.
 | I230 | Small files read whole from disk with three system calls; the file pool keeps a worker a CPU and grows only for blocked ones | I229 | done |
 | I231 | A file read whole leaves no garbage, its header goes as a block, and fib's `Watch` takes no lock (fib A98) | I230 | done |
 | I232 | Files above 16 KiB go by sendfile from a raw descriptor, without `ServeContent` or a duplicate (fib A102) | I231 | done |
+| I233 | The static handler's `default_type`, as nginx's: files whose extension gives no type are not sniffed | I232 | done |
 
 ## M0, foundations
 
@@ -10348,3 +10349,40 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
    which handles `If-*` and multi-range, and are rare in this workload.
 3. **The `fstat` stays** (nginx does one too): it keeps a file replaced since the lookup, or a
    directory, from going out with stale validators or none.
+
+### I233 The static handler's default_type, and what is left of the 17-64 KiB gap — done
+
+- **Why**: after I232, 20 KiB files went at 80% of nginx at the same CPU (29.7 µs a request against
+  24). A profile (`bench/results/static-default-type-2026-11-22/prof`) found system calls 69% of the CPU, each about 1 µs on this kernel
+  (SRSO mitigation), and three nginx does not make: a 512-byte `pread` to sniff a file whose name
+  has no extension, as the benchmark's have (nginx answers with its `default_type`), an `fstat`
+  after the open, and an `epoll_ctl` for a quarter of the requests; in user space the header map
+  (4%) and SendFile's completion hop (2%). A build with each candidate switched on by the
+  environment measured the ceiling at 20 KiB: no sniff +6.8%, no fstat +2.3%, an unchecked header
+  block +2.3%, completion inline −0.8% (less CPU, no throughput), all four +13.0%.
+- **Done**: `handler/static`: `default_type`, the Content-Type of a file whose extension gives none,
+  unsniffed, on every path (memory, read whole, SendFile, ServeContent; a compressed twin of such a
+  file takes it too); left out, files are sniffed as before. `variant.contentType` is the one place
+  the type is decided. fit moves to fib `65f407b`, with fib's fix of the Upgrade race
+  (`de24a5f`).
+- **Benchmark** (.51, [bench/results/static-default-type-2026-11-22](../bench/results/static-default-type-2026-11-22/README.md)): with `default_type application/octet-stream`, as the
+  nginx config has, 20 KiB +6.1%, 32 KiB +5.3%, 64 KiB +3.2%, 8-16 KiB +0.6-0.9%; against nginx
+  8 KiB 99.5%, 16 KiB 92%, 20 KiB 86%, 32 KiB 87%, 64 KiB 93%.
+  Three rounds of the build as committed against fit main on the same fib: 8 KiB +1.3%, 20 KiB
+  +6.5%; without `default_type` −0.5% and +0.1%.
+- **Tried and dropped**: the header as a block through a fib API (`Context.AddHeaderBlock`,
+  checked and copied): +0.1% at 20 KiB against the same code, where the unchecked hack gave
+  +2.3%; not worth an API, not in fib.
+- **Left**: 20-32 KiB 13-14% below nginx; the 16 KiB read-whole path 8%.
+
+**Decisions pending review** (2026-11-22):
+
+1. **`default_type` is opt-in**: left out, files whose extension gives no type are sniffed, as
+   net/http does and fit did; the benchmarks against nginx set it, since nginx's config does.
+2. **The `fstat` stays** (+2.3% without it): it keeps a file replaced between the lookup and the
+   open from going out with the lookup's length and validators.
+3. **SendFile's completion stays on another goroutine**, as fib's contract says: inline it saved
+   CPU but bought no throughput.
+4. **No fib header-block API**: the checked form gained nothing measurable.
+5. **Level without `default_type`**: −0.5% at 8 KiB without it set, about the variation of rounds
+   (0.4%), taken for the option.

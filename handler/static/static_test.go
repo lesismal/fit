@@ -412,3 +412,49 @@ func BenchmarkServeCached(b *testing.B) {
 		fibtest.ServeRequest(s, r)
 	}
 }
+
+// TestDefaultType checks that default_type types a file whose extension
+// gives none, on every path a file takes, in memory, read whole, sent by
+// SendFile and through ServeContent for a range, as one Content-Type, and
+// that a type not a media type is refused.
+func TestDefaultType(t *testing.T) {
+	html := "<html><body>sniffed as text/html</body></html>"
+	root := tree(t, map[string]string{
+		"small": html,
+		"mid":   html + strings.Repeat("m", smallFile-len(html)),
+		"big":   html + strings.Repeat("b", smallFile+10),
+		"a.css": "body{}",
+	})
+	const dt = "application/x-default"
+	for _, tt := range []struct {
+		name, extra string
+	}{
+		{"memory", `, "default_type": "` + dt + `"`},
+		{"disk", `, "default_type": "` + dt + `", "max_file_bytes": 4`},
+	} {
+		s := mustLoad(t, root, tt.extra)
+		for _, target := range []string{"/small", "/mid", "/big"} {
+			for _, header := range []map[string]string{nil, {"Range": "bytes=0-9"}} {
+				got := get(s, "GET", target, header).Response
+				if got.StatusCode != 200 && got.StatusCode != 206 {
+					t.Fatalf("%s %s %v: %d", tt.name, target, header, got.StatusCode)
+				}
+				if types := got.Header.Values("Content-Type"); len(types) != 1 || types[0] != dt {
+					t.Errorf("%s %s %v: Content-Type %q", tt.name, target, header, types)
+				}
+			}
+		}
+		if got := get(s, "GET", "/a.css", nil).Response; got.Header.Get("Content-Type") != "text/css; charset=utf-8" {
+			t.Errorf("%s: a.css as %q", tt.name, got.Header.Get("Content-Type"))
+		}
+	}
+	s := mustLoad(t, root, `, "max_file_bytes": 4`)
+	for _, target := range []string{"/mid", "/big"} {
+		if got := get(s, "GET", target, nil).Response; got.Header.Get("Content-Type") != "text/html; charset=utf-8" {
+			t.Errorf("sniffed %s as %q", target, got.Header.Get("Content-Type"))
+		}
+	}
+	if _, err := load(t, `{"root": `+quote(root)+`, "default_type": "not a type"}`); err == nil {
+		t.Error("default_type \"not a type\" was taken")
+	}
+}

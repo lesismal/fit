@@ -1,0 +1,19 @@
+size-8192.r1 fit-iso rps_line: rps=334584.57 50%=736.00us 90%=0.90ms 99%=2.45ms  errs=0 srvcpu=7.82/8
+size-8192.r1 fit-final rps_line: rps=333035.05 50%=741.00us 90%=0.90ms 99%=1.88ms  errs=0 srvcpu=7.83/8
+size-8192.r1 fit-final-dt rps_line: rps=338066.01 50%=725.00us 90%=0.90ms 99%=1.87ms  errs=0 srvcpu=7.76/8
+size-8192.r2 fit-iso rps_line: rps=333681.51 50%=737.00us 90%=0.91ms 99%=2.21ms  errs=0 srvcpu=7.82/8
+size-8192.r2 fit-final rps_line: rps=331891.81 50%=742.00us 90%=0.91ms 99%=2.45ms  errs=0 srvcpu=7.81/8
+size-8192.r2 fit-final-dt rps_line: rps=337767.28 50%=728.00us 90%=0.90ms 99%=2.37ms  errs=0 srvcpu=7.82/8
+size-8192.r3 fit-iso rps_line: rps=333331.96 50%=739.00us 90%=0.90ms 99%=2.05ms  errs=0 srvcpu=7.82/8
+size-8192.r3 fit-final rps_line: rps=331813.03 50%=743.00us 90%=0.91ms 99%=2.27ms  errs=0 srvcpu=7.82/8
+size-8192.r3 fit-final-dt rps_line: rps=338447.79 50%=727.00us 90%=0.90ms 99%=1.76ms  errs=0 srvcpu=7.83/8
+size-20480.r1 fit-iso rps_line: rps=270900.33 50%=0.87ms 90%=1.54ms 99%=2.61ms  errs=0 srvcpu=7.84/8
+size-20480.r1 fit-final rps_line: rps=271061.63 50%=0.86ms 90%=1.54ms 99%=2.55ms  errs=0 srvcpu=7.84/8
+size-20480.r1 fit-final-dt rps_line: rps=288384.50 50%=799.00us 90%=1.44ms 99%=2.41ms  errs=0 srvcpu=7.78/8
+size-20480.r2 fit-iso rps_line: rps=269619.08 50%=0.87ms 90%=1.54ms 99%=2.56ms  errs=0 srvcpu=7.84/8
+size-20480.r2 fit-final rps_line: rps=271325.40 50%=0.87ms 90%=1.53ms 99%=2.54ms  errs=0 srvcpu=7.86/8
+size-20480.r2 fit-final-dt rps_line: rps=288483.23 50%=804.00us 90%=1.43ms 99%=2.40ms  errs=0 srvcpu=7.86/8
+size-20480.r3 fit-iso rps_line: rps=271114.58 50%=0.87ms 90%=1.53ms 99%=2.54ms  errs=0 srvcpu=7.85/8
+size-20480.r3 fit-final rps_line: rps=269384.84 50%=0.87ms 90%=1.54ms 99%=2.56ms  errs=0 srvcpu=7.83/8
+size-20480.r3 fit-final-dt rps_line: rps=287737.76 50%=795.00us 90%=1.44ms 99%=2.44ms  errs=0 srvcpu=7.84/8
+done 03:10:13

@@ -660,7 +660,7 @@ func (s *Static) twins(l *lookup) {
 // compressed twin the client prefers among those on disk. It returns the
 // variant, and the path, stat and stamp of the file that carries it.
 func (s *Static) variant(r *stdhttp.Request, l *lookup) (variant, string, fs.FileInfo, filewatch.Stamp) {
-	v := variant{name: l.name, vary: s.vary}
+	v := variant{name: l.name, vary: s.vary, defaultType: s.DefaultType}
 	if i := s.preferred(r, l); i >= 0 {
 		v.encoding = s.precompressed[i].name
 		t := &l.twins[i]

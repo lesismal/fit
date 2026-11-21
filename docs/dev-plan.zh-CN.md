@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I233。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I234。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -392,6 +392,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I230 | 小文件从磁盘整读，只需三次系统调用；文件池每 CPU 一个 worker，仅为阻塞的 worker 扩容 | I229 | done |
 | I231 | 整读的文件不再产生垃圾，响应头以块发送，fib 的 `Watch` 不再加锁（fib A98） | I230 | done |
 | I232 | 超过 16 KiB 的文件从原始描述符 sendfile，不经 `ServeContent`、不复制描述符（fib A102） | I231 | done |
+| I233 | 静态处理器的 `default_type`（同 nginx）：扩展名给不出类型的文件不再嗅探 | I232 | done |
 
 ## M0 基础
 
@@ -7212,3 +7213,29 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 1. **整读阈值保持 16 KiB**：8-16 KiB 改走新路径（`fit-cliff4k`）低 11-15%。
 2. **只有普通请求走新路径**；条件与范围请求仍用 `ServeContent`，它处理 `If-*` 和多段范围，且在这类负载中很少。
 3. **保留 `fstat`**（nginx 也做一次）：防止查找后被替换的文件或目录带着过期的校验信息或没有校验信息发出。
+
+### I233 静态处理器的 default_type，以及 17-64 KiB 差距还剩什么 — done
+
+- **原因**：I232 之后 20 KiB 文件在相同 CPU 下为 nginx 的 80%（每请求 29.7 µs 对 24）。profile（`bench/results/static-default-type-2026-11-22/prof`）显示系统调用占
+  69% CPU，本机内核每次约 1 µs（SRSO 缓解），其中三次是 nginx 没有的：对无扩展名文件（压测文件即如此）读 512 字节嗅探类型
+  的 `pread`（nginx 用 `default_type` 回答）、open 之后的 `fstat`、以及四分之一请求上的 `epoll_ctl`；用户态里响应头 map
+  占 4%，SendFile 完成回调换 goroutine 占 2%。用环境变量逐项开关的实验构建测出 20 KiB 的上限：不嗅探 +6.8%，不 fstat
+  +2.3%，不校验的响应头块 +2.3%，完成回调内联 −0.8%（CPU 更少但吞吐不变），四项全开 +13.0%。
+- **完成**：`handler/static`：`default_type`，扩展名给不出类型的文件直接用它作 Content-Type，不嗅探，所有路径都生效（内存、
+  整读、SendFile、ServeContent；这类文件的压缩副本也用它）；不设置时照旧嗅探。类型只在 `variant.contentType` 一处决定。
+  fit 改用 fib `65f407b`，包含 fib 对 Upgrade 竞争的修复（`de24a5f`）。
+- **压测**（.51，[bench/results/static-default-type-2026-11-22](../bench/results/static-default-type-2026-11-22/README.md)）：设置 `default_type application/octet-stream`（与 nginx 配置相同）后 20 KiB +6.1%，
+  32 KiB +5.3%，64 KiB +3.2%，8-16 KiB +0.6-0.9%；相对 nginx：8 KiB 99.5%，16 KiB 92%，20 KiB 86%，32 KiB 87%，64 KiB 93%。
+  按提交版本与同一 fib 上的 fit main 三轮对比：8 KiB +1.3%，20 KiB +6.5%；不设置 `default_type` 时 −0.5% 与 +0.1%。
+- **试过并放弃**：通过 fib 接口以块发送响应头（`Context.AddHeaderBlock`，校验并复制）：20 KiB 相对同一代码 +0.1%，而不校验的
+  实验版为 +2.3%；不值得新增接口，fib 不加。
+- **遗留**：20-32 KiB 仍比 nginx 低 13-14%；16 KiB 整读路径低 8%。
+
+**待审查的决定**（2026-11-22）：
+
+1. **`default_type` 需显式开启**：不设置时扩展名给不出类型的文件照旧嗅探（同 net/http 与以前的 fit）；与 nginx 对比的压测设置
+   它，因为 nginx 的配置也设置了。
+2. **保留 `fstat`**（去掉可 +2.3%）：防止查找与打开之间被替换的文件带着查找时的长度和校验信息发出。
+3. **SendFile 的完成回调仍在另一个 goroutine 上运行**（fib 的约定）：内联节省 CPU 但不提高吞吐。
+4. **fib 不加响应头块接口**：校验后的版本没有可测的收益。
+5. **不设置 `default_type` 时持平**：8 KiB −0.5%，约为同一构建各轮之间的波动（0.4%），为这个选项接受。

@@ -1,0 +1,12 @@
+r1 base rps=268939.61 p99=2.63ms errs=0 srvcpu=7.86
+r1 nosniff rps=287140.84 p99=2.50ms errs=0 srvcpu=7.82
+r1 nofstat rps=276077.81 p99=2.52ms errs=0 srvcpu=7.80
+r1 block rps=274984.40 p99=2.48ms errs=0 srvcpu=7.84
+r1 inline rps=267488.52 p99=2.30ms errs=0 srvcpu=7.72
+r1 all rps=303678.52 p99=2.73ms errs=0 srvcpu=7.68
+r2 base rps=269542.90 p99=2.53ms errs=0 srvcpu=7.85
+r2 nosniff rps=288138.74 p99=2.40ms errs=0 srvcpu=7.86
+r2 nofstat rps=274932.16 p99=2.49ms errs=0 srvcpu=7.83
+r2 block rps=275658.59 p99=2.51ms errs=0 srvcpu=7.84
+r2 inline rps=266837.17 p99=2.37ms errs=0 srvcpu=7.71
+r2 all rps=304620.50 p99=2.55ms errs=0 srvcpu=7.70

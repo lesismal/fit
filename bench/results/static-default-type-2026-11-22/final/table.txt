@@ -1,0 +1,3 @@
+  size      fit-iso    fit-final fit-final-dt  2nd/1st   2nd/4th   3rd/2nd   p99 by column (ms)
+   8K        333682       331892       338066       99.5%      98.2%  2.21/2.27/1.87
+  20K        270900       271062       288384      100.1%      94.0%  2.56/2.55/2.41

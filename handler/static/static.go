@@ -113,6 +113,8 @@ type Static struct {
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out."`
 
+	DefaultType string `json:"default_type,omitempty" doc:"The Content-Type of a file whose extension gives none, as nginx's default_type, such as application/octet-stream; when left out, such a file's type is sniffed from its first 512 bytes, as net/http's is, which costs a read of a file not in memory."`
+
 	CheckInterval *config.Duration `json:"check_interval,omitempty" default:"\"5s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again, where no watch reports its changes. On Linux a watch of the directories under the root reports a change within moments, a file written, replaced or removed, a directory renamed, or a symbolic link on the way to the root pointed elsewhere, and what it watches is trusted until it does; this interval is for other systems, and for a file that is a symbolic link, whose target's changes the watch does not see. A file is told by its size, modification and status change times and inode, so one replaced by another of the same size and modification time is seen too. 0 looks at the disk for every request, with no watch, so that a response always carries the file as it is on disk then, also on a network file system, whose changes from other machines no watch sees. 5s when left out."`
 
 	root         string
@@ -170,6 +172,11 @@ func (s *Static) Provision(ctx *module.Context) error {
 	s.hideShortNames = s.hideDotfiles && dotfile.ShortNames
 	s.refuseAliases = dotfile.Aliases
 	s.foldCase = dotfile.FoldsCase(root)
+	if s.DefaultType != "" {
+		if _, _, err := mime.ParseMediaType(s.DefaultType); err != nil {
+			return ctx.Errorf("default_type", "%q is not a media type: %v", s.DefaultType, err)
+		}
+	}
 	for _, name := range s.index {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") {
 			return ctx.Errorf("index", "%q is not a file name", name)
@@ -537,14 +544,11 @@ func (s *Static) sendWhole(c *fibhttp.Context, v variant, full string, info fs.F
 		f.Close()
 		return true
 	}
-	contentType := mime.TypeByExtension(filepath.Ext(v.name))
-	if contentType == "" && v.encoding == "" {
+	contentType := v.contentType(nil)
+	if contentType == "" {
 		var head [512]byte
 		n, _ := f.ReadAt(head[:], 0)
 		contentType = stdhttp.DetectContentType(head[:n])
-	}
-	if contentType == "" && v.encoding != "" {
-		contentType = "application/octet-stream"
 	}
 	h := c.Header()
 	if v.encoding != "" {
@@ -669,13 +673,7 @@ func appendEtag(b []byte, info fs.FileInfo) []byte {
 // CRLF, the fields fileHeader makes for v, info and data, without making
 // them: for Response.HeaderBlock.
 func appendFileHeader(b []byte, v variant, info fs.FileInfo, data []byte) []byte {
-	contentType := mime.TypeByExtension(filepath.Ext(v.name))
-	if contentType == "" && data != nil && v.encoding == "" {
-		contentType = stdhttp.DetectContentType(data)
-	}
-	if contentType == "" && v.encoding != "" {
-		contentType = "application/octet-stream"
-	}
+	contentType := v.contentType(data)
 	if v.encoding != "" {
 		b = append(append(append(b, "Content-Encoding: "...), v.encoding...), "\r\n"...)
 	}
@@ -698,6 +696,26 @@ type variant struct {
 	name     string
 	encoding string
 	vary     bool
+	// defaultType is the handler's default_type.
+	defaultType string
+}
+
+// contentType is the type of the file v names: its extension's; else the
+// handler's default_type; else, for a file not compressed, the one sniffed
+// from data, its first bytes, when they are at hand, or none; and for a
+// compressed twin, which has its original's name, application/octet-stream.
+func (v variant) contentType(data []byte) string {
+	t := mime.TypeByExtension(filepath.Ext(v.name))
+	if t == "" {
+		t = v.defaultType
+	}
+	if t == "" && data != nil && v.encoding == "" {
+		t = stdhttp.DetectContentType(data)
+	}
+	if t == "" && v.encoding != "" {
+		t = "application/octet-stream"
+	}
+	return t
 }
 
 // fileHeader is what a response carrying the file says of it. data is its
@@ -706,13 +724,7 @@ type variant struct {
 // original's type, from the original's name.
 func fileHeader(v variant, info fs.FileInfo, data []byte) stdhttp.Header {
 	h := make(stdhttp.Header, 6)
-	contentType := mime.TypeByExtension(filepath.Ext(v.name))
-	if contentType == "" && data != nil && v.encoding == "" {
-		contentType = stdhttp.DetectContentType(data)
-	}
-	if contentType == "" && v.encoding != "" {
-		contentType = "application/octet-stream"
-	}
+	contentType := v.contentType(data)
 	if v.encoding != "" {
 		h["Content-Encoding"] = []string{v.encoding}
 	}
