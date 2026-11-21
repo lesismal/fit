@@ -490,14 +490,22 @@ func (f *File) rotate(now time.Time) error {
 		err = fmt.Errorf("rotate %s: %w", f.path, err)
 		f.setErr(err)
 		f.retryAt = now.Add(rotateRetry)
-		// Keep appending to the file that could not be renamed.
-		if fh, _, e := openRegular(f.path, appendFlags, perm); e != nil {
+		// Keep appending to the file that could not be renamed: its size
+		// stays the writer's, so the next size check counts what it holds.
+		if fh, info, e := openRegular(f.path, appendFlags, perm); e != nil {
 			f.setErr(e)
 		} else {
 			f.file = fh
+			f.size = info.Size()
 		}
 		return err
 	}
+	// The old file is gone from the path: what the writer counts starts
+	// again, or every later write would pass max_bytes and rotate.
+	f.size = 0
+	f.statusMu.Lock()
+	f.currentSize = 0
+	f.statusMu.Unlock()
 	if rot.compress {
 		if statErr != nil {
 			f.setErr(fmt.Errorf("compress %s: %w", backup, statErr))
@@ -505,15 +513,16 @@ func (f *File) rotate(now time.Time) error {
 			f.startCompress(backup, held)
 		}
 	}
-	fh, _, err := openRegular(f.path, appendFlags, perm)
+	fh, info, err := openRegular(f.path, appendFlags, perm)
 	if err != nil {
 		f.setErr(err)
 		return err
 	}
 	f.file = fh
+	f.size = info.Size()
 	f.statusMu.Lock()
 	f.current = f.path
-	f.currentSize = 0
+	f.currentSize = f.size
 	f.statusMu.Unlock()
 	if rot.interval > 0 {
 		f.periodStart = periodStart(now, rot.interval, f.zone())

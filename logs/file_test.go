@@ -101,6 +101,53 @@ func TestFileRotateBySize(t *testing.T) {
 	}
 }
 
+// TestFileRotateBySizeOncePerMax checks the file turns once per max_bytes
+// written, not at every write after the first rotation: the writer's count
+// of the open file's size must start again with the new file.
+func TestFileRotateBySizeOncePerMax(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fit.log")
+	fs := NewFiles()
+	fs.every = time.Hour
+	f, err := fs.Open(path, &config.Rotate{
+		MaxBytes: intp(50), MaxAge: durp(0), MaxTotalBytes: intp(0), Compress: boolp(false),
+	}, func() *time.Location { return time.UTC })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Release(f)
+
+	// 50 lines of 10 bytes: five fill a file, so 500 bytes make ten files,
+	// the open one and nine rotated.
+	const lines, lineLen, perFile = 50, 10, 5
+	for i := 0; i < lines; i++ {
+		line := strings.Repeat(string(rune('a'+i%26)), lineLen-1) + "\n"
+		if _, err := f.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+		waitIdle(t, f)
+	}
+
+	names := filesIn(t, dir)
+	if want := lines / perFile; len(names) != want {
+		t.Fatalf("%d files, want %d (one rotation per max_bytes): %v", len(names), want, names)
+	}
+	total := 0
+	for _, n := range names {
+		data := readFile(t, dir, n)
+		if len(data) != perFile*lineLen {
+			t.Errorf("%s holds %d bytes, want %d", n, len(data), perFile*lineLen)
+		}
+		total += len(data)
+	}
+	if total != lines*lineLen {
+		t.Errorf("files hold %d bytes, want %d", total, lines*lineLen)
+	}
+	if info := f.Info(); info.CurrentSize != perFile*lineLen {
+		t.Errorf("current size %d, want %d", info.CurrentSize, perFile*lineLen)
+	}
+}
+
 // TestFileRotateByInterval checks a file turns at a period boundary of the
 // log's zone, 24h being local midnight.
 func TestFileRotateByInterval(t *testing.T) {
