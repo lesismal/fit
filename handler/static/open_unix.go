@@ -3,8 +3,11 @@
 package static
 
 import (
+	"errors"
+	"io"
 	"io/fs"
 	"os"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/lesismal/fib/bufferpool"
@@ -73,3 +76,75 @@ func readSmall(full string, size int64) ([]byte, error) {
 	}
 	return buf[:n], nil
 }
+
+// openSendable opens the file at full for SendFile as a rawFile: a
+// descriptor and no os.File, which costs no fcntl, and which it hands over
+// to the connection rather than have it duplicated.
+func openSendable(full string) (sendable, error) {
+	fd, err := openRead(full)
+	if err != nil {
+		return nil, err
+	}
+	return &rawFile{fd: fd}, nil
+}
+
+// rawFile is a file opened for SendFile: its descriptor, which it hands
+// over to the connection once (fib.FileHandover), which then sends from it
+// and closes it, or closes itself when it never was.
+type rawFile struct {
+	fd     int
+	handed atomic.Bool
+}
+
+func (f *rawFile) ReadAt(p []byte, off int64) (int, error) {
+	for {
+		n, err := syscall.Pread(f.fd, p, off)
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if n < len(p) {
+			return n, io.EOF
+		}
+		return n, nil
+	}
+}
+
+// SyscallConn lets SendFile duplicate the descriptor, for a range it sends
+// in pieces before the last.
+func (f *rawFile) SyscallConn() (syscall.RawConn, error) { return rawConn{f.fd}, nil }
+
+func (f *rawFile) HandOverFD() (int, bool) {
+	return f.fd, f.handed.CompareAndSwap(false, true)
+}
+
+// stands reports whether the file is still a regular file of size bytes,
+// with one fstat and nothing allocated.
+func (f *rawFile) stands(size int64) bool {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(f.fd, &st); err != nil {
+		return false
+	}
+	return st.Mode&syscall.S_IFMT == syscall.S_IFREG && st.Size == size
+}
+
+// Close closes the descriptor unless it was handed over.
+func (f *rawFile) Close() error {
+	if f.handed.CompareAndSwap(false, true) {
+		return syscall.Close(f.fd)
+	}
+	return nil
+}
+
+// rawConn is the syscall.RawConn of a rawFile, which only Control serves.
+type rawConn struct{ fd int }
+
+func (c rawConn) Control(fn func(uintptr)) error { fn(uintptr(c.fd)); return nil }
+
+func (rawConn) Read(func(uintptr) bool) error { return errRawConn }
+
+func (rawConn) Write(func(uintptr) bool) error { return errRawConn }
+
+var errRawConn = errors.New("static: a file's descriptor is not read or written through its RawConn")

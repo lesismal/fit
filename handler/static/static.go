@@ -76,6 +76,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lesismal/fib"
 	"github.com/lesismal/fib/bufferpool"
 	"github.com/lesismal/fib/filewatch"
 	fibhttp "github.com/lesismal/fib/http"
@@ -436,6 +437,8 @@ const smallFile = 16 << 10
 // SendFile, which neither waits for the disk nor for the client; see
 // send.go.
 func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info fs.FileInfo, q *queued) {
+	// stale says the lookup's stat no longer stands for the file.
+	stale := false
 	if info.Size() <= smallFile {
 		data, err := readSmall(full, info.Size())
 		switch {
@@ -454,6 +457,10 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info f
 			serveRead(c, v, info, data)
 			return
 		}
+		stale = true
+	}
+	if !stale && !hasConditions(c.Request) && s.sendWhole(c, v, full, info, q) {
+		return
 	}
 	f, err := openFile(full)
 	if err != nil {
@@ -491,6 +498,81 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info f
 		q.sending = true
 	}
 }
+
+// sendable is a file opened for SendFile, which done closes.
+type sendable interface {
+	fib.File
+	Close() error
+	// stands reports whether the file is still a regular file of size
+	// bytes, as the lookup found it.
+	stands(size int64) bool
+}
+
+// sendWhole sends the whole of the file at full, as v describes it and
+// info, the lookup's stat of it, sizes it, with SendFile, for a request with
+// no conditions and no range: the most of them, which ServeContent would
+// only set the header for and sniff the type of. It opens the file as
+// openSendable does, and sets the header itself, as fileHeader makes it but
+// for the type of a file whose name gives none, sniffed from its first 512
+// bytes; the validators are the lookup's, as for a file read whole, once an
+// fstat finds it the regular file of the size the lookup did. Above 16 KiB,
+// where files are not read whole, this is what fib's SendFile costs beside
+// a read whole: 17 KiB files went at 70% of nginx's rate through
+// ServeContent, an os.File and a duplicate of its descriptor. It reports
+// false, answering nothing, for a file no longer as the lookup found it,
+// which sendFromDisk then serves as before.
+func (s *Static) sendWhole(c *fibhttp.Context, v variant, full string, info fs.FileInfo, q *queued) bool {
+	f, err := openSendable(full)
+	if err != nil {
+		if q.claim() {
+			respondError(c, statusOf(err))
+		}
+		return true
+	}
+	if !f.stands(info.Size()) {
+		f.Close()
+		return false
+	}
+	if !q.claim() {
+		f.Close()
+		return true
+	}
+	contentType := mime.TypeByExtension(filepath.Ext(v.name))
+	if contentType == "" && v.encoding == "" {
+		var head [512]byte
+		n, _ := f.ReadAt(head[:], 0)
+		contentType = stdhttp.DetectContentType(head[:n])
+	}
+	if contentType == "" && v.encoding != "" {
+		contentType = "application/octet-stream"
+	}
+	h := c.Header()
+	if v.encoding != "" {
+		h["Content-Encoding"] = []string{v.encoding}
+	}
+	if v.vary {
+		h["Vary"] = varyAcceptEncoding
+	}
+	h["Content-Type"] = []string{contentType}
+	h["Last-Modified"] = []string{info.ModTime().UTC().Format(stdhttp.TimeFormat)}
+	h["Etag"] = []string{etag(info)}
+	h["Accept-Ranges"] = acceptRangesBytes
+	if q != nil {
+		q.sending = true
+	}
+	c.SendFileStall(f, 0, info.Size(), s.stall, func(error) {
+		f.Close()
+		c.Release()
+	})
+	return true
+}
+
+// The values of header fields sendWhole sets, the same for every response,
+// which fib does not change.
+var (
+	varyAcceptEncoding = []string{"Accept-Encoding"}
+	acceptRangesBytes  = []string{"bytes"}
+)
 
 // check returns the status a request path, name, is refused with, in one
 // look at it, or 0 when it may be served: 400 for one that could name a file

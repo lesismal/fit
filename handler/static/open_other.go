@@ -36,3 +36,21 @@ func readSmall(full string, size int64) ([]byte, error) {
 	}
 	return buf[:n], nil
 }
+
+// openSendable opens the file at full for SendFile.
+func openSendable(full string) (sendable, error) {
+	f, err := os.Open(full)
+	if err != nil {
+		return nil, err
+	}
+	return osSendable{f}, nil
+}
+
+// osSendable is an os.File for SendFile, which stands knows the size of.
+type osSendable struct{ *os.File }
+
+// stands reports whether the file is still a regular file of size bytes.
+func (f osSendable) stands(size int64) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode().IsRegular() && info.Size() == size
+}

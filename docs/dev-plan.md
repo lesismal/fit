@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I232.
+Status: `todo`, `doing` or `done`. The next free iteration number is I233.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -401,6 +401,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I232.
 | I229 | The static handler's lookup cache in shards, with a doorkeeper once full; fib workers never wait for its locks | — | done |
 | I230 | Small files read whole from disk with three system calls; the file pool keeps a worker a CPU and grows only for blocked ones | I229 | done |
 | I231 | A file read whole leaves no garbage, its header goes as a block, and fib's `Watch` takes no lock (fib A98) | I230 | done |
+| I232 | Files above 16 KiB go by sendfile from a raw descriptor, without `ServeContent` or a duplicate (fib A102) | I231 | done |
 
 ## M0, foundations
 
@@ -10315,3 +10316,35 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
    fib.
 4. **The header block only on the read-whole path**; the memory cache shares one header map across
    responses already, and the large path sets the header for SendFile.
+
+### I232 Files above 16 KiB by sendfile without ServeContent or a duplicate descriptor — done
+
+- **Why**: the parameter sweep (`bench/results/sweep-2026-11-21`) found a cliff past the read-whole
+  threshold: 90.7% of nginx at 16 KiB, 70.0% at 17-32 KiB. A file above 16 KiB went through
+  `ServeContent` with an `*os.File` (`NewFile` sets it non-blocking: two `fcntl`), which fib's
+  `SendFile` duplicated (`dup`, `F_SETFD`, a second `close`): 11.5 system calls a request at 20 KiB
+  against nginx's 7.1, and `ServeContent` 10.3% of the CPU.
+- **Done**: `handler/static`: a GET or HEAD without conditions or a range, of a file the lookup
+  found above 16 KiB, takes `sendWhole`: the file opened raw (`rawFile`, a descriptor with
+  `ReadAt`, `SyscallConn` and `HandOverFD`), one `fstat` that it is still a regular file of the
+  size looked up (else the old path), the header set from the lookup's validators, and
+  `SendFileStall` from that descriptor. fib A102 (`cec2122`): `FileHandover`, a file `SendFile` asks
+  for its descriptor, sends from and closes, with no duplicate; fit on it. Elsewhere than Unix the
+  file is an `*os.File` and fib duplicates as before.
+- **Benchmark** (.51, two rounds, [bench/results/static-sendfile-path-2026-11-22](../bench/results/static-sendfile-path-2026-11-22/README.md)): 17 KiB 231,751 → 267,914 QPS (+15.6%),
+  20 KiB +16.5%, 32 KiB +15.1%, 64 KiB +12.8%; 128 KiB and up to 16 KiB level. p99 at 17-32 KiB
+  2.9 → 2.6-2.9 ms. Against nginx 17-32 KiB 70% → 80-83%, 64 KiB 83% → 94%.
+- **Tried and dropped**: the header and the file in one TCP segment (fib corking the connection
+  over both, the header sent with `MSG_MORE`): −1.5..−1.9% at 17-20 KiB in both rounds.
+- **Left**: 17-32 KiB are still 17-20% below nginx at the same CPU (about 29 µs a request against
+  24); the sendfile path costs 3-4 µs more than reading 16 KiB whole. Next: a profile of
+  `fit-cliff` at 20 KiB.
+
+**Decisions pending review** (2026-11-22):
+
+1. **The read-whole threshold stays at 16 KiB**: sending 8-16 KiB by the new path instead
+   (`fit-cliff4k`) lost 11-15%.
+2. **Only plain requests take the new path**; conditional and range requests keep `ServeContent`,
+   which handles `If-*` and multi-range, and are rare in this workload.
+3. **The `fstat` stays** (nginx does one too): it keeps a file replaced since the lookup, or a
+   directory, from going out with stale validators or none.

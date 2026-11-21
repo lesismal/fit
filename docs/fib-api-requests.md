@@ -2861,3 +2861,17 @@ garbage: 133 and 152 collections a second proxying 8 and 32 KiB bodies.
 **API.** None: bodies up to 1 MiB are pooled; `BodyBytes` hands out a copy of its own size above
 4 KiB. With A100: the proxy +4.4% (8 KiB) and +19.8% (32 KiB), 17 and 7 collections a second
 ([bench/results/fib-owned-bodies-2026-11-21](../bench/results/fib-owned-bodies-2026-11-21/README.md)).
+
+## A102: SendFile from a descriptor the file hands over
+
+**Status.** Requested and done on 2026-11-22, fib `cec2122`, for I232.
+
+**Problem.** `SendFile` duplicated every file's descriptor (`dup`, `F_SETFD`, a second `close`), so
+that the caller could close its file at once; fit's static handler opens a file for one response
+and closes it when the send is done, and paid three system calls a request for nothing.
+
+**API.** `core.FileHandover` (`fib.FileHandover`): a `File` with `HandOverFD() (fd int, ok bool)`.
+On Unix `SendFile` asks once; ok gives the descriptor up, and the connection sends from it and
+closes it. `http.Context.SendFile` and `SendFileStall` take a `fib.File`; a file queued in pieces
+hands over only on the last. With fit I232: 17-32 KiB files +15-16%
+([bench/results/static-sendfile-path-2026-11-22](../bench/results/static-sendfile-path-2026-11-22/README.md)).

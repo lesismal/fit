@@ -2201,3 +2201,14 @@ fib 客户端收到的正文。
 
 **接口。** 无：1 MiB 以内的正文都池化；`BodyBytes` 对超过 4 KiB 的正文返回等大的副本。加上 A100：代理 +4.4%（8 KiB）和
 +19.8%（32 KiB），每秒 GC 17 和 7 次（[bench/results/fib-owned-bodies-2026-11-21](../bench/results/fib-owned-bodies-2026-11-21/README.md)）。
+
+## A102：SendFile 使用文件交出的描述符
+
+**状态。** 2026-11-22 提出并完成，fib `cec2122`，用于 I232。
+
+**问题。** `SendFile` 对每个文件都复制描述符（`dup`、`F_SETFD`、多一次 `close`），好让调用方立刻关闭文件；fit 的静态处理器为一次
+响应打开文件、发送完再关闭，每请求白付三次系统调用。
+
+**接口。** `core.FileHandover`（`fib.FileHandover`）：带 `HandOverFD() (fd int, ok bool)` 的 `File`。Unix 上 `SendFile` 询问一次；
+ok 表示交出描述符，连接从它发送并负责关闭。`http.Context.SendFile` 与 `SendFileStall` 接受 `fib.File`；分段排队的文件只在最后
+一段交出。配合 fit I232：17-32 KiB 文件 +15-16%（[bench/results/static-sendfile-path-2026-11-22](../bench/results/static-sendfile-path-2026-11-22/README.md)）。

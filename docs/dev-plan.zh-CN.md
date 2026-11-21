@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I232。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I233。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -391,6 +391,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I229 | static handler 的路径缓存分片，满后经门卫准入；fib worker 不再等待其锁 | — | done |
 | I230 | 小文件从磁盘整读，只需三次系统调用；文件池每 CPU 一个 worker，仅为阻塞的 worker 扩容 | I229 | done |
 | I231 | 整读的文件不再产生垃圾，响应头以块发送，fib 的 `Watch` 不再加锁（fib A98） | I230 | done |
+| I232 | 超过 16 KiB 的文件从原始描述符 sendfile，不经 `ServeContent`、不复制描述符（fib A102） | I231 | done |
 
 ## M0 基础
 
@@ -7188,3 +7189,26 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 3. **用 `WriteResponseCopy`，不改 fib 的 `WriteResponseOwned`**：每请求复制 8 KiB 比原来的垃圾便宜；让 HTTP/1 的自有正文
    发送后还池留给 fib。
 4. **响应头块只用于整读路径**；内存缓存本就让所有响应共享一个响应头 map，大文件路径为 SendFile 设置响应头。
+
+### I232 超过 16 KiB 的文件 sendfile 不经 ServeContent、不复制描述符 — done
+
+- **原因**：参数扫描（`bench/results/sweep-2026-11-21`）发现整读阈值之后有断崖：16 KiB 为 nginx 的 90.7%，17-32 KiB 为 70.0%。
+  超过 16 KiB 的文件走 `ServeContent` 和 `*os.File`（`NewFile` 设为非阻塞：两次 `fcntl`），fib 的 `SendFile` 再复制一次描述符
+  （`dup`、`F_SETFD`、多一次 `close`）：20 KiB 时每请求 11.5 次系统调用，nginx 为 7.1，`ServeContent` 占 10.3% CPU。
+- **完成**：`handler/static`：无条件、无范围的 GET 或 HEAD，查找到的文件超过 16 KiB 时走 `sendWhole`：原始打开文件
+  （`rawFile`，带 `ReadAt`、`SyscallConn` 与 `HandOverFD` 的描述符），一次 `fstat` 确认仍是查找时大小的普通文件（否则走原路径），
+  用查找得到的校验信息设置响应头，从该描述符 `SendFileStall`。fib A102（`cec2122`）：`FileHandover`，`SendFile` 向文件要描述符，
+  从它发送并关闭它，不复制；fit 改用它。非 Unix 平台文件仍是 `*os.File`，fib 照旧复制。
+- **压测**（.51，两轮，[bench/results/static-sendfile-path-2026-11-22](../bench/results/static-sendfile-path-2026-11-22/README.md)）：17 KiB 231,751 → 267,914 QPS（+15.6%），20 KiB +16.5%，32 KiB +15.1%，
+  64 KiB +12.8%；128 KiB 与 16 KiB 以下持平。17-32 KiB 的 p99 2.9 → 2.6-2.9 ms。相对 nginx：17-32 KiB 70% → 80-83%，
+  64 KiB 83% → 94%。
+- **试过并放弃**：响应头与文件放进同一个 TCP 段（fib 在两者之间 cork 连接，响应头带 `MSG_MORE` 发送）：17-20 KiB 两轮均
+  −1.5..−1.9%。
+- **遗留**：17-32 KiB 在相同 CPU 下仍比 nginx 低 17-20%（每请求约 29 µs 对 24）；sendfile 路径比整读 16 KiB 多 3-4 µs。下一步：
+  在 20 KiB 下对 `fit-cliff` 做 profile。
+
+**待审查的决定**（2026-11-22）：
+
+1. **整读阈值保持 16 KiB**：8-16 KiB 改走新路径（`fit-cliff4k`）低 11-15%。
+2. **只有普通请求走新路径**；条件与范围请求仍用 `ServeContent`，它处理 `If-*` 和多段范围，且在这类负载中很少。
+3. **保留 `fstat`**（nginx 也做一次）：防止查找后被替换的文件或目录带着过期的校验信息或没有校验信息发出。

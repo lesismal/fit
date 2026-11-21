@@ -8171,3 +8171,13 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - Decision pending review: the static handler keeps `WriteResponseCopy` for files read whole;
   `WriteResponseOwned` there gave +1.7-1.8% at saturation but a higher p99 at 256 connections in
   every round (2.74 → 3.70 ms).
+
+### I232 Files above 16 KiB by sendfile without ServeContent — done
+
+- **Change**: a plain GET or HEAD of a file above 16 KiB opens it raw, checks it with one `fstat`,
+  sets the header from the lookup and hands the descriptor to `SendFile` (fib A102 `cec2122`, no
+  `dup`); fit is on fib `cec2122`.
+- **Benchmark** (.51): 17/20/32/64 KiB +15.6/+16.5/+15.1/+12.8%, against nginx 70% → 80-83% (64 KiB
+  94%); up to 16 KiB and 128 KiB level. Results in `bench/results/static-sendfile-path-2026-11-22`.
+- **Open**: 17-32 KiB still 17-20% below nginx; one header segment with the file was tried and
+  was slower. Decisions pending review in the plan section.

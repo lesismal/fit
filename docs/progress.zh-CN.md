@@ -5737,3 +5737,11 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   结果在 `bench/results/fib-owned-bodies-2026-11-21`。
 - 待审查的决定：static handler 对整读的文件仍用 `WriteResponseCopy`；改用 `WriteResponseOwned` 在饱和时 +1.7-1.8%，但 256 并发的
   p99 每轮都更高（2.74 → 3.70 ms）。
+
+### I232 超过 16 KiB 的文件 sendfile 不经 ServeContent — done
+
+- **改动**：超过 16 KiB 文件的普通 GET 或 HEAD 原始打开，一次 `fstat` 校验，按查找结果设置响应头，把描述符交给 `SendFile`
+  （fib A102 `cec2122`，不再 `dup`）；fit 改用 fib `cec2122`。
+- **压测**（.51）：17/20/32/64 KiB +15.6/+16.5/+15.1/+12.8%，相对 nginx 70% → 80-83%（64 KiB 94%）；16 KiB 以下与 128 KiB
+  持平。结果见 `bench/results/static-sendfile-path-2026-11-22`。
+- **未决**：17-32 KiB 仍比 nginx 低 17-20%；响应头与文件同段发送试过，更慢。待审查的决定见计划部分。
