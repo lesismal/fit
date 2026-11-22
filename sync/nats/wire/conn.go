@@ -897,8 +897,13 @@ func (ib *Inbox) Close() {
 }
 
 // Request publishes data to subject and returns its first answer: a
-// status 503 is ErrNoResponders.
+// status 503 is ErrNoResponders. A request whose ctx is done already is not
+// published: with an answer at hand and ctx done, the wait for it could
+// take either.
 func (c *Client) Request(ctx context.Context, subject string, hdr Header, data []byte) (*Msg, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("nats: %s: %w", subject, err)
+	}
 	ib, err := c.NewInbox(1)
 	if err != nil {
 		return nil, err
