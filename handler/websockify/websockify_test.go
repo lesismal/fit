@@ -463,15 +463,28 @@ func TestMetrics(t *testing.T) {
 	c := mustDial(t, clientEngine(t), "ws://"+f.addr+"/", nil)
 	_ = c.conn.WriteMessage(websocket.Binary, []byte("hello"))
 	c.read(5, false)
-	var w observe.TextWriter
-	WriteMetrics(&w, f.engine)
-	out := string(w.B)
-	for _, want := range []string{
+	wants := []string{
 		`fit_websockify_connections_open{bridge="m"} 1`,
 		`fit_websockify_requests_total{bridge="m",result="bridged"} 1`,
 		`fit_websockify_bytes_total{bridge="m",direction="to_target"} 5`,
 		`fit_websockify_bytes_total{bridge="m",direction="to_client"} 5`,
-	} {
+	}
+	// The bytes to the client are counted once their send returns, which
+	// may be after the client has them: read until the counts are in.
+	var out string
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		var w observe.TextWriter
+		WriteMetrics(&w, f.engine)
+		out = string(w.B)
+		missing := false
+		for _, want := range wants {
+			missing = missing || !strings.Contains(out, want)
+		}
+		if !missing || time.Now().After(deadline) {
+			break
+		}
+	}
+	for _, want := range wants {
 		if !strings.Contains(out, want) {
 			t.Errorf("the metrics lack %s:\n%s", want, out)
 		}
