@@ -292,6 +292,8 @@ func (a *Assistant) saver() {
 }
 
 func (a *Assistant) saveDirty() {
+	a.saveMu.Lock()
+	defer a.saveMu.Unlock()
 	a.saveAudit()
 	for {
 		a.chats.mu.Lock()

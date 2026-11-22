@@ -151,6 +151,9 @@ type Assistant struct {
 	audit    auditLog
 	// applyMu lets one proposal be applied at a time.
 	applyMu sync.Mutex
+	// saveMu lets one saveDirty run at a time, so that one returns only
+	// once what an earlier one took is written, and writes land in order.
+	saveMu sync.Mutex
 	// subjectKey is the key playback sessions' subjects are hashed with
 	// for the model, made anew each time fit starts (tools_media.go).
 	subjectKey []byte
