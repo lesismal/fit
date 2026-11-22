@@ -3,7 +3,7 @@ module github.com/lesismal/fit/plugin/build/testdata/hello
 go 1.27.3
 
 require (
-	github.com/lesismal/fib v1.9.0
+	github.com/lesismal/fib v1.9.1
 	github.com/lesismal/fit v0.0.0-00010101000000-000000000000
 )
 
