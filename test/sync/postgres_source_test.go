@@ -476,8 +476,12 @@ func TestPostgresSourceAcrossKills(t *testing.T) {
 		for round := 0; wrote.Load() < txs || round < 12; round++ {
 			at, nth := points[rnd.IntN(len(points))], int32(1+rnd.IntN(100))
 			var seen atomic.Int32
+			// The first run makes the slot and is not killed: checkpoints
+			// come every millisecond with or without records, so a kill at
+			// one could come before a slow server had the slot made, and
+			// nothing would make it then (pg13, CI run 45059933470).
 			rt := fitsync.NewRuntime(fitsync.Options{Crash: func(_ string, p fitsync.Point) bool {
-				return p == at && seen.Add(1) == nth
+				return round > 0 && p == at && seen.Add(1) == nth
 			}})
 			if err := rt.Apply(cfg); err != nil {
 				t.Fatal(err)
