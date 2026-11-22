@@ -115,7 +115,7 @@ type Static struct {
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out."`
 
-	DiskIO string `json:"disk_io,omitempty" enum:"auto,pool,inline" default:"\"auto\"" doc:"Where a request that needs the disk looks at it, for a file the cache does not hold: auto on fib's worker that serves it, as nginx does in its event loop, while no more requests than a quarter of the process's CPUs do so at once, and on the file pool past that; pool always on the file pool, as fit did before, which keeps a disk that hangs off fib's workers altogether; inline always on fib's worker. A request on fib's worker waits for the disk however long it takes, where one on the pool is answered 503 past the pool's timeout: with auto a disk that hangs holds no more of fib's workers than that quarter, and the requests past them get the pool's 503. On a disk that answers from memory, as tmpfs or a page cache that holds the files does, the hand-over to the pool costs a few percent of a busy server's rate (4% at 20 KiB files), which auto wins half of, and inline all, at the cost of a longer tail at saturation (its 99th percentile half as long again). auto when left out."`
+	DiskIO string `json:"disk_io,omitempty" enum:"auto,pool" default:"\"auto\"" doc:"Where a request that needs the disk looks at it, for a file the cache does not hold: auto on fib's worker that serves it, as nginx does in its event loop, while no more requests than a quarter of the process's CPUs do so at once, and on the file pool past that; pool always on the file pool, as fit did before, which keeps a disk that hangs off fib's workers altogether. A request on fib's worker waits for the disk however long it takes, where one on the pool is answered 503 past the pool's timeout: with auto a disk that hangs holds no more of fib's workers than that quarter, and the requests past them get the pool's 503. On a disk that answers from memory, as tmpfs or a page cache that holds the files does, auto serves a few percent more than pool (2.6% at 20 KiB files), with the 99th percentile at saturation 5-12% longer. auto when left out."`
 
 	DefaultType string `json:"default_type,omitempty" doc:"The Content-Type of a file whose extension gives none, as nginx's default_type, such as application/octet-stream; when left out, such a file's type is sniffed from its first 512 bytes, as net/http's is, which costs a read of a file not in memory."`
 
@@ -303,16 +303,12 @@ func (s *Static) ServeHTTP(c *fibhttp.Context) {
 }
 
 // inlineBegin reports whether the request is served here, on fib's worker,
-// disk and all (see disk_io): always with inline, never with pool, and with
-// auto while fewer than inlineMax requests are; inlining then counts it,
-// until the caller takes it off.
+// disk and all (see disk_io): never with pool, and with auto while fewer
+// than inlineMax requests are; inlining then counts it, until the caller
+// takes it off.
 func (s *Static) inlineBegin() bool {
-	switch s.diskIO {
-	case diskPool:
+	if s.diskIO == diskPool {
 		return false
-	case diskInline:
-		s.inlining.Add(1)
-		return true
 	}
 	if s.inlining.Add(1) <= s.inlineMax {
 		return true
@@ -346,9 +342,8 @@ var inlineHook func()
 
 // The values of disk_io.
 const (
-	diskAuto   = "auto"
-	diskPool   = "pool"
-	diskInline = "inline"
+	diskAuto = "auto"
+	diskPool = "pool"
 )
 
 // serve answers the request for name, whose URL path is urlPath, or try_files

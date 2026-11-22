@@ -404,7 +404,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I236.
 | I232 | Files above 16 KiB go by sendfile from a raw descriptor, without `ServeContent` or a duplicate (fib A102) | I231 | done |
 | I233 | The static handler's `default_type`, as nginx's: files whose extension gives no type are not sniffed | I232 | done |
 | I234 | The static handler: open and fstat in place of lstat, the user-space cost of a request, no timer a request, opt-in `inline_disk` | I233 | done |
-| I235 | The static handler's `disk_io`: requests that need the disk served on fib's worker, a quarter of the CPUs at once, by default | I234 | done |
+| I235 | The static handler's `disk_io` (`auto`, `pool`): requests that need the disk served on fib's worker, a quarter of the CPUs at once, by default | I234 | done |
 
 ## M0, foundations
 
@@ -10446,8 +10446,9 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
   poller where fib's loops park).
 - **Done**: `handler/static`: `disk_io` replaces `inline_disk` (I234's, never released): `auto`,
   the default, serves a request that needs the disk on fib's worker while no more than a quarter of
-  the CPUs' worth do so, and on the file pool past that; `pool` as before I235; `inline` always on
-  fib's worker. A request on fib's worker waits for the disk however long it takes (fib sends a
+  the CPUs' worth do so, and on the file pool past that; `pool` as before I235. (An `inline`
+  value, always on fib's worker, was there at first and was removed the same day at the user's
+  request; see the decisions.) A request on fib's worker waits for the disk however long it takes (fib sends a
   retained response only once the handler returns, so the pool's 503 could not go out sooner);
   auto's bound is what keeps a disk that hangs from holding more of fib's workers. A lookup the
   cache does not hold is one allocation with its stat and its file; the contents the cache holds
@@ -10457,8 +10458,8 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
   most. As committed, against I234: +1.0% at 8 KiB, +1.3% at 16 KiB, +2.6% at 20 KiB, +2.2% at 32 KiB,
   +1.1% at 64 KiB, p99 5-12% longer; against nginx 8 KiB 107.6%, 16 KiB 100.9%, 20 KiB 97.0%, 32 KiB
   96.8%, 64 KiB 95.4%. Paced at nine tenths of saturation, 20 KiB: +2.7%, 98.3% of nginx, p99 2.47 ms
-  (nginx 2.86). `disk_io inline`: 20 KiB 99.5%, 32 KiB 98.5% of nginx, p99 at saturation 2-3 times
-  longer.
+  (nginx 2.86). Every request on fib's worker, unbounded (the removed `inline`): 20 KiB 99.5%,
+  32 KiB 98.5% of nginx, p99 at saturation 2-3 times longer.
 - **Left**: 20-32 KiB 3% below nginx at saturation by default, under 2% at nine tenths of it. fit
   makes fewer system calls a request than nginx (6.17 against 7.39) and spends less time in the
   kernel; the rest is Go's scheduler and collector and fib's header serialization.
@@ -10472,6 +10473,8 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
    saturation and a longer tail, less near saturation.
 3. **No 503 for a request on fib's worker**: it waits for the disk; auto's bound limits how many
    can. The requests past it go to the pool, whose timeout answers them as before.
-4. **`inline_disk` is gone**, replaced by `disk_io inline`; it was pushed with I234 the same day
-   and never released.
+4. **`inline_disk` is gone**, and with it any unbounded mode: `disk_io` takes `auto` and `pool`
+   only. `inline_disk` was pushed with I234 and a `disk_io inline` with I235, both the same day and
+   never released; at the user's request (2026-11-22) inline was dropped, since unbounded it lets a
+   disk that hangs take every one of fib's workers, and every route with them.
 

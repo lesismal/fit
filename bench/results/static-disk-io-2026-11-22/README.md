@@ -11,6 +11,10 @@ it, 256 half; their lines are in `paced.txt`.
 
 `fit-all` is fit as I234 left it (2707b1e5), every request that needs the disk on the file pool.
 
+`disk_io inline`, measured below as `fit-auto2-inline`, was removed after these runs at the user's
+request: unbounded, a disk that hangs could take all of fib's workers. `disk_io` takes `auto` and
+`pool`.
+
 ## The hand-over to the pool
 
 What I234 left of the 20-32 KiB gap was the hand-over: a fib worker queues the request for the file
@@ -49,7 +53,7 @@ served most. **auto's bound is a quarter of the CPUs.**
 `fit-auto2` is the change with `disk_io` left out (auto, a bound of 2 here), which also makes a
 lookup the cache does not hold one allocation with its stat and its file, and looks at the
 contents the cache holds once rather than twice for a file it does not hold; `fit-auto2-inline` the
-same with `disk_io inline` (`fit-dt-inline.conf`).
+same with `disk_io inline` (`fit-dt-inline.conf`), since removed.
 
 | Size | fit-all | auto | Change | inline | nginx | auto of nginx | inline of nginx |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -70,7 +74,8 @@ System calls a request at 20 KiB: fit-all 6.56, auto 6.17, inline 5.82, nginx 7.
 ## What is left
 
 By default 20-32 KiB is 3% below nginx at saturation and under 2% at nine tenths of it; with
-`disk_io inline`, 0.5-1.5% at saturation with the tail much longer. fit now makes fewer system
+every request on fib's worker (the removed `inline`), 0.5-1.5% at saturation with the tail much
+longer. fit now makes fewer system
 calls a request than nginx and spends less time in the kernel; what remains is Go's: a goroutine a
 request, the scheduler's look at its poller, the collector (a GC every 150 ms at this rate), and
 fib's header serialization (2%).

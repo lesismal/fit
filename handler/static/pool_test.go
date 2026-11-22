@@ -157,14 +157,14 @@ func TestWaiting(t *testing.T) {
 	}
 }
 
-// TestDiskIO checks disk_io: with inline, and with auto under its bound,
+// TestDiskIO checks disk_io: with auto under its bound,
 // files read whole and sent by SendFile, HEAD, a directory and a file not
 // there are answered as from the pool, and the pool is not used; with pool
 // it is; a value not known is refused.
 func TestDiskIO(t *testing.T) {
 	big := strings.Repeat("0123456789", smallFile/10+100)
 	root := tree(t, map[string]string{"small.txt": "small", "big.txt": big, "sub/index.html": "index"})
-	for _, mode := range []string{"", "auto", "inline", "pool"} {
+	for _, mode := range []string{"", "auto", "pool"} {
 		extra := `, "max_file_bytes": 4, "check_interval": "0s"`
 		if mode != "" {
 			extra += `, "disk_io": "` + mode + `"`
@@ -199,8 +199,10 @@ func TestDiskIO(t *testing.T) {
 			t.Fatalf("%q: %d requests still counted inline", mode, n)
 		}
 	}
-	if _, err := load(t, `{"root": `+quote(root)+`, "disk_io": "sometimes"}`); err == nil {
-		t.Error("disk_io \"sometimes\" was taken")
+	for _, bad := range []string{"sometimes", "inline"} {
+		if _, err := load(t, `{"root": `+quote(root)+`, "disk_io": "`+bad+`"}`); err == nil {
+			t.Errorf("disk_io %q was taken", bad)
+		}
 	}
 }
 

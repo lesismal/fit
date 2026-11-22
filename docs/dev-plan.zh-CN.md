@@ -394,7 +394,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I232 | 超过 16 KiB 的文件从原始描述符 sendfile，不经 `ServeContent`、不复制描述符（fib A102） | I231 | done |
 | I233 | 静态处理器的 `default_type`（同 nginx）：扩展名给不出类型的文件不再嗅探 | I232 | done |
 | I234 | 静态处理器：以 open+fstat 取代 lstat、请求的用户态开销、去掉每请求的定时器、可选的 `inline_disk` | I233 | done |
-| I235 | 静态处理器的 `disk_io`：默认在 fib worker 上处理需要访问磁盘的请求，同时最多 CPU 数的四分之一 | I234 | done |
+| I235 | 静态处理器的 `disk_io`（`auto`、`pool`）：默认在 fib worker 上处理需要访问磁盘的请求，同时最多 CPU 数的四分之一 | I234 | done |
 
 ## M0 基础
 
@@ -7283,13 +7283,13 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
   20 KiB 快 4%，事件循环挂起的次数降到十分之一；但 I234 的 `inline_disk` 需显式开启，而且对所有请求都内联时饱和下 99 分位长了一半
   （所有 P 都忙，运行时很少去看 fib 事件循环所挂的 poller）。
 - **完成**：`handler/static`：`disk_io` 取代 `inline_disk`（I234 加入，从未发布）：默认的 `auto` 在 fib worker 上处理需要访问磁盘的请求，
-  同时这样做的不超过 CPU 数的四分之一，超出的交给文件池；`pool` 即 I235 之前的做法；`inline` 总是在 fib worker 上。在 fib worker 上的
+  同时这样做的不超过 CPU 数的四分之一，超出的交给文件池；`pool` 即 I235 之前的做法。（最初还有总是在 fib worker 上的 `inline`，同日应用户要求去掉，见决定。）在 fib worker 上的
   请求会一直等磁盘（fib 只在处理器返回后才发出被 Retain 的响应，文件池的 503 本来也无法更早发出）；auto 的上限保证挂起的磁盘不会占住
   更多 fib worker。缓存未命中的查找与其 stat 和文件合为一次分配；缓存未持有的文件只查一次内容缓存而不是两次（`currentOrRoom`）。
 - **压测**（.51，[bench/results/static-disk-io-2026-11-22](../bench/results/static-disk-io-2026-11-22/README.md)）：在 20 KiB 上对上限扫描（8 个 CPU 上 0、2、4、8）：每加一档，饱和吞吐更高、尾延迟更长；接近饱和时最小
   的上限吞吐最高。按提交版本相对 I234：8 KiB +1.0%，16 KiB +1.3%，20 KiB +2.6%，32 KiB +2.2%，64 KiB +1.1%，p99 长 5-12%；相对 nginx：
   8 KiB 107.6%，16 KiB 100.9%，20 KiB 97.0%，32 KiB 96.8%，64 KiB 95.4%。在饱和的十分之九负载下（20 KiB）：+2.7%，为 nginx 的 98.3%，
-  p99 2.47 ms（nginx 2.86）。`disk_io inline`：20 KiB 为 nginx 的 99.5%，32 KiB 98.5%，饱和下 p99 长 2-3 倍。
+  p99 2.47 ms（nginx 2.86）。所有请求都在 fib worker 上、不设上限（已去掉的 `inline`）：20 KiB 为 nginx 的 99.5%，32 KiB 98.5%，饱和下 p99 长 2-3 倍。
 - **遗留**：默认配置下 20-32 KiB 饱和时比 nginx 低 3%，十分之九负载下不到 2%。fit 每请求的系统调用比 nginx 少（6.17 对 7.39），内核时间
   也更少；剩下的是 Go 的调度器与垃圾回收，以及 fib 的响应头序列化。
 
@@ -7299,5 +7299,6 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
    保留旧行为，磁盘挂起时完全不占 fib worker。
 2. **上限为 CPU 数的四分之一**（至少 1），依据扫描结果：更大则饱和吞吐更高、尾延迟更长，接近饱和时反而更低。
 3. **fib worker 上的请求没有 503**：它会一直等磁盘；auto 的上限限制这样的请求数量。超出上限的请求交给文件池，照旧由其超时应答。
-4. **去掉 `inline_disk`**，由 `disk_io inline` 取代；它与 I234 同日推送，从未发布。
+4. **去掉 `inline_disk`，也不提供任何不设上限的模式**：`disk_io` 只接受 `auto` 和 `pool`。`inline_disk`（I234）和 `disk_io inline`（I235）都在同日推送、从未发布；
+   应用户要求（2026-11-22）去掉 inline，因为不设上限时挂起的磁盘能占满 fib 的所有 worker，连带所有路由。
 
