@@ -33,8 +33,15 @@ func TestTrafficAndRTT(t *testing.T) {
 	if _, err := d.Call(ctxT(t), Head{Method: "/echo"}, payload); err != nil {
 		t.Fatal(err)
 	}
-	din, dout := d.Traffic()
-	lin, lout := l.Traffic()
+	// A session counts what it sent once the send returns, which may be
+	// after the peer has the frame: the listener's reply can reach the
+	// dialer before the listener counts it (CI run 45053871273).
+	var din, dout, lin, lout int64
+	waitUntil(t, func() bool {
+		din, dout = d.Traffic()
+		lin, lout = l.Traffic()
+		return dout == lin && din == lout
+	})
 	if dout < 300 || din < 300 || dout != lin || din != lout {
 		t.Fatalf("dialer in %d out %d, listener in %d out %d", din, dout, lin, lout)
 	}
