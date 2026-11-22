@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	fibhttp "github.com/lesismal/fib/http"
+
 	"github.com/lesismal/fit/internal/filepool"
 )
 
@@ -157,10 +159,10 @@ func TestWaiting(t *testing.T) {
 	}
 }
 
-// TestDiskIO checks disk_io: with auto under its bound,
-// files read whole and sent by SendFile, HEAD, a directory and a file not
-// there are answered as from the pool, and the pool is not used; with pool
-// it is; a value not known is refused.
+// TestDiskIO checks disk_io: with auto under its bound, files read whole
+// and sent by SendFile, HEAD, a directory and a file not there are answered
+// as from the pool, and the pool is not used; with pool, the default, it
+// is; a value not known is refused.
 func TestDiskIO(t *testing.T) {
 	big := strings.Repeat("0123456789", smallFile/10+100)
 	root := tree(t, map[string]string{"small.txt": "small", "big.txt": big, "sub/index.html": "index"})
@@ -192,7 +194,7 @@ func TestDiskIO(t *testing.T) {
 				}
 			}
 		}
-		if n := jobs.Load(); (n == 0) != (mode != "pool") {
+		if n := jobs.Load(); (n == 0) != (mode == "auto") {
 			t.Fatalf("%q: the pool ran %d jobs", mode, n)
 		}
 		if n := s.inlining.Load(); n != 0 {
@@ -211,7 +213,7 @@ func TestDiskIO(t *testing.T) {
 // those past the bound go to the pool, whose timeout answers them 503.
 func TestInlineSlowDisk(t *testing.T) {
 	root := tree(t, map[string]string{"a.txt": "aaa"})
-	s := mustLoad(t, root, `, "check_interval": "0s"`)
+	s := mustLoad(t, root, `, "check_interval": "0s", "disk_io": "auto"`)
 	s.pool = filepool.New(1, 8, 300*time.Millisecond)
 	s.inlineMax = 2
 	stuck := make(chan struct{})
@@ -253,5 +255,83 @@ func TestInlineSlowDisk(t *testing.T) {
 	}
 	if n := s.inlining.Load(); n != 0 {
 		t.Fatalf("%d still counted inline", n)
+	}
+}
+
+// TestBegin checks the start of the pool's work on a request: it goes on
+// for one still waiting and listed; it stops, answering nothing, for one
+// the timeout answered; and it answers 503 itself for one a sweep took off
+// its list past its deadline while it looked at the Context.
+func TestBegin(t *testing.T) {
+	w := newWaiting()
+	var went bool
+	rec := with("/", func(c *fibhttp.Context) {
+		c.Retain()
+		q := &queued{snapshot: true}
+		w.join(q, c, time.Hour)
+		went = q.begin(c)
+		if went && q.state.Load() != queuedWaiting {
+			t.Errorf("state %d after begin", q.state.Load())
+		}
+		q.leave()
+		c.Release()
+	})
+	if !went || rec.Response.StatusCode != 200 {
+		t.Fatalf("waiting: went %v, %d", went, rec.Response.StatusCode)
+	}
+	rec = with("/", func(c *fibhttp.Context) {
+		q := done()
+		if q.begin(c) {
+			t.Error("begin went on for a request the timeout answered")
+		}
+	})
+	if rec.Response.StatusCode != 200 {
+		t.Fatalf("answered by the timeout: begin wrote %d", rec.Response.StatusCode)
+	}
+	rec = with("/", func(c *fibhttp.Context) {
+		c.Retain()
+		q := &queued{snapshot: true}
+		w.join(q, c, time.Hour)
+		// As a sweep past the deadline leaves a request it found checking.
+		q.leave()
+		if q.begin(c) {
+			t.Error("begin went on for a request past its deadline")
+		}
+	})
+	if rec.Response.StatusCode != 503 {
+		t.Fatalf("swept while checking: %d, want 503", rec.Response.StatusCode)
+	}
+	if n := w.count.Load(); n != 0 {
+		t.Fatalf("%d still wait", n)
+	}
+}
+
+// TestPoolSnapshot checks that the pool's work decides by what was taken of
+// the request when it was queued: a precompressed twin for the client that
+// accepts it, and a conditional request answered 304.
+func TestPoolSnapshot(t *testing.T) {
+	big := strings.Repeat("0123456789", smallFile/10+100)
+	twin := strings.Repeat("z", smallFile+3)
+	root := tree(t, map[string]string{"big.txt": big, "big.txt.gz": twin})
+	s := mustLoad(t, root, `, "max_file_bytes": 4, "precompressed": ["gzip"], "disk_io": "pool"`)
+	var jobs atomic.Int32
+	s.pool = filepool.New(2, 16, time.Second)
+	s.pool.Hook = func() { jobs.Add(1) }
+	got := get(s, "GET", "/big.txt", map[string]string{"Accept-Encoding": "gzip"}).Response
+	if got.StatusCode != 200 || string(got.Body) != twin || got.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("twin: %d, %d bytes, %v", got.StatusCode, len(got.Body), got.Header)
+	}
+	got = get(s, "GET", "/big.txt", nil).Response
+	if got.StatusCode != 200 || string(got.Body) != big {
+		t.Fatalf("plain: %d, %d bytes", got.StatusCode, len(got.Body))
+	}
+	tag := got.Header.Get("Etag")
+	s2 := mustLoad(t, root, `, "max_file_bytes": 4, "precompressed": ["gzip"], "disk_io": "pool", "check_interval": "0s"`)
+	s2.pool = s.pool
+	if got := get(s2, "GET", "/big.txt", map[string]string{"If-None-Match": tag}).Response; got.StatusCode != 304 || len(got.Body) != 0 {
+		t.Fatalf("conditional: %d, %d bytes", got.StatusCode, len(got.Body))
+	}
+	if jobs.Load() < 3 {
+		t.Fatalf("%d pool jobs, want every request through the pool", jobs.Load())
 	}
 }

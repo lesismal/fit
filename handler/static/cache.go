@@ -683,9 +683,9 @@ func (s *Static) twins(l *lookup) {
 // variant is how l's file goes out to r's client: as it is, or as the
 // compressed twin the client prefers among those on disk. It returns the
 // variant, and the path, stat and stamp of the file that carries it.
-func (s *Static) variant(r *stdhttp.Request, l *lookup) (variant, string, fs.FileInfo, filewatch.Stamp) {
+func (s *Static) variant(accept []string, l *lookup) (variant, string, fs.FileInfo, filewatch.Stamp) {
 	v := variant{name: l.name, vary: s.vary, defaultType: s.DefaultType}
-	if i := s.preferred(r, l); i >= 0 {
+	if i := s.preferred(accept, l); i >= 0 {
 		v.encoding = s.precompressed[i].name
 		t := &l.twins[i]
 		return v, t.full, t.info, t.stamp

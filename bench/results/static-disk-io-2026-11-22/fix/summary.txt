@@ -1,0 +1,15 @@
+size-20480.r1 fit-auto2 sys rps=310134.22 all=6.14 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.95 newfstatat=0.03 epoll_ctl=0.08 epoll_wait=0.00 epoll_pwait=0.27 sendto=0.95 write=0.00 sendfile64=0.95 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.00 
+size-20480.r1 fit-auto2 rps_line: rps=323149.43 50%=702.00us 90%=1.47ms 99%=2.84ms  errs=0 srvcpu=7.87/8
+size-20480.r1 fit-fix sys rps=309955.49 all=6.17 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.94 newfstatat=0.03 epoll_ctl=0.09 epoll_wait=0.00 epoll_pwait=0.31 sendto=0.94 write=0.00 sendfile64=0.94 recvfrom=0.97 sendmsg=0.03 setsockopt=0.00 futex=0.00 
+size-20480.r1 fit-fix rps_line: rps=324954.39 50%=703.00us 90%=1.44ms 99%=2.64ms  errs=0 srvcpu=7.88/8
+size-20480.r2 fit-auto2 rps_line: rps=325455.27 50%=705.00us 90%=1.44ms 99%=2.54ms  errs=0 srvcpu=7.90/8
+size-20480.r2 fit-fix rps_line: rps=323451.92 50%=706.00us 90%=1.45ms 99%=2.65ms  errs=0 srvcpu=7.81/8
+size-20480.r3 fit-auto2 rps_line: rps=326162.35 50%=706.00us 90%=1.45ms 99%=2.58ms  errs=0 srvcpu=7.90/8
+size-20480.r3 fit-fix rps_line: rps=324887.73 50%=705.00us 90%=1.45ms 99%=2.60ms  errs=0 srvcpu=7.88/8
+size-8192.r1 fit-auto2 rps_line: rps=360735.13 50%=697.00us 90%=1.26ms 99%=2.18ms  errs=0 srvcpu=7.91/8
+size-8192.r1 fit-fix rps_line: rps=358799.43 50%=700.00us 90%=1.28ms 99%=2.30ms  errs=0 srvcpu=7.90/8
+size-8192.r2 fit-auto2 rps_line: rps=360254.05 50%=699.00us 90%=1.27ms 99%=2.19ms  errs=0 srvcpu=7.91/8
+size-8192.r2 fit-fix rps_line: rps=358810.14 50%=701.00us 90%=1.28ms 99%=2.30ms  errs=0 srvcpu=7.90/8
+size-8192.r3 fit-auto2 rps_line: rps=360863.91 50%=696.00us 90%=1.27ms 99%=2.28ms  errs=0 srvcpu=7.91/8
+size-8192.r3 fit-fix rps_line: rps=360200.60 50%=695.00us 90%=1.26ms 99%=2.17ms  errs=0 srvcpu=7.91/8
+done 17:35:11

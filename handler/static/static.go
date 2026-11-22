@@ -115,7 +115,7 @@ type Static struct {
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out."`
 
-	DiskIO string `json:"disk_io,omitempty" enum:"auto,pool" default:"\"auto\"" doc:"Where a request that needs the disk looks at it, for a file the cache does not hold: auto on fib's worker that serves it, as nginx does in its event loop, while no more requests than a quarter of the process's CPUs do so at once, and on the file pool past that; pool always on the file pool, as fit did before, which keeps a disk that hangs off fib's workers altogether. A request on fib's worker waits for the disk however long it takes, where one on the pool is answered 503 past the pool's timeout: with auto a disk that hangs holds no more of fib's workers than that quarter, and the requests past them get the pool's 503. On a disk that answers from memory, as tmpfs or a page cache that holds the files does, auto serves a few percent more than pool (2.6% at 20 KiB files), with the 99th percentile at saturation 5-12% longer. auto when left out."`
+	DiskIO string `json:"disk_io,omitempty" enum:"pool,auto" default:"\"pool\"" doc:"Where a request that needs the disk looks at it, for a file the cache does not hold: pool on the file pool, which keeps a disk that hangs off fib's workers altogether, a request waiting on it past the pool's timeout answered 503; auto on fib's worker that serves it, as nginx does in its event loop, while no more requests than a quarter of the process's CPUs do so at once, and on the file pool past that. A request on fib's worker waits for the disk however long it takes: with auto a disk that hangs holds no more of fib's workers than that quarter, and the requests past them get the pool's 503. On a disk that answers from memory, as tmpfs or a page cache that holds the files does, auto serves a few percent more than pool (2.6% at 20 KiB files), with the 99th percentile at saturation 5-12% longer. pool when left out."`
 
 	DefaultType string `json:"default_type,omitempty" doc:"The Content-Type of a file whose extension gives none, as nginx's default_type, such as application/octet-stream; when left out, such a file's type is sniffed from its first 512 bytes, as net/http's is, which costs a read of a file not in memory."`
 
@@ -151,7 +151,7 @@ type Static struct {
 	pool  *filepool.Pool
 	// waiting holds the requests queued for the pool, for its timeout.
 	waiting *waiting
-	// diskIO is disk_io's value, auto when left out; inlining counts the
+	// diskIO is disk_io's value, pool when left out; inlining counts the
 	// requests served on fib's workers disk and all, which auto keeps to
 	// inlineMax, a quarter of the CPUs. The padding keeps the counter, which every such
 	// request changes twice, off the fields read beside it.
@@ -247,7 +247,7 @@ func (s *Static) Provision(ctx *module.Context) error {
 	s.waiting = newWaiting()
 	s.diskIO = s.DiskIO
 	if s.diskIO == "" {
-		s.diskIO = diskAuto
+		s.diskIO = diskPool
 	}
 	// A quarter of the CPUs: at 20 KiB on 8, a bound of 2 served 2.5% more
 	// than the pool alone at saturation with the 99th percentile 5% up, and
@@ -307,7 +307,7 @@ func (s *Static) ServeHTTP(c *fibhttp.Context) {
 // than inlineMax requests are; inlining then counts it, until the caller
 // takes it off.
 func (s *Static) inlineBegin() bool {
-	if s.diskIO == diskPool {
+	if s.diskIO != diskAuto {
 		return false
 	}
 	if s.inlining.Add(1) <= s.inlineMax {
@@ -429,7 +429,7 @@ func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queue
 		s.list(c, listPath, l.full, q)
 		return true
 	}
-	v, full, info, stamp := s.variant(c.Request, l)
+	v, full, info, stamp := s.variant(q.acceptEncoding(c), l)
 	e, room := s.cache.currentOrRoom(full, stamp, info.Size(), q != nil)
 	if e == nil && q != nil && room {
 		e = s.cache.load(full, info, stamp, v)
@@ -477,6 +477,12 @@ func (o *opened) close() {
 // pool's work or the pool's timeout answers, whichever claims it first.
 type queued struct {
 	state atomic.Int32
+	// The request as the pool's work sees it until it claims the request,
+	// taken when it was queued: once the timeout has answered it, the
+	// Context may serve another request, and its Request with it.
+	snapshot   bool
+	accept     []string
+	conditions bool
 	// sending says SendFile took the request over, and gives it back.
 	sending bool
 	// c is the request, and the rest its place among the waiting (see
@@ -492,7 +498,49 @@ const (
 	queuedWaiting int32 = iota
 	queuedClaimed
 	queuedDone
+	// queuedChecking is the pool's work looking at the request's Context
+	// as it begins (see begin), which the timeout leaves alone.
+	queuedChecking
 )
+
+// acceptEncoding is the request's Accept-Encoding fields: from its Context
+// for a request served on fib's worker, which the Context stays with; from
+// what was taken when it was queued for the pool.
+func (q *queued) acceptEncoding(c *fibhttp.Context) []string {
+	if q != nil && q.snapshot {
+		return q.accept
+	}
+	return c.Request.Header["Accept-Encoding"]
+}
+
+// conditional reports whether the request is conditional or ranged (see
+// hasConditions), as acceptEncoding tells its fields.
+func (q *queued) conditional(c *fibhttp.Context) bool {
+	if q != nil && q.snapshot {
+		return q.conditions
+	}
+	return hasConditions(c.Request)
+}
+
+// begin starts the pool's work on q, and reports whether it goes on: not
+// when the timeout answered the request already, nor when its client went
+// while it waited, which it answers as the timeout would. It looks at the
+// Context in queuedChecking, which keeps the timeout off it: a sweep that
+// finds the request past its deadline meanwhile leaves it to begin, which
+// then answers it 503 itself.
+func (q *queued) begin(c *fibhttp.Context) bool {
+	if !q.state.CompareAndSwap(queuedWaiting, queuedChecking) {
+		return false
+	}
+	gone := c.Err() != nil
+	q.state.Store(queuedWaiting)
+	if gone || !q.listed() {
+		q.leave()
+		q.expire()
+		return false
+	}
+	return true
+}
 
 // claim reports whether the pool's work may answer the request: true once
 // it has it, false when the timeout answered it first. A nil q is a request
@@ -513,7 +561,15 @@ func (q *queued) claim() bool {
 // waiting to be taken up, or with the disk the work waits on hung.
 func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
 	c.Retain()
-	q := &queued{}
+	q := &queued{snapshot: true, conditions: hasConditions(c.Request)}
+	if len(s.precompressed) > 0 {
+		for _, field := range c.Request.Header["Accept-Encoding"] {
+			q.accept = append(q.accept, strings.Clone(field))
+		}
+	}
+	// The paths may point into the request's head, which the Context's
+	// next request may overwrite once the timeout has answered this one.
+	name, urlPath = strings.Clone(name), strings.Clone(urlPath)
 	s.waiting.join(q, c, s.pool.Timeout())
 	// The pool's own ways out.
 	expire := func() {
@@ -521,12 +577,11 @@ func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
 		q.expire()
 	}
 	run := func() {
-		if c.Err() != nil {
-			// The client went while the request waited.
-			expire()
+		if !q.begin(c) {
 			return
 		}
-		// With q, serve looks at the disk and always answers.
+		// With q, serve looks at the disk and always answers; until it
+		// claims the request it looks at nothing of the Context.
 		s.serve(c, name, urlPath, q)
 		if q.state.Load() == queuedClaimed && !q.sending {
 			c.Release()
@@ -581,7 +636,7 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info f
 		}
 		stale = true
 	}
-	if !stale && !hasConditions(c.Request) && s.sendWhole(c, v, full, info, q, o.take(full)) {
+	if !stale && !q.conditional(c) && s.sendWhole(c, v, full, info, q, o.take(full)) {
 		return
 	}
 	f, err := openFile(full)

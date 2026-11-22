@@ -13,7 +13,8 @@ it, 256 half; their lines are in `paced.txt`.
 
 `disk_io inline`, measured below as `fit-auto2-inline`, was removed after these runs at the user's
 request: unbounded, a disk that hangs could take all of fib's workers. `disk_io` takes `auto` and
-`pool`.
+`pool`, and `pool` is the default again: `auto` is opt-in, at the user's request. The `fit-auto2`
+numbers below are what `disk_io auto` gives.
 
 ## The hand-over to the pool
 
@@ -80,7 +81,14 @@ calls a request than nginx and spends less time in the kernel; what remains is G
 request, the scheduler's look at its poller, the collector (a GC every 150 ms at this rate), and
 fib's header serialization (2%).
 
+## I236: the pool's work and a Context the timeout answered (`fix/`)
+
+`fit-fix` takes what the pool's work needs of a request when it is queued and touches nothing of
+the Context before it claims the request; against `fit-auto2`, both with `auto`, which still sends
+most requests through the pool: 20 KiB 324,888 against 325,455 (−0.2%), 8 KiB 358,810 against
+360,735 (−0.5%).
+
 ## Files
 
-`auto.sh`, `imax.sh`, `auto2.sh` (the A/Bs; the first round at 20 KiB also counts system calls by
+`auto.sh`, `imax.sh`, `auto2.sh`, `fix.sh` (the A/Bs; the first round at 20 KiB also counts system calls by
 name, `*.syscalls.csv`), `sweep-paced.lua`, `fit-dt.conf`, `fit-dt-inline.conf`, `cliff-sum.py`.

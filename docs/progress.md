@@ -8208,10 +8208,10 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 
 ### I235 The static handler's disk_io — done
 
-- **Change**: `disk_io` (replacing I234's unreleased `inline_disk`): `auto`, the default, looks at
+- **Change**: `disk_io` (replacing I234's unreleased `inline_disk`): `auto`, opt-in, looks at
   the disk on fib's worker for up to a quarter of the CPUs' worth of requests at once and on the
-  file pool past that; `pool` as before (an unbounded `inline` was dropped the same day at the
-  user's request). A lookup miss is one
+  file pool past that; `pool`, the default, as before (an unbounded `inline` was dropped, and `auto`
+  turned back from the default to opt-in, the same day at the user's request). A lookup miss is one
   allocation; the content cache is looked at once for a file it does not hold.
 - **Benchmark** (.51): against I234 +1.0-2.6% at every size; against nginx 8 KiB 108%, 16 KiB 101%,
   20-32 KiB 97%, 64 KiB 95%; near saturation 20 KiB 98% with p99 below nginx's; unbounded, 20 KiB
@@ -8219,3 +8219,11 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Open**: 20-32 KiB 3% below nginx at saturation, now in Go's scheduler and collector rather
   than system calls. Decisions pending review in the plan section.
 
+### I236 The file pool's work touches no Context the timeout has answered — done
+
+- **Change**: a request queued for the pool keeps a snapshot of what the work needs (paths,
+  conditional, Accept-Encoding); the work begins in a state the timeout leaves alone, checks
+  `c.Err()` there, and reads nothing of the Context before it claims the request. Before, once
+  the timeout had answered a request stuck on a hung disk, the work could read the next request's
+  data through the recycled Context.
+- **Benchmark** (.51): 20 KiB −0.2%, 8 KiB −0.5%, about what rounds vary by.

@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I236.
+Status: `todo`, `doing` or `done`. The next free iteration number is I237.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -404,7 +404,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I236.
 | I232 | Files above 16 KiB go by sendfile from a raw descriptor, without `ServeContent` or a duplicate (fib A102) | I231 | done |
 | I233 | The static handler's `default_type`, as nginx's: files whose extension gives no type are not sniffed | I232 | done |
 | I234 | The static handler: open and fstat in place of lstat, the user-space cost of a request, no timer a request, opt-in `inline_disk` | I233 | done |
-| I235 | The static handler's `disk_io` (`auto`, `pool`): requests that need the disk served on fib's worker, a quarter of the CPUs at once, by default | I234 | done |
+| I235 | The static handler's `disk_io` (`pool`, `auto`): requests that need the disk served on fib's worker, a quarter of the CPUs at once, opt-in | I234 | done |
+| I236 | The file pool's work touches no Context the timeout has answered | I235 | done |
 
 ## M0, foundations
 
@@ -10437,16 +10438,16 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
 5. **No fib header-block API** again: with the copy gone, the map is two allocations and 1.9% of
    the CPU in fib's serialization.
 
-### I235 disk_io: the file pool's hand-over by default — done
+### I235 disk_io: the file pool's hand-over, opt-in — done
 
 - **Why**: what I234 left of the 20-32 KiB gap (5-6%) was the hand-over to the file pool: served on
   fib's worker, as nginx serves a file in its event loop, 20 KiB went 4% faster and the event loops
   parked a tenth as often; but I234's `inline_disk` was opt-in, and on every request it made the
   99th percentile at saturation half as long again (every P busy, the runtime seldom looks at the
   poller where fib's loops park).
-- **Done**: `handler/static`: `disk_io` replaces `inline_disk` (I234's, never released): `auto`,
-  the default, serves a request that needs the disk on fib's worker while no more than a quarter of
-  the CPUs' worth do so, and on the file pool past that; `pool` as before I235. (An `inline`
+- **Done**: `handler/static`: `disk_io` replaces `inline_disk` (I234's, never released): `auto`
+  serves a request that needs the disk on fib's worker while no more than a quarter of
+  the CPUs' worth do so, and on the file pool past that; `pool`, the default, as before I235. (An `inline`
   value, always on fib's worker, was there at first and was removed the same day at the user's
   request; see the decisions.) A request on fib's worker waits for the disk however long it takes (fib sends a
   retained response only once the handler returns, so the pool's 503 could not go out sooner);
@@ -10466,9 +10467,10 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
 
 **Decisions pending review** (2026-11-22):
 
-1. **`auto` is the default**, the disk looked at on fib's worker up to a quarter of the CPUs at
-   once: +1-2.6% at every size, p99 5-12% longer at saturation, level near it. `pool` keeps the old
-   behaviour, a disk that hangs off fib's workers altogether.
+1. **`pool` is the default**, as before I235; `auto` is opt-in (+1-2.6% at every size, p99 5-12%
+   longer at saturation, level near it). `auto` was the default at first and was turned back to
+   opt-in the same day at the user's request (2026-11-22): `pool` keeps a disk that hangs off fib's
+   workers altogether, and every request that waits too long gets its 503.
 2. **The bound is a quarter of the CPUs** (at least 1), from the sweep: more is more throughput at
    saturation and a longer tail, less near saturation.
 3. **No 503 for a request on fib's worker**: it waits for the disk; auto's bound limits how many
@@ -10477,4 +10479,28 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
    only. `inline_disk` was pushed with I234 and a `disk_io inline` with I235, both the same day and
    never released; at the user's request (2026-11-22) inline was dropped, since unbounded it lets a
    disk that hangs take every one of fib's workers, and every route with them.
+
+### I236 The file pool's work touches no Context the timeout has answered — done
+
+- **Why**: a request queued for the file pool is answered 503 by the pool's timeout when the disk
+  holds the pool's work past it, and released, after which fib may give its Context to the
+  connection's next request. The work, once the disk answered, went on reading the Context before
+  it found the request claimed by the timeout: `c.Err()` as it began, the request's Accept-Encoding
+  and conditional fields, and the request path and URL path, which point into the request's head.
+  It wrote nothing (its claim failed), but read another request's data, a data race, and could
+  look up and cache a path made of the next request's bytes. Found in I235's review of the pool
+  path; there since the timeout answered for a hung disk (I229).
+- **Done**: `handler/static`: when a request is queued, what the work needs of it is taken while
+  the Context is still the handler's: the paths cloned, whether it is conditional, and its
+  Accept-Encoding fields when the handler serves precompressed twins. The work begins in a state
+  the timeout leaves alone (`queuedChecking`, `begin`), looks at `c.Err()` there, and answers the
+  503 itself when a sweep found the request past its deadline meanwhile; until it claims the
+  request it looks at nothing of the Context. A request served on fib's worker (`auto`) reads its
+  Context as before: nothing else answers it.
+- **Tests**: `TestBegin` (going on, answered already, swept while checking); `TestPoolSnapshot`
+  (the twin and a 304 decided from the snapshot through the pool; it fails with the snapshot
+  ignored).
+- **Benchmark** (.51, `fix/` in [bench/results/static-disk-io-2026-11-22](../bench/results/static-disk-io-2026-11-22/README.md), with `auto`, which sends most
+  requests through the pool still): 20 KiB −0.2%, 8 KiB −0.5%, three rounds each, about what rounds
+  vary by; taken for the fix.
 

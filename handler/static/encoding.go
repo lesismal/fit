@@ -1,7 +1,6 @@
 package static
 
 import (
-	stdhttp "net/http"
 	"strconv"
 	"strings"
 )
@@ -23,8 +22,7 @@ var encodings = map[string]encoding{
 // compressed twin of l's file that r's client prefers of those on disk, or
 // -1 when the client takes none of them or none is on disk. The client's q
 // values rank them; among equals, the order precompressed lists them.
-func (s *Static) preferred(r *stdhttp.Request, l *lookup) int {
-	accept := r.Header["Accept-Encoding"]
+func (s *Static) preferred(accept []string, l *lookup) int {
 	if len(accept) == 0 || len(l.twins) == 0 {
 		return -1
 	}

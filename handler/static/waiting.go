@@ -98,6 +98,19 @@ func (q *queued) leave() {
 	}
 }
 
+// listed reports whether q is still on its list: not once a sweep took it
+// off past its deadline, nor once it left.
+func (q *queued) listed() bool {
+	sh := q.shard
+	if sh == nil {
+		return true
+	}
+	sh.mu.Lock()
+	on := q.next != nil
+	sh.mu.Unlock()
+	return on
+}
+
 // sweep answers the requests past their deadline, and runs again in an
 // interval while any wait.
 func (w *waiting) sweep() {
