@@ -125,8 +125,26 @@ func testSlowPeer(t *testing.T, dialerProduces bool) {
 		t.Fatalf("the link is not above its limit (%v) or its streams not held (%v)", above, producer.held.Load())
 	}
 	if dialerProduces {
-		// The dialer reads again after maxHold, its streams still held: the peer's push gets through.
-		// 拨号方在 maxHold 之后恢复读取，其流仍被停止：对端的推送能够送达。
+		// The dialer reads again after maxHold, its streams still held: the peer's push gets through. Nothing goes the
+		// dialer's way before its reads are let go: a frame from the peer carries a window update, after which the
+		// kernel may take what was queued and the episode ends, as it should, with the queue at half its limit. Such
+		// an episode, if one ends anyway, is followed by another, whose maxHold is waited for in turn.
+		// 拨号方在 maxHold 之后恢复读取，其流仍被停止：对端的推送能够送达。在拨号方的读取被放开之前不向它发送任何东西：对端的
+		// 帧带有窗口更新，此后内核可能接走排队的数据，时段随之结束（队列降到上限的一半），这是应有的行为。若某个时段仍这样结束，
+		// 随后会有下一个时段，再等它的 maxHold。
+		ws := producer.ws.NetConn()
+		readsLetGo := false
+		for deadline := time.Now().Add(slow / 2); !readsLetGo; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("the dialer's reads stayed held past maxHold")
+			}
+			producer.flowMu.Lock()
+			readsLetGo = producer.above && !ws.ReadsHeld()
+			producer.flowMu.Unlock()
+		}
+		if !producer.held.Load() {
+			t.Fatal("the streams went on with the queue above its limit")
+		}
 		if err := peer.Push(Head{Method: "/p"}, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -134,9 +152,6 @@ func testSlowPeer(t *testing.T, dialerProduces bool) {
 		case <-pushed:
 		case <-time.After(slow / 2):
 			t.Fatal("the link did not read again")
-		}
-		if !producer.held.Load() {
-			t.Fatal("the streams went on with the queue above its limit")
 		}
 	}
 	select {
