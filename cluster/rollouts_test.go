@@ -456,8 +456,20 @@ func TestRolloutRolling(t *testing.T) {
 			t.Errorf("%s: %+v %+v", name, x, x.Gate)
 		}
 	}
-	if _, err := k.m.StartOp("op", &OpRequest{Op: OpCheck, Members: []string{"m5"}}); err != nil {
+	check, err := k.m.StartOp("op", &OpRequest{Op: OpCheck, Members: []string{"m5"}})
+	if err != nil {
 		t.Errorf("the members are still held: %v", err)
+	} else {
+		// The check holds m5 while it runs, which the plan below would
+		// find busy.
+		waitFor(t, "the check of m5 to end", func() bool {
+			for _, op := range k.m.Ops() {
+				if op.ID == check.ID {
+					return !op.Ended.IsZero()
+				}
+			}
+			return false
+		})
 	}
 	// The store is written after the rollout's state changes in memory, so
 	// it is waited for rather than read once.
