@@ -1,0 +1,2 @@
+  size      fit-all  fit-autox-2  fit-autox-4  fit-autox-8  2nd/1st   2nd/4th   3rd/2nd   p99 by column (ms)
+  20K        316670       324732       328855       332934      102.5%      97.5%     101.3%  2.45/2.58/2.99/3.53

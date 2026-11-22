@@ -23,7 +23,7 @@ func TestOpenStat(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	info, f, ok, err := openStat(file)
+	info, f, ok, err := openStat(file, new(lookupSpare))
 	if !ok || err != nil || f == nil {
 		t.Fatalf("regular file: ok %v, err %v, file %v", ok, err, f)
 	}
@@ -48,18 +48,18 @@ func TestOpenStat(t *testing.T) {
 	if err := os.Symlink(file, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, f, ok, _ := openStat(link); ok || f != nil {
+	if _, f, ok, _ := openStat(link, new(lookupSpare)); ok || f != nil {
 		t.Fatalf("a symbolic link is not handed back to statLink: ok %v", ok)
 	}
 
-	if _, _, ok, err := openStat(filepath.Join(dir, "none")); !ok || !errors.Is(err, fs.ErrNotExist) {
+	if _, _, ok, err := openStat(filepath.Join(dir, "none"), new(lookupSpare)); !ok || !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("missing file: ok %v, err %v", ok, err)
 	}
-	if _, _, ok, err := openStat(filepath.Join(file, "x")); !ok || err == nil {
+	if _, _, ok, err := openStat(filepath.Join(file, "x"), new(lookupSpare)); !ok || err == nil {
 		t.Fatalf("a path through a file: ok %v, err %v", ok, err)
 	}
 
-	info, f, ok, err = openStat(dir)
+	info, f, ok, err = openStat(dir, new(lookupSpare))
 	if !ok || err != nil || f != nil || !info.IsDir() || !info.Mode().IsDir() {
 		t.Fatalf("directory: ok %v, err %v, file %v, info %v", ok, err, f, info)
 	}
@@ -71,7 +71,7 @@ func TestOpenStat(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		info, f, ok, err = openStat(fifo)
+		info, f, ok, err = openStat(fifo, new(lookupSpare))
 	}()
 	select {
 	case <-done:

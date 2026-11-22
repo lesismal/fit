@@ -185,7 +185,7 @@ func TestCacheFits(t *testing.T) {
 		{"/a", 6, false}, // past max_file_bytes
 	}
 	for _, tt := range tests {
-		if got := c.fits(tt.full, tt.size); got != tt.want {
+		if _, got := c.currentOrRoom(tt.full, filewatch.Stamp{Size: -1}, tt.size, true); got != tt.want {
 			t.Errorf("fits(%s, %d) = %v, want %v", tt.full, tt.size, got, tt.want)
 		}
 	}

@@ -71,6 +71,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -114,7 +115,7 @@ type Static struct {
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out."`
 
-	InlineDisk bool `json:"inline_disk,omitempty" doc:"Look at the disk on fib's worker that serves the request, as nginx does in its event loop, rather than on the file pool: for files on a disk that answers from memory, as tmpfs or a page cache that holds them does, where the hand-over to the pool costs a few percent of a busy server's rate (4% at 20 KiB files). A disk that hangs then holds fib's workers, and the pool's timeout answers nothing with 503. false when left out."`
+	DiskIO string `json:"disk_io,omitempty" enum:"auto,pool,inline" default:"\"auto\"" doc:"Where a request that needs the disk looks at it, for a file the cache does not hold: auto on fib's worker that serves it, as nginx does in its event loop, while no more requests than a quarter of the process's CPUs do so at once, and on the file pool past that; pool always on the file pool, as fit did before, which keeps a disk that hangs off fib's workers altogether; inline always on fib's worker. A request on fib's worker waits for the disk however long it takes, where one on the pool is answered 503 past the pool's timeout: with auto a disk that hangs holds no more of fib's workers than that quarter, and the requests past them get the pool's 503. On a disk that answers from memory, as tmpfs or a page cache that holds the files does, the hand-over to the pool costs a few percent of a busy server's rate (4% at 20 KiB files), which auto wins half of, and inline all, at the cost of a longer tail at saturation (its 99th percentile half as long again). auto when left out."`
 
 	DefaultType string `json:"default_type,omitempty" doc:"The Content-Type of a file whose extension gives none, as nginx's default_type, such as application/octet-stream; when left out, such a file's type is sniffed from its first 512 bytes, as net/http's is, which costs a read of a file not in memory."`
 
@@ -150,6 +151,15 @@ type Static struct {
 	pool  *filepool.Pool
 	// waiting holds the requests queued for the pool, for its timeout.
 	waiting *waiting
+	// diskIO is disk_io's value, auto when left out; inlining counts the
+	// requests served on fib's workers disk and all, which auto keeps to
+	// inlineMax, a quarter of the CPUs. The padding keeps the counter, which every such
+	// request changes twice, off the fields read beside it.
+	diskIO    string
+	inlineMax int32
+	_         [64]byte
+	inlining  atomic.Int32
+	_         [60]byte
 	// watch reports changes under the root to the cache; nil where the
 	// system has none, or with a check_interval of 0.
 	watch *filewatch.Watcher
@@ -235,6 +245,16 @@ func (s *Static) Provision(ctx *module.Context) error {
 	s.stall = ctx.WriteStallTimeout()
 	s.pool = defaultPool()
 	s.waiting = newWaiting()
+	s.diskIO = s.DiskIO
+	if s.diskIO == "" {
+		s.diskIO = diskAuto
+	}
+	// A quarter of the CPUs: at 20 KiB on 8, a bound of 2 served 2.5% more
+	// than the pool alone at saturation with the 99th percentile 5% up, and
+	// 5% more at nine tenths of it with the percentile level; 8, the CPUs,
+	// served 5% more at saturation, its percentile 45% up, Ps never idle
+	// enough for the runtime to look at fib's parked event loops.
+	s.inlineMax = int32(max(1, goruntime.GOMAXPROCS(0)/4))
 	if s.cache.check > 0 {
 		// Where the system offers no watch, the check interval alone
 		// bounds how long a change goes unseen.
@@ -271,11 +291,65 @@ func (s *Static) ServeHTTP(c *fibhttp.Context) {
 		respondError(c, status)
 		return
 	}
+	if s.inlineBegin() {
+		s.inline(c, name, urlPath)
+		s.inlining.Add(-1)
+		return
+	}
 	if s.serve(c, name, urlPath, nil) {
 		return
 	}
 	s.queue(c, name, urlPath)
 }
+
+// inlineBegin reports whether the request is served here, on fib's worker,
+// disk and all (see disk_io): always with inline, never with pool, and with
+// auto while fewer than inlineMax requests are; inlining then counts it,
+// until the caller takes it off.
+func (s *Static) inlineBegin() bool {
+	switch s.diskIO {
+	case diskPool:
+		return false
+	case diskInline:
+		s.inlining.Add(1)
+		return true
+	}
+	if s.inlining.Add(1) <= s.inlineMax {
+		return true
+	}
+	s.inlining.Add(-1)
+	return false
+}
+
+// inline serves the request here as the file pool's work would, from the
+// cache or the disk, however long the disk takes: a response fib sends once
+// the handler returns, as it sends a retained one, could not go out sooner
+// as the pool's 503 anyway. What bounds a disk that hangs is auto's bound:
+// it holds no more of fib's workers than that, and the requests past it go
+// to the pool, whose timeout answers them.
+func (s *Static) inline(c *fibhttp.Context, name, urlPath string) {
+	c.Retain()
+	q := &queued{}
+	q.state.Store(queuedClaimed)
+	if inlineHook != nil {
+		inlineHook()
+	}
+	s.serve(c, name, urlPath, q)
+	if !q.sending {
+		c.Release()
+	}
+}
+
+// inlineHook, when set, runs before a request served inline looks at the
+// disk, as a slow disk would; for tests.
+var inlineHook func()
+
+// The values of disk_io.
+const (
+	diskAuto   = "auto"
+	diskPool   = "pool"
+	diskInline = "inline"
+)
 
 // serve answers the request for name, whose URL path is urlPath, or try_files
 // for it. Without q, on a fib worker, it answers only from what the cache
@@ -361,8 +435,8 @@ func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queue
 		return true
 	}
 	v, full, info, stamp := s.variant(c.Request, l)
-	e := s.cache.current(full, stamp, q != nil)
-	if e == nil && q != nil && s.cache.fits(full, info.Size()) {
+	e, room := s.cache.currentOrRoom(full, stamp, info.Size(), q != nil)
+	if e == nil && q != nil && room {
 		e = s.cache.load(full, info, stamp, v)
 	}
 	switch {
@@ -441,20 +515,10 @@ func (q *queued) claim() bool {
 
 // queue serves the request on the file pool, or answers 503 when the pool's
 // queue is full, or its timeout passes before the pool's work has answered:
-// waiting to be taken up, or with the disk the work waits on hung. With
-// inline_disk it serves it here, on fib's worker, as the pool's work would.
+// waiting to be taken up, or with the disk the work waits on hung.
 func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
 	c.Retain()
 	q := &queued{}
-	if s.InlineDisk {
-		// On this worker, claimed at once: nothing else answers it.
-		q.state.Store(queuedClaimed)
-		s.serve(c, name, urlPath, q)
-		if !q.sending {
-			c.Release()
-		}
-		return
-	}
 	s.waiting.join(q, c, s.pool.Timeout())
 	// The pool's own ways out.
 	expire := func() {

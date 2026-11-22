@@ -6677,6 +6677,16 @@
           "description": "The Content-Type of a file whose extension gives none, as nginx's default_type, such as application/octet-stream; when left out, such a file's type is sniffed from its first 512 bytes, as net/http's is, which costs a read of a file not in memory.",
           "type": "string"
         },
+        "disk_io": {
+          "default": "auto",
+          "description": "Where a request that needs the disk looks at it, for a file the cache does not hold: auto on fib's worker that serves it, as nginx does in its event loop, while no more requests than a quarter of the process's CPUs do so at once, and on the file pool past that; pool always on the file pool, as fit did before, which keeps a disk that hangs off fib's workers altogether; inline always on fib's worker. A request on fib's worker waits for the disk however long it takes, where one on the pool is answered 503 past the pool's timeout: with auto a disk that hangs holds no more of fib's workers than that quarter, and the requests past them get the pool's 503. On a disk that answers from memory, as tmpfs or a page cache that holds the files does, the hand-over to the pool costs a few percent of a busy server's rate (4% at 20 KiB files), which auto wins half of, and inline all, at the cost of a longer tail at saturation (its 99th percentile half as long again). auto when left out.",
+          "enum": [
+            "auto",
+            "pool",
+            "inline"
+          ],
+          "type": "string"
+        },
         "dotfiles": {
           "default": "deny",
           "description": "Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out.",
@@ -6695,10 +6705,6 @@
             "type": "string"
           },
           "type": "array"
-        },
-        "inline_disk": {
-          "description": "Look at the disk on fib's worker that serves the request, as nginx does in its event loop, rather than on the file pool: for files on a disk that answers from memory, as tmpfs or a page cache that holds them does, where the hand-over to the pool costs a few percent of a busy server's rate (4% at 20 KiB files). A disk that hangs then holds fib's workers, and the pool's timeout answers nothing with 503. false when left out.",
-          "type": "boolean"
         },
         "max_cache_bytes": {
           "default": 67108864,

@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I235.
+Status: `todo`, `doing` or `done`. The next free iteration number is I236.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -404,6 +404,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I235.
 | I232 | Files above 16 KiB go by sendfile from a raw descriptor, without `ServeContent` or a duplicate (fib A102) | I231 | done |
 | I233 | The static handler's `default_type`, as nginx's: files whose extension gives no type are not sniffed | I232 | done |
 | I234 | The static handler: open and fstat in place of lstat, the user-space cost of a request, no timer a request, opt-in `inline_disk` | I233 | done |
+| I235 | The static handler's `disk_io`: requests that need the disk served on fib's worker, a quarter of the CPUs at once, by default | I234 | done |
 
 ## M0, foundations
 
@@ -10435,4 +10436,42 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
    SendFile returns (HTTP/1, queued, no hooks); everywhere else it copies it as before.
 5. **No fib header-block API** again: with the copy gone, the map is two allocations and 1.9% of
    the CPU in fib's serialization.
+
+### I235 disk_io: the file pool's hand-over by default — done
+
+- **Why**: what I234 left of the 20-32 KiB gap (5-6%) was the hand-over to the file pool: served on
+  fib's worker, as nginx serves a file in its event loop, 20 KiB went 4% faster and the event loops
+  parked a tenth as often; but I234's `inline_disk` was opt-in, and on every request it made the
+  99th percentile at saturation half as long again (every P busy, the runtime seldom looks at the
+  poller where fib's loops park).
+- **Done**: `handler/static`: `disk_io` replaces `inline_disk` (I234's, never released): `auto`,
+  the default, serves a request that needs the disk on fib's worker while no more than a quarter of
+  the CPUs' worth do so, and on the file pool past that; `pool` as before I235; `inline` always on
+  fib's worker. A request on fib's worker waits for the disk however long it takes (fib sends a
+  retained response only once the handler returns, so the pool's 503 could not go out sooner);
+  auto's bound is what keeps a disk that hangs from holding more of fib's workers. A lookup the
+  cache does not hold is one allocation with its stat and its file; the contents the cache holds
+  are looked at once, not twice, for a file it does not hold (`currentOrRoom`).
+- **Benchmark** (.51, [bench/results/static-disk-io-2026-11-22](../bench/results/static-disk-io-2026-11-22/README.md)): a sweep of the bound at 20 KiB (0, 2, 4, 8 on 8 CPUs) bought
+  throughput at saturation for a longer tail at each step, and near saturation the smallest served
+  most. As committed, against I234: +1.0% at 8 KiB, +1.3% at 16 KiB, +2.6% at 20 KiB, +2.2% at 32 KiB,
+  +1.1% at 64 KiB, p99 5-12% longer; against nginx 8 KiB 107.6%, 16 KiB 100.9%, 20 KiB 97.0%, 32 KiB
+  96.8%, 64 KiB 95.4%. Paced at nine tenths of saturation, 20 KiB: +2.7%, 98.3% of nginx, p99 2.47 ms
+  (nginx 2.86). `disk_io inline`: 20 KiB 99.5%, 32 KiB 98.5% of nginx, p99 at saturation 2-3 times
+  longer.
+- **Left**: 20-32 KiB 3% below nginx at saturation by default, under 2% at nine tenths of it. fit
+  makes fewer system calls a request than nginx (6.17 against 7.39) and spends less time in the
+  kernel; the rest is Go's scheduler and collector and fib's header serialization.
+
+**Decisions pending review** (2026-11-22):
+
+1. **`auto` is the default**, the disk looked at on fib's worker up to a quarter of the CPUs at
+   once: +1-2.6% at every size, p99 5-12% longer at saturation, level near it. `pool` keeps the old
+   behaviour, a disk that hangs off fib's workers altogether.
+2. **The bound is a quarter of the CPUs** (at least 1), from the sweep: more is more throughput at
+   saturation and a longer tail, less near saturation.
+3. **No 503 for a request on fib's worker**: it waits for the disk; auto's bound limits how many
+   can. The requests past it go to the pool, whose timeout answers them as before.
+4. **`inline_disk` is gone**, replaced by `disk_io inline`; it was pushed with I234 the same day
+   and never released.
 

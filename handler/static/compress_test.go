@@ -197,7 +197,7 @@ func TestCompressBounds(t *testing.T) {
 	// again.
 	s = mustLoad(t, root, `, "compress": ["gzip"]`)
 	get(s, "GET", "/app.js", nil) // kept
-	e := s.cache.current(full, fileStamp(t, full), true)
+	e, _ := s.cache.currentOrRoom(full, fileStamp(t, full), 0, true)
 	pool := s.pool
 	s.pool = filepool.New(0, 0, time.Second)
 	if got := get(s, "GET", "/app.js", accept).Response; got.Header.Get("Content-Encoding") != "" || e.packs[0].Load() != nil {
@@ -217,7 +217,7 @@ func TestCompressBounds(t *testing.T) {
 // or as it is after 5 seconds.
 func waitPacked(t *testing.T, s *Static, full string, i int) *entry {
 	t.Helper()
-	e := s.cache.current(full, fileStamp(t, full), true)
+	e, _ := s.cache.currentOrRoom(full, fileStamp(t, full), 0, true)
 	for deadline := time.Now().Add(5 * time.Second); e != nil && time.Now().Before(deadline); {
 		if p := e.packs[i].Load(); p != nil && p != packing {
 			break

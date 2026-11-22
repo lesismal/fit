@@ -1,0 +1,12 @@
+paced256-size-20480.r1 fit-all rps=166854.15 50%=283.00us 90%=405.00us 99%=652.00us  srvcpu=4.25/8
+paced256-size-20480.r1 fit-auto rps=164611.04 50%=276.00us 90%=423.00us 99%=668.00us  srvcpu=4.25/8
+paced256-size-20480.r1 nginx rps=167289.02 50%=271.00us 90%=373.00us 99%=507.00us  srvcpu=3.48/8
+paced512-size-20480.r1 fit-all rps=300250.74 50%=0.88ms 90%=1.39ms 99%=2.32ms  srvcpu=7.18/8
+paced512-size-20480.r1 fit-auto rps=308196.37 50%=797.00us 90%=1.44ms 99%=2.42ms  srvcpu=7.52/8
+paced512-size-20480.r1 nginx rps=319465.13 50%=670.00us 90%=1.27ms 99%=1.62ms  srvcpu=7.56/8
+paced256-size-20480.r2 fit-all rps=166594.24 50%=284.00us 90%=408.00us 99%=631.00us  srvcpu=4.24/8
+paced256-size-20480.r2 fit-auto rps=165175.73 50%=275.00us 90%=419.00us 99%=659.00us  srvcpu=4.27/8
+paced256-size-20480.r2 nginx rps=166317.90 50%=268.00us 90%=399.00us 99%=725.00us  srvcpu=3.71/8
+paced512-size-20480.r2 fit-all rps=282891.08 50%=658.00us 90%=1.33ms 99%=2.27ms  srvcpu=7.12/8
+paced512-size-20480.r2 fit-auto rps=289581.44 50%=604.00us 90%=1.37ms 99%=2.46ms  srvcpu=7.31/8
+paced512-size-20480.r2 nginx rps=294120.58 50%=589.00us 90%=1.20ms 99%=2.62ms  srvcpu=7.22/8

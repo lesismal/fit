@@ -5765,3 +5765,11 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   `bench/results/static-open-stat-2026-11-22`。
 - **未决**：默认配置下 20-32 KiB 仍比 nginx 低 5-6%。待审查的决定见计划部分。
 
+### I235 静态处理器的 disk_io — done
+
+- **改动**：`disk_io`（取代 I234 未发布的 `inline_disk`）：默认 `auto` 在 fib worker 上为最多 CPU 数四分之一的请求同时访问磁盘，超出的交给
+  文件池；`pool` 同以前；`inline` 总是在 fib worker 上。缓存未命中的查找只分配一次；缓存未持有的文件只查一次内容缓存。
+- **压测**（.51）：相对 I234 各尺寸 +1.0-2.6%；相对 nginx：8 KiB 108%，16 KiB 101%，20-32 KiB 97%，64 KiB 95%；接近饱和时 20 KiB 为 98%，
+  p99 低于 nginx；`disk_io inline` 20 KiB 99.5%，但饱和下尾延迟长得多。见 `bench/results/static-disk-io-2026-11-22`。
+- **未决**：饱和时 20-32 KiB 比 nginx 低 3%，剩余开销已在 Go 的调度器和垃圾回收而非系统调用。待审查的决定见计划部分。
+

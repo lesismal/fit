@@ -17,7 +17,10 @@ import (
 // having opened nothing, for an error other than a path that names nothing,
 // or a permission it lacks to read a file it may stat, which statLink tells
 // apart as before. A file that is not a regular one is closed at once.
-func openStat(full string) (fs.FileInfo, sendable, bool, error) {
+//
+// The FileInfo and the file are made in spare, which newLookup made with
+// the lookup they belong to, in one allocation.
+func openStat(full string, spare *lookupSpare) (fs.FileInfo, sendable, bool, error) {
 	var fd int
 	var err error
 	for {
@@ -33,7 +36,8 @@ func openStat(full string) (fs.FileInfo, sendable, bool, error) {
 	default:
 		return nil, nil, false, nil
 	}
-	info := &statInfo{name: filepath.Base(full)}
+	info := &spare.info
+	info.name = filepath.Base(full)
 	if err := syscall.Fstat(fd, &info.st); err != nil {
 		syscall.Close(fd)
 		return nil, nil, false, nil
@@ -42,7 +46,29 @@ func openStat(full string) (fs.FileInfo, sendable, bool, error) {
 		syscall.Close(fd)
 		return info, nil, true, nil
 	}
-	return info, &rawFile{fd: fd}, true, nil
+	f := &spare.file
+	f.fd = fd
+	return info, f, true, nil
+}
+
+// lookupSpare is room for what openStat makes, allocated with the lookup
+// it makes them for: a lookup the cache does not hold costs one allocation
+// for the three.
+type lookupSpare struct {
+	info statInfo
+	file rawFile
+}
+
+type lookupWithSpare struct {
+	lookup
+	spare lookupSpare
+}
+
+// newLookup returns a lookup and the room openStat makes its stat and file
+// in.
+func newLookup() (*lookup, *lookupSpare) {
+	l := new(lookupWithSpare)
+	return &l.lookup, &l.spare
 }
 
 // statInfo is the fs.FileInfo of an fstat, as os.File.Stat makes it, but

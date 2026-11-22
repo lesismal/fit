@@ -1,0 +1,4 @@
+paced512-size-20480.r1 fit-all rps=301339.18 50%=0.86ms 90%=1.38ms 99%=2.32ms  srvcpu=7.19/8
+paced512-size-20480.r1 fit-autox-2 rps=317545.62 50%=735.00us 90%=1.41ms 99%=2.34ms  srvcpu=7.66/8
+paced512-size-20480.r1 fit-autox-4 rps=314288.59 50%=742.00us 90%=1.42ms 99%=2.40ms  srvcpu=7.59/8
+paced512-size-20480.r1 fit-autox-8 rps=310449.56 50%=779.00us 90%=1.41ms 99%=2.36ms  srvcpu=7.53/8

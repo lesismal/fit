@@ -8206,3 +8206,15 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   Profiles, allocation profile and A/Bs in `bench/results/static-open-stat-2026-11-22`.
 - **Open**: 20-32 KiB 5-6% below nginx by default. Decisions pending review in the plan section.
 
+### I235 The static handler's disk_io — done
+
+- **Change**: `disk_io` (replacing I234's unreleased `inline_disk`): `auto`, the default, looks at
+  the disk on fib's worker for up to a quarter of the CPUs' worth of requests at once and on the
+  file pool past that; `pool` as before; `inline` always on fib's worker. A lookup miss is one
+  allocation; the content cache is looked at once for a file it does not hold.
+- **Benchmark** (.51): against I234 +1.0-2.6% at every size; against nginx 8 KiB 108%, 16 KiB 101%,
+  20-32 KiB 97%, 64 KiB 95%; near saturation 20 KiB 98% with p99 below nginx's; `disk_io inline` 20
+  KiB 99.5% with a much longer tail at saturation. In `bench/results/static-disk-io-2026-11-22`.
+- **Open**: 20-32 KiB 3% below nginx at saturation, now in Go's scheduler and collector rather
+  than system calls. Decisions pending review in the plan section.
+

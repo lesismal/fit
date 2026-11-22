@@ -188,11 +188,11 @@ func TestWorkerDoesNotWait(t *testing.T) {
 	}
 	full := filepath.Join(root, "a.txt")
 	stamp := fileStamp(t, full)
-	if s.cache.current(full, stamp, false) == nil {
+	if e, _ := s.cache.currentOrRoom(full, stamp, 0, false); e == nil {
 		t.Fatal("the file's contents not held")
 	}
 	s.cache.mu.Lock()
-	e := s.cache.current(full, stamp, false)
+	e, _ := s.cache.currentOrRoom(full, stamp, 0, false)
 	s.cache.mu.Unlock()
 	if e != nil {
 		t.Fatal("a worker read the contents past a held lock")

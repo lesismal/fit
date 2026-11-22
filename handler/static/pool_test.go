@@ -15,7 +15,7 @@ import (
 // unless a watch vouches for it.
 func TestNoDiskOnHit(t *testing.T) {
 	root := tree(t, map[string]string{"a.txt": "aaa", "dir/index.html": "<p>i</p>", "big.bin": "0123456789abcdefghij"})
-	s := mustLoad(t, root, `, "max_file_bytes": 16, "check_interval": "200ms"`)
+	s := mustLoad(t, root, `, "max_file_bytes": 16, "check_interval": "200ms", "disk_io": "pool"`)
 	var jobs atomic.Int32
 	s.pool = filepool.New(2, 16, time.Second)
 	s.pool.Hook = func() { jobs.Add(1) }
@@ -65,7 +65,7 @@ func TestNoDiskOnHit(t *testing.T) {
 // the cache answers.
 func TestSlowDisk(t *testing.T) {
 	root := tree(t, map[string]string{"a.txt": "aaa", "b.txt": "bbb"})
-	s := mustLoad(t, root, `, "check_interval": "1h"`)
+	s := mustLoad(t, root, `, "check_interval": "1h", "disk_io": "pool"`)
 	s.pool = filepool.New(1, 4, 300*time.Millisecond)
 	if got := get(s, "GET", "/a.txt", nil).Response; string(got.Body) != "aaa" {
 		t.Fatalf("a.txt: %d %q", got.StatusCode, got.Body)
@@ -157,35 +157,99 @@ func TestWaiting(t *testing.T) {
 	}
 }
 
-// TestInlineDisk checks inline_disk: files read whole and sent by SendFile,
-// HEAD, a directory and a file not there answered as from the pool, and the
-// pool never used.
-func TestInlineDisk(t *testing.T) {
+// TestDiskIO checks disk_io: with inline, and with auto under its bound,
+// files read whole and sent by SendFile, HEAD, a directory and a file not
+// there are answered as from the pool, and the pool is not used; with pool
+// it is; a value not known is refused.
+func TestDiskIO(t *testing.T) {
 	big := strings.Repeat("0123456789", smallFile/10+100)
 	root := tree(t, map[string]string{"small.txt": "small", "big.txt": big, "sub/index.html": "index"})
-	s := mustLoad(t, root, `, "inline_disk": true, "max_file_bytes": 4`)
-	var jobs atomic.Int32
-	s.pool.Hook = func() { jobs.Add(1) }
-	for range 2 {
-		for _, tt := range []struct {
-			method, target string
-			status         int
-			body           string
-		}{
-			{"GET", "/small.txt", 200, "small"},
-			{"GET", "/big.txt", 200, big},
-			{"HEAD", "/big.txt", 200, ""},
-			{"GET", "/sub", 301, ""},
-			{"GET", "/sub/", 200, "index"},
-			{"GET", "/none", 404, ""},
-		} {
-			got := get(s, tt.method, tt.target, nil).Response
-			if got.StatusCode != tt.status || (tt.body != "" && string(got.Body) != tt.body) {
-				t.Fatalf("%s %s: %d, %d bytes", tt.method, tt.target, got.StatusCode, len(got.Body))
+	for _, mode := range []string{"", "auto", "inline", "pool"} {
+		extra := `, "max_file_bytes": 4, "check_interval": "0s"`
+		if mode != "" {
+			extra += `, "disk_io": "` + mode + `"`
+		}
+		s := mustLoad(t, root, extra)
+		var jobs atomic.Int32
+		s.pool = filepool.New(2, 16, time.Second)
+		s.pool.Hook = func() { jobs.Add(1) }
+		for range 2 {
+			for _, tt := range []struct {
+				method, target string
+				status         int
+				body           string
+			}{
+				{"GET", "/small.txt", 200, "small"},
+				{"GET", "/big.txt", 200, big},
+				{"HEAD", "/big.txt", 200, ""},
+				{"GET", "/sub", 301, ""},
+				{"GET", "/sub/", 200, "index"},
+				{"GET", "/none", 404, ""},
+			} {
+				got := get(s, tt.method, tt.target, nil).Response
+				if got.StatusCode != tt.status || (tt.body != "" && string(got.Body) != tt.body) {
+					t.Fatalf("%q %s %s: %d, %d bytes", mode, tt.method, tt.target, got.StatusCode, len(got.Body))
+				}
 			}
 		}
+		if n := jobs.Load(); (n == 0) != (mode != "pool") {
+			t.Fatalf("%q: the pool ran %d jobs", mode, n)
+		}
+		if n := s.inlining.Load(); n != 0 {
+			t.Fatalf("%q: %d requests still counted inline", mode, n)
+		}
 	}
-	if n := jobs.Load(); n != 0 {
-		t.Fatalf("the pool ran %d jobs", n)
+	if _, err := load(t, `{"root": `+quote(root)+`, "disk_io": "sometimes"}`); err == nil {
+		t.Error("disk_io \"sometimes\" was taken")
+	}
+}
+
+// TestInlineSlowDisk checks auto on a disk that hangs: no more requests
+// than the bound wait for it on fib's workers, answered once it answers;
+// those past the bound go to the pool, whose timeout answers them 503.
+func TestInlineSlowDisk(t *testing.T) {
+	root := tree(t, map[string]string{"a.txt": "aaa"})
+	s := mustLoad(t, root, `, "check_interval": "0s"`)
+	s.pool = filepool.New(1, 8, 300*time.Millisecond)
+	s.inlineMax = 2
+	stuck := make(chan struct{})
+	var inline atomic.Int32
+	inlineHook = func() { inline.Add(1); <-stuck }
+	defer func() { inlineHook = nil }()
+	poolStuck := make(chan struct{})
+	s.pool.Hook = func() { <-poolStuck }
+	defer close(poolStuck)
+	statuses := make(chan int, 3)
+	for range 2 {
+		go func() { statuses <- get(s, "GET", "/a.txt", nil).Response.StatusCode }()
+	}
+	for deadline := time.Now().Add(5 * time.Second); inline.Load() != 2; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d inline", inline.Load())
+		}
+	}
+	// Past the bound: the pool, stuck too, and its timeout's 503.
+	start := time.Now()
+	if got := get(s, "GET", "/a.txt", nil).Response; got.StatusCode != 503 || time.Since(start) > 3*time.Second || inline.Load() != 2 {
+		t.Fatalf("past the bound: %d after %v, %d inline", got.StatusCode, time.Since(start), inline.Load())
+	}
+	select {
+	case status := <-statuses:
+		t.Fatalf("answered %d while the disk hangs", status)
+	default:
+	}
+	close(stuck)
+	for range 2 {
+		select {
+		case status := <-statuses:
+			if status != 200 {
+				t.Fatalf("once the disk answered: %d", status)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("not answered once the disk answered")
+		}
+	}
+	if n := s.inlining.Load(); n != 0 {
+		t.Fatalf("%d still counted inline", n)
 	}
 }

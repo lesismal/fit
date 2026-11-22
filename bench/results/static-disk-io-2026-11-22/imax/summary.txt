@@ -1,0 +1,17 @@
+size-20480.r1 fit-all sys rps=301903.46 all=6.42 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.94 newfstatat=0.03 epoll_ctl=0.16 epoll_wait=0.00 epoll_pwait=0.48 sendto=0.94 write=0.00 sendfile64=0.94 recvfrom=0.97 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-all rps_line: rps=316082.71 50%=649.00us 90%=1.35ms 99%=2.51ms  errs=0 srvcpu=7.85/8
+size-20480.r1 fit-autox-2 sys rps=309302.75 all=6.07 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.95 newfstatat=0.03 epoll_ctl=0.06 epoll_wait=0.00 epoll_pwait=0.22 sendto=0.95 write=0.00 sendfile64=0.95 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-autox-2 rps_line: rps=324820.11 50%=688.00us 90%=1.44ms 99%=2.58ms  errs=0 srvcpu=7.88/8
+size-20480.r1 fit-autox-4 sys rps=315077.25 all=6.02 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.95 newfstatat=0.03 epoll_ctl=0.05 epoll_wait=0.00 epoll_pwait=0.19 sendto=0.95 write=0.00 sendfile64=0.95 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.00 
+size-20480.r1 fit-autox-4 rps_line: rps=328531.50 50%=689.00us 90%=1.56ms 99%=3.01ms  errs=0 srvcpu=7.88/8
+size-20480.r1 fit-autox-8 sys rps=315894.19 all=5.86 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.95 newfstatat=0.03 epoll_ctl=0.01 epoll_wait=0.00 epoll_pwait=0.07 sendto=0.95 write=0.00 sendfile64=0.95 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.00 
+size-20480.r1 fit-autox-8 rps_line: rps=332041.75 50%=654.00us 90%=1.59ms 99%=3.61ms  errs=0 srvcpu=7.85/8
+size-20480.r2 fit-all rps_line: rps=317256.73 50%=712.00us 90%=1.35ms 99%=2.39ms  errs=0 srvcpu=7.84/8
+size-20480.r2 fit-autox-2 rps_line: rps=324643.79 50%=709.00us 90%=1.44ms 99%=2.58ms  errs=0 srvcpu=7.87/8
+size-20480.r2 fit-autox-4 rps_line: rps=329179.19 50%=685.00us 90%=1.55ms 99%=2.97ms  errs=0 srvcpu=7.89/8
+size-20480.r2 fit-autox-8 rps_line: rps=333826.54 50%=650.00us 90%=1.57ms 99%=3.45ms  errs=0 srvcpu=7.87/8
+paced512-size-20480.r1 fit-all rps_line: rps=301339.18 50%=0.86ms 90%=1.38ms 99%=2.32ms  errs=0 srvcpu=7.19/8
+paced512-size-20480.r1 fit-autox-2 rps_line: rps=317545.62 50%=735.00us 90%=1.41ms 99%=2.34ms  errs=0 srvcpu=7.66/8
+paced512-size-20480.r1 fit-autox-4 rps_line: rps=314288.59 50%=742.00us 90%=1.42ms 99%=2.40ms  errs=0 srvcpu=7.59/8
+paced512-size-20480.r1 fit-autox-8 rps_line: rps=310449.56 50%=779.00us 90%=1.41ms 99%=2.36ms  errs=0 srvcpu=7.53/8
+done 14:54:23

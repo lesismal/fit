@@ -458,40 +458,6 @@ func (d *doorkeeper) admit(h uint64) bool {
 	return false
 }
 
-// current returns the contents of the file at full, if the cache holds them
-// as read from the file stamp stands for. Without wait, as on a fib worker,
-// it returns nil rather than wait for the lock, which the file pool holds
-// to keep a file it read.
-func (c *cache) current(full string, stamp filewatch.Stamp, wait bool) *entry {
-	if wait {
-		c.mu.RLock()
-	} else if !c.mu.TryRLock() {
-		return nil
-	}
-	e := c.entries[full]
-	c.mu.RUnlock()
-	if e != nil && e.stamp == stamp {
-		return e
-	}
-	return nil
-}
-
-// fits reports whether a file of size bytes at full would be kept: no
-// larger than maxFile, and within what is left of maxBytes. One that would
-// not is sent from disk rather than read whole into memory to go once.
-func (c *cache) fits(full string, size int64) bool {
-	if size > c.maxFile {
-		return false
-	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	var freed int64
-	if old := c.entries[full]; old != nil {
-		freed = old.size
-	}
-	return c.bytes-freed+size <= c.maxBytes
-}
-
 // load reads the file at full, which info and stamp describe, and keeps its
 // contents if they fit. It returns nil for a file it cannot read, or one that
 // changed while it was read; and the contents, kept or not, otherwise. It
@@ -527,6 +493,32 @@ func (c *cache) load(full string, info fs.FileInfo, stamp filewatch.Stamp, v var
 	return e
 }
 
+// currentOrRoom returns, under one look at the contents the cache holds,
+// those of the file at full when they are current, of stamp; and when they
+// are not, whether a file of size bytes would be kept, no larger than
+// maxFile and within what is left of maxBytes, one that would not being
+// sent from disk rather than read whole into memory to go once. Without
+// wait, on a fib worker, it returns nil and false rather than wait for the
+// lock, which the file pool holds while it loads a file.
+func (c *cache) currentOrRoom(full string, stamp filewatch.Stamp, size int64, wait bool) (*entry, bool) {
+	if wait {
+		c.mu.RLock()
+	} else if !c.mu.TryRLock() {
+		return nil, false
+	}
+	e := c.entries[full]
+	var freed int64
+	if e != nil {
+		freed = e.size
+	}
+	room := size <= c.maxFile && c.bytes-freed+size <= c.maxBytes
+	c.mu.RUnlock()
+	if e != nil && e.stamp == stamp {
+		return e, false
+	}
+	return nil, room
+}
+
 // holds reports whether the cache holds contents of the file at full.
 func (c *cache) holds(full string) bool {
 	c.mu.RLock()
@@ -557,7 +549,8 @@ func (c *cache) forget(full string) {
 // the file pool. With o, a file name names, which the cache holds no
 // contents of, is looked at with openStat, and left open in o.
 func (s *Static) resolve(name string, o *opened) *lookup {
-	l := &lookup{checked: time.Now(), gen: s.cache.gen.Load()}
+	l, spare := newLookup()
+	l.checked, l.gen = time.Now(), s.cache.gen.Load()
 	dir := name == "" || strings.HasSuffix(name, "/")
 	if !strings.HasPrefix(name, "/") {
 		name = "/" + name
@@ -574,7 +567,7 @@ func (s *Static) resolve(name string, o *opened) *lookup {
 	var err error
 	if o != nil && !dir && !s.cache.holds(full) {
 		var f sendable
-		if info, f, ok, err = openStat(full); f != nil {
+		if info, f, ok, err = openStat(full, spare); f != nil {
 			o.f, o.full = f, full
 		}
 	}
