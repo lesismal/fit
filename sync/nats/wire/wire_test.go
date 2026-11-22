@@ -221,9 +221,17 @@ func TestPubSub(t *testing.T) {
 func TestErrors(t *testing.T) {
 	s := server(t, natstest.Options{})
 	var action atomic.Int32
+	var silenced, pingUnanswered atomic.Bool
 	s.SetHook(func(op, subject string) natstest.Action {
 		if op == "PUB" && subject == "x" {
-			return natstest.Action(action.Load())
+			a := natstest.Action(action.Load())
+			if a == natstest.Silence {
+				silenced.Store(true)
+			}
+			return a
+		}
+		if op == "PING" && silenced.Load() {
+			pingUnanswered.Store(true)
 		}
 		return natstest.Normal
 	})
@@ -260,7 +268,9 @@ func TestErrors(t *testing.T) {
 	c.Publish("x", "", nil, nil)
 	done := make(chan error, 1)
 	go func() { done <- c.Flush(context.Background()) }()
-	time.Sleep(20 * time.Millisecond)
+	// The flush's PING reached the server after the silence, so it waits
+	// for a PONG that never comes.
+	eventually(t, pingUnanswered.Load)
 	action.Store(int32(natstest.Normal))
 	s.Kick()
 	if err := <-done; !errors.Is(err, ErrDisconnected) {
