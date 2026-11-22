@@ -171,7 +171,14 @@ func TestFollower(t *testing.T) {
 	src.openErr = errors.New("refused")
 	src.mu.Unlock()
 	w.fail <- errors.New("lost again")
-	time.Sleep(100 * time.Millisecond)
+	// Refused at least once before the source opens again, which a fixed
+	// sleep did not make sure of on a loaded machine.
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(l.all(), "provider p: refused; trying again"); {
+		if time.Now().After(deadline) {
+			t.Fatalf("the source's refusal was never reported:\n%s", l.all())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	src.mu.Lock()
 	src.openErr = nil
 	src.part = "three"
