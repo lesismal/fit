@@ -13,7 +13,7 @@ import (
 )
 
 // version is fit's version, set at build time with
-// -ldflags "-X main.version=v1.1.1".
+// -ldflags "-X main.version=v1.2.0".
 var version string
 
 func main() {
