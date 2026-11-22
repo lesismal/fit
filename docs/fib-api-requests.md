@@ -2875,3 +2875,17 @@ On Unix `SendFile` asks once; ok gives the descriptor up, and the connection sen
 closes it. `http.Context.SendFile` and `SendFileStall` take a `fib.File`; a file queued in pieces
 hands over only on the last. With fit I232: 17-32 KiB files +15-16%
 ([bench/results/static-sendfile-path-2026-11-22](../bench/results/static-sendfile-path-2026-11-22/README.md)).
+
+## A103: SendFile sends the handler's header without a copy where it can
+
+**Status.** Requested and done on 2026-11-22, fib `cc74d2c`, for I234.
+
+**Problem.** WriteHeader copies the header map it sends, so that what a handler does to it later
+changes nothing; SendFile went through it for every response. fit's static handler sends a file
+by SendFile on HTTP/1, where the header is built and sent before SendFile returns, and paid 435
+bytes and 1.75% of the CPU a request for a copy nothing used.
+
+**Change.** No API: SendFile on HTTP/1, queuing the file, of a response without hooks, sends the
+handler's map as it is; on every other path (HTTP/2 and 3, a file read a piece at a time, HEAD,
+an empty range) it copies it as before. TestSendFileHeaderAfter changes the header once SendFile
+returns. With fit I234 [bench/results/static-open-stat-2026-11-22](../bench/results/static-open-stat-2026-11-22/README.md).

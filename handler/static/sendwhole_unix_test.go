@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
-	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -128,7 +127,7 @@ func TestSendWhole(t *testing.T) {
 	if rec := fromPool(s, "/gone", variant{name: "gone"}, filepath.Join(root, "gone"), info); rec.Response.StatusCode != 404 {
 		t.Fatalf("gone: %d", rec.Response.StatusCode)
 	}
-	if rec := with("/big", func(c *fibhttp.Context) { s.sendFromDisk(c, variant{name: "big"}, full, info, done()) }); rec.Response.StatusCode != 200 || len(rec.Response.Body) != 0 {
+	if rec := with("/big", func(c *fibhttp.Context) { s.sendFromDisk(c, variant{name: "big"}, full, info, done(), nil) }); rec.Response.StatusCode != 200 || len(rec.Response.Body) != 0 {
 		t.Fatalf("answered by the timeout: %d, %d bytes", rec.Response.StatusCode, len(rec.Response.Body))
 	}
 	// A twin whose name gives no type goes as application/octet-stream.
@@ -161,8 +160,8 @@ func fromPoolWith(s *Static, target string, header map[string]string, v variant,
 		r.Header.Set(k, val)
 	}
 	return fibtest.ServeRequest(fibhttp.HandlerFunc(func(c *fibhttp.Context) {
-		q := &queued{timer: time.NewTimer(time.Hour)}
-		s.sendFromDisk(c, v, full, info, q)
+		q := &queued{}
+		s.sendFromDisk(c, v, full, info, q, nil)
 		if q.state.Load() == queuedClaimed && !q.sending {
 			c.Release()
 		}

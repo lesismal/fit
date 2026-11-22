@@ -111,7 +111,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I234。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I235。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -393,6 +393,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I231 | 整读的文件不再产生垃圾，响应头以块发送，fib 的 `Watch` 不再加锁（fib A98） | I230 | done |
 | I232 | 超过 16 KiB 的文件从原始描述符 sendfile，不经 `ServeContent`、不复制描述符（fib A102） | I231 | done |
 | I233 | 静态处理器的 `default_type`（同 nginx）：扩展名给不出类型的文件不再嗅探 | I232 | done |
+| I234 | 静态处理器：以 open+fstat 取代 lstat、请求的用户态开销、去掉每请求的定时器、可选的 `inline_disk` | I233 | done |
 
 ## M0 基础
 
@@ -7239,3 +7240,39 @@ fit 是网关，与 nginx、Caddy、Traefik 一样，三者都没有这样的处
 3. **SendFile 的完成回调仍在另一个 goroutine 上运行**（fib 的约定）：内联节省 CPU 但不提高吞吐。
 4. **fib 不加响应头块接口**：校验后的版本没有可测的收益。
 5. **不设置 `default_type` 时持平**：8 KiB −0.5%，约为同一构建各轮之间的波动（0.4%），为这个选项接受。
+
+### I234 16-64 KiB 差距的剩余部分：open+fstat、用户态、inline_disk — done
+
+- **原因**：I233 之后 20-32 KiB 文件为 nginx 的 86-87%。20 KiB 的 profile（`prof3.sh`）显示差距不在内核：每请求内核
+  19.5 µs，nginx 20.5，系统调用次数相当（7.33 对 7.37；nginx 为 `tcp_nopush` 每请求多两次 `setsockopt`）。差距在用户态：
+  8.1 µs 对 3.0。另有一次 nginx 没有的系统调用：缓存未命中的查找都做一次 `lstat`，把 `open` 要走的路径先走一遍。
+- **完成**：`handler/static`：
+  1. 缓存未命中的查找直接打开文件（`O_NOFOLLOW|O_NONBLOCK`）并通过描述符 fstat（同 nginx，`openStat`，仅 Linux），请求随后
+     从这个描述符整读或发送：open、fstat、close，原来是 lstat、open、fstat、close。符号链接、无读权限或其他错误回退到 lstat；
+     命名管道和设备立即关闭；内容缓存持有的文件照旧。
+  2. 用户态，依据分配 profile（每请求 25.7 次分配、1,767 字节）：fib `cc74d2c`（A103）在 SendFile 返回前就发出响应头的路径上
+     不再复制处理器的响应头；sendWhole 把 Content-Length、Last-Modified、Etag 写进一个字符串、值放进一个数组（七次分配减为两次）；
+     Last-Modified 逐字段写出（`appendHTTPTime`，16 ns，AppendFormat 为 69 ns）；根目录与已规整的请求路径拼接时不再重复规整
+     （`joinRoot`）。
+  3. 去掉每请求的定时器：排队等文件池的请求加入一个分八把锁的链表，有请求等待时每隔池超时的八分之一扫描一次，对超时的应答
+     503；原来每个请求一个 `time.AfterFunc`（占 2% CPU）。
+  4. `inline_disk`（需显式开启）：在处理请求的 fib worker 上直接访问磁盘（同 nginx 在事件循环里做的那样），不交给文件池。
+  fit 改用 fib `cc74d2c`。cluster 的 TestRolloutRolling 因这些改动的时序变化 20 次失败 4 次，改为等自己对成员的检查结束后再
+  重新规划。
+- **压测**（.51，[bench/results/static-open-stat-2026-11-22](../bench/results/static-open-stat-2026-11-22/README.md)）：1-3 相对 I233：8 KiB +6.6%，16 KiB +5.7%，20 KiB +11.0%，32 KiB +9.4%，64 KiB +4.0%，
+  p99 持平；相对 nginx：8 KiB 107%，16 KiB 99%，20 KiB 94.7%，32 KiB 93.9%，64 KiB 93.6%。再开 `inline_disk`：20 KiB +4.0%
+  （nginx 的 98.3%），32 KiB +1.8%（96.8%），p99 略差。
+- **遗留**：默认配置下 20-32 KiB 仍比 nginx 低 5-6%，开 `inline_disk` 低 2-3%，剩余开销分散在缓存 map 查找、fib 响应头序列化、
+  内存分配和 SendFile 完成回调换 goroutine 上。
+
+**待审查的决定**（2026-11-22）：
+
+1. **以 `O_NONBLOCK` 打开**（nginx 也这样打开文件），请求根目录下的命名管道不会等写端；普通文件的读和 sendfile 不受影响。根目录
+   下的设备现在会被打开（并立即关闭），原来 lstat 不会打开它；nginx 也是如此。
+2. **503 超时变粗**：在池超时加其八分之一以内应答，原来的定时器是精确的；扫描只在有请求等待时运行。
+3. **`inline_disk` 需显式开启**：20 KiB +4%、p99 略差，且磁盘挂起时会占住 fib 的 worker、没有 503。与 nginx 对比的压测除非注明
+   都不开。
+4. **fib 的 SendFile 共享处理器的响应头 map**，仅在 SendFile 返回前就发出响应头的路径上（HTTP/1、排队发送、无钩子）；其他路径照旧
+   复制。
+5. **仍不加 fib 响应头块接口**：去掉复制后，map 只剩两次分配和 fib 序列化里 1.9% 的 CPU。
+

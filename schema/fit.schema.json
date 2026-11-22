@@ -6696,6 +6696,10 @@
           },
           "type": "array"
         },
+        "inline_disk": {
+          "description": "Look at the disk on fib's worker that serves the request, as nginx does in its event loop, rather than on the file pool: for files on a disk that answers from memory, as tmpfs or a page cache that holds them does, where the hand-over to the pool costs a few percent of a busy server's rate (4% at 20 KiB files). A disk that hangs then holds fib's workers, and the pool's timeout answers nothing with 503. false when left out.",
+          "type": "boolean"
+        },
         "max_cache_bytes": {
           "default": 67108864,
           "description": "How many bytes of files are kept in memory at most; 64 MiB when left out.",

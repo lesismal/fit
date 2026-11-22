@@ -8192,3 +8192,17 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   profile and a ceiling build of each candidate in `bench/results/static-default-type-2026-11-22`.
 - **Open**: 20-32 KiB still 13-14% below nginx; a fib header-block API was tried and gained
   nothing. Decisions pending review in the plan section.
+
+### I234 The rest of the static handler's 16-64 KiB gap — done
+
+- **Change**: a lookup the cache does not hold opens and fstats the file, as nginx does, and the
+  request reads or sends from that descriptor (no lstat); fib `cc74d2c` (A103) sends the header
+  without WriteHeader's copy where SendFile sends it before returning; fewer allocations and a
+  fast Last-Modified in sendWhole; no `time.AfterFunc` a request (a swept list answers the pool's
+  503); opt-in `inline_disk`, the disk looked at on fib's worker as nginx does. TestRolloutRolling
+  waits for its check of a member before planning again.
+- **Benchmark** (.51): against I233 20 KiB +11.0%, 32 KiB +9.4%, 8-16 KiB +5.7-6.6%, 64 KiB +4.0%;
+  against nginx 8 KiB 107%, 16 KiB 99%, 20-64 KiB 94-95%; `inline_disk` 20 KiB 98%, 32 KiB 97%.
+  Profiles, allocation profile and A/Bs in `bench/results/static-open-stat-2026-11-22`.
+- **Open**: 20-32 KiB 5-6% below nginx by default. Decisions pending review in the plan section.
+

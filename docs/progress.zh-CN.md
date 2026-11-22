@@ -5753,3 +5753,15 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **压测**（.51，`default_type application/octet-stream`，同 nginx 配置）：20/32/64 KiB +6.1/+5.3/+3.2%；相对 nginx：8 KiB
   99.5%，16 KiB 92%，20-32 KiB 86-87%，64 KiB 93%。profile 与逐项上限实验见 `bench/results/static-default-type-2026-11-22`。
 - **未决**：20-32 KiB 仍比 nginx 低 13-14%；fib 响应头块接口试过，没有收益。待审查的决定见计划部分。
+
+### I234 静态处理器 16-64 KiB 差距的剩余部分 — done
+
+- **改动**：缓存未命中的查找直接打开并 fstat 文件（同 nginx），请求从该描述符读取或发送（不再 lstat）；fib `cc74d2c`（A103）
+  在 SendFile 返回前就发出响应头的路径上不再复制响应头；sendWhole 分配更少、Last-Modified 快速写出；去掉每请求的
+  `time.AfterFunc`（改由扫描链表应答文件池的 503）；可选的 `inline_disk`，同 nginx 在 fib worker 上直接访问磁盘。
+  TestRolloutRolling 改为等对成员的检查结束后再重新规划。
+- **压测**（.51）：相对 I233：20 KiB +11.0%，32 KiB +9.4%，8-16 KiB +5.7-6.6%，64 KiB +4.0%；相对 nginx：8 KiB 107%，16 KiB 99%，
+  20-64 KiB 94-95%；开 `inline_disk`：20 KiB 98%，32 KiB 97%。profile、分配 profile 与各组对比见
+  `bench/results/static-open-stat-2026-11-22`。
+- **未决**：默认配置下 20-32 KiB 仍比 nginx 低 5-6%。待审查的决定见计划部分。
+

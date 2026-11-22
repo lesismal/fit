@@ -2212,3 +2212,13 @@ fib 客户端收到的正文。
 **接口。** `core.FileHandover`（`fib.FileHandover`）：带 `HandOverFD() (fd int, ok bool)` 的 `File`。Unix 上 `SendFile` 询问一次；
 ok 表示交出描述符，连接从它发送并负责关闭。`http.Context.SendFile` 与 `SendFileStall` 接受 `fib.File`；分段排队的文件只在最后
 一段交出。配合 fit I232：17-32 KiB 文件 +15-16%（[bench/results/static-sendfile-path-2026-11-22](../bench/results/static-sendfile-path-2026-11-22/README.md)）。
+
+## A103：SendFile 在可以时不复制处理器的响应头
+
+**状态。** 2026-11-22 提出并完成，fib `cc74d2c`，用于 I234。
+
+**问题。** WriteHeader 会复制要发送的响应头 map，使处理器之后的修改不起作用；SendFile 每次响应都经过这一步。fit 的静态处理器在
+HTTP/1 上用 SendFile 发文件，响应头在 SendFile 返回前就已构造并发出，每请求为一份没人用的副本付出 435 字节和 1.75% 的 CPU。
+
+**改动。** 没有新接口：HTTP/1 上排队发送文件、且响应没有钩子时，SendFile 直接发送处理器的 map；其他路径（HTTP/2 与 3、逐段读取的
+文件、HEAD、空范围）照旧复制。TestSendFileHeaderAfter 在 SendFile 返回后修改响应头来验证。配合 fit I234（[bench/results/static-open-stat-2026-11-22](../bench/results/static-open-stat-2026-11-22/README.md)）。

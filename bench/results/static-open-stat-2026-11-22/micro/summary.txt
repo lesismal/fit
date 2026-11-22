@@ -1,0 +1,21 @@
+size-20480.r1 fit-open sys rps=287171.14 all=6.44 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.94 newfstatat=0.03 epoll_ctl=0.17 epoll_wait=0.00 epoll_pwait=0.49 sendto=0.94 write=0.00 sendfile64=0.94 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-open rps_line: rps=299454.76 50%=704.00us 90%=1.41ms 99%=2.67ms  errs=0 srvcpu=7.83/8
+size-20480.r1 fit-micro sys rps=297699.99 all=6.44 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.95 newfstatat=0.03 epoll_ctl=0.16 epoll_wait=0.00 epoll_pwait=0.49 sendto=0.95 write=0.00 sendfile64=0.95 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-micro rps_line: rps=312838.42 50%=658.00us 90%=1.36ms 99%=2.73ms  errs=0 srvcpu=7.85/8
+size-20480.r2 fit-open rps_line: rps=300826.19 50%=700.00us 90%=1.41ms 99%=2.72ms  errs=0 srvcpu=7.86/8
+size-20480.r2 fit-micro rps_line: rps=312954.27 50%=660.00us 90%=1.35ms 99%=2.70ms  errs=0 srvcpu=7.85/8
+size-20480.r3 fit-open rps_line: rps=301107.03 50%=699.00us 90%=1.41ms 99%=2.74ms  errs=0 srvcpu=7.85/8
+size-20480.r3 fit-micro rps_line: rps=313508.64 50%=660.00us 90%=1.36ms 99%=2.75ms  errs=0 srvcpu=7.85/8
+size-32768.r1 fit-open rps_line: rps=285495.74 50%=636.00us 90%=1.49ms 99%=3.72ms  errs=0 srvcpu=7.79/8
+size-32768.r1 fit-micro rps_line: rps=290513.47 50%=601.00us 90%=1.41ms 99%=3.64ms  errs=0 srvcpu=7.71/8
+size-32768.r2 fit-open rps_line: rps=288084.82 50%=613.00us 90%=1.44ms 99%=3.67ms  errs=0 srvcpu=7.77/8
+size-32768.r2 fit-micro rps_line: rps=294009.56 50%=604.00us 90%=1.39ms 99%=3.61ms  errs=0 srvcpu=7.71/8
+size-32768.r3 fit-open rps_line: rps=285230.49 50%=643.00us 90%=1.48ms 99%=3.71ms  errs=0 srvcpu=7.77/8
+size-32768.r3 fit-micro rps_line: rps=288886.11 50%=598.00us 90%=1.40ms 99%=3.66ms  errs=0 srvcpu=7.74/8
+size-16384.r1 fit-open rps_line: rps=319347.97 50%=751.00us 90%=0.97ms 99%=2.52ms  errs=0 srvcpu=7.81/8
+size-16384.r1 fit-micro rps_line: rps=322768.86 50%=737.00us 90%=0.97ms 99%=2.45ms  errs=0 srvcpu=7.80/8
+size-16384.r2 fit-open rps_line: rps=318569.29 50%=755.00us 90%=0.97ms 99%=2.31ms  errs=0 srvcpu=7.80/8
+size-16384.r2 fit-micro rps_line: rps=321490.32 50%=741.00us 90%=0.97ms 99%=2.55ms  errs=0 srvcpu=7.78/8
+size-16384.r3 fit-open rps_line: rps=318463.48 50%=749.00us 90%=0.97ms 99%=2.44ms  errs=0 srvcpu=7.78/8
+size-16384.r3 fit-micro rps_line: rps=324335.93 50%=759.00us 90%=0.93ms 99%=2.38ms  errs=0 srvcpu=7.82/8
+done 12:04:07

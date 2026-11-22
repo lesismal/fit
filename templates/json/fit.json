@@ -1610,6 +1610,14 @@
           // // one of: deny, allow; default "deny".
           // "dotfiles": "deny",
 
+          // // Look at the disk on fib's worker that serves the request, as nginx does in its event loop,
+          // // rather than on the file pool: for files on a disk that answers from memory, as tmpfs or a
+          // // page cache that holds them does, where the hand-over to the pool costs a few percent of a
+          // // busy server's rate (4% at 20 KiB files). A disk that hangs then holds fib's workers, and the
+          // // pool's timeout answers nothing with 503. false when left out.
+          // // boolean.
+          // "inline_disk": true,
+
           // // The Content-Type of a file whose extension gives none, as nginx's default_type, such as
           // // application/octet-stream; when left out, such a file's type is sniffed from its first 512
           // // bytes, as net/http's is, which costs a read of a file not in memory.

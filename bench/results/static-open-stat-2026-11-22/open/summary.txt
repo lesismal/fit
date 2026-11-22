@@ -1,0 +1,40 @@
+size-20480.r1 fit-final sys rps=271430.94 all=7.33 openat=0.94 read=0.00 pread64=0.00 close=0.94 newfstat=0.94 newfstatat=0.82 epoll_ctl=0.21 epoll_wait=0.00 epoll_pwait=0.58 sendto=0.94 write=0.00 sendfile64=0.94 recvfrom=0.97 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-final rps_line: rps=286938.92 50%=807.00us 90%=1.46ms 99%=2.44ms  errs=0 srvcpu=7.85/8
+size-20480.r1 fit-open sys rps=289245.73 all=6.56 openat=0.94 read=0.00 pread64=0.00 close=0.94 newfstat=0.94 newfstatat=0.03 epoll_ctl=0.21 epoll_wait=0.00 epoll_pwait=0.58 sendto=0.94 write=0.00 sendfile64=0.94 recvfrom=0.97 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-open rps_line: rps=301565.00 50%=763.00us 90%=1.37ms 99%=2.38ms  errs=0 srvcpu=7.84/8
+size-20480.r1 nginx sys rps=317348.23 all=7.37 openat=0.82 read=0.00 pread64=0.00 close=0.82 newfstat=0.82 newfstatat=0.03 epoll_ctl=0.00 epoll_wait=0.04 epoll_pwait=0.00 sendto=0.00 writev=0.97 write=0.00 sendfile64=0.97 recvfrom=0.97 sendmsg=0.00 setsockopt=1.94 futex=0.00 
+size-20480.r1 nginx rps_line: rps=334368.07 50%=769.00us 90%=0.89ms 99%=1.19ms  errs=0 srvcpu=7.91/8
+size-20480.r2 fit-final rps_line: rps=286201.54 50%=812.00us 90%=1.45ms 99%=2.41ms  errs=0 srvcpu=7.83/8
+size-20480.r2 fit-open rps_line: rps=302760.88 50%=759.00us 90%=1.37ms 99%=2.38ms  errs=0 srvcpu=7.84/8
+size-20480.r2 nginx rps_line: rps=335233.05 50%=709.00us 90%=1.02ms 99%=1.24ms  errs=0 srvcpu=7.91/8
+size-20480.r3 fit-final rps_line: rps=286220.85 50%=807.00us 90%=1.45ms 99%=2.45ms  errs=0 srvcpu=7.83/8
+size-20480.r3 fit-open rps_line: rps=302383.50 50%=761.00us 90%=1.38ms 99%=2.45ms  errs=0 srvcpu=7.84/8
+size-20480.r3 nginx rps_line: rps=337223.74 50%=781.00us 90%=0.94ms 99%=1.18ms  errs=0 srvcpu=7.92/8
+size-16384.r1 fit-final rps_line: rps=309966.80 50%=799.00us 90%=0.94ms 99%=2.07ms  errs=0 srvcpu=7.80/8
+size-16384.r1 fit-open rps_line: rps=319092.34 50%=771.00us 90%=0.94ms 99%=2.32ms  errs=0 srvcpu=7.81/8
+size-16384.r1 nginx rps_line: rps=338153.78 50%=692.00us 90%=1.06ms 99%=1.24ms  errs=0 srvcpu=7.91/8
+size-16384.r2 fit-final rps_line: rps=310330.86 50%=796.00us 90%=0.95ms 99%=2.19ms  errs=0 srvcpu=7.80/8
+size-16384.r2 fit-open rps_line: rps=318959.74 50%=773.00us 90%=0.94ms 99%=2.53ms  errs=0 srvcpu=7.80/8
+size-16384.r2 nginx rps_line: rps=334552.07 50%=737.00us 90%=1.06ms 99%=1.26ms  errs=0 srvcpu=7.91/8
+size-16384.r3 fit-final rps_line: rps=309880.61 50%=799.00us 90%=0.94ms 99%=2.13ms  errs=0 srvcpu=7.79/8
+size-16384.r3 fit-open rps_line: rps=319617.13 50%=772.00us 90%=0.94ms 99%=2.28ms  errs=0 srvcpu=7.81/8
+size-16384.r3 nginx rps_line: rps=338032.16 50%=711.00us 90%=0.89ms 99%=1.19ms  errs=0 srvcpu=7.92/8
+size-32768.r1 fit-final rps_line: rps=282763.46 50%=807.00us 90%=1.46ms 99%=2.53ms  errs=0 srvcpu=7.82/8
+size-32768.r1 fit-open rps_line: rps=294271.62 50%=768.00us 90%=1.39ms 99%=2.54ms  errs=0 srvcpu=7.80/8
+size-32768.r1 nginx rps_line: rps=331056.80 50%=724.00us 90%=0.89ms 99%=1.07ms  errs=0 srvcpu=7.90/8
+size-32768.r2 fit-final rps_line: rps=281926.38 50%=808.00us 90%=1.47ms 99%=2.57ms  errs=0 srvcpu=7.81/8
+size-32768.r2 fit-open rps_line: rps=295159.11 50%=765.00us 90%=1.38ms 99%=2.46ms  errs=0 srvcpu=7.81/8
+size-32768.r2 nginx rps_line: rps=329855.08 50%=723.00us 90%=0.97ms 99%=1.11ms  errs=0 srvcpu=7.91/8
+size-32768.r3 fit-final rps_line: rps=282465.41 50%=804.00us 90%=1.46ms 99%=2.60ms  errs=0 srvcpu=7.80/8
+size-32768.r3 fit-open rps_line: rps=295147.33 50%=769.00us 90%=1.38ms 99%=2.43ms  errs=0 srvcpu=7.83/8
+size-32768.r3 nginx rps_line: rps=307094.92 50%=636.00us 90%=1.06ms 99%=3.73ms  errs=0 srvcpu=7.76/8
+size-8192.r1 fit-final rps_line: rps=334744.32 50%=723.00us 90%=0.93ms 99%=1.99ms  errs=0 srvcpu=7.82/8
+size-8192.r1 fit-open rps_line: rps=346859.99 50%=693.00us 90%=0.91ms 99%=1.71ms  errs=0 srvcpu=7.82/8
+size-8192.r1 nginx rps_line: rps=333160.42 50%=700.00us 90%=0.94ms 99%=1.48ms  errs=0 srvcpu=7.92/8
+size-8192.r2 fit-final rps_line: rps=334560.13 50%=723.00us 90%=0.93ms 99%=2.26ms  errs=0 srvcpu=7.80/8
+size-8192.r2 fit-open rps_line: rps=344635.70 50%=695.00us 90%=0.91ms 99%=1.98ms  errs=0 srvcpu=7.78/8
+size-8192.r2 nginx rps_line: rps=332623.62 50%=696.00us 90%=0.95ms 99%=1.51ms  errs=0 srvcpu=7.93/8
+size-8192.r3 fit-final rps_line: rps=333985.71 50%=722.00us 90%=0.93ms 99%=2.13ms  errs=0 srvcpu=7.78/8
+size-8192.r3 fit-open rps_line: rps=347015.53 50%=692.00us 90%=0.91ms 99%=1.89ms  errs=0 srvcpu=7.80/8
+size-8192.r3 nginx rps_line: rps=331849.22 50%=700.00us 90%=0.94ms 99%=1.45ms  errs=0 srvcpu=7.91/8
+done 11:53:29

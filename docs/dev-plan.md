@@ -121,7 +121,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I234.
+Status: `todo`, `doing` or `done`. The next free iteration number is I235.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -403,6 +403,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I234.
 | I231 | A file read whole leaves no garbage, its header goes as a block, and fib's `Watch` takes no lock (fib A98) | I230 | done |
 | I232 | Files above 16 KiB go by sendfile from a raw descriptor, without `ServeContent` or a duplicate (fib A102) | I231 | done |
 | I233 | The static handler's `default_type`, as nginx's: files whose extension gives no type are not sniffed | I232 | done |
+| I234 | The static handler: open and fstat in place of lstat, the user-space cost of a request, no timer a request, opt-in `inline_disk` | I233 | done |
 
 ## M0, foundations
 
@@ -10386,3 +10387,52 @@ handler fed by the Admin API or by a sync sink, for dashboards with no backend.
 4. **No fib header-block API**: the checked form gained nothing measurable.
 5. **Level without `default_type`**: −0.5% at 8 KiB without it set, about the variation of rounds
    (0.4%), taken for the option.
+
+### I234 The rest of the 16-64 KiB gap: open and fstat, user space, inline_disk — done
+
+- **Why**: after I233, 20-32 KiB files went at 86-87% of nginx. A profile at 20 KiB
+  (`prof3.sh`) found the kernel was not the gap: 19.5 µs a request against nginx's 20.5, with as
+  many system calls (7.33 against 7.37; nginx makes two `setsockopt` a request for `tcp_nopush`).
+  User space was: 8.1 µs against 3.0. And one system call nginx does not make: an `lstat` on each
+  lookup the cache does not hold, walking the path the `open` walks again.
+- **Done**: `handler/static`:
+  1. A lookup the cache does not hold opens the file (`O_NOFOLLOW|O_NONBLOCK`) and stats it
+     through the descriptor, as nginx does (`openStat`, Linux), and the request reads it whole or
+     sends it from that descriptor: open, fstat, close where it was lstat, open, fstat, close. A
+     symbolic link, a permission to read it lacks or another error falls back to the lstat; a named
+     pipe or a device is closed at once; a file the content cache holds is looked at as before.
+  2. User space, after an allocation profile (25.7 allocations, 1,767 bytes a request): fib
+     `cc74d2c` (A103) sends the handler's header without WriteHeader's copy where SendFile sends it
+     before returning; sendWhole writes Content-Length, Last-Modified and Etag into one string and
+     the values into one array (two allocations for seven); Last-Modified is written field by
+     field (`appendHTTPTime`, 16 ns against AppendFormat's 69); the root and a clean request path
+     are joined without cleaning again (`joinRoot`).
+  3. No timer a request: a request queued for the file pool joins a list, sharded under eight
+     locks, which a sweep every eighth of the pool's timeout goes through while any wait,
+     answering 503 to those past it, where each had a `time.AfterFunc` (2% of the CPU).
+  4. `inline_disk`, opt-in: the disk is looked at on fib's worker that serves the request, as
+     nginx does in its event loop, rather than on the file pool.
+  fit moves to fib `cc74d2c`. TestRolloutRolling (cluster), which these changes' timing made fail
+  4 runs in 20, waits for its own check of a member to end before planning again.
+- **Benchmark** (.51, [bench/results/static-open-stat-2026-11-22](../bench/results/static-open-stat-2026-11-22/README.md)): with 1-3, against I233, 8 KiB +6.6%, 16 KiB +5.7%,
+  20 KiB +11.0%, 32 KiB +9.4%, 64 KiB +4.0%, p99 level; against nginx 8 KiB 107%, 16 KiB 99%,
+  20 KiB 94.7%, 32 KiB 93.9%, 64 KiB 93.6%. `inline_disk` on top: 20 KiB +4.0% (98.3% of nginx),
+  32 KiB +1.8% (96.8%), p99 a little worse.
+- **Left**: 20-32 KiB 5-6% below nginx by default, 2-3% with `inline_disk`, spread thin over the
+  caches' map lookups, fib's header serialization, allocation and SendFile's completion hop.
+
+**Decisions pending review** (2026-11-22):
+
+1. **Opened with `O_NONBLOCK`**, as nginx opens files, so that a request for a named pipe under
+   the root does not wait for a writer; reads and sendfile of a regular file do not heed it. A
+   device under the root is now opened (and closed at once) where the lstat kept it shut; nginx
+   does the same.
+2. **The 503 timeout is coarser**: answered within the pool's timeout and an eighth of it, where
+   the timer was exact; the sweep runs only while requests wait.
+3. **`inline_disk` is opt-in**: +4% at 20 KiB with p99 a little worse, and a disk that hangs then
+   holds fib's workers with no 503 for it. The benchmarks against nginx leave it off unless said.
+4. **fib's SendFile shares the handler's header map** only where the header is sent before
+   SendFile returns (HTTP/1, queued, no hooks); everywhere else it copies it as before.
+5. **No fib header-block API** again: with the copy gone, the map is two allocations and 1.9% of
+   the CPU in fib's serialization.
+

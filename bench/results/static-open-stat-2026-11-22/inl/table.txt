@@ -1,0 +1,3 @@
+  size     fit-allx fit-allx-inline        nginx  2nd/1st   2nd/4th   3rd/2nd   p99 by column (ms)
+  20K        313271       325764       331272      104.0%      98.3%  3.12/3.50/2.17
+  32K        294295       299604       309371      101.8%      96.8%  3.66/3.79/3.66

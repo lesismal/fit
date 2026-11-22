@@ -150,7 +150,7 @@ func TestCacheEvent(t *testing.T) {
 		s.cache.checkIndex(t, fmt.Sprintf("%+v", tt.ev))
 	}
 	// A lookup that began before a change is not kept.
-	l := s.resolve("a.txt")
+	l := s.resolve("a.txt", nil)
 	s.cache.event(filewatch.Event{Name: "other"})
 	s.cache.keep("/a.txt", s.cache.hash("/a.txt"), l)
 	if known()["/a.txt"] {
@@ -257,16 +257,16 @@ func TestWatchedNeedsNoCheck(t *testing.T) {
 	if s.watch == nil {
 		t.Skip("no watch here")
 	}
-	a := s.find("/a.txt", true)
-	link := s.find("/link.txt", true)
+	a := s.find("/a.txt", true, nil)
+	link := s.find("/link.txt", true, nil)
 	if !a.watched || link.watched {
 		t.Fatalf("watched: a.txt %v, link.txt %v", a.watched, link.watched)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if got := s.find("/a.txt", false); got != a {
+	if got := s.find("/a.txt", false, nil); got != a {
 		t.Fatal("a watched path was not trusted past check_interval")
 	}
-	if got := s.find("/link.txt", false); got != nil {
+	if got := s.find("/link.txt", false, nil); got != nil {
 		t.Fatal("a symbolic link was trusted past check_interval")
 	}
 	if err := os.WriteFile(target, []byte("two"), 0o644); err != nil {

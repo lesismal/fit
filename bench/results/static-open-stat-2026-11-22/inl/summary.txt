@@ -1,0 +1,16 @@
+size-20480.r1 fit-allx sys rps=293761.05 all=6.44 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.95 newfstatat=0.03 epoll_ctl=0.15 epoll_wait=0.00 epoll_pwait=0.47 sendto=0.95 write=0.00 sendfile64=0.95 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-allx rps_line: rps=311793.49 50%=603.00us 90%=1.47ms 99%=3.41ms  errs=0 srvcpu=7.84/8
+size-20480.r1 fit-allx-inline sys rps=312820.43 all=5.82 openat=0.94 read=0.00 pread64=0.00 close=0.94 newfstat=0.94 newfstatat=0.03 epoll_ctl=0.00 epoll_wait=0.00 epoll_pwait=0.06 sendto=0.94 write=0.00 sendfile64=0.94 recvfrom=0.97 sendmsg=0.03 setsockopt=0.00 futex=0.00 
+size-20480.r1 fit-allx-inline rps_line: rps=324942.93 50%=582.00us 90%=1.54ms 99%=3.54ms  errs=0 srvcpu=7.90/8
+size-20480.r1 nginx sys rps=313917.96 all=7.41 openat=0.82 read=0.00 pread64=0.00 close=0.82 newfstat=0.82 newfstatat=0.03 epoll_ctl=0.00 epoll_wait=0.05 epoll_pwait=0.00 sendto=0.00 writev=0.97 write=0.00 sendfile64=0.97 recvfrom=0.97 sendmsg=0.00 setsockopt=1.95 futex=0.00 
+size-20480.r1 nginx rps_line: rps=331583.64 50%=663.00us 90%=1.08ms 99%=2.13ms  errs=0 srvcpu=7.92/8
+size-20480.r2 fit-allx rps_line: rps=314749.01 50%=645.00us 90%=1.39ms 99%=2.83ms  errs=0 srvcpu=7.83/8
+size-20480.r2 fit-allx-inline rps_line: rps=326585.11 50%=616.00us 90%=1.52ms 99%=3.46ms  errs=0 srvcpu=7.88/8
+size-20480.r2 nginx rps_line: rps=330960.57 50%=662.00us 90%=1.03ms 99%=2.20ms  errs=0 srvcpu=7.92/8
+size-32768.r1 fit-allx rps_line: rps=294202.29 50%=610.00us 90%=1.44ms 99%=3.67ms  errs=0 srvcpu=7.66/8
+size-32768.r1 fit-allx-inline rps_line: rps=300643.52 50%=416.00us 90%=1.41ms 99%=3.81ms  errs=0 srvcpu=7.84/8
+size-32768.r1 nginx rps_line: rps=309235.54 50%=625.00us 90%=1.06ms 99%=3.67ms  errs=0 srvcpu=7.79/8
+size-32768.r2 fit-allx rps_line: rps=294386.91 50%=603.00us 90%=1.41ms 99%=3.64ms  errs=0 srvcpu=7.71/8
+size-32768.r2 fit-allx-inline rps_line: rps=298563.82 50%=398.00us 90%=1.36ms 99%=3.76ms  errs=0 srvcpu=7.86/8
+size-32768.r2 nginx rps_line: rps=309505.84 50%=648.00us 90%=1.03ms 99%=3.65ms  errs=0 srvcpu=7.77/8
+done 12:33:58

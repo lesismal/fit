@@ -527,6 +527,14 @@ func (c *cache) load(full string, info fs.FileInfo, stamp filewatch.Stamp, v var
 	return e
 }
 
+// holds reports whether the cache holds contents of the file at full.
+func (c *cache) holds(full string) bool {
+	c.mu.RLock()
+	_, ok := c.entries[full]
+	c.mu.RUnlock()
+	return ok
+}
+
 // forget drops the contents the cache holds of the file at full.
 func (c *cache) forget(full string) {
 	c.mu.RLock()
@@ -546,8 +554,9 @@ func (c *cache) forget(full string) {
 // resolve looks at what name, a request path within the root that check
 // passed, names on disk: a file; a directory's index file or listing when
 // name ends in a slash; or a redirect for a directory without one. It runs on
-// the file pool.
-func (s *Static) resolve(name string) *lookup {
+// the file pool. With o, a file name names, which the cache holds no
+// contents of, is looked at with openStat, and left open in o.
+func (s *Static) resolve(name string, o *opened) *lookup {
 	l := &lookup{checked: time.Now(), gen: s.cache.gen.Load()}
 	dir := name == "" || strings.HasSuffix(name, "/")
 	if !strings.HasPrefix(name, "/") {
@@ -559,8 +568,19 @@ func (s *Static) resolve(name string) *lookup {
 	// Watched before the disk is looked at, so that no change after the
 	// look goes unreported.
 	l.watched = s.watch.Watch(path.Dir(name))
-	full := filepath.Join(s.root, filepath.FromSlash(name))
-	info, link, err := statLink(full)
+	full := s.joinRoot(name)
+	var info fs.FileInfo
+	var link, ok bool
+	var err error
+	if o != nil && !dir && !s.cache.holds(full) {
+		var f sendable
+		if info, f, ok, err = openStat(full); f != nil {
+			o.f, o.full = f, full
+		}
+	}
+	if !ok {
+		info, link, err = statLink(full)
+	}
 	if err != nil {
 		s.cache.forget(full)
 		l.status = statusOf(err)
@@ -600,6 +620,17 @@ func (s *Static) resolve(name string) *lookup {
 	}
 	l.name, l.full, l.info, l.stamp, l.link = name, full, info, filewatch.StampOf(info), link
 	return s.file(l)
+}
+
+// joinRoot is filepath.Join(s.root, name) for name, a request path resolve
+// cleaned, without its leading slash, but with no cleaning again: where the
+// separator is a slash, the clean root, from filepath.Abs, and a clean name
+// below it join clean.
+func (s *Static) joinRoot(name string) string {
+	if filepath.Separator != '/' || name == "" || s.root == "/" {
+		return filepath.Join(s.root, filepath.FromSlash(name))
+	}
+	return s.root + "/" + name
 }
 
 // onDisk is dotfile.OnDisk, which tests replace to stand for a file system

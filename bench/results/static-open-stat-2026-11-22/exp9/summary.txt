@@ -1,0 +1,10 @@
+size-20480.r1 fit-open sys rps=288241.39 all=6.44 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.95 newfstatat=0.03 epoll_ctl=0.17 epoll_wait=0.00 epoll_pwait=0.50 sendto=0.95 write=0.00 sendfile64=0.95 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-open rps_line: rps=299712.15 50%=703.00us 90%=1.41ms 99%=2.69ms  errs=0 srvcpu=7.84/8
+size-20480.r1 fit-inline sys rps=301430.53 all=5.82 openat=0.94 read=0.00 pread64=0.00 close=0.94 newfstat=0.94 newfstatat=0.03 epoll_ctl=0.00 epoll_wait=0.00 epoll_pwait=0.05 sendto=0.94 write=0.00 sendfile64=0.94 recvfrom=0.97 sendmsg=0.03 setsockopt=0.00 futex=0.00 
+size-20480.r1 fit-inline rps_line: rps=312567.31 50%=657.00us 90%=1.60ms 99%=3.50ms  errs=0 srvcpu=7.87/8
+size-20480.r1 fit-notimer sys rps=291514.89 all=6.45 openat=0.95 read=0.00 pread64=0.00 close=0.95 newfstat=0.95 newfstatat=0.03 epoll_ctl=0.17 epoll_wait=0.00 epoll_pwait=0.50 sendto=0.94 write=0.00 sendfile64=0.94 recvfrom=0.98 sendmsg=0.03 setsockopt=0.00 futex=0.01 
+size-20480.r1 fit-notimer rps_line: rps=305619.63 50%=682.00us 90%=1.41ms 99%=2.68ms  errs=0 srvcpu=7.84/8
+size-20480.r2 fit-open rps_line: rps=300218.64 50%=703.00us 90%=1.41ms 99%=2.70ms  errs=0 srvcpu=7.86/8
+size-20480.r2 fit-inline rps_line: rps=312570.15 50%=661.00us 90%=1.57ms 99%=3.38ms  errs=0 srvcpu=7.87/8
+size-20480.r2 fit-notimer rps_line: rps=304918.14 50%=683.00us 90%=1.42ms 99%=2.78ms  errs=0 srvcpu=7.82/8
+done 11:56:28

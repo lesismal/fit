@@ -64,6 +64,7 @@ package static
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"mime"
 	stdhttp "net/http"
@@ -113,6 +114,8 @@ type Static struct {
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out."`
 
+	InlineDisk bool `json:"inline_disk,omitempty" doc:"Look at the disk on fib's worker that serves the request, as nginx does in its event loop, rather than on the file pool: for files on a disk that answers from memory, as tmpfs or a page cache that holds them does, where the hand-over to the pool costs a few percent of a busy server's rate (4% at 20 KiB files). A disk that hangs then holds fib's workers, and the pool's timeout answers nothing with 503. false when left out."`
+
 	DefaultType string `json:"default_type,omitempty" doc:"The Content-Type of a file whose extension gives none, as nginx's default_type, such as application/octet-stream; when left out, such a file's type is sniffed from its first 512 bytes, as net/http's is, which costs a read of a file not in memory."`
 
 	CheckInterval *config.Duration `json:"check_interval,omitempty" default:"\"5s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again, where no watch reports its changes. On Linux a watch of the directories under the root reports a change within moments, a file written, replaced or removed, a directory renamed, or a symbolic link on the way to the root pointed elsewhere, and what it watches is trusted until it does; this interval is for other systems, and for a file that is a symbolic link, whose target's changes the watch does not see. A file is told by its size, modification and status change times and inode, so one replaced by another of the same size and modification time is seen too. 0 looks at the disk for every request, with no watch, so that a response always carries the file as it is on disk then, also on a network file system, whose changes from other machines no watch sees. 5s when left out."`
@@ -145,6 +148,8 @@ type Static struct {
 	cache cache
 	stall time.Duration
 	pool  *filepool.Pool
+	// waiting holds the requests queued for the pool, for its timeout.
+	waiting *waiting
 	// watch reports changes under the root to the cache; nil where the
 	// system has none, or with a check_interval of 0.
 	watch *filewatch.Watcher
@@ -229,6 +234,7 @@ func (s *Static) Provision(ctx *module.Context) error {
 	}
 	s.stall = ctx.WriteStallTimeout()
 	s.pool = defaultPool()
+	s.waiting = newWaiting()
 	if s.cache.check > 0 {
 		// Where the system offers no watch, the check interval alone
 		// bounds how long a change goes unseen.
@@ -278,7 +284,12 @@ func (s *Static) ServeHTTP(c *fibhttp.Context) {
 // request from q before it answers.
 func (s *Static) serve(c *fibhttp.Context, name, urlPath string, q *queued) bool {
 	if s.TryFiles == nil {
-		l := s.find(name, q != nil)
+		var o *opened
+		if q != nil {
+			o = &opened{}
+			defer o.close()
+		}
+		l := s.find(name, q != nil, o)
 		if l == nil {
 			return false
 		}
@@ -292,7 +303,7 @@ func (s *Static) serve(c *fibhttp.Context, name, urlPath string, q *queued) bool
 				respondError(c, l.status)
 			}
 		default:
-			return s.answer(c, l, urlPath, q)
+			return s.answer(c, l, urlPath, q, o)
 		}
 		return true
 	}
@@ -302,14 +313,14 @@ func (s *Static) serve(c *fibhttp.Context, name, urlPath string, q *queued) bool
 		if s.check(candidate) != 0 {
 			continue
 		}
-		l := s.find(candidate, q != nil)
+		l := s.find(candidate, q != nil, nil)
 		switch {
 		case l == nil:
 			return false
 		case l.redirect, l.status != 0:
 			continue
 		}
-		return s.answer(c, l, path.Clean(candidate)+"/", q)
+		return s.answer(c, l, path.Clean(candidate)+"/", q, nil)
 	}
 	if q.claim() {
 		respondError(c, stdhttp.StatusNotFound)
@@ -320,8 +331,9 @@ func (s *Static) serve(c *fibhttp.Context, name, urlPath string, q *queued) bool
 // find returns what the cache knows of name, a request path within the
 // root, when it was learned within check_interval; or, with disk, what a look
 // at the disk finds, which the cache then keeps. Without disk it returns nil
-// for a name the cache does not know, or cannot tell at once.
-func (s *Static) find(name string, disk bool) *lookup {
+// for a name the cache does not know, or cannot tell at once. A file the
+// look at the disk opens is left in o (see resolve).
+func (s *Static) find(name string, disk bool, o *opened) *lookup {
 	h := s.cache.hash(name)
 	// Without disk, on a fib worker, the cache's lock is not waited for.
 	if l := s.cache.lookup(name, h, disk); l != nil {
@@ -333,13 +345,14 @@ func (s *Static) find(name string, disk bool) *lookup {
 	// name may point into the request's head, which the cache would keep
 	// whole for as long as it keeps the name.
 	name = strings.Clone(name)
-	l := s.resolve(name)
+	l := s.resolve(name, o)
 	s.cache.keep(name, h, l)
 	return l
 }
 
-// answer serves the file or the listing l stands for, as serve does.
-func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queued) bool {
+// answer serves the file or the listing l stands for, as serve does, from
+// the file in o when the lookup opened it.
+func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queued, o *opened) bool {
 	if l.listing {
 		if q == nil {
 			return false
@@ -360,18 +373,50 @@ func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queue
 	case q == nil:
 		return false
 	default:
-		s.sendFromDisk(c, v, full, info, q)
+		s.sendFromDisk(c, v, full, info, q, o)
 	}
 	return true
+}
+
+// opened is the file a lookup opened to stat it (see openStat), which the
+// request then reads or sends from, and which serve closes when nothing
+// took it.
+type opened struct {
+	f    sendable
+	full string
+}
+
+// take returns the file opened at full, which the caller then closes, or
+// nil.
+func (o *opened) take(full string) sendable {
+	if o == nil || o.f == nil || o.full != full {
+		return nil
+	}
+	f := o.f
+	o.f = nil
+	return f
+}
+
+func (o *opened) close() {
+	if o != nil && o.f != nil {
+		o.f.Close()
+		o.f = nil
+	}
 }
 
 // queued is a request on its way through the file pool, which either the
 // pool's work or the pool's timeout answers, whichever claims it first.
 type queued struct {
 	state atomic.Int32
-	timer *time.Timer
 	// sending says SendFile took the request over, and gives it back.
 	sending bool
+	// c is the request, and the rest its place among the waiting (see
+	// waiting), until the pool's work claims it.
+	c          *fibhttp.Context
+	list       *waiting
+	shard      *waitShard
+	prev, next *queued
+	deadline   int64
 }
 
 const (
@@ -388,7 +433,7 @@ func (q *queued) claim() bool {
 		return true
 	}
 	if q.state.CompareAndSwap(queuedWaiting, queuedClaimed) {
-		q.timer.Stop()
+		q.leave()
 		return true
 	}
 	return q.state.Load() == queuedClaimed
@@ -396,21 +441,25 @@ func (q *queued) claim() bool {
 
 // queue serves the request on the file pool, or answers 503 when the pool's
 // queue is full, or its timeout passes before the pool's work has answered:
-// waiting to be taken up, or with the disk the work waits on hung.
+// waiting to be taken up, or with the disk the work waits on hung. With
+// inline_disk it serves it here, on fib's worker, as the pool's work would.
 func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
 	c.Retain()
 	q := &queued{}
-	timeout := func() {
-		if q.state.CompareAndSwap(queuedWaiting, queuedDone) {
-			respondError(c, stdhttp.StatusServiceUnavailable)
+	if s.InlineDisk {
+		// On this worker, claimed at once: nothing else answers it.
+		q.state.Store(queuedClaimed)
+		s.serve(c, name, urlPath, q)
+		if !q.sending {
 			c.Release()
 		}
+		return
 	}
-	q.timer = time.AfterFunc(s.pool.Timeout(), timeout)
-	// The pool's own ways out, which come after q.timer is set.
+	s.waiting.join(q, c, s.pool.Timeout())
+	// The pool's own ways out.
 	expire := func() {
-		q.timer.Stop()
-		timeout()
+		q.leave()
+		q.expire()
 	}
 	run := func() {
 		if c.Err() != nil {
@@ -443,11 +492,18 @@ const smallFile = 16 << 10
 // one is read whole and answered from memory; a larger one goes through
 // SendFile, which neither waits for the disk nor for the client; see
 // send.go.
-func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info fs.FileInfo, q *queued) {
+func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info fs.FileInfo, q *queued, o *opened) {
 	// stale says the lookup's stat no longer stands for the file.
 	stale := false
 	if info.Size() <= smallFile {
-		data, err := readSmall(full, info.Size())
+		var data []byte
+		var err error
+		if f := o.take(full); f != nil {
+			data, err = readFrom(f, full, info.Size())
+			f.Close()
+		} else {
+			data, err = readSmall(full, info.Size())
+		}
 		switch {
 		case err != nil:
 			if q.claim() {
@@ -466,7 +522,7 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info f
 		}
 		stale = true
 	}
-	if !stale && !hasConditions(c.Request) && s.sendWhole(c, v, full, info, q) {
+	if !stale && !hasConditions(c.Request) && s.sendWhole(c, v, full, info, q, o.take(full)) {
 		return
 	}
 	f, err := openFile(full)
@@ -506,6 +562,24 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, info f
 	}
 }
 
+// readFrom reads the whole of f, the file at full, of size bytes when it
+// was looked at, as readSmall reads it, but for the open: one read, a short
+// one its end.
+func readFrom(f sendable, full string, size int64) ([]byte, error) {
+	// One byte more tells a file that grew.
+	buf := bufferpool.Get(int(size) + 1)
+	n, err := f.ReadAt(buf, 0)
+	if err != nil && err != io.EOF {
+		bufferpool.Put(buf)
+		return nil, &fs.PathError{Op: "read", Path: full, Err: err}
+	}
+	if int64(n) != size {
+		bufferpool.Put(buf)
+		return nil, nil
+	}
+	return buf[:n], nil
+}
+
 // sendable is a file opened for SendFile, which done closes.
 type sendable interface {
 	fib.File
@@ -527,18 +601,21 @@ type sendable interface {
 // a read whole: 17 KiB files went at 70% of nginx's rate through
 // ServeContent, an os.File and a duplicate of its descriptor. It reports
 // false, answering nothing, for a file no longer as the lookup found it,
-// which sendFromDisk then serves as before.
-func (s *Static) sendWhole(c *fibhttp.Context, v variant, full string, info fs.FileInfo, q *queued) bool {
-	f, err := openSendable(full)
-	if err != nil {
-		if q.claim() {
-			respondError(c, statusOf(err))
+// which sendFromDisk then serves as before. With f, the file the lookup
+// opened and info is the fstat of, it opens and checks nothing.
+func (s *Static) sendWhole(c *fibhttp.Context, v variant, full string, info fs.FileInfo, q *queued, f sendable) bool {
+	if f == nil {
+		var err error
+		if f, err = openSendable(full); err != nil {
+			if q.claim() {
+				respondError(c, statusOf(err))
+			}
+			return true
 		}
-		return true
-	}
-	if !f.stands(info.Size()) {
-		f.Close()
-		return false
+		if !f.stands(info.Size()) {
+			f.Close()
+			return false
+		}
 	}
 	if !q.claim() {
 		f.Close()
@@ -557,9 +634,19 @@ func (s *Static) sendWhole(c *fibhttp.Context, v variant, full string, info fs.F
 	if v.vary {
 		h["Vary"] = varyAcceptEncoding
 	}
-	h["Content-Type"] = []string{contentType}
-	h["Last-Modified"] = []string{info.ModTime().UTC().Format(stdhttp.TimeFormat)}
-	h["Etag"] = []string{etag(info)}
+	// The length and the validators in one string, and the four values in
+	// one array: two allocations where there would be seven.
+	var buf [96]byte
+	b := strconv.AppendInt(buf[:0], info.Size(), 10)
+	length := len(b)
+	b = appendHTTPTime(b, info.ModTime())
+	modified := len(b)
+	all := string(appendEtag(b, info))
+	values := &[4]string{contentType, all[:length], all[length:modified], all[modified:]}
+	h["Content-Type"] = values[0:1:1]
+	h["Content-Length"] = values[1:2:2]
+	h["Last-Modified"] = values[2:3:3]
+	h["Etag"] = values[3:4:4]
 	h["Accept-Ranges"] = acceptRangesBytes
 	if q != nil {
 		q.sending = true
@@ -684,7 +771,7 @@ func appendFileHeader(b []byte, v variant, info fs.FileInfo, data []byte) []byte
 		b = append(append(append(b, "Content-Type: "...), contentType...), "\r\n"...)
 	}
 	b = append(b, "Last-Modified: "...)
-	b = info.ModTime().UTC().AppendFormat(b, stdhttp.TimeFormat)
+	b = appendHTTPTime(b, info.ModTime())
 	b = append(b, "\r\nEtag: "...)
 	b = appendEtag(b, info)
 	return append(b, "\r\nAccept-Ranges: bytes\r\n"...)
@@ -734,8 +821,29 @@ func fileHeader(v variant, info fs.FileInfo, data []byte) stdhttp.Header {
 	if contentType != "" {
 		h["Content-Type"] = []string{contentType}
 	}
-	h["Last-Modified"] = []string{info.ModTime().UTC().Format(stdhttp.TimeFormat)}
+	h["Last-Modified"] = []string{string(appendHTTPTime(make([]byte, 0, len(stdhttp.TimeFormat)), info.ModTime()))}
 	h["Etag"] = []string{etag(info)}
 	h["Accept-Ranges"] = []string{"bytes"}
 	return h
+}
+
+// appendHTTPTime appends t, in UTC, as http.TimeFormat lays it out, written
+// field by field rather than through AppendFormat, which reads the layout
+// each time and costs several times as much.
+func appendHTTPTime(b []byte, t time.Time) []byte {
+	t = t.UTC()
+	year, month, day := t.Date()
+	if year < 0 || year > 9999 {
+		return t.AppendFormat(b, stdhttp.TimeFormat)
+	}
+	hour, minute, second := t.Clock()
+	const days, months = "SunMonTueWedThuFriSat", "JanFebMarAprMayJunJulAugSepOctNovDec"
+	wd, mo := int(t.Weekday())*3, (int(month)-1)*3
+	b = append(b, days[wd:wd+3]...)
+	b = append(b, ',', ' ', byte('0'+day/10), byte('0'+day%10), ' ')
+	b = append(b, months[mo:mo+3]...)
+	return append(b, ' ',
+		byte('0'+year/1000), byte('0'+year/100%10), byte('0'+year/10%10), byte('0'+year%10), ' ',
+		byte('0'+hour/10), byte('0'+hour%10), ':', byte('0'+minute/10), byte('0'+minute%10), ':',
+		byte('0'+second/10), byte('0'+second%10), ' ', 'G', 'M', 'T')
 }

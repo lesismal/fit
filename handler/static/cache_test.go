@@ -175,13 +175,13 @@ func TestWorkerDoesNotWait(t *testing.T) {
 	if got := get(s, "GET", "/a.txt", nil); got.Response.StatusCode != 200 {
 		t.Fatalf("%d", got.Response.StatusCode)
 	}
-	if s.find("/a.txt", false) == nil {
+	if s.find("/a.txt", false, nil) == nil {
 		t.Fatal("a lookup not kept")
 	}
 	sh := s.cache.shard(s.cache.hash("/a.txt"))
 	sh.mu.Lock()
 	start := time.Now()
-	l := s.find("/a.txt", false)
+	l := s.find("/a.txt", false, nil)
 	sh.mu.Unlock()
 	if l != nil || time.Since(start) > time.Second {
 		t.Fatalf("a worker found %v past a held lock in %v", l, time.Since(start))

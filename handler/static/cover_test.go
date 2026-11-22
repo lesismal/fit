@@ -118,13 +118,13 @@ func TestLookupBounds(t *testing.T) {
 	root := tree(t, map[string]string{"a": "a"})
 	s := mustLoad(t, root, "")
 	long := "/" + strings.Repeat("x", MaxLookupPath)
-	if l := s.find(long, true); l == nil || l.status == 0 {
+	if l := s.find(long, true, nil); l == nil || l.status == 0 {
 		t.Fatalf("find of a long path: %+v", l)
 	}
 	if n, size := s.cache.lookupTotals(); n != 0 || size != 0 {
 		t.Fatalf("a path longer than %d kept: %d lookups, %d bytes", MaxLookupPath, n, size)
 	}
-	if l := s.find(long[:MaxLookupPath], true); l == nil || len(s.cache.known()) != 1 {
+	if l := s.find(long[:MaxLookupPath], true, nil); l == nil || len(s.cache.known()) != 1 {
 		t.Fatalf("a path of %d bytes not kept: %+v", MaxLookupPath, l)
 	}
 
@@ -199,7 +199,7 @@ func TestLookupKeepsOwnName(t *testing.T) {
 	s := mustLoad(t, root, "")
 	head := []byte("GET /a.txt HTTP/1.1")
 	name := unsafe.String(&head[5], 5)
-	if l := s.find(name, true); l == nil || l.status != 0 {
+	if l := s.find(name, true, nil); l == nil || l.status != 0 {
 		t.Fatalf("find: %+v", l)
 	}
 	for key, l := range s.cache.known() {
@@ -279,7 +279,7 @@ func TestSendFromDiskErrors(t *testing.T) {
 	// SendFile.
 	for _, info := range []fs.FileInfo{small, big} {
 		for _, tt := range tests {
-			rec := with("/a", func(c *fibhttp.Context) { s.sendFromDisk(c, variant{name: "a"}, tt.full, info, tt.q) })
+			rec := with("/a", func(c *fibhttp.Context) { s.sendFromDisk(c, variant{name: "a"}, tt.full, info, tt.q, nil) })
 			// Status 0 is no answer of the handler's, which fib finishes with an empty 200.
 			got := rec.Response
 			if tt.status == 0 && (got.StatusCode != 200 || len(got.Body) != 0) || tt.status != 0 && got.StatusCode != tt.status {
@@ -306,9 +306,9 @@ func TestSmallFromDisk(t *testing.T) {
 			r.Header.Set(k, v)
 		}
 		// Queued, as a request served from the file pool is.
-		q := &queued{timer: time.NewTimer(time.Hour)}
+		q := &queued{}
 		return fibtest.ServeRequest(fibhttp.HandlerFunc(func(c *fibhttp.Context) {
-			s.sendFromDisk(c, variant{name: "a"}, full, info, q)
+			s.sendFromDisk(c, variant{name: "a"}, full, info, q, nil)
 			if q.state.Load() == queuedClaimed && !q.sending {
 				c.Release()
 			}

@@ -1,6 +1,7 @@
 package static
 
 import (
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,12 +82,110 @@ func TestSlowDisk(t *testing.T) {
 		t.Fatalf("a.txt from the cache with the disk stuck: %d %q after %v", got.StatusCode, got.Body, time.Since(start))
 	}
 	// The one worker is stuck and the queue fills: past it, 503 at once.
+	queued := make(chan int, 4)
 	for range 4 {
-		go get(s, "GET", "/b.txt", nil)
+		go func() { queued <- get(s, "GET", "/b.txt", nil).Response.StatusCode }()
 	}
 	time.Sleep(50 * time.Millisecond)
 	start = time.Now()
 	if got := get(s, "GET", "/b.txt", nil).Response; got.StatusCode != 503 || time.Since(start) > 100*time.Millisecond {
 		t.Fatalf("b.txt with the queue full: %d after %v", got.StatusCode, time.Since(start))
+	}
+	// The queued ones, which no worker takes up, the timeout answers.
+	for range 4 {
+		select {
+		case status := <-queued:
+			if status != 503 {
+				t.Fatalf("b.txt queued behind a stuck disk: %d", status)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("b.txt queued behind a stuck disk was never answered")
+		}
+	}
+	if n := s.waiting.count.Load(); n != 0 {
+		t.Fatalf("%d requests still wait", n)
+	}
+}
+
+// TestWaiting checks the list of requests waiting for the pool: those
+// claimed leave it, the sweep answers those past their deadline, and stops
+// once none wait.
+func TestWaiting(t *testing.T) {
+	w := newWaiting()
+	var claimed, expired []*queued
+	for i := range 100 {
+		q := &queued{}
+		// No request to answer: expire is called only once the deadline
+		// passes, and the state tells.
+		w.join(q, nil, time.Hour)
+		if i%2 == 0 {
+			if !q.claim() {
+				t.Fatal("claim")
+			}
+			claimed = append(claimed, q)
+		} else {
+			expired = append(expired, q)
+		}
+	}
+	if n := w.count.Load(); n != 50 {
+		t.Fatalf("%d wait, want 50", n)
+	}
+	for _, q := range claimed {
+		if q.next != nil || q.prev != nil {
+			t.Fatal("a claimed request is still on the list")
+		}
+	}
+	// Past their deadline: the sweep takes them off and expires them,
+	// which, with no request, panics past the state's CAS; claim them as
+	// the work would first, so that expire finds them taken.
+	for _, q := range expired {
+		q.deadline = 0
+		q.state.Store(queuedClaimed)
+	}
+	w.sweep()
+	if n := w.count.Load(); n != 0 {
+		t.Fatalf("%d wait after the sweep", n)
+	}
+	for _, q := range expired {
+		if q.next != nil || q.state.Load() != queuedClaimed {
+			t.Fatal("swept wrong")
+		}
+		q.leave()
+	}
+	if w.sweeping.Load() {
+		t.Fatal("a sweep is scheduled with none waiting")
+	}
+}
+
+// TestInlineDisk checks inline_disk: files read whole and sent by SendFile,
+// HEAD, a directory and a file not there answered as from the pool, and the
+// pool never used.
+func TestInlineDisk(t *testing.T) {
+	big := strings.Repeat("0123456789", smallFile/10+100)
+	root := tree(t, map[string]string{"small.txt": "small", "big.txt": big, "sub/index.html": "index"})
+	s := mustLoad(t, root, `, "inline_disk": true, "max_file_bytes": 4`)
+	var jobs atomic.Int32
+	s.pool.Hook = func() { jobs.Add(1) }
+	for range 2 {
+		for _, tt := range []struct {
+			method, target string
+			status         int
+			body           string
+		}{
+			{"GET", "/small.txt", 200, "small"},
+			{"GET", "/big.txt", 200, big},
+			{"HEAD", "/big.txt", 200, ""},
+			{"GET", "/sub", 301, ""},
+			{"GET", "/sub/", 200, "index"},
+			{"GET", "/none", 404, ""},
+		} {
+			got := get(s, tt.method, tt.target, nil).Response
+			if got.StatusCode != tt.status || (tt.body != "" && string(got.Body) != tt.body) {
+				t.Fatalf("%s %s: %d, %d bytes", tt.method, tt.target, got.StatusCode, len(got.Body))
+			}
+		}
+	}
+	if n := jobs.Load(); n != 0 {
+		t.Fatalf("the pool ran %d jobs", n)
 	}
 }

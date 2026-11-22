@@ -1,0 +1,2 @@
+  size     fit-open  fit-notimer   fit-inline     fit-open  2nd/1st   2nd/4th   3rd/2nd   p99 by column (ms)
+  20K        299965       305269       312569       299965      101.8%     101.8%     102.4%  2.70/2.73/3.44/2.70
