@@ -2034,15 +2034,15 @@
       // },
 
       // The most connections open, or being opened, to one address; a request past it waits for one
-      // to be free. 8192 when left out or 0: large enough that high concurrency against a slow
+      // to be free. 10000 when left out or 0: large enough that high concurrency against a slow
       // upstream does not reach it, and still a bound.
-      // integer, 0 or more; default 8192.
-      // "max_conns": 8192,
+      // integer, 0 or more; default 10000.
+      // "max_conns": 10000,
 
       // How many requests may wait for a connection to one address once its max_conns are busy; one
-      // past it is answered 503 at once. 16384 when left out or 0.
-      // integer, 0 or more; default 16384.
-      // "max_pending": 16384,
+      // past it is answered 503 at once. 50000 when left out or 0.
+      // integer, 0 or more; default 50000.
+      // "max_pending": 50000,
 
       // How many idle connections to one address are kept for later requests; 32 when left out, and
       // 0 keeps none.

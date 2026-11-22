@@ -47,8 +47,8 @@ const (
 	// max_conns and max_pending are large enough that high concurrency
 	// against a slow upstream does not reach them, and still bounds: a
 	// config that sets none is bounded (rules 10 and 11 of docs/rules.md).
-	DefaultMaxConns        = 8192
-	DefaultMaxPending      = 16384
+	DefaultMaxConns        = 10000
+	DefaultMaxPending      = 50000
 	DefaultResponseTimeout = time.Hour
 	// StreamThreshold is the response body size past which a body streams
 	// to the callback rather than arriving whole.

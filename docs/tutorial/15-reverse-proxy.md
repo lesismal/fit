@@ -102,8 +102,8 @@ Only the key parameters are listed; the full field tables are in
 | `load_balancing` | `round_robin`, or `weighted_round_robin` when `weights` are given | How requests are spread over the addresses; see the nine strategies below. |
 | `hash_key` | none | The header `header_hash` and the cookie `cookie_hash` hash by: needed by those two, refused with any other strategy. |
 | `sticky_cookie` | none | Keeps each client on one address with a cookie: `name` `fit_sticky`, `path` `/`, `max_age` until the browser closes, `secure` off; it is always HttpOnly and SameSite=Lax. |
-| `max_conns` | `8192` | The most connections open, or being opened, to one address; a request past it waits for one to be free. |
-| `max_pending` | `16384` | How many requests may wait for a connection to one address once its `max_conns` are busy; one past it is answered 503 at once. |
+| `max_conns` | `10000` | The most connections open, or being opened, to one address; a request past it waits for one to be free. |
+| `max_pending` | `50000` | How many requests may wait for a connection to one address once its `max_conns` are busy; one past it is answered 503 at once. |
 | `max_idle_conns` | `32` | The idle connections kept to one address; 0 keeps none. |
 | `idle_timeout` | `60s` | How long an idle connection is kept before it is closed. |
 | `connect_timeout` | `10s` | How long opening a connection may take; a request whose connect times out gets 504. |

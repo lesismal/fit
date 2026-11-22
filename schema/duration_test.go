@@ -50,8 +50,8 @@ func TestDefaults(t *testing.T) {
 		{"config.Limits", "max_header_bytes", float64(config.DefaultMaxHeaderBytes)},
 		{"config.Limits", "max_body_bytes", float64(config.DefaultMaxBodyBytes)},
 		{"config.Limits", "write_stall_timeout", "30s"},
-		{"config.Upstream", "max_conns", float64(8192)},
-		{"config.Upstream", "max_pending", float64(16384)},
+		{"config.Upstream", "max_conns", float64(10000)},
+		{"config.Upstream", "max_pending", float64(50000)},
 		{"config.Upstream", "response_timeout", "1h"},
 		{"http.handlers.static", "browse_max_entries", float64(10000)},
 	} {

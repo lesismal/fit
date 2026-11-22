@@ -84,8 +84,8 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | `load_balancing` | `round_robin`（写了 `weights` 时 `weighted_round_robin`） | 请求如何分给各地址，见下面九种策略。 |
 | `hash_key` | 无 | `header_hash` 的头部与 `cookie_hash` 的 cookie 的名字：这两种策略必填，其他策略写了会被拒绝。 |
 | `sticky_cookie` | 无 | 用 cookie 把每个客户端固定在一个地址上：`name` 默认 `fit_sticky`，`path` 默认 `/`，`max_age` 默认到浏览器关闭，`secure` 默认关；它总是 HttpOnly、SameSite=Lax。 |
-| `max_conns` | `8192` | 到一个地址最多打开（或正在打开）的连接数；超过的请求等一个空出来。 |
-| `max_pending` | `16384` | 一个地址的 `max_conns` 占满后还能等待该地址连接的请求数；超过的立刻答 503。 |
+| `max_conns` | `10000` | 到一个地址最多打开（或正在打开）的连接数；超过的请求等一个空出来。 |
+| `max_pending` | `50000` | 一个地址的 `max_conns` 占满后还能等待该地址连接的请求数；超过的立刻答 503。 |
 | `max_idle_conns` | `32` | 为一个地址保留的空闲连接数；0 不保留。 |
 | `idle_timeout` | `60s` | 空闲连接保留多久后关闭。 |
 | `connect_timeout` | `10s` | 建立连接最多多久；超时的请求答 504。 |
