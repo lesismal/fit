@@ -7,7 +7,7 @@ API 网关。本路线图把 [nginx、Caddy、Traefik 对比](comparison.zh-CN.m
 每个里程碑交付什么、怎样算完成、建立在 fib 的哪些能力之上。
 
 fit 已完成所有里程碑（包括 1.0）的迭代，已完成的内容见 [开发进度](progress.zh-CN.md)。1.0 之后又加入了边缘代理之外的
-几条路线（[1.0 之后](#10-之后)）：控制台与加密的 store、llm 与 tunnel、WebRTC、媒体、AI 助手、媒体库、集群管理、日志文件、地址的允许与拒绝名单、数据同步（两批连接器）和 BitTorrent 已完成；P2P 和 VPN 正在进行。[开发计划](dev-plan.zh-CN.md) 把这些里程碑拆成了小迭代，
+几条路线（[1.0 之后](#10-之后)）：控制台与加密的 store、llm 与 tunnel、WebRTC、媒体、AI 助手、媒体库、集群管理、日志文件、地址的允许与拒绝名单、数据同步（两批连接器）和 BitTorrent 已完成；P2P 和 VPN 正在进行；由多个进程服务并按 NUMA 节点放置已[列入计划](#计划中prefork-与-numa)，尚未写入开发计划。[开发计划](dev-plan.zh-CN.md) 把这些里程碑拆成了小迭代，
 每个迭代的大小适合一次工作会话。里程碑的先后顺序是确定的，具体内容会随开发中的认识调整。
 文中刻意不写日期：里程碑在满足退出标准时结束，而不是按日历结束。
 
@@ -24,6 +24,7 @@ fit 已完成所有里程碑（包括 1.0）的迭代，已完成的内容见 [�
   - [M5 缓存与扩展](#m5-缓存与扩展)
   - [1.0](#10)
   - [1.0 之后](#10-之后)
+  - [计划中：prefork 与 NUMA](#计划中prefork-与-numa)
 - [功能对照](#功能对照)
 - [性能目标](#性能目标)
 - [风险与待定问题](#风险与待定问题)
@@ -290,6 +291,56 @@ fit 可以作为反向代理和静态文件服务器使用。
 | [BitTorrent](dev-plan.zh-CN.md#bittorrent下载与做种tracker发布) | `bittorrent.client`：在 fit 的引擎上下载与做种，恢复时不重新哈希，分类、队列、`alt_speed` 时间表、`watch_dir`、单任务限速；`bt_stream`，种子中的文件边下边经 HTTP Range 播放；`bittorrent.tracker`，基于 HTTP 与 UDP，私有 passkey、允许列表，集群可经 Redis 共享的存储；目录发布为带 web seed 的 hybrid 种子；RSS 自动下载；Admin API、事件流、`fit bt`、指标与 workbench 的 BitTorrent 页面；集群汇总成员的种子并经 BitTorrent 分发大文件（[决定 037](decisions/037-bittorrent.zh-CN.md)、[BitTorrent](bittorrent.zh-CN.md)） | 已完成（I196–I210） | `bittorrent`（客户端、tracker、uTP、DHT） |
 | [P2P 与 NAT 穿透](dev-plan.zh-CN.md#p2p-与-nat-穿透) | NAT 后的两台主机通过 ICE 直接相连，或经 TURN 中继相连，承载 TCP 和 UDP 服务（[决定 025](decisions/025-p2p.zh-CN.md)） | 进行中：STUN 消息和 STUN 服务器（`p2p/stun`，I84，尚未进入配置的库）和 fib 中的 A49（I85）已完成；STUN 和 TURN 客户端、ICE、隧道和配置待做（I86、I88–I93） | `webrtc/stun`、`webrtc/turn`、`webrtc/ice` |
 | [VPN](dev-plan.zh-CN.md#vpnfit-节点组成的网络) | 节点组成一个覆盖网络，各有一个 TUN 接口，IP 包直接或经中继发送（[决定 026](decisions/026-vpn.zh-CN.md)） | 进行中：IP 包和覆盖网络路由表（`vpn/packet`，I94，尚未进入配置的库）已完成；TUN 设备、中继、协调器和节点待做（I95–I103） | — |
+| [Prefork 与 NUMA](#计划中prefork-与-numa) | 数据面由多个进程服务，每个进程有自己的堆和 GC，并按 NUMA 节点放置；控制面和有状态的服务留在一个进程里 | 计划中，尚未写入开发计划 | `prefork`（`Placement`、`BindMemory`、`BalanceReusePort`） |
+
+### 计划中：prefork 与 NUMA
+
+留待以后考虑；[开发计划](dev-plan.zh-CN.md)中还没有它的迭代，下面的待定问题定下来之后才拆成迭代。
+
+**为什么。** fit 在一个进程里运行，每个 CPU 一个 P。核数多时，单个堆的 GC 和锁在每个请求里占的比例越来越大：
+fib 的 `prefork` 包在 64 核的 HttpArena 上把 json-tls 从每秒 56 万请求提到 87 万，latency-1m 的 p99 从 1.6 ms
+降到 124 µs，同时少用四分之一的核。在多个 NUMA 节点的机器上（双路，或 EPYC、Threadripper 设成 NPS2、NPS4），
+被调度器在节点间移动的进程还要跨节点读内存。fib 的 `prefork.Config.Placement`（fib 2128369）把每个子进程
+限制在一个节点的 CPU 上（`PlaceNode`），或给它一段独占的本节点 CPU（`PlaceCPU`），`BindMemory` 把它的内存
+绑到该节点。nginx 靠 `worker_processes`、`worker_cpu_affinity` 和 `reuseport` 做到这些；fit 应该在配置里做到，
+而不是让用户给每个进程套 `numactl`。
+
+**将交付什么。**
+
+- 一个 `process` 配置段（仅 Linux；其他平台照旧一个进程）：子进程数和每个子进程的 P 数，
+  `placement: any | node | cpu`，`bind_memory`，以及共享监听的轮询分配（`BalanceReusePort`）。默认关闭：
+  在压测机上的测量给出结论之前，单进程仍是默认。
+- **一个控制进程和若干数据面子进程。** 启动 fit 的那个进程保留控制面：Admin API、工作台与控制台、store、
+  配置的编译与检查、ACME 签发、集群管理端、SIGHUP 与 `-watch`。子进程服务各个监听。一次配置修改只编译一次，
+  再分两阶段应用到各子进程：所有子进程都准备好之后才提交，任何一个子进程拒绝就全部留在旧配置上。
+- **状态按规则共享或拆分。** 每个保存状态的功能在决定记录里归入一类：保持每个子进程一份（静态文件缓存、
+  连接池、被动健康检查、P2C 与最少连接的视图，各子进程自己的）；拆分（限流与并发限制按子进程数均分，如
+  `prefork.Children()` 所示，或放进子进程共享的计数器）；由控制进程持有并推送给子进程（主动健康检查、证书、
+  子进程请求的按需 TLS 签发、访问名单的列表文件）；或者不能 prefork。
+- **留在一个进程里的服务。** 第二条连接需要再找到同一会话的服务，在一个进程里、在子进程不共享的监听上运行：
+  流媒体 hub（推到一个子进程的流必须从它播放）、WebRTC 房间与 SFU、tunnel 和 llm 的 hub、BitTorrent 客户端
+  与 tracker、sync 管道及其位点、频道及其排期。要么配置把这样的监听标为单进程，要么 fit 拒绝会共享它的
+  `process` 配置。
+- **可观测性。** `/metrics` 在各子进程间汇总，或按子进程打标签；fit 自己的日志和访问日志每个路径仍由一个
+  有界的写入者写（日志路线的做法），子进程的行发给它；工作台显示每个子进程的节点、CPU、P 数、连接数和内存，
+  并能重启其中一个。
+- **失败的子进程会被重新启动**（带退避），而不是像现在 fib 的 `prefork` 那样让其余子进程一起停止。
+- **网卡就近。** 比 nginx 多做的一步：一个 reuseport 选择器，把连接交给其数据包到达的那个 CPU 所在节点上的
+  子进程；配合把网卡队列和中断分布到各节点，请求在哪个节点进来就在哪个节点处理。
+
+**需要的 fib 能力**（列入计划时写进 [fib API 需求](fib-api-requests.zh-CN.md)）：`prefork` 重启失败的子进程而不是
+全部停止（或提供让 fit 决定的钩子）；按接收 CPU 所在节点选择的 reuseport 选择器；HTTP/3 按连接 ID 把 QUIC 包
+导向持有该连接的子进程（nginx 的 `quic_bpf`），否则对端地址变化后可能落到另一个子进程；以及 master 与子进程之间的
+通道，除非 fit 自己用 socket pair 建一个。
+
+**待定问题。**
+
+- 控制进程自己是否服务流量，还是只负责控制面和单进程的服务。
+- 限制如何共享：按子进程数均分（简单，但内核哈希不均时也不均）、共享内存里的计数器，还是询问控制进程（精确，
+  但多一次往返）。
+- 内存：每个子进程都有自己的缓存和池，单进程放得下的机器未必放得下十六个；缓存是否按子进程分全局预算。
+- 测量：压测机（192.168.100.51）只有一个 NUMA 节点，能验证放置是否正确，测不出收益；需要双路机器，或
+  NPS2/NPS4。fitbench 已经记录 `numa_nodes`，并按节点安排各角色。
 
 ## 功能对照
 
@@ -352,6 +403,7 @@ fit 可以作为反向代理和静态文件服务器使用。
 | 种子中的文件边下载边经 HTTP 播放 | BitTorrent，I200 | `bittorrent` |
 | 基于 HTTP 与 UDP 的 BitTorrent tracker，私有，存储可在集群中共享 | BitTorrent，I201、I207 | `bittorrent/tracker` |
 | 把目录发布为带 web seed 的种子 | BitTorrent，I202 | `bittorrent` |
+| 多进程（prefork），按 NUMA 节点放置 | [计划中](#计划中prefork-与-numa) | `prefork` |
 | STUN 服务器 | P2P，I84（库，尚未进入配置） | — |
 | VPN：IP 包和覆盖网络路由表 | VPN，I94（库，尚未进入配置） | — |
 

@@ -11,7 +11,8 @@ fit has done the iterations of every milestone, 1.0's included; [progress](progr
 is built. Since 1.0, tracks beyond the edge proxy have been added ([after 1.0](#after-10)): the
 console and the encrypted store, the LLM feature and the tunnel, WebRTC, media, the AI assistant, the media
 library, cluster management, log files, allow and deny lists, sync (two rounds of connectors) and BitTorrent are
-done; P2P and a VPN are under way. The [development plan](dev-plan.md) breaks these milestones into small iterations, each
+done; P2P and a VPN are under way; serving from several processes placed on NUMA nodes is
+[planned](#planned-prefork-and-numa), not yet in the development plan. The [development plan](dev-plan.md) breaks these milestones into small iterations, each
 sized for one working session. The order of the milestones is firm; their contents will move as the work teaches
 us things. Dates are left out on purpose, because a milestone ends when its exit criteria are met,
 not when a calendar says so.
@@ -29,6 +30,7 @@ not when a calendar says so.
   - [M5, caching and extensions](#m5-caching-and-extensions)
   - [1.0](#10)
   - [After 1.0](#after-10)
+  - [Planned: prefork and NUMA](#planned-prefork-and-numa)
 - [Feature map](#feature-map)
 - [Performance targets](#performance-targets)
 - [Risks and open questions](#risks-and-open-questions)
@@ -337,6 +339,76 @@ set in the same config and changed with it.
 | [BitTorrent](dev-plan.md#bittorrent-downloading-and-seeding-a-tracker-publishing) | `bittorrent.client`: downloading and seeding on fit's engine, resume without hashing again, categories, a queue, `alt_speed` schedules, a `watch_dir`, per-torrent limits; `bt_stream`, a torrent's file played over HTTP ranges while it downloads; `bittorrent.tracker` over HTTP and UDP, private passkeys, an allow-list, a store a cluster shares in Redis; a directory published as hybrid torrents with web seeds; RSS auto-download; the Admin API, an event stream, `fit bt`, metrics and the workbench's BitTorrent pages; a cluster's view of its members' torrents and large files spread to them ([decision 037](decisions/037-bittorrent.md), [BitTorrent](bittorrent.md)) | done (I196–I210) | `bittorrent` (client, tracker, uTP, DHT) |
 | [P2P, NAT traversal](dev-plan.md#p2p-nat-traversal) | two hosts behind NAT connected directly through ICE, or through a TURN relay, carrying TCP and UDP services ([decision 025](decisions/025-p2p.md)) | under way: STUN messages and a STUN server (`p2p/stun`, I84), a library not yet in the config, and A49 in fib (I85) done; the STUN and TURN clients, ICE, tunnels and the config to come (I86, I88–I93) | `webrtc/stun`, `webrtc/turn`, `webrtc/ice` |
 | [VPN](dev-plan.md#vpn-a-network-of-fit-nodes) | nodes in one overlay network, each with a TUN interface, IP packets sent directly or through a relay ([decision 026](decisions/026-vpn.md)) | under way: IP packets and the overlay route table (`vpn/packet`, I94), a library not yet in the config, done; TUN devices, the relay, the coordinator and the node to come (I95–I103) | — |
+| [Prefork and NUMA](#planned-prefork-and-numa) | the data plane served from several processes, each with its own heap and collector, placed on NUMA nodes; the control plane and stateful services kept in one | planned, not in the development plan | `prefork` (`Placement`, `BindMemory`, `BalanceReusePort`) |
+
+### Planned: prefork and NUMA
+
+To be considered later; it has no iterations in the [development plan](dev-plan.md) yet, and the
+plan gets them only once the open questions below are settled.
+
+**Why.** fit runs in one process with a P for every CPU. On many cores one heap's collector and
+locks take a growing share of each request: fib's `prefork` package, on 64 cores of HttpArena,
+took json-tls from 0.56M to 0.87M requests a second and latency-1m's p99 from 1.6 ms to 124 µs,
+on a quarter fewer cores. On a machine of several NUMA nodes (two sockets, or EPYC and
+Threadripper set to NPS2 or NPS4) a process the scheduler moves between nodes also reads its
+memory across them. fib's `prefork.Config.Placement` (fib 2128369) keeps each child on one node's
+CPUs (`PlaceNode`) or on a share of them of its own (`PlaceCPU`), and `BindMemory` binds its
+memory to the node. nginx gets there with `worker_processes`, `worker_cpu_affinity` and
+`reuseport`; fit should get there from its config, without the user running `numactl` per
+process.
+
+**What it would deliver.**
+
+- A `process` section (Linux only; one process elsewhere, as now): how many children and how many
+  Ps each, `placement: any | node | cpu`, `bind_memory`, and round-robin balancing of the shared
+  listeners (`BalanceReusePort`). Off by default: a single process stays the default until
+  measurements on the benchmark host say otherwise.
+- **A control process and data-plane children.** The process fit is started as keeps the control
+  plane: the Admin API, the workbench and console, the store, config compilation and checks, ACME
+  issuance, the cluster manager, SIGHUP and `-watch`. The children serve the listeners. A config
+  change is compiled once, then applied in two phases across the children, prepared in every
+  child before any commits, so that a child that refuses it leaves all of them on the old config.
+- **State, shared or split by rule.** Every feature that keeps state is classed, in the decision
+  record, as one of: per child as it is (static file caches, connection pools, passive health,
+  P2C and least-connections views, each child's own); split (rate and concurrency limits divided by
+  the children, as `prefork.Children()` suggests, or kept in counters the children share);
+  owned by the control process and pushed to the children (active health checks, certificates,
+  on-demand TLS issuance asked for by a child, list files of the access lists); or not
+  preforkable.
+- **Services that stay in one process.** What holds sessions a second connection must find again
+  runs in one process, on listeners the children do not share: the streaming hub (a stream
+  published to one child must play from it), WebRTC rooms and the SFU, the tunnel's and the LLM
+  feature's hubs, the BitTorrent client and tracker, sync pipelines and their positions, channels
+  and their schedules. Either the config marks such a listener as single, or fit refuses a
+  `process` section that would share it.
+- **Observability.** `/metrics` aggregated over the children, or labelled by child; fit's log and
+  the access log written by one bounded writer per path, as the logging track has it, the children's lines
+  sent to it; the workbench shows each child's node, CPUs, Ps, connections and memory, and restarts
+  one.
+- **Children that fail are started again,** with backoff, rather than stopping the others, as fib's
+  `prefork` does today.
+- **NIC locality.** Beyond what nginx does: a reuseport selector that hands a connection to a child
+  on the node of the CPU its packets arrived on, so that, with the NIC's queues and interrupts
+  spread over the nodes, a request is served where it came in.
+
+**fib parts it would need** (to go to [fib API requests](fib-api-requests.md) when planned):
+`prefork` restarting a failed child instead of stopping all (or a hook that lets fit decide); a
+reuseport selector by the receiving CPU's node; for HTTP/3, steering QUIC packets to the child that
+holds the connection by its connection ID (nginx's `quic_bpf`), since a peer that rebinds may
+otherwise land on another child; and a channel between the master and its children, unless fit
+builds its own over a socket pair.
+
+**Open questions.**
+
+- Whether the control process serves any traffic itself, or only the control plane and the
+  single-process services.
+- How limits are shared: divided by the children (simple, but uneven when the kernel's hash is),
+  counters in shared memory, or asked of the control process (exact, but a round trip).
+- Memory: every child keeps its own caches and pools, so a box that fits one process may not fit
+  sixteen; whether caches get a per-child share of a global budget.
+- Measuring it: the benchmark host (192.168.100.51) has one NUMA node, so placement can be checked
+  there but its gain cannot; that needs a host of two sockets, or NPS2/NPS4. fitbench already
+  records `numa_nodes` and lays roles out node by node.
 
 ## Feature map
 
@@ -400,6 +472,7 @@ The rows follow the [feature table](comparison.md#features) in the comparison, t
 | A torrent's file played over HTTP while it downloads | BitTorrent, I200 | `bittorrent` |
 | BitTorrent tracker over HTTP and UDP, private, with a store a cluster shares | BitTorrent, I201, I207 | `bittorrent/tracker` |
 | A directory published as torrents with web seeds | BitTorrent, I202 | `bittorrent` |
+| Several processes (prefork), placed on NUMA nodes | [planned](#planned-prefork-and-numa) | `prefork` |
 | STUN server | P2P, I84 (a library, not yet in the config) | — |
 | VPN: IP packets and the overlay route table | VPN, I94 (a library, not yet in the config) | — |
 
