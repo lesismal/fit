@@ -115,6 +115,18 @@ func (f *pgSrcFixture) confirmedFlush(t *testing.T) pgwire.LSN {
 	return l
 }
 
+// slotLetGo waits until no walsender holds the slot: a run just ended may
+// still have its walsender for a moment, and the next START_REPLICATION on
+// the slot would fail with 55006 (in a pipeline, the restart after that
+// error takes it again).
+func (f *pgSrcFixture) slotLetGo(t *testing.T) {
+	t.Helper()
+	waitPG(t, "the slot to be let go", func() bool {
+		got := pgOne(t, f.c, "SELECT active::text FROM pg_replication_slots WHERE slot_name = $1", f.slot)
+		return got != nil && got[0] == "false"
+	})
+}
+
 // pgSrcRun runs a source on a goroutine, keeping what it emits.
 type pgSrcRun struct {
 	mu   sync.Mutex
@@ -339,6 +351,7 @@ func TestPostgresSourceChanges(t *testing.T) {
 		if err := run.end(t); !errors.Is(err, context.Canceled) {
 			t.Fatalf("the run ended with %v", err)
 		}
+		f.slotLetGo(t)
 		run = runPGSource(src, pos(2))
 		again := pgTxs(t, run.wait(t, 3+1+30000))
 		if len(again) != 3 || pgRecString(again[0][0]) != pgRecString(txs[3][0]) || string(again[2][len(again[2])-1].Position) != string(pos(5)) {
@@ -384,6 +397,7 @@ func TestPostgresSourceChanges(t *testing.T) {
 		} else {
 			run1("INSERT INTO " + a + " VALUES (101, 'no restart')")
 		}
+		f.slotLetGo(t)
 		run = runPGSource(src, pos(5))
 		last := pgTxs(t, run.wait(t, 2))
 		if len(last) != 2 || pgRecString(last[0][0]) != "a insert "+`{"map":{"id":{"int":100}}}` || pgRecString(last[1][0]) != "a insert "+`{"map":{"id":{"int":101}}}` {
