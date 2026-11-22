@@ -84,8 +84,8 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | `load_balancing` | `round_robin`（写了 `weights` 时 `weighted_round_robin`） | 请求如何分给各地址，见下面九种策略。 |
 | `hash_key` | 无 | `header_hash` 的头部与 `cookie_hash` 的 cookie 的名字：这两种策略必填，其他策略写了会被拒绝。 |
 | `sticky_cookie` | 无 | 用 cookie 把每个客户端固定在一个地址上：`name` 默认 `fit_sticky`，`path` 默认 `/`，`max_age` 默认到浏览器关闭，`secure` 默认关；它总是 HttpOnly、SameSite=Lax。 |
-| `max_conns` | `256` | 到一个地址最多打开（或正在打开）的连接数；超过的请求等一个空出来。 |
-| `max_pending` | `1024` | 一个地址的 `max_conns` 占满后还能等待该地址连接的请求数；超过的立刻答 503。 |
+| `max_conns` | `8192` | 到一个地址最多打开（或正在打开）的连接数；超过的请求等一个空出来。 |
+| `max_pending` | `16384` | 一个地址的 `max_conns` 占满后还能等待该地址连接的请求数；超过的立刻答 503。 |
 | `max_idle_conns` | `32` | 为一个地址保留的空闲连接数；0 不保留。 |
 | `idle_timeout` | `60s` | 空闲连接保留多久后关闭。 |
 | `connect_timeout` | `10s` | 建立连接最多多久；超时的请求答 504。 |
@@ -97,6 +97,10 @@ proxy 转发到上游，static 提供静态文件，respond 直接应答。正�
 | `health_check` | 无 | 主动健康检查：按 `interval`（默认 `5s`）探测每个地址；`type` 为 `http`（默认）时按上游的 `protocol` 发一个 `path`（默认 `/`）的 GET，Host 为 `host`（默认地址的主机），状态码在 `expect_status` 中（默认 200–399 任一）算通过；`tcp` 连上就算通过；`port` 改探测另一个端口。连续 `fails`（默认 2）次失败取出，连续 `passes`（默认 2）次通过放回；`timeout` 默认 `2s`（不超过 `interval`），`jitter` 默认 `interval` 的十分之一。主动探测与 `max_fails` 各自独立地取出地址。 |
 | `deny_internal` | 关闭 | 拒绝地址、或主机名解析到的地址，是环回、链路本地（`169.254.169.254`，多数云的元数据服务）、未指定、组播或本机自己的连接；连接打开后、送出任何东西之前判定，被拒绝的请求答 502。 |
 | `protocol` | `http/1.1` | 请求如何到达上游：明文的 `http/1.1`、`h2c`（明文 HTTP/2，服务器须支持），或 `h2`（TLS，服务器经 ALPN 选择时用 HTTP/2，否则 HTTP/1.1；配 `tls_server_name`、`tls_ca_file`，双向 TLS 再配 `tls_cert_file` 与 `tls_key_file`）。 |
+
+`max_conns` 与 `max_pending` 的默认值有意比以前（256 与 1024）大得多，使高并发访问慢上游时碰不到它们。它们仍然是
+上限：每个上限都有安全的默认值，所以什么都不设的配置也是有界的（[规则](../rules.zh-CN.md) 10 与 11）。上游承受不了
+这么多连接时，请设更小的值保护它。
 
 ### 九种负载均衡策略
 
@@ -218,8 +222,8 @@ upstream app {
 		max_age 24h
 		secure true
 	}
-	max_conns 256
-	max_pending 1024
+	max_conns 4096
+	max_pending 4096
 	max_idle_conns 32
 	idle_timeout 60s
 	connect_timeout 3s

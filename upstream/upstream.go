@@ -44,9 +44,12 @@ const (
 	DefaultResponseIdleTimeout   = 60 * time.Second
 	DefaultMaxFails              = 1
 	DefaultFailTimeout           = 10 * time.Second
-	DefaultMaxConns              = 256
-	DefaultMaxPending            = 1024
-	DefaultResponseTimeout       = time.Hour
+	// max_conns and max_pending are large enough that high concurrency
+	// against a slow upstream does not reach them, and still bounds: a
+	// config that sets none is bounded (rules 10 and 11 of docs/rules.md).
+	DefaultMaxConns        = 8192
+	DefaultMaxPending      = 16384
+	DefaultResponseTimeout = time.Hour
 	// StreamThreshold is the response body size past which a body streams
 	// to the callback rather than arriving whole.
 	StreamThreshold = 64 << 10

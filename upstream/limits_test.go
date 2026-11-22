@@ -4,16 +4,59 @@ import (
 	"errors"
 	"io"
 	stdhttp "net/http"
+	"reflect"
+	"strconv"
 	"testing"
 	"time"
+
+	"github.com/lesismal/fit/config"
 )
 
-// TestDefaultMaxConns reaches the default of 256 connections to an address
-// and max_pending past it: with every request held by the backend, 256
-// connections open, the next max_pending requests wait, and the one after
-// them is refused at once. The 256 go at once: a request waiting for the
-// connection being opened for it does not count against max_pending.
-func TestDefaultMaxConns(t *testing.T) {
+// TestDefaultLimits: max_conns and max_pending left out, or 0, are their
+// defaults, which bound the pool as one that sets them does, and the config
+// reference states the same defaults the pool applies.
+func TestDefaultLimits(t *testing.T) {
+	for _, doc := range []string{
+		`{"addresses": ["127.0.0.1:1", "127.0.0.1:2"]}`,
+		`{"addresses": ["127.0.0.1:1", "127.0.0.1:2"], "max_conns": 0, "max_pending": 0}`,
+	} {
+		c, err := decode(t, doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := New(nil, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := int64(DefaultMaxConns+DefaultMaxPending) * 2; p.saturated != want {
+			t.Fatalf("%s: saturated at %d requests in flight, want %d", doc, p.saturated, want)
+		}
+	}
+	tag := func(field string) string {
+		f, _ := reflect.TypeFor[config.Upstream]().FieldByName(field)
+		return f.Tag.Get("default")
+	}
+	for field, want := range map[string]int{"MaxConns": DefaultMaxConns, "MaxPending": DefaultMaxPending} {
+		if got, err := strconv.Atoi(tag(field)); err != nil || got != want {
+			t.Errorf("config.Upstream.%s: default %q, want %d", field, tag(field), want)
+		}
+	}
+	s, err := strconv.Unquote(tag("ResponseTimeout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := time.ParseDuration(s); err != nil || got != DefaultResponseTimeout {
+		t.Errorf("config.Upstream.ResponseTimeout: default %q, want %v", s, DefaultResponseTimeout)
+	}
+}
+
+// TestMaxConnsPending reaches max_conns and max_pending past it: with every
+// request held by the backend, max_conns connections open, the next
+// max_pending requests wait, and the one after them is refused at once. The
+// first max_conns go at once: a request waiting for the connection being
+// opened for it does not count against max_pending.
+func TestMaxConnsPending(t *testing.T) {
+	const maxConns = 8
 	release := make(chan struct{})
 	b := newBackend(t, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		<-release
@@ -26,15 +69,15 @@ func TestDefaultMaxConns(t *testing.T) {
 			close(release)
 		}
 	}()
-	p := newPool(t, `{"addresses": [%s], "max_pending": 8}`, b)
+	p := newPool(t, `{"addresses": [%s], "max_conns": 8, "max_pending": 8}`, b)
 	var results []<-chan result
-	for range DefaultMaxConns {
+	for range maxConns {
 		results = append(results, goDo(t, p, "/"))
 	}
 	deadline := time.Now().Add(10 * time.Second)
-	for b.open.Load() < DefaultMaxConns {
+	for b.open.Load() < maxConns {
 		if time.Now().After(deadline) {
-			t.Fatalf("%d connections open, want %d", b.open.Load(), DefaultMaxConns)
+			t.Fatalf("%d connections open, want %d", b.open.Load(), maxConns)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -47,8 +90,8 @@ func TestDefaultMaxConns(t *testing.T) {
 		t.Fatalf("one past max_conns and max_pending: %+v", got)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if n := b.maxOpen.Load(); n != DefaultMaxConns {
-		t.Fatalf("%d connections at most, want %d", n, DefaultMaxConns)
+	if n := b.maxOpen.Load(); n != maxConns {
+		t.Fatalf("%d connections at most, want %d", n, maxConns)
 	}
 	close(release)
 	for i, ch := range results {

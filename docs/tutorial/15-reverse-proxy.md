@@ -102,8 +102,8 @@ Only the key parameters are listed; the full field tables are in
 | `load_balancing` | `round_robin`, or `weighted_round_robin` when `weights` are given | How requests are spread over the addresses; see the nine strategies below. |
 | `hash_key` | none | The header `header_hash` and the cookie `cookie_hash` hash by: needed by those two, refused with any other strategy. |
 | `sticky_cookie` | none | Keeps each client on one address with a cookie: `name` `fit_sticky`, `path` `/`, `max_age` until the browser closes, `secure` off; it is always HttpOnly and SameSite=Lax. |
-| `max_conns` | `256` | The most connections open, or being opened, to one address; a request past it waits for one to be free. |
-| `max_pending` | `1024` | How many requests may wait for a connection to one address once its `max_conns` are busy; one past it is answered 503 at once. |
+| `max_conns` | `8192` | The most connections open, or being opened, to one address; a request past it waits for one to be free. |
+| `max_pending` | `16384` | How many requests may wait for a connection to one address once its `max_conns` are busy; one past it is answered 503 at once. |
 | `max_idle_conns` | `32` | The idle connections kept to one address; 0 keeps none. |
 | `idle_timeout` | `60s` | How long an idle connection is kept before it is closed. |
 | `connect_timeout` | `10s` | How long opening a connection may take; a request whose connect times out gets 504. |
@@ -115,6 +115,11 @@ Only the key parameters are listed; the full field tables are in
 | `health_check` | none | Active health checks: probe each address every `interval` (`5s`); `type` `http` (the default) sends a GET of `path` (`/`), with `host` as its Host (the address's host), over the upstream's `protocol`, and passes on `expect_status` (any of 200–399), `tcp` passes once a connection opens; `port` probes another port than the address's. An address is out after `fails` (`2`) in a row, back after `passes` (`2`); `timeout` `2s` (no longer than `interval`), `jitter` a tenth of `interval`. Probes and `max_fails` take an address out each on their own account. |
 | `deny_internal` | off | Refuse a connection whose address, or the address its host name resolved to, is loopback, link-local (`169.254.169.254`, the metadata service of most clouds), unspecified, multicast or the host's own, decided once the connection is open and before anything is sent; a request refused so gets 502. |
 | `protocol` | `http/1.1` | How requests reach the upstream: `http/1.1` in the clear, `h2c` (HTTP/2 in the clear, which the servers must expect), or `h2` (TLS, HTTP/2 when the server picks it by ALPN and HTTP/1.1 otherwise; with `tls_server_name`, `tls_ca_file`, and `tls_cert_file` with `tls_key_file` for mutual TLS). |
+
+The defaults of `max_conns` and `max_pending` are deliberately larger than they were (256 and 1024), so
+that high concurrency against a slow upstream does not reach them. They are still bounds: every limit has
+a safe default, so a config that sets none is bounded ([rules](../rules.md), 10 and 11). Set lower values
+to protect an upstream that cannot take that many connections.
 
 ### The nine load balancing strategies
 
@@ -238,8 +243,8 @@ upstream app {
 		max_age 24h
 		secure true
 	}
-	max_conns 256
-	max_pending 1024
+	max_conns 4096
+	max_pending 4096
 	max_idle_conns 32
 	idle_timeout 60s
 	connect_timeout 3s
