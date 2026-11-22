@@ -93,9 +93,10 @@ func TestAssistantInsight(t *testing.T) {
 	if data, _ = a.Certs(t.Context(), "admin", "", []string{"b-many"}, 2); json.Unmarshal(data, &c) != nil || len(c.Certificates) != 2 || c.Certificates[0].DaysLeft > c.Certificates[1].DaysLeft {
 		t.Fatalf("%s", data)
 	}
-	gone := newCertMember(t, 0)
-	f.add(tokenInput("c-gone", gone.srv.URL))
-	gone.srv.Close()
+	// Where nothing listens, so it is never read: a member that answered
+	// until closed right after its add could be polled in between, and
+	// read with no certificates (CI run 45055824608).
+	f.add(tokenInput("c-gone", downURL(t)))
 	if data, _ = a.Certs(t.Context(), "admin", "", []string{"c-gone"}, 0); !strings.Contains(string(data), `"not_read":[{"name":"c-gone"`) {
 		t.Fatalf("%s", data)
 	}
