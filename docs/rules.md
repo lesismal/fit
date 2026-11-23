@@ -106,6 +106,8 @@ Every check costs waiting; each change gets the checks its kind needs, no more.
     | The hot path | `bench/ab.sh` with the scenarios and protocols it touches, 10s runs, 3 alternating rounds; micro-benchmarks with `bench/microbench.sh` |
     | A milestone's end | the full harness, every server, and a report |
 
+    In a feature task, this column is left to the separate benchmark tasks (rule 26).
+
     A micro-benchmark comparison is `bench/microbench.sh` (10 alternating runs on the host,
     benchstat here); a change counts where benchstat says it is significant, and in `bench/ab.sh`
     where its summary says so: past 1% and the spread of the rounds.
@@ -140,3 +142,16 @@ Every check costs waiting; each change gets the checks its kind needs, no more.
     but are pruned when they grow. The benchmark host's disk is shared by every session: check its
     free space (`df -h /`) before a large build or run, and never leave it fuller than you found it;
     a full disk stops everyone's builds and runs.
+
+## 13. Feature work and benchmarks
+
+26. **A feature task runs the basic CI tests, not load tests or benchmarks.** A task that develops a
+    feature or fixes a bug runs what CI runs: `make test-changed` while working and `go test -race
+    ./...` once before a push (rule 20), vet and staticcheck. It runs no load tests, benchmarks, A/B
+    comparisons, perf profiles, full benchmark harness runs, or stress and soak runs (high repeat
+    counts, long runs under load), neither here nor on the benchmark host. The benchmark host's time
+    belongs to the benchmark tasks the maintainer runs separately (HTTPArena and the like); a
+    feature task that loads the host wastes it and skews or delays those runs. Where another rule
+    asks for a measurement, the feature task leaves it to such a benchmark task and says in its
+    report what should be measured. A feature task runs a benchmark only when the user asks for one
+    in that task.

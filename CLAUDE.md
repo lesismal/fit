@@ -21,8 +21,13 @@ limits, parallel packages under load) run on the benchmark host,
 ordinary tests: `go test -race ./...`, vet, staticcheck. A brief for another session that
 involves any of this says so explicitly. A user-level hook refuses such commands locally.
 
+**Feature tasks run only the basic CI tests** (rule 26): no load tests, benchmarks, A/B
+comparisons, profiles or stress runs, here or on the benchmark host, unless the user asks for one in
+that task. Benchmarks are the maintainer's separate tasks (HTTPArena and the like); a feature task
+says in its report what should be measured.
+
 **Verification is sized to the change (rules 20-23):** `make test-changed` while working, the
-full `go test -race ./...` once before a push; benchmarks only for the hot path, with
+full `go test -race ./...` once before a push; benchmarks only for the hot path and only in a benchmark task (rule 26), with
 `bench/ab.sh` (started in the background, read with `-report` before the push) and
 `bench/microbench.sh`; the full harness only at a milestone's end.
 
