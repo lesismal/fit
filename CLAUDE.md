@@ -26,6 +26,10 @@ full `go test -race ./...` once before a push; benchmarks only for the hot path,
 `bench/ab.sh` (started in the background, read with `-report` before the push) and
 `bench/microbench.sh`; the full harness only at a milestone's end.
 
+**Clean up after every development, test and benchmark run (rule 25):** binaries, test binaries,
+`bench/.work`, copies, worktrees, containers and temporary files, here and on the benchmark host,
+whose disk every session shares.
+
 For iteration work, also read [docs/progress.md](docs/progress.md) and the iteration's section in
 [docs/dev-plan.md](docs/dev-plan.md); when an iteration is done, update both dev-plan files and
 both progress files.

@@ -128,3 +128,15 @@ Every check costs waiting; each change gets the checks its kind needs, no more.
     scores and weights are benchreport's (`score.go`, and [bench/README.md](../bench/README.md#scores));
     a change to them is made there, and said in the next report, whose ranking is then not
     compared with earlier ones.
+
+## 12. Cleaning up
+
+25. **Every development, test and benchmark run cleans up after itself and frees the space it
+    took.** When the work is done (an iteration, a fix, a test or benchmark run, a reproduction),
+    remove what it left behind, on this machine and on the benchmark host: build output made for it
+    (binaries, test binaries from `go test -c`, `bench/.work`), copies of the tree and git
+    worktrees, containers, images and volumes it created, and logs and temporary files no longer
+    needed. Caches kept on purpose (Go's build and module caches, the pinned server images) stay,
+    but are pruned when they grow. The benchmark host's disk is shared by every session: check its
+    free space (`df -h /`) before a large build or run, and never leave it fuller than you found it;
+    a full disk stops everyone's builds and runs.
