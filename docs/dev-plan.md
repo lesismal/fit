@@ -10,6 +10,7 @@ of room.
 - [How to work an iteration](#how-to-work-an-iteration)
 - [Package layout](#package-layout)
 - [Index](#index)
+- [Benchmark and optimization status](#benchmark-and-optimization-status)
 - [M0, foundations](#m0-foundations)
 - [M1, the proxy core](#m1-the-proxy-core)
 - [M1 review fixes](#m1-review-fixes)
@@ -406,6 +407,57 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I237.
 | I234 | The static handler: open and fstat in place of lstat, the user-space cost of a request, no timer a request, opt-in `inline_disk` | I233 | done |
 | I235 | The static handler's `disk_io` (`pool`, `auto`): requests that need the disk served on fib's worker, a quarter of the CPUs at once, opt-in | I234 | done |
 | I236 | The file pool's work touches no Context the timeout has answered | I235 | done |
+
+## Benchmark and optimization status
+
+What each feature that needs a benchmark has had. A feature needs one when it is on the hot path
+(`bench/ab.sh` and micro-benchmarks) or is a data plane off it whose throughput, latency or memory
+users compare (micro-benchmarks or a harness of its own), as [rule 21](rules.md#10-verification-sized-to-the-change)
+sorts them; the control plane needs none and has no row. **Benchmarked** says whether it has been
+measured on the benchmark host against a baseline or a competing server; **Optimized** whether a
+round has worked on what the measurement found. Each is `yes` (when, commit or report), `partial`
+or `no`. A row that is not `yes` in both is an open todo for a benchmark task. A feature task adds
+its feature's row as `no` and says what should be measured; a benchmark task updates the row
+([rule 26](rules.md#13-feature-work-and-benchmarks)). Results are under `bench/results/`, each
+iteration's numbers in its section here and in [progress](progress.md).
+
+| Feature | Iterations | Benchmarked | Optimized | Evidence or what is left |
+| --- | --- | --- | --- | --- |
+| HTTP/1.1 entry, fixed responses | I06, R07a, R07c, R07e | yes (2026-11-06, `plan-2026-11-06`) | partial | W0 level with nginx (98-101%). Left: W6 at 200,000 a second, p99 5.33 ms to nginx's 2.17 |
+| HTTP/2 entry (h2c, h2) | I06, I09, I158 | yes (2026-11-06, `plan-2026-11-06`; I158's A/B) | yes (fib A42, A43, A48, I158 `cb9bbbe`) | W0 3.3-6.7 times nginx; first in W1, W5 and W6 over h2 |
+| HTTP/3 entry | I10 | yes (2026-11-06, `plan-2026-11-06`) | partial (fib `d4319879`, QPACK `47948dd6`, 2026-10-27 to 10-31) | W0 +17% to +33% over nginx. Left: W2 website over HTTP/3 at 53-87% of nginx |
+| TLS: handshakes and record sealing | I09, I31, I35b | yes (W3 in `plan-2026-11-06`; `BenchmarkTLSHandshake`) | partial (fib seals records, kernel TLS for files of 512 KiB or more, `ecb80934`) | W3 with one request a connection: 99-100% of Caddy, second or third |
+| Kernel TLS offload to the network card | I224 | no | no | Measure throughput and CPU a request with a card that encrypts TLS 1.2 records, against fib's TLS |
+| Router and dispatcher | I11, I36, I37, R07a | yes (`BenchmarkMatch`, `BenchmarkDispatch`, `bench/ab.sh` of I36 and the Gateway API's hosts) | yes (I36, `BenchmarkMatch` 92 to 57 ns) | Matchers v2's expression matcher has no micro-benchmark of its own |
+| Static files, sendfile | I12, I13, R05, R05b, I229-I236 | yes (2026-11-22, `sweep-2026-11-21`, `static-*-2026-11-2x`) | partial (I229-I235) | 8-16 KiB 101-108% of nginx, 64 KiB 95%. Left: 20-32 KiB 3% below nginx at saturation (Go's scheduler and collector) |
+| Reverse proxy, HTTP/1.1 upstreams and pools | I14-I17, R04, R07b, R07f | yes (2026-11-06, W1 in `plan-2026-11-06`) | partial (R07b, R07f, `6501fd1a` to `cfa37b38`, fib A100-A101) | W1 over h2 +3% to +10% over nginx. Left: W1 over HTTP/1.1 at 86-96% of nginx |
+| Large bodies: downloads, uploads, splice | I16, R04 | yes (2026-11-06, W4 in `plan-2026-11-06`) | yes (fib A47, A62 splice `4f6dbf4e`, pooled chunks) | First in all six W4 tables |
+| HTTP/2 and HTTP/3 upstreams | I18, I54 | no | no | The harness's backend speaks HTTP/1.1 only. Measure W1 to an h2 and an h2c backend |
+| Load balancing | I19, I33, I45 | yes (`BenchmarkPick`; `bench/ab.sh` proxy of I33 and I45) | yes (R07a, weighted round robin precomputed) | |
+| Access logs | I21, R07d, I83, I155, I156 | yes (R07d's harness A/B; `BenchmarkLog` 2026-11) | partial (R07d shards) | I155's JSON formatter +5.5% a line, to re-run with `bench/microbench.sh` on an idle host |
+| Compression | I46, I223 | partial (`BenchmarkCompressBody`, 2026-11-20) | yes (I223) | No harness scenario with `compress` on: measure W1 with JSON bodies compressed |
+| Cache | I67-I69 | yes (M5, `cache-hot` and `cache-zipf` in W2) | partial | Disk tier and stale or locked requests not measured |
+| Access lists | I195 | partial (`BenchmarkAllows`, no result recorded) | no | A list's cost a request on the benchmark host, with a large list |
+| Middleware on the hot path: limits, auth, JWT, retries, breakers, mirroring, tracing | I39-I45, I65 | partial (each one's micro-benchmark; `bench/ab.sh` with them off) | no | No harness run with them on: measure W1 behind `rate_limit`, `jwt` and tracing |
+| WASM plugins | I71, I72, I81, I165b | partial (`BenchmarkWASM` 5.1 µs, `BenchmarkProxyWasm` 8.4 µs) | partial (I165b binary record form) | The cost against built-in middleware was accepted, not worked on |
+| WebSocket proxying | I47, I48 | partial (idle memory, `i47-ws-idle-2026-10-21`: 5,761 bytes a connection, nginx 18,176) | no | Messages a second and latency through fit over HTTP/1.1, h2 and h3 |
+| `websockify` | I225 | partial (about 4.3 KB an idle bridge, not on the host) | no | Throughput and latency bridged to TCP, against websockify |
+| gRPC proxying | I49 | no (`bench/ab.sh` proxy only, no gRPC) | no | Unary and streaming calls a second, against Envoy |
+| TCP proxying | I50, I52, I53 | partial (`BenchmarkTCPProxy`: 2.18 GB/s through fit, 11.0 direct) | no | The gap to direct; connections a second; against nginx `stream` |
+| UDP proxying | I51 | no | no | Datagrams a second and sessions, against nginx `stream` |
+| Idle connection memory | I08, P2 | yes (2026-11-06, W5) | yes (P2 `465221f2`, fib read rounds `861689c9`) | 438 MiB with 40,000 idle, nginx 1,304 |
+| Tunnel data path | I106, I227 | partial (`tunnel/internal/transport/ws` micro-benchmarks, M4 Pro, not the host) | partial (I227 framing) | End to end over TCP, WebSocket and QUIC on the benchmark host, against frp |
+| LLM proxy and mesh | I112, I113, I226 | no | no | Streamed tokens through proxy, hub and node: added latency and memory a call |
+| Streaming role: RTMP, RTSP, SRT, HLS, HTTP-FLV, channels | I116, I134 | no | no | Viewers a stream, fan-out CPU and memory, against SRS or MediaMTX |
+| Video on demand | I133, I136 | yes (2026-11, `bench/vod.sh`) | no | Cached 77% of nginx's segments a second, p99 8.4 ms to 3.6, 615 MiB to 135 |
+| WebRTC: SFU, WHIP and WHEP proxy, TURN | I87, I109-I111 | no | no | Packets a second a viewer and TURN relay throughput, against coturn and an SFU |
+| Sync | I163-I222 | yes (2026-11-11, `sync-2026-11-11b`) | yes (I193, I165b, `131c08c1`) | First at 98.1 |
+| BitTorrent | I196-I205, I210 | yes (2026-11-09, `bt-2026-11-09`) | partial (fib A89: one torrent's download 470 to 2,687 MiB/s) | I205's download was 0.68-0.73 times anacrolix's MiB/s: run `bench/bt.sh` again on fib after A89 |
+
+Open, by the table: HTTP/3 for the website; HTTP/1.1 in W1 and at high rate; the 20-32 KiB static
+gap; kernel TLS offload; HTTP/2 upstreams; compression and middleware under load; WebSocket,
+`websockify`, gRPC, TCP and UDP proxying; the tunnel, the LLM proxy, streaming, video on demand,
+WebRTC and BitTorrent downloads. P2P and VPN add their rows when they are built.
 
 ## M0, foundations
 

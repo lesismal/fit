@@ -9,6 +9,7 @@ and worked in sessions as in the [gateway development plan](dev-plan.md#how-to-w
 - [How to work an iteration](#how-to-work-an-iteration)
 - [Package layout](#package-layout)
 - [Index](#index)
+- [Benchmark and optimization status](#benchmark-and-optimization-status)
 - [S0 Groundwork and baseline](#s0-groundwork-and-baseline)
 - [S1 Identity and HBONE](#s1-identity-and-hbone)
 - [S2 Node proxy](#s2-node-proxy)
@@ -111,6 +112,27 @@ Status: `todo`, `doing` or `done`.
 | **Mesh 1.0** | | | |
 | S35 | Istio compatibility matrix | S25, S30 | todo |
 | S36 | Mesh documentation | S35 | todo |
+
+## Benchmark and optimization status
+
+As in the [gateway plan's table](dev-plan.md#benchmark-and-optimization-status): one row per mesh
+data plane feature that needs a benchmark, `yes`, `partial` or `no` in each column, and a row not
+`yes` in both an open todo for a benchmark task. The feature's iteration adds its row as `no` and
+names what should be measured; benchmark tasks fill it in. The reference is S03's ztunnel baseline,
+and for the waypoint the Envoy waypoint (S25); the control plane (certificates, xDS, ZDS) has no
+row. Nothing in this plan is built yet, so every row is open.
+
+| Feature | Iterations | Benchmarked | Optimized | Evidence or what is left |
+| --- | --- | --- | --- | --- |
+| ztunnel baseline | S03 | no | — | The reference itself: throughput, p50/p99, memory a connection and CPU, ztunnel against direct |
+| HBONE server | S08 | no | no | Tunnels accepted a second, throughput through one tunnel and many on one connection |
+| HBONE client and connection pool | S09 | no | no | Opening a tunnel (S09's own benchmark); reuse under many destinations |
+| Node proxy outbound and inbound paths | S15, S16, S19 | no | no | Against S03: throughput, p50/p99, memory a connection, CPU (S19) |
+| Layer 4 authorization and telemetry | S17, S18 | no | no | Cost a connection with many policies and with metrics on |
+| Waypoint data path, layer 7 policy and telemetry | S21, S23, S24, S25 | no | no | Against the Envoy waypoint: requests a second, p99, CPU and memory (S25) |
+| Overload protection | S27 | no | no | Other pods' latency while one floods its node (S27) |
+| DNS proxy | S28 | no | no | Queries a second and latency, cached and forwarded, against ztunnel's |
+| Double HBONE across networks | S33 | no | no | Latency and throughput added by the outer tunnel |
 
 ## S0 Groundwork and baseline
 

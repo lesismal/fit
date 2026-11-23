@@ -154,4 +154,8 @@ Every check costs waiting; each change gets the checks its kind needs, no more.
     feature task that loads the host wastes it and skews or delays those runs. Where another rule
     asks for a measurement, the feature task leaves it to such a benchmark task and says in its
     report what should be measured. A feature task runs a benchmark only when the user asks for one
-    in that task.
+    in that task. When its feature needs a benchmark (rule 21), it adds or keeps the feature's row in
+    the dev plan's [benchmark status table](dev-plan.md#benchmark-and-optimization-status) (the
+    mesh's in [its plan](mesh-dev-plan.md#benchmark-and-optimization-status)), marked not
+    benchmarked and not optimized, and names there what should be measured; a benchmark task
+    updates the row with what it measured and optimized.

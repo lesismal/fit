@@ -8,6 +8,7 @@
 - [如何进行一次迭代](#如何进行一次迭代)
 - [包结构](#包结构)
 - [索引](#索引)
+- [压测与优化状态](#压测与优化状态)
 - [M0 基础](#m0-基础)
 - [M1 反向代理核心](#m1-反向代理核心)
 - [M1 审查修复](#m1-审查修复)
@@ -396,6 +397,52 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I234 | 静态处理器：以 open+fstat 取代 lstat、请求的用户态开销、去掉每请求的定时器、可选的 `inline_disk` | I233 | done |
 | I235 | 静态处理器的 `disk_io`（`pool`、`auto`）：可选在 fib worker 上处理需要访问磁盘的请求，同时最多 CPU 数的四分之一 | I234 | done |
 | I236 | 文件池的任务不再访问已被超时应答的 Context | I235 | done |
+
+## 压测与优化状态
+
+每个需要压测的功能目前的状况。按 [规则 21](rules.zh-CN.md#十按改动大小验证) 的分类，位于热路径上的功能（`bench/ab.sh`
+与微基准），以及热路径之外、用户会比较其吞吐、延迟或内存的数据面（微基准或专门的测评框架）需要压测；控制面不需要，
+也不列在表中。**已压测** 指是否已在基准主机上对照基线或竞品测过；**已优化** 指是否已有一轮工作针对测量发现的问题做过
+优化。取值为 `yes`（时间、commit 或报告）、`partial` 或 `no`。两列不都是 `yes` 的行，就是留给压测任务的待办项。功能任务
+为其功能添加一行，标为 `no`，并写明应当测什么；压测任务负责更新该行（[规则 26](rules.zh-CN.md#13-功能开发与压测)）。结果
+位于 `bench/results/`，各迭代的数字见本计划对应小节与 [进度](progress.zh-CN.md)。
+
+| 功能 | 迭代 | 已压测 | 已优化 | 依据或尚待完成 |
+| --- | --- | --- | --- | --- |
+| HTTP/1.1 入口，固定响应 | I06、R07a、R07c、R07e | yes（2026-11-06，`plan-2026-11-06`） | partial | W0 与 nginx 持平（98-101%）。尚待：W6 每秒 200,000 请求时 p99 5.33 ms，nginx 为 2.17 |
+| HTTP/2 入口（h2c、h2） | I06、I09、I158 | yes（2026-11-06，`plan-2026-11-06`；I158 的 A/B） | yes（fib A42、A43、A48，I158 `cb9bbbe`） | W0 为 nginx 的 3.3-6.7 倍；h2 下 W1、W5、W6 第一 |
+| HTTP/3 入口 | I10 | yes（2026-11-06，`plan-2026-11-06`） | partial（fib `d4319879`、QPACK `47948dd6`，2026-10-27 至 10-31） | W0 比 nginx 高 17% 至 33%。尚待：W2 网站经 HTTP/3 为 nginx 的 53-87% |
+| TLS：握手与记录加密 | I09、I31、I35b | yes（`plan-2026-11-06` 的 W3；`BenchmarkTLSHandshake`） | partial（fib 自行加密记录，512 KiB 及以上的文件用内核 TLS，`ecb80934`） | W3 每连接一个请求：Caddy 的 99-100%，排第二或第三 |
+| 内核 TLS 卸载到网卡 | I224 | no | no | 用能加密 TLS 1.2 记录的网卡，测吞吐与每请求 CPU，对照 fib 的 TLS |
+| 路由与分发 | I11、I36、I37、R07a | yes（`BenchmarkMatch`、`BenchmarkDispatch`，I36 与 Gateway API 主机名的 `bench/ab.sh`） | yes（I36，`BenchmarkMatch` 92 降到 57 ns） | Matchers v2 的表达式匹配器没有自己的微基准 |
+| 静态文件、sendfile | I12、I13、R05、R05b、I229-I236 | yes（2026-11-22，`sweep-2026-11-21`、`static-*-2026-11-2x`） | partial（I229-I235） | 8-16 KiB 为 nginx 的 101-108%，64 KiB 为 95%。尚待：20-32 KiB 饱和时比 nginx 低 3%（Go 调度器与回收器） |
+| 反向代理、HTTP/1.1 上游与连接池 | I14-I17、R04、R07b、R07f | yes（2026-11-06，`plan-2026-11-06` 的 W1） | partial（R07b、R07f，`6501fd1a` 至 `cfa37b38`，fib A100-A101） | W1 经 h2 比 nginx 高 3% 至 10%。尚待：W1 经 HTTP/1.1 为 nginx 的 86-96% |
+| 大 body：下载、上传、splice | I16、R04 | yes（2026-11-06，`plan-2026-11-06` 的 W4） | yes（fib A47、A62 splice `4f6dbf4e`、池化分块） | W4 六张表全部第一 |
+| HTTP/2 与 HTTP/3 上游 | I18、I54 | no | no | 测评框架的后端只讲 HTTP/1.1。测 W1 到 h2 与 h2c 后端 |
+| 负载均衡 | I19、I33、I45 | yes（`BenchmarkPick`；I33 与 I45 的 proxy `bench/ab.sh`） | yes（R07a，加权轮询预先计算） | |
+| 访问日志 | I21、R07d、I83、I155、I156 | yes（R07d 的测评框架 A/B；`BenchmarkLog`，2026-11） | partial（R07d 分片） | I155 的 JSON 格式化每行 +5.5%，待在空闲主机上用 `bench/microbench.sh` 重测 |
+| 压缩 | I46、I223 | partial（`BenchmarkCompressBody`，2026-11-20） | yes（I223） | 测评框架没有开启 `compress` 的场景：测 W1 压缩 JSON body |
+| 缓存 | I67-I69 | yes（M5，W2 中的 `cache-hot` 与 `cache-zipf`） | partial | 磁盘层与 stale、加锁的请求未测 |
+| 访问控制列表 | I195 | partial（`BenchmarkAllows`，未记录结果） | no | 在基准主机上测大列表下每请求的开销 |
+| 热路径上的中间件：限流、认证、JWT、重试、熔断、镜像、追踪 | I39-I45、I65 | partial（各自的微基准；关闭它们时的 `bench/ab.sh`） | no | 没有开启它们的测评框架运行：测 W1 在 `rate_limit`、`jwt` 与追踪之后 |
+| WASM 插件 | I71、I72、I81、I165b | partial（`BenchmarkWASM` 5.1 µs，`BenchmarkProxyWasm` 8.4 µs） | partial（I165b 二进制记录格式） | 与内置中间件的差距被接受，没有专门优化 |
+| WebSocket 代理 | I47、I48 | partial（空闲内存，`i47-ws-idle-2026-10-21`：每连接 5,761 字节，nginx 18,176） | no | 经 HTTP/1.1、h2、h3 时每秒消息数与延迟 |
+| `websockify` | I225 | partial（每个空闲桥接约 4.3 KB，非基准主机） | no | 桥接到 TCP 的吞吐与延迟，对照 websockify |
+| gRPC 代理 | I49 | no（只有 proxy 场景的 `bench/ab.sh`，没有 gRPC） | no | 一元与流式调用每秒数，对照 Envoy |
+| TCP 代理 | I50、I52、I53 | partial（`BenchmarkTCPProxy`：经 fit 2.18 GB/s，直连 11.0） | no | 与直连的差距；每秒新连接数；对照 nginx `stream` |
+| UDP 代理 | I51 | no | no | 每秒数据报数与会话数，对照 nginx `stream` |
+| 空闲连接内存 | I08、P2 | yes（2026-11-06，W5） | yes（P2 `465221f2`，fib 读轮次 `861689c9`） | 40,000 个空闲连接 438 MiB，nginx 1,304 |
+| tunnel 数据路径 | I106、I227 | partial（`tunnel/internal/transport/ws` 微基准，M4 Pro，非基准主机） | partial（I227 分帧） | 在基准主机上经 TCP、WebSocket、QUIC 端到端测，对照 frp |
+| LLM 代理与互联 | I112、I113、I226 | no | no | 流式 token 经 proxy、hub、node：增加的延迟与每次调用的内存 |
+| 流媒体角色：RTMP、RTSP、SRT、HLS、HTTP-FLV、频道 | I116、I134 | no | no | 每路流的观众数、分发的 CPU 与内存，对照 SRS 或 MediaMTX |
+| 点播 | I133、I136 | yes（2026-11，`bench/vod.sh`） | no | 全缓存时每秒分片数为 nginx 的 77%，p99 8.4 ms 对 3.6，615 MiB 对 135 |
+| WebRTC：SFU、WHIP 与 WHEP 代理、TURN | I87、I109-I111 | no | no | 每个观众每秒包数与 TURN 中继吞吐，对照 coturn 与一个 SFU |
+| 数据同步 | I163-I222 | yes（2026-11-11，`sync-2026-11-11b`） | yes（I193、I165b、`131c08c1`） | 第一，98.1 |
+| BitTorrent | I196-I205、I210 | yes（2026-11-09，`bt-2026-11-09`） | partial（fib A89：单个种子下载 470 提到 2,687 MiB/s） | I205 的下载为 anacrolix 的 0.68-0.73 倍：在 A89 之后的 fib 上重跑 `bench/bt.sh` |
+
+按上表尚未完成的：网站经 HTTP/3；W1 与高速率下的 HTTP/1.1；静态文件 20-32 KiB 的差距；内核 TLS 卸载；HTTP/2 上游；
+负载下的压缩与中间件；WebSocket、`websockify`、gRPC、TCP、UDP 代理；tunnel、LLM 代理、流媒体、点播、WebRTC 与
+BitTorrent 下载。P2P 与 VPN 在实现时添加各自的行。
 
 ## M0 基础
 
