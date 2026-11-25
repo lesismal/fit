@@ -39,7 +39,7 @@ func TestSet(t *testing.T) {
 		name      string
 		got, want int
 	}{
-		{"IOPollerCount", got.IOPollerCount, 3},
+		{"EventLoopCount", got.EventLoopCount, 3},
 		{"WorkerCount", got.WorkerCount, 40},
 		{"MinWorkerCount", got.MinWorkerCount, 4},
 		{"MaxEvents", got.MaxEvents, 5000},
@@ -63,8 +63,8 @@ func TestSet(t *testing.T) {
 	}
 	// What it leaves out stays fib's.
 	def := fib.DefaultConfig()
-	if got := Config("fit", &config.Engine{Workers: 40}); got.MaxEvents != def.MaxEvents || got.IOPollerCount != def.IOPollerCount {
-		t.Errorf("Workers alone changed MaxEvents %d or IOPollerCount %d", got.MaxEvents, got.IOPollerCount)
+	if got := Config("fit", &config.Engine{Workers: 40}); got.MaxEvents != def.MaxEvents || got.EventLoopCount != def.EventLoopCount {
+		t.Errorf("Workers alone changed MaxEvents %d or EventLoopCount %d", got.MaxEvents, got.EventLoopCount)
 	}
 	// min_workers above fit's ceiling raises the ceiling to it.
 	many := runtime.GOMAXPROCS(0)*WorkersPerCPU + 10

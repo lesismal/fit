@@ -74,7 +74,7 @@ func Config(name string, e *config.Engine) fib.Config {
 		cfg.MinWorkerCount = e.MinWorkers
 	}
 	if e.EventLoops > 0 {
-		cfg.IOPollerCount = e.EventLoops
+		cfg.EventLoopCount = e.EventLoops
 	}
 	if e.PollBatch > 0 {
 		cfg.PollBatchSize = e.PollBatch
