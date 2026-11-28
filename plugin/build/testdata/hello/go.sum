@@ -1,4 +1,4 @@
-github.com/lesismal/fib v1.9.1 h1:RKmX5osN6OpA22TqcQpXrIuESqeyg8w7BJxLcR2WMUY=
-github.com/lesismal/fib v1.9.1/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
+github.com/lesismal/fib v1.10.0 h1:O07TJpBHVoMHkl9sjkPYs+GsR+q1p7KSwwWdmG027DA=
+github.com/lesismal/fib v1.10.0/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
 golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
 golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
