@@ -203,8 +203,11 @@ func TestH3PortZeroRetries(t *testing.T) {
 	_, s := start(t, fmt.Sprintf(`{"listeners": [
     {"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h3"], "tls": {"certificates": [{"cert_file": %q, "key_file": %q}]}}],
   "routes": [{"handler": {"module": "respond", "params": {"body": "ok"}}}]}`, cert.CertFile, cert.KeyFile))
-	if len(tried) != 3 {
-		t.Fatalf("UDP ports tried: %v, want 3", tried)
+	// Two refusals of the test's own, then at least one real try: the port TCP
+	// got next may really be taken for UDP too (a macOS runner had one), and
+	// the listener tries again then as well.
+	if len(tried) < 3 {
+		t.Fatalf("UDP ports tried: %v, want the two refused and at least one more", tried)
 	}
 	resp, err := tlsClient(addrOf(s, "web"), false, cert).Get("https://a.example/")
 	if err != nil {
